@@ -1,0 +1,7 @@
+{
+  "recommendations": [
+    "esbenp.prettier-vscode",
+    "swellaby.rust-pack",
+    "tamasfe.even-better-toml"
+  ]
+}

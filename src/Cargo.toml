@@ -1,0 +1,33 @@
+[workspace]
+members = [
+  "codegen",
+  "generated",
+  "health_check",
+  "host_primitives",
+  "integration",
+  "metrics",
+  "parser/app",
+  "parser/host",
+]
+
+resolver = "3"
+
+[profile.dev]
+opt-level = 0
+lto = false
+debug = true
+debug-assertions = true
+overflow-checks = true
+panic = 'unwind'
+incremental = true
+
+[workspace.dependencies]
+# See https://doc.rust-lang.org/nightly/cargo/reference/workspaces.html#the-dependencies-table
+qos_client = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400d9dfa3ad000690896af2", default-features = false }
+qos_core = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400d9dfa3ad000690896af2", default-features = false }
+qos_crypto = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400d9dfa3ad000690896af2", default-features = false }
+qos_hex = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400d9dfa3ad000690896af2", default-features = false }
+qos_net = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400d9dfa3ad000690896af2", default-features = false }
+qos_nsm = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400d9dfa3ad000690896af2", default-features = false }
+qos_p256 = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400d9dfa3ad000690896af2", default-features = false }
+qos_test_primitives = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400d9dfa3ad000690896af2", default-features = false }

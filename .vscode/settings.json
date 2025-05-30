@@ -1,0 +1,21 @@
+{
+  "cSpell.words": [],
+  "editor.formatOnSave": true,
+  "editor.trimAutoWhitespace": true,
+  "files.insertFinalNewline": true,
+  "[yaml]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[markdown]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[css]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "protoc": {
+    "options": ["--proto_path=proto"]
+  },
+  "rust-analyzer.linkedProjects": [
+    "src/Cargo.toml",
+  ]
+}

@@ -1,0 +1,22 @@
+[package]
+name = "parser_host"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+qos_core = { workspace = true}
+health_check = { path = "../../health_check" }
+host_primitives = { path = "../../host_primitives" }
+generated = { path = "../../generated", features = ["tonic_types"] }
+metrics = { path = "../../metrics" }
+
+tokio = { version = "1.0", features = [
+  "macros",
+  "rt-multi-thread",
+  "signal",
+], default-features = false }
+futures = "0.3"
+
+[features]
+vsock = ["qos_core/vm"]

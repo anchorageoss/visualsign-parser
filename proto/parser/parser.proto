@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package parser;
+
+import "health/rpc.proto";
+import "vendor/google/rpc/status.proto";
+
+
+service ParserService {
+  rpc Parse(ParseRequest) returns (ParseResponse);
+}
+
+// This is a bit odd, but needed for the QOS host.
+// (the QOS host receives messages which can be either parser responses or QOS-level responses)
+// TODO: can we remove the need for these?
+message QOSParserRequest {
+  oneof input {
+    ParseRequest parse_request = 1;
+    health.AppHealthRequest health_request = 2;
+  }
+}
+
+message QOSParserResponse {
+  oneof output {
+    ParseResponse parse_response = 1;
+    health.AppHealthResponse health_response = 3;
+    google.rpc.Status status = 4;
+  }
+}
+
+message ParseRequest {
+  string unsigned_payload = 1;
+}
+
+message ParseResponse {
+  ParsedTransaction parsed_transaction = 1;
+}
+
+message Metadata {
+  string key = 1;
+  string value = 2;
+}
+
+message ParsedTransactionPayload {
+  repeated Metadata transaction_metadata = 1;
+  repeated Metadata method_metadata = 2;
+  string unsigned_payload = 3;
+}
+
+message ParsedTransaction {
+  ParsedTransactionPayload payload = 1;
+  Signature signature = 2;
+}
+
+enum SignatureScheme {
+  SIGNATURE_SCHEME_UNSPECIFIED = 0;
+  // Scheme used for Turnkey app proofs
+  SIGNATURE_SCHEME_TURNKEY_P256_EPHEMERAL_KEY = 1;
+}
+
+message Signature {
+  SignatureScheme scheme = 1;
+  string public_key = 2;
+  string message = 3;
+  string signature = 4;
+}
