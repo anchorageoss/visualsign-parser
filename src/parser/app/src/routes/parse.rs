@@ -15,7 +15,7 @@ use crate::errors::GrpcError;
 
 pub fn parse(
     parse_request: ParseRequest,
-    quorum_key: &P256Pair,
+    ephemeral_key: &P256Pair,
 ) -> Result<ParseResponse, GrpcError> {
     let unsigned_payload = parse_request.unsigned_payload;
     if unsigned_payload.is_empty() {
@@ -38,12 +38,12 @@ pub fn parse(
     };
 
     let digest = sha_256(&borsh::to_vec(&payload).expect("payload implements borsh::Serialize"));
-    let sig = quorum_key
+    let sig = ephemeral_key
         .sign(&digest)
         .map_err(|e| GrpcError::new(Code::Internal, &format!("{e:?}")))?;
 
     let signature = Signature {
-        public_key: qos_hex::encode(&quorum_key.public_key().to_bytes()),
+        public_key: qos_hex::encode(&ephemeral_key.public_key().to_bytes()),
         signature: qos_hex::encode(&sig),
         message: qos_hex::encode(&digest),
         scheme: SignatureScheme::TurnkeyP256EphemeralKey as i32,
