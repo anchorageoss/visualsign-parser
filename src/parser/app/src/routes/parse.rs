@@ -3,13 +3,12 @@
 use generated::{
     google::rpc::Code,
     parser::{
-        Metadata, ParseRequest, ParseResponse, ParsedTransaction, ParsedTransactionPayload,
-        Signature, SignatureScheme,
+        ParseRequest, ParseResponse, ParsedTransaction, ParsedTransactionPayload, Signature,
+        SignatureScheme,
     },
 };
 use qos_crypto::sha_256;
 use qos_p256::P256Pair;
-use std::string::ToString;
 
 use crate::errors::GrpcError;
 
@@ -17,24 +16,27 @@ pub fn parse(
     parse_request: ParseRequest,
     ephemeral_key: &P256Pair,
 ) -> Result<ParseResponse, GrpcError> {
-    let unsigned_payload = parse_request.unsigned_payload;
-    if unsigned_payload.is_empty() {
+    let request_payload = parse_request.unsigned_payload;
+    if request_payload.is_empty() {
         return Err(GrpcError::new(
             Code::InvalidArgument,
             "unsigned transaction is empty",
         ));
     }
 
+    let signable_payload = String::from("fill in parsed signable payload");
+
     let payload = ParsedTransactionPayload {
-        transaction_metadata: vec![Metadata {
-            key: "tx_foo".to_string(),
-            value: "tx_bar".to_string(),
-        }],
-        method_metadata: vec![Metadata {
-            key: "method_baz".to_string(),
-            value: "method_quux".to_string(),
-        }],
-        unsigned_payload,
+        // transaction_metadata: vec![Metadata {
+        //     key: "tx_foo".to_string(),
+        //     value: "tx_bar".to_string(),
+        // }],
+        // method_metadata: vec![Metadata {
+        //     key: "method_baz".to_string(),
+        //     value: "method_quux".to_string(),
+        // }],
+        request_payload,
+        signable_payload,
     };
 
     let digest = sha_256(&borsh::to_vec(&payload).expect("payload implements borsh::Serialize"));

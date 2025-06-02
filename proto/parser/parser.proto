@@ -42,9 +42,10 @@ message Metadata {
 }
 
 message ParsedTransactionPayload {
-  repeated Metadata transaction_metadata = 1;
-  repeated Metadata method_metadata = 2;
-  string unsigned_payload = 3;
+  // repeated Metadata transaction_metadata = 1;
+  // repeated Metadata method_metadata = 2;
+  string request_payload = 3;
+  string signable_payload = 4;
 }
 
 message ParsedTransaction {
