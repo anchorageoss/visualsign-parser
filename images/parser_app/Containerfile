@@ -1,0 +1,12 @@
+FROM common AS build
+
+WORKDIR /src/parser/app
+RUN --network=none <<-EOF
+    set -eu
+    cargo build ${CARGOFLAGS} --features vsock
+    mkdir -p /rootfs
+    mv ${RELEASE_DIR}/parser_app /rootfs/
+EOF
+
+FROM scratch AS package
+COPY --from=build /rootfs/. .

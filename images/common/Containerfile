@@ -1,0 +1,92 @@
+
+FROM stagex/bash:5.2.21@sha256:cb58f55d268fbe7ef629cda86e3a8af893066e4af7f26ef54748b6ad47bdaa66 AS bash
+FROM stagex/binutils:2.43.1@sha256:30a1bd110273894fe91c3a4a2103894f53eaac43cf12a035008a6982cb0e6908 AS binutils
+FROM stagex/busybox:1.36.1@sha256:d34bfa56566aa72d605d6cbdc154de8330cf426cfea1bc4ba8013abcac594395 AS busybox
+FROM stagex/ca-certificates:sx2024.09.0@sha256:33787f1feb634be4232a6dfe77578c1a9b890ad82a2cf18c11dd44507b358803 AS ca-certificates
+FROM stagex/curl:8.9.1@sha256:8e5705a77a76c92d058e016184dabd0c4fa2f6117021cc5ff55df35f654cb158 AS curl
+FROM stagex/file:5.45@sha256:b43a7f0bd50419a39d91d77a316bb888ed87c94aeb6f9eb11f12efd275ca4ab8 AS file
+FROM stagex/findutils:4.9.0@sha256:d92494daaf08999aac0a277327d240a0149494716707fbce93381df058f693e2 AS findutils
+FROM stagex/gcc:13.1.0@sha256:439bf36289ef036a934129d69dd6b4c196427e4f8e28bc1a3de5b9aab6e062f0 AS gcc
+FROM stagex/git:2.9.5@sha256:29a02c423a4b55fa72cf2fce89f3bbabd1defea86d251bb2aea84c056340ab22 AS git
+FROM stagex/grep:3.11@sha256:576288125a7ecda969285e5edfaedef479c4bc18cba8230c0502000fdf2586c1 AS grep
+FROM stagex/kubectl:1.29.3@sha256:56043e069e820e3d85e0df3144a7e908d749bf89bd46c6d5fad9fc5011abaa48 AS kubectl
+FROM stagex/libunwind:1.7.2@sha256:97ee6068a8e8c9f1c74409f80681069c8051abb31f9559dedf0d0d562d3bfc82 AS libunwind
+FROM stagex/llvm:18.1.8@sha256:30517a41af648305afe6398af5b8c527d25545037df9d977018c657ba1b1708f AS llvm
+FROM stagex/make:4.4@sha256:df43f0cf3ac1ad91bf91baefb539e8df42c11b0954a6e2498322a5467deb81e3 AS make
+FROM stagex/musl:1.2.4@sha256:ad351b875f26294562d21740a3ee51c23609f15e6f9f0310e0994179c4231e1d AS musl
+FROM stagex/openssl:3.0.12@sha256:2c1a9d8fcc6f52cb11a206f380b17d74c1079f04cbb08071a4176648b4df52c1 AS openssl
+# This is using an old version of pcsc-lite since upgrading to v2.2.3 broke
+# static builds. Once we have confirmed an updated pcsc-lite has fixed this
+# issue, we should upgrade this again
+FROM stagex/pcsc-lite:sx2024.03.0@sha256:e720e1795706c7c8c1db14bf730b10521e3ff42e4bed90addc590f7446aac8af AS pcsc-lite
+FROM stagex/pkgconf:1.6.3@sha256:ba7fce4108b721e8bf1a0d993a5f9be9b65eceda8ba073fe7e8ebca2a31b1494 AS pkgconf
+FROM stagex/py-setuptools:68.2.2@sha256:28182587b8e4bc98245195df5ffc38268c8e19fa053f3e888841dcb06c8aaf6d AS py-setuptools
+FROM stagex/python:3.11.8@sha256:a4b55e2fd4c20aec1535181e5bc0172c66a14e8b19d13bd17870b96dea32fb2e AS python
+FROM stagex/zlib:1.3.1@sha256:96b4100550760026065dac57148d99e20a03d17e5ee20d6b32cbacd61125dbb6 AS zlib
+
+FROM stagex/core-rust:1.85.0@sha256:9be04ac253dabe11367336d29a1582a25535876a1b68fb9508ac85e898d812fd AS rust
+FROM stagex/core-libzstd:1.5.5@sha256:35ae8f0433cf1472f8fb25e74dc631723e9f458ca3e9544976beb724690adea8 AS libzstd
+
+FROM scratch
+
+COPY --from=bash . /
+COPY --from=busybox . /
+COPY --from=ca-certificates . /
+COPY --from=findutils . /
+COPY --from=grep . /
+COPY --from=musl . /
+COPY --from=libunwind . /
+COPY --from=openssl . /
+COPY --from=zlib . /
+COPY --from=binutils . /
+COPY --from=pkgconf . /
+COPY --from=git . /
+COPY --from=llvm . /
+COPY --from=file . /
+COPY --from=gcc . /
+COPY --from=python . /
+COPY --from=py-setuptools . /
+COPY --from=make . /
+COPY --from=curl . /
+COPY --from=kubectl . /
+COPY --from=pcsc-lite . /
+COPY --from=rust . /
+COPY --from=libzstd . /
+
+COPY --chmod=644 <<-EOF /etc/passwd
+	root:x:0:0:root:/root:/bin/sh
+	user:x:1000:1000::/home/user:/bin/sh
+EOF
+COPY --chmod=644 <<-EOF /etc/group
+	root:x:0:
+	user:x:1000:
+EOF
+
+RUN mkdir -p /rootfs/etc
+RUN mkdir -p /rootfs/home/user
+RUN chown -R user:user /rootfs/home/user
+
+COPY --from=ca-certificates /etc /rootfs/etc
+
+RUN touch -hcd "@0" /etc/group /etc/hpasswd
+ENV TARGET=x86_64-unknown-linux-musl
+ENV TZ=UTC
+ENV LANG=C.UTF-8
+ENV LC_ALL=C
+ENV USER=user
+ENV HOME=/home/user
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Rust configuration
+ENV RUSTFLAGS='-C target-feature=+crt-static'
+ENV CARGOFLAGS='--target x86_64-unknown-linux-musl --no-default-features --locked --release'
+
+# Directory for Rust artifacts
+ENV RELEASE_DIR=/src/target/x86_64-unknown-linux-musl/release
+
+# Load Rust sources
+ADD src /src
+WORKDIR /src/
+
+# pre-fetch all workspace deps; we need to them to build with `--network=none` later
+RUN cargo fetch

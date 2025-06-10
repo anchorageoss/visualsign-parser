@@ -1,0 +1,13 @@
+FROM common AS build
+
+WORKDIR /src/parser/host
+RUN --network=none <<-EOF
+    set -eu
+    cargo build ${CARGOFLAGS} --features vsock
+    mkdir -p /rootfs/usr/local/bin
+    mv ${RELEASE_DIR}/parser_host /rootfs/usr/local/bin/
+    ln -s /usr/local/bin/parser_host /rootfs/parser_host.linux-x86_64
+EOF
+
+FROM scratch AS package
+COPY --from=build /rootfs/. .

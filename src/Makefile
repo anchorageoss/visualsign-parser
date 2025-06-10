@@ -53,3 +53,18 @@ parser_enclave:
 .PHONY: parser_host
 parser_host:
 	cargo run --bin parser_host -- --host-ip $(PARSER_HOST) --host-port $(PARSER_PORT) --metrics --metrics-port $(PARSER_METRICS_PORT) --usock $(PARSER_OUTER_SOCKET_PATH)
+
+
+out/parser_host/index.json: \
+	$(shell git ls-files images/parser_host src) \
+	out/common/index.json
+	$(call build,parser_host)
+
+out/parser_app/index.json: \
+	$(shell git ls-files src/images/parser_app src) \
+	out/common/index.json
+	$(call build,parser_app)
+
+out/common/index.json: \
+	images/common/Containerfile
+	$(call build,common)
