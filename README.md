@@ -37,3 +37,30 @@ If everything works you'll get a response like this:
   }
 }
 ```
+
+## Building parser OCI containers
+
+This repository uses [StageX](https://stagex.tools) to build OCI containers. To build these locally, you'll need Docker > 26 and `containerd` for OCI compatibility:
+
+- If you are using Docker Desktop, go to Dashboard > Settings > "Use containerd for pulling and storing images"
+- If you are using a Linux-based system, add the following to `/etc/docker/daemon.json`:
+  ```
+  {
+    "features": {
+      "containerd-snapshotter": true
+    },
+    "registry-mirrors": ["https://ghcr.io/anchorageoss"]
+  }
+  ```
+
+Then build the OCI containers with the `Makefile` targets:
+
+```sh
+# Builds the parser app container
+make out/parser_app/index.json
+
+# Builds the parser host container
+make out/parser_host/index.json
+```
+
+Note: you can also build non-OCI versions with `make non-oci-docker-images`.
