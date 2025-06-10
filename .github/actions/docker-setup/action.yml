@@ -31,8 +31,10 @@ runs:
     - name: Login to Docker Hub
       if: ${{ inputs.dockerHub != '' }}
       shell: 'script -q -e -c "bash {0}"'
+      # Login in to Dockerhub just to avoid being rate limited or shut down.
+      # Public access to public images are needed for StageX builds, nothing else.
       run: |
-        echo "${{ inputs.dockerHub }}" | docker login -u anchorageoss --password-stdin
+        echo "${{ inputs.dockerHub }}" | docker login -u anchorrno --password-stdin
 
     - name: Login to GHCR
       if: ${{ inputs.ghcr != '' }}
