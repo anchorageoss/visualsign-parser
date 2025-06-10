@@ -2,18 +2,11 @@ name: stagex
 
 on:
   push:
-    tags:
-      - "v*.*.*"
-    branches: # run on every branch for dev of this workflow
-      - "**" # TODO: switch this to 'main'
-    # paths:
-    #   - ".github/**"
-    #   - "src/**"
+    branches:
+      - main
   pull_request:
-    # paths:
-    #   - ".github/**"
-    #   - "src/**"
-  workflow_dispatch: # Allows manual invocation
+    branches:
+      - main
 
 jobs:
   common:
