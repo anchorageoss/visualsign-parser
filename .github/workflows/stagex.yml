@@ -6,9 +6,9 @@ on:
       - "v*.*.*"
     branches: # run on every branch for dev of this workflow
       - "**" # TODO: switch this to 'main'
-    paths:
-      - ".github/**"
-      - "src/**"
+    # paths:
+    #   - ".github/**"
+    #   - "src/**"
   pull_request:
     paths:
       - ".github/**"
