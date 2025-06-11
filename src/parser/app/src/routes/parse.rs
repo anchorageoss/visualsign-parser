@@ -27,14 +27,6 @@ pub fn parse(
     let signable_payload = String::from("fill in parsed signable payload");
 
     let payload = ParsedTransactionPayload {
-        // transaction_metadata: vec![Metadata {
-        //     key: "tx_foo".to_string(),
-        //     value: "tx_bar".to_string(),
-        // }],
-        // method_metadata: vec![Metadata {
-        //     key: "method_baz".to_string(),
-        //     value: "method_quux".to_string(),
-        // }],
         request_payload,
         signable_payload,
     };
