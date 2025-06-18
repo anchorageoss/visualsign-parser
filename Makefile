@@ -23,6 +23,12 @@ $$( \
 )
 endef
 
+#Import environment variable into a MAKE variable
+GITHUB_TOKEN ?= $(shell echo $$GITHUB_TOKEN)
+
+DOCKER_BUILD_ARGS = --build-arg VERSION=$(VERSION)
+DOCKER_BUILD_ARGS += $(if $(GITHUB_TOKEN),--build-arg GITHUB_TOKEN=$(GITHUB_TOKEN))
+
 ,:=,
 define build
 	$(eval NAME := $(1))
@@ -33,8 +39,7 @@ define build
 	SOURCE_DATE_EPOCH=1 \
 	BUILDKIT_MULTIPLATFORM=1 \
 	docker build \
-		--build-arg GITHUB_TOKEN=$(GITHUB_TOKEN) \
-		--build-arg VERSION=$(VERSION) \
+		$(DOCKER_BUILD_ARGS) \
 		--tag $(REGISTRY)/$(NAME) \
 		--progress=plain \
 		--platform=$(PLATFORM) \
