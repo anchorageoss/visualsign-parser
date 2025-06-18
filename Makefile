@@ -27,7 +27,26 @@ endef
 GITHUB_TOKEN ?= $(shell echo $$GITHUB_TOKEN)
 
 DOCKER_BUILD_ARGS = --build-arg VERSION=$(VERSION)
-DOCKER_BUILD_ARGS += $(if $(GITHUB_TOKEN),--secret id=github_token,src=<(echo "$(GITHUB_TOKEN)"))
+# --- Secret Handling ---
+ifneq ($(GITHUB_TOKEN),)
+# Generate a temporary file name for the secret
+# Using `mktemp` for secure temporary file creation
+# We use `shell` to execute the command and capture its output
+SECRET_FILE := $(shell mktemp -u --tmpdir docker-secret-XXXXXXXXXX)
+
+# Command to write the secret to the temporary file
+WRITE_SECRET_CMD := @echo "$(GITHUB_TOKEN)" > $(SECRET_FILE)
+
+# Command to remove the temporary secret file
+REMOVE_SECRET_CMD := @rm -f $(SECRET_FILE)
+
+# Docker build arguments for secrets
+# This combines the ID and the path to the temporary file
+DOCKER_BUILD_SECRET_ARG := --secret id=github_token,src=$(SECRET_FILE)
+else 
+WRITE_SECRET_CMD := @echo "No GITHUB_TOKEN provided, skipping secret handling."
+REMOVE_SECRET_CMD := @true
+endif
 
 ,:=,
 define build
@@ -35,6 +54,7 @@ define build
 	$(eval TYPE := $(if $(2),$(2),dir))
 	$(eval REGISTRY := anchorageoss-visualsign-parser)
 	$(eval PLATFORM := linux/amd64)
+	$(WRITE_SECRET_CMD) && \
 	DOCKER_BUILDKIT=1 \
 	SOURCE_DATE_EPOCH=1 \
 	BUILDKIT_MULTIPLATFORM=1 \
@@ -55,5 +75,6 @@ define build
 			$(if $(filter tar,$(TYPE)),dest=$@") \
 			$(if $(filter dir,$(TYPE)),dest=out/$(NAME)") \
 		-f images/$(NAME)/Containerfile \
-		.
+		. && \
+	$(REMOVE_SECRET_CMD)
 endef
