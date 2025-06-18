@@ -47,16 +47,11 @@ jobs:
         with:
           dockerHub: ${{ secrets.DOCKERHUB_API_KEY }}
           ghcr: ${{ secrets.GITHUB_TOKEN }}
-      - name: Configure git for private repos
-        run: |
-          git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
-          git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build ${{ matrix.target.name }}
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_PRIVATE_TOKEN }}
         run: |
           make -j$(nproc) out/${{ matrix.target.name }}/index.json
 
