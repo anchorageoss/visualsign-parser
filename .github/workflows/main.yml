@@ -23,6 +23,12 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           version: "21.4"
+      - name: Configure git for private repos
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run codegen
         run: make -C src generated
       - name: Ensure working tree is clean
