@@ -51,7 +51,7 @@ jobs:
       - name: Build ${{ matrix.target.name }}
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_PRIVATE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
         run: |
           make -j$(nproc) out/${{ matrix.target.name }}/index.json
 
