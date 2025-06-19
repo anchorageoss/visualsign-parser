@@ -23,7 +23,7 @@ mod tests {
             RegistryChain::Solana => ProtoChain::Solana,
             RegistryChain::Ethereum => ProtoChain::Ethereum,
             RegistryChain::Sui => ProtoChain::Sui,
-            _ => ProtoChain::Unspecified,
+            _ => ProtoChain::Custom,
         }
     }
 
