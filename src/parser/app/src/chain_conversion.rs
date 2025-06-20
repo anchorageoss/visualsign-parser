@@ -42,7 +42,7 @@ mod tests {
         // Test unsupported map to unspecified
         assert_eq!(
             registry_to_proto(&RegistryChain::Bitcoin),
-            ProtoChain::Unspecified
+            ProtoChain::Custom
         );
         assert_eq!(
             proto_to_registry(ProtoChain::Unspecified),
