@@ -27,7 +27,6 @@ jobs:
       id-token: write
       contents: read
       packages: write
-      repository-projects: read
     env:
       tags: >-
         ${{ github.ref == format('refs/heads/{0}', 'main') && 'latest' || '' }}
