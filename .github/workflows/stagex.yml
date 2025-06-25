@@ -14,6 +14,7 @@ on:
     paths:
       - ".github/**"
       - "src/**"
+      - "images/**"
       - "Makefile"
   workflow_dispatch: # Allows manual invocation
 
