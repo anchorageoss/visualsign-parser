@@ -11,11 +11,6 @@ on:
 jobs:
   ubuntu:
     runs-on: ubuntu-latest
-    # I'm not sure if this is strictly needed - I addded it as part of the GITHUB_TOKEN debugging
-    permissions:
-      id-token: write
-      contents: read
-      packages: write
     steps:
       - name: git checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -29,7 +24,6 @@ jobs:
         with:
           version: "21.4"
       - name: Run codegen
-        shell: bash
         run: make -C src generated
       - name: Ensure working tree is clean
         run: |

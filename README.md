@@ -10,27 +10,6 @@ make -C src test
 
 ## Running locally
 
-<!-- remove before open source -->
-Since visualsign-rs is still not publicly available yet, the configuration isn't
-using ssh login, you can do the following
-
-git config url."ssh://git@github.com/".insteadOf "https://github.com/"
-
-and set `net.git-fetch-with-cli` configuration in your local
-`~/.cargo/config.toml`
-
-```
-mkdir -p ~/.cargo
-cat >> ~/.cargo/config.toml << 'EOF'
-[net]
-git-fetch-with-cli = true
-
-# Map the HTTPS URL to SSH for local development
-[source."https://github.com/anchorageoss/visualsign-rs.git"]
-git = "ssh://git@github.com/anchorageoss/visualsign-rs.git"
-EOF
-```
-
 The following will start 3 sub-processes: an enclave simulator, a host, and an inner app:
 
 ```
@@ -91,6 +70,8 @@ make out/parser_host/index.json
 ```
 
 Note: you can also build non-OCI versions with `make non-oci-docker-images`.
+
+## Manual Testing Notes
 
 
 ## Example Solana tx

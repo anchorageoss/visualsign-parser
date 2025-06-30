@@ -6,12 +6,10 @@ out/parser_app/index.json: \
 	$(shell git ls-files images/parser_app src)
 	$(call build,parser_app)
 
-# Base docker args
-DOCKER_BUILD_ARGS = --build-arg VERSION=$(VERSION)
-
 .PHONY: non-oci-docker-images
 non-oci-docker-images:
-	docker buildx build $(DOCKER_BUILD_ARGS) --load --tag anchorageoss-visualsign-parser/parser_app -f images/parser_app/Containerfile .
+	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_app -f images/parser_app/Containerfile .
+	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_host -f images/parser_host/Containerfile .
 
 define build_context
 $$( \
@@ -35,7 +33,7 @@ define build
 	SOURCE_DATE_EPOCH=1 \
 	BUILDKIT_MULTIPLATFORM=1 \
 	docker build \
-		$(DOCKER_BUILD_ARGS) \
+		--build-arg VERSION=$(VERSION) \
 		--tag $(REGISTRY)/$(NAME) \
 		--progress=plain \
 		--platform=$(PLATFORM) \
@@ -51,5 +49,5 @@ define build
 			$(if $(filter tar,$(TYPE)),dest=$@") \
 			$(if $(filter dir,$(TYPE)),dest=out/$(NAME)") \
 		-f images/$(NAME)/Containerfile \
-		. 
+		.
 endef
