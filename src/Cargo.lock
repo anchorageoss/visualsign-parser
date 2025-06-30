@@ -5621,6 +5621,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "visualsign-goethereum"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "visualsign",
+]
+
+[[package]]
 name = "visualsign-solana"
 version = "0.1.0"
 dependencies = [
