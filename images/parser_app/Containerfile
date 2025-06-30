@@ -11,19 +11,6 @@ ENV RELEASE_DIR=/src/target/x86_64-unknown-linux-musl/release
 ADD src /src
 WORKDIR /src/
 
-# Configure git with secret mount (more secure)
-RUN --mount=type=secret,id=github_token \
-    echo "=== Checking GitHub token availability ===" && \
-    if [ -f /run/secrets/github_token ]; then \
-        echo "✓ Secret found, configuring git..." && \
-        GITHUB_TOKEN=$(cat /run/secrets/github_token) && \
-        git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/" && \
-        echo "✓ Git configured with token"; \
-    else \
-        echo "✗ No GitHub token secret found" && \
-        ls -la /run/secrets/ 2>/dev/null || echo "No secrets directory"; \
-    fi
-
 # pre-fetch all workspace deps; we need to them to build with `--network=none` later
 RUN cargo fetch
 

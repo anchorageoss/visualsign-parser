@@ -5612,8 +5612,8 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "visualsign"
 version = "0.1.0"
-source = "git+https://github.com/anchorageoss/visualsign-rs.git?rev=e97e3384539e9c2a12a41e23210b3d804d443e09#e97e3384539e9c2a12a41e23210b3d804d443e09"
 dependencies = [
+ "hex",
  "pretty_assertions",
  "serde",
  "serde_json",

@@ -28,11 +28,6 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           version: "21.4"
-      - name: use PRIVATE_REPO_TOKEN for visualsign-rs
-        run:
-          git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
-        env:
-          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
       - name: Run codegen
         shell: bash
         run: make -C src generated

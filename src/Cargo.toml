@@ -8,6 +8,7 @@ members = [
   "metrics",
   "parser/app",
   "parser/host",
+  "visualsign",
   "chain_parsers/visualsign-solana",
   "chain_parsers/visualsign-unspecified",
 ]
@@ -34,4 +35,4 @@ qos_nsm = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400
 qos_p256 = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400d9dfa3ad000690896af2", default-features = false }
 qos_test_primitives = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400d9dfa3ad000690896af2", default-features = false }
 # Pin visualsign dependencies
-visualsign = { git = "https://github.com/anchorageoss/visualsign-rs.git", rev = "e97e3384539e9c2a12a41e23210b3d804d443e09"}
+visualsign = { path="./visualsign" }
