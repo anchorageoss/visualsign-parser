@@ -3,8 +3,11 @@ use std::marker::PhantomData;
 use std::str::FromStr;
 
 use crate::{
+    vsptrait::{
+        Transaction, VisualSignConverter, VisualSignConverterFromString, VisualSignError,
+        VisualSignOptions,
+    },
     SignablePayload,
-    vsptrait::{Transaction, VisualSignConverter, VisualSignConverterFromString, VisualSignError, VisualSignOptions},
 };
 
 /// Supported blockchain types
@@ -38,12 +41,12 @@ impl Chain {
 
 impl FromStr for Chain {
     type Err = ();
-    
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.to_lowercase().as_str() {
             "unspecified" => Chain::Unspecified,
             "solana" => Chain::Solana,
-            "ethereum" => Chain::Ethereum, 
+            "ethereum" => Chain::Ethereum,
             "bitcoin" => Chain::Bitcoin,
             "sui" => Chain::Sui,
             "aptos" => Chain::Aptos,
@@ -60,7 +63,7 @@ pub trait VisualSignConverterAny: Send + Sync {
         transaction_data: &str,
         options: VisualSignOptions,
     ) -> Result<SignablePayload, VisualSignError>;
-    
+
     fn supports_format(&self, transaction_data: &str) -> bool;
 }
 
@@ -98,9 +101,10 @@ where
         transaction_data: &str,
         options: VisualSignOptions,
     ) -> Result<SignablePayload, VisualSignError> {
-        self.converter.to_visual_sign_payload_from_string(transaction_data, options)
+        self.converter
+            .to_visual_sign_payload_from_string(transaction_data, options)
     }
-    
+
     fn supports_format(&self, transaction_data: &str) -> bool {
         // Try to parse and see if it succeeds
         T::from_string(transaction_data).is_ok()
@@ -124,19 +128,20 @@ impl TransactionConverterRegistry {
             converters: HashMap::new(),
         }
     }
-    
+
     pub fn register<T, C>(&mut self, chain: Chain, converter: C)
     where
         T: Transaction + Send + Sync + 'static,
         C: VisualSignConverter<T> + VisualSignConverterFromString<T> + Send + Sync + 'static,
     {
-        self.converters.insert(chain, Box::new(ConverterWrapper::<T, C>::new(converter)));
+        self.converters
+            .insert(chain, Box::new(ConverterWrapper::<T, C>::new(converter)));
     }
-    
+
     pub fn get_converter(&self, chain: &Chain) -> Option<&dyn VisualSignConverterAny> {
         self.converters.get(chain).map(|c| c.as_ref())
     }
-    
+
     pub fn convert_transaction(
         &self,
         chain: &Chain,
@@ -144,13 +149,16 @@ impl TransactionConverterRegistry {
         options: VisualSignOptions,
     ) -> Result<SignablePayload, VisualSignError> {
         match self.get_converter(chain) {
-            Some(converter) => converter.to_visual_sign_payload_from_string_any(transaction_data, options),
-            None => Err(VisualSignError::ConversionError(
-                format!("No converter registered for chain: {}", chain.as_str())
-            )),
+            Some(converter) => {
+                converter.to_visual_sign_payload_from_string_any(transaction_data, options)
+            }
+            None => Err(VisualSignError::ConversionError(format!(
+                "No converter registered for chain: {}",
+                chain.as_str()
+            ))),
         }
     }
-    
+
     pub fn auto_detect_and_convert(
         &self,
         transaction_data: &str,
@@ -159,18 +167,20 @@ impl TransactionConverterRegistry {
         // Try each converter to see if it can parse the transaction
         for (chain, converter) in &self.converters {
             if converter.supports_format(transaction_data) {
-                match converter.to_visual_sign_payload_from_string_any(transaction_data, options.clone()) {
+                match converter
+                    .to_visual_sign_payload_from_string_any(transaction_data, options.clone())
+                {
                     Ok(payload) => return Ok((chain.clone(), payload)),
                     Err(_) => continue, // Try next converter
                 }
             }
         }
-        
+
         Err(VisualSignError::ConversionError(
-            "Could not detect transaction type or no compatible converter found".to_string()
+            "Could not detect transaction type or no compatible converter found".to_string(),
         ))
     }
-    
+
     pub fn supported_chains(&self) -> Vec<Chain> {
         self.converters.keys().cloned().collect()
     }
@@ -182,7 +192,7 @@ mod tests {
     use crate::{SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2};
     // Import TransactionParseError only in tests where it's actually used
     use crate::vsptrait::TransactionParseError;
-    
+
     // Mock transactions for different chains with realistic format detection
     #[derive(Debug, Clone)]
     #[allow(dead_code)]
@@ -205,15 +215,21 @@ mod tests {
                 // Simple hex decode without using hex crate
                 let bytes = match decode_hex(data) {
                     Ok(b) => b,
-                    Err(_) => return Err(TransactionParseError::DecodeError("Invalid hex".to_string())),
+                    Err(_) => {
+                        return Err(TransactionParseError::DecodeError(
+                            "Invalid hex".to_string(),
+                        ))
+                    }
                 };
-                
+
                 if !bytes.is_empty() && bytes[0] == 0x01 {
                     return Ok(Self { data: bytes });
                 }
             }
-            
-            Err(TransactionParseError::InvalidFormat("Not a Solana transaction".to_string()))
+
+            Err(TransactionParseError::InvalidFormat(
+                "Not a Solana transaction".to_string(),
+            ))
         }
 
         fn transaction_type(&self) -> String {
@@ -229,15 +245,21 @@ mod tests {
                 // Simple hex decode without using hex crate
                 let bytes = match decode_hex(data) {
                     Ok(b) => b,
-                    Err(_) => return Err(TransactionParseError::DecodeError("Invalid hex".to_string())),
+                    Err(_) => {
+                        return Err(TransactionParseError::DecodeError(
+                            "Invalid hex".to_string(),
+                        ))
+                    }
                 };
-                
+
                 if !bytes.is_empty() && bytes[0] == 0x02 {
                     return Ok(Self { data: bytes });
                 }
             }
-            
-            Err(TransactionParseError::InvalidFormat("Not an Ethereum transaction".to_string()))
+
+            Err(TransactionParseError::InvalidFormat(
+                "Not an Ethereum transaction".to_string(),
+            ))
         }
 
         fn transaction_type(&self) -> String {
@@ -250,10 +272,10 @@ mod tests {
         if s.len() % 2 != 0 {
             return Err("Hex string must have even length");
         }
-        
+
         let mut result = Vec::with_capacity(s.len() / 2);
         let mut chars = s.chars();
-        
+
         while let (Some(a), Some(b)) = (chars.next(), chars.next()) {
             let byte = match (a.to_digit(16), b.to_digit(16)) {
                 (Some(high), Some(low)) => (high as u8) << 4 | (low as u8),
@@ -261,7 +283,7 @@ mod tests {
             };
             result.push(byte);
         }
-        
+
         Ok(result)
     }
 
@@ -272,7 +294,9 @@ mod tests {
 
     impl<T> MockSuccessConverter<T> {
         fn new() -> Self {
-            Self { phantom: PhantomData }
+            Self {
+                phantom: PhantomData,
+            }
         }
     }
 
@@ -309,7 +333,9 @@ mod tests {
 
     impl<T> MockFailingConverter<T> {
         fn new() -> Self {
-            Self { phantom: PhantomData }
+            Self {
+                phantom: PhantomData,
+            }
         }
     }
 
@@ -319,7 +345,9 @@ mod tests {
             _transaction: T,
             _options: VisualSignOptions,
         ) -> Result<SignablePayload, VisualSignError> {
-            Err(VisualSignError::ConversionError("Mock conversion failed".to_string()))
+            Err(VisualSignError::ConversionError(
+                "Mock conversion failed".to_string(),
+            ))
         }
     }
 
@@ -328,22 +356,15 @@ mod tests {
     #[test]
     fn test_auto_detect_solana_success() {
         let mut registry = TransactionConverterRegistry::new();
-        
-        registry.register::<MockSolanaTransaction, _>(
-            Chain::Solana,
-            MockSuccessConverter::new(),
-        );
-        
-        registry.register::<MockEthereumTransaction, _>(
-            Chain::Ethereum,
-            MockSuccessConverter::new(),
-        );
-        
-        let result = registry.auto_detect_and_convert(
-            "01abcdef1234567890",
-            VisualSignOptions::default(),
-        );
-        
+
+        registry.register::<MockSolanaTransaction, _>(Chain::Solana, MockSuccessConverter::new());
+
+        registry
+            .register::<MockEthereumTransaction, _>(Chain::Ethereum, MockSuccessConverter::new());
+
+        let result =
+            registry.auto_detect_and_convert("01abcdef1234567890", VisualSignOptions::default());
+
         assert!(result.is_ok());
         let (chain, _) = result.unwrap();
         assert_eq!(chain, Chain::Solana);
@@ -352,21 +373,14 @@ mod tests {
     #[test]
     fn test_auto_detect_ethereum_success() {
         let mut registry = TransactionConverterRegistry::new();
-        
-        registry.register::<MockSolanaTransaction, _>(
-            Chain::Solana,
-            MockSuccessConverter::new(),
-        );
-        registry.register::<MockEthereumTransaction, _>(
-            Chain::Ethereum,
-            MockSuccessConverter::new(),
-        );
-        
-        let result = registry.auto_detect_and_convert(
-            "02abcdef1234567890",
-            VisualSignOptions::default(),
-        );
-        
+
+        registry.register::<MockSolanaTransaction, _>(Chain::Solana, MockSuccessConverter::new());
+        registry
+            .register::<MockEthereumTransaction, _>(Chain::Ethereum, MockSuccessConverter::new());
+
+        let result =
+            registry.auto_detect_and_convert("02abcdef1234567890", VisualSignOptions::default());
+
         assert!(result.is_ok());
         let (chain, _) = result.unwrap();
         assert_eq!(chain, Chain::Ethereum);
@@ -375,43 +389,33 @@ mod tests {
     #[test]
     fn test_auto_detect_no_matching_converter() {
         let mut registry = TransactionConverterRegistry::new();
-        
-        registry.register::<MockSolanaTransaction, _>(
-            Chain::Solana,
-            MockSuccessConverter::new(),
-        );
-        registry.register::<MockEthereumTransaction, _>(
-            Chain::Ethereum,
-            MockSuccessConverter::new(),
-        );
-        
+
+        registry.register::<MockSolanaTransaction, _>(Chain::Solana, MockSuccessConverter::new());
+        registry
+            .register::<MockEthereumTransaction, _>(Chain::Ethereum, MockSuccessConverter::new());
+
         let result = registry.auto_detect_and_convert(
             "03abcdef1234567890", // Starts with 03, not supported
             VisualSignOptions::default(),
         );
-        
+
         assert!(result.is_err());
     }
 
     #[test]
     fn test_auto_detect_format_supported_but_conversion_fails() {
         let mut registry = TransactionConverterRegistry::new();
-        
-        registry.register::<MockSolanaTransaction, _>(
-            Chain::Solana,
-            MockFailingConverter::new(),
-        );
-        
-        registry.register::<MockEthereumTransaction, _>(
-            Chain::Ethereum,
-            MockSuccessConverter::new(),
-        );
-        
+
+        registry.register::<MockSolanaTransaction, _>(Chain::Solana, MockFailingConverter::new());
+
+        registry
+            .register::<MockEthereumTransaction, _>(Chain::Ethereum, MockSuccessConverter::new());
+
         let result = registry.auto_detect_and_convert(
             "01abcdef1234567890", // Solana format but conversion will fail
             VisualSignOptions::default(),
         );
-        
+
         // Should try Ethereum after Solana fails, but Ethereum won't match the format
         assert!(result.is_err());
     }
@@ -419,15 +423,13 @@ mod tests {
     #[test]
     fn test_empty_registry() {
         let registry = TransactionConverterRegistry::new();
-        
-        let result = registry.auto_detect_and_convert(
-            "01abcdef1234567890",
-            VisualSignOptions::default(),
-        );
-        
+
+        let result =
+            registry.auto_detect_and_convert("01abcdef1234567890", VisualSignOptions::default());
+
         assert!(result.is_err());
     }
-    
+
     #[test]
     fn test_chain_from_str() {
         assert_eq!(Chain::from_str("solana"), Ok(Chain::Solana));
@@ -437,9 +439,12 @@ mod tests {
         assert_eq!(Chain::from_str("sui"), Ok(Chain::Sui));
         assert_eq!(Chain::from_str("aptos"), Ok(Chain::Aptos));
         assert_eq!(Chain::from_str("polkadot"), Ok(Chain::Polkadot));
-        assert_eq!(Chain::from_str("unknown"), Ok(Chain::Custom("unknown".to_string())));
+        assert_eq!(
+            Chain::from_str("unknown"),
+            Ok(Chain::Custom("unknown".to_string()))
+        );
     }
-    
+
     #[test]
     fn test_chain_as_str() {
         assert_eq!(Chain::Solana.as_str(), "Solana");

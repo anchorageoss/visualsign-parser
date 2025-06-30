@@ -70,6 +70,8 @@ pub enum TransactionParseError {
     DecodeError(String),
     #[error("Unsupported transaction version: {0}")]
     UnsupportedVersion(String),
+    #[error("Unsupported encoding format: {0}")]
+    UnsupportedEncoding(String),
 }
 
 #[derive(Debug, thiserror::Error)]

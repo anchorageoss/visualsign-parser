@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-pub mod vsptrait;
+pub mod encodings;
 pub mod registry;
+pub mod vsptrait;
 
 // A function to check if a string is empty (used for skip_serializing_if)
 fn is_empty_string(s: &str) -> bool {
@@ -15,7 +16,7 @@ fn is_empty_string(s: &str) -> bool {
 pub struct SignablePayload {
     #[serde(rename = "Fields")]
     pub fields: Vec<SignablePayloadField>,
-    #[serde(rename="PayloadType", skip_serializing_if = "is_empty_string")]
+    #[serde(rename = "PayloadType", skip_serializing_if = "is_empty_string")]
     pub payload_type: String,
     #[serde(rename = "Subtitle", skip_serializing_if = "Option::is_none")]
     pub subtitle: Option<String>,
@@ -337,25 +338,23 @@ impl SignablePayload {
         }
     }
 
-
-
     pub fn to_json(&self) -> Result<String, Box<dyn std::error::Error>> {
         // First convert to a standard JSON value
         let value = serde_json::to_value(self)?;
-        
+
         // Convert to a completely new object with alphabetically sorted keys
         let sorted_value = sort_json_alphabetically(value);
-        
+
         // Serialize without pretty-printing and without escape HTML
         let mut buf = Vec::new();
         let formatter = serde_json::ser::CompactFormatter;
         let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
         sorted_value.serialize(&mut ser)?;
-        
+
         // Convert bytes to string
         Ok(String::from_utf8(buf)?)
     }
-    
+
     // Add this method for debugging
     pub fn to_pretty_json(&self) -> Result<String, Box<dyn std::error::Error>> {
         let value = serde_json::to_value(self)?;
@@ -363,7 +362,6 @@ impl SignablePayload {
         Ok(serde_json::to_string_pretty(&sorted_value)?)
     }
 }
-
 
 // Helper function to recursively sort JSON by keys alphabetically
 fn sort_json_alphabetically(value: serde_json::Value) -> serde_json::Value {
@@ -376,18 +374,14 @@ fn sort_json_alphabetically(value: serde_json::Value) -> serde_json::Value {
             for (key, val) in map {
                 sorted_map.insert(key, sort_json_alphabetically(val));
             }
-            
+
             // Convert back to serde_json::Value
             serde_json::Value::Object(serde_json::Map::from_iter(sorted_map))
-        },
+        }
         serde_json::Value::Array(arr) => {
             // Recursively sort array elements (if they are objects)
-            serde_json::Value::Array(
-                arr.into_iter()
-                    .map(sort_json_alphabetically)
-                    .collect()
-            )
-        },
+            serde_json::Value::Array(arr.into_iter().map(sort_json_alphabetically).collect())
+        }
         // Other value types (string, number, boolean, null) don't need sorting
         other => other,
     }
@@ -506,13 +500,8 @@ mod tests {
             },
         ];
 
-        let payload = SignablePayload::new(
-            15,
-            "Withdraw".to_string(),
-            None,
-            fields,
-            "".to_string(),
-        );
+        let payload =
+            SignablePayload::new(15, "Withdraw".to_string(), None, fields, "".to_string());
 
         let json = payload.to_json().unwrap();
         println!("{}", json);
@@ -576,18 +565,18 @@ mod tests {
 
         let generated_json: Value = serde_json::from_str(&json).unwrap();
         assert_eq!(generated_json, expected_json);
-    }    
+    }
 
     #[test]
     fn test_alphabetical_sorting() {
         let payload = SignablePayload::new(
             1,
-            "Z_Title".to_string(),  // Starts with Z
-            Some("A_Subtitle".to_string()),  // Starts with A
-            vec![],  // Empty fields
-            "M_PayloadType".to_string(),  // Starts with M
+            "Z_Title".to_string(),          // Starts with Z
+            Some("A_Subtitle".to_string()), // Starts with A
+            vec![],                         // Empty fields
+            "M_PayloadType".to_string(),    // Starts with M
         );
-        
+
         let json = payload.to_json().unwrap();
         assert_sorted_alphabetically(json);
 
@@ -595,7 +584,6 @@ mod tests {
         // this is more to ensure that engineer isn't changing the order of fields
         let serde_default_json = serde_json::to_string(&payload).unwrap();
         assert_sorted_alphabetically(serde_default_json);
-
     }
 
     fn assert_sorted_alphabetically(json: String) {
@@ -606,10 +594,19 @@ mod tests {
         let pos_subtitle = json.find("Subtitle").unwrap_or(0);
         let pos_title = json.find("Title").unwrap_or(0);
         let pos_version = json.find("Version").unwrap_or(0);
-        
-        assert!(pos_fields < pos_payload, "Fields should come before PayloadType");
-        assert!(pos_payload < pos_subtitle, "PayloadType should come before Subtitle");
-        assert!(pos_subtitle < pos_title, "Subtitle should come before Title");
+
+        assert!(
+            pos_fields < pos_payload,
+            "Fields should come before PayloadType"
+        );
+        assert!(
+            pos_payload < pos_subtitle,
+            "PayloadType should come before Subtitle"
+        );
+        assert!(
+            pos_subtitle < pos_title,
+            "Subtitle should come before Title"
+        );
         assert!(pos_title < pos_version, "Title should come before Version");
     }
 }

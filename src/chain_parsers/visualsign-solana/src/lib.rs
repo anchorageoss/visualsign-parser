@@ -8,6 +8,7 @@ use spl_stake_pool::instruction::StakePoolInstruction;
 use visualsign::{
     AnnotatedPayloadField, SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
+    encodings::SupportedEncodings,
     vsptrait::{
         Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
         VisualSignError, VisualSignOptions,
@@ -23,11 +24,7 @@ pub struct SolanaTransactionWrapper {
 impl Transaction for SolanaTransactionWrapper {
     fn from_string(data: &str) -> Result<Self, TransactionParseError> {
         // Detect if format is base64 or hex
-        let format = if data.chars().all(|c| c.is_ascii_hexdigit()) {
-            "hex"
-        } else {
-            "base64"
-        };
+        let format = visualsign::encodings::SupportedEncodings::detect(data);
 
         let transaction = decode_transaction(data, format)
             .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?;
@@ -76,12 +73,13 @@ impl VisualSignConverterFromString<SolanaTransactionWrapper> for SolanaVisualSig
 
 fn decode_transaction(
     raw_transaction: &str,
-    format: &str,
+    encodings: SupportedEncodings,
 ) -> Result<SolanaTransaction, Box<dyn std::error::Error>> {
-    let bytes = match format {
-        "base64" => base64::engine::general_purpose::STANDARD.decode(raw_transaction)?,
-        "hex" => hex::decode(raw_transaction)?,
-        _ => return Err("Unsupported format. Use 'base64' or 'hex'.".into()),
+    let bytes = match encodings {
+        SupportedEncodings::Base64 => {
+            base64::engine::general_purpose::STANDARD.decode(raw_transaction)?
+        }
+        SupportedEncodings::Hex => hex::decode(raw_transaction)?,
     };
 
     let transaction: SolanaTransaction = bincode::deserialize(&bytes)?;
@@ -210,11 +208,6 @@ fn convert_to_visual_sign_payload(
     // this might have double the transfers but I don't know yet how to filter them out if decode_transfers is true
     for (i, instruction) in message.instructions.iter().enumerate() {
         let program_id = message.account_keys[instruction.program_id_index as usize].to_string();
-        let accounts: Vec<String> = instruction
-            .accounts
-            .iter()
-            .map(|&index| message.account_keys[index as usize].to_string())
-            .collect();
         let data = hex::encode(&instruction.data);
 
         let decoded_data = match program_id.as_str() {
