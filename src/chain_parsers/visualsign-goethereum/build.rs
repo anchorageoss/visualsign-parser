@@ -109,24 +109,8 @@ fn main() {
 
 pub type GoInt = ::std::os::raw::c_longlong;
 
-#[repr(C)]
-pub struct EthTransaction {
-    pub hash: *mut ::std::os::raw::c_char,
-    pub from: *mut ::std::os::raw::c_char,
-    pub to: *mut ::std::os::raw::c_char,
-    pub value: *mut ::std::os::raw::c_char,
-    pub nonce: ::std::os::raw::c_ulonglong,
-    pub input_data: *mut ::std::os::raw::c_char,
-    pub gas: ::std::os::raw::c_ulonglong,
-    pub gas_price: *mut ::std::os::raw::c_char,
-}
-
 unsafe extern "C" {
-    pub fn HelloFromGo(name: *mut ::std::os::raw::c_char) -> *mut ::std::os::raw::c_char;
-    pub fn AddNumbers(a: GoInt, b: GoInt) -> GoInt;
     pub fn GoFree(ptr: *mut ::std::os::raw::c_char);
-    pub fn FreeEthTransaction(tx: *mut EthTransaction);
-    pub fn DecodeEthereumTransaction(rawTxHex: *mut ::std::os::raw::c_char) -> *mut EthTransaction;
     pub fn DecodeEthereumTransactionToJSON(rawTxHex: *mut ::std::os::raw::c_char) -> *mut ::std::os::raw::c_char;
     pub fn FreeString(s: *mut ::std::os::raw::c_char);
 }
