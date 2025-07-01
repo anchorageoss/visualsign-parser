@@ -339,7 +339,7 @@ fn convert_to_visual_sign_payload(
             }
             program_id if program_id.starts_with("AToken") => {
                 if let Ok(instruction_type) = parse_ata_instruction(&instruction.data) {
-                    format_associated_token_instruction(&instruction_type)
+                    format_associated_token_instruction(&instruction_type, program_id)
                 } else {
                     create_default_expanded_fields(program_id, &instruction.data)
                 }
@@ -1186,7 +1186,7 @@ mod tests {
     #[test]
     fn test_format_associated_token_instruction_expanded_fields() {
         let instruction = AssociatedTokenAccountInstruction::Create;
-        let expanded = format_associated_token_instruction(&instruction);
+        let expanded = format_associated_token_instruction(&instruction, "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
         assert_eq!(expanded.fields.len(), 2); // Program ID + Instruction
 
