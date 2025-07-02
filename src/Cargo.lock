@@ -4777,6 +4777,7 @@ dependencies = [
  "sha2 0.10.9",
  "visualsign",
  "visualsign-solana",
+ "visualsign-sui",
  "visualsign-unspecified",
 ]
 

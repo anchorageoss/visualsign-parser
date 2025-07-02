@@ -17,6 +17,10 @@ fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
         visualsign::registry::Chain::Solana,
         visualsign_solana::SolanaVisualSignConverter,
     );
+    registry.register::<visualsign_sui::SuiTransactionWrapper, _>(
+        visualsign::registry::Chain::Sui,
+        visualsign_sui::SuiTransactionConverter,
+    );
     registry.register::<visualsign_unspecified::UnspecifiedTransactionWrapper, _>(
         visualsign::registry::Chain::Unspecified,
         visualsign_unspecified::UnspecifiedVisualSignConverter,

@@ -17,16 +17,16 @@ use visualsign::{
 
 /// Wrapper for SuiTransactionBlock to implement the Transaction trait
 #[derive(Debug, Clone)]
-pub struct SuiTransaction {
+pub struct SuiTransactionWrapper {
     pub transaction_block: SuiTransactionBlock,
     pub raw_data: String,
 }
 
-impl Transaction for SuiTransaction {
+impl Transaction for SuiTransactionWrapper {
     fn from_string(data: &str) -> anyhow::Result<Self, TransactionParseError> {
         let encoding = TransactionEncoding::Base64;
         match parse_sui_transaction(data.to_string(), encoding) {
-            Ok(transaction_block) => Ok(SuiTransaction {
+            Ok(transaction_block) => Ok(SuiTransactionWrapper {
                 transaction_block,
                 raw_data: data.to_string(),
             }),
@@ -42,10 +42,10 @@ impl Transaction for SuiTransaction {
 /// Converter for Sui transactions to VSP format
 pub struct SuiTransactionConverter;
 
-impl VisualSignConverter<SuiTransaction> for SuiTransactionConverter {
+impl VisualSignConverter<SuiTransactionWrapper> for SuiTransactionConverter {
     fn to_visual_sign_payload(
         &self,
-        transaction: SuiTransaction,
+        transaction: SuiTransactionWrapper,
         _options: VisualSignOptions,
     ) -> anyhow::Result<SignablePayload, VisualSignError> {
         let tx_block = &transaction.transaction_block;
@@ -241,7 +241,7 @@ fn transfer_info_to_vsp(transfer_info: &TransferInfo) -> Vec<SignablePayloadFiel
     fields
 }
 
-impl VisualSignConverterFromString<SuiTransaction> for SuiTransactionConverter {}
+impl VisualSignConverterFromString<SuiTransactionWrapper> for SuiTransactionConverter {}
 
 /// Convenience function to convert a base64-encoded Sui transaction to VSP format
 pub fn sui_transaction_to_vsp(
@@ -301,7 +301,7 @@ mod tests {
     fn test_sui_transaction_trait() {
         let test_data = "AQAAAAAAAgAI6AMAAAAAAAAAIKHjrlUcKr48a86iLT8ZNWpkcIbWvVasDQnk7u0GKQt2AgIAAQEAAAEBAgAAAQEA1ukuAC4mw6+yCIABwbWCC2TyvDUb/aWiNCrL+fXBysIBy0he+AoLr5B5piHELIsMtlzpmG4cgf0W7ogDjwBKWu3zD9AUAAAAACB0zCGEALsfD5u98y58qbKGIiXkCtDxxN2Pu+r/HyOy1tbpLgAuJsOvsgiAAcG1ggtk8rw1G/2lojQqy/n1wcrC6AMAAAAAAABAS0wAAAAAAAABYQBMegviWYFsLskcYMnTIhZRxiZkET3j2RqtgG1g7f1/EuPjfCHfTvgDqVys+AA6jLWojR35eW4HoOh8qURdshkADNDs6YjOg+HDmdMLe0zMuMDJKqzwIYg08CT6mXiLc2Y=";
 
-        let result = SuiTransaction::from_string(test_data);
+        let result = SuiTransactionWrapper::from_string(test_data);
         assert!(result.is_ok());
 
         let sui_tx = result.unwrap();
@@ -309,7 +309,7 @@ mod tests {
         assert_eq!(sui_tx.raw_data, test_data);
 
         // Test with invalid data
-        let invalid_result = SuiTransaction::from_string("invalid_data");
+        let invalid_result = SuiTransactionWrapper::from_string("invalid_data");
         assert!(invalid_result.is_err());
     }
 }

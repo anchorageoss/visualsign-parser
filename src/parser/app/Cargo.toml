@@ -15,6 +15,7 @@ qos_p256 = { workspace = true }
 generated = { path = "../../generated" }
 visualsign = {workspace = true}
 visualsign-solana = { path = "../../chain_parsers/visualsign-solana"}
+visualsign-sui = { path = "../../chain_parsers/visualsign-sui"}
 visualsign-unspecified = { path = "../../chain_parsers/visualsign-unspecified"}
 
 serde_json = "1"
