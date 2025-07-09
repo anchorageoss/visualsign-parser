@@ -132,12 +132,14 @@ async fn parser_k8_health() {
     integration::Builder::new().execute(test).await
 }
 
+// This is deliberately using a more "high level test" that only handles the native transfer - any chain specific logic is handled by the tests in chain_parsers
+// This allows us to focus on the parser's ability to handle different chain types without getting bogged down in chain-specific libraries
 #[tokio::test]
 async fn parser_solana_native_transfer_e2e() {
     async fn test(test_args: TestArgs) {
         // Base64 encoded Solana transfer transaction
         // This was generated using the Solana CLI using solana transfer --sign-only which only prints message, that needs to be wrapped into a transaction
-        let solana_transfer_message = "AQABA/vgkNkfnOBm+03UvAGzKxIiY/EUhIUGtwFgGKTg7zW14SNc89MK6BlbxE3LXXr+fSM83MDCJQ1wYYDwn39kZloAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAALHd9i9ddFp9Pbk7SBekGKS8baviinT//+klSnP/gLqsAQICAAEMAgAAAACAxqR+jQMA";
+        let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
 
         let solana_tx = create_solana_transaction_with_empty_signatures(solana_transfer_message);
         let parse_request = ParseRequest {
@@ -157,80 +159,89 @@ async fn parser_solana_native_transfer_e2e() {
 
         // this is currently optimized around just being able to copy the json output from parser as-is and pass the eye-test
         let expected_sp = serde_json::json!({
-          "Fields": [
-            {
-              "FallbackText": "Solana",
-              "Label": "Network",
-              "TextV2": {
-                "Text": "Solana"
-              },
-              "Type": "text_v2"
-            },
-            {
-              "FallbackText": "HxDwUk6kcpR7UStRPHnCSCqCGqWWxqBcgf8YkGrAnwak, G9r1RYmVnXptzCA2an46rNnHsCAQLvjyM6vR2mo3LpG1, 11111111111111111111111111111111",
-              "Label": "Account Keys",
-              "TextV2": {
-                "Text": "HxDwUk6kcpR7UStRPHnCSCqCGqWWxqBcgf8YkGrAnwak, G9r1RYmVnXptzCA2an46rNnHsCAQLvjyM6vR2mo3LpG1, 11111111111111111111111111111111"
-              },
-              "Type": "text_v2"
-            },
-            {
-              "FallbackText": "Transfer 1: HxDwUk6kcpR7UStRPHnCSCqCGqWWxqBcgf8YkGrAnwak -> G9r1RYmVnXptzCA2an46rNnHsCAQLvjyM6vR2mo3LpG1: 1000000000000000",
-              "Label": "Transfer 1",
-              "TextV2": {
-                "Text": "From: HxDwUk6kcpR7UStRPHnCSCqCGqWWxqBcgf8YkGrAnwak\nTo: G9r1RYmVnXptzCA2an46rNnHsCAQLvjyM6vR2mo3LpG1\nAmount: 1000000000000000"
-              },
-              "Type": "text_v2"
-            },
-            {
-              "FallbackText": "Program ID: 11111111111111111111111111111111\nData: 020000000080c6a47e8d0300",
-              "Label": "Instruction 1",
-              "PreviewLayout": {
-                "Condensed": {
-                  "Fields": [
-                    {
-                      "FallbackText": "Transfer { lamports: 1000000000000000 }",
-                      "Label": "Instruction",
-                      "TextV2": {
-                        "Text": "Transfer { lamports: 1000000000000000 }"
-                      },
-                      "Type": "text_v2"
+            "Fields": [
+                {
+                    "Type": "text_v2",
+                    "FallbackText": "Solana",
+                    "Label": "Network",
+                    "TextV2": {
+                        "Text": "Solana"
                     }
-                  ]
                 },
-                "Expanded": {
-                  "Fields": [
-                    {
-                      "FallbackText": "11111111111111111111111111111111",
-                      "Label": "Program ID",
-                      "TextV2": {
-                        "Text": "11111111111111111111111111111111"
-                      },
-                      "Type": "text_v2"
-                    },
-                    {
-                      "FallbackText": "020000000080c6a47e8d0300",
-                      "Label": "Data",
-                      "TextV2": {
-                        "Text": "020000000080c6a47e8d0300"
-                      },
-                      "Type": "text_v2"
+                {
+                    "Type": "text_v2",
+                    "FallbackText": "8jSCrV9xWkmMRSyf6xH3phL7SretagdqP3LRqkUYUp73, HdD2N8HDzNEM6vwAq5mBLiUbgy1P9wyJfbASt93ndDsD, 11111111111111111111111111111111",
+                    "Label": "Account Keys",
+                    "TextV2": {
+                        "Text": "8jSCrV9xWkmMRSyf6xH3phL7SretagdqP3LRqkUYUp73, HdD2N8HDzNEM6vwAq5mBLiUbgy1P9wyJfbASt93ndDsD, 11111111111111111111111111111111"
                     }
-                  ]
                 },
-                "Subtitle": {
-                  "Text": ""
+                {
+                    "Type": "text_v2",
+                    "FallbackText": "Transfer 1: HdD2N8HDzNEM6vwAq5mBLiUbgy1P9wyJfbASt93ndDsD -> 8jSCrV9xWkmMRSyf6xH3phL7SretagdqP3LRqkUYUp73: 1000000000",
+                    "Label": "Transfer 1",
+                    "TextV2": {
+                        "Text": "From: HdD2N8HDzNEM6vwAq5mBLiUbgy1P9wyJfbASt93ndDsD\nTo: 8jSCrV9xWkmMRSyf6xH3phL7SretagdqP3LRqkUYUp73\nAmount: 1000000000"
+                    }
                 },
-                "Title": {
-                  "Text": "Transfer { lamports: 1000000000000000 }"
+                {
+                    "Type": "preview_layout",
+                    "FallbackText": "Program ID: 11111111111111111111111111111111\nData: 0200000000ca9a3b00000000",
+                    "Label": "Instruction 1",
+                    "PreviewLayout": {
+                        "Title": {
+                            "Text": "Transfer: 1000000000 lamports"
+                        },
+                        "Subtitle": {
+                            "Text": ""
+                        },
+                        "Condensed": {
+                            "Fields": [
+                                {
+                                    "Type": "text_v2",
+                                    "FallbackText": "Transfer: 1000000000 lamports",
+                                    "Label": "Instruction",
+                                    "TextV2": {
+                                        "Text": "Transfer: 1000000000 lamports"
+                                    }
+                                }
+                            ]
+                        },
+                        "Expanded": {
+                            "Fields": [
+                                {
+                                    "Type": "text_v2",
+                                    "FallbackText": "11111111111111111111111111111111",
+                                    "Label": "Program ID",
+                                    "TextV2": {
+                                        "Text": "11111111111111111111111111111111"
+                                    }
+                                },
+                                {
+                                    "Type": "amount_v2",
+                                    "FallbackText": "1 SOL",
+                                    "Label": "Transfer Amount",
+                                    "AmountV2": {
+                                        "Amount": "1000000000",
+                                        "Abbreviation": "lamports"
+                                    }
+                                },
+                                {
+                                    "Type": "text_v2",
+                                    "FallbackText": "0200000000ca9a3b00000000",
+                                    "Label": "Raw Data",
+                                    "TextV2": {
+                                        "Text": "0200000000ca9a3b00000000"
+                                    }
+                                }
+                            ]
+                        }
+                    }
                 }
-              },
-              "Type": "preview_layout"
-            }
-          ],
-          "PayloadType": "SolanaTx",
-          "Title": "Solana Transaction",
-          "Version": "0"
+            ],
+            "PayloadType": "SolanaTx",
+            "Title": "Solana Transaction",
+            "Version": "0"
         });
 
         // Verify the transaction contains Solana-specific fields
@@ -243,7 +254,3 @@ async fn parser_solana_native_transfer_e2e() {
 
     integration::Builder::new().execute(test).await
 }
-
-// TODO SPL transfers
-// TODO major DeFi examples
-// Maybe this should be handled by the chain_parsers?
