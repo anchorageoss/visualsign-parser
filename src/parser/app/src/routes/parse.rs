@@ -17,6 +17,10 @@ fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
         visualsign::registry::Chain::Solana,
         visualsign_solana::SolanaVisualSignConverter,
     );
+    registry.register::<visualsign_ethereum::EthereumTransactionWrapper, _>(
+        visualsign::registry::Chain::Ethereum,
+        visualsign_ethereum::EthereumVisualSignConverter,
+    );
     registry.register::<visualsign_unspecified::UnspecifiedTransactionWrapper, _>(
         visualsign::registry::Chain::Unspecified,
         visualsign_unspecified::UnspecifiedVisualSignConverter,
