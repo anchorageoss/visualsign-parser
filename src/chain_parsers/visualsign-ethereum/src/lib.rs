@@ -335,6 +335,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{TxLegacy, TypedTransaction};
     use alloy_primitives::{Address, Bytes, ChainId, U256};
+    use alloy_rlp::Encodable;
     #[test]
     fn test_transaction_to_visual_sign_basic() {
         // Create a dummy Ethereum transaction
@@ -568,8 +569,6 @@ mod tests {
         let result = EthereumTransactionWrapper::from_string(" 0x1234 ");
         assert!(result.is_err());
 
-        // For successful parsing tests, we'll create transactions directly rather than parsing RLP
-        // since creating valid RLP data is complex and error-prone
         let tx = TypedTransaction::Legacy(TxLegacy {
             chain_id: Some(ChainId::from(1u64)),
             nonce: 0,
@@ -580,12 +579,238 @@ mod tests {
             input: Bytes::new(),
         });
 
-        let wrapper = EthereumTransactionWrapper::new(tx);
+        // Encode the transaction to RLP bytes
+        let mut encoded = Vec::new();
+        if let TypedTransaction::Legacy(ref legacy_tx) = tx {
+            legacy_tx.encode(&mut encoded);
+        }
+
+        // Convert to hex string for testing
+        let hex_string = format!("0x{}", hex::encode(&encoded));
+
+        // Test parsing the encoded transaction
+        let result = EthereumTransactionWrapper::from_string(&hex_string);
+        assert!(
+            result.is_ok(),
+            "Should successfully parse encoded transaction"
+        );
+
+        let wrapper = result.unwrap();
         assert_eq!(wrapper.transaction_type(), "Ethereum");
 
-        // Note: Real RLP parsing tests are omitted due to complexity of creating valid RLP data
-        // The decode_transaction function is tested separately with actual network data
-        println!("Note: Full RLP parsing tests require valid network transaction data");
+        // Compare the decoded transaction with the original
+        if let (TypedTransaction::Legacy(original), TypedTransaction::Legacy(decoded)) =
+            (&tx, wrapper.inner())
+        {
+            assert_eq!(original.chain_id, decoded.chain_id);
+            assert_eq!(original.nonce, decoded.nonce);
+            assert_eq!(original.gas_price, decoded.gas_price);
+            assert_eq!(original.gas_limit, decoded.gas_limit);
+            assert_eq!(original.to, decoded.to);
+            assert_eq!(original.value, decoded.value);
+            assert_eq!(original.input, decoded.input);
+        } else {
+            panic!("Expected both transactions to be Legacy type");
+        }
+
+        // Test with EIP-1559 transaction
+        let eip1559_tx = TypedTransaction::Eip1559(alloy_consensus::TxEip1559 {
+            chain_id: ChainId::from(1u64),
+            nonce: 1,
+            gas_limit: 21000,
+            max_fee_per_gas: 30_000_000_000u128,
+            max_priority_fee_per_gas: 2_000_000_000u128,
+            to: alloy_primitives::TxKind::Call(Address::ZERO),
+            value: U256::from(1000000000000000000u64),
+            access_list: Default::default(),
+            input: Bytes::new(),
+        });
+
+        // Encode EIP-1559 transaction
+        let mut eip1559_encoded = vec![0x02]; // EIP-1559 type prefix
+        if let TypedTransaction::Eip1559(ref eip1559) = eip1559_tx {
+            eip1559.encode(&mut eip1559_encoded);
+        }
+
+        let eip1559_hex = format!("0x{}", hex::encode(&eip1559_encoded));
+        let eip1559_result = EthereumTransactionWrapper::from_string(&eip1559_hex);
+        assert!(
+            eip1559_result.is_ok(),
+            "Should successfully parse EIP-1559 transaction"
+        );
+
+        let eip1559_wrapper = eip1559_result.unwrap();
+        // Compare the decoded EIP-1559 transaction with the original
+        if let (TypedTransaction::Eip1559(original), TypedTransaction::Eip1559(decoded)) =
+            (&eip1559_tx, eip1559_wrapper.inner())
+        {
+            assert_eq!(original.chain_id, decoded.chain_id);
+            assert_eq!(original.nonce, decoded.nonce);
+            assert_eq!(original.gas_limit, decoded.gas_limit);
+            assert_eq!(original.max_fee_per_gas, decoded.max_fee_per_gas);
+            assert_eq!(
+                original.max_priority_fee_per_gas,
+                decoded.max_priority_fee_per_gas
+            );
+            assert_eq!(original.to, decoded.to);
+            assert_eq!(original.value, decoded.value);
+            assert_eq!(original.access_list, decoded.access_list);
+            assert_eq!(original.input, decoded.input);
+        } else {
+            panic!("Expected both transactions to be EIP-1559 type");
+        }
+
+        // Test with EIP-2930 transaction
+        let eip2930_tx = TypedTransaction::Eip2930(alloy_consensus::TxEip2930 {
+            chain_id: ChainId::from(1u64),
+            nonce: 2,
+            gas_price: 25_000_000_000u128,
+            gas_limit: 21000,
+            to: alloy_primitives::TxKind::Call(Address::ZERO),
+            value: U256::from(500000000000000000u64),
+            access_list: Default::default(),
+            input: Bytes::new(),
+        });
+
+        // Encode EIP-2930 transaction
+        let mut eip2930_encoded = vec![0x01]; // EIP-2930 type prefix
+        if let TypedTransaction::Eip2930(ref eip2930) = eip2930_tx {
+            eip2930.encode(&mut eip2930_encoded);
+        }
+
+        let eip2930_hex = format!("0x{}", hex::encode(&eip2930_encoded));
+        let eip2930_result = EthereumTransactionWrapper::from_string(&eip2930_hex);
+        assert!(
+            eip2930_result.is_ok(),
+            "Should successfully parse EIP-2930 transaction"
+        );
+
+        let eip2930_wrapper = eip2930_result.unwrap();
+        // Compare the decoded EIP-2930 transaction with the original
+        if let (TypedTransaction::Eip2930(original), TypedTransaction::Eip2930(decoded)) =
+            (&eip2930_tx, eip2930_wrapper.inner())
+        {
+            assert_eq!(original.chain_id, decoded.chain_id);
+            assert_eq!(original.nonce, decoded.nonce);
+            assert_eq!(original.gas_price, decoded.gas_price);
+            assert_eq!(original.gas_limit, decoded.gas_limit);
+            assert_eq!(original.to, decoded.to);
+            assert_eq!(original.value, decoded.value);
+            assert_eq!(original.access_list, decoded.access_list);
+            assert_eq!(original.input, decoded.input);
+        } else {
+            panic!("Expected both transactions to be EIP-2930 type");
+        }
+
+        // Test with EIP-4844 transaction
+        let eip4844_tx = TypedTransaction::Eip4844(alloy_consensus::TxEip4844Variant::TxEip4844(
+            alloy_consensus::TxEip4844 {
+                chain_id: ChainId::from(1u64),
+                nonce: 3,
+                gas_limit: 21000,
+                max_fee_per_gas: 40_000_000_000u128,
+                max_priority_fee_per_gas: 3_000_000_000u128,
+                to: Address::ZERO,
+                value: U256::from(250000000000000000u64),
+                access_list: Default::default(),
+                blob_versioned_hashes: vec![],
+                max_fee_per_blob_gas: 1_000_000_000u128,
+                input: Bytes::new(),
+            },
+        ));
+
+        // Encode EIP-4844 transaction
+        let mut eip4844_encoded = vec![0x03]; // EIP-4844 type prefix
+        if let TypedTransaction::Eip4844(alloy_consensus::TxEip4844Variant::TxEip4844(
+            ref eip4844,
+        )) = eip4844_tx
+        {
+            eip4844.encode(&mut eip4844_encoded);
+        }
+
+        let eip4844_hex = format!("0x{}", hex::encode(&eip4844_encoded));
+        let eip4844_result = EthereumTransactionWrapper::from_string(&eip4844_hex);
+        assert!(
+            eip4844_result.is_ok(),
+            "Should successfully parse EIP-4844 transaction"
+        );
+
+        let eip4844_wrapper = eip4844_result.unwrap();
+        // Compare the decoded EIP-4844 transaction with the original
+        if let (
+            TypedTransaction::Eip4844(alloy_consensus::TxEip4844Variant::TxEip4844(original)),
+            TypedTransaction::Eip4844(alloy_consensus::TxEip4844Variant::TxEip4844(decoded)),
+        ) = (&eip4844_tx, eip4844_wrapper.inner())
+        {
+            assert_eq!(original.chain_id, decoded.chain_id);
+            assert_eq!(original.nonce, decoded.nonce);
+            assert_eq!(original.gas_limit, decoded.gas_limit);
+            assert_eq!(original.max_fee_per_gas, decoded.max_fee_per_gas);
+            assert_eq!(
+                original.max_priority_fee_per_gas,
+                decoded.max_priority_fee_per_gas
+            );
+            assert_eq!(original.to, decoded.to);
+            assert_eq!(original.value, decoded.value);
+            assert_eq!(original.access_list, decoded.access_list);
+            assert_eq!(
+                original.blob_versioned_hashes,
+                decoded.blob_versioned_hashes
+            );
+            assert_eq!(original.max_fee_per_blob_gas, decoded.max_fee_per_blob_gas);
+            assert_eq!(original.input, decoded.input);
+        } else {
+            panic!("Expected both transactions to be EIP-4844 type");
+        }
+
+        // Test with EIP-7702 transaction
+        let eip7702_tx = TypedTransaction::Eip7702(alloy_consensus::TxEip7702 {
+            chain_id: ChainId::from(1u64),
+            nonce: 4,
+            gas_limit: 21000,
+            max_fee_per_gas: 35_000_000_000u128,
+            max_priority_fee_per_gas: 2_500_000_000u128,
+            to: Address::ZERO,
+            value: U256::from(750000000000000000u64),
+            access_list: Default::default(),
+            authorization_list: vec![],
+            input: Bytes::new(),
+        });
+
+        // Encode EIP-7702 transaction
+        let mut eip7702_encoded = vec![0x04]; // EIP-7702 type prefix
+        if let TypedTransaction::Eip7702(ref eip7702) = eip7702_tx {
+            eip7702.encode(&mut eip7702_encoded);
+        }
+
+        let eip7702_hex = format!("0x{}", hex::encode(&eip7702_encoded));
+        let eip7702_result = EthereumTransactionWrapper::from_string(&eip7702_hex);
+        assert!(
+            eip7702_result.is_ok(),
+            "Should successfully parse EIP-7702 transaction"
+        );
+
+        let eip7702_wrapper = eip7702_result.unwrap();
+        // Compare the decoded EIP-7702 transaction with the original
+        if let (TypedTransaction::Eip7702(original), TypedTransaction::Eip7702(decoded)) =
+            (&eip7702_tx, eip7702_wrapper.inner())
+        {
+            assert_eq!(original.chain_id, decoded.chain_id);
+            assert_eq!(original.nonce, decoded.nonce);
+            assert_eq!(original.gas_limit, decoded.gas_limit);
+            assert_eq!(original.max_fee_per_gas, decoded.max_fee_per_gas);
+            assert_eq!(
+                original.max_priority_fee_per_gas,
+                decoded.max_priority_fee_per_gas
+            );
+            assert_eq!(original.to, decoded.to);
+            assert_eq!(original.value, decoded.value);
+            assert_eq!(original.access_list, decoded.access_list);
+            assert_eq!(original.authorization_list, decoded.authorization_list);
+            assert_eq!(original.input, decoded.input);
+        } else {
+            panic!("Expected both transactions to be EIP-7702 type");
+        }
     }
 
     #[test]
@@ -627,6 +852,25 @@ mod tests {
         if let SignablePayloadField::TextV2 { text_v2, .. } = value_field {
             assert!(text_v2.text.contains("0"));
             assert!(text_v2.text.contains("ETH"));
+        }
+    }
+    #[test]
+    fn test_transaction_to_visual_sign_public_api() {
+        // Test the public API function
+        let test_tx = "0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83";
+        let options = VisualSignOptions::default();
+        let tx = EthereumTransactionWrapper::from_string(test_tx).unwrap();
+
+        let result = transaction_to_visual_sign(tx.inner().clone(), options);
+
+        match result {
+            Ok(payload) => {
+                assert_eq!(payload.title, "Ethereum Transaction");
+            }
+            Err(e) => {
+                eprintln!("Public API failed with error: {:?}", e);
+                panic!("Public API should work but got error: {:?}", e);
+            }
         }
     }
 }
