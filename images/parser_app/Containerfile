@@ -1,4 +1,23 @@
+FROM alpine:latest AS downloader
+RUN apk add --no-cache wget ca-certificates
+RUN wget -O go.tar.gz https://go.dev/dl/go1.24.4.linux-amd64.tar.gz \
+    && echo "77e5da33bb72aeaef1ba4418b6fe511bc4d041873cbf82e5aa6318740df98717  go.tar.gz" | sha256sum -c
+
+
 FROM stagex/pallet-rust:sx2025.06.0@sha256:740b9ed5f2a897d45cafdc806976d84231aa50a64998610750b42a48f8daacab AS build
+
+COPY --from=downloader /go.tar.gz /tmp/
+
+# Install Go from downloaded archive
+RUN <<-EOF
+    set -eu
+    tar -C /usr/local -xzf /tmp/go.tar.gz
+    rm /tmp/go.tar.gz
+EOF
+
+# Add Go to PATH and configure CGO for static linking
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV CGO_ENABLED=1
 
 # Rust configuration
 ENV RUSTFLAGS='-C target-feature=+crt-static'
@@ -13,6 +32,15 @@ WORKDIR /src/
 
 # pre-fetch all workspace deps; we need to them to build with `--network=none` later
 RUN cargo fetch
+
+# Also fetch Go dependencies for the visualsign-goethereum module
+RUN <<-EOF
+    set -eu
+    cd /src/chain_parsers/visualsign-goethereum
+    go mod download
+    cd /src/chain_parsers/visualsign-goethereum/go
+    go mod download
+EOF
 
 WORKDIR /src/parser/app
 RUN --network=none <<-EOF

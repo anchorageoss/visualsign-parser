@@ -21,6 +21,10 @@ fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
         visualsign::registry::Chain::Unspecified,
         visualsign_unspecified::UnspecifiedVisualSignConverter,
     );
+    registry.register::<visualsign_goethereum::GoEthereumTransactionWrapper, _>(
+        visualsign::registry::Chain::Ethereum,
+        visualsign_goethereum::GoEthereumVisualSignConverter,
+    );
     registry
 }
 

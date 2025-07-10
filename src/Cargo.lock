@@ -2208,6 +2208,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "visualsign",
+ "visualsign-goethereum",
  "visualsign-solana",
  "visualsign-unspecified",
 ]
@@ -5601,6 +5602,14 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "visualsign-goethereum"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "visualsign",
 ]
 
 [[package]]

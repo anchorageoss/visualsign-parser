@@ -10,6 +10,7 @@ members = [
   "parser/host",
   "visualsign",
   "chain_parsers/visualsign-solana",
+  "chain_parsers/visualsign-goethereum",
   "chain_parsers/visualsign-unspecified",
 ]
 
