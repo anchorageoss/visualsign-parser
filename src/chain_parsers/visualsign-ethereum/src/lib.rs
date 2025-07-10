@@ -2,7 +2,6 @@ use alloy_consensus::{Transaction as _, TypedTransaction};
 use alloy_primitives::U256;
 use alloy_rlp::Decodable;
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
-use hex;
 use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2,
     encodings::SupportedEncodings,
@@ -129,31 +128,29 @@ fn decode_transaction(
             // EIP-2930: Optional access lists
             let tx = alloy_consensus::TxEip2930::decode(&mut &bytes[1..])
                 .map_err(|e| format!("Failed to decode EIP-2930 transaction: {}", e))?;
-            return Ok(TypedTransaction::Eip2930(tx));
+            Ok(TypedTransaction::Eip2930(tx))
         }
         0x02 => {
             // EIP-1559: Fee market change
             let tx = alloy_consensus::TxEip1559::decode(&mut &bytes[1..])
                 .map_err(|e| format!("Failed to decode EIP-1559 transaction: {}", e))?;
-            return Ok(TypedTransaction::Eip1559(tx));
+            Ok(TypedTransaction::Eip1559(tx))
         }
         0x03 => {
             // EIP-4844: Blob transactions
             let tx = alloy_consensus::TxEip4844::decode(&mut &bytes[1..])
                 .map_err(|e| format!("Failed to decode EIP-4844 transaction: {}", e))?;
-            return Ok(TypedTransaction::Eip4844(
+            Ok(TypedTransaction::Eip4844(
                 alloy_consensus::TxEip4844Variant::TxEip4844(tx),
-            ));
+            ))
         }
         0x04 => {
             // EIP-7702: Set EOA account code
             let tx = alloy_consensus::TxEip7702::decode(&mut &bytes[1..])
                 .map_err(|e| format!("Failed to decode EIP-7702 transaction: {}", e))?;
-            return Ok(TypedTransaction::Eip7702(tx));
+            Ok(TypedTransaction::Eip7702(tx))
         }
-        _ => {
-            return Err(format!("Unknown transaction type: 0x{:02x}", bytes[0]).into());
-        }
+        _ => Err(format!("Unknown transaction type: 0x{:02x}", bytes[0]).into()),
     }
 }
 
