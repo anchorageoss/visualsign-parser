@@ -47,6 +47,10 @@ message QOSParserResponse {
 message ParseRequest {
   string unsigned_payload = 1;
   Chain chain = 2;
+  oneof chainMetadata {
+    EthereumMetadata ethereum = 3;
+    SolanaMetadata solana = 4;
+  }
 }
 
 message ParseResponse {
@@ -78,4 +82,9 @@ message Signature {
   string public_key = 2;
   string message = 3;
   string signature = 4;
+}
+
+message EthereumMetadata {
+}
+message SolanaMetadata {
 }

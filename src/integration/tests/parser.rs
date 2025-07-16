@@ -85,6 +85,7 @@ async fn parser_e2e() {
         let parse_request = ParseRequest {
             unsigned_payload: "unsignedpayload".to_string(),
             chain: Chain::Unspecified as i32,
+            chain_metadata: None,
         };
 
         let parse_response = test_args
@@ -145,6 +146,7 @@ async fn parser_solana_native_transfer_e2e() {
         let parse_request = ParseRequest {
             unsigned_payload: solana_tx,
             chain: Chain::Solana as i32,
+            chain_metadata: None,
         };
 
         let parse_response = test_args

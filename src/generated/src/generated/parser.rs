@@ -71,6 +71,25 @@ pub struct ParseRequest {
     pub unsigned_payload: ::prost::alloc::string::String,
     #[prost(enumeration = "Chain", tag = "2")]
     pub chain: i32,
+    #[prost(oneof = "parse_request::ChainMetadata", tags = "3, 4")]
+    pub chain_metadata: ::core::option::Option<parse_request::ChainMetadata>,
+}
+/// Nested message and enum types in `ParseRequest`.
+pub mod parse_request {
+    #[cfg_attr(
+        feature = "serde_derive",
+        derive(::serde::Serialize, ::serde::Deserialize),
+        serde(rename_all = "camelCase")
+    )]
+    #[cfg_attr(feature = "serde_derive", serde(untagged))]
+    #[allow(clippy::derive_partial_eq_without_eq)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum ChainMetadata {
+        #[prost(message, tag = "3")]
+        Ethereum(super::EthereumMetadata),
+        #[prost(message, tag = "4")]
+        Solana(super::SolanaMetadata),
+    }
 }
 #[cfg_attr(
     feature = "serde_derive",
@@ -139,6 +158,22 @@ pub struct Signature {
     #[prost(string, tag = "4")]
     pub signature: ::prost::alloc::string::String,
 }
+#[cfg_attr(
+    feature = "serde_derive",
+    derive(::serde::Serialize, ::serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct EthereumMetadata {}
+#[cfg_attr(
+    feature = "serde_derive",
+    derive(::serde::Serialize, ::serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SolanaMetadata {}
 /// Chain represents supported blockchain networks
 #[cfg_attr(
     feature = "serde_derive",
