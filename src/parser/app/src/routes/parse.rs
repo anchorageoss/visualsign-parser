@@ -1,5 +1,7 @@
 //! Parsing endpoint for `VisualSign`
 
+use crate::{chain_conversion, errors::GrpcError, registry::create_registry};
+use generated::parser::Chain as ProtoChain;
 use generated::{
     google::rpc::Code,
     parser::{
@@ -9,23 +11,6 @@ use generated::{
 };
 use qos_crypto::sha_256;
 use qos_p256::P256Pair;
-
-// TODO(pg): this may not be the right place for this
-fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
-    let mut registry = visualsign::registry::TransactionConverterRegistry::new();
-    registry.register::<visualsign_solana::SolanaTransactionWrapper, _>(
-        visualsign::registry::Chain::Solana,
-        visualsign_solana::SolanaVisualSignConverter,
-    );
-    registry.register::<visualsign_unspecified::UnspecifiedTransactionWrapper, _>(
-        visualsign::registry::Chain::Unspecified,
-        visualsign_unspecified::UnspecifiedVisualSignConverter,
-    );
-    registry
-}
-
-use crate::{chain_conversion, errors::GrpcError};
-use generated::parser::Chain as ProtoChain;
 use visualsign::registry::Chain as VisualSignRegistryChain;
 use visualsign::vsptrait::VisualSignOptions;
 

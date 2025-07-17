@@ -1,25 +1,8 @@
-use clap::{Arg, Command};
-
 use crate::chains;
 use chains::{available_chains, parse_chain};
+use clap::{Arg, Command};
+use parser_app::registry::create_registry;
 use visualsign::vsptrait::VisualSignOptions;
-
-fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
-    let mut registry = visualsign::registry::TransactionConverterRegistry::new();
-    registry.register::<visualsign_solana::SolanaTransactionWrapper, _>(
-        visualsign::registry::Chain::Solana,
-        visualsign_solana::SolanaVisualSignConverter,
-    );
-    //registry.register::<visualsign_ethereum::EthereumTransactionWrapper, _>(
-    //    visualsign::registry::Chain::Ethereum,
-    //    visualsign_ethereum::EthereumVisualSignConverter,
-    //);
-    registry.register::<visualsign_unspecified::UnspecifiedTransactionWrapper, _>(
-        visualsign::registry::Chain::Unspecified,
-        visualsign_unspecified::UnspecifiedVisualSignConverter,
-    );
-    registry
-}
 
 fn parse_and_display(chain: &str, raw_tx: &str, options: VisualSignOptions) {
     let registry_chain = parse_chain(chain);

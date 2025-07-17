@@ -12,6 +12,8 @@ pub mod errors;
 
 pub mod chain_conversion;
 
+pub mod registry;
+
 mod routes {
     pub(crate) mod parse;
 }

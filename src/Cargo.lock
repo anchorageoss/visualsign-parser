@@ -2335,6 +2335,7 @@ dependencies = [
  "bs58",
  "clap",
  "generated",
+ "parser_app",
  "serde",
  "serde_json",
  "sha2 0.10.9",
