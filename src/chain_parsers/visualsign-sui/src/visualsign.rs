@@ -151,7 +151,12 @@ fn add_transfer_preview_layouts(
 /// Create a preview layout for a transfer
 fn create_transfer_preview_layout(transfer: &TransferInfo, index: usize) -> SignablePayloadField {
     let title_text = match &transfer.coin_object {
-        CoinObject::Sui => format!("Transfer {}: {} SUI", index, transfer.amount),
+        CoinObject::Sui => format!(
+            "Transfer {}: {} MIST ({} SUI)",
+            index,
+            transfer.amount,
+            transfer.amount as f64 / 1_000_000_000.0,
+        ),
         CoinObject::Unknown(_) => format!("Transfer {}: {} tokens", index, transfer.amount),
     };
 
