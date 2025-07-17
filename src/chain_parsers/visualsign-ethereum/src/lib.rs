@@ -57,11 +57,7 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
         options: VisualSignOptions,
     ) -> Result<SignablePayload, VisualSignError> {
         let transaction = transaction_wrapper.inner().clone();
-        let payload = convert_to_visual_sign_payload(
-            transaction,
-            options.decode_transfers,
-            options.transaction_name,
-        );
+        let payload = convert_to_visual_sign_payload(transaction, options);
         Ok(payload)
     }
 }
@@ -129,8 +125,7 @@ fn decode_transaction(
 
 fn convert_to_visual_sign_payload(
     transaction: TypedTransaction,
-    decode_transfers: bool,
-    title: Option<String>,
+    options: VisualSignOptions,
 ) -> SignablePayload {
     let mut fields = vec![
         SignablePayloadField::TextV2 {
@@ -232,54 +227,10 @@ fn convert_to_visual_sign_payload(
         });
     }
 
-    if decode_transfers {
-        // Add ERC-20 token transfer parsing here
-        if let Some(decoded_transfer) = decode_erc20_transfer(input) {
-            fields.push(SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: format!(
-                        "ERC-20 Transfer: {} to {}",
-                        decoded_transfer.amount, decoded_transfer.recipient
-                    ),
-                    label: "Token Transfer".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 {
-                    text: format!(
-                        "Amount: {}\nRecipient: {}",
-                        decoded_transfer.amount, decoded_transfer.recipient
-                    ),
-                },
-            });
-        }
-    }
-
-    let title = title.unwrap_or_else(|| "Ethereum Transaction".to_string());
+    let title = options
+        .transaction_name
+        .unwrap_or_else(|| "Ethereum Transaction".to_string());
     SignablePayload::new(0, title, None, fields, "EthereumTx".to_string())
-}
-
-// Helper struct for ERC-20 transfers
-#[derive(Debug)]
-struct Erc20Transfer {
-    recipient: String,
-    amount: String,
-}
-
-fn decode_erc20_transfer(input: &[u8]) -> Option<Erc20Transfer> {
-    // ERC-20 transfer function signature: transfer(address,uint256)
-    const TRANSFER_SELECTOR: &[u8] = &[0xa9, 0x05, 0x9c, 0xbb];
-
-    if input.len() >= 68 && input[0..4] == *TRANSFER_SELECTOR {
-        let recipient = format!("0x{}", hex::encode(&input[16..36]));
-        let amount_bytes = &input[36..68];
-        let amount = U256::from_be_bytes(amount_bytes.try_into().unwrap_or([0u8; 32]));
-
-        Some(Erc20Transfer {
-            recipient,
-            amount: amount.to_string(),
-        })
-    } else {
-        None
-    }
 }
 
 // Public API functions for ease of use
@@ -460,37 +411,6 @@ mod tests {
         let payload = transaction_to_visual_sign(tx, options).unwrap();
 
         assert_eq!(payload.title, "Custom Transaction Title");
-    }
-
-    #[test]
-    fn test_decode_erc20_transfer() {
-        // Valid ERC-20 transfer data
-        let mut input_data = vec![0xa9, 0x05, 0x9c, 0xbb]; // transfer function selector
-        input_data.extend_from_slice(&[0u8; 12]); // padding
-        input_data
-            .extend_from_slice(&hex::decode("1234567890123456789012345678901234567890").unwrap()); // recipient
-
-        // Convert amount to 32-byte big-endian representation
-        let amount = U256::from(1000);
-        let amount_bytes = amount.to_be_bytes::<32>();
-        input_data.extend_from_slice(&amount_bytes); // amount
-
-        let result = decode_erc20_transfer(&input_data);
-        assert!(result.is_some());
-        let transfer = result.unwrap();
-        assert_eq!(
-            transfer.recipient,
-            "0x1234567890123456789012345678901234567890"
-        );
-        assert_eq!(transfer.amount, "1000");
-
-        // Invalid data (too short)
-        let short_data = vec![0xa9, 0x05, 0x9c, 0xbb, 0x12];
-        assert!(decode_erc20_transfer(&short_data).is_none());
-
-        // Invalid function selector
-        let invalid_selector = vec![0x00, 0x00, 0x00, 0x00];
-        assert!(decode_erc20_transfer(&invalid_selector).is_none());
     }
 
     #[test]
