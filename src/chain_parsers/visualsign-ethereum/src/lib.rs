@@ -312,11 +312,7 @@ mod tests {
         // Check specific field values
         let to_field = payload.fields.iter().find(|f| f.label() == "To").unwrap();
         if let SignablePayloadField::TextV2 { text_v2, .. } = to_field {
-            assert!(
-                text_v2
-                    .text
-                    .contains("0x000000000000000000000000000000000000dead")
-            );
+            assert_eq!(text_v2.text, "0x000000000000000000000000000000000000dEaD"); // EIP-55 mixed-capitalization
         }
 
         let value_field = payload
