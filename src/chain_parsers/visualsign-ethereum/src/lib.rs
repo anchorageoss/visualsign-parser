@@ -301,42 +301,94 @@ mod tests {
         let options = VisualSignOptions::default();
         let payload = transaction_to_visual_sign(tx, options).unwrap();
 
-        // Check that all expected fields are present
-        assert!(payload.fields.iter().any(|f| f.label() == "Network"));
-        assert!(payload.fields.iter().any(|f| f.label() == "To"));
-        assert!(payload.fields.iter().any(|f| f.label() == "Value"));
-        assert!(payload.fields.iter().any(|f| f.label() == "Gas Limit"));
-        assert!(payload.fields.iter().any(|f| f.label() == "Gas Price"));
-        assert!(payload.fields.iter().any(|f| f.label() == "Nonce"));
+        let expected_payload = SignablePayload::new(
+            0,
+            "Ethereum Transaction".to_string(),
+            None,
+            vec![
+                SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: "Ethereum Mainnet".to_string(),
+                        label: "Network".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "Ethereum Mainnet".to_string(),
+                    },
+                },
+                SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: "0x000000000000000000000000000000000000dEaD".to_string(),
+                        label: "To".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "0x000000000000000000000000000000000000dEaD".to_string(),
+                    },
+                },
+                SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: "1 ETH".to_string(),
+                        label: "Value".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "1 ETH".to_string(),
+                    },
+                },
+                SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: "21000".to_string(),
+                        label: "Gas Limit".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "21000".to_string(),
+                    },
+                },
+                SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: "0.00000002 ETH".to_string(),
+                        label: "Gas Price".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "0.00000002 ETH".to_string(),
+                    },
+                },
+                SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: "42".to_string(),
+                        label: "Nonce".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "42".to_string(),
+                    },
+                },
+            ],
+            "EthereumTx".to_string(),
+        );
 
-        // Check specific field values
-        let to_field = payload.fields.iter().find(|f| f.label() == "To").unwrap();
-        if let SignablePayloadField::TextV2 { text_v2, .. } = to_field {
-            assert_eq!(text_v2.text, "0x000000000000000000000000000000000000dEaD"); // EIP-55 mixed-capitalization
+        // Compare individual fields since SignablePayload doesn't implement PartialEq
+        assert_eq!(expected_payload.title, payload.title);
+        assert_eq!(expected_payload.version, payload.version);
+        assert_eq!(expected_payload.subtitle, payload.subtitle);
+        assert_eq!(expected_payload.fields.len(), payload.fields.len());
+        assert_eq!(expected_payload.payload_type, payload.payload_type);
+
+        for (expected_field, actual_field) in
+            expected_payload.fields.iter().zip(payload.fields.iter())
+        {
+            assert_eq!(expected_field.label(), actual_field.label());
+            if let (
+                SignablePayloadField::TextV2 {
+                    text_v2: expected_text,
+                    ..
+                },
+                SignablePayloadField::TextV2 {
+                    text_v2: actual_text,
+                    ..
+                },
+            ) = (expected_field, actual_field)
+            {
+                assert_eq!(expected_text.text, actual_text.text);
+            }
         }
-
-        let value_field = payload
-            .fields
-            .iter()
-            .find(|f| f.label() == "Value")
-            .unwrap();
-        if let SignablePayloadField::TextV2 { text_v2, .. } = value_field {
-            assert!(text_v2.text.contains("1"));
-            assert!(text_v2.text.contains("ETH"));
-        }
-
-        let nonce_field = payload
-            .fields
-            .iter()
-            .find(|f| f.label() == "Nonce")
-            .unwrap();
-        if let SignablePayloadField::TextV2 { text_v2, .. } = nonce_field {
-            assert_eq!(text_v2.text, "42");
-        }
-
-        // Check title and type
-        assert_eq!(payload.title, "Ethereum Transaction");
-        assert_eq!(payload.payload_type, "EthereumTx");
     }
 
     #[test]
