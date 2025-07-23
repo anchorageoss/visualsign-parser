@@ -14,17 +14,20 @@ fn parse_and_display(chain: &str, raw_tx: &str, options: VisualSignOptions, outp
         "json" => match &signable_payload_str {
             Ok(payload) => {
                 if let Ok(json_output) = serde_json::to_string_pretty(payload) {
-                    println!("{}", json_output);
+                    println!("{json_output}");
                 } else {
                     eprintln!("Error: Failed to serialize output as JSON");
                 }
             }
             Err(err) => {
-                eprintln!("Error: {:?}", err);
+                eprintln!("Error: {err:?}");
             }
         },
-        "text" | _ => {
+        "text" => {
             println!("{signable_payload_str:#?}");
+        }
+        _ => {
+            eprintln!("Error: Unsupported output format '{output_format}'");
         }
     }
 }
