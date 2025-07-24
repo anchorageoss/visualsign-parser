@@ -222,7 +222,7 @@ mod tests {
         let call = IUniversalRouter::executeCall {
             commands: commands.clone().into(),
             inputs: inputs.iter().map(|v| v.clone().into()).collect(),
-            deadline: deadline,
+            deadline,
         };
 
         let input_data = call.abi_encode();
