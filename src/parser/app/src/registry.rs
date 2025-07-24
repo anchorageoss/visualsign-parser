@@ -7,6 +7,10 @@
 #[must_use]
 pub fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
     let mut registry = visualsign::registry::TransactionConverterRegistry::new();
+    registry.register::<visualsign_ethereum::EthereumTransactionWrapper, _>(
+        visualsign::registry::Chain::Ethereum,
+        visualsign_ethereum::EthereumVisualSignConverter,
+    );
     registry.register::<visualsign_solana::SolanaTransactionWrapper, _>(
         visualsign::registry::Chain::Solana,
         visualsign_solana::SolanaVisualSignConverter,

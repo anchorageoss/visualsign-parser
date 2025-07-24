@@ -256,3 +256,89 @@ async fn parser_solana_native_transfer_e2e() {
 
     integration::Builder::new().execute(test).await
 }
+
+#[tokio::test]
+async fn parser_ethereum_native_transfer_e2e() {
+    async fn test(test_args: TestArgs) {
+        // Base64 encoded Ethereum legacy transaction
+        // This is a sample Ethereum transaction that transfers 1 ETH
+        let ethereum_tx_hex = "0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83";
+
+        let parse_request = ParseRequest {
+            unsigned_payload: ethereum_tx_hex.to_string(),
+            chain: Chain::Ethereum as i32,
+            chain_metadata: None,
+        };
+
+        let parse_response = test_args
+            .parser_client
+            .unwrap()
+            .parse(tonic::Request::new(parse_request))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let parsed_transaction = parse_response.parsed_transaction.unwrap().payload.unwrap();
+
+        // Expected structure for Ethereum transaction
+        let expected_sp = serde_json::json!({
+          "Fields": [
+          {
+            "FallbackText": "Xpla Mainnet",
+            "Label": "Network",
+            "TextV2": {
+            "Text": "Xpla Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "Label": "To",
+            "TextV2": {
+            "Text": "0x3535353535353535353535353535353535353535"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "Label": "Value",
+            "TextV2": {
+            "Text": "1 ETH"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "Label": "Gas Limit",
+            "TextV2": {
+            "Text": "21000"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "Label": "Gas Price",
+            "TextV2": {
+            "Text": "0.00000002 ETH"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "Label": "Nonce",
+            "TextV2": {
+            "Text": "0"
+            },
+            "Type": "text_v2"
+          }
+          ],
+          "PayloadType": "EthereumTx",
+          "Title": "Ethereum Transaction",
+          "Version": "0"
+        });
+
+        // Verify the transaction contains Ethereum-specific fields
+        let signable_payload: serde_json::Value =
+            serde_json::from_str(&parsed_transaction.signable_payload).unwrap();
+
+        // Validate that the parsed transaction contains all expected fields
+        validate_required_fields_present(&signable_payload, &expected_sp);
+    }
+
+    integration::Builder::new().execute(test).await
+}

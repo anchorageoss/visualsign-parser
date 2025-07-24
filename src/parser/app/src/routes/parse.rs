@@ -11,6 +11,7 @@ use generated::{
 };
 use qos_crypto::sha_256;
 use qos_p256::P256Pair;
+
 use visualsign::registry::Chain as VisualSignRegistryChain;
 use visualsign::vsptrait::VisualSignOptions;
 
