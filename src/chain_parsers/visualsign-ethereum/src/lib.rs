@@ -137,7 +137,7 @@ fn decode_transaction(
             .decode(raw_transaction)
             .map_err(|e| format!("Failed to decode base64: {}", e))?,
     };
-    decode_transaction_bytes(&mut &bytes)
+    decode_transaction_bytes(&bytes)
 }
 
 fn convert_to_visual_sign_payload(
