@@ -1,4 +1,5 @@
 use alloy_sol_types::{SolCall, sol};
+use chrono::{TimeZone, Utc};
 use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2};
 
 sol! {
@@ -8,6 +9,7 @@ sol! {
     // --- Enums ---
     // The Command enum defines the various operations the Universal Router can perform.
     // Each command corresponds to a specific action (e.g., swapping, settling, taking assets).
+    #[derive(Debug)]
     enum Command {
         // V4_SWAP is for interacting with Uniswap V4 pools
         V4_SWAP,
@@ -161,9 +163,12 @@ fn decode_universal_router_execute(input: &[u8]) -> Option<UniversalRouterExecut
 
     if let Ok(call) = IUniversalRouter::executeCall::abi_decode(input) {
         println!("Decoded Universal Router execute call");
+        let deadline = Utc
+            .timestamp_opt(call.deadline.try_into().ok()?, 0)
+            .unwrap();
         Some(UniversalRouterExecute {
             commands: call.commands.0.to_vec(),
-            deadline: call.deadline.to_string(),
+            deadline: deadline.to_string(),
         })
     } else {
         println!("Failed to decode Universal Router execute call");
@@ -174,11 +179,22 @@ fn decode_universal_router_execute(input: &[u8]) -> Option<UniversalRouterExecut
 pub fn parse_universal_router_execute(input: &[u8]) -> Vec<SignablePayloadField> {
     let mut fields = Vec::new();
     if let Some(decoded) = decode_universal_router_execute(input) {
+        let mapped_commands: Vec<Command> = {
+            let mut cmds = Vec::with_capacity(decoded.commands.len());
+            for &cmd in &decoded.commands {
+                match Command::try_from(cmd) {
+                    Ok(c) => cmds.push(c),
+                    Err(_) => return [].to_vec(),
+                }
+            }
+            cmds
+        };
         fields.push(SignablePayloadField::TextV2 {
             common: SignablePayloadFieldCommon {
                 fallback_text: format!(
-                    "Universal Router Execute: {} commands, deadline {}",
+                    "Universal Router Execute: {} commands ({:?}), deadline {}",
                     decoded.commands.len(),
+                    mapped_commands,
                     decoded.deadline
                 ),
                 label: "Universal Router".to_string(),
@@ -186,7 +202,7 @@ pub fn parse_universal_router_execute(input: &[u8]) -> Vec<SignablePayloadField>
             text_v2: SignablePayloadFieldTextV2 {
                 text: format!(
                     "Commands: {:?}\nDeadline: {}",
-                    decoded.commands, decoded.deadline
+                    mapped_commands, decoded.deadline
                 ),
             },
         });
@@ -215,12 +231,15 @@ mod tests {
 
     #[test]
     fn test_parse_universal_router_execute_field() {
-        // Use the same valid input as aboves
-        let commands = vec![1u8, 2, 3];
+        let commands: Vec<u8> = vec![
+            Command::V4_SWAP.into(),
+            Command::APPROVE.into(),
+            Command::TRANSFER.into(),
+        ];
         let inputs: Vec<Vec<u8>> = vec![];
         let deadline = Uint::<256, 4>::from(1234567890);
         let call = IUniversalRouter::executeCall {
-            commands: commands.clone().into(),
+            commands: commands.into(),
             inputs: inputs.iter().map(|v| v.clone().into()).collect(),
             deadline,
         };
@@ -230,10 +249,13 @@ mod tests {
         assert_eq!(fields.len(), 1);
         if let SignablePayloadField::TextV2 { common, text_v2 } = &fields[0] {
             assert_eq!(
-                "Universal Router Execute: 3 commands, deadline 1234567890",
+                "Universal Router Execute: 3 commands ([V4_SWAP, APPROVE, TRANSFER]), deadline 2009-02-13 23:31:30 UTC",
                 common.fallback_text
             );
-            assert_eq!("Commands: [1, 2, 3]\nDeadline: 1234567890", text_v2.text);
+            assert_eq!(
+                "Commands: [V4_SWAP, APPROVE, TRANSFER]\nDeadline: 2009-02-13 23:31:30 UTC",
+                text_v2.text
+            );
         } else {
             panic!("Expected TextV2 field");
         }

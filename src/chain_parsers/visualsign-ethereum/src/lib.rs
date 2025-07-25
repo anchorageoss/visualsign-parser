@@ -1,5 +1,5 @@
+use crate::fmt::{format_ether, format_gwei};
 use alloy_consensus::{Transaction as _, TxType, TypedTransaction};
-use alloy_primitives::{U256, utils::format_units};
 use alloy_rlp::{Buf, Decodable};
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use visualsign::{
@@ -13,6 +13,7 @@ use visualsign::{
 
 pub mod chains;
 pub mod contracts;
+pub mod fmt;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub enum EthereumParserError {
@@ -24,25 +25,6 @@ pub enum EthereumParserError {
     UnsupportedTransactionType(String),
     #[error("Failed to decode transaction: {0}")]
     FailedToDecodeTransaction(String),
-}
-
-fn trim_trailing_zeros(s: String) -> String {
-    if s.contains('.') {
-        s.trim_end_matches('0').trim_end_matches('.').to_string()
-    } else {
-        s.to_string()
-    }
-}
-
-// Helper function to format wei to ether
-fn format_ether(wei: U256) -> String {
-    trim_trailing_zeros(format_units(wei, 18).unwrap_or_else(|_| wei.to_string()))
-}
-
-// Helper function to format wei to gwei
-fn format_gwei(wei: u128) -> String {
-    let wei_u256 = alloy_primitives::U256::from(wei);
-    trim_trailing_zeros(format_units(wei_u256, "gwei").unwrap_or_else(|_| wei.to_string()))
 }
 
 // Helper function to extract gas price from different transaction types
@@ -300,10 +282,24 @@ fn convert_to_visual_sign_payload(
     let input = transaction.input();
     if !input.is_empty() {
         if options.decode_transfers {
-            fields.append(&mut contracts::erc20::parse_erc20_transfer(input));
-            fields.append(&mut contracts::uniswap::parse_universal_router_execute(
-                input,
-            ));
+            let mut erc20_fields = contracts::erc20::parse_erc20_transfer(input);
+            let mut uniswap_fields = contracts::uniswap::parse_universal_router_execute(input);
+
+            if erc20_fields.is_empty() && uniswap_fields.is_empty() {
+                // If no specific contract parsing was successful, show raw input data
+                fields.push(SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("0x{}", hex::encode(input)),
+                        label: "Input Data".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("0x{}", hex::encode(input)),
+                    },
+                });
+            } else {
+                fields.append(&mut erc20_fields);
+                fields.append(&mut uniswap_fields);
+            }
         } else {
             fields.push(SignablePayloadField::TextV2 {
                 common: SignablePayloadFieldCommon {

@@ -11,6 +11,7 @@ alloy-rlp = "0.3.12"
 alloy-sol-types = "1.4.1"
 alloy-contract = "1.0.42"
 base64 = "0.22.1"
+chrono = { version = "0.4", features = ["std", "clock"] }
 hex = "0.4.3"
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
