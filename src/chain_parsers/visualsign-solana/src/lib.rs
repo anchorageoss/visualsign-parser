@@ -10,7 +10,7 @@ use visualsign::{
     AnnotatedPayloadField, SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
     encodings::SupportedEncodings,
-    utils::{create_amount_field, create_number_field, create_text_field},
+    field_builders::{create_amount_field, create_number_field, create_text_field},
     vsptrait::{
         Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
         VisualSignError, VisualSignOptions,
