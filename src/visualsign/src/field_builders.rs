@@ -57,3 +57,20 @@ pub fn create_amount_field(
         },
     }
 }
+
+/// Create a standard Raw Data field for expanded views
+pub fn create_raw_data_field(data: &[u8]) -> AnnotatedPayloadField {
+    AnnotatedPayloadField {
+        signable_payload_field: SignablePayloadField::TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "The raw instruction data in base64 format".to_string(),
+                label: "Raw Data".to_string(),
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: base64::engine::general_purpose::STANDARD.encode(data),
+            },
+        },
+        static_annotation: None,
+        dynamic_annotation: None,
+    }
+}
