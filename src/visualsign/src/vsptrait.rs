@@ -62,7 +62,7 @@ pub trait VisualSignConverterFromString<T: Transaction>: VisualSignConverter<T> 
 }
 
 /// Errors that can occur during transaction parsing
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub enum TransactionParseError {
     #[error("Invalid transaction format: {0}")]
     InvalidFormat(String),
@@ -74,7 +74,7 @@ pub enum TransactionParseError {
     UnsupportedEncoding(String),
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub enum VisualSignError {
     #[error("Failed to parse transaction")]
     ParseError(#[from] TransactionParseError),

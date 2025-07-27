@@ -12,31 +12,15 @@ fn fixture_path(name: &str) -> PathBuf {
     path
 }
 
+static FIXTURES: [&str; 2] = ["1559", "legacy"];
+
 #[test]
 fn test_with_fixtures() {
     // Get paths for all test cases
     let fixtures_dir = fixture_path("");
-    let test_cases = fs::read_dir(&fixtures_dir)
-        .unwrap()
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .path()
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .ends_with(".input")
-        });
 
-    for input_file in test_cases {
-        let input_path = input_file.path();
-        let test_name = input_path
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .replace(".input", "");
+    for test_name in FIXTURES {
+        let input_path = fixtures_dir.join(format!("{}.input", test_name));
 
         // Read input file contents
         let input_contents = fs::read_to_string(&input_path)
