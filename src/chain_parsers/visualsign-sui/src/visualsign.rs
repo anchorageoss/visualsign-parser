@@ -244,7 +244,7 @@ fn add_transaction_details_preview_layout(
 
     let condensed = SignablePayloadFieldListLayout {
         fields: vec![
-            create_text_field("Type", &determine_transaction_type_string(&block_data)),
+            create_text_field("Type", &determine_transaction_type_string(block_data)),
             create_text_field(
                 "Gas Budget",
                 &format!("{} MIST", block_data.gas_data().budget),

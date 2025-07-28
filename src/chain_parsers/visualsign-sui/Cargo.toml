@@ -10,11 +10,11 @@ hex = "0.4.3"
 
 bcs = "0.1.6"
 
-move-core-types = { git = "https://github.com/MystenLabs/sui", tag = "sui_v1.52.0_1751960694_ci", package = "move-core-types" }
-move-bytecode-utils = { git = "https://github.com/MystenLabs/sui", tag = "sui_v1.52.0_1751960694_ci", package = "move-bytecode-utils" }
+move-core-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.52.2", package = "move-core-types" }
+move-bytecode-utils = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.52.2", package = "move-bytecode-utils" }
 
-sui-json = { git = "https://github.com/MystenLabs/sui", tag = "sui_v1.52.0_1751960694_ci", package = "sui-json" }
-sui-types = { git = "https://github.com/MystenLabs/sui", tag = "sui_v1.52.0_1751960694_ci", package = "sui-types" }
-sui-json-rpc-types = { git = "https://github.com/MystenLabs/sui", tag = "sui_v1.52.0_1751960694_ci", package = "sui-json-rpc-types" }
+sui-json = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.52.2", package = "sui-json" }
+sui-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.52.2", package = "sui-types" }
+sui-json-rpc-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.52.2", package = "sui-json-rpc-types" }
 
 visualsign = { workspace = true }

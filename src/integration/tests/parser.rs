@@ -342,3 +342,198 @@ async fn parser_ethereum_native_transfer_e2e() {
 
     integration::Builder::new().execute(test).await
 }
+
+#[tokio::test]
+async fn parser_sui_native_transfer_e2e() {
+    async fn test(test_args: TestArgs) {
+        let sui_tx_b64 = "AAACACCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJCrze8SNFZ4kAAIAMqaOwAAAAACAgABAQEAAQECAAABAADW6S4ALibDr7IIgAHBtYILZPK8NRv9paI0Ksv59cHKwgHLSF74CguvkHmmIcQsiwy2XOmYbhyB/RbuiAOPAEpa7Rua1BcAAAAAIGOAX4LpV/FYmnpiNGs3y1rsDwwf9O10x5SdK7vXP+9Q1ukuAC4mw6+yCIABwbWCC2TyvDUb/aWiNCrL+fXBysLoAwAAAAAAAEBLTAAAAAAAAA==";
+
+        let parse_request = ParseRequest {
+            unsigned_payload: sui_tx_b64.to_string(),
+            chain: Chain::Sui as i32,
+            chain_metadata: None,
+        };
+
+        let parse_response = test_args
+            .parser_client
+            .unwrap()
+            .parse(tonic::Request::new(parse_request))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let parsed_transaction = parse_response.parsed_transaction.unwrap().payload.unwrap();
+
+        let expected_sp = serde_json::json!({
+            "Fields": [
+                {
+                    "Type": "text_v2",
+                    "FallbackText": "Sui Network",
+                    "Label": "Network",
+                    "TextV2": {
+                        "Text": "Sui Network"
+                    }
+                },
+                {
+                    "Type": "preview_layout",
+                    "FallbackText": "Transfer 1: 1000000000 MIST (1 SUI)",
+                    "Label": "Transfer 1",
+                    "PreviewLayout": {
+                        "Title": {
+                            "Text": "Transfer 1: 1000000000 MIST (1 SUI)"
+                        },
+                        "Subtitle": {
+                            "Text": "From 0xd6e9...cac2 to 0xabcd...7890"
+                        },
+                        "Condensed": {
+                            "Fields": [
+                                {
+                                    "Type": "text_v2",
+                                    "FallbackText": "Transfer 1000000000 Sui from 0xd6e9...cac2 to 0xabcd...7890",
+                                    "Label": "Summary",
+                                    "TextV2": {
+                                        "Text": "Transfer 1000000000 Sui from 0xd6e9...cac2 to 0xabcd...7890"
+                                    }
+                                }
+                            ]
+                        },
+                        "Expanded": {
+                            "Fields": [
+                                {
+                                    "Type": "text_v2",
+                                    "FallbackText": "Sui",
+                                    "Label": "Asset Object ID",
+                                    "TextV2": {
+                                        "Text": "Sui"
+                                    }
+                                },
+                                {
+                                    "Type": "address_v2",
+                                    "FallbackText": "0xd6e92e002e26c3afb2088001c1b5820b64f2bc351bfda5a2342acbf9f5c1cac2",
+                                    "Label": "From",
+                                    "AddressV2": {
+                                        "Address": "0xd6e92e002e26c3afb2088001c1b5820b64f2bc351bfda5a2342acbf9f5c1cac2"
+                                    }
+                                },
+                                {
+                                    "Type": "address_v2",
+                                    "FallbackText": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+                                    "Label": "To",
+                                    "AddressV2": {
+                                        "Address": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+                                    }
+                                },
+                                {
+                                    "Type": "amount_v2",
+                                    "FallbackText": "1000000000 Sui",
+                                    "Label": "Amount",
+                                    "AmountV2": {
+                                        "Amount": "1000000000",
+                                        "Abbreviation": "Sui"
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "Type": "preview_layout",
+                    "FallbackText": "Transaction Details",
+                    "Label": "Transaction",
+                    "PreviewLayout": {
+                        "Title": {
+                            "Text": "Transaction Details"
+                        },
+                        "Subtitle": {
+                            "Text": "Gas: 5000000 MIST"
+                        },
+                        "Condensed": {
+                            "Fields": [
+                                {
+                                    "Type": "text_v2",
+                                    "FallbackText": "Programmable Transaction",
+                                    "Label": "Type",
+                                    "TextV2": {
+                                        "Text": "Programmable Transaction"
+                                    }
+                                },
+                                {
+                                    "Type": "text_v2",
+                                    "FallbackText": "5000000 MIST",
+                                    "Label": "Gas Budget",
+                                    "TextV2": {
+                                        "Text": "5000000 MIST"
+                                    }
+                                }
+                            ]
+                        },
+                        "Expanded": {
+                            "Fields": [
+                                {
+                                    "Type": "text_v2",
+                                    "FallbackText": "Programmable Transaction",
+                                    "Label": "Transaction Type",
+                                    "TextV2": {
+                                        "Text": "Programmable Transaction"
+                                    }
+                                },
+                                {
+                                    "Type": "address_v2",
+                                    "FallbackText": "0xd6e92e002e26c3afb2088001c1b5820b64f2bc351bfda5a2342acbf9f5c1cac2",
+                                    "Label": "Gas Owner",
+                                    "AddressV2": {
+                                        "Address": "0xd6e92e002e26c3afb2088001c1b5820b64f2bc351bfda5a2342acbf9f5c1cac2"
+                                    }
+                                },
+                                {
+                                    "Type": "amount_v2",
+                                    "FallbackText": "5000000 MIST",
+                                    "Label": "Gas Budget",
+                                    "AmountV2": {
+                                        "Amount": "5000000",
+                                        "Abbreviation": "MIST"
+                                    }
+                                },
+                                {
+                                    "Type": "amount_v2",
+                                    "FallbackText": "1000 MIST",
+                                    "Label": "Gas Price",
+                                    "AmountV2": {
+                                        "Amount": "1000",
+                                        "Abbreviation": "MIST"
+                                    }
+                                },
+                                {
+                                    "Type": "text_v2",
+                                    "FallbackText": "2",
+                                    "Label": "Commands",
+                                    "TextV2": {
+                                        "Text": "2"
+                                    }
+                                },
+                                {
+                                    "Type": "text_v2",
+                                    "FallbackText": "The raw instruction data in base64 format",
+                                    "Label": "Raw Data",
+                                    "TextV2": {
+                                        "Text": "AAACACCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJCrze8SNFZ4kAAIAMqaOwAAAAACAgABAQEAAQECAAABAADW6S4ALibDr7IIgAHBtYILZPK8NRv9paI0Ksv59cHKwgHLSF74CguvkHmmIcQsiwy2XOmYbhyB/RbuiAOPAEpa7Rua1BcAAAAAIGOAX4LpV/FYmnpiNGs3y1rsDwwf9O10x5SdK7vXP+9Q1ukuAC4mw6+yCIABwbWCC2TyvDUb/aWiNCrL+fXBysLoAwAAAAAAAEBLTAAAAAAAAA=="
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            ],
+            "PayloadType": "Sui",
+            "Title": "Programmable Transaction",
+            "Version": "0"
+        });
+
+        let signable_payload: serde_json::Value =
+            serde_json::from_str(&parsed_transaction.signable_payload).unwrap();
+
+        validate_required_fields_present(&signable_payload, &expected_sp);
+    }
+
+    integration::Builder::new().execute(test).await
+}

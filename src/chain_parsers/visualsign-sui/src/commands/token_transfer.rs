@@ -147,10 +147,10 @@ mod tests {
     use super::*;
     use crate::visualsign::decode_transaction;
 
-    use std::str::FromStr;
     use move_bytecode_utils::module_cache::SyncModuleCache;
+    use std::str::FromStr;
     use visualsign::encodings::SupportedEncodings;
-    
+
     use crate::module_resolver::SuiModuleResolver;
 
     #[test]
