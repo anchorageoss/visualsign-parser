@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 pub mod encodings;
+pub mod field_builders;
 pub mod registry;
 pub mod vsptrait;
 

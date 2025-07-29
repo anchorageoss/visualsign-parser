@@ -10,6 +10,7 @@ use visualsign::{
     AnnotatedPayloadField, SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
     encodings::SupportedEncodings,
+    field_builders::{create_amount_field, create_number_field, create_text_field},
     vsptrait::{
         Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
         VisualSignError, VisualSignOptions,
@@ -551,59 +552,6 @@ fn get_stake_pool_instruction_name(instruction: &StakePoolInstruction) -> &'stat
     }
 }
 
-fn create_text_field(label: &str, text: &str) -> AnnotatedPayloadField {
-    AnnotatedPayloadField {
-        static_annotation: None,
-        dynamic_annotation: None,
-        signable_payload_field: SignablePayloadField::TextV2 {
-            common: SignablePayloadFieldCommon {
-                fallback_text: text.to_string(),
-                label: label.to_string(),
-            },
-            text_v2: visualsign::SignablePayloadFieldTextV2 {
-                text: text.to_string(),
-            },
-        },
-    }
-}
-
-fn create_number_field(label: &str, number: &str, unit: &str) -> AnnotatedPayloadField {
-    AnnotatedPayloadField {
-        static_annotation: None,
-        dynamic_annotation: None,
-        signable_payload_field: SignablePayloadField::Number {
-            common: SignablePayloadFieldCommon {
-                fallback_text: format!("{} {}", number, unit),
-                label: label.to_string(),
-            },
-            number: visualsign::SignablePayloadFieldNumber {
-                number: number.to_string(),
-            },
-        },
-    }
-}
-
-fn create_amount_field(
-    label: &str,
-    amount: &str,
-    abbreviation: &str,
-    sol_value: f64,
-) -> AnnotatedPayloadField {
-    AnnotatedPayloadField {
-        static_annotation: None,
-        dynamic_annotation: None,
-        signable_payload_field: SignablePayloadField::AmountV2 {
-            common: SignablePayloadFieldCommon {
-                fallback_text: format!("{} SOL", sol_value),
-                label: label.to_string(),
-            },
-            amount_v2: visualsign::SignablePayloadFieldAmountV2 {
-                amount: amount.to_string(),
-                abbreviation: Some(abbreviation.to_string()),
-            },
-        },
-    }
-}
 fn create_compute_budget_expanded_fields(
     instruction: &ComputeBudgetInstruction,
     program_id: &str,
@@ -669,6 +617,7 @@ fn create_system_instruction_expanded_fields(
                 &lamports.to_string(),
                 "lamports",
                 *lamports as f64 / 1_000_000_000.0,
+                "SOL",
             ));
             fields.push(create_number_field("Space", &space.to_string(), "bytes"));
             fields.push(create_text_field("Owner", &owner.to_string()));
@@ -679,6 +628,7 @@ fn create_system_instruction_expanded_fields(
                 &lamports.to_string(),
                 "lamports",
                 *lamports as f64 / 1_000_000_000.0,
+                "SOL",
             ));
         }
         SystemInstruction::Assign { owner } => {
