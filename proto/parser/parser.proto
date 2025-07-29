@@ -114,3 +114,19 @@ enum SolanaIdlType {
   SOLANA_IDL_TYPE_UNSPECIFIED = 0;
   SOLANA_IDL_TYPE_ANCHOR = 1;
 }
+
+message Abi {
+  string value = 1;                    // JSON ABI definition
+  optional AbiSignature signature = 2; // Optional ABI signature
+}
+
+message AbiSignature {
+  string value = 1;                    // Signature of ABI hash
+  optional AbiMetadata metadata = 2;   // Optional signature metadata
+}
+
+message AbiMetadata {
+  optional string algorithm = 1;       // Signature algorithm used
+  optional string issuer = 2;          // Identity of ABI signer
+  optional int64 timestamp = 3;        // When signature was created
+}

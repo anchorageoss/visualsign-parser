@@ -2,6 +2,7 @@ use alloy_consensus::{Transaction as _, TxType, TypedTransaction};
 use alloy_primitives::{U256, utils::format_units};
 use alloy_rlp::{Buf, Decodable};
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
+use generated::parser::parse_request::ChainMetadata;
 use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2,
     encodings::SupportedEncodings,
@@ -12,6 +13,7 @@ use visualsign::{
 };
 
 pub mod chains;
+pub mod provider;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub enum EthereumParserError {
@@ -298,6 +300,31 @@ fn convert_to_visual_sign_payload(
     // Add contract call data if present
     let input = transaction.input();
     if !input.is_empty() {
+        if options.decode_transfers {
+            if let Some(metadata) = options.metadata {
+                if let ChainMetadata::Ethereum(eth_metadata) = metadata {
+                    if let Some(abi) = eth_metadata.abi {
+                        match provider::json_abi::parse_json_abi_input(input.clone(), &abi.value) {
+                            Ok(decoded_fields) => fields.extend(decoded_fields),
+                            Err(e) => {
+                                // TODO: return error instead
+                                fields.push(SignablePayloadField::TextV2 {
+                                    common: SignablePayloadFieldCommon {
+                                        fallback_text: format!("Error decoding input: {e}"),
+                                        label: "Input Data".to_string(),
+                                    },
+                                    text_v2: SignablePayloadFieldTextV2 {
+                                        text: format!("Error decoding input: {e}"),
+                                    },
+                                });
+                            }
+                        }
+                        // TODO: if abi signature is provided add to signable payload
+                    }
+                }
+            }
+        }
+
         fields.push(SignablePayloadField::TextV2 {
             common: SignablePayloadFieldCommon {
                 fallback_text: format!("0x{}", hex::encode(input)),

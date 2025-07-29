@@ -165,7 +165,10 @@ pub struct Signature {
 )]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct EthereumMetadata {}
+pub struct EthereumMetadata {
+    #[prost(message, optional, tag = "1")]
+    pub abi: ::core::option::Option<Abi>,
+}
 #[cfg_attr(
     feature = "serde_derive",
     derive(::serde::Serialize, ::serde::Deserialize),
@@ -174,6 +177,54 @@ pub struct EthereumMetadata {}
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SolanaMetadata {}
+#[cfg_attr(
+    feature = "serde_derive",
+    derive(::serde::Serialize, ::serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Abi {
+    /// JSON ABI definition
+    #[prost(string, tag = "1")]
+    pub value: ::prost::alloc::string::String,
+    /// Optional ABI signature
+    #[prost(message, optional, tag = "2")]
+    pub signature: ::core::option::Option<AbiSignature>,
+}
+#[cfg_attr(
+    feature = "serde_derive",
+    derive(::serde::Serialize, ::serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AbiSignature {
+    /// Signature of ABI hash
+    #[prost(string, tag = "1")]
+    pub value: ::prost::alloc::string::String,
+    /// Optional signature metadata
+    #[prost(message, optional, tag = "2")]
+    pub metadata: ::core::option::Option<AbiMetadata>,
+}
+#[cfg_attr(
+    feature = "serde_derive",
+    derive(::serde::Serialize, ::serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AbiMetadata {
+    /// Signature algorithm used
+    #[prost(string, optional, tag = "1")]
+    pub algorithm: ::core::option::Option<::prost::alloc::string::String>,
+    /// Identity of ABI signer
+    #[prost(string, optional, tag = "2")]
+    pub issuer: ::core::option::Option<::prost::alloc::string::String>,
+    /// When signature was created
+    #[prost(int64, optional, tag = "3")]
+    pub timestamp: ::core::option::Option<i64>,
+}
 /// Chain represents supported blockchain networks
 #[cfg_attr(
     feature = "serde_derive",

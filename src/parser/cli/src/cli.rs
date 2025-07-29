@@ -1,6 +1,7 @@
 use crate::chains;
 use chains::{available_chains, parse_chain};
 use clap::{Arg, Command};
+use generated::parser::{EthereumMetadata, parse_request::ChainMetadata};
 use parser_app::registry::create_registry;
 use visualsign::vsptrait::VisualSignOptions;
 
@@ -72,6 +73,13 @@ impl Cli {
                     .value_parser(["text", "json"])
                     .default_value("text"),
             )
+            .arg(
+                Arg::new("abi")
+                    .long("abi")
+                    .value_name("ABI_JSON")
+                    .help("Contract ABI as a JSON string")
+                    .required(false),
+            )
             .get_matches();
 
         let chain = matches
@@ -83,10 +91,27 @@ impl Cli {
         let output_format = matches
             .get_one::<String>("output")
             .expect("Output format has default value");
+        let abi = matches.get_one::<String>("abi").cloned();
 
-        let options = VisualSignOptions {
-            decode_transfers: true,
-            transaction_name: None,
+        let options = if chain == "ethereum" {
+            VisualSignOptions {
+                decode_transfers: true,
+                transaction_name: None,
+                metadata: abi.map(|abi_str| {
+                    ChainMetadata::Ethereum(EthereumMetadata {
+                        abi: Some(generated::parser::Abi {
+                            value: abi_str,
+                            signature: None,
+                        }),
+                    })
+                }),
+            }
+        } else {
+            VisualSignOptions {
+                decode_transfers: true,
+                transaction_name: None,
+                metadata: None,
+            }
         };
 
         parse_and_display(chain, raw_tx, options, output_format);

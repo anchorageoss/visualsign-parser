@@ -1,6 +1,6 @@
-use std::fmt::Debug;
-
 use crate::SignablePayload;
+use generated::parser::parse_request::ChainMetadata;
+use std::fmt::Debug;
 
 pub use crate::errors::{TransactionParseError, VisualSignError};
 pub use generated::parser::ChainMetadata;
