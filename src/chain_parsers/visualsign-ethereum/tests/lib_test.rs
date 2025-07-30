@@ -1,3 +1,5 @@
+use generated::parser::parse_request::ChainMetadata;
+use generated::parser::{Abi, EthereumMetadata};
 use std::fs;
 use std::path::PathBuf;
 use visualsign::vsptrait::VisualSignOptions;
@@ -29,14 +31,18 @@ fn test_with_fixtures() {
         // Parse the input to extract transaction data
         let transaction_hex = input_contents.trim();
 
-        // Create options for the transaction
-        let options = VisualSignOptions {
-            decode_transfers: true,
-            transaction_name: None,
-            metadata: None, // No metadata for this test
-        };
+        if path == "json-abi" {
+            let abi_path = fixtures_dir.join(format!("{}.abi", test_name));
+            options.metadata = Some(ChainMetadata::Ethereum(EthereumMetadata {
+                abi: Some(Abi {
+                    value: fs::read_to_string(&abi_path)
+                        .unwrap_or_else(|_| panic!("Expected abi file not found: {:?}", abi_path)),
+                    signature: None,
+                }),
+            }));
+        }
 
-        let result = transaction_string_to_visual_sign(transaction_hex, options);
+        let result = transaction_string_to_visual_sign(transaction_hex, options.clone());
 
         let actual_output = match result {
             Ok(payload) => {

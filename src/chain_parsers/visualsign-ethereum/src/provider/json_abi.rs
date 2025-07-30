@@ -1,24 +1,15 @@
 use alloy_dyn_abi::{DynSolValue, JsonAbiExt};
 use alloy_json_abi::JsonAbi;
-
 use alloy_primitives::{Bytes, FixedBytes};
 use visualsign::{
-    SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2,
-    vsptrait::VisualSignError,
+    AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
+    SignablePayloadFieldListLayout, SignablePayloadFieldTextV2, vsptrait::VisualSignError,
 };
 
-/// Parses a JSON ABI and a raw transaction, decodes the transaction input using the ABI,
-/// and returns a SignablePayload with decoded function and arguments.
-///
-/// # Arguments
-/// * `abi_json` - The contract ABI in JSON format (string)
-/// * `tx` - The typed transaction to decode
-/// * `options` - VisualSignOptions for customizing the payload
 pub fn parse_json_abi_input(
     input: Bytes,
     abi_json: &str,
 ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
-    // Parse the ABI
     let abi: JsonAbi = serde_json::from_str(abi_json)
         .map_err(|e| VisualSignError::DecodeError(format!("Invalid ABI JSON: {e}")))?;
 
@@ -34,12 +25,10 @@ pub fn parse_json_abi_input(
             VisualSignError::DecodeError("Function selector not found in ABI".to_string())
         })?;
 
-    // Decode the arguments
     let decoded = function
         .abi_decode_input(&input[4..])
         .map_err(|e| VisualSignError::DecodeError(format!("Failed to decode input: {e}")))?;
 
-    // Prepare fields for the payload
     let mut fields = vec![SignablePayloadField::TextV2 {
         common: SignablePayloadFieldCommon {
             fallback_text: function.name.clone(),
@@ -49,19 +38,78 @@ pub fn parse_json_abi_input(
             text: function.name.clone(),
         },
     }];
-
     for (param, value) in function.inputs.iter().zip(decoded) {
-        let value_str = format_abi_value(&value);
-        fields.push(SignablePayloadField::TextV2 {
-            common: SignablePayloadFieldCommon {
-                fallback_text: value_str.clone(),
-                label: param.name.clone(),
-            },
-            text_v2: SignablePayloadFieldTextV2 { text: value_str },
-        });
+        fields.push(dynsol_to_signable_field(&param.name, &value));
     }
-
     Ok(fields)
+}
+
+fn dynsol_to_signable_field(label: &str, value: &DynSolValue) -> SignablePayloadField {
+    match value {
+        DynSolValue::Array(arr) => {
+            let annotated_fields: Vec<AnnotatedPayloadField> = arr
+                .iter()
+                .enumerate()
+                .map(|(i, v)| AnnotatedPayloadField {
+                    signable_payload_field: dynsol_to_signable_field(&format!("Element {i}"), v),
+                    static_annotation: None,
+                    dynamic_annotation: None,
+                })
+                .collect();
+
+            SignablePayloadField::ListLayout {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!(
+                        "{label}: [{}]",
+                        arr.iter()
+                            .map(format_abi_value)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    label: label.to_string(),
+                },
+                list_layout: SignablePayloadFieldListLayout {
+                    fields: annotated_fields,
+                },
+            }
+        }
+        DynSolValue::Tuple(arr) => {
+            let annotated_fields: Vec<AnnotatedPayloadField> = arr
+                .iter()
+                .enumerate()
+                .map(|(i, v)| AnnotatedPayloadField {
+                    signable_payload_field: dynsol_to_signable_field(&format!("Field {i}"), v),
+                    static_annotation: None,
+                    dynamic_annotation: None,
+                })
+                .collect();
+
+            SignablePayloadField::ListLayout {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!(
+                        "{label}: ({})",
+                        arr.iter()
+                            .map(format_abi_value)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    label: label.to_string(),
+                },
+                list_layout: SignablePayloadFieldListLayout {
+                    fields: annotated_fields,
+                },
+            }
+        }
+        _ => SignablePayloadField::TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: format_abi_value(value),
+                label: label.to_string(),
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: format_abi_value(value),
+            },
+        },
+    }
 }
 
 fn format_abi_value(value: &DynSolValue) -> String {
@@ -73,17 +121,10 @@ fn format_abi_value(value: &DynSolValue) -> String {
         DynSolValue::String(s) => s.clone(),
         DynSolValue::Bytes(b) => format!("0x{}", hex::encode(b)),
         DynSolValue::FixedBytes(b, _) => format!("0x{}", hex::encode(b)),
-        DynSolValue::Array(arr) => {
-            let vals: Vec<String> = arr.iter().map(format_abi_value).collect();
-            format!("[{}]", vals.join(", "))
-        }
-        DynSolValue::Tuple(tup) => {
-            let vals: Vec<String> = tup.iter().map(format_abi_value).collect();
-            format!("({})", vals.join(", "))
-        }
         _ => "<unsupported>".to_string(),
     }
 }
+
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Bytes, U256};

@@ -300,38 +300,33 @@ fn convert_to_visual_sign_payload(
     // Add contract call data if present
     let input = transaction.input();
     if !input.is_empty() {
+        let mut input_fields = Vec::new();
         if options.decode_transfers {
             if let Some(ChainMetadata::Ethereum(metadata)) = options.metadata {
                 if let Some(abi) = metadata.abi {
-                    match provider::json_abi::parse_json_abi_input(input.clone(), &abi.value) {
-                        Ok(decoded_fields) => fields.extend(decoded_fields),
-                        Err(e) => {
-                            // TODO: return error instead
-                            fields.push(SignablePayloadField::TextV2 {
-                                common: SignablePayloadFieldCommon {
-                                    fallback_text: format!("Error decoding input: {e}"),
-                                    label: "Input Data".to_string(),
-                                },
-                                text_v2: SignablePayloadFieldTextV2 {
-                                    text: format!("Error decoding input: {e}"),
-                                },
-                            });
-                        }
+                    if let Ok(decoded_fields) =
+                        provider::json_abi::parse_json_abi_input(input.clone(), &abi.value)
+                    {
+                        input_fields.extend(decoded_fields);
+                        // TODO: if abi signature is provided add to signable payload
                     }
-                    // TODO: if abi signature is provided add to signable payload
                 }
             }
         }
-
-        fields.push(SignablePayloadField::TextV2 {
-            common: SignablePayloadFieldCommon {
-                fallback_text: format!("0x{}", hex::encode(input)),
-                label: "Input Data".to_string(),
-            },
-            text_v2: SignablePayloadFieldTextV2 {
-                text: format!("0x{}", hex::encode(input)),
-            },
-        });
+        if input_fields.is_empty() {
+            fields.push(SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!("0x{}", hex::encode(input)),
+                    label: "Input Data".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 {
+                    text: format!("0x{}", hex::encode(input)),
+                },
+            });
+        } else {
+            // Add decoded input fields to the payload
+            fields.extend(input_fields);
+        }
     }
 
     let title = options

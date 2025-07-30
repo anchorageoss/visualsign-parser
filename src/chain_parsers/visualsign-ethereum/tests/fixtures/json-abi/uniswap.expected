@@ -1,0 +1,215 @@
+SignablePayload {
+    fields: [
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "Ethereum Mainnet",
+                label: "Network",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "Ethereum Mainnet",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+                label: "To",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0 ETH",
+                label: "Value",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "0 ETH",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "437566",
+                label: "Gas Limit",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "437566",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "3051",
+                label: "Nonce",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "3051",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "mint",
+                label: "Function",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "mint",
+            },
+        },
+        ListLayout {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "params: (0x7420b4b9a0110cdc71fb720908340c03f9bc03ec, 0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2, 10000, -123600, -123200, 1857846604477612049825792, 0, 1764954274253731407069184, 0, 0x0e9d806e354eb4235958a294fdef09d18862c02c, 115792089237316195423570985008687907853269984665640564039457584007913129639935)",
+                label: "params",
+            },
+            list_layout: SignablePayloadFieldListLayout {
+                fields: [
+                    AnnotatedPayloadField {
+                        signable_payload_field: TextV2 {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: "0x7420b4b9a0110cdc71fb720908340c03f9bc03ec",
+                                label: "Field 0",
+                            },
+                            text_v2: SignablePayloadFieldTextV2 {
+                                text: "0x7420b4b9a0110cdc71fb720908340c03f9bc03ec",
+                            },
+                        },
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                    },
+                    AnnotatedPayloadField {
+                        signable_payload_field: TextV2 {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                                label: "Field 1",
+                            },
+                            text_v2: SignablePayloadFieldTextV2 {
+                                text: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                            },
+                        },
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                    },
+                    AnnotatedPayloadField {
+                        signable_payload_field: TextV2 {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: "10000",
+                                label: "Field 2",
+                            },
+                            text_v2: SignablePayloadFieldTextV2 {
+                                text: "10000",
+                            },
+                        },
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                    },
+                    AnnotatedPayloadField {
+                        signable_payload_field: TextV2 {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: "-123600",
+                                label: "Field 3",
+                            },
+                            text_v2: SignablePayloadFieldTextV2 {
+                                text: "-123600",
+                            },
+                        },
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                    },
+                    AnnotatedPayloadField {
+                        signable_payload_field: TextV2 {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: "-123200",
+                                label: "Field 4",
+                            },
+                            text_v2: SignablePayloadFieldTextV2 {
+                                text: "-123200",
+                            },
+                        },
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                    },
+                    AnnotatedPayloadField {
+                        signable_payload_field: TextV2 {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: "1857846604477612049825792",
+                                label: "Field 5",
+                            },
+                            text_v2: SignablePayloadFieldTextV2 {
+                                text: "1857846604477612049825792",
+                            },
+                        },
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                    },
+                    AnnotatedPayloadField {
+                        signable_payload_field: TextV2 {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: "0",
+                                label: "Field 6",
+                            },
+                            text_v2: SignablePayloadFieldTextV2 {
+                                text: "0",
+                            },
+                        },
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                    },
+                    AnnotatedPayloadField {
+                        signable_payload_field: TextV2 {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: "1764954274253731407069184",
+                                label: "Field 7",
+                            },
+                            text_v2: SignablePayloadFieldTextV2 {
+                                text: "1764954274253731407069184",
+                            },
+                        },
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                    },
+                    AnnotatedPayloadField {
+                        signable_payload_field: TextV2 {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: "0",
+                                label: "Field 8",
+                            },
+                            text_v2: SignablePayloadFieldTextV2 {
+                                text: "0",
+                            },
+                        },
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                    },
+                    AnnotatedPayloadField {
+                        signable_payload_field: TextV2 {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: "0x0e9d806e354eb4235958a294fdef09d18862c02c",
+                                label: "Field 9",
+                            },
+                            text_v2: SignablePayloadFieldTextV2 {
+                                text: "0x0e9d806e354eb4235958a294fdef09d18862c02c",
+                            },
+                        },
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                    },
+                    AnnotatedPayloadField {
+                        signable_payload_field: TextV2 {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+                                label: "Field 10",
+                            },
+                            text_v2: SignablePayloadFieldTextV2 {
+                                text: "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+                            },
+                        },
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                    },
+                ],
+            },
+        },
+    ],
+    payload_type: "EthereumTx",
+    subtitle: None,
+    title: "Ethereum Transaction",
+    version: "0",
+}
