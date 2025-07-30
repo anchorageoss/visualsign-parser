@@ -39,7 +39,7 @@ pub fn parse_json_abi_input(
         },
     }];
     for (param, value) in function.inputs.iter().zip(decoded) {
-        fields.push(dynsol_to_signable_field(&param, &value));
+        fields.push(dynsol_to_signable_field(param, &value));
     }
     Ok(fields)
 }
@@ -88,11 +88,7 @@ fn dynsol_to_signable_field(param: &Param, value: &DynSolValue) -> SignablePaylo
                 .iter()
                 .enumerate()
                 .map(|(i, v)| {
-                    let field_param = param.components.get(i).cloned().unwrap_or_else(|| {
-                        let mut p = Param::default();
-                        p.name = format!("{}_field_{}", param.name, i);
-                        p
-                    });
+                    let field_param = param.components.get(i).cloned().unwrap_or_default();
                     AnnotatedPayloadField {
                         signable_payload_field: dynsol_to_signable_field(&field_param, v),
                         static_annotation: None,
