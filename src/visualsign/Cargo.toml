@@ -11,4 +11,5 @@ pretty_assertions = "1.4.1"
 thiserror = "2.0.12"
 
 [dev-dependencies]
+base64 = "0.22.1"
 hex = "0.4.3"
