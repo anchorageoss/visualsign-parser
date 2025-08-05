@@ -1,7 +1,8 @@
-use crate::commands::add_tx_commands;
-use crate::module_resolver::SuiModuleResolver;
-use crate::utils;
-use crate::visualiser::{add_tx_details, add_tx_network, determine_transaction_type_string};
+use crate::core::commands::add_tx_commands;
+use crate::core::helper::SuiModuleResolver;
+use crate::core::transaction::{
+    add_tx_details, add_tx_network, decode_transaction, determine_transaction_type_string,
+};
 
 use move_bytecode_utils::module_cache::SyncModuleCache;
 
@@ -9,7 +10,7 @@ use sui_json_rpc_types::SuiTransactionBlockData;
 use sui_types::transaction::TransactionData;
 
 use visualsign::{
-    SignablePayload,
+    SignablePayload, SignablePayloadField,
     encodings::SupportedEncodings,
     vsptrait::{
         Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
@@ -25,6 +26,7 @@ pub struct SuiTransactionWrapper {
 
 impl SuiTransactionWrapper {
     /// Create a new SuiTransactionWrapper
+    #[allow(dead_code)]
     pub fn new(transaction: TransactionData) -> Self {
         Self { transaction }
     }
@@ -39,7 +41,7 @@ impl Transaction for SuiTransactionWrapper {
     fn from_string(data: &str) -> Result<Self, TransactionParseError> {
         let format = SupportedEncodings::detect(data);
 
-        let transaction = utils::decode_transaction(data, format)
+        let transaction = decode_transaction(data, format)
             .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?;
 
         Ok(Self { transaction })
@@ -74,7 +76,7 @@ impl VisualSignConverter<SuiTransactionWrapper> for SuiVisualSignConverter {
 /// Convert Sui transaction to visual sign payload
 fn convert_to_visual_sign_payload(
     transaction: &TransactionData,
-    decode_transfers: bool,
+    _decode_transfers: bool,
     title: Option<String>,
 ) -> Result<SignablePayload, VisualSignError> {
     let block_data: SuiTransactionBlockData = SuiTransactionBlockData::try_from_with_module_cache(
@@ -83,13 +85,15 @@ fn convert_to_visual_sign_payload(
     )
     .map_err(|e| VisualSignError::ParseError(TransactionParseError::DecodeError(e.to_string())))?;
 
-    let mut fields = vec![];
+    let mut fields: Vec<SignablePayloadField> = vec![];
 
-    add_tx_network(&mut fields);
-    add_tx_details(&mut fields, transaction, &block_data);
-    if decode_transfers {
-        add_tx_commands(&mut fields, &block_data);
-    }
+    fields.push(add_tx_network().signable_payload_field);
+    fields.push(add_tx_details(transaction, &block_data));
+
+    // TODO: revisit this later
+    // if decode_transfers {}
+
+    fields.extend(add_tx_commands(&block_data));
 
     let title = title.unwrap_or_else(|| determine_transaction_type_string(&block_data));
     Ok(SignablePayload::new(
@@ -102,6 +106,7 @@ fn convert_to_visual_sign_payload(
 }
 
 /// Public API function for ease of use
+#[allow(dead_code)]
 pub fn transaction_to_visual_sign(
     transaction: TransactionData,
     options: VisualSignOptions,
@@ -110,6 +115,7 @@ pub fn transaction_to_visual_sign(
 }
 
 /// Public API function for string-based transactions
+#[allow(dead_code)]
 pub fn transaction_string_to_visual_sign(
     transaction_data: &str,
     options: VisualSignOptions,
@@ -181,7 +187,7 @@ mod tests {
         );
     }
 
-     #[test]
+    #[test]
     fn test_transfer_command() {
         // https://suivision.xyz/txblock/CE46w3GYgWnZU8HF4P149m6ANGebD22xuNqA64v7JykJ
         let test_data = "AQAAAAAABQEAm9cmP35lHGKppWJLgoYU7aexd43oTT2ci4QzxDXFNv92CAsjAAAAACANp0teIzSyzZ4Pj5dL3YaYBdeVmiWScWL/9RCV4mUINwEAARQFJheK7qwbpqmQudEhsSyQ6AjVawfLpN4XRBhe12FH6TIiAAAAACDXzuT2xanZ36QNQSYtDhZn31zfzIlhRk5H6pTsqGdRDAEAXpykdGz3KJdaAVjyAMZQxufRYJfqzNXfOu8jVCAjEjIzfYIhAAAAACA5hk9rACYb1i5fqrUBJIgXhdUFOqOaouNWmQINCW4/WQAIAPLhNQAAAAAAIEutPmqkZpN81fwdos/haXZAQJoZsX8SvKilyMRxrv/pAwMBAAACAQEAAQIAAgEAAAEBAwABAQIBAAEEAA4x8k3bZAV+p192pmk9h7U2nGDwuTmW8EY6c95JyFHCAaCnde0j6aiVXUd/1gCf3q5Uuj1mPVIuuEpJn1teueghdggLIwAAAAAgNhuP2zGpc0qF3gRzxQC5B0lpAZR7xyssXC3gKbH8uxwOMfJN22QFfqdfdqZpPYe1Npxg8Lk5lvBGOnPeSchRwugDAAAAAAAAoIVIAAAAAAAAAWEAFrlPuI8JOSzIoIBc0xwfWia7T5uPf1PS+aSSphoTTq0lRpNuTOg8eOggpBxpLsQDrbAx3jDoWg1R8hZKR62LBex1R808U6AgiY8V7LxOVsChXFf8nSAEGaeSLQc7mJbx";
@@ -205,7 +211,7 @@ mod tests {
         );
     }
 
-     #[test]
+    #[test]
     fn test_stake_commands() {
         // Stake
         // https://suivision.xyz/txblock/4cccJLKehRtyRQY7TaNUJiM4ipauWCn8S3GNJr9RtfCN
@@ -220,17 +226,14 @@ mod tests {
         assert!(result.is_ok());
 
         let payload = result.unwrap();
-        let transaction_preview = payload
-            .fields
-            .iter()
-            .find(|f| f.label() == "Stake Command");
+        let transaction_preview = payload.fields.iter().find(|f| f.label() == "Stake Command");
         assert!(
             transaction_preview.is_some(),
             "Should have Stake Command layout"
         );
     }
 
-     #[test]
+    #[test]
     fn test_withdraw_commands() {
         // Withdraw
         // https://suivision.xyz/txblock/4cccJLKehRtyRQY7TaNUJiM4ipauWCn8S3GNJr9RtfCN
@@ -255,7 +258,7 @@ mod tests {
         );
     }
 
-     #[test]
+    #[test]
     fn test_cetus_amm_swap_b2a_commands() {
         // https://suivision.xyz/txblock/7Je4yeXMvvEHFcRSTD4WYv3eSsaDk2zqvdoSxWXdUYGx
         let test_data = "AQAAAAAACQEAEXs/ewhS1RZrUZQ2xQEliCJn40SK4PvEV75r2SGFMXhjUsAjAAAAACBSKqlrLdPXYeuzckz31NAkeSO09qmNPv/pkWggJMTC2QAIuMbAAQAAAAABAdqkYpJjLDxNjzHyPqD5s2oo/zZ36WhJgORDhAOmej2PLgUYAAAAAAAAAQFK94o+ni1sq8pdp5wea/9ImVZqQhMh/DtaYZZkAXpg1nkOqBoAAAAAAQABAQAIuMbAAQAAAAAACI0+GgMAAAAAABCvMxuoMn+7NbHE/v8AAAAAAQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABgEAAAAAAAAAAAMCAQAAAQEBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgRjb2luBHplcm8BB9ujRnLjDLBlsfk+OrVTGHaP1v72bBWULJ98uEbi+QDnBHVzZGMEVVNEQwAAALLbcUL6gyEKfXjZwSrEnAQ7PLvUgiJP6m49oAqlpa4tDnBvb2xfc2NyaXB0X3YyCHN3YXBfYjJhAgfbo0Zy4wywZbH5Pjq1Uxh2j9b+9mwVlCyffLhG4vkA5wR1c2RjBFVTREMAB7eETiiahBDlD7PKSNaeuc8p4n0iPvkDU/4b2OJ/+PP4BGNvaW4EQ09JTgAJAQIAAQMAAgEAAgAAAQQAAQUAAQYAAQcAAQgArltnUkfA5IdctLm9N6YO1bz4kng0TThA3StCbiinZoUBZI8YcdbCiGOtIFCZV/M9U6lZTgf3lg6t7feHRsBBqR1jUsAjAAAAACCmwR6aeqn8D632smpzU9fbDhP3vPOQhgc806IrzekPH65bZ1JHwOSHXLS5vTemDtW8+JJ4NE04QN0rQm4op2aFBQIAAAAAAAC8YDQAAAAAAAABYQAdbFpPHuOPe/TYRMttj4FSzAN1ErZdI75GooTkFmiIVkvCM+lnSS3pR/qQt6j7K3gsrtBExfgOL/dffWapvuMEyeP1ig9kZWEaY4lMw99QxRTo2PcUhKsb1gquOOAGXP8=";

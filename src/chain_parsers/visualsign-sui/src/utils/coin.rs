@@ -1,47 +1,60 @@
-use std::fmt::Display;
-
+use sui_json_rpc_types::SuiArgument;
 use sui_json_rpc_types::SuiArgument::Input;
-use sui_json_rpc_types::{SuiArgument};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Coin {
     pub id: String,
     pub label: String,
 }
 
-impl Coin {
-    pub fn from_string(str: &str) -> Self {
-        let parts: Vec<&str> = str.split("::").collect();
-        let id = parts.get(0).unwrap_or(&"").to_string();
-        let label = parts.get(2).unwrap_or(&"").to_string();
+impl std::str::FromStr for Coin {
+    type Err = ();
 
-        Coin { id, label }
-    }
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.trim().is_empty() {
+            return Ok(Coin::default());
+        }
 
-    pub fn get_label(&self) -> String {
-        self.label.clone()
+        let mut parts = s.splitn(3, "::");
+        let (id, label) = match (parts.next(), parts.next(), parts.next()) {
+            (Some(id), _, Some(label)) => (id.to_string(), label.to_string()),
+            (Some(id), _, None) => (id.to_string(), String::new()),
+            _ => (String::new(), String::new()),
+        };
+
+        Ok(Coin { id, label })
     }
 }
 
-impl Display for Coin {
+impl Coin {
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+}
+
+impl std::fmt::Display for Coin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        return write!(f, "{}::{}", self.id, self.label);
+        write!(f, "{}::{}", self.id, self.label)
     }
 }
 
 impl Default for Coin {
-    fn default() -> Coin {
-        Coin::from_string("0x0::unknown::Unknown")
+    fn default() -> Self {
+        Coin {
+            id: "0x0".to_string(),
+            label: "Unknown".to_string(),
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CoinObject {
+    #[allow(dead_code)]
     Sui,
     Unknown(String),
 }
 
-impl Display for CoinObject {
+impl std::fmt::Display for CoinObject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CoinObject::Sui => write!(f, "Sui"),

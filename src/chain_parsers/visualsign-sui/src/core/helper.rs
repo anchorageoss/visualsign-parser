@@ -1,8 +1,6 @@
-use move_core_types::resolver::ModuleResolver;
-
 pub struct SuiModuleResolver;
 
-impl ModuleResolver for SuiModuleResolver {
+impl move_core_types::resolver::ModuleResolver for SuiModuleResolver {
     type Error = String;
 
     fn get_module(

@@ -1,6 +1,11 @@
 use base64::Engine;
-use sui_types::transaction::{SenderSignedData, TransactionData};
+
 use visualsign::encodings::SupportedEncodings;
+
+use sui_json_rpc_types::{
+    SuiTransactionBlockData, SuiTransactionBlockDataAPI, SuiTransactionBlockKind,
+};
+use sui_types::transaction::{SenderSignedData, TransactionData};
 
 /// Decode a transaction from string format
 pub fn decode_transaction(
@@ -30,6 +35,26 @@ pub fn decode_transaction(
         "Unable to decode transaction data as either `SenderSignedData` or `TransactionData`"
             .into(),
     )
+}
+
+/// Determine transaction title based on type
+pub fn determine_transaction_type_string(tx_data: &SuiTransactionBlockData) -> String {
+    match &tx_data.transaction() {
+        SuiTransactionBlockKind::ProgrammableTransaction(_) => "Programmable Transaction",
+        SuiTransactionBlockKind::ChangeEpoch(_) => "Change Epoch",
+        SuiTransactionBlockKind::Genesis(_) => "Genesis Transaction",
+        SuiTransactionBlockKind::ConsensusCommitPrologue(_) => "Consensus Commit",
+        SuiTransactionBlockKind::AuthenticatorStateUpdate(_) => "Authenticator State Update",
+        SuiTransactionBlockKind::RandomnessStateUpdate(_) => "Randomness State Update",
+        SuiTransactionBlockKind::EndOfEpochTransaction(_) => "End of Epoch Transaction",
+        SuiTransactionBlockKind::ConsensusCommitPrologueV2(_) => "Consensus Commit Prologue V2",
+        SuiTransactionBlockKind::ConsensusCommitPrologueV3(_) => "Consensus Commit Prologue V3",
+        SuiTransactionBlockKind::ConsensusCommitPrologueV4(_) => "Consensus Commit Prologue V4",
+        SuiTransactionBlockKind::ProgrammableSystemTransaction(_) => {
+            "Programmable System Transaction"
+        }
+    }
+    .to_string()
 }
 
 #[cfg(test)]
