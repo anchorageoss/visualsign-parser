@@ -13,7 +13,7 @@ pub fn decode_bool(call_arg: &SuiCallArg) -> Option<bool> {
     }
 }
 
-// TODO: think about u256 and fallback options 
+// TODO: think about u256 and fallback options
 pub fn decode_number<T>(call_arg: &SuiCallArg) -> Option<T>
 where
     T: FromLeBytes,

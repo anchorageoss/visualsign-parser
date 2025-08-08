@@ -33,7 +33,9 @@ impl CommandVisualizer for CoinTransferVisualizer {
 
         let title_text = if amount > 0 {
             match &coin {
-                CoinObject::Sui => format!("Transfer: {} MIST ({} SUI)", amount, amount / MIST_PER_SUI),
+                CoinObject::Sui => {
+                    format!("Transfer: {} MIST ({} SUI)", amount, amount / MIST_PER_SUI)
+                }
                 CoinObject::Unknown(id) => format!("Transfer: {} {}", amount, id),
             }
         } else {
