@@ -1,48 +1,52 @@
-use sui_json_rpc_types::SuiArgument;
-use sui_json_rpc_types::SuiArgument::Input;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Coin {
-    pub id: String,
-    pub label: String,
+pub struct SuiCoin {
+    pub address: String,
+    pub name: String,
+    pub symbol: String,
 }
 
-impl std::str::FromStr for Coin {
+impl std::str::FromStr for SuiCoin {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.trim().is_empty() {
-            return Ok(Coin::default());
+            return Ok(SuiCoin::default());
         }
 
         let mut parts = s.splitn(3, "::");
-        let (id, label) = match (parts.next(), parts.next(), parts.next()) {
-            (Some(id), _, Some(label)) => (id.to_string(), label.to_string()),
-            (Some(id), _, None) => (id.to_string(), String::new()),
-            _ => (String::new(), String::new()),
+        let (address, name, symbol) = match (parts.next(), parts.next(), parts.next()) {
+            (Some(address), Some(name), Some(symbol)) => {
+                (address.to_string(), name.to_string(), symbol.to_string())
+            }
+            _ => (String::new(), String::new(), String::new()),
         };
 
-        Ok(Coin { id, label })
+        Ok(SuiCoin {
+            address,
+            name,
+            symbol,
+        })
     }
 }
 
-impl Coin {
-    pub fn label(&self) -> &str {
-        &self.label
+impl SuiCoin {
+    pub fn symbol(&self) -> &str {
+        &self.symbol
     }
 }
 
-impl std::fmt::Display for Coin {
+impl std::fmt::Display for SuiCoin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}::{}", self.id, self.label)
+        write!(f, "{}::{}::{}", self.address, self.name, self.symbol)
     }
 }
 
-impl Default for Coin {
+impl Default for SuiCoin {
     fn default() -> Self {
-        Coin {
-            id: "0x0".to_string(),
-            label: "Unknown".to_string(),
+        SuiCoin {
+            address: "0x0".to_string(),
+            name: "Unknown".to_string(),
+            symbol: "Unknown".to_string(),
         }
     }
 }
@@ -75,24 +79,5 @@ impl CoinObject {
 impl Default for CoinObject {
     fn default() -> CoinObject {
         CoinObject::Unknown(String::default())
-    }
-}
-
-/// Get index from SUI arguments array (expects single argument)
-pub fn get_index(sui_args: &[SuiArgument], index: Option<usize>) -> Option<u16> {
-    let arg = match index {
-        Some(i) => sui_args.get(i)?,
-        None => sui_args.first()?,
-    };
-
-    parse_numeric_argument(arg)
-}
-
-/// Parse numeric argument from SUI argument (Input or Result)
-pub fn parse_numeric_argument(arg: &SuiArgument) -> Option<u16> {
-    match arg {
-        Input(index) => Some(*index),
-        SuiArgument::Result(index) => Some(*index),
-        _ => None,
     }
 }

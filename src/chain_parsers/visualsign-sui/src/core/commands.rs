@@ -6,14 +6,7 @@ use sui_json_rpc_types::{
 };
 use visualsign::SignablePayloadField;
 
-/// Returns a list of all available visualizers.
-/// Extend this function to add new visualizers.
-fn available_visualizers() -> Vec<Box<dyn CommandVisualizer>> {
-    vec![
-        Box::new(crate::presets::sui_native_staking::SuiNativeStakingVisualizer),
-        Box::new(crate::presets::cetus::CetusVisualizer),
-    ]
-}
+include!(concat!(env!("OUT_DIR"), "/generated_visualizers.rs"));
 
 /// Extracts commands and inputs from a programmable transaction, or returns None.
 fn extract_commands_and_inputs(
@@ -32,8 +25,9 @@ pub fn decode_commands(block_data: &SuiTransactionBlockData) -> Vec<SignablePayl
         None => return vec![],
     };
 
-    let visualizers = available_visualizers();
-    let visualizers_refs = visualizers.iter().map(|v| v.as_ref()).collect::<Vec<_>>();
+    let visualizers: Vec<Box<dyn CommandVisualizer>> = available_visualizers();
+    let visualizers_refs: Vec<&dyn CommandVisualizer> =
+        visualizers.iter().map(|v| v.as_ref()).collect::<Vec<_>>();
 
     tx_commands
         .iter()

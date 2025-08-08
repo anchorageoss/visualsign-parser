@@ -1,20 +1,16 @@
-use crate::core::{CommandVisualizer, VisualizerContext};
-use crate::utils::{Coin, create_address_field, decode_number, get_index};
+mod config;
 
-use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
+use config::{CETUS_CONFIG, PoolScriptV2Functions, SwapB2AIndexes};
+
+use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext};
+use crate::utils::{SuiCoin, create_address_field, get_tx_type_arg};
+
+use sui_json_rpc_types::{SuiCommand, SuiProgrammableMoveCall};
 
 use visualsign::{
     SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldListLayout,
     field_builders::{create_amount_field, create_text_field},
 };
-
-pub const CETUS_AMM_SWAP_B2A_PACKAGE: &str =
-    "0xb2db7142fa83210a7d78d9c12ac49c043b3cbbd482224fea6e3da00aa5a5ae2d";
-pub const MODULE_POOL_SCRIPT_V2: &str = "pool_script_v2";
-pub const FUNC_SWAP_B2A: &str = "swap_b2a";
-
-const ARG_INDEX_INPUT_AMOUNT: usize = 5;
-const ARG_INDEX_MIN_OUTPUT: usize = 6;
 
 pub struct CetusVisualizer;
 
@@ -25,90 +21,76 @@ impl CommandVisualizer for CetusVisualizer {
             return None;
         };
 
-        match pwc.function.as_str() {
-            FUNC_SWAP_B2A => {
-                let input_coin = get_token_1_coin(&pwc.type_arguments).unwrap_or_default();
-                let output_coin = get_token_2_coin(&pwc.type_arguments).unwrap_or_default();
+        let function = match pwc.function.as_str().try_into() {
+            Ok(function) => function,
+            Err(_) => return None,
+        };
 
-                let input_amount =
-                    get_amount_by_index(context.inputs(), &pwc.arguments, ARG_INDEX_INPUT_AMOUNT)
-                        .unwrap_or_default();
-                let min_output_amount =
-                    get_amount_by_index(context.inputs(), &pwc.arguments, ARG_INDEX_MIN_OUTPUT)
-                        .unwrap_or_default();
+        match function {
+            PoolScriptV2Functions::SwapB2A => Some(self.handle_swap_b2a(context, pwc)),
+        }
+    }
 
-                Some(SignablePayloadField::ListLayout {
-                    common: SignablePayloadFieldCommon {
-                        fallback_text: "CetusAMM Swap Command".to_string(),
-                        label: "CetusAMM Swap Command".to_string(),
-                    },
-                    list_layout: SignablePayloadFieldListLayout {
-                        fields: vec![
-                            create_address_field(
-                                "From",
-                                &context.sender().to_string(),
-                                None,
-                                None,
-                                None,
-                                None,
-                            ),
-                            create_address_field(
-                                "To",
-                                &context.sender().to_string(),
-                                None,
-                                None,
-                                None,
-                                None,
-                            ),
-                            create_amount_field(
-                                "Input Amount",
-                                &input_amount.to_string(),
-                                input_coin.label(),
-                            ),
-                            create_text_field("Input Coin", input_coin.label()),
-                            create_amount_field(
-                                "Min Output Amount",
-                                &min_output_amount.to_string(),
-                                output_coin.label(),
-                            ),
-                            create_text_field("Output Coin", output_coin.label()),
-                        ],
-                    },
-                })
+    fn get_config(&self) -> Option<&dyn SuiIntegrationConfig> {
+        Some(&*CETUS_CONFIG)
+    }
+}
+
+impl CetusVisualizer {
+    fn handle_swap_b2a(
+        &self,
+        context: &VisualizerContext,
+        pwc: &SuiProgrammableMoveCall,
+    ) -> SignablePayloadField {
+        let input_coin: SuiCoin = get_tx_type_arg(&pwc.type_arguments, 0).unwrap_or_default();
+        let output_coin: SuiCoin = get_tx_type_arg(&pwc.type_arguments, 1).unwrap_or_default();
+
+        let input_amount = SwapB2AIndexes::get_input_amount(context.inputs(), &pwc.arguments);
+        let min_output_amount =
+            SwapB2AIndexes::get_min_output_amount(context.inputs(), &pwc.arguments);
+
+        let mut list_layout_fields = vec![
+            create_address_field(
+                "From",
+                &context.sender().to_string(),
+                None,
+                None,
+                None,
+                None,
+            ),
+            create_address_field("To", &context.sender().to_string(), None, None, None, None),
+        ];
+
+        list_layout_fields.push(match input_amount {
+            Some(amount) => {
+                create_amount_field("Input Amount", &amount.to_string(), input_coin.symbol())
             }
-            _ => None,
+            None => create_text_field("Input Amount", "N/A"),
+        });
+
+        list_layout_fields.push(create_text_field("Input Coin", input_coin.symbol()));
+
+        list_layout_fields.push(match min_output_amount {
+            Some(amount) => create_amount_field(
+                "Min Output Amount",
+                &amount.to_string(),
+                output_coin.symbol(),
+            ),
+            None => create_text_field("Min Output Amount", "N/A"),
+        });
+
+        list_layout_fields.push(create_text_field("Output Coin", output_coin.symbol()));
+
+        SignablePayloadField::ListLayout {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "CetusAMM Swap Command".to_string(),
+                label: "CetusAMM Swap Command".to_string(),
+            },
+            list_layout: SignablePayloadFieldListLayout {
+                fields: list_layout_fields,
+            },
         }
     }
-
-    fn can_handle(&self, context: &VisualizerContext) -> bool {
-        if let Some(SuiCommand::MoveCall(pwc)) = context.commands().get(context.command_index()) {
-            pwc.package.to_hex_literal() == CETUS_AMM_SWAP_B2A_PACKAGE
-                && pwc.module == MODULE_POOL_SCRIPT_V2
-                && matches!(pwc.function.as_str(), FUNC_SWAP_B2A)
-        } else {
-            false
-        }
-    }
-}
-
-fn get_token_1_coin(type_args: &[String]) -> Option<Coin> {
-    type_args
-        .first()
-        .and_then(|coin_type| coin_type.parse().ok())
-}
-
-fn get_token_2_coin(type_args: &[String]) -> Option<Coin> {
-    type_args
-        .get(1)
-        .and_then(|coin_type| coin_type.parse().ok())
-}
-
-fn get_amount_by_index(
-    inputs: &[SuiCallArg],
-    args: &[SuiArgument],
-    arg_index: usize,
-) -> Option<u64> {
-    decode_number::<u64>(inputs.get(get_index(args, Some(arg_index))? as usize)?)
 }
 
 #[cfg(test)]

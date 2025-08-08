@@ -1,5 +1,5 @@
 mod core;
-mod integration;
+mod integrations;
 mod presets;
 mod utils;
 

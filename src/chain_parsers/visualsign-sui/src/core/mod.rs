@@ -3,14 +3,37 @@ mod helper;
 mod transaction;
 mod visualsign;
 
-use ::visualsign::SignablePayloadField;
+use std::collections::HashMap;
+
 use sui_json_rpc_types::{SuiCallArg, SuiCommand};
 use sui_types::base_types::SuiAddress;
 
+use ::visualsign::SignablePayloadField;
 pub use visualsign::{
     SuiTransactionWrapper, SuiVisualSignConverter, transaction_string_to_visual_sign,
     transaction_to_visual_sign,
 };
+
+pub struct SuiIntegrationConfigData {
+    pub packages: HashMap<&'static str, HashMap<&'static str, Vec<&'static str>>>,
+}
+
+pub trait SuiIntegrationConfig {
+    fn new() -> Self
+    where
+        Self: Sized;
+
+    fn data(&self) -> &SuiIntegrationConfigData;
+
+    fn can_handle(&self, package: &str, module: &str, function: &str) -> bool {
+        self.data()
+            .packages
+            .get(package)
+            .and_then(|modules| modules.get(module))
+            .map(|functions| functions.contains(&function))
+            .unwrap_or(false)
+    }
+}
 
 /// Context for visualizing a Sui transaction command.
 ///
@@ -73,8 +96,22 @@ pub trait CommandVisualizer {
     /// or `None` if the command is not supported by this visualizer.
     fn visualize_tx_commands(&self, context: &VisualizerContext) -> Option<SignablePayloadField>;
 
+    /// Returns the config for the visualizer.
+    fn get_config(&self) -> Option<&dyn SuiIntegrationConfig>;
+
     /// Checks if this visualizer can handle the given command.
-    fn can_handle(&self, context: &VisualizerContext) -> bool;
+    fn can_handle(&self, context: &VisualizerContext) -> bool {
+        let Some(config) = self.get_config() else {
+            return false;
+        };
+
+        let Some(SuiCommand::MoveCall(pwc)) = context.commands().get(context.command_index())
+        else {
+            return false;
+        };
+
+        config.can_handle(&pwc.package.to_hex_literal(), &pwc.module, &pwc.function)
+    }
 }
 
 /// Tries multiple visualizers in order, returning the first successful visualization.
