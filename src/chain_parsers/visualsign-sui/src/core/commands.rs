@@ -1,8 +1,7 @@
-use crate::core::{visualize_with_any, CommandVisualizer, VisualizerContext};
+use crate::core::{CommandVisualizer, VisualizerContext, visualize_with_any};
 
 use sui_json_rpc_types::{
-    SuiTransactionBlockData, SuiTransactionBlockDataAPI,
-    SuiTransactionBlockKind,
+    SuiTransactionBlockData, SuiTransactionBlockDataAPI, SuiTransactionBlockKind,
 };
 
 use visualsign::SignablePayloadField;
