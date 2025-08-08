@@ -37,5 +37,13 @@ qos_net = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400
 qos_nsm = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400d9dfa3ad000690896af2", default-features = false }
 qos_p256 = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400d9dfa3ad000690896af2", default-features = false }
 qos_test_primitives = { git = "https://github.com/tkhq/qos.git", rev = "c7f99535bf6c1799e400d9dfa3ad000690896af2", default-features = false }
+
+# Common dependencies
+base64 = "0.22.1"
+hex = "0.4.3"
+
+once_cell = "1.21.3"
+serde_json = "1.0.142"
+
 # Pin visualsign dependencies
 visualsign = { path = "./visualsign" }
