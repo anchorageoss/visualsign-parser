@@ -252,7 +252,7 @@ mod tests {
     fn test_create_amount_field_missing_abbreviation() {
         let err = create_amount_field("Label", "123", "").unwrap_err();
         match err {
-            VisualSignError::MissingField(ref s) if s == "" => {}
+            VisualSignError::MissingField(ref s) if s.is_empty() => {}
             _ => panic!("Expected MissingField error"),
         }
     }
