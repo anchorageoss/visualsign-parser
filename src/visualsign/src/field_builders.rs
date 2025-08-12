@@ -87,7 +87,7 @@ pub fn create_amount_field(
         dynamic_annotation: None,
         signable_payload_field: SignablePayloadField::AmountV2 {
             common: SignablePayloadFieldCommon {
-                fallback_text: fallback_text,
+                fallback_text,
                 label: label.to_string(),
             },
             amount_v2: SignablePayloadFieldAmountV2 {

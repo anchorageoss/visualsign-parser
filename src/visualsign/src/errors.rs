@@ -1,4 +1,3 @@
-use std::io;
 use thiserror::Error;
 
 // Our library's custom, top-level error type.
