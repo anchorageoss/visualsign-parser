@@ -301,15 +301,13 @@ fn convert_to_visual_sign_payload(
     let input = transaction.input();
     if !input.is_empty() {
         let mut input_fields = Vec::new();
-        if options.decode_transfers {
-            if let Some(ChainMetadata::Ethereum(metadata)) = options.metadata {
-                if let Some(abi) = metadata.abi {
-                    if let Ok(decoded_fields) =
-                        provider::json_abi::parse_json_abi_input(input.clone(), &abi.value)
-                    {
-                        input_fields.extend(decoded_fields);
-                        // TODO: if abi signature is provided add to signable payload
-                    }
+        if let Some(ChainMetadata::Ethereum(metadata)) = options.metadata {
+            if let Some(abi) = metadata.abi {
+                if let Ok(decoded_fields) =
+                    provider::json_abi::parse_json_abi_input(input.clone(), &abi.value)
+                {
+                    input_fields.extend(decoded_fields);
+                    // TODO: if abi signature is provided add to signable payload
                 }
             }
         }
