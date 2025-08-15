@@ -5,7 +5,6 @@ use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePaylo
 
 // From: https://github.com/Uniswap/universal-router/blob/main/contracts/interfaces/IUniversalRouter.sol
 sol! {
-    #[sol(rpc)]
     interface IUniversalRouter {
         /// @notice Executes encoded commands along with provided inputs. Reverts if deadline has expired.
         /// @param commands A set of concatenated commands, each 1 byte in length

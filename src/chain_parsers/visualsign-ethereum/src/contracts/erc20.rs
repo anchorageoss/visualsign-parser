@@ -2,7 +2,6 @@ use alloy_sol_types::{SolCall, sol};
 use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2};
 
 sol! {
-    #[sol(rpc)]
     interface IERC20 {
         function name() external view returns (string memory);
         function symbol() external view returns (string memory);
