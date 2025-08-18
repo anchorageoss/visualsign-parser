@@ -57,7 +57,7 @@ jobs:
         if: steps.command_check.outputs.should_proceed == 'true'
         id: check
         run: |
-          TEAM_SLUG="maintainers"
+          TEAM_SLUG="anchorageoss/maintainers"
           COMMENTER="${{ github.event.comment.user.login }}"
 
           echo "Checking if user '$COMMENTER' is in team '$TEAM_SLUG'..."
