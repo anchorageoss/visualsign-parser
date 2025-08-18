@@ -16,7 +16,7 @@ jobs:
     # Environment variables for easy configuration
     env:
       CLA_URL: "https://ironcladapp.com/public-launch/6896309b0f158de8c7450de6"
-      MAINTAINER_TAG: "@vikstrous2" # probably can be a group?
+      MAINTAINER_TAG: "@maintainers"
 
     steps:
       - name: Checkout repository
