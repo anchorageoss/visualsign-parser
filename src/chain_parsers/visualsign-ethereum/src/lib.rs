@@ -12,6 +12,8 @@ use visualsign::{
 };
 
 pub mod chains;
+pub mod provider;
+pub mod registry;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub enum EthereumParserError {

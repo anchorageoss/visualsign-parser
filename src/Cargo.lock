@@ -3716,6 +3716,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "include_dir"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "923d117408f1e49d914f1a379a309cffe4f18c05cf4e3d12e613a15fc81bd0dd"
+dependencies = [
+ "include_dir_macros",
+]
+
+[[package]]
+name = "include_dir_macros"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cab85a7ed0bd5f0e76d93846e0147172bed2e2d3f859bcc33a8d9699cad1a75"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
 name = "indenter"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4543,7 +4562,7 @@ version = "0.1.0"
 source = "git+https://github.com/MystenLabs/sui?tag=mainnet-v1.52.2#7f45ba185ff0773331d256469c49aefb82542102"
 dependencies = [
  "once_cell",
- "phf",
+ "phf 0.11.3",
  "serde",
 ]
 
@@ -5299,7 +5318,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "visualsign",
+ "visualsign 0.1.0",
  "visualsign-ethereum",
  "visualsign-solana",
  "visualsign-sui",
@@ -5319,7 +5338,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "visualsign",
+ "visualsign 0.1.0",
  "visualsign-solana",
  "visualsign-unspecified",
 ]
@@ -5464,8 +5483,29 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
 dependencies = [
- "phf_macros",
- "phf_shared",
+ "phf_macros 0.11.3",
+ "phf_shared 0.11.3",
+]
+
+[[package]]
+name = "phf"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
+dependencies = [
+ "phf_macros 0.12.1",
+ "phf_shared 0.12.1",
+ "serde",
+]
+
+[[package]]
+name = "phf_codegen"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "efbdcb6f01d193b17f0b9c3360fa7e0e620991b193ff08702f78b3ce365d7e61"
+dependencies = [
+ "phf_generator 0.12.1",
+ "phf_shared 0.12.1",
 ]
 
 [[package]]
@@ -5474,8 +5514,18 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
 dependencies = [
- "phf_shared",
+ "phf_shared 0.11.3",
  "rand 0.8.5",
+]
+
+[[package]]
+name = "phf_generator"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cbb1126afed61dd6368748dae63b1ee7dc480191c6262a3b4ff1e29d86a6c5b"
+dependencies = [
+ "fastrand",
+ "phf_shared 0.12.1",
 ]
 
 [[package]]
@@ -5484,8 +5534,21 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f84ac04429c13a7ff43785d75ad27569f2951ce0ffd30a3321230db2fc727216"
 dependencies = [
- "phf_generator",
- "phf_shared",
+ "phf_generator 0.11.3",
+ "phf_shared 0.11.3",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
+name = "phf_macros"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d713258393a82f091ead52047ca779d37e5766226d009de21696c4e667044368"
+dependencies = [
+ "phf_generator 0.12.1",
+ "phf_shared 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.104",
@@ -5496,6 +5559,15 @@ name = "phf_shared"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
+dependencies = [
+ "siphasher 1.0.1",
+]
+
+[[package]]
+name = "phf_shared"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
 dependencies = [
  "siphasher 1.0.1",
 ]
@@ -10779,6 +10851,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "visualsign"
+version = "0.1.0"
+source = "git+ssh://git@github.com/anchorageoss/visualsign-parser.git?branch=main#db12a545d43535a491ac06db37e009ca6344300b"
+dependencies = [
+ "base64 0.22.1",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "visualsign-erc7730-adapter"
+version = "0.1.0"
+source = "git+ssh://git@github.com/anchorageoss/visualsign-erc-7730-adapter.git?branch=main#7d375c2390f653bffa4df5eec410a2954b98e4f6"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
+ "anyhow",
+ "clap",
+ "hex",
+ "serde",
+ "serde_json",
+ "visualsign 0.1.0 (git+ssh://git@github.com/anchorageoss/visualsign-parser.git?branch=main)",
+]
+
+[[package]]
 name = "visualsign-ethereum"
 version = "0.1.0"
 dependencies = [
@@ -10788,11 +10888,16 @@ dependencies = [
  "alloy-rlp",
  "base64 0.22.1",
  "hex",
+ "include_dir",
  "log",
+ "once_cell",
+ "phf 0.12.1",
+ "phf_codegen",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
- "visualsign",
+ "visualsign 0.1.0",
+ "visualsign-erc7730-adapter",
 ]
 
 [[package]]
@@ -10811,7 +10916,7 @@ dependencies = [
  "spl-associated-token-account 6.0.0",
  "spl-stake-pool",
  "spl-token 7.0.0",
- "visualsign",
+ "visualsign 0.1.0",
 ]
 
 [[package]]
@@ -10827,14 +10932,14 @@ dependencies = [
  "sui-json",
  "sui-json-rpc-types",
  "sui-types",
- "visualsign",
+ "visualsign 0.1.0",
 ]
 
 [[package]]
 name = "visualsign-unspecified"
 version = "0.1.0"
 dependencies = [
- "visualsign",
+ "visualsign 0.1.0",
 ]
 
 [[package]]
