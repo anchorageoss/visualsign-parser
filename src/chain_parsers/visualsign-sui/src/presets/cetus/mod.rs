@@ -3,32 +3,39 @@ mod config;
 use config::{CETUS_CONFIG, PoolScriptV2Functions, SwapB2AIndexes};
 
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
-use crate::utils::{SuiCoin, create_address_field, get_tx_type_arg, truncate_address};
+use crate::utils::{SuiCoin, get_tx_type_arg, truncate_address};
 
 use sui_json_rpc_types::{SuiCommand, SuiProgrammableMoveCall};
 
+use visualsign::errors::VisualSignError;
+use visualsign::field_builders::create_address_field;
 use visualsign::{
-    SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldListLayout,
-    SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
+    AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
+    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
     field_builders::{create_amount_field, create_text_field},
 };
 
 pub struct CetusVisualizer;
 
 impl CommandVisualizer for CetusVisualizer {
-    fn visualize_tx_commands(&self, context: &VisualizerContext) -> Option<SignablePayloadField> {
+    fn visualize_tx_commands(
+        &self,
+        context: &VisualizerContext,
+    ) -> Result<AnnotatedPayloadField, VisualSignError> {
         let Some(SuiCommand::MoveCall(pwc)) = context.commands().get(context.command_index())
         else {
-            return None;
+            return Err(VisualSignError::MissingData(
+                "Expected to get MoveCall for Cetus parsing".into(),
+            ));
         };
 
         let function = match pwc.function.as_str().try_into() {
             Ok(function) => function,
-            Err(_) => return None,
+            Err(e) => return Err(VisualSignError::DecodeError(e)),
         };
 
         match function {
-            PoolScriptV2Functions::SwapB2A => Some(self.handle_swap_b2a(context, pwc)),
+            PoolScriptV2Functions::SwapB2A => Ok(self.handle_swap_b2a(context, pwc)?),
         }
     }
 
@@ -46,7 +53,7 @@ impl CetusVisualizer {
         &self,
         context: &VisualizerContext,
         pwc: &SuiProgrammableMoveCall,
-    ) -> SignablePayloadField {
+    ) -> Result<AnnotatedPayloadField, VisualSignError> {
         let input_coin: SuiCoin = get_tx_type_arg(&pwc.type_arguments, 1).unwrap_or_default();
         let output_coin: SuiCoin = get_tx_type_arg(&pwc.type_arguments, 0).unwrap_or_default();
 
@@ -62,29 +69,29 @@ impl CetusVisualizer {
                 None,
                 None,
                 None,
-            ),
-            create_address_field("To", &context.sender().to_string(), None, None, None, None),
+            )?,
+            create_address_field("To", &context.sender().to_string(), None, None, None, None)?,
         ];
 
         list_layout_fields.push(match input_amount {
             Some(amount) => {
-                create_amount_field("Input Amount", &amount.to_string(), input_coin.symbol())
+                create_amount_field("Input Amount", &amount.to_string(), input_coin.symbol())?
             }
-            None => create_text_field("Input Amount", "N/A"),
+            None => create_text_field("Input Amount", "N/A")?,
         });
 
-        list_layout_fields.push(create_text_field("Input Coin", &input_coin.to_string()));
+        list_layout_fields.push(create_text_field("Input Coin", &input_coin.to_string())?);
 
         list_layout_fields.push(match min_output_amount {
             Some(amount) => create_amount_field(
                 "Min Output Amount",
                 &amount.to_string(),
                 output_coin.symbol(),
-            ),
-            None => create_text_field("Min Output Amount", "N/A"),
+            )?,
+            None => create_text_field("Min Output Amount", "N/A")?,
         });
 
-        list_layout_fields.push(create_text_field("Output Coin", &output_coin.to_string()));
+        list_layout_fields.push(create_text_field("Output Coin", &output_coin.to_string())?);
 
         {
             let title_text = match input_amount {
@@ -113,27 +120,31 @@ impl CetusVisualizer {
                             .map(|v| v.to_string())
                             .unwrap_or_else(|| "N/A".to_string())
                     ),
-                )],
+                )?],
             };
 
             let expanded = SignablePayloadFieldListLayout {
                 fields: list_layout_fields,
             };
 
-            SignablePayloadField::PreviewLayout {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: title_text.clone(),
-                    label: "CetusAMM Swap Command".to_string(),
+            Ok(AnnotatedPayloadField {
+                static_annotation: None,
+                dynamic_annotation: None,
+                signable_payload_field: SignablePayloadField::PreviewLayout {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: title_text.clone(),
+                        label: "CetusAMM Swap Command".to_string(),
+                    },
+                    preview_layout: SignablePayloadFieldPreviewLayout {
+                        title: Some(SignablePayloadFieldTextV2 { text: title_text }),
+                        subtitle: Some(SignablePayloadFieldTextV2 {
+                            text: subtitle_text,
+                        }),
+                        condensed: Some(condensed),
+                        expanded: Some(expanded),
+                    },
                 },
-                preview_layout: SignablePayloadFieldPreviewLayout {
-                    title: Some(SignablePayloadFieldTextV2 { text: title_text }),
-                    subtitle: Some(SignablePayloadFieldTextV2 {
-                        text: subtitle_text,
-                    }),
-                    condensed: Some(condensed),
-                    expanded: Some(expanded),
-                },
-            }
+            })
         }
     }
 }

@@ -3,31 +3,38 @@ mod config;
 use config::{NATIVE_STAKING_CONFIG, SuiSystemFunctions};
 
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
-use crate::utils::{create_address_field, get_index, truncate_address};
+use crate::utils::{get_index, truncate_address};
 
 use move_core_types::runtime_value::MoveValue;
 use sui_json::{MoveTypeLayout, SuiJsonValue};
 use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
 use sui_types::base_types::SuiAddress;
 
+use visualsign::errors::VisualSignError;
+use visualsign::field_builders::create_address_field;
 use visualsign::{
-    SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldListLayout,
-    SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
+    AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
+    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
     field_builders::create_amount_field,
 };
 
 pub struct SuiNativeStakingVisualizer;
 
 impl CommandVisualizer for SuiNativeStakingVisualizer {
-    fn visualize_tx_commands(&self, context: &VisualizerContext) -> Option<SignablePayloadField> {
+    fn visualize_tx_commands(
+        &self,
+        context: &VisualizerContext,
+    ) -> Result<AnnotatedPayloadField, VisualSignError> {
         let Some(SuiCommand::MoveCall(pwc)) = context.commands().get(context.command_index())
         else {
-            return None;
+            return Err(VisualSignError::MissingData(
+                "Expected to get MoveCall for staking parsing".into(),
+            ));
         };
 
         let function = match pwc.function.as_str().try_into() {
             Ok(function) => function,
-            Err(_) => return None,
+            Err(e) => return Err(VisualSignError::DecodeError(e)),
         };
 
         match function {
@@ -46,7 +53,7 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
                     );
 
                     let condensed = SignablePayloadFieldListLayout {
-                        fields: vec![create_amount_field("Amount", &amount.to_string(), "MIST")],
+                        fields: vec![create_amount_field("Amount", &amount.to_string(), "MIST")?],
                     };
 
                     let expanded = SignablePayloadFieldListLayout {
@@ -58,7 +65,7 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
                                 None,
                                 None,
                                 None,
-                            ),
+                            )?,
                             create_address_field(
                                 "Validator",
                                 &receiver.to_string(),
@@ -66,23 +73,27 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
                                 None,
                                 None,
                                 None,
-                            ),
-                            create_amount_field("Amount", &amount.to_string(), "MIST"),
+                            )?,
+                            create_amount_field("Amount", &amount.to_string(), "MIST")?,
                         ],
                     };
 
-                    Some(SignablePayloadField::PreviewLayout {
-                        common: SignablePayloadFieldCommon {
-                            fallback_text: title_text.clone(),
-                            label: "Stake Command".to_string(),
-                        },
-                        preview_layout: SignablePayloadFieldPreviewLayout {
-                            title: Some(SignablePayloadFieldTextV2 { text: title_text }),
-                            subtitle: Some(SignablePayloadFieldTextV2 {
-                                text: subtitle_text,
-                            }),
-                            condensed: Some(condensed),
-                            expanded: Some(expanded),
+                    Ok(AnnotatedPayloadField {
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                        signable_payload_field: SignablePayloadField::PreviewLayout {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: title_text.clone(),
+                                label: "Stake Command".to_string(),
+                            },
+                            preview_layout: SignablePayloadFieldPreviewLayout {
+                                title: Some(SignablePayloadFieldTextV2 { text: title_text }),
+                                subtitle: Some(SignablePayloadFieldTextV2 {
+                                    text: subtitle_text,
+                                }),
+                                condensed: Some(condensed),
+                                expanded: Some(expanded),
+                            },
                         },
                     })
                 }
@@ -100,7 +111,7 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
                         None,
                         None,
                         None,
-                    )],
+                    )?],
                 };
 
                 let expanded = SignablePayloadFieldListLayout {
@@ -111,21 +122,25 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
                         None,
                         None,
                         None,
-                    )],
+                    )?],
                 };
 
-                Some(SignablePayloadField::PreviewLayout {
-                    common: SignablePayloadFieldCommon {
-                        fallback_text: title_text.clone(),
-                        label: "Withdraw Command".to_string(),
-                    },
-                    preview_layout: SignablePayloadFieldPreviewLayout {
-                        title: Some(SignablePayloadFieldTextV2 { text: title_text }),
-                        subtitle: Some(SignablePayloadFieldTextV2 {
-                            text: subtitle_text,
-                        }),
-                        condensed: Some(condensed),
-                        expanded: Some(expanded),
+                Ok(AnnotatedPayloadField {
+                    static_annotation: None,
+                    dynamic_annotation: None,
+                    signable_payload_field: SignablePayloadField::PreviewLayout {
+                        common: SignablePayloadFieldCommon {
+                            fallback_text: title_text.clone(),
+                            label: "Withdraw Command".to_string(),
+                        },
+                        preview_layout: SignablePayloadFieldPreviewLayout {
+                            title: Some(SignablePayloadFieldTextV2 { text: title_text }),
+                            subtitle: Some(SignablePayloadFieldTextV2 {
+                                text: subtitle_text,
+                            }),
+                            condensed: Some(condensed),
+                            expanded: Some(expanded),
+                        },
                     },
                 })
             }

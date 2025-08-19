@@ -2,6 +2,8 @@ use std::fmt::Debug;
 
 use crate::SignablePayload;
 
+pub use crate::errors::{TransactionParseError, VisualSignError};
+
 #[derive(Default, Debug, Clone)]
 pub struct VisualSignOptions {
     pub decode_transfers: bool,
@@ -59,35 +61,6 @@ pub trait VisualSignConverterFromString<T: Transaction>: VisualSignConverter<T> 
         let transaction = T::from_string(transaction_data).map_err(VisualSignError::ParseError)?;
         self.to_visual_sign_payload(transaction, options)
     }
-}
-
-/// Errors that can occur during transaction parsing
-#[derive(Debug, Eq, PartialEq, thiserror::Error)]
-pub enum TransactionParseError {
-    #[error("Invalid transaction format: {0}")]
-    InvalidFormat(String),
-    #[error("Decode error: {0}")]
-    DecodeError(String),
-    #[error("Unsupported transaction version: {0}")]
-    UnsupportedVersion(String),
-    #[error("Unsupported encoding format: {0}")]
-    UnsupportedEncoding(String),
-}
-
-#[derive(Debug, Eq, PartialEq, thiserror::Error)]
-pub enum VisualSignError {
-    #[error("Failed to parse transaction")]
-    ParseError(#[from] TransactionParseError),
-
-    #[error("Failed to decode instruction: {0}")]
-    DecodeError(String),
-
-    #[error("Missing required data: {0}")]
-    MissingData(String),
-
-    // Consider adding more specific error types
-    #[error("Conversion failed: {0}")]
-    ConversionError(String),
 }
 
 #[cfg(test)]

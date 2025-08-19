@@ -85,15 +85,23 @@ fn convert_to_visual_sign_payload(
     )
     .map_err(|e| VisualSignError::ParseError(TransactionParseError::DecodeError(e.to_string())))?;
 
-    let mut fields: Vec<SignablePayloadField> = vec![get_tx_network().signable_payload_field];
+    let mut fields: Vec<SignablePayloadField> = vec![get_tx_network()?.signable_payload_field];
 
     if decode_transfers {
-        fields.extend(commands::decode_transfers(&block_data));
+        fields.extend(
+            commands::decode_transfers(&block_data)?
+                .iter()
+                .map(|e| e.signable_payload_field.clone()),
+        );
     }
 
-    fields.extend(decode_commands(&block_data));
+    fields.extend(
+        decode_commands(&block_data)?
+            .iter()
+            .map(|e| e.signable_payload_field.clone()),
+    );
 
-    fields.push(get_tx_details(transaction, &block_data));
+    fields.push(get_tx_details(transaction, &block_data)?.signable_payload_field);
 
     let title = title.unwrap_or_else(|| determine_transaction_type_string(&block_data));
     Ok(SignablePayload::new(

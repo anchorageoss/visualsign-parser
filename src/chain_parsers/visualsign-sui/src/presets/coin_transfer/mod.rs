@@ -1,7 +1,5 @@
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
-use crate::utils::{
-    CoinObject, create_address_field, get_index, parse_numeric_argument, truncate_address,
-};
+use crate::utils::{CoinObject, get_index, parse_numeric_argument, truncate_address};
 
 use move_core_types::runtime_value::MoveValue;
 
@@ -10,20 +8,27 @@ use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
 use sui_types::base_types::SuiAddress;
 
 use sui_types::gas_coin::MIST_PER_SUI;
+use visualsign::errors::VisualSignError;
+use visualsign::field_builders::create_address_field;
 use visualsign::{
-    SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldListLayout,
-    SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
+    AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
+    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
     field_builders::{create_amount_field, create_text_field},
 };
 
 pub struct CoinTransferVisualizer;
 
 impl CommandVisualizer for CoinTransferVisualizer {
-    fn visualize_tx_commands(&self, context: &VisualizerContext) -> Option<SignablePayloadField> {
+    fn visualize_tx_commands(
+        &self,
+        context: &VisualizerContext,
+    ) -> Result<AnnotatedPayloadField, VisualSignError> {
         let Some(SuiCommand::TransferObjects(args, arg)) =
             context.commands().get(context.command_index())
         else {
-            return None;
+            return Err(VisualSignError::MissingData(
+                "Expected to get TransferObjects for coin transfer parsing".into(),
+            ));
         };
 
         let coin = get_coin(context.commands(), context.inputs(), args).unwrap_or_default();
@@ -58,12 +63,12 @@ impl CommandVisualizer for CoinTransferVisualizer {
                     truncate_address(&context.sender().to_string()),
                     truncate_address(&receiver.to_string())
                 ),
-            )],
+            )?],
         };
 
         let expanded = SignablePayloadFieldListLayout {
             fields: vec![
-                create_text_field("Asset Object ID", &coin.to_string()),
+                create_text_field("Asset Object ID", &coin.to_string())?,
                 create_address_field(
                     "From",
                     &context.sender().to_string(),
@@ -71,24 +76,28 @@ impl CommandVisualizer for CoinTransferVisualizer {
                     None,
                     None,
                     None,
-                ),
-                create_address_field("To", &receiver.to_string(), None, None, None, None),
-                create_amount_field("Amount", &amount.to_string(), &coin.get_label()),
+                )?,
+                create_address_field("To", &receiver.to_string(), None, None, None, None)?,
+                create_amount_field("Amount", &amount.to_string(), &coin.get_label())?,
             ],
         };
 
-        Some(SignablePayloadField::PreviewLayout {
-            common: SignablePayloadFieldCommon {
-                fallback_text: title_text.clone(),
-                label: "Transfer Command".to_string(),
-            },
-            preview_layout: SignablePayloadFieldPreviewLayout {
-                title: Some(SignablePayloadFieldTextV2 { text: title_text }),
-                subtitle: Some(SignablePayloadFieldTextV2 {
-                    text: subtitle_text,
-                }),
-                condensed: Some(condensed),
-                expanded: Some(expanded),
+        Ok(AnnotatedPayloadField {
+            static_annotation: None,
+            dynamic_annotation: None,
+            signable_payload_field: SignablePayloadField::PreviewLayout {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: title_text.clone(),
+                    label: "Transfer Command".to_string(),
+                },
+                preview_layout: SignablePayloadFieldPreviewLayout {
+                    title: Some(SignablePayloadFieldTextV2 { text: title_text }),
+                    subtitle: Some(SignablePayloadFieldTextV2 {
+                        text: subtitle_text,
+                    }),
+                    condensed: Some(condensed),
+                    expanded: Some(expanded),
+                },
             },
         })
     }

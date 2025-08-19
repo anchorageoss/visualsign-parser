@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use sui_json_rpc_types::{SuiCallArg, SuiCommand};
 use sui_types::base_types::SuiAddress;
 
-use ::visualsign::SignablePayloadField;
+use ::visualsign::errors::VisualSignError;
+use ::visualsign::AnnotatedPayloadField;
 pub use visualsign::{
     SuiTransactionWrapper, SuiVisualSignConverter, transaction_string_to_visual_sign,
     transaction_to_visual_sign,
@@ -107,7 +108,10 @@ pub trait CommandVisualizer {
     ///
     /// Returns `Some(SignablePayloadField)` if the command can be visualized,
     /// or `None` if the command is not supported by this visualizer.
-    fn visualize_tx_commands(&self, context: &VisualizerContext) -> Option<SignablePayloadField>;
+    fn visualize_tx_commands(
+        &self,
+        context: &VisualizerContext,
+    ) -> Result<AnnotatedPayloadField, VisualSignError>;
 
     /// Returns the config for the visualizer.
     fn get_config(&self) -> Option<&dyn SuiIntegrationConfig>;
@@ -133,7 +137,7 @@ pub trait CommandVisualizer {
 /// Result of a successful visualization attempt, including which visualizer handled it.
 #[derive(Debug, Clone)]
 pub struct VisualizeResult {
-    pub field: SignablePayloadField,
+    pub field: AnnotatedPayloadField,
     pub kind: VisualizerKind,
 }
 
@@ -149,25 +153,27 @@ pub struct VisualizeResult {
 pub fn visualize_with_any(
     visualizers: &[&dyn CommandVisualizer],
     context: &VisualizerContext,
-) -> Option<VisualizeResult> {
+) -> Option<Result<VisualizeResult, VisualSignError>> {
     visualizers.iter().find_map(|v| {
-        if v.can_handle(context) {
-            tracing::debug!(
-                "Handling command {:?} with visualizer {:?}",
-                context
-                    .commands()
-                    .get(context.command_index())
-                    .map(|c| c.to_string()),
-                v.kind()
-            );
+        if !v.can_handle(context) {
+            return None;
+        }
 
+        tracing::debug!(
+            "Handling command {:?} with visualizer {:?}",
+            context
+                .commands()
+                .get(context.command_index())
+                .map(|c| c.to_string()),
+            v.kind()
+        );
+
+        Some(
             v.visualize_tx_commands(context)
                 .map(|field| VisualizeResult {
                     field,
                     kind: v.kind(),
-                })
-        } else {
-            None
-        }
+                }),
+        )
     })
 }

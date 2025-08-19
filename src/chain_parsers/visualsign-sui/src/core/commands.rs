@@ -4,15 +4,18 @@ use sui_json_rpc_types::{
     SuiTransactionBlockData, SuiTransactionBlockDataAPI, SuiTransactionBlockKind,
 };
 
-use visualsign::SignablePayloadField;
+use visualsign::errors::VisualSignError;
+use visualsign::AnnotatedPayloadField;
 
 include!(concat!(env!("OUT_DIR"), "/generated_visualizers.rs"));
 
 /// Visualizes all commands in a transaction block, returning their signable fields.
-pub fn decode_commands(block_data: &SuiTransactionBlockData) -> Vec<SignablePayloadField> {
+pub fn decode_commands(
+    block_data: &SuiTransactionBlockData,
+) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     let (tx_commands, tx_inputs) = match block_data.transaction() {
         SuiTransactionBlockKind::ProgrammableTransaction(tx) => (&tx.commands, &tx.inputs),
-        _ => return vec![],
+        _ => return Ok(vec![]),
     };
 
     // TODO: add comment that available_visualizers is generated
@@ -28,15 +31,17 @@ pub fn decode_commands(block_data: &SuiTransactionBlockData) -> Vec<SignablePayl
                 &visualizers_refs,
                 &VisualizerContext::new(block_data.sender(), command_index, tx_commands, tx_inputs),
             )
-            .map(|res| res.field)
         })
+        .map(|res| res.map(|viz_result| viz_result.field))
         .collect()
 }
 
-pub fn decode_transfers(block_data: &SuiTransactionBlockData) -> Vec<SignablePayloadField> {
+pub fn decode_transfers(
+    block_data: &SuiTransactionBlockData,
+) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     let (tx_commands, tx_inputs) = match block_data.transaction() {
         SuiTransactionBlockKind::ProgrammableTransaction(tx) => (&tx.commands, &tx.inputs),
-        _ => return vec![],
+        _ => return Ok(vec![]),
     };
 
     let visualizer = crate::presets::coin_transfer::CoinTransferVisualizer;
@@ -49,8 +54,8 @@ pub fn decode_transfers(block_data: &SuiTransactionBlockData) -> Vec<SignablePay
                 &[&visualizer],
                 &VisualizerContext::new(block_data.sender(), command_index, tx_commands, tx_inputs),
             )
-            .map(|res| res.field)
         })
+        .map(|res| res.map(|viz_result| viz_result.field))
         .collect()
 }
 
@@ -102,6 +107,7 @@ mod tests {
                     ),
                 )
             })
+            .map(|res| res.unwrap())
             .collect();
 
         assert!(
@@ -139,6 +145,7 @@ mod tests {
                     ),
                 )
             })
+            .map(|res| res.unwrap())
             .collect();
 
         assert!(

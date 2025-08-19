@@ -1,13 +1,11 @@
 mod address;
 mod coin;
-mod field_builder;
 mod numeric;
 mod package;
 mod tx_args;
 
 pub use address::truncate_address;
 pub use coin::{CoinObject, SuiCoin};
-pub use field_builder::create_address_field;
 pub use numeric::decode_number;
 pub use package::SuiPackage;
 pub use tx_args::{get_index, get_nested_result_value, get_tx_type_arg, parse_numeric_argument};

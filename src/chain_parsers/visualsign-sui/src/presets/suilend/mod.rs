@@ -1,32 +1,38 @@
 use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
 mod config;
 
+use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
+use crate::presets::suilend::config::{SUILEND_CONFIG, SuiLendMarketFunction};
+use visualsign::errors::VisualSignError;
+use visualsign::field_builders::create_address_field;
 use visualsign::{
-    SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldListLayout,
-    SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
+    AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
+    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
     field_builders::{create_amount_field, create_text_field},
 };
 
-use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
-use crate::presets::suilend::config::{SuiLendMarketFunction, SUILEND_CONFIG};
-
 use crate::utils::{
-    SuiCoin, SuiPackage, create_address_field, decode_number, get_index, get_nested_result_value,
-    get_tx_type_arg, truncate_address,
+    SuiCoin, SuiPackage, decode_number, get_index, get_nested_result_value, get_tx_type_arg,
+    truncate_address,
 };
 
 pub struct SuilendVisualizer;
 
 impl CommandVisualizer for SuilendVisualizer {
-    fn visualize_tx_commands(&self, context: &VisualizerContext) -> Option<SignablePayloadField> {
+    fn visualize_tx_commands(
+        &self,
+        context: &VisualizerContext,
+    ) -> Result<AnnotatedPayloadField, VisualSignError> {
         let Some(SuiCommand::MoveCall(pwc)) = context.commands().get(context.command_index())
         else {
-            return None;
+            return Err(VisualSignError::MissingData(
+                "Expected to get MoveCall for suilend parsing".into(),
+            ));
         };
 
         let function = match pwc.function.as_str().try_into() {
             Ok(function) => function,
-            Err(_) => return None,
+            Err(e) => return Err(VisualSignError::DecodeError(e)),
         };
 
         match function {
@@ -47,7 +53,7 @@ impl CommandVisualizer for SuilendVisualizer {
                         fields: vec![create_text_field(
                             "Summary",
                             &format!("Repay {} {} via {}", amount, coin.symbol(), package),
-                        )],
+                        )?],
                     };
 
                     let expanded = SignablePayloadFieldListLayout {
@@ -59,10 +65,14 @@ impl CommandVisualizer for SuilendVisualizer {
                                 None,
                                 None,
                                 None,
-                            ),
-                            create_text_field("Package", &package.to_string()),
-                            create_text_field("Coin", &coin.to_string()),
-                            create_amount_field("Repay Amount", &amount.to_string(), coin.symbol()),
+                            )?,
+                            create_text_field("Package", &package.to_string())?,
+                            create_text_field("Coin", &coin.to_string())?,
+                            create_amount_field(
+                                "Repay Amount",
+                                &amount.to_string(),
+                                coin.symbol(),
+                            )?,
                         ],
                     };
 
@@ -77,12 +87,16 @@ impl CommandVisualizer for SuilendVisualizer {
                         expanded: Some(expanded),
                     };
 
-                    Some(SignablePayloadField::PreviewLayout {
-                        common: SignablePayloadFieldCommon {
-                            fallback_text: title_text,
-                            label: "Suilend Repay Command".to_string(),
+                    Ok(AnnotatedPayloadField {
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                        signable_payload_field: SignablePayloadField::PreviewLayout {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: title_text,
+                                label: "Suilend Repay Command".to_string(),
+                            },
+                            preview_layout,
                         },
-                        preview_layout,
                     })
                 }
             }
@@ -105,7 +119,7 @@ impl CommandVisualizer for SuilendVisualizer {
                                 coin.symbol(),
                                 package
                             ),
-                        )],
+                        )?],
                     };
 
                     let expanded = SignablePayloadFieldListLayout {
@@ -117,9 +131,9 @@ impl CommandVisualizer for SuilendVisualizer {
                                 None,
                                 None,
                                 None,
-                            ),
-                            create_text_field("Package", &package.to_string()),
-                            create_text_field("Coin", &coin.to_string()),
+                            )?,
+                            create_text_field("Package", &package.to_string())?,
+                            create_text_field("Coin", &coin.to_string())?,
                         ],
                     };
 
@@ -134,12 +148,16 @@ impl CommandVisualizer for SuilendVisualizer {
                         expanded: Some(expanded),
                     };
 
-                    Some(SignablePayloadField::PreviewLayout {
-                        common: SignablePayloadFieldCommon {
-                            fallback_text: title_text,
-                            label: "Suilend Claim Rewards and Deposit Command".to_string(),
+                    Ok(AnnotatedPayloadField {
+                        static_annotation: None,
+                        dynamic_annotation: None,
+                        signable_payload_field: SignablePayloadField::PreviewLayout {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: title_text,
+                                label: "Suilend Claim Rewards and Deposit Command".to_string(),
+                            },
+                            preview_layout,
                         },
-                        preview_layout,
                     })
                 }
             }
