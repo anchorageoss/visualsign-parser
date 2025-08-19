@@ -16,7 +16,7 @@ jobs:
       - name: Debug event
         run: |
           echo "Event type: ${{ github.event_name }}"
-          echo "Comment body: ${{ github.event.comment.body }}"
+          echo "Comment body: '${{ github.event.comment.body }}'"
           echo "Commenter: ${{ github.event.comment.user.login }}"
           echo "Issue number: ${{ github.event.issue.number }}"
           echo "Is PR: ${{ github.event.issue.pull_request != null }}"
@@ -25,6 +25,10 @@ jobs:
         id: command_check
         run: |
           COMMENT_BODY="${{ github.event.comment.body }}"
+          # Trim whitespace and normalize the command
+          COMMENT_BODY=$(echo "$COMMENT_BODY" | xargs)
+          echo "Trimmed comment: '$COMMENT_BODY'"
+
           if [[ "$COMMENT_BODY" == "/approve-cla" ]]; then
             echo "Command found, proceeding..."
             echo "should_proceed=true" >> $GITHUB_OUTPUT
@@ -57,13 +61,13 @@ jobs:
         if: steps.command_check.outputs.should_proceed == 'true'
         id: check
         run: |
-          TEAM_SLUG="anchorageoss/maintainers"
+          TEAM_SLUG="maintainers" 
           COMMENTER="${{ github.event.comment.user.login }}"
 
           echo "Checking if user '$COMMENTER' is in team '$TEAM_SLUG'..."
 
-          # Check team membership
-          if gh api -H "Accept: application/vnd.github.v3+json" "/orgs/${{ github.repository_owner }}/teams/$TEAM_SLUG/memberships/$COMMENTER" --silent; then
+          # Check team membership - the API path includes the org, but TEAM_SLUG should just be the team name
+          if gh api "/orgs/${{ github.repository_owner }}/teams/$TEAM_SLUG/memberships/$COMMENTER" --silent; then
             echo "✅ User is a maintainer. Proceeding."
             echo "is_maintainer=true" >> $GITHUB_OUTPUT
           else
