@@ -14,7 +14,7 @@ pub enum TransactionParseError {
 }
 
 // Our library's custom, top-level error type.
-#[derive(Error, Debug)]
+#[derive(Debug, Eq, PartialEq, Error)]
 pub enum VisualSignError {
     #[error("Failed to parse transaction")]
     ParseError(#[from] TransactionParseError),
