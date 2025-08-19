@@ -57,24 +57,26 @@ jobs:
           ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check team membership
+      - name: Check authorization
         if: steps.command_check.outputs.should_proceed == 'true'
         id: check
         run: |
-          TEAM_SLUG="maintainers" 
           COMMENTER="${{ github.event.comment.user.login }}"
 
-          echo "Checking if user '$COMMENTER' is in team '$TEAM_SLUG'..."
+          # Simple allowlist of maintainers because Running with PAT doesn't seem safe or necessary
+          AUTHORIZED_USERS=("vikstrous2" "prasanna-anchorage") 
 
-          # Check team membership - the API path includes the org, but TEAM_SLUG should just be the team name
-          if gh api "/orgs/${{ github.repository_owner }}/teams/$TEAM_SLUG/memberships/$COMMENTER" --silent; then
-            echo "✅ User is a maintainer. Proceeding."
+          echo "Checking if user '$COMMENTER' is authorized..."
+
+          if [[ " ${AUTHORIZED_USERS[*]} " =~ " ${COMMENTER} " ]]; then
+            echo "✅ User is in the authorized list. Proceeding."
             echo "is_maintainer=true" >> $GITHUB_OUTPUT
           else
-            echo "❌ User is not in the maintainers team. Aborting."
+            echo "❌ User is not authorized."
             echo "is_maintainer=false" >> $GITHUB_OUTPUT
             gh pr comment ${{ github.event.issue.number }} --body "Sorry @$COMMENTER, you are not authorized to run this command. Only maintainers can approve CLA signatures."
           fi
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
