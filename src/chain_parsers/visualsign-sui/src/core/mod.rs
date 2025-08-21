@@ -1,3 +1,4 @@
+mod chain_config;
 mod commands;
 mod helper;
 mod transaction;

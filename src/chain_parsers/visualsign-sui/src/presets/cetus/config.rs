@@ -1,127 +1,23 @@
-use once_cell::sync::Lazy;
-use std::collections::HashMap;
-use std::fmt::Display;
+#![allow(dead_code)]
 
-use crate::{
-    core::{SuiIntegrationConfig, SuiIntegrationConfigData},
-    utils::{decode_number, get_index},
-};
+crate::chain_config! {
+  config CETUS_CONFIG as Config;
 
-use sui_json_rpc_types::{SuiArgument, SuiCallArg};
-use visualsign::errors::VisualSignError;
-
-// Proposed layout for the macros.
-// chain_config! {
-//     cetus_testnet_package => {
-//         package_id => 0xb2db7142fa83210a7d78d9c12ac49c043b3cbbd482224fea6e3da00aa5a5ae2d,
-//         modules: {
-//             pool_script_v2: {
-//                 swap_b2a(input_amount: u64 => 4, min_output_amount: u64 => 5)
-//             }
-//         }
-//     },
-// };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PoolScriptV2Functions {
-    SwapB2A,
+  cetus_mainnet => {
+      package_id => 0xb2db7142fa83210a7d78d9c12ac49c043b3cbbd482224fea6e3da00aa5a5ae2d,
+      modules: {
+        pool_script_v2 => PoolScriptV2Functions: {
+          swap_a2b as SwapA2B => SwapA2BIndexes(
+                amount_out as AmountOut: u64 => 5 => get_amount_out,
+                max_amount_in as MaxAmountIn: u64 => 6 => get_max_amount_in,
+                sqrt_price_limit as SqrtPriceLimit: u128 => 7 => get_sqrt_price_limit,
+          ),
+          swap_b2a as SwapB2A => SwapB2AIndexes(
+                amount_in as AmountIn: u64 => 5 => get_amount_in,
+                min_amount_out as MinAmountOut: u64 => 6 => get_min_amount_out,
+                sqrt_price_limit as SqrtPriceLimit: u128 => 7 => get_sqrt_price_limit,
+          ),
+        },
+      }
+  },
 }
-
-impl TryFrom<&str> for PoolScriptV2Functions {
-    type Error = String;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "swap_b2a" => Ok(PoolScriptV2Functions::SwapB2A),
-            _ => Err(format!("Unsupported function name: {}", value)),
-        }
-    }
-}
-
-impl Display for PoolScriptV2Functions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl PoolScriptV2Functions {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            PoolScriptV2Functions::SwapB2A => "swap_b2a",
-        }
-    }
-
-    pub fn get_supported_functions() -> Vec<&'static str> {
-        vec![PoolScriptV2Functions::SwapB2A.as_str()]
-    }
-}
-
-impl AsRef<str> for PoolScriptV2Functions {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-
-#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
-pub enum SwapB2AIndexes {
-    InputAmount = 5,
-    MinOutputAmount = 6,
-}
-
-impl SwapB2AIndexes {
-    pub fn get_input_amount(
-        inputs: &[SuiCallArg],
-        args: &[SuiArgument],
-    ) -> Result<u64, VisualSignError> {
-        decode_number::<u64>(
-            inputs
-                .get(get_index(args, Some(SwapB2AIndexes::InputAmount as usize))? as usize)
-                .ok_or(VisualSignError::MissingData(
-                    "Input amount not found".into(),
-                ))?,
-        )
-    }
-
-    pub fn get_min_output_amount(
-        inputs: &[SuiCallArg],
-        args: &[SuiArgument],
-    ) -> Result<u64, VisualSignError> {
-        decode_number::<u64>(
-            inputs
-                .get(get_index(args, Some(SwapB2AIndexes::MinOutputAmount as usize))? as usize)
-                .ok_or(VisualSignError::MissingData(
-                    "Min output amount not found".into(),
-                ))?,
-        )
-    }
-}
-
-pub struct Config {
-    pub data: SuiIntegrationConfigData,
-}
-
-impl SuiIntegrationConfig for Config {
-    fn new() -> Self {
-        let mut modules = HashMap::new();
-        modules.insert(
-            "pool_script_v2",
-            PoolScriptV2Functions::get_supported_functions(),
-        );
-
-        let mut packages = HashMap::new();
-        packages.insert(
-            "0xb2db7142fa83210a7d78d9c12ac49c043b3cbbd482224fea6e3da00aa5a5ae2d",
-            modules,
-        );
-
-        Self {
-            data: SuiIntegrationConfigData { packages },
-        }
-    }
-
-    fn data(&self) -> &SuiIntegrationConfigData {
-        &self.data
-    }
-}
-
-pub static CETUS_CONFIG: Lazy<Config> = Lazy::new(Config::new);
