@@ -10954,7 +10954,6 @@ dependencies = [
  "hex",
  "move-bytecode-utils",
  "move-core-types",
- "once_cell",
  "serde_json",
  "sui-json",
  "sui-json-rpc-types",

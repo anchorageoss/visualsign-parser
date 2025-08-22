@@ -5,6 +5,7 @@ use config::{NATIVE_STAKING_CONFIG, SuiSystemFunctions};
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
 use crate::utils::{decode_number, get_index, parse_numeric_argument, truncate_address};
 
+use crate::presets::sui_native_staking::config::Config;
 use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
 use sui_types::base_types::SuiAddress;
 use visualsign::errors::VisualSignError;
@@ -155,7 +156,7 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
     }
 
     fn get_config(&self) -> Option<&dyn SuiIntegrationConfig> {
-        Some(&*NATIVE_STAKING_CONFIG)
+        Some(NATIVE_STAKING_CONFIG.get_or_init(Config::new))
     }
 
     fn kind(&self) -> VisualizerKind {

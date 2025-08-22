@@ -10,7 +10,6 @@ base64 = { workspace = true }
 hex = { workspace = true }
 
 bcs = "0.1.6"
-once_cell = { workspace = true }
 serde_json = { workspace = true }
 
 move-core-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.52.2", package = "move-core-types" }

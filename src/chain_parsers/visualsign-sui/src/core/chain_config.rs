@@ -121,8 +121,6 @@ macro_rules! chain_config {
       }
     ),* $(,)?
   ) => {
-    use $crate::core::SuiIntegrationConfig;
-
     // 1) Generate module-level code (enums + indexes + getters)
     $(
       $(
@@ -180,7 +178,6 @@ macro_rules! chain_config {
       }
     }
 
-    pub static $static_name: once_cell::sync::Lazy<$struct_name> =
-      once_cell::sync::Lazy::new($struct_name::new);
+    pub static $static_name: std::sync::OnceLock<$struct_name> = std::sync::OnceLock::new();
   };
 }

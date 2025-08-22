@@ -1,4 +1,3 @@
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
 use crate::core::{SuiIntegrationConfig, SuiIntegrationConfigData};
@@ -59,4 +58,4 @@ impl SuiIntegrationConfig for Config {
     }
 }
 
-pub static NATIVE_STAKING_CONFIG: Lazy<Config> = Lazy::new(Config::new);
+pub static NATIVE_STAKING_CONFIG: std::sync::OnceLock<Config> = std::sync::OnceLock::new();

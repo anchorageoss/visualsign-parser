@@ -2,7 +2,7 @@ use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
 mod config;
 
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
-use crate::presets::suilend::config::{SUILEND_CONFIG, SuiLendMarketFunction};
+use crate::presets::suilend::config::{Config, SUILEND_CONFIG, SuiLendMarketFunction};
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::create_address_field;
 use visualsign::{
@@ -173,7 +173,7 @@ impl CommandVisualizer for SuilendVisualizer {
     }
 
     fn get_config(&self) -> Option<&dyn SuiIntegrationConfig> {
-        Some(&*SUILEND_CONFIG)
+        Some(SUILEND_CONFIG.get_or_init(Config::new))
     }
 
     fn kind(&self) -> VisualizerKind {
