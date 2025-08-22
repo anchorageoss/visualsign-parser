@@ -22,11 +22,11 @@ impl CommandVisualizer for SuilendVisualizer {
     fn visualize_tx_commands(
         &self,
         context: &VisualizerContext,
-    ) -> Result<AnnotatedPayloadField, VisualSignError> {
+    ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
         let Some(SuiCommand::MoveCall(pwc)) = context.commands().get(context.command_index())
         else {
             return Err(VisualSignError::MissingData(
-                "Expected to get MoveCall for suilend parsing".into(),
+                "Expected a `MoveCall` for Suilend parsing".into(),
             ));
         };
 
@@ -45,14 +45,26 @@ impl CommandVisualizer for SuilendVisualizer {
                     .unwrap_or_default();
 
                 {
-                    let title_text = format!("Suilend: Repay {} {}", amount, coin.symbol());
+                    let (title_text, amount_str, amount_field) = match amount {
+                        Some(amount) => (
+                            format!("Suilend: Repay {} {}", amount, coin.symbol()),
+                            amount.to_string(),
+                            create_amount_field("Amount", &amount.to_string(), "MIST")?,
+                        ),
+                        None => (
+                            format!("Suilend: Repay {} {}", "N/A", coin.symbol()),
+                            "N/A".to_string(),
+                            create_text_field("Amount", "N/A MIST")?,
+                        ),
+                    };
+
                     let subtitle_text =
                         format!("From {}", truncate_address(&context.sender().to_string()));
 
                     let condensed = SignablePayloadFieldListLayout {
                         fields: vec![create_text_field(
                             "Summary",
-                            &format!("Repay {} {} via {}", amount, coin.symbol(), package),
+                            &format!("Repay {} {} via {}", amount_str, coin.symbol(), package),
                         )?],
                     };
 
@@ -68,11 +80,7 @@ impl CommandVisualizer for SuilendVisualizer {
                             )?,
                             create_text_field("Package", &package.to_string())?,
                             create_text_field("Coin", &coin.to_string())?,
-                            create_amount_field(
-                                "Repay Amount",
-                                &amount.to_string(),
-                                coin.symbol(),
-                            )?,
+                            amount_field,
                         ],
                     };
 
@@ -87,7 +95,7 @@ impl CommandVisualizer for SuilendVisualizer {
                         expanded: Some(expanded),
                     };
 
-                    Ok(AnnotatedPayloadField {
+                    Ok(vec![AnnotatedPayloadField {
                         static_annotation: None,
                         dynamic_annotation: None,
                         signable_payload_field: SignablePayloadField::PreviewLayout {
@@ -97,7 +105,7 @@ impl CommandVisualizer for SuilendVisualizer {
                             },
                             preview_layout,
                         },
-                    })
+                    }])
                 }
             }
             SuiLendMarketFunction::ClaimRewardsAndDeposit => {
@@ -148,7 +156,7 @@ impl CommandVisualizer for SuilendVisualizer {
                         expanded: Some(expanded),
                     };
 
-                    Ok(AnnotatedPayloadField {
+                    Ok(vec![AnnotatedPayloadField {
                         static_annotation: None,
                         dynamic_annotation: None,
                         signable_payload_field: SignablePayloadField::PreviewLayout {
@@ -158,7 +166,7 @@ impl CommandVisualizer for SuilendVisualizer {
                             },
                             preview_layout,
                         },
-                    })
+                    }])
                 }
             }
         }
@@ -177,16 +185,22 @@ fn get_repay_amount(
     commands: &[SuiCommand],
     inputs: &[SuiCallArg],
     transfer_args: &[SuiArgument],
-) -> Option<u64> {
+) -> Result<Option<u64>, VisualSignError> {
     let command_index_with_input_amount = get_nested_result_value(transfer_args, 4, 0);
-    let command_with_input_amount = commands.get(command_index_with_input_amount? as usize)?;
+    let command_with_input_amount = commands
+        .get(command_index_with_input_amount? as usize)
+        .ok_or(VisualSignError::MissingData("Command not found".into()))?;
 
     match command_with_input_amount {
         SuiCommand::SplitCoins(_, args_with_input_index) => {
-            let amount_arg = inputs.get(get_index(args_with_input_index, Some(0))? as usize)?;
-            decode_number::<u64>(amount_arg)
+            let amount_arg = inputs
+                .get(get_index(args_with_input_index, Some(0))? as usize)
+                .ok_or(VisualSignError::MissingData(
+                    "Amount argument not found".into(),
+                ))?;
+            Ok(Some(decode_number::<u64>(amount_arg)?))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 

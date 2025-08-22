@@ -54,14 +54,14 @@ impl Default for SuiCoin {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CoinObject {
     Sui,
-    Unknown(String),
+    UnknownObject(String),
 }
 
 impl std::fmt::Display for CoinObject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CoinObject::Sui => write!(f, "Sui"),
-            CoinObject::Unknown(s) => write!(f, "Object ID: {}", s),
+            CoinObject::UnknownObject(s) => write!(f, "Object ID: {}", s),
         }
     }
 }
@@ -70,13 +70,13 @@ impl CoinObject {
     pub fn get_label(&self) -> String {
         match self {
             CoinObject::Sui => "MIST".to_string(),
-            CoinObject::Unknown(_) => "Unknown".to_string(),
+            CoinObject::UnknownObject(_) => "Unknown".to_string(),
         }
     }
 }
 
 impl Default for CoinObject {
     fn default() -> CoinObject {
-        CoinObject::Unknown(String::default())
+        CoinObject::UnknownObject(String::default())
     }
 }

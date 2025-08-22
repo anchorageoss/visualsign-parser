@@ -18,7 +18,7 @@ pub fn decode_commands(
         _ => return Ok(vec![]),
     };
 
-    // TODO: add comment that available_visualizers is generated
+    // TODO: Add a comment that `available_visualizers` is generated
     let visualizers: Vec<Box<dyn CommandVisualizer>> = available_visualizers();
     let visualizers_refs: Vec<&dyn CommandVisualizer> =
         visualizers.iter().map(|v| v.as_ref()).collect::<Vec<_>>();
@@ -33,7 +33,8 @@ pub fn decode_commands(
             )
         })
         .map(|res| res.map(|viz_result| viz_result.field))
-        .collect()
+        .collect::<Result<Vec<Vec<AnnotatedPayloadField>>, _>>()
+        .map(|nested| nested.into_iter().flatten().collect())
 }
 
 pub fn decode_transfers(
@@ -56,7 +57,8 @@ pub fn decode_transfers(
             )
         })
         .map(|res| res.map(|viz_result| viz_result.field))
-        .collect()
+        .collect::<Result<Vec<Vec<AnnotatedPayloadField>>, _>>()
+        .map(|nested| nested.into_iter().flatten().collect())
 }
 
 #[cfg(test)]

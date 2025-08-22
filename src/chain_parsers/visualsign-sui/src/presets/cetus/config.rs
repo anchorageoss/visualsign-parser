@@ -8,6 +8,7 @@ use crate::{
 };
 
 use sui_json_rpc_types::{SuiArgument, SuiCallArg};
+use visualsign::errors::VisualSignError;
 
 // Proposed layout for the macros.
 // chain_config! {
@@ -68,16 +69,29 @@ pub enum SwapB2AIndexes {
 }
 
 impl SwapB2AIndexes {
-    pub fn get_input_amount(inputs: &[SuiCallArg], args: &[SuiArgument]) -> Option<u64> {
+    pub fn get_input_amount(
+        inputs: &[SuiCallArg],
+        args: &[SuiArgument],
+    ) -> Result<u64, VisualSignError> {
         decode_number::<u64>(
-            inputs.get(get_index(args, Some(SwapB2AIndexes::InputAmount as usize))? as usize)?,
+            inputs
+                .get(get_index(args, Some(SwapB2AIndexes::InputAmount as usize))? as usize)
+                .ok_or(VisualSignError::MissingData(
+                    "Input amount not found".into(),
+                ))?,
         )
     }
 
-    pub fn get_min_output_amount(inputs: &[SuiCallArg], args: &[SuiArgument]) -> Option<u64> {
+    pub fn get_min_output_amount(
+        inputs: &[SuiCallArg],
+        args: &[SuiArgument],
+    ) -> Result<u64, VisualSignError> {
         decode_number::<u64>(
             inputs
-                .get(get_index(args, Some(SwapB2AIndexes::MinOutputAmount as usize))? as usize)?,
+                .get(get_index(args, Some(SwapB2AIndexes::MinOutputAmount as usize))? as usize)
+                .ok_or(VisualSignError::MissingData(
+                    "Min output amount not found".into(),
+                ))?,
         )
     }
 }

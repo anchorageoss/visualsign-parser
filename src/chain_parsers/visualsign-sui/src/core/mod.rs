@@ -51,8 +51,7 @@ pub trait SuiIntegrationConfig {
 
 /// Context for visualizing a Sui transaction command.
 ///
-/// Holds all necessary information to visualize a specific command
-/// within a transaction.
+/// Holds the information required to visualize a specific command within a transaction.
 #[derive(Debug, Clone)]
 pub struct VisualizerContext<'a> {
     /// The address sending the transaction.
@@ -106,17 +105,17 @@ impl<'a> VisualizerContext<'a> {
 pub trait CommandVisualizer {
     /// Visualizes a specific command in a transaction.
     ///
-    /// Returns `Some(SignablePayloadField)` if the command can be visualized,
+    /// Returns `Vec<AnnotatedPayloadField>` if the command can be visualized,
     /// or `None` if the command is not supported by this visualizer.
     fn visualize_tx_commands(
         &self,
         context: &VisualizerContext,
-    ) -> Result<AnnotatedPayloadField, VisualSignError>;
+    ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError>;
 
     /// Returns the config for the visualizer.
     fn get_config(&self) -> Option<&dyn SuiIntegrationConfig>;
 
-    /// The identifier of this visualizer.
+    /// The identifier for this visualizer.
     fn kind(&self) -> VisualizerKind;
 
     /// Checks if this visualizer can handle the given command.
@@ -137,11 +136,11 @@ pub trait CommandVisualizer {
 /// Result of a successful visualization attempt, including which visualizer handled it.
 #[derive(Debug, Clone)]
 pub struct VisualizeResult {
-    pub field: AnnotatedPayloadField,
+    pub field: Vec<AnnotatedPayloadField>,
     pub kind: VisualizerKind,
 }
 
-/// Tries multiple visualizers in order, returning the first successful visualization.
+/// Tries multiple visualizers in order and returns the first successful visualization.
 ///
 /// # Arguments
 /// * `visualizers` - Slice of visualizer trait objects.

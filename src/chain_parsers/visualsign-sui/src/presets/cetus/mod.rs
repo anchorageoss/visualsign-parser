@@ -21,11 +21,11 @@ impl CommandVisualizer for CetusVisualizer {
     fn visualize_tx_commands(
         &self,
         context: &VisualizerContext,
-    ) -> Result<AnnotatedPayloadField, VisualSignError> {
+    ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
         let Some(SuiCommand::MoveCall(pwc)) = context.commands().get(context.command_index())
         else {
             return Err(VisualSignError::MissingData(
-                "Expected to get MoveCall for Cetus parsing".into(),
+                "Expected a `MoveCall` for Cetus parsing".into(),
             ));
         };
 
@@ -53,13 +53,13 @@ impl CetusVisualizer {
         &self,
         context: &VisualizerContext,
         pwc: &SuiProgrammableMoveCall,
-    ) -> Result<AnnotatedPayloadField, VisualSignError> {
+    ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
         let input_coin: SuiCoin = get_tx_type_arg(&pwc.type_arguments, 1).unwrap_or_default();
         let output_coin: SuiCoin = get_tx_type_arg(&pwc.type_arguments, 0).unwrap_or_default();
 
-        let input_amount = SwapB2AIndexes::get_input_amount(context.inputs(), &pwc.arguments);
+        let input_amount = SwapB2AIndexes::get_input_amount(context.inputs(), &pwc.arguments)?;
         let min_output_amount =
-            SwapB2AIndexes::get_min_output_amount(context.inputs(), &pwc.arguments);
+            SwapB2AIndexes::get_min_output_amount(context.inputs(), &pwc.arguments)?;
 
         let mut list_layout_fields = vec![
             create_address_field(
@@ -73,40 +73,29 @@ impl CetusVisualizer {
             create_address_field("To", &context.sender().to_string(), None, None, None, None)?,
         ];
 
-        list_layout_fields.push(match input_amount {
-            Some(amount) => {
-                create_amount_field("Input Amount", &amount.to_string(), input_coin.symbol())?
-            }
-            None => create_text_field("Input Amount", "N/A")?,
-        });
+        list_layout_fields.push(create_amount_field(
+            "Input Amount",
+            &input_amount.to_string(),
+            input_coin.symbol(),
+        )?);
 
         list_layout_fields.push(create_text_field("Input Coin", &input_coin.to_string())?);
 
-        list_layout_fields.push(match min_output_amount {
-            Some(amount) => create_amount_field(
-                "Min Output Amount",
-                &amount.to_string(),
-                output_coin.symbol(),
-            )?,
-            None => create_text_field("Min Output Amount", "N/A")?,
-        });
+        list_layout_fields.push(create_amount_field(
+            "Min Output Amount",
+            &min_output_amount.to_string(),
+            output_coin.symbol(),
+        )?);
 
         list_layout_fields.push(create_text_field("Output Coin", &output_coin.to_string())?);
 
         {
-            let title_text = match input_amount {
-                Some(amount) => format!(
-                    "CetusAMM Swap: {} {} → {}",
-                    amount,
-                    input_coin.symbol(),
-                    output_coin.symbol()
-                ),
-                None => format!(
-                    "CetusAMM Swap: {} → {}",
-                    input_coin.symbol(),
-                    output_coin.symbol()
-                ),
-            };
+            let title_text = format!(
+                "CetusAMM Swap: {} {} → {}",
+                input_amount,
+                input_coin.symbol(),
+                output_coin.symbol()
+            );
             let subtitle_text = format!("From {}", truncate_address(&context.sender().to_string()));
 
             let condensed = SignablePayloadFieldListLayout {
@@ -117,8 +106,6 @@ impl CetusVisualizer {
                         input_coin.symbol(),
                         output_coin.symbol(),
                         min_output_amount
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "N/A".to_string())
                     ),
                 )?],
             };
@@ -127,7 +114,7 @@ impl CetusVisualizer {
                 fields: list_layout_fields,
             };
 
-            Ok(AnnotatedPayloadField {
+            Ok(vec![AnnotatedPayloadField {
                 static_annotation: None,
                 dynamic_annotation: None,
                 signable_payload_field: SignablePayloadField::PreviewLayout {
@@ -144,7 +131,7 @@ impl CetusVisualizer {
                         expanded: Some(expanded),
                     },
                 },
-            })
+            }])
         }
     }
 }

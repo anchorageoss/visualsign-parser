@@ -1,19 +1,16 @@
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
-use crate::utils::{CoinObject, get_index, parse_numeric_argument, truncate_address};
+use crate::truncate_address;
+use crate::utils::{CoinObject, decode_number, parse_numeric_argument};
 
-use move_core_types::runtime_value::MoveValue;
-
-use sui_json::{MoveTypeLayout, SuiJsonValue};
-use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
+use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand, SuiObjectArg};
 use sui_types::base_types::SuiAddress;
 
 use sui_types::gas_coin::MIST_PER_SUI;
-use visualsign::errors::VisualSignError;
-use visualsign::field_builders::create_address_field;
+use visualsign::errors::{TransactionParseError, VisualSignError};
+use visualsign::field_builders::{create_address_field, create_amount_field, create_text_field};
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
-    field_builders::{create_amount_field, create_text_field},
 };
 
 pub struct CoinTransferVisualizer;
@@ -22,84 +19,26 @@ impl CommandVisualizer for CoinTransferVisualizer {
     fn visualize_tx_commands(
         &self,
         context: &VisualizerContext,
-    ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let Some(SuiCommand::TransferObjects(args, arg)) =
+    ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+        let Some(SuiCommand::TransferObjects(objects_to_send, receiver_argument)) =
             context.commands().get(context.command_index())
         else {
             return Err(VisualSignError::MissingData(
-                "Expected to get TransferObjects for coin transfer parsing".into(),
+                "Expected `TransferObjects` for coin transfer parsing".into(),
             ));
         };
 
-        let coin = get_coin(context.commands(), context.inputs(), args).unwrap_or_default();
-        let amount =
-            get_coin_amount(context.commands(), context.inputs(), args).unwrap_or_default();
-        let receiver = get_receiver(context.inputs(), arg).unwrap_or_default();
+        let receiver = resolve_receiver(context.inputs(), receiver_argument)?;
+        let objects_sent_to_receiver = objects_to_send
+            .iter()
+            .map(|object| resolve_object(context.commands(), context.inputs(), object))
+            .collect::<Result<Vec<CoinObject>, VisualSignError>>()?;
 
-        let title_text = if amount > 0 {
-            match &coin {
-                CoinObject::Sui => {
-                    format!("Transfer: {} MIST ({} SUI)", amount, amount / MIST_PER_SUI)
-                }
-                CoinObject::Unknown(id) => format!("Transfer: {} {}", amount, id),
-            }
-        } else {
-            "Transfer Command".to_string()
-        };
-
-        let subtitle_text = format!(
-            "From {} to {}",
-            truncate_address(&context.sender().to_string()),
-            truncate_address(&receiver.to_string())
-        );
-
-        let condensed = SignablePayloadFieldListLayout {
-            fields: vec![create_text_field(
-                "Summary",
-                &format!(
-                    "Transfer {} {} from {} to {}",
-                    amount,
-                    coin.get_label(),
-                    truncate_address(&context.sender().to_string()),
-                    truncate_address(&receiver.to_string())
-                ),
-            )?],
-        };
-
-        let expanded = SignablePayloadFieldListLayout {
-            fields: vec![
-                create_text_field("Asset Object ID", &coin.to_string())?,
-                create_address_field(
-                    "From",
-                    &context.sender().to_string(),
-                    None,
-                    None,
-                    None,
-                    None,
-                )?,
-                create_address_field("To", &receiver.to_string(), None, None, None, None)?,
-                create_amount_field("Amount", &amount.to_string(), &coin.get_label())?,
-            ],
-        };
-
-        Ok(AnnotatedPayloadField {
-            static_annotation: None,
-            dynamic_annotation: None,
-            signable_payload_field: SignablePayloadField::PreviewLayout {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: title_text.clone(),
-                    label: "Transfer Command".to_string(),
-                },
-                preview_layout: SignablePayloadFieldPreviewLayout {
-                    title: Some(SignablePayloadFieldTextV2 { text: title_text }),
-                    subtitle: Some(SignablePayloadFieldTextV2 {
-                        text: subtitle_text,
-                    }),
-                    condensed: Some(condensed),
-                    expanded: Some(expanded),
-                },
-            },
-        })
+        objects_to_send
+            .iter()
+            .enumerate()
+            .map(|(object_index, object_argument)| visualize_transfer_command(context, receiver, objects_sent_to_receiver.get(object_index).expect("Object to exist as objects_sent_to_receiver should be the same length as objects_to_send"), object_argument))
+            .collect::<_>()
     }
 
     fn get_config(&self) -> Option<&dyn SuiIntegrationConfig> {
@@ -119,58 +58,190 @@ impl CommandVisualizer for CoinTransferVisualizer {
     }
 }
 
-fn get_receiver(inputs: &[SuiCallArg], transfer_arg: &SuiArgument) -> Option<SuiAddress> {
-    let receiver_input = inputs.get(parse_numeric_argument(transfer_arg)? as usize)?;
+fn resolve_receiver(
+    inputs: &[SuiCallArg],
+    receiver_argument: &SuiArgument,
+) -> Result<SuiAddress, VisualSignError> {
+    let receiver_input = inputs
+        .get(parse_numeric_argument(receiver_argument)? as usize)
+        .ok_or(VisualSignError::MissingData(
+            "Receiver input not found".into(),
+        ))?;
 
-    receiver_input.pure()?.to_sui_address().ok()
+    match receiver_input
+        .pure()
+        .ok_or(VisualSignError::MissingData(
+            "Receiver input not found".into(),
+        ))?
+        .to_sui_address()
+    {
+        Ok(address) => Ok(address),
+        Err(e) => Err(VisualSignError::ConversionError(e.to_string())),
+    }
 }
 
-fn get_coin(
+fn resolve_object(
     commands: &[SuiCommand],
     inputs: &[SuiCallArg],
-    transfer_args: &[SuiArgument],
-) -> Option<CoinObject> {
-    let result_index = get_index(transfer_args, Some(0))? as usize;
-    let result_command = commands.get(result_index)?;
-
-    match result_command {
-        SuiCommand::SplitCoins(input_coin_arg, _) => match input_coin_arg {
-            SuiArgument::GasCoin => Some(CoinObject::Sui),
-            _ => {
-                let coin_arg = inputs.get(parse_numeric_argument(input_coin_arg)? as usize)?;
-                coin_arg.object().map(|id| CoinObject::Unknown(id.to_hex()))
+    object_argument: &SuiArgument,
+) -> Result<CoinObject, VisualSignError> {
+    match object_argument {
+        SuiArgument::GasCoin => Ok(CoinObject::Sui),
+        SuiArgument::Input(index) => {
+            match inputs
+                .get(*index as usize)
+                .ok_or(VisualSignError::MissingData("Input not found".into()))?
+            {
+                SuiCallArg::Object(e) => match e {
+                    SuiObjectArg::ImmOrOwnedObject { object_id, .. }
+                    | SuiObjectArg::SharedObject { object_id, .. }
+                    | SuiObjectArg::Receiving { object_id, .. } => {
+                        Ok(CoinObject::UnknownObject(object_id.to_hex()))
+                    }
+                },
+                SuiCallArg::Pure(_) => Err(TransactionParseError::UnsupportedVersion(
+                    "Parsing Sui native transfer input expected `Object`".into(),
+                )
+                .into()),
             }
-        },
-        _ => None,
+        }
+        SuiArgument::Result(command_index) | SuiArgument::NestedResult(command_index, _) => {
+            match commands
+                .get(*command_index as usize)
+                .ok_or(VisualSignError::MissingData(
+                    "Result command not found".into(),
+                ))? {
+                SuiCommand::SplitCoins(coin_type, _) | SuiCommand::MergeCoins(coin_type, _) => {
+                    resolve_object(commands, inputs, coin_type)
+                }
+                _ => Err(TransactionParseError::UnsupportedVersion(
+                    "Parsing Sui native transfer expected `SplitCoins` or `MergeCoins`".into(),
+                )
+                .into()),
+            }
+        }
     }
 }
 
-fn get_coin_amount(
+fn resolve_amount(
     commands: &[SuiCommand],
     inputs: &[SuiCallArg],
-    transfer_args: &[SuiArgument],
-) -> Option<u64> {
-    let result_index = get_index(transfer_args, Some(0))? as usize;
-    let result_command = commands.get(result_index)?;
+    object_argument: &SuiArgument,
+) -> Result<Option<u64>, VisualSignError> {
+    let SuiArgument::Result(_) = object_argument else {
+        return Ok(None);
+    };
 
-    match result_command {
-        SuiCommand::SplitCoins(_, input_coin_args) => {
-            let amount_arg = inputs.get(get_index(input_coin_args, Some(0))? as usize)?;
-            let Ok(MoveValue::U64(decoded_value)) = SuiJsonValue::to_move_value(
-                &amount_arg.pure()?.to_json_value(),
-                &MoveTypeLayout::U64,
-            ) else {
-                return None;
-            };
-            Some(decoded_value)
+    let command = commands
+        .get(parse_numeric_argument(object_argument)? as usize)
+        .ok_or(VisualSignError::MissingData("Command not found".into()))?;
+
+    match command {
+        SuiCommand::SplitCoins(_, input_coin_args) if input_coin_args.len() == 1 => {
+            let amount_arg = inputs
+                .get(parse_numeric_argument(&input_coin_args[0])? as usize)
+                .ok_or(VisualSignError::MissingData(
+                    "Amount argument not found".into(),
+                ))?;
+
+            Ok(Some(decode_number::<u64>(amount_arg)?))
         }
-        _ => None,
+        _ => Ok(None),
     }
+}
+
+fn visualize_transfer_command(
+    context: &VisualizerContext,
+    receiver: SuiAddress,
+    object_sent_to_receiver: &CoinObject,
+    object_argument: &SuiArgument,
+) -> Result<AnnotatedPayloadField, VisualSignError> {
+    let amount = resolve_amount(context.commands(), context.inputs(), object_argument)?;
+
+    let (amount_str, title_text, amount_field) = match amount {
+        Some(amount) => {
+            let title_text = match object_sent_to_receiver {
+                CoinObject::Sui => {
+                    format!("Transfer: {} MIST ({} SUI)", amount, amount / MIST_PER_SUI)
+                }
+                CoinObject::UnknownObject(id) => format!("Transfer: {} {}", amount, id),
+            };
+
+            (
+                format!("{} MIST", amount),
+                title_text,
+                create_amount_field(
+                    "Amount",
+                    &amount.to_string(),
+                    &object_sent_to_receiver.get_label(),
+                )?,
+            )
+        }
+        None => (
+            "N/A MIST".to_string(),
+            "Transfer Command".to_string(),
+            create_text_field("Amount", "N/A MIST")?,
+        ),
+    };
+
+    let subtitle_text = format!(
+        "From {} to {}",
+        truncate_address(&context.sender().to_string()),
+        truncate_address(&receiver.to_string())
+    );
+
+    let condensed = SignablePayloadFieldListLayout {
+        fields: vec![create_text_field(
+            "Summary",
+            &format!(
+                "Transfer {} from {} to {}",
+                amount_str,
+                truncate_address(&context.sender().to_string()),
+                truncate_address(&receiver.to_string())
+            ),
+        )?],
+    };
+
+    let expanded = SignablePayloadFieldListLayout {
+        fields: vec![
+            create_text_field("Asset Object ID", &object_sent_to_receiver.to_string())?,
+            create_address_field(
+                "From",
+                &context.sender().to_string(),
+                None,
+                None,
+                None,
+                None,
+            )?,
+            create_address_field("To", &receiver.to_string(), None, None, None, None)?,
+            amount_field,
+        ],
+    };
+
+    Ok(AnnotatedPayloadField {
+        static_annotation: None,
+        dynamic_annotation: None,
+        signable_payload_field: SignablePayloadField::PreviewLayout {
+            common: SignablePayloadFieldCommon {
+                fallback_text: title_text.clone(),
+                label: "Transfer Command".to_string(),
+            },
+            preview_layout: SignablePayloadFieldPreviewLayout {
+                title: Some(SignablePayloadFieldTextV2 { text: title_text }),
+                subtitle: Some(SignablePayloadFieldTextV2 {
+                    text: subtitle_text,
+                }),
+                condensed: Some(condensed),
+                expanded: Some(expanded),
+            },
+        },
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use crate::test_utils::{assert_has_field, payload_from_b64};
+    use visualsign::SignablePayloadField;
 
     #[test]
     fn test_transfer_commands() {
@@ -179,5 +250,70 @@ mod tests {
 
         let payload = payload_from_b64(test_data);
         assert_has_field(&payload, "Transfer Command");
+    }
+
+    #[test]
+    fn test_transfer_commands_single_transfer() {
+        // https://suivision.xyz/txblock/5S2D1qNww9QXDLgCzEr2UReFas7PGFRxdyjCJrYfjUxd
+        let test_data = "AQAAAAAAAwEAVCf5McvToD8qhL+h2/xg7M2l287m7+8IGIpLQ/6cxBYgqxwkAAAAACDT4HJIX5m7UeyrSJQAHz+p5ZniCwngoTE8GX8E6Vu8HgAI5AYAAAAAAAAAIPEcpBpzFvUgalVqqqnn/Y6mrsto2zVvr1FpVbQvZUfiAgIBAAABAQEAAQECAAABAgCCWsIch38qw9SMwyrvCbO4KfA+TwtC/MZ6NYYnVJq0nAFzUrDKacSVDVVrzYCDnNWtV6Of8JseRtaWdzmHWx/eACCrHCQAAAAAIHZmDcOF5ICx52aJBITeT+GXuGbiP1LOdMK9ewrTvoU3glrCHId/KsPUjMMq7wmzuCnwPk8LQvzGejWGJ1SatJz0AQAAAAAAAOi2MgAAAAAAAAFhALPjB1b3CwKNTPZTHUWogbc9Wz5fgXzVTh1I0dhWVAPGoWxP8HzKFAKr7pZSF/eF1ls/V+m8by7W62K4GbDHLAbJHKJuw6P/F6xoTvR/p7PpYvz2kjD0Z+S3PwARYTCtiw==";
+
+        let payload = payload_from_b64(test_data);
+
+        let transfer_command: Option<&SignablePayloadField> = payload
+            .fields
+            .iter()
+            .find(|f| f.label() == "Transfer Command");
+
+        match transfer_command {
+            Some(SignablePayloadField::PreviewLayout { preview_layout, .. }) => {
+                assert_eq!(
+                    preview_layout.expanded.clone().unwrap().fields[0]
+                        .signable_payload_field
+                        .fallback_text(),
+                    "Object ID: 5427f931cbd3a03f2a84bfa1dbfc60eccda5dbcee6efef08188a4b43fe9cc416"
+                );
+
+                assert_eq!(
+                    preview_layout.expanded.clone().unwrap().fields[1]
+                        .signable_payload_field
+                        .fallback_text(),
+                    "0x825ac21c877f2ac3d48cc32aef09b3b829f03e4f0b42fcc67a358627549ab49c"
+                );
+
+                assert_eq!(
+                    preview_layout.expanded.clone().unwrap().fields[2]
+                        .signable_payload_field
+                        .fallback_text(),
+                    "0xf11ca41a7316f5206a556aaaa9e7fd8ea6aecb68db356faf516955b42f6547e2"
+                );
+
+                assert_eq!(
+                    preview_layout.expanded.clone().unwrap().fields[3]
+                        .signable_payload_field
+                        .fallback_text(),
+                    "1764 Unknown"
+                );
+            }
+            _ => panic!("Expected a PreviewLayout for Transfer Command"),
+        }
+    }
+
+    #[test]
+    fn test_transfer_commands_multiple_transfers() {
+        // https://suivision.xyz/txblock/CE46w3GYgWnZU8HF4P149m6ANGebD22xuNqA64v7JykJ
+        let test_data = "AQAAAAAABwEA6Y5kz7fNxZOj6yZRvcQBtXykVIWvnEy6HQ4kpt8rkstEKr0jAAAAACDGqhNnbuG6uY3kzKZ3wji82QjhFjSBp/RhJBmLCmrq9wEANaDAaF3wfproXnOA3DQll20l0sKpI5/pwi7PgTQo2O1EKr0jAAAAACCV7ngIWPDBl8jcZ4ROZMvFsFd+l/bDIgRa5MnJ1U+O8QEAQZqheNp0/QSrywtlsaKcaLpNlWhnDe/rJLnDSL7EdwlJKr0jAAAAACCiuEQMpyzDWUeQLji6IZh2ZVQsJ3bfV9ohbFikWWK/SgEA/yIhccvTw3DNOX0eBnjuJoOlj0wVJnJUPrybRXWIqQNJKr0jAAAAACBS2RDiolpleMxI7YixmXfd0yg8qyjxDdU9AEmpbbEldQAINhwBAwAAAAAAIFyZUAMWUtWCEIOgr0t+NfSLnuhKon4e/foY3MuJlRuaACD8MuPzTp6pDb/8zoOsfdjhmlRpIVq8iqVCQI3qEAcc9AUDAQEAAQEAAAMBAwABAQIAAgABAQQAAQECAgABBQABAwEDAAEBAAABBgBcmVADFlLVghCDoK9LfjX0i57oSqJ+Hv36GNzLiZUbmgODyYnEoQPANAx0dAuxgpZm+6xO4Pe04Z0g0nm0ZewBsEkqvSMAAAAAIHzjp+LIH7ug3H6/wkA/rj8JYefB3x+6gBLpcCd8eSH5YU0cMRSH6QQ2aSXkllPWCW1/QjVC4OwdAmbY+9A8IXBJKr0jAAAAACAGZnIszNBh5u8vrd/vbQoGHT5HS/VtJSZSQjrBwjTvRR3Kxvc/VyIEFiN2ja7agdhYhyERH/driCiKwDVDXkX/SSq9IwAAAAAg4xzfi5cOl6aSFOyMzS9/o9mQYsVgLpDDjT8YYmoILEtcmVADFlLVghCDoK9LfjX0i57oSqJ+Hv36GNzLiZUbmiECAAAAAAAA0KEQAAAAAAAAAWEAzzUYs9lUE87bOysJcBeWH69UoPgvOH5rHStsap6apWhkAMoUnJuM+XoCT3rDH+BUdxw5Skoqdk1VEYCm13k8Bm+W3QJTREXUZtaOs+eopm2qifmjn1oezf2q05W79+rJ";
+        let payload = payload_from_b64(test_data);
+
+        let transfer_commands: Vec<&SignablePayloadField> = payload
+            .fields
+            .iter()
+            .filter(|f| f.label() == "Transfer Command")
+            .collect();
+
+        assert_eq!(
+            transfer_commands.len(),
+            4,
+            "Should have four Transfer Command fields"
+        );
     }
 }

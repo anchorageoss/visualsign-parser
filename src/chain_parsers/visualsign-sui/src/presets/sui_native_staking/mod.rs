@@ -3,15 +3,12 @@ mod config;
 use config::{NATIVE_STAKING_CONFIG, SuiSystemFunctions};
 
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
-use crate::utils::{get_index, truncate_address};
+use crate::utils::{decode_number, get_index, parse_numeric_argument, truncate_address};
 
-use move_core_types::runtime_value::MoveValue;
-use sui_json::{MoveTypeLayout, SuiJsonValue};
 use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
 use sui_types::base_types::SuiAddress;
-
 use visualsign::errors::VisualSignError;
-use visualsign::field_builders::create_address_field;
+use visualsign::field_builders::{create_address_field, create_text_field};
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
@@ -24,11 +21,11 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
     fn visualize_tx_commands(
         &self,
         context: &VisualizerContext,
-    ) -> Result<AnnotatedPayloadField, VisualSignError> {
+    ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
         let Some(SuiCommand::MoveCall(pwc)) = context.commands().get(context.command_index())
         else {
             return Err(VisualSignError::MissingData(
-                "Expected to get MoveCall for staking parsing".into(),
+                "Expected a `MoveCall` for staking parsing".into(),
             ));
         };
 
@@ -45,7 +42,17 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
                     get_stake_receiver(context.inputs(), &pwc.arguments).unwrap_or_default();
 
                 {
-                    let title_text = format!("Stake: {} MIST", amount);
+                    let (title_text, amount_field) = match amount {
+                        Some(amount) => (
+                            format!("Stake: {} MIST", amount),
+                            create_amount_field("Amount", &amount.to_string(), "MIST")?,
+                        ),
+                        None => (
+                            "Stake Command".to_string(),
+                            create_text_field("Amount", "N/A MIST")?,
+                        ),
+                    };
+
                     let subtitle_text = format!(
                         "From {} to validator {}",
                         truncate_address(&context.sender().to_string()),
@@ -53,7 +60,7 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
                     );
 
                     let condensed = SignablePayloadFieldListLayout {
-                        fields: vec![create_amount_field("Amount", &amount.to_string(), "MIST")?],
+                        fields: vec![amount_field.clone()],
                     };
 
                     let expanded = SignablePayloadFieldListLayout {
@@ -74,11 +81,11 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
                                 None,
                                 None,
                             )?,
-                            create_amount_field("Amount", &amount.to_string(), "MIST")?,
+                            amount_field,
                         ],
                     };
 
-                    Ok(AnnotatedPayloadField {
+                    Ok(vec![AnnotatedPayloadField {
                         static_annotation: None,
                         dynamic_annotation: None,
                         signable_payload_field: SignablePayloadField::PreviewLayout {
@@ -95,7 +102,7 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
                                 expanded: Some(expanded),
                             },
                         },
-                    })
+                    }])
                 }
             }
             SuiSystemFunctions::WithdrawStake => {
@@ -125,7 +132,7 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
                     )?],
                 };
 
-                Ok(AnnotatedPayloadField {
+                Ok(vec![AnnotatedPayloadField {
                     static_annotation: None,
                     dynamic_annotation: None,
                     signable_payload_field: SignablePayloadField::PreviewLayout {
@@ -142,7 +149,7 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
                             expanded: Some(expanded),
                         },
                     },
-                })
+                }])
             }
         }
     }
@@ -156,31 +163,46 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
     }
 }
 
-fn get_stake_receiver(inputs: &[SuiCallArg], args: &[SuiArgument]) -> Option<SuiAddress> {
-    let receiver_input = inputs.get(get_index(args, Some(args.len() - 1))? as usize)?;
+fn get_stake_receiver(
+    inputs: &[SuiCallArg],
+    args: &[SuiArgument],
+) -> Result<SuiAddress, VisualSignError> {
+    let receiver_input = inputs
+        .get(get_index(args, Some(args.len() - 1))? as usize)
+        .ok_or(VisualSignError::MissingData("Command not found".into()))?;
 
-    receiver_input.pure()?.to_sui_address().ok()
+    match receiver_input
+        .pure()
+        .ok_or(VisualSignError::MissingData(
+            "Receiver input not found".into(),
+        ))?
+        .to_sui_address()
+    {
+        Ok(address) => Ok(address),
+        Err(e) => Err(VisualSignError::ConversionError(e.to_string())),
+    }
 }
 
 fn get_stake_amount(
     commands: &[SuiCommand],
     inputs: &[SuiCallArg],
     args: &[SuiArgument],
-) -> Option<u64> {
-    let result_command = commands.get(get_index(args, Some(1))? as usize)?;
+) -> Result<Option<u64>, VisualSignError> {
+    let command = commands
+        .get(get_index(args, Some(1))? as usize)
+        .ok_or(VisualSignError::MissingData("Command not found".into()))?;
 
-    match result_command {
-        SuiCommand::SplitCoins(_, input_coin_args) => {
-            let amount_arg = inputs.get(get_index(input_coin_args, Some(0))? as usize)?;
-            let Ok(MoveValue::U64(decoded_value)) = SuiJsonValue::to_move_value(
-                &amount_arg.pure()?.to_json_value(),
-                &MoveTypeLayout::U64,
-            ) else {
-                return None;
-            };
-            Some(decoded_value)
+    match command {
+        SuiCommand::SplitCoins(_, input_coin_args) if input_coin_args.len() == 1 => {
+            let amount_arg = inputs
+                .get(parse_numeric_argument(&input_coin_args[0])? as usize)
+                .ok_or(VisualSignError::MissingData(
+                    "Amount argument not found".into(),
+                ))?;
+
+            Ok(Some(decode_number::<u64>(amount_arg)?))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
