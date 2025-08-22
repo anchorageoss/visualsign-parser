@@ -1,4 +1,4 @@
-# visualsign-parser
+# VisualSign Parser
 
 This repo contains an enclave application to parse unsigned transactions and return VisualSign output.
 
