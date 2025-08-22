@@ -1,19 +1,17 @@
 mod config;
 
-use config::{CETUS_CONFIG, PoolScriptV2Functions, SwapA2BIndexes, SwapB2AIndexes};
+use config::{CETUS_CONFIG, Config, PoolScriptV2Functions, SwapA2BIndexes, SwapB2AIndexes};
 
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
 use crate::utils::{SuiCoin, get_tx_type_arg, truncate_address};
 
 use sui_json_rpc_types::{SuiCommand, SuiProgrammableMoveCall};
 
-use crate::presets::cetus::config::Config;
-use visualsign::errors::VisualSignError;
-use visualsign::field_builders::create_address_field;
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
-    field_builders::{create_amount_field, create_text_field},
+    errors::VisualSignError,
+    field_builders::{create_address_field, create_amount_field, create_text_field},
 };
 
 pub struct CetusVisualizer;

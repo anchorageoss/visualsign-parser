@@ -1,19 +1,18 @@
 mod config;
 
-use config::{NATIVE_STAKING_CONFIG, SuiSystemFunctions};
+use config::{Config, NATIVE_STAKING_CONFIG, SuiSystemFunctions};
 
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
 use crate::utils::{decode_number, get_index, parse_numeric_argument, truncate_address};
 
-use crate::presets::sui_native_staking::config::Config;
 use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
 use sui_types::base_types::SuiAddress;
-use visualsign::errors::VisualSignError;
-use visualsign::field_builders::{create_address_field, create_text_field};
+
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
-    field_builders::create_amount_field,
+    errors::VisualSignError,
+    field_builders::{create_address_field, create_amount_field, create_text_field},
 };
 
 pub struct SuiNativeStakingVisualizer;

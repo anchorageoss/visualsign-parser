@@ -1,19 +1,20 @@
-use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
 mod config;
 
-use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
-use crate::presets::suilend::config::{Config, SUILEND_CONFIG, SuiLendMarketFunction};
-use visualsign::errors::VisualSignError;
-use visualsign::field_builders::create_address_field;
-use visualsign::{
-    AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
-    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
-    field_builders::{create_amount_field, create_text_field},
-};
+use config::{Config, SUILEND_CONFIG, SuiLendMarketFunction};
 
+use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
 use crate::utils::{
     SuiCoin, SuiPackage, decode_number, get_index, get_nested_result_value, get_tx_type_arg,
     truncate_address,
+};
+
+use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
+
+use visualsign::{
+    AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
+    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
+    errors::VisualSignError,
+    field_builders::{create_address_field, create_amount_field, create_text_field},
 };
 
 pub struct SuilendVisualizer;
