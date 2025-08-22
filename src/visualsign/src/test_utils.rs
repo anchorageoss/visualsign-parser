@@ -50,7 +50,14 @@ fn check_signable_payload_field(field: &SignablePayloadField, label: &str) -> (b
         SignablePayloadField::AmountV2 { common, amount_v2 } => {
             (common.label == label, amount_v2.amount.to_string())
         }
-        SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+        SignablePayloadField::PreviewLayout {
+            preview_layout,
+            common,
+        } => {
+            if common.label == label {
+                return (true, common.fallback_text.to_string());
+            }
+
             let condensed_check: (bool, String) = if let Some(condensed) =
                 preview_layout.condensed.as_ref()
             {
@@ -83,12 +90,21 @@ fn check_signable_payload_field(field: &SignablePayloadField, label: &str) -> (b
 
             expanded_check
         }
-        SignablePayloadField::ListLayout { list_layout, .. } => list_layout
-            .fields
-            .iter()
-            .map(|field| check_signable_payload_field(&field.signable_payload_field, label))
-            .find(|x| x.0)
-            .unwrap_or((false, "".to_string())),
+        SignablePayloadField::ListLayout {
+            list_layout,
+            common,
+        } => {
+            if common.label == label {
+                return (true, common.fallback_text.to_string());
+            }
+
+            list_layout
+                .fields
+                .iter()
+                .map(|field| check_signable_payload_field(&field.signable_payload_field, label))
+                .find(|x| x.0)
+                .unwrap_or((false, "".to_string()))
+        }
         _ => (false, "".to_string()),
     }
 }
