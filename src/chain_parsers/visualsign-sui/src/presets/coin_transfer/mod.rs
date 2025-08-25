@@ -114,6 +114,9 @@ fn resolve_object(
                 SuiCommand::SplitCoins(coin_type, _) | SuiCommand::MergeCoins(coin_type, _) => {
                     resolve_object(commands, inputs, coin_type)
                 }
+                // TODO: extended chain_config to parse return results from transaction like this:
+                // https://suivision.xyz/txblock/5QMTpn34NuBvMMAU1LeKhWKSNTMoJEriEier3DA8tjNU
+                SuiCommand::MoveCall(_) => Ok(CoinObject::UnknownObject("Unknown".into())),
                 _ => Err(TransactionParseError::UnsupportedVersion(
                     "Parsing Sui native transfer expected `SplitCoins` or `MergeCoins`".into(),
                 )
