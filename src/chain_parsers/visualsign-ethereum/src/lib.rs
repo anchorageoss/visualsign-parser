@@ -287,16 +287,6 @@ fn convert_to_visual_sign_payload(
         fields.push(create_priority_fee_field(priority_fee));
     }
 
-    fields.push(SignablePayloadField::TextV2 {
-        common: SignablePayloadFieldCommon {
-            fallback_text: format!("{}", transaction.nonce()),
-            label: "Nonce".to_string(),
-        },
-        text_v2: SignablePayloadFieldTextV2 {
-            text: format!("{}", transaction.nonce()),
-        },
-    });
-
     // Add contract call data if present
     let input = transaction.input();
     if !input.is_empty() {
@@ -431,15 +421,6 @@ mod tests {
                     },
                     text_v2: SignablePayloadFieldTextV2 {
                         text: "20 gwei".to_string(),
-                    },
-                },
-                SignablePayloadField::TextV2 {
-                    common: SignablePayloadFieldCommon {
-                        fallback_text: "42".to_string(),
-                        label: "Nonce".to_string(),
-                    },
-                    text_v2: SignablePayloadFieldTextV2 {
-                        text: "42".to_string(),
                     },
                 },
             ],

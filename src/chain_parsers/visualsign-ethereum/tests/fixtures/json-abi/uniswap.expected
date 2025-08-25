@@ -38,15 +38,6 @@ SignablePayload {
         },
         TextV2 {
             common: SignablePayloadFieldCommon {
-                fallback_text: "3051",
-                label: "Nonce",
-            },
-            text_v2: SignablePayloadFieldTextV2 {
-                text: "3051",
-            },
-        },
-        TextV2 {
-            common: SignablePayloadFieldCommon {
                 fallback_text: "mint",
                 label: "Function",
             },

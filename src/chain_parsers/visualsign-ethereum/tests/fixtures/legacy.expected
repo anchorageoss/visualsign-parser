@@ -47,15 +47,6 @@ SignablePayload {
         },
         TextV2 {
             common: SignablePayloadFieldCommon {
-                fallback_text: "0",
-                label: "Nonce",
-            },
-            text_v2: SignablePayloadFieldTextV2 {
-                text: "0",
-            },
-        },
-        TextV2 {
-            common: SignablePayloadFieldCommon {
                 fallback_text: "0x454e354d5154544630",
                 label: "Input Data",
             },
