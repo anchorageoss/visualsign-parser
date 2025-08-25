@@ -14,7 +14,10 @@ impl SolanaIntegrationConfig for JupiterConfig {
             let mut programs = HashMap::new();
             let mut jupiter_instructions = HashMap::new();
             jupiter_instructions.insert("*", vec!["*"]);
-            programs.insert("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4", jupiter_instructions);
+            programs.insert(
+                "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+                jupiter_instructions,
+            );
             SolanaIntegrationConfigData { programs }
         })
     }

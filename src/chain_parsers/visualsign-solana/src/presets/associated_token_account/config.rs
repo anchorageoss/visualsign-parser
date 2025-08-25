@@ -13,7 +13,10 @@ impl SolanaIntegrationConfig for AssociatedTokenAccountConfig {
             let mut programs = std::collections::HashMap::new();
             let mut ata_instructions = std::collections::HashMap::new();
             ata_instructions.insert("*", vec!["*"]);
-            programs.insert("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", ata_instructions);
+            programs.insert(
+                "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+                ata_instructions,
+            );
             SolanaIntegrationConfigData { programs }
         })
     }

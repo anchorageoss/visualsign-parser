@@ -2,12 +2,17 @@
 
 mod config;
 
-use crate::core::{InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind};
-use visualsign::{AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2};
-use visualsign::errors::VisualSignError;
-use visualsign::field_builders::{create_text_field};
-use spl_associated_token_account::instruction::AssociatedTokenAccountInstruction;
+use crate::core::{
+    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+};
 use config::AssociatedTokenAccountConfig;
+use spl_associated_token_account::instruction::AssociatedTokenAccountInstruction;
+use visualsign::errors::VisualSignError;
+use visualsign::field_builders::create_text_field;
+use visualsign::{
+    AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
+    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
+};
 
 // Create a static instance that we can reference
 static ATA_CONFIG: AssociatedTokenAccountConfig = AssociatedTokenAccountConfig;
@@ -19,14 +24,15 @@ impl InstructionVisualizer for AssociatedTokenAccountVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context.current_instruction()
+        let instruction = context
+            .current_instruction()
             .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
 
         let ata_instruction = parse_ata_instruction(&instruction.data)
             .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
         let instruction_text = format_ata_instruction(&ata_instruction);
-        
+
         let condensed = SignablePayloadFieldListLayout {
             fields: vec![AnnotatedPayloadField {
                 static_annotation: None,

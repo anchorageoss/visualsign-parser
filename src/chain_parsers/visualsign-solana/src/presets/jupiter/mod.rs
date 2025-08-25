@@ -2,12 +2,19 @@
 
 mod config;
 
-use crate::core::{InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind};
+use crate::core::{
+    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+};
 use crate::utils::{SwapTokenInfo, get_token_info};
-use visualsign::{AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2};
-use visualsign::errors::VisualSignError;
-use visualsign::field_builders::{create_text_field, create_amount_field, create_number_field, create_raw_data_field};
 use config::JupiterConfig;
+use visualsign::errors::VisualSignError;
+use visualsign::field_builders::{
+    create_amount_field, create_number_field, create_raw_data_field, create_text_field,
+};
+use visualsign::{
+    AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
+    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
+};
 
 #[derive(Debug, Clone)]
 pub enum JupiterSwapInstruction {
@@ -39,7 +46,8 @@ impl InstructionVisualizer for JupiterVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context.current_instruction()
+        let instruction = context
+            .current_instruction()
             .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
 
         // Create account list from instruction accounts
@@ -49,11 +57,12 @@ impl InstructionVisualizer for JupiterVisualizer {
             .map(|account| account.pubkey.to_string())
             .collect();
 
-        let jupiter_instruction = parse_jupiter_swap_instruction(&instruction.data, &instruction_accounts)
-            .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
+        let jupiter_instruction =
+            parse_jupiter_swap_instruction(&instruction.data, &instruction_accounts)
+                .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
         let instruction_text = format_jupiter_swap_instruction(&jupiter_instruction);
-        
+
         let condensed = SignablePayloadFieldListLayout {
             fields: vec![AnnotatedPayloadField {
                 static_annotation: None,
@@ -163,12 +172,24 @@ fn parse_jupiter_route_instruction(
 
     // Parse amounts from instruction data
     let in_amount = u64::from_le_bytes([
-        data[data.len() - 16], data[data.len() - 15], data[data.len() - 14], data[data.len() - 13],
-        data[data.len() - 12], data[data.len() - 11], data[data.len() - 10], data[data.len() - 9],
+        data[data.len() - 16],
+        data[data.len() - 15],
+        data[data.len() - 14],
+        data[data.len() - 13],
+        data[data.len() - 12],
+        data[data.len() - 11],
+        data[data.len() - 10],
+        data[data.len() - 9],
     ]);
     let quoted_out_amount = u64::from_le_bytes([
-        data[data.len() - 8], data[data.len() - 7], data[data.len() - 6], data[data.len() - 5],
-        data[data.len() - 4], data[data.len() - 3], data[data.len() - 2], data[data.len() - 1],
+        data[data.len() - 8],
+        data[data.len() - 7],
+        data[data.len() - 6],
+        data[data.len() - 5],
+        data[data.len() - 4],
+        data[data.len() - 3],
+        data[data.len() - 2],
+        data[data.len() - 1],
     ]);
 
     // For Jupiter swaps, we need to infer token accounts from the instruction accounts
@@ -200,12 +221,24 @@ fn parse_jupiter_exact_out_route_instruction(
     }
 
     let in_amount = u64::from_le_bytes([
-        data[data.len() - 16], data[data.len() - 15], data[data.len() - 14], data[data.len() - 13],
-        data[data.len() - 12], data[data.len() - 11], data[data.len() - 10], data[data.len() - 9],
+        data[data.len() - 16],
+        data[data.len() - 15],
+        data[data.len() - 14],
+        data[data.len() - 13],
+        data[data.len() - 12],
+        data[data.len() - 11],
+        data[data.len() - 10],
+        data[data.len() - 9],
     ]);
     let out_amount = u64::from_le_bytes([
-        data[data.len() - 8], data[data.len() - 7], data[data.len() - 6], data[data.len() - 5],
-        data[data.len() - 4], data[data.len() - 3], data[data.len() - 2], data[data.len() - 1],
+        data[data.len() - 8],
+        data[data.len() - 7],
+        data[data.len() - 6],
+        data[data.len() - 5],
+        data[data.len() - 4],
+        data[data.len() - 3],
+        data[data.len() - 2],
+        data[data.len() - 1],
     ]);
 
     let in_token = if accounts.len() > 0 {
@@ -236,12 +269,24 @@ fn parse_jupiter_shared_accounts_route_instruction(
     }
 
     let in_amount = u64::from_le_bytes([
-        data[data.len() - 16], data[data.len() - 15], data[data.len() - 14], data[data.len() - 13],
-        data[data.len() - 12], data[data.len() - 11], data[data.len() - 10], data[data.len() - 9],
+        data[data.len() - 16],
+        data[data.len() - 15],
+        data[data.len() - 14],
+        data[data.len() - 13],
+        data[data.len() - 12],
+        data[data.len() - 11],
+        data[data.len() - 10],
+        data[data.len() - 9],
     ]);
     let quoted_out_amount = u64::from_le_bytes([
-        data[data.len() - 8], data[data.len() - 7], data[data.len() - 6], data[data.len() - 5],
-        data[data.len() - 4], data[data.len() - 3], data[data.len() - 2], data[data.len() - 1],
+        data[data.len() - 8],
+        data[data.len() - 7],
+        data[data.len() - 6],
+        data[data.len() - 5],
+        data[data.len() - 4],
+        data[data.len() - 3],
+        data[data.len() - 2],
+        data[data.len() - 1],
     ]);
 
     let in_token = if accounts.len() > 0 {
@@ -265,33 +310,81 @@ fn parse_jupiter_shared_accounts_route_instruction(
 
 fn format_jupiter_swap_instruction(instruction: &JupiterSwapInstruction) -> String {
     match instruction {
-        JupiterSwapInstruction::Route { in_token, out_token, slippage_bps } => {
+        JupiterSwapInstruction::Route {
+            in_token,
+            out_token,
+            slippage_bps,
+        } => {
             format!(
                 "Jupiter Swap: {} {} → {} {} (slippage: {}bps)",
-                in_token.as_ref().map(|t| t.amount.to_string()).unwrap_or_else(|| "Unknown".to_string()),
-                in_token.as_ref().map(|t| t.symbol.clone()).unwrap_or_else(|| "Unknown".to_string()),
-                out_token.as_ref().map(|t| t.amount.to_string()).unwrap_or_else(|| "Unknown".to_string()),
-                out_token.as_ref().map(|t| t.symbol.clone()).unwrap_or_else(|| "Unknown".to_string()),
+                in_token
+                    .as_ref()
+                    .map(|t| t.amount.to_string())
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                in_token
+                    .as_ref()
+                    .map(|t| t.symbol.clone())
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                out_token
+                    .as_ref()
+                    .map(|t| t.amount.to_string())
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                out_token
+                    .as_ref()
+                    .map(|t| t.symbol.clone())
+                    .unwrap_or_else(|| "Unknown".to_string()),
                 slippage_bps
             )
         }
-        JupiterSwapInstruction::ExactOutRoute { in_token, out_token, slippage_bps } => {
+        JupiterSwapInstruction::ExactOutRoute {
+            in_token,
+            out_token,
+            slippage_bps,
+        } => {
             format!(
                 "Jupiter Exact Out Route: {} {} → {} {} (slippage: {}bps)",
-                in_token.as_ref().map(|t| t.amount.to_string()).unwrap_or_else(|| "Unknown".to_string()),
-                in_token.as_ref().map(|t| t.symbol.clone()).unwrap_or_else(|| "Unknown".to_string()),
-                out_token.as_ref().map(|t| t.amount.to_string()).unwrap_or_else(|| "Unknown".to_string()),
-                out_token.as_ref().map(|t| t.symbol.clone()).unwrap_or_else(|| "Unknown".to_string()),
+                in_token
+                    .as_ref()
+                    .map(|t| t.amount.to_string())
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                in_token
+                    .as_ref()
+                    .map(|t| t.symbol.clone())
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                out_token
+                    .as_ref()
+                    .map(|t| t.amount.to_string())
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                out_token
+                    .as_ref()
+                    .map(|t| t.symbol.clone())
+                    .unwrap_or_else(|| "Unknown".to_string()),
                 slippage_bps
             )
         }
-        JupiterSwapInstruction::SharedAccountsRoute { in_token, out_token, slippage_bps } => {
+        JupiterSwapInstruction::SharedAccountsRoute {
+            in_token,
+            out_token,
+            slippage_bps,
+        } => {
             format!(
                 "Jupiter Shared Accounts Route: {} {} → {} {} (slippage: {}bps)",
-                in_token.as_ref().map(|t| t.amount.to_string()).unwrap_or_else(|| "Unknown".to_string()),
-                in_token.as_ref().map(|t| t.symbol.clone()).unwrap_or_else(|| "Unknown".to_string()),
-                out_token.as_ref().map(|t| t.amount.to_string()).unwrap_or_else(|| "Unknown".to_string()),
-                out_token.as_ref().map(|t| t.symbol.clone()).unwrap_or_else(|| "Unknown".to_string()),
+                in_token
+                    .as_ref()
+                    .map(|t| t.amount.to_string())
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                in_token
+                    .as_ref()
+                    .map(|t| t.symbol.clone())
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                out_token
+                    .as_ref()
+                    .map(|t| t.amount.to_string())
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                out_token
+                    .as_ref()
+                    .map(|t| t.symbol.clone())
+                    .unwrap_or_else(|| "Unknown".to_string()),
                 slippage_bps
             )
         }
@@ -308,30 +401,52 @@ fn create_jupiter_swap_expanded_fields(
 
     // Add specific fields based on instruction type
     match instruction {
-        JupiterSwapInstruction::Route { in_token, out_token, slippage_bps } |
-        JupiterSwapInstruction::ExactOutRoute { in_token, out_token, slippage_bps } |
-        JupiterSwapInstruction::SharedAccountsRoute { in_token, out_token, slippage_bps } => {
+        JupiterSwapInstruction::Route {
+            in_token,
+            out_token,
+            slippage_bps,
+        }
+        | JupiterSwapInstruction::ExactOutRoute {
+            in_token,
+            out_token,
+            slippage_bps,
+        }
+        | JupiterSwapInstruction::SharedAccountsRoute {
+            in_token,
+            out_token,
+            slippage_bps,
+        } => {
             if let Some(token) = in_token {
                 fields.push(create_text_field("Input Token", &token.symbol).unwrap());
-                fields.push(create_amount_field("Input Amount", &token.amount.to_string(), &token.symbol).unwrap());
+                fields.push(
+                    create_amount_field("Input Amount", &token.amount.to_string(), &token.symbol)
+                        .unwrap(),
+                );
                 fields.push(create_text_field("Input Token Name", &token.name).unwrap());
                 fields.push(create_text_field("Input Token Address", &token.address).unwrap());
             }
-            
+
             if let Some(token) = out_token {
                 fields.push(create_text_field("Output Token", &token.symbol).unwrap());
-                fields.push(create_amount_field("Quoted Output Amount", &token.amount.to_string(), &token.symbol).unwrap());
+                fields.push(
+                    create_amount_field(
+                        "Quoted Output Amount",
+                        &token.amount.to_string(),
+                        &token.symbol,
+                    )
+                    .unwrap(),
+                );
                 fields.push(create_text_field("Output Token Name", &token.name).unwrap());
                 fields.push(create_text_field("Output Token Address", &token.address).unwrap());
             }
-            
+
             fields.push(create_number_field("Slippage", &slippage_bps.to_string(), "bps").unwrap());
         }
         JupiterSwapInstruction::Unknown => {
             fields.push(create_text_field("Status", "Unknown Jupiter instruction type").unwrap());
         }
     }
-    
+
     let hex_fallback_string = hex::encode(data).to_string();
     let raw_data_field = create_raw_data_field(data, Some(hex_fallback_string)).unwrap();
     fields.push(raw_data_field);

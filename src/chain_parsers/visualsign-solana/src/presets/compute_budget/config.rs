@@ -13,7 +13,10 @@ impl SolanaIntegrationConfig for ComputeBudgetConfig {
             let mut programs = std::collections::HashMap::new();
             let mut compute_budget_instructions = std::collections::HashMap::new();
             compute_budget_instructions.insert("*", vec!["*"]);
-            programs.insert("ComputeBudget111111111111111111111111111111", compute_budget_instructions);
+            programs.insert(
+                "ComputeBudget111111111111111111111111111111",
+                compute_budget_instructions,
+            );
             SolanaIntegrationConfigData { programs }
         })
     }

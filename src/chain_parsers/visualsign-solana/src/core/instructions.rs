@@ -1,7 +1,7 @@
 use crate::core::{InstructionVisualizer, VisualizerContext, visualize_with_any};
 use solana_parser::solana::structs::SolanaAccount;
-use solana_sdk::transaction::Transaction as SolanaTransaction;
 use solana_sdk::instruction::Instruction;
+use solana_sdk::transaction::Transaction as SolanaTransaction;
 
 use visualsign::AnnotatedPayloadField;
 use visualsign::errors::VisualSignError;
@@ -29,7 +29,12 @@ pub fn decode_instructions(
             accounts: ci
                 .accounts
                 .iter()
-                .map(|&i| solana_sdk::instruction::AccountMeta::new_readonly(account_keys[i as usize], false))
+                .map(|&i| {
+                    solana_sdk::instruction::AccountMeta::new_readonly(
+                        account_keys[i as usize],
+                        false,
+                    )
+                })
                 .collect(),
             data: ci.data.clone(),
         })

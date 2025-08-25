@@ -2,13 +2,18 @@
 
 mod config;
 
-use crate::core::{InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind};
-use visualsign::{AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2};
-use visualsign::errors::VisualSignError;
-use visualsign::field_builders::{create_text_field, create_number_field, create_raw_data_field};
-use solana_sdk::compute_budget::ComputeBudgetInstruction;
+use crate::core::{
+    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+};
 use borsh::de::BorshDeserialize;
 use config::ComputeBudgetConfig;
+use solana_sdk::compute_budget::ComputeBudgetInstruction;
+use visualsign::errors::VisualSignError;
+use visualsign::field_builders::{create_number_field, create_raw_data_field, create_text_field};
+use visualsign::{
+    AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
+    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
+};
 
 // Create a static instance that we can reference
 static COMPUTE_BUDGET_CONFIG: ComputeBudgetConfig = ComputeBudgetConfig;
@@ -20,14 +25,20 @@ impl InstructionVisualizer for ComputeBudgetVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context.current_instruction()
+        let instruction = context
+            .current_instruction()
             .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
 
-        let compute_budget_instruction = ComputeBudgetInstruction::try_from_slice(&instruction.data)
-            .map_err(|e| VisualSignError::DecodeError(format!("Failed to parse compute budget instruction: {}", e)))?;
+        let compute_budget_instruction =
+            ComputeBudgetInstruction::try_from_slice(&instruction.data).map_err(|e| {
+                VisualSignError::DecodeError(format!(
+                    "Failed to parse compute budget instruction: {}",
+                    e
+                ))
+            })?;
 
         let instruction_text = format_compute_budget_instruction(&compute_budget_instruction);
-        
+
         let condensed = SignablePayloadFieldListLayout {
             fields: vec![AnnotatedPayloadField {
                 static_annotation: None,
@@ -100,7 +111,10 @@ fn format_compute_budget_instruction(instruction: &ComputeBudgetInstruction) -> 
             format!("Set Compute Unit Limit: {} units", units)
         }
         ComputeBudgetInstruction::SetComputeUnitPrice(micro_lamports) => {
-            format!("Set Compute Unit Price: {} micro-lamports per compute unit", micro_lamports)
+            format!(
+                "Set Compute Unit Price: {} micro-lamports per compute unit",
+                micro_lamports
+            )
         }
         ComputeBudgetInstruction::SetLoadedAccountsDataSizeLimit(bytes) => {
             format!("Set Loaded Accounts Data Size Limit: {} bytes", bytes)
@@ -119,9 +133,8 @@ fn create_compute_budget_expanded_fields(
     // Add specific fields based on instruction type
     match instruction {
         ComputeBudgetInstruction::RequestHeapFrame(bytes) => {
-            fields.push(
-                create_number_field("Heap Frame Size", &bytes.to_string(), "bytes").unwrap(),
-            );
+            fields
+                .push(create_number_field("Heap Frame Size", &bytes.to_string(), "bytes").unwrap());
         }
         ComputeBudgetInstruction::SetComputeUnitLimit(units) => {
             fields.push(
@@ -139,9 +152,8 @@ fn create_compute_budget_expanded_fields(
             );
         }
         ComputeBudgetInstruction::SetLoadedAccountsDataSizeLimit(bytes) => {
-            fields.push(
-                create_number_field("Data Size Limit", &bytes.to_string(), "bytes").unwrap(),
-            );
+            fields
+                .push(create_number_field("Data Size Limit", &bytes.to_string(), "bytes").unwrap());
         }
         ComputeBudgetInstruction::Unused => {
             // No additional fields for unused instruction
