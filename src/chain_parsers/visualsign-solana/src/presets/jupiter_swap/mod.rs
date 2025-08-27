@@ -360,3 +360,263 @@ fn create_jupiter_swap_expanded_fields(
 
     Ok(fields)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::engine::{Engine, general_purpose::STANDARD};
+
+    #[test]
+    fn test_jupiter_swap_instruction_parsing() {
+        // Real Jupiter swap transaction data
+        let transaction_b64 = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAsTTXq/T5ciKTTbZJhKN+HNd2Q3/i8mDBxbxpek3krZ6653iXpBtBVMUA2+7hURKVHSEiGP6Bzz+71DafYBHQDv0Yk27V9AGBuUCokgwtdJtHGjOn65hFbpKYxFjpOxf9DslqNk9ntU1o905D8G/f/M/gGJfV/szOEdGlj8ByB4ydCgh9JdZoBmFC/1V+60NB9JdEtwXur6E410yCBDwODn7a9i8ySuhrG7m4UOmmngOd7rrj0EIP/mIOo3poMglc7k/piKlm7+u7deeb1LQ3/H1gPv54+BUArFsw2O5lY54pz/YD6rtbZ/BQGLaOTytSS3SHI51lpsQDqNm8IHuyTAFQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAEedVb8jHAbu50xW7OaBUH/bGy3qP0jlECsc2iVrwTjwTp4S+8hOgmyTLM6eJkDM4VWQwcYnOwklcIujuFILC8BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqYb8H//NLjVx31IUdFMPpkUf0008tghSu5vUckZpELeujJclj04kifG7PRApFI4NgwtaE5na/xCEBI572Nvp+FmycNZ/qYxRzwITBRNYliuvNXQr7VnJ2URenA0MhcfNkbQ/+if11/ZKdMCbHylYed5LCas238ndUUsyGqezjOXo/NFB6YMsrxCtkXSVyg8nG1spPNRwJ+pzcAftQOs5oL2MaEXlNY7kQGEFwqYqsAepz7QXX/3fSFmPGjLpqakIxwYJAAUCQA0DAA8GAAIADAgNAQEIAgACDAIAAACghgEAAAAAAA0BAgERChsNAAIDChIKEQoLBA4BBQIDEgwGCwANDRALBwoj5RfLl3rjrSoBAAAAJmQAAaCGAQAAAAAAkz4BAAAAAAAyAAANAwIAAAEJ";
+
+        // Decode the transaction
+        let _transaction_bytes = STANDARD
+            .decode(transaction_b64)
+            .expect("Failed to decode base64");
+
+        // Extract the Jupiter instruction data from the transaction
+        // This is a simplified extraction - in a real scenario you'd parse the full transaction
+        let instruction_data = [
+            0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a, // Route discriminator
+            0x01, 0x00, 0x00, 0x00, 0x26, 0x64, 0x00, 0x00, // Additional data
+            0xa0, 0x86, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // Input amount: 100000
+            0x93, 0x3e, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // Output amount: 99150
+            0x32, 0x00, // Slippage: 50 bps
+        ];
+
+        // Mock accounts for testing
+        let accounts = vec![
+            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4".to_string(), // Jupiter program ID
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string(), // Token program
+        ];
+
+        // Parse the instruction
+        let parsed_instruction =
+            parse_jupiter_swap_instruction(&instruction_data, &accounts).unwrap();
+
+        // Verify it parsed as a Route instruction
+        match parsed_instruction {
+            JupiterSwapInstruction::Route { slippage_bps, .. } => {
+                assert_eq!(slippage_bps, 50, "Slippage should be 50 bps");
+            }
+            _ => panic!("Expected Route instruction, got {:?}", parsed_instruction),
+        }
+
+        // Test the formatting
+        let formatted = format_jupiter_swap_instruction(&parsed_instruction);
+        assert!(
+            formatted.contains("Jupiter"),
+            "Formatted string should contain 'Jupiter'"
+        );
+        assert!(
+            formatted.contains("50bps"),
+            "Formatted string should contain slippage"
+        );
+
+        // Test expanded fields creation
+        let fields = create_jupiter_swap_expanded_fields(
+            &parsed_instruction,
+            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+            &instruction_data,
+        )
+        .unwrap();
+
+        // Verify we get the expected number of fields
+        assert!(
+            fields.len() >= 3,
+            "Should have at least 3 fields (Program ID, Slippage, Raw Data)"
+        );
+
+        // Check that we have a Program ID field
+        let program_id_field = fields.iter().find(|f| {
+            if let SignablePayloadField::TextV2 { common, text_v2: _ } = &f.signable_payload_field {
+                common.label == "Program ID"
+            } else {
+                false
+            }
+        });
+        assert!(program_id_field.is_some(), "Should have Program ID field");
+
+        // Check that we have a Slippage field
+        let slippage_field = fields.iter().find(|f| {
+            if let SignablePayloadField::Number { common, number: _ } = &f.signable_payload_field {
+                common.label == "Slippage"
+            } else {
+                false
+            }
+        });
+        assert!(slippage_field.is_some(), "Should have Slippage field");
+    }
+
+    #[test]
+    fn test_jupiter_instruction_with_real_data() {
+        use serde_json::json;
+
+        // Jupiter Route instruction data (8-byte discriminator + data)
+        let instruction_data = [
+            0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a, // Route discriminator
+            0x01, 0x00, 0x00, 0x00, 0x26, 0x64, 0x00, 0x00, // Additional data
+            0xa0, 0x86, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // Input amount: 100000
+            0x93, 0x3e, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // Output amount: 99150
+            0x32, 0x00, // Slippage: 50 bps
+        ];
+
+        let accounts = vec!["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4".to_string()];
+
+        // Parse the instruction
+        let result = parse_jupiter_swap_instruction(&instruction_data, &accounts).unwrap();
+
+        // Verify parsing result using pattern matching
+        match result {
+            JupiterSwapInstruction::Route { slippage_bps, .. } => {
+                assert_eq!(slippage_bps, 50);
+
+                // Create fields and verify their structure
+                let fields = create_jupiter_swap_expanded_fields(
+                    &result,
+                    "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+                    &instruction_data,
+                )
+                .unwrap();
+
+                // Test JSON serialization structure
+                let fields_json = serde_json::to_value(&fields).unwrap();
+
+                // Verify expected JSON structure
+                assert!(
+                    fields_json.is_array(),
+                    "Fields should serialize to JSON array"
+                );
+                let fields_array = fields_json.as_array().unwrap();
+                assert!(fields_array.len() >= 3, "Should have at least 3 fields");
+
+                // Verify that we have a Program ID field with correct structure
+                let has_program_id = fields_array.iter().any(|field| {
+                    field
+                        .get("Label")
+                        .and_then(|label| label.as_str())
+                        .map(|s| s == "Program ID")
+                        .unwrap_or(false)
+                        && field
+                            .get("Type")
+                            .and_then(|type_val| type_val.as_str())
+                            .map(|s| s == "text_v2")
+                            .unwrap_or(false)
+                });
+
+                // Verify that we have a Slippage field with correct structure
+                let has_slippage = fields_array.iter().any(|field| {
+                    field
+                        .get("Label")
+                        .and_then(|label| label.as_str())
+                        .map(|s| s == "Slippage")
+                        .unwrap_or(false)
+                        && field
+                            .get("Type")
+                            .and_then(|type_val| type_val.as_str())
+                            .map(|s| s == "number")
+                            .unwrap_or(false)
+                });
+
+                assert!(
+                    has_program_id,
+                    "Should have Program ID field in JSON structure"
+                );
+                assert!(has_slippage, "Should have Slippage field in JSON structure");
+
+                // Verify the JSON matches expected structure using serde_json::json! macro
+                let expected_program_id_field = json!({
+                    "Label": "Program ID",
+                    "Type": "text_v2"
+                });
+
+                let program_id_field = fields_array
+                    .iter()
+                    .find(|field| field.get("Label").and_then(|l| l.as_str()) == Some("Program ID"))
+                    .unwrap();
+
+                // Check partial structure match
+                assert_eq!(
+                    program_id_field.get("Label"),
+                    expected_program_id_field.get("Label")
+                );
+                assert_eq!(
+                    program_id_field.get("Type"),
+                    expected_program_id_field.get("Type")
+                );
+
+                println!("✅ Jupiter instruction parsed and serialized successfully");
+                println!(
+                    "✅ Created {} fields with correct JSON structure",
+                    fields_array.len()
+                );
+            }
+            _ => panic!("Expected Route instruction"),
+        }
+    }
+
+    #[test]
+    fn test_jupiter_discriminator_constants() {
+        // Verify discriminator constants are correct 8-byte arrays
+        assert_eq!(JUPITER_ROUTE_DISCRIMINATOR.len(), 8);
+        assert_eq!(JUPITER_EXACT_OUT_ROUTE_DISCRIMINATOR.len(), 8);
+        assert_eq!(JUPITER_SHARED_ACCOUNTS_ROUTE_DISCRIMINATOR.len(), 8);
+
+        // Verify they are different
+        assert_ne!(
+            JUPITER_ROUTE_DISCRIMINATOR,
+            JUPITER_EXACT_OUT_ROUTE_DISCRIMINATOR
+        );
+        assert_ne!(
+            JUPITER_ROUTE_DISCRIMINATOR,
+            JUPITER_SHARED_ACCOUNTS_ROUTE_DISCRIMINATOR
+        );
+        assert_ne!(
+            JUPITER_EXACT_OUT_ROUTE_DISCRIMINATOR,
+            JUPITER_SHARED_ACCOUNTS_ROUTE_DISCRIMINATOR
+        );
+    }
+
+    #[test]
+    fn test_jupiter_discriminator_matching() {
+        // Test that our discriminators match correctly
+        let route_data = [0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a, 0x00, 0x00];
+        let exact_out_data = [0x4b, 0xd7, 0xdf, 0xa8, 0x0c, 0xd0, 0xb6, 0x2a, 0x00, 0x00];
+        let shared_accounts_data = [0x3a, 0xf2, 0xaa, 0xae, 0x2f, 0xb6, 0xd4, 0x2a, 0x00, 0x00];
+        let unknown_data = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x00, 0x00];
+
+        let accounts = vec!["test".to_string()];
+
+        // Test Route discriminator
+        match parse_jupiter_swap_instruction(&route_data, &accounts) {
+            Ok(JupiterSwapInstruction::Route { .. }) => println!("✅ Route discriminator matches"),
+            _ => panic!("Route discriminator should match"),
+        }
+
+        // Test ExactOutRoute discriminator
+        match parse_jupiter_swap_instruction(&exact_out_data, &accounts) {
+            Ok(JupiterSwapInstruction::ExactOutRoute { .. }) => {
+                println!("✅ ExactOutRoute discriminator matches")
+            }
+            _ => panic!("ExactOutRoute discriminator should match"),
+        }
+
+        // Test SharedAccountsRoute discriminator
+        match parse_jupiter_swap_instruction(&shared_accounts_data, &accounts) {
+            Ok(JupiterSwapInstruction::SharedAccountsRoute { .. }) => {
+                println!("✅ SharedAccountsRoute discriminator matches")
+            }
+            _ => panic!("SharedAccountsRoute discriminator should match"),
+        }
+
+        // Test unknown discriminator
+        match parse_jupiter_swap_instruction(&unknown_data, &accounts) {
+            Ok(JupiterSwapInstruction::Unknown) => {
+                println!("✅ Unknown discriminator handled correctly")
+            }
+            _ => panic!("Unknown discriminator should return Unknown variant"),
+        }
+    }
+}

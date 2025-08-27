@@ -202,4 +202,82 @@ mod tests {
         let invalid_result = SolanaTransactionWrapper::from_string("invalid_data");
         assert!(invalid_result.is_err());
     }
+
+    #[test]
+    fn test_jupiter_swap_transaction() {
+        // Jupiter swap transaction from the user's request
+        let jupiter_transaction = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAsTTXq/T5ciKTTbZJhKN+HNd2Q3/i8mDBxbxpek3krZ6653iXpBtBVMUA2+7hURKVHSEiGP6Bzz+71DafYBHQDv0Yk27V9AGBuUCokgwtdJtHGjOn65hFbpKYxFjpOxf9DslqNk9ntU1o905D8G/f/M/gGJfV/szOEdGlj8ByB4ydCgh9JdZoBmFC/1V+60NB9JdEtwXur6E410yCBDwODn7a9i8ySuhrG7m4UOmmngOd7rrj0EIP/mIOo3poMglc7k/piKlm7+u7deeb1LQ3/H1gPv54+BUArFsw2O5lY54pz/YD6rtbZ/BQGLaOTytSS3SHI51lpsQDqNm8IHuyTAFQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAEedVb8jHAbu50xW7OaBUH/bGy3qP0jlECsc2iVrwTjwTp4S+8hOgmyTLM6eJkDM4VWQwcYnOwklcIujuFILC8BpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAEG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqYb8H//NLjVx31IUdFMPpkUf0008tghSu5vUckZpELeujJclj04kifG7PRApFI4NgwtaE5na/xCEBI572Nvp+FmycNZ/qYxRzwITBRNYliuvNXQr7VnJ2URenA0MhcfNkbQ/+if11/ZKdMCbHylYed5LCas238ndUUsyGqezjOXo/NFB6YMsrxCtkXSVyg8nG1spPNRwJ+pzcAftQOs5oL2MaEXlNY7kQGEFwqYqsAepz7QXX/3fSFmPGjLpqakIxwYJAAUCQA0DAA8GAAIADAgNAQEIAgACDAIAAACghgEAAAAAAA0BAgERChsNAAIDChIKEQoLBA4BBQIDEgwGCwANDRALBwoj5RfLl3rjrSoBAAAAJmQAAaCGAQAAAAAAkz4BAAAAAAAyAAANAwIAAAEJ";
+
+        let solana_tx_result = SolanaTransactionWrapper::from_string(&jupiter_transaction);
+        assert!(solana_tx_result.is_ok());
+
+        let solana_tx = solana_tx_result.unwrap();
+
+        // Convert to VisualSign payload using the converter
+        let payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
+            solana_tx,
+            VisualSignOptions {
+                decode_transfers: true,
+                transaction_name: Some("Solana Transaction".to_string()),
+            },
+        );
+
+        if let Err(ref e) = payload_result {
+            println!("Error converting to payload: {:?}", e);
+        }
+        assert!(payload_result.is_ok());
+
+        let payload = payload_result.unwrap();
+
+        // Verify basic payload properties
+        assert_eq!(payload.title, "Solana Transaction");
+        assert_eq!(payload.version, "0");
+        assert_eq!(payload.payload_type, "SolanaTx");
+        assert!(!payload.fields.is_empty());
+
+        // Convert to JSON and verify structure
+        let json_result = payload.to_json();
+        assert!(json_result.is_ok());
+
+        let json_value: serde_json::Value = serde_json::from_str(&json_result.unwrap()).unwrap();
+
+        // Verify expected JSON structure using serde_json::json! macro for comparison
+        let expected_structure = serde_json::json!({
+            "Title": "Solana Transaction",
+            "Version": "0",
+            "PayloadType": "SolanaTx"
+        });
+
+        assert_eq!(json_value["Title"], expected_structure["Title"]);
+        assert_eq!(json_value["Version"], expected_structure["Version"]);
+        assert_eq!(json_value["PayloadType"], expected_structure["PayloadType"]);
+
+        // Verify that fields array exists and is not empty
+        assert!(json_value["Fields"].is_array());
+        let fields = json_value["Fields"].as_array().unwrap();
+        assert!(!fields.is_empty());
+
+        // Look for Jupiter-related content in the fields
+        let _fields_json = serde_json::to_string(&fields).unwrap();
+
+        // Check for presence of Jupiter program ID or swap-related content
+        let has_jupiter_content = fields.iter().any(|field| {
+            let field_str = serde_json::to_string(field).unwrap_or_default();
+            field_str.contains("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4")
+                || field_str.contains("Jupiter")
+                || field_str.contains("swap")
+                || field_str.contains("Swap")
+        });
+
+        // Verify we found Jupiter content
+        assert!(has_jupiter_content, "Should contain Jupiter swap content");
+
+        // Note: This test verifies the transaction can be parsed without errors
+        // The exact Jupiter swap detection depends on the instruction data parsing
+        println!(
+            "✅ Jupiter transaction parsed successfully with {} fields",
+            fields.len()
+        );
+        println!("✅ Contains Jupiter content: {}", has_jupiter_content);
+    }
 }
