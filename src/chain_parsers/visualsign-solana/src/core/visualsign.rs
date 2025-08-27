@@ -133,8 +133,9 @@ fn convert_to_visual_sign_payload(
     ];
 
     if decode_transfers {
+        let transfer_fields = instructions::decode_transfers(transaction)?;
         fields.extend(
-            instructions::decode_transfers(transaction)?
+            transfer_fields
                 .iter()
                 .map(|e| e.signable_payload_field.clone()),
         );

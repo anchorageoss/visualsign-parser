@@ -7,7 +7,10 @@ use crate::core::{
 use solana_program::system_instruction::SystemInstruction;
 use std::collections::HashMap;
 use visualsign::errors::VisualSignError;
-use visualsign::{AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon};
+use visualsign::{
+    AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldAmountV2,
+    SignablePayloadFieldCommon,
+};
 
 // Create a static instance that we can reference
 static SYSTEM_CONFIG: SystemConfig = SystemConfig;
@@ -85,32 +88,28 @@ fn create_system_preview_layout(
                 .map(|meta| meta.pubkey.to_string())
                 .unwrap_or_else(|| "Unknown".to_string());
 
-            let condensed_fields = vec![
-                create_text_field("Action", "Transfer SOL")?,
-                create_text_field(
-                    "Amount",
-                    &format!("{} SOL", (*lamports as f64) / 1_000_000_000.0),
-                )?,
-                create_text_field(
-                    "From",
-                    &format!("{}...{}", &from_key[..8], &from_key[from_key.len() - 8..]),
-                )?,
-                create_text_field(
-                    "To",
-                    &format!("{}...{}", &to_key[..8], &to_key[to_key.len() - 8..]),
-                )?,
-            ];
+            let condensed_fields = vec![create_text_field(
+                "Instruction",
+                &format!("Transfer: {} lamports", lamports),
+            )?];
 
             let expanded_fields = vec![
-                create_text_field("Action", "Transfer SOL")?,
-                create_number_field("Amount (lamports)", &lamports.to_string(), "")?,
-                create_text_field(
-                    "Amount (SOL)",
-                    &format!("{}", (*lamports as f64) / 1_000_000_000.0),
-                )?,
-                create_text_field("From Account", &from_key)?,
-                create_text_field("To Account", &to_key)?,
-                create_text_field("Program", "System Program")?,
+                create_text_field("Program ID", &solana_instruction.program_id.to_string())?,
+                AnnotatedPayloadField {
+                    static_annotation: None,
+                    dynamic_annotation: None,
+                    signable_payload_field: SignablePayloadField::AmountV2 {
+                        common: SignablePayloadFieldCommon {
+                            fallback_text: format!("{} SOL", (*lamports as f64) / 1_000_000_000.0),
+                            label: "Transfer Amount".to_string(),
+                        },
+                        amount_v2: SignablePayloadFieldAmountV2 {
+                            amount: lamports.to_string(),
+                            abbreviation: Some("lamports".to_string()),
+                        },
+                    },
+                },
+                create_text_field("Raw Data", &hex::encode(&solana_instruction.data))?,
             ];
 
             let condensed = visualsign::SignablePayloadFieldListLayout {
@@ -122,7 +121,7 @@ fn create_system_preview_layout(
 
             let preview_layout = visualsign::SignablePayloadFieldPreviewLayout {
                 title: Some(visualsign::SignablePayloadFieldTextV2 {
-                    text: "System Transfer".to_string(),
+                    text: format!("Transfer: {} lamports", lamports),
                 }),
                 subtitle: Some(visualsign::SignablePayloadFieldTextV2 {
                     text: String::new(),
@@ -138,8 +137,9 @@ fn create_system_preview_layout(
                     common: SignablePayloadFieldCommon {
                         label: format!("Instruction {}", context.instruction_index() + 1),
                         fallback_text: format!(
-                            "Transfer {} SOL",
-                            (*lamports as f64) / 1_000_000_000.0
+                            "Program ID: {}\nData: {}",
+                            solana_instruction.program_id,
+                            hex::encode(&solana_instruction.data)
                         ),
                     },
                     preview_layout,
@@ -209,7 +209,11 @@ fn create_system_preview_layout(
                 signable_payload_field: SignablePayloadField::PreviewLayout {
                     common: SignablePayloadFieldCommon {
                         label: format!("Instruction {}", context.instruction_index() + 1),
-                        fallback_text: "Create Account".to_string(),
+                        fallback_text: format!(
+                            "Program ID: {}\nData: {}",
+                            solana_instruction.program_id,
+                            hex::encode(&solana_instruction.data)
+                        ),
                     },
                     preview_layout,
                 },
@@ -267,7 +271,11 @@ fn create_system_preview_layout(
                 signable_payload_field: SignablePayloadField::PreviewLayout {
                     common: SignablePayloadFieldCommon {
                         label: format!("Instruction {}", context.instruction_index() + 1),
-                        fallback_text: instruction_name.to_string(),
+                        fallback_text: format!(
+                            "Program ID: {}\nData: {}",
+                            solana_instruction.program_id,
+                            hex::encode(&solana_instruction.data)
+                        ),
                     },
                     preview_layout,
                 },

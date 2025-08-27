@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-
 use base64::{self, Engine};
 /// Helper function to create a complete Solana transaction from a message with empty signatures
 pub fn create_transaction_with_empty_signatures(message_base64: &str) -> String {
@@ -130,10 +129,10 @@ pub fn get_token_info(address: &str, amount: u64) -> SwapTokenInfo {
 
 #[cfg(test)]
 pub mod test_utils {
+    use super::*;
     use crate::transaction_string_to_visual_sign;
     use visualsign::SignablePayload;
     use visualsign::vsptrait::VisualSignOptions;
-    use super::*;
 
     pub fn payload_from_b64(data: &str) -> SignablePayload {
         transaction_string_to_visual_sign(
