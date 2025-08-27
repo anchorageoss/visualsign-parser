@@ -100,7 +100,7 @@ fn dynsol_to_signable_field(param: &Param, value: &DynSolValue) -> SignablePaylo
             SignablePayloadField::PreviewLayout {
                 common: SignablePayloadFieldCommon {
                     fallback_text: format!(
-                        "{}: ({})",
+                        "{}: [{}]",
                         param.name,
                         arr.iter()
                             .map(format_abi_value)
