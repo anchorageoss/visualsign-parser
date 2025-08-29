@@ -53,3 +53,6 @@ parser_enclave:
 .PHONY: parser_host
 parser_host:
 	cargo run --bin parser_host -- --host-ip $(PARSER_HOST) --host-port $(PARSER_PORT) --metrics --metrics-port $(PARSER_METRICS_PORT) --usock $(PARSER_OUTER_SOCKET_PATH)
+
+update_submodules:
+	git submodule update --init --recursive
