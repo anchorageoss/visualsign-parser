@@ -217,12 +217,8 @@ impl CetusVisualizer {
         let by_amount_in = RouterSwapIndexes::get_by_amount_in(context.inputs(), &pwc.arguments)?;
         let amount = RouterSwapIndexes::get_amount(context.inputs(), &pwc.arguments)?;
 
-        let amount_limit = if by_amount_in {
-            // Min out is not explicitly provided here; use sqrt price limit presence to indicate
-            0u64
-        } else {
-            0u64
-        };
+        // TODO: Min out is not explicitly provided here; use sqrt price limit presence to indicate
+        let amount_limit = 0u64;
 
         self.render_swap_fields(context, by_amount_in, amount, amount_limit, is_a2b, pwc)
     }
