@@ -43,3 +43,6 @@ bs58 = { version = "0.5.1", default-features = false }
 
 # for encoding and decoding txs
 base64 = "0.22.1"
+
+[dev-dependencies]
+visualsign-solana = { path = "../chain_parsers/visualsign-solana" }

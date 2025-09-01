@@ -1,27 +1,6 @@
-use base64::Engine;
 use generated::health::{AppHealthRequest, AppHealthResponse};
 use generated::parser::{Chain, ParseRequest};
 use integration::TestArgs;
-
-/// Helper function to create a complete Solana transaction from a message with empty signatures
-fn create_solana_transaction_with_empty_signatures(message_base64: &str) -> String {
-    // Decode the message
-    let message_bytes = base64::engine::general_purpose::STANDARD
-        .decode(message_base64)
-        .unwrap();
-
-    // Create a complete Solana transaction with empty signatures
-    let mut transaction_bytes = Vec::new();
-
-    // Add compact array length for signatures (0 signatures)
-    transaction_bytes.push(0u8);
-
-    // Add the message
-    transaction_bytes.extend_from_slice(&message_bytes);
-
-    // Encode the complete transaction back to base64
-    base64::engine::general_purpose::STANDARD.encode(transaction_bytes)
-}
 
 /// Recursively validates that all fields in expected are present in actual
 /// This catches missing fields but allows extra fields in actual implementation.
@@ -142,7 +121,12 @@ async fn parser_solana_native_transfer_e2e() {
         // This was generated using the Solana CLI using solana transfer --sign-only which only prints message, that needs to be wrapped into a transaction
         let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
 
-        let solana_tx = create_solana_transaction_with_empty_signatures(solana_transfer_message);
+        // If the function is in a different module, update the import path accordingly.
+        // For example, if it's in visualsign_solana::utils:
+        let solana_tx = visualsign_solana::utils::create_transaction_with_empty_signatures(
+            solana_transfer_message,
+        );
+        println!("Solana transaction: {}", solana_tx);
         let parse_request = ParseRequest {
             unsigned_payload: solana_tx,
             chain: Chain::Solana as i32,

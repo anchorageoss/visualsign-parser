@@ -1,3 +1,4 @@
+use similar::{ChangeTag, TextDiff};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -57,11 +58,23 @@ fn test_cli_with_fixtures() {
         let actual_output = String::from_utf8(output.stdout)
             .unwrap_or_else(|e| panic!("Invalid UTF-8 output: {}", e));
 
-        assert_eq!(
-            actual_output.trim(),
-            expected_output.trim(),
-            "Test case '{}' failed",
-            test_name
-        );
+        let expected = expected_output.trim();
+        let actual = actual_output.trim();
+
+        if expected != actual {
+            let diff = TextDiff::from_lines(expected, actual);
+            let mut diff_output = String::new();
+
+            for change in diff.iter_all_changes() {
+                let sign = match change.tag() {
+                    ChangeTag::Delete => "-",
+                    ChangeTag::Insert => "+",
+                    ChangeTag::Equal => " ",
+                };
+                diff_output.push_str(&format!("{}{}", sign, change));
+            }
+
+            panic!("Test case '{}' failed:\n{}", test_name, diff_output);
+        }
     }
 }
