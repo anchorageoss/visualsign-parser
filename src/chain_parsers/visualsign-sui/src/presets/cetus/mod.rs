@@ -1066,38 +1066,40 @@ mod tests {
         struct AggregatedTestData {
             explorer_tx_prefix: String,
             #[serde(flatten)]
-            categories: HashMap<String, Category>,
+            modules: HashMap<String, HashMap<String, Category>>,
         }
 
         let json_str = include_str!("aggregated_test_data.json");
         let data: AggregatedTestData =
             serde_json::from_str(json_str).expect("invalid aggregated_test_data.json");
 
-        for (name, category) in data.categories.iter() {
-            let label = &category.label;
-            for (op_id, op) in category.operations.iter() {
-                let test_context = format!(
-                    "Test name: {name}. Tx id: {}{op_id}",
-                    data.explorer_tx_prefix
-                );
+        for (_module_name, module) in data.modules.iter() {
+            for (name, category) in module.iter() {
+                let label = &category.label;
+                for (op_id, op) in category.operations.iter() {
+                    let test_context = format!(
+                        "Test name: {name}. Tx id: {}{op_id}",
+                        data.explorer_tx_prefix
+                    );
 
-                let payload = payload_from_b64_with_context(&op.data, &test_context);
+                    let payload = payload_from_b64_with_context(&op.data, &test_context);
 
-                assert_has_field_with_context(&payload, label, &test_context);
-                for (field, expected) in op.asserts.iter() {
-                    match expected {
-                        OneOrMany::One(value) => assert_has_field_with_value_with_context(
-                            &payload,
-                            field,
-                            value.as_str(),
-                            &test_context,
-                        ),
-                        OneOrMany::Many(values) => assert_has_fields_with_values_with_context(
-                            &payload,
-                            field,
-                            values.as_slice(),
-                            &test_context,
-                        ),
+                    assert_has_field_with_context(&payload, label, &test_context);
+                    for (field, expected) in op.asserts.iter() {
+                        match expected {
+                            OneOrMany::One(value) => assert_has_field_with_value_with_context(
+                                &payload,
+                                field,
+                                value.as_str(),
+                                &test_context,
+                            ),
+                            OneOrMany::Many(values) => assert_has_fields_with_values_with_context(
+                                &payload,
+                                field,
+                                values.as_slice(),
+                                &test_context,
+                            ),
+                        }
                     }
                 }
             }
