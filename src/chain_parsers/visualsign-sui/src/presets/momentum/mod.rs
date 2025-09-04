@@ -1,8 +1,7 @@
 mod config;
 
 use config::{
-    CollectFunctions, Config, LiquidityFunctions, MOMENTUM_CONFIG, MomentumModules,
-    PositionFunctions, TradeFunctions,
+    CollectFunctions, Config, LiquidityFunctions, MOMENTUM_CONFIG, MomentumModules, TradeFunctions,
 };
 
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
@@ -10,8 +9,9 @@ use crate::utils::{SuiCoin, get_tx_type_arg, truncate_address};
 
 use sui_json_rpc_types::{SuiCommand, SuiProgrammableMoveCall};
 
+use crate::presets::momentum::config::{AddLiquidityIndexes, RemoveLiquidityIndexes};
 use visualsign::errors::VisualSignError;
-use visualsign::field_builders::create_address_field;
+use visualsign::field_builders::{create_address_field, create_amount_field};
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
@@ -45,9 +45,6 @@ impl CommandVisualizer for MomentumVisualizer {
                 CollectFunctions::Fee => Ok(self.handle_collect_fee(context, pwc)?),
                 CollectFunctions::Reward => Ok(self.handle_collect_reward(context, pwc)?),
             },
-            MomentumModules::Position => match pwc.function.as_str().try_into()? {
-                PositionFunctions::Liquidity => Ok(self.handle_position_liquidity(context)?),
-            },
             MomentumModules::Trade => match pwc.function.as_str().try_into()? {
                 TradeFunctions::FlashSwap => Ok(self.handle_trade_flash_swap(context, pwc)?),
                 TradeFunctions::RepayFlashSwap => {
@@ -55,6 +52,12 @@ impl CommandVisualizer for MomentumVisualizer {
                 }
                 TradeFunctions::SwapReceiptDebts => {
                     Ok(self.handle_trade_swap_receipt_debts(context)?)
+                }
+                TradeFunctions::FlashLoan => {
+                    todo!("Have not found tx for testing yet")
+                }
+                TradeFunctions::RepayFlashLoan => {
+                    todo!("Have not found tx for testing yet")
                 }
             },
         }
@@ -78,17 +81,35 @@ impl MomentumVisualizer {
         let coin_1: SuiCoin = get_tx_type_arg(&pwc.type_arguments, 0).unwrap_or_default();
         let coin_2: SuiCoin = get_tx_type_arg(&pwc.type_arguments, 1).unwrap_or_default();
 
-        let mut list_layout_fields = vec![create_address_field(
-            "Sender",
-            &context.sender().to_string(),
-            None,
-            None,
-            None,
-            None,
-        )?];
+        let liquidity = RemoveLiquidityIndexes::get_liquidity(context.inputs(), &pwc.arguments)?;
+        let min_amount_x =
+            RemoveLiquidityIndexes::get_min_amount_x(context.inputs(), &pwc.arguments)?;
+        let min_amount_y =
+            RemoveLiquidityIndexes::get_min_amount_y(context.inputs(), &pwc.arguments)?;
 
-        list_layout_fields.push(create_text_field("Coin 1", &coin_1.to_string())?);
-        list_layout_fields.push(create_text_field("Coin 2", &coin_2.to_string())?);
+        let list_layout_fields = vec![
+            create_address_field(
+                "User Address",
+                &context.sender().to_string(),
+                None,
+                None,
+                None,
+                None,
+            )?,
+            create_text_field("Pool Coin A", &coin_1.to_string())?,
+            create_text_field("Pool Coin B", &coin_2.to_string())?,
+            create_text_field("Liquidity", &liquidity.to_string())?,
+            create_amount_field(
+                "Min Amount X",
+                &min_amount_x.to_string(),
+                coin_1.base_unit_symbol(),
+            )?,
+            create_amount_field(
+                "Min Amount Y",
+                &min_amount_y.to_string(),
+                coin_2.base_unit_symbol(),
+            )?,
+        ];
 
         {
             let title_text = format!(
@@ -140,7 +161,7 @@ impl MomentumVisualizer {
         context: &VisualizerContext,
     ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
         let list_layout_fields = vec![create_address_field(
-            "Sender",
+            "User Address",
             &context.sender().to_string(),
             None,
             None,
@@ -192,16 +213,31 @@ impl MomentumVisualizer {
         let coin_1: SuiCoin = get_tx_type_arg(&pwc.type_arguments, 0).unwrap_or_default();
         let coin_2: SuiCoin = get_tx_type_arg(&pwc.type_arguments, 1).unwrap_or_default();
 
-        let mut list_layout_fields = vec![create_address_field(
-            "Sender",
-            &context.sender().to_string(),
-            None,
-            None,
-            None,
-            None,
-        )?];
-        list_layout_fields.push(create_text_field("Coin 1", &coin_1.to_string())?);
-        list_layout_fields.push(create_text_field("Coin 2", &coin_2.to_string())?);
+        let min_amount_x = AddLiquidityIndexes::get_min_amount_x(context.inputs(), &pwc.arguments)?;
+        let min_amount_y = AddLiquidityIndexes::get_min_amount_y(context.inputs(), &pwc.arguments)?;
+
+        let list_layout_fields = vec![
+            create_address_field(
+                "User Address",
+                &context.sender().to_string(),
+                None,
+                None,
+                None,
+                None,
+            )?,
+            create_text_field("Pool Coin A", &coin_1.to_string())?,
+            create_text_field("Pool Coin B", &coin_2.to_string())?,
+            create_amount_field(
+                "Min Amount X",
+                &min_amount_x.to_string(),
+                coin_1.base_unit_symbol(),
+            )?,
+            create_amount_field(
+                "Min Amount Y",
+                &min_amount_y.to_string(),
+                coin_2.base_unit_symbol(),
+            )?,
+        ];
 
         let title_text = format!(
             "Momentum Add Liquidity to pair {}/{}",
@@ -254,17 +290,18 @@ impl MomentumVisualizer {
         let coin_1: SuiCoin = get_tx_type_arg(&pwc.type_arguments, 0).unwrap_or_default();
         let coin_2: SuiCoin = get_tx_type_arg(&pwc.type_arguments, 1).unwrap_or_default();
 
+        // TODO: think how to pipe lower and upper ticks
         let list_layout_fields = vec![
             create_address_field(
-                "Sender",
+                "User Address",
                 &context.sender().to_string(),
                 None,
                 None,
                 None,
                 None,
             )?,
-            create_text_field("Coin 1", &coin_1.to_string())?,
-            create_text_field("Coin 2", &coin_2.to_string())?,
+            create_text_field("Pool Coin A", &coin_1.to_string())?,
+            create_text_field("Pool Coin B", &coin_2.to_string())?,
         ];
 
         let title_text = "Momentum Open Position".to_string();
@@ -313,15 +350,15 @@ impl MomentumVisualizer {
 
         let list_layout_fields = vec![
             create_address_field(
-                "Sender",
+                "User Address",
                 &context.sender().to_string(),
                 None,
                 None,
                 None,
                 None,
             )?,
-            create_text_field("Pool Coin 1", &coin_1.to_string())?,
-            create_text_field("Pool Coin 2", &coin_2.to_string())?,
+            create_text_field("Pool Coin A", &coin_1.to_string())?,
+            create_text_field("Pool Coin B", &coin_2.to_string())?,
         ];
 
         let title_text = "Momentum Collect Fee".to_string();
@@ -370,15 +407,15 @@ impl MomentumVisualizer {
 
         let list_layout_fields = vec![
             create_address_field(
-                "Sender",
+                "User Address",
                 &context.sender().to_string(),
                 None,
                 None,
                 None,
                 None,
             )?,
-            create_text_field("Pool Coin 1", &coin_1.to_string())?,
-            create_text_field("Pool Coin 2", &coin_2.to_string())?,
+            create_text_field("Pool Coin A", &coin_1.to_string())?,
+            create_text_field("Pool Coin B", &coin_2.to_string())?,
             create_text_field("Reward Coin", &reward_coin.to_string())?,
         ];
 
@@ -418,47 +455,6 @@ impl MomentumVisualizer {
         }])
     }
 
-    fn handle_position_liquidity(
-        &self,
-        context: &VisualizerContext,
-    ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
-        let list_layout_fields = vec![create_address_field(
-            "Sender",
-            &context.sender().to_string(),
-            None,
-            None,
-            None,
-            None,
-        )?];
-
-        let title_text = "Momentum Position Liquidity".to_string();
-        let subtitle_text = format!("From {}", truncate_address(&context.sender().to_string()));
-        let condensed = SignablePayloadFieldListLayout {
-            fields: vec![create_text_field("Summary", "Query position liquidity")?],
-        };
-
-        Ok(vec![AnnotatedPayloadField {
-            static_annotation: None,
-            dynamic_annotation: None,
-            signable_payload_field: SignablePayloadField::PreviewLayout {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: title_text.clone(),
-                    label: "Momentum Position Liquidity Command".to_string(),
-                },
-                preview_layout: SignablePayloadFieldPreviewLayout {
-                    title: Some(SignablePayloadFieldTextV2 { text: title_text }),
-                    subtitle: Some(SignablePayloadFieldTextV2 {
-                        text: subtitle_text,
-                    }),
-                    condensed: Some(condensed),
-                    expanded: Some(SignablePayloadFieldListLayout {
-                        fields: list_layout_fields,
-                    }),
-                },
-            },
-        }])
-    }
-
     fn handle_trade_flash_swap(
         &self,
         context: &VisualizerContext,
@@ -469,15 +465,15 @@ impl MomentumVisualizer {
 
         let list_layout_fields = vec![
             create_address_field(
-                "Sender",
+                "User Address",
                 &context.sender().to_string(),
                 None,
                 None,
                 None,
                 None,
             )?,
-            create_text_field("Pool Coin 1", &coin_1.to_string())?,
-            create_text_field("Pool Coin 2", &coin_2.to_string())?,
+            create_text_field("Pool Coin A", &coin_1.to_string())?,
+            create_text_field("Pool Coin B", &coin_2.to_string())?,
         ];
 
         let title_text = "Momentum Flash Swap".to_string();
@@ -521,15 +517,15 @@ impl MomentumVisualizer {
 
         let list_layout_fields = vec![
             create_address_field(
-                "Sender",
+                "User Address",
                 &context.sender().to_string(),
                 None,
                 None,
                 None,
                 None,
             )?,
-            create_text_field("Pool Coin 1", &coin_1.to_string())?,
-            create_text_field("Pool Coin 2", &coin_2.to_string())?,
+            create_text_field("Pool Coin A", &coin_1.to_string())?,
+            create_text_field("Pool Coin B", &coin_2.to_string())?,
         ];
 
         let title_text = "Momentum Repay Flash Swap".to_string();
@@ -572,7 +568,7 @@ impl MomentumVisualizer {
         context: &VisualizerContext,
     ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
         let list_layout_fields = vec![create_address_field(
-            "Sender",
+            "User Address",
             &context.sender().to_string(),
             None,
             None,
@@ -611,29 +607,97 @@ impl MomentumVisualizer {
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::payload_from_b64;
+    use crate::utils::{payload_from_b64, payload_from_b64_with_context};
 
-    use visualsign::test_utils::assert_has_field;
+    use visualsign::test_utils::{
+        assert_has_field, assert_has_field_with_context, assert_has_field_with_value_with_context,
+        assert_has_fields_with_values_with_context,
+    };
 
     #[test]
-    #[ignore]
     fn test_momentum_remove_liquidity() {
         // https://suivision.xyz/txblock/5QMTpn34NuBvMMAU1LeKhWKSNTMoJEriEier3DA8tjNU
         let test_data = "AQAAAAAACQEBPaCQ0SWho3nWCgPDOKD6unBgRzh8TFJfRUXNyoR8CztrLWshAAAAAAEBAGui4JnRVsicDXzXmGFNQvRmndeFmEicY7+jg9JMG+ZQfMd1JAAAAAAgCSKS99j5XY79h/qhe06kf9pgB7VObJ06G/l6Ud9XAGQAEBxPFM1qAQAAAAAAAAAAAAAACAAAAAAAAAAAAAgAAAAAAAAAAAEBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYBAAAAAAAAAAABASN1oLHsEgEKrqOyVFrPoq00z7ugPOS1n0w54eJe7RsqZMDJHQAAAAAAACAfXmTDHwP2Rlu0mLfnYcvZIHIgHSo8l5YRP37GNCKy9QAgH15kwx8D9kZbtJi352HL2SByIB0qPJeWET9+xjQisvUFAM9gpA9F1G/B6CiHGmR8HiWgkV3shg0mYusQ/bOCw8HRCWxpcXVpZGl0eRByZW1vdmVfbGlxdWlkaXR5AgfxbmtyPyQux0Xf12NK0HLELVwdmsnWKjnDgTA+qldpOgVmZHVzZAVGRFVTRAAHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIDc3VpA1NVSQAHAQAAAQEAAQIAAQMAAQQAAQUAAQYAAQIDAAAAAAMAAAEAAQcAAM9gpA9F1G/B6CiHGmR8HiWgkV3shg0mYusQ/bOCw8HRB2NvbGxlY3QDZmVlAgfxbmtyPyQux0Xf12NK0HLELVwdmsnWKjnDgTA+qldpOgVmZHVzZAVGRFVTRAAHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIDc3VpA1NVSQAEAQAAAQEAAQUAAQYAAQIDAgAAAAMCAAEAAQgAAM9gpA9F1G/B6CiHGmR8HiWgkV3shg0mYusQ/bOCw8HRCWxpcXVpZGl0eQ5jbG9zZV9wb3NpdGlvbgACAQEAAQYAH15kwx8D9kZbtJi352HL2SByIB0qPJeWET9+xjQisvUCkbzKYJjNnW1dS+OSg47AfzhenXHE5j3YEbVj3w12vjXw4nUkAAAAACBtbk7awxrfKFU5O/j7O18DlbaWBF5AuSr4VpAuZYT9myUkbWMUm6dirPubSAoZWYWkarBH6bfjxezwFmpyxTOW8OJ1JAAAAAAgMZMdJNCNAIa0d8vNuiN4ghW7faU/0/TTTP670s5Pq0ofXmTDHwP2Rlu0mLfnYcvZIHIgHSo8l5YRP37GNCKy9fQBAAAAAAAAYOMWAAAAAAAAAWEA6Rn4TrqLBl72XmEPSColPnONOY5JiYtLk6F/aQKMWL88mC9+MptS02/JP1+LD8sFsJQD1f8LngMtuLPHny5cAB1S0wCE/sDcB5tDvq1+juWWCcJmS9clXEb99ez37zYB";
 
         let payload = payload_from_b64(test_data);
-
         assert_has_field(&payload, "Momentum Remove Liquidity Command");
     }
 
     #[test]
-    #[ignore]
     fn test_momentum_close_position() {
         // https://suivision.xyz/txblock/5QMTpn34NuBvMMAU1LeKhWKSNTMoJEriEier3DA8tjNU
         let test_data = "AQAAAAAACQEBPaCQ0SWho3nWCgPDOKD6unBgRzh8TFJfRUXNyoR8CztrLWshAAAAAAEBAGui4JnRVsicDXzXmGFNQvRmndeFmEicY7+jg9JMG+ZQfMd1JAAAAAAgCSKS99j5XY79h/qhe06kf9pgB7VObJ06G/l6Ud9XAGQAEBxPFM1qAQAAAAAAAAAAAAAACAAAAAAAAAAAAAgAAAAAAAAAAAEBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYBAAAAAAAAAAABASN1oLHsEgEKrqOyVFrPoq00z7ugPOS1n0w54eJe7RsqZMDJHQAAAAAAACAfXmTDHwP2Rlu0mLfnYcvZIHIgHSo8l5YRP37GNCKy9QAgH15kwx8D9kZbtJi352HL2SByIB0qPJeWET9+xjQisvUFAM9gpA9F1G/B6CiHGmR8HiWgkV3shg0mYusQ/bOCw8HRCWxpcXVpZGl0eRByZW1vdmVfbGlxdWlkaXR5AgfxbmtyPyQux0Xf12NK0HLELVwdmsnWKjnDgTA+qldpOgVmZHVzZAVGRFVTRAAHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIDc3VpA1NVSQAHAQAAAQEAAQIAAQMAAQQAAQUAAQYAAQIDAAAAAAMAAAEAAQcAAM9gpA9F1G/B6CiHGmR8HiWgkV3shg0mYusQ/bOCw8HRB2NvbGxlY3QDZmVlAgfxbmtyPyQux0Xf12NK0HLELVwdmsnWKjnDgTA+qldpOgVmZHVzZAVGRFVTRAAHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIDc3VpA1NVSQAEAQAAAQEAAQUAAQYAAQIDAgAAAAMCAAEAAQgAAM9gpA9F1G/B6CiHGmR8HiWgkV3shg0mYusQ/bOCw8HRCWxpcXVpZGl0eQ5jbG9zZV9wb3NpdGlvbgACAQEAAQYAH15kwx8D9kZbtJi352HL2SByIB0qPJeWET9+xjQisvUCkbzKYJjNnW1dS+OSg47AfzhenXHE5j3YEbVj3w12vjXw4nUkAAAAACBtbk7awxrfKFU5O/j7O18DlbaWBF5AuSr4VpAuZYT9myUkbWMUm6dirPubSAoZWYWkarBH6bfjxezwFmpyxTOW8OJ1JAAAAAAgMZMdJNCNAIa0d8vNuiN4ghW7faU/0/TTTP670s5Pq0ofXmTDHwP2Rlu0mLfnYcvZIHIgHSo8l5YRP37GNCKy9fQBAAAAAAAAYOMWAAAAAAAAAWEA6Rn4TrqLBl72XmEPSColPnONOY5JiYtLk6F/aQKMWL88mC9+MptS02/JP1+LD8sFsJQD1f8LngMtuLPHny5cAB1S0wCE/sDcB5tDvq1+juWWCcJmS9clXEb99ez37zYB";
 
         let payload = payload_from_b64(test_data);
-
         assert_has_field(&payload, "Momentum Close Position Command");
+    }
+
+    #[test]
+    fn test_momentum_aggregated() {
+        use serde::Deserialize;
+        use std::collections::HashMap;
+
+        #[derive(Debug, Deserialize)]
+        #[serde(untagged)]
+        enum OneOrMany {
+            One(String),
+            Many(Vec<String>),
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct Operation {
+            data: String,
+            asserts: HashMap<String, OneOrMany>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct Category {
+            label: String,
+            operations: HashMap<String, Operation>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct AggregatedTestData {
+            explorer_tx_prefix: String,
+            #[serde(flatten)]
+            modules: HashMap<String, HashMap<String, Category>>,
+        }
+
+        let json_str = include_str!("aggregated_test_data.json");
+        let data: AggregatedTestData =
+            serde_json::from_str(json_str).expect("invalid aggregated_test_data.json");
+
+        // TODO: use module during visualization (in details)
+        for (_module_name, module) in data.modules.iter() {
+            for (name, category) in module.iter() {
+                let label = &category.label;
+                for (op_id, op) in category.operations.iter() {
+                    let test_context = format!(
+                        "Test name: {name}. Tx id: {}{op_id}",
+                        data.explorer_tx_prefix
+                    );
+
+                    let payload = payload_from_b64_with_context(&op.data, &test_context);
+
+                    assert_has_field_with_context(&payload, label, &test_context);
+                    for (field, expected) in op.asserts.iter() {
+                        match expected {
+                            OneOrMany::One(value) => assert_has_field_with_value_with_context(
+                                &payload,
+                                field,
+                                value.as_str(),
+                                &test_context,
+                            ),
+                            OneOrMany::Many(values) => assert_has_fields_with_values_with_context(
+                                &payload,
+                                field,
+                                values.as_slice(),
+                                &test_context,
+                            ),
+                        }
+                    }
+                }
+            }
+        }
     }
 }
