@@ -43,6 +43,13 @@ pub fn get_nested_result_value(
 pub fn parse_numeric_argument(arg: SuiArgument) -> Result<u16, VisualSignError> {
     match arg {
         SuiArgument::Result(index) | Input(index) => Ok(index),
+        SuiArgument::Result(_) => {
+            todo!("`parse_numeric_argument` Result")
+        }
+        SuiArgument::NestedResult(command_index, argument_index) => {
+            dbg!(command_index, argument_index);
+            todo!("`parse_numeric_argument` NestedResult")
+        }
         _ => Err(VisualSignError::DecodeError(
             "Parsing numeric argument from Sui argument (expected `Input` or `Result`)".into(),
         )),
