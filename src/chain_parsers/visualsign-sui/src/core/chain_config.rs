@@ -25,36 +25,15 @@ macro_rules! __gen_module {
 
       fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
-          $( stringify!($fn_snake) => Ok($FuncEnum::$FnVariant), )*
-          _ => Err(visualsign::errors::VisualSignError::DecodeError(format!("Unsupported function name: {}", value))),
+          $( stringify!($fn_snake) => Ok(Self::$FnVariant), )*
+          _ => Err(visualsign::errors::VisualSignError::DecodeError(format!("Unsupported function name: {value}"))),
         }
       }
     }
 
     impl $FuncEnum {
-      pub fn as_str(&self) -> &'static str {
-        match self {
-          $( $FuncEnum::$FnVariant => stringify!($fn_snake), )*
-        }
-      }
-
       pub fn get_supported_functions() -> Vec<&'static str> {
         vec![ $( stringify!($fn_snake) ),* ]
-      }
-    }
-
-    impl AsRef<str> for $FuncEnum {
-      fn as_ref(&self) -> &str {
-        self.as_str()
-      }
-    }
-
-    impl std::fmt::Display for $FuncEnum {
-      fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-      ) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
       }
     }
 
@@ -71,18 +50,18 @@ macro_rules! __gen_module {
             inputs: &[sui_json_rpc_types::SuiCallArg],
             args: &[sui_json_rpc_types::SuiArgument],
           ) -> Result<$param_ty, visualsign::errors::VisualSignError> {
-            $crate::utils::decode_number::<$param_ty>(
-              inputs
-                .get(
-                  $crate::utils::get_index(
-                    args,
-                    Some($IdxEnum::$ParamVariant as usize),
-                  )? as usize,
-                )
-                .ok_or(visualsign::errors::VisualSignError::MissingData(
-                  concat!(stringify!($param_snake), " not found").into(),
-                ))?,
-            )
+            let idx = $crate::utils::get_index(
+              args,
+              Some($IdxEnum::$ParamVariant as usize),
+            )? as usize;
+
+            let arg = inputs
+              .get(idx)
+              .ok_or(visualsign::errors::VisualSignError::MissingData(
+                concat!(stringify!($param_snake), " not found").into(),
+              ))?;
+
+            $crate::utils::decode_number::<$param_ty>(arg)
           }
         )*
       }
@@ -132,8 +111,8 @@ macro_rules! chain_config {
 
           fn try_from(value: &str) -> Result<Self, Self::Error> {
             match value {
-              $( stringify!($mod_name) => Ok($ModEnum::$ModVariant), )*
-              _ => Err(visualsign::errors::VisualSignError::DecodeError(format!("Unsupported module name: {}", value))),
+              $( stringify!($mod_name) => Ok(Self::$ModVariant), )*
+              _ => Err(visualsign::errors::VisualSignError::DecodeError(format!("Unsupported module name: {value}"))),
             }
           }
         }
