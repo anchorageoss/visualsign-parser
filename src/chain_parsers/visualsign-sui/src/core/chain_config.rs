@@ -1,3 +1,19 @@
+//! Macros for declaring Sui package layouts and generating typed argument indexers.
+//!
+//! These macros are used by integrations/presets to:
+//! - Declare supported `modules` and `functions` for a package
+//! - Generate typed index enums and getters for function arguments
+//! - Produce a `Config` that backs `SuiIntegrationConfig` for `can_handle` checks
+//!
+//! Constraints and notes:
+//! - Index getters decode only primitive numeric types and `bool` that implement `FromLeBytes`.
+//!   They rely on `utils::decode_number`, which rejects `Object` arguments.
+//! - The argument indices are positional in the `SuiProgrammableMoveCall.arguments` array.
+//! - Package ids are stored as string keys via `stringify!(0x...)`. Use the exact on-chain id.
+//! - If a function signature changes (order or types), the generated getters will return
+//!   `VisualSignError` at runtime. Keep configs aligned with the on-chain ABI.
+//! - These macros do not query chain state; they are purely declarative code generators.
+
 #[macro_export]
 macro_rules! __gen_module {
   (
@@ -15,6 +31,7 @@ macro_rules! __gen_module {
       ),* $(,)?
     }
   ) => {
+    /// Function variants for the `$module_name` module.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum $FuncEnum {
       $( $FnVariant ),*
@@ -32,6 +49,7 @@ macro_rules! __gen_module {
     }
 
     impl $FuncEnum {
+      /// Returns the list of supported function names for `$module_name`.
       pub fn get_supported_functions() -> Vec<&'static str> {
         vec![ $( stringify!($fn_snake) ),* ]
       }
@@ -39,6 +57,7 @@ macro_rules! __gen_module {
 
 
     $(
+      /// Index enum for `$fn_snake` arguments and generated typed getters.
       #[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
       pub enum $IdxEnum {
         $( $ParamVariant = $param_idx, )*
@@ -46,6 +65,9 @@ macro_rules! __gen_module {
 
       impl $IdxEnum {
         $(
+          /// Getter for the `$param_snake` argument (position `$param_idx`) as `$param_ty`.
+          ///
+          /// Fails if the argument is missing, not `Pure`, or cannot be decoded as `$param_ty`.
           pub fn $getter_name (
             inputs: &[sui_json_rpc_types::SuiCallArg],
             args: &[sui_json_rpc_types::SuiArgument],
@@ -69,8 +91,13 @@ macro_rules! __gen_module {
   };
 }
 
-// Top-level macro: generates module code, config struct + impl, and static
-// Lazy. You can define multiple packages and modules in one go.
+/// Top-level macro for declaring a package layout and generating:
+/// - Module/function enums and typed argument getters (via `__gen_module!`)
+/// - A `Config` that implements `SuiIntegrationConfig`
+/// - A process-global `OnceLock<Config>` for lazy initialization
+///
+/// Multiple packages can be defined in a single invocation. See existing configs
+/// under `src/presets/*/config.rs` for examples.
 #[macro_export]
 macro_rules! chain_config {
   (
@@ -101,6 +128,7 @@ macro_rules! chain_config {
     ),* $(,)?
   ) => {
     $(
+      /// Module variants for a declared package.
       #[derive(Debug, Clone, Copy, PartialEq, Eq)]
       pub enum $ModEnum {
         $( $ModVariant ),*
@@ -140,11 +168,14 @@ macro_rules! chain_config {
     )*
 
     // 2) Generate Config + impl + static Lazy
+    /// Generated config type with precomputed package → module → function map.
     pub struct $struct_name {
       pub data: $crate::core::SuiIntegrationConfigData,
     }
 
     impl $crate::core::SuiIntegrationConfig for $struct_name {
+      /// Builds the config map. Package ids are stored as string keys using
+      /// `stringify!(0x...)`. Keep these in sync with on-chain deployments.
       fn new() -> Self {
         let mut packages = std::collections::HashMap::new();
 
@@ -175,6 +206,7 @@ macro_rules! chain_config {
       }
     }
 
+    /// Process-global lazy holder for the generated config.
     pub static $static_name: std::sync::OnceLock<$struct_name> = std::sync::OnceLock::new();
   };
 }

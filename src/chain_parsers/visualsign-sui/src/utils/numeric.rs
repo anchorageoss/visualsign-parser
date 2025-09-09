@@ -1,3 +1,13 @@
+//! Helpers for decoding primitive numeric types and bool from Sui `Pure` inputs.
+//!
+//! Constraints and behavior:
+//! - Only `Pure` call args are supported. `Object` arguments return `DecodeError`.
+//! - Supported types implement `FromLeBytes` (`bool`, `u8`, `u16`, `u32`, `u64`, `u128`).
+//! - JSON arrays of bytes are converted to little-endian values; type-tagged values are decoded
+//!   via `SuiJsonValue::to_move_value` when available.
+//! - `u256` is not supported; consider splitting into two `u128` or adding explicit support.
+//! - Errors include precise messages to aid debugging when fixtures or indices go out of sync.
+
 use move_core_types::annotated_value::MoveTypeLayout;
 use move_core_types::language_storage::TypeTag;
 use move_core_types::runtime_value::MoveValue;

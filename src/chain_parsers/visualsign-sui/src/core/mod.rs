@@ -1,3 +1,11 @@
+//! Core types, traits, and orchestration for Sui → VisualSign conversion.
+//!
+//! - `chain_config`: declarative macros for package/module/function layouts and typed getters.
+//! - `commands`: walks transaction commands and dispatches to available visualizers.
+//! - `helper`: chain resolution utilities (module cache adapters, etc.).
+//! - `transaction`: raw decoding and helpers for titles/network/details.
+//! - `visualsign`: public API surface for converting to VisualSign payloads.
+
 mod chain_config;
 mod commands;
 mod helper;
@@ -33,6 +41,8 @@ pub struct SuiIntegrationConfigData {
     pub packages: HashMap<&'static str, HashMap<&'static str, Vec<&'static str>>>,
 }
 
+/// Data source that tells a visualizer whether it can handle a call
+/// based on package id, module name, and function name.
 pub trait SuiIntegrationConfig {
     fn new() -> Self
     where
@@ -40,6 +50,7 @@ pub trait SuiIntegrationConfig {
 
     fn data(&self) -> &SuiIntegrationConfigData;
 
+    /// Returns true if this config declares support for `(package, module, function)`.
     fn can_handle(&self, package: &str, module: &str, function: &str) -> bool {
         self.data()
             .packages
@@ -105,14 +116,17 @@ impl<'a> VisualizerContext<'a> {
 pub trait CommandVisualizer {
     /// Visualizes a specific command in a transaction.
     ///
-    /// Returns `Vec<AnnotatedPayloadField>` if the command can be visualized,
-    /// or `None` if the command is not supported by this visualizer.
+    /// Returns the rendered fields on success. Errors if decoding fails or
+    /// required arguments are missing. Visualizers should be invoked only when
+    /// `can_handle` matches the `(package, module, function)` tuple.
     fn visualize_tx_commands(
         &self,
         context: &VisualizerContext,
     ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError>;
 
     /// Returns the config for the visualizer.
+    ///
+    /// If `None`, `can_handle` will always be false.
     fn get_config(&self) -> Option<&dyn SuiIntegrationConfig>;
 
     /// The identifier for this visualizer.
@@ -129,6 +143,8 @@ pub trait CommandVisualizer {
             return false;
         };
 
+        // NOTE: We match by exact on-chain identifiers. If the contract changes,
+        // update the generated `config.rs` for that integration.
         config.can_handle(&pwc.package.to_hex_literal(), &pwc.module, &pwc.function)
     }
 }

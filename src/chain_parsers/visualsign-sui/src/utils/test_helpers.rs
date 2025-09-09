@@ -1,6 +1,7 @@
 //! Aggregated test fixtures and helpers for protocol visualizers.
 //!
-//! The aggregated runner reduces complexity when testing visualizers.
+//! The aggregated runner reduces complexity when testing visualizers by loading a single
+//! JSON file (`aggregated_test_data.json`) per integration and verifying labeled fields.
 //!
 //! When a visualizer is created, the goal is to verify that specific fields appear with the correct values in the final output.
 //! The JSON file (e.g., `aggregated_test_data.json`) has the following structure:

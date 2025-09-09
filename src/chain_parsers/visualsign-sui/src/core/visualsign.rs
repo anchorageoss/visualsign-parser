@@ -1,3 +1,5 @@
+//! Public conversion entry points and wrapper types for VisualSign on Sui.
+
 use crate::core::commands::decode_commands;
 use crate::core::helper::SuiModuleResolver;
 use crate::core::transaction::{
@@ -54,7 +56,7 @@ impl Transaction for SuiTransactionWrapper {
     }
 }
 
-/// Converter that knows how to format Sui transactions for `VisualSign`
+/// Converter that knows how to format Sui transactions for `VisualSign`.
 pub struct SuiVisualSignConverter;
 
 impl VisualSignConverterFromString<SuiTransactionWrapper> for SuiVisualSignConverter {}
@@ -75,7 +77,7 @@ impl VisualSignConverter<SuiTransactionWrapper> for SuiVisualSignConverter {
     }
 }
 
-/// Convert Sui transaction to visual sign payload
+/// Convert Sui transaction to a VisualSign payload.
 fn convert_to_visual_sign_payload(
     transaction: &TransactionData,
     decode_transfers: bool,
@@ -115,7 +117,7 @@ fn convert_to_visual_sign_payload(
     ))
 }
 
-/// Public API function for ease of use
+/// Public API function for ease of use.
 ///
 /// # Errors
 /// Returns a `VisualSignError` if the transaction cannot be converted into
@@ -128,7 +130,7 @@ pub fn transaction_to_visual_sign(
     SuiVisualSignConverter.to_visual_sign_payload(SuiTransactionWrapper::new(transaction), options)
 }
 
-/// Public API function for string-based transactions
+/// Public API function for string-based transactions.
 ///
 /// # Errors
 /// Returns a `VisualSignError` if the string cannot be decoded into a Sui
