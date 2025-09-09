@@ -1,127 +1,108 @@
-use once_cell::sync::Lazy;
-use std::collections::HashMap;
-use std::fmt::Display;
+#![allow(dead_code)]
 
-use crate::{
-    core::{SuiIntegrationConfig, SuiIntegrationConfigData},
-    utils::{decode_number, get_index},
-};
+crate::chain_config! {
+  config CETUS_CONFIG as Config;
 
-use sui_json_rpc_types::{SuiArgument, SuiCallArg};
-use visualsign::errors::VisualSignError;
-
-// Proposed layout for the macros.
-// chain_config! {
-//     cetus_testnet_package => {
-//         package_id => 0xb2db7142fa83210a7d78d9c12ac49c043b3cbbd482224fea6e3da00aa5a5ae2d,
-//         modules: {
-//             pool_script_v2: {
-//                 swap_b2a(input_amount: u64 => 4, min_output_amount: u64 => 5)
-//             }
-//         }
-//     },
-// };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PoolScriptV2Functions {
-    SwapB2A,
+  cetus_mainnet => {
+      package_id => 0xb2db7142fa83210a7d78d9c12ac49c043b3cbbd482224fea6e3da00aa5a5ae2d,
+      modules as CetusModules: {
+        pool_script as PoolScript => PoolScriptFunctions: {
+          swap_a2b as SwapA2B => PoolScriptSwapA2BIndexes(
+                by_amount_in as ByAmountIn: bool => 3 => get_by_amount_in,
+                amount as Amount: u64 => 4 => get_amount,
+                amount_limit as AmountLimit: u64 => 5 => get_amount_limit,
+                sqrt_price_limit as SqrtPriceLimit: u128 => 6 => get_sqrt_price_limit,
+          ),
+          swap_b2a as SwapB2A => PoolScriptSwapB2AIndexes(
+                by_amount_in as ByAmountIn: bool => 3 => get_by_amount_in,
+                amount as Amount: u64 => 4 => get_amount,
+                amount_limit as AmountLimit: u64 => 5 => get_amount_limit,
+                sqrt_price_limit as SqrtPriceLimit: u128 => 6 => get_sqrt_price_limit,
+          ),
+          swap_a2b_with_partner as SwapA2BWithPartner => PoolScriptSwapA2BWithPartnerIndexes(
+                by_amount_in as ByAmountIn: bool => 4 => get_by_amount_in,
+                amount as Amount: u64 => 5 => get_amount,
+                amount_limit as AmountLimit: u64 => 6 => get_amount_limit,
+                sqrt_price_limit as SqrtPriceLimit: u128 => 7 => get_sqrt_price_limit,
+          ),
+          swap_b2a_with_partner as SwapB2AWithPartner => PoolScriptSwapB2AWithPartnerIndexes(
+                by_amount_in as ByAmountIn: bool => 4 => get_by_amount_in,
+                amount as Amount: u64 => 5 => get_amount,
+                amount_limit as AmountLimit: u64 => 6 => get_amount_limit,
+                sqrt_price_limit as SqrtPriceLimit: u128 => 7 => get_sqrt_price_limit,
+          ),
+          close_position as ClosePosition => PoolScriptClosePositionIndexes(
+                min_amount_a as MinAmountA: u64 => 3 => get_min_amount_a,
+                min_amount_b as MinAmountB: u64 => 4 => get_min_amount_b,
+          ),
+          remove_liquidity as RemoveLiquidity => PoolScriptRemoveLiquidityIndexes(
+                liquidity as Liquidity: u128 => 3 => get_liquidity,
+                min_amount_a as MinAmountA: u64 => 4 => get_min_amount_a,
+                min_amount_b as MinAmountB: u64 => 5 => get_min_amount_b,
+          ),
+          open_position_with_liquidity_with_all as OpenPositionWithLiquidityWithAll => PoolScriptOpenPositionWithLiquidityWithAllIndexes(
+                amount_a as AmountA: u64 => 6 => get_amount_a,
+                amount_b as AmountB: u64 => 7 => get_amount_b,
+                is_fix_a as IsFixA: bool => 8 => get_is_fix_a,
+          ),
+        },
+        pool_script_v2 as PoolScriptV2 => PoolScriptV2Functions: {
+          swap_a2b as SwapA2B => SwapA2BIndexes(
+                by_amount_in as ByAmountIn: bool => 4 => get_by_amount_in,
+                amount as Amount: u64 => 5 => get_amount,
+                amount_limit as AmountLimit: u64 => 6 => get_amount_limit,
+                sqrt_price_limit as SqrtPriceLimit: u128 => 7 => get_sqrt_price_limit,
+          ),
+          swap_b2a as SwapB2A => SwapB2AIndexes(
+                by_amount_in as ByAmountIn: bool => 4 => get_by_amount_in,
+                amount as Amount: u64 => 5 => get_amount,
+                amount_limit as AmountLimit: u64 => 6 => get_amount_limit,
+                sqrt_price_limit as SqrtPriceLimit: u128 => 7 => get_sqrt_price_limit,
+          ),
+          swap_a2b_with_partner as SwapA2BWithPartner => SwapA2BWithPartnerIndexes(
+                by_amount_in as ByAmountIn: bool => 5 => get_by_amount_in,
+                amount as Amount: u64 => 6 => get_amount,
+                amount_limit as AmountLimit: u64 => 7 => get_amount_limit,
+                sqrt_price_limit as SqrtPriceLimit: u128 => 8 => get_sqrt_price_limit,
+          ),
+          swap_b2a_with_partner as SwapB2AWithPartner => SwapB2AWithPartnerIndexes(
+                by_amount_in as ByAmountIn: bool => 5 => get_by_amount_in,
+                amount as Amount: u64 => 6 => get_amount,
+                amount_limit as AmountLimit: u64 => 7 => get_amount_limit,
+                sqrt_price_limit as SqrtPriceLimit: u128 => 8 => get_sqrt_price_limit,
+          ),
+          add_liquidity_by_fix_coin as AddLiquidityByFixCoin => AddLiquidityByFixCoinIndexes(
+                amount_a as AmountA: u64 => 5 => get_amount_a,
+                amount_b as AmountB: u64 => 6 => get_amount_b,
+                is_fix_a as IsFixA: bool => 7 => get_is_fix_a,
+          ),
+          open_position_with_liquidity_by_fix_coin as OpenPositionWithLiquidityByFixCoin => OpenPositionWithLiquidityByFixCoinIndexes(
+                amount_a as AmountA: u64 => 6 => get_amount_a,
+                amount_b as AmountB: u64 => 7 => get_amount_b,
+                is_fix_a as IsFixA: bool => 8 => get_is_fix_a,
+          ),
+          collect_fee as CollectFee => CollectFeeV2Indexes(),
+          collect_reward as CollectReward => CollectRewardV2Indexes(),
+        },
+        pool_script_v3 as PoolScriptV3 => PoolScriptV3Functions: {
+          collect_fee as CollectFee => CollectFeeV3Indexes(),
+          collect_reward as CollectReward => CollectRewardV3Indexes(),
+        },
+        router as Router => RouterFunctions: {
+          swap as Swap => RouterSwapIndexes(
+                is_a2b as IsA2B: bool => 4 => get_is_a2b,
+                by_amount_in as ByAmountIn: bool => 5 => get_by_amount_in,
+                amount as Amount: u64 => 6 => get_amount,
+                sqrt_price_limit as SqrtPriceLimit: u128 => 7 => get_sqrt_price_limit,
+                use_all_coin as UseAllCoin: bool => 8 => get_use_all_coin,
+          ),
+          check_coin_threshold as CheckCoinThreshold => RouterCheckCoinThresholdIndexes(
+                threshold as Threshold: u64 => 1 => get_threshold,
+          ),
+        },
+        utils as Utils => UtilsFunctions: {
+          transfer_coin_to_sender as TransferCoinToSender => UtilsTransferCoinToSenderIndexes()
+        },
+      }
+  },
 }
-
-impl TryFrom<&str> for PoolScriptV2Functions {
-    type Error = String;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "swap_b2a" => Ok(PoolScriptV2Functions::SwapB2A),
-            _ => Err(format!("Unsupported function name: {}", value)),
-        }
-    }
-}
-
-impl Display for PoolScriptV2Functions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl PoolScriptV2Functions {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            PoolScriptV2Functions::SwapB2A => "swap_b2a",
-        }
-    }
-
-    pub fn get_supported_functions() -> Vec<&'static str> {
-        vec![PoolScriptV2Functions::SwapB2A.as_str()]
-    }
-}
-
-impl AsRef<str> for PoolScriptV2Functions {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-
-#[derive(Hash, Eq, PartialEq, Debug, Clone, Copy)]
-pub enum SwapB2AIndexes {
-    InputAmount = 5,
-    MinOutputAmount = 6,
-}
-
-impl SwapB2AIndexes {
-    pub fn get_input_amount(
-        inputs: &[SuiCallArg],
-        args: &[SuiArgument],
-    ) -> Result<u64, VisualSignError> {
-        decode_number::<u64>(
-            inputs
-                .get(get_index(args, Some(SwapB2AIndexes::InputAmount as usize))? as usize)
-                .ok_or(VisualSignError::MissingData(
-                    "Input amount not found".into(),
-                ))?,
-        )
-    }
-
-    pub fn get_min_output_amount(
-        inputs: &[SuiCallArg],
-        args: &[SuiArgument],
-    ) -> Result<u64, VisualSignError> {
-        decode_number::<u64>(
-            inputs
-                .get(get_index(args, Some(SwapB2AIndexes::MinOutputAmount as usize))? as usize)
-                .ok_or(VisualSignError::MissingData(
-                    "Min output amount not found".into(),
-                ))?,
-        )
-    }
-}
-
-pub struct Config {
-    pub data: SuiIntegrationConfigData,
-}
-
-impl SuiIntegrationConfig for Config {
-    fn new() -> Self {
-        let mut modules = HashMap::new();
-        modules.insert(
-            "pool_script_v2",
-            PoolScriptV2Functions::get_supported_functions(),
-        );
-
-        let mut packages = HashMap::new();
-        packages.insert(
-            "0xb2db7142fa83210a7d78d9c12ac49c043b3cbbd482224fea6e3da00aa5a5ae2d",
-            modules,
-        );
-
-        Self {
-            data: SuiIntegrationConfigData { packages },
-        }
-    }
-
-    fn data(&self) -> &SuiIntegrationConfigData {
-        &self.data
-    }
-}
-
-pub static CETUS_CONFIG: Lazy<Config> = Lazy::new(Config::new);

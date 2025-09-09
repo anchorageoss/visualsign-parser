@@ -75,7 +75,7 @@ fn create_tx_type_fields(
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     create_text_field(
         "Transaction Type",
-        &determine_transaction_type_string(block_data),
+        determine_transaction_type_string(block_data),
     )
 }
 

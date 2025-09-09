@@ -1,3 +1,6 @@
+//! Convert Sui transactions into `VisualSign` payloads and visualize protocol-specific commands.
+#![warn(clippy::all, clippy::pedantic)]
+
 mod core;
 mod integrations;
 mod presets;
@@ -9,4 +12,4 @@ pub use core::{
 };
 
 #[allow(unused_imports)]
-pub(crate) use utils::*;
+pub(crate) use utils::truncate_address;

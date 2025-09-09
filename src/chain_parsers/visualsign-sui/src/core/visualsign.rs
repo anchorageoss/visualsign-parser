@@ -26,12 +26,14 @@ pub struct SuiTransactionWrapper {
 }
 
 impl SuiTransactionWrapper {
-    /// Create a new SuiTransactionWrapper
+    /// Create a new `SuiTransactionWrapper`
+    #[must_use]
     pub fn new(transaction: TransactionData) -> Self {
         Self { transaction }
     }
 
     /// Get a reference to the inner transaction
+    #[must_use]
     pub fn inner(&self) -> &TransactionData {
         &self.transaction
     }
@@ -52,7 +54,7 @@ impl Transaction for SuiTransactionWrapper {
     }
 }
 
-/// Converter that knows how to format Sui transactions for VisualSign
+/// Converter that knows how to format Sui transactions for `VisualSign`
 pub struct SuiVisualSignConverter;
 
 impl VisualSignConverterFromString<SuiTransactionWrapper> for SuiVisualSignConverter {}
@@ -103,7 +105,7 @@ fn convert_to_visual_sign_payload(
 
     fields.push(get_tx_details(transaction, &block_data)?.signable_payload_field);
 
-    let title = title.unwrap_or_else(|| determine_transaction_type_string(&block_data));
+    let title = title.unwrap_or_else(|| determine_transaction_type_string(&block_data).to_string());
     Ok(SignablePayload::new(
         0,
         title,
@@ -114,6 +116,11 @@ fn convert_to_visual_sign_payload(
 }
 
 /// Public API function for ease of use
+///
+/// # Errors
+/// Returns a `VisualSignError` if the transaction cannot be converted into
+/// `SuiTransactionBlockData`, if command/transfer decoding fails, or if any
+/// field construction fails during payload building.
 pub fn transaction_to_visual_sign(
     transaction: TransactionData,
     options: VisualSignOptions,
@@ -122,6 +129,11 @@ pub fn transaction_to_visual_sign(
 }
 
 /// Public API function for string-based transactions
+///
+/// # Errors
+/// Returns a `VisualSignError` if the string cannot be decoded into a Sui
+/// transaction (invalid encoding/content) or if payload construction fails
+/// while decoding commands, transfers, or building fields.
 pub fn transaction_string_to_visual_sign(
     transaction_data: &str,
     options: VisualSignOptions,
@@ -132,7 +144,7 @@ pub fn transaction_string_to_visual_sign(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::payload_from_b64;
+    use crate::utils::payload_from_b64;
 
     #[test]
     fn test_sui_transaction_to_vsp() {

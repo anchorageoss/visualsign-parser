@@ -1,6 +1,7 @@
 use base64::Engine;
 
 use visualsign::encodings::SupportedEncodings;
+use visualsign::vsptrait::TransactionParseError;
 
 use sui_json_rpc_types::{
     SuiTransactionBlockData, SuiTransactionBlockDataAPI, SuiTransactionBlockKind,
@@ -11,16 +12,19 @@ use sui_types::transaction::{SenderSignedData, TransactionData};
 pub fn decode_transaction(
     raw_transaction: &str,
     encodings: SupportedEncodings,
-) -> Result<TransactionData, Box<dyn std::error::Error>> {
+) -> Result<TransactionData, TransactionParseError> {
     if raw_transaction.is_empty() {
-        return Err("Transaction is empty".into());
+        return Err(TransactionParseError::DecodeError(
+            "Transaction is empty".into(),
+        ));
     }
 
     let bytes = match encodings {
-        SupportedEncodings::Base64 => {
-            base64::engine::general_purpose::STANDARD.decode(raw_transaction)?
-        }
-        SupportedEncodings::Hex => hex::decode(raw_transaction)?,
+        SupportedEncodings::Base64 => base64::engine::general_purpose::STANDARD
+            .decode(raw_transaction)
+            .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?,
+        SupportedEncodings::Hex => hex::decode(raw_transaction)
+            .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?,
     };
 
     if let Ok(sender_signed_data) = bcs::from_bytes::<SenderSignedData>(&bytes) {
@@ -31,14 +35,14 @@ pub fn decode_transaction(
         return Ok(transaction_data);
     }
 
-    Err(
+    Err(TransactionParseError::DecodeError(
         "Unable to decode transaction data as either `SenderSignedData` or `TransactionData`"
             .into(),
-    )
+    ))
 }
 
 /// Determine transaction title based on type
-pub fn determine_transaction_type_string(tx_data: &SuiTransactionBlockData) -> String {
+pub fn determine_transaction_type_string(tx_data: &SuiTransactionBlockData) -> &'static str {
     match &tx_data.transaction() {
         SuiTransactionBlockKind::ProgrammableTransaction(_) => "Programmable Transaction",
         SuiTransactionBlockKind::ChangeEpoch(_) => "Change Epoch",
@@ -54,7 +58,6 @@ pub fn determine_transaction_type_string(tx_data: &SuiTransactionBlockData) -> S
             "Programmable System Transaction"
         }
     }
-    .to_string()
 }
 
 #[cfg(test)]
@@ -66,7 +69,10 @@ mod tests {
         let result = decode_transaction("", SupportedEncodings::Base64);
 
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "Transaction is empty");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Decode error: Transaction is empty"
+        );
     }
 
     #[test]

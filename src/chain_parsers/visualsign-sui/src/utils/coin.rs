@@ -33,6 +33,17 @@ impl SuiCoin {
     pub fn symbol(&self) -> &str {
         &self.symbol
     }
+
+    pub fn base_unit_symbol(&self) -> &str {
+        if self.address == "0x2"
+            && self.name.eq_ignore_ascii_case("sui")
+            && self.symbol.eq_ignore_ascii_case("SUI")
+        {
+            "MIST"
+        } else {
+            self.symbol()
+        }
+    }
 }
 
 impl std::fmt::Display for SuiCoin {
@@ -61,7 +72,7 @@ impl std::fmt::Display for CoinObject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CoinObject::Sui => write!(f, "Sui"),
-            CoinObject::UnknownObject(s) => write!(f, "Object ID: {}", s),
+            CoinObject::UnknownObject(s) => write!(f, "Object ID: {s}"),
         }
     }
 }

@@ -28,16 +28,16 @@ impl CommandVisualizer for CoinTransferVisualizer {
             ));
         };
 
-        let receiver = resolve_receiver(context.inputs(), receiver_argument)?;
+        let receiver = resolve_receiver(context.inputs(), *receiver_argument)?;
         let objects_sent_to_receiver = objects_to_send
             .iter()
-            .map(|object| resolve_object(context.commands(), context.inputs(), object))
+            .map(|object| resolve_object(context.commands(), context.inputs(), *object))
             .collect::<Result<Vec<CoinObject>, VisualSignError>>()?;
 
         objects_to_send
             .iter()
             .enumerate()
-            .map(|(object_index, object_argument)| visualize_transfer_command(context, receiver, objects_sent_to_receiver.get(object_index).expect("Object to exist as objects_sent_to_receiver should be the same length as objects_to_send"), object_argument))
+            .map(|(object_index, object_argument)| visualize_transfer_command(context, receiver, objects_sent_to_receiver.get(object_index).expect("Object to exist as objects_sent_to_receiver should be the same length as objects_to_send"), *object_argument))
             .collect::<_>()
     }
 
@@ -60,7 +60,7 @@ impl CommandVisualizer for CoinTransferVisualizer {
 
 fn resolve_receiver(
     inputs: &[SuiCallArg],
-    receiver_argument: &SuiArgument,
+    receiver_argument: SuiArgument,
 ) -> Result<SuiAddress, VisualSignError> {
     let receiver_input = inputs
         .get(parse_numeric_argument(receiver_argument)? as usize)
@@ -83,13 +83,13 @@ fn resolve_receiver(
 fn resolve_object(
     commands: &[SuiCommand],
     inputs: &[SuiCallArg],
-    object_argument: &SuiArgument,
+    object_argument: SuiArgument,
 ) -> Result<CoinObject, VisualSignError> {
     match object_argument {
         SuiArgument::GasCoin => Ok(CoinObject::Sui),
         SuiArgument::Input(index) => {
             match inputs
-                .get(*index as usize)
+                .get(index as usize)
                 .ok_or(VisualSignError::MissingData("Input not found".into()))?
             {
                 SuiCallArg::Object(e) => match e {
@@ -107,13 +107,16 @@ fn resolve_object(
         }
         SuiArgument::Result(command_index) | SuiArgument::NestedResult(command_index, _) => {
             match commands
-                .get(*command_index as usize)
+                .get(command_index as usize)
                 .ok_or(VisualSignError::MissingData(
                     "Result command not found".into(),
                 ))? {
                 SuiCommand::SplitCoins(coin_type, _) | SuiCommand::MergeCoins(coin_type, _) => {
-                    resolve_object(commands, inputs, coin_type)
+                    resolve_object(commands, inputs, *coin_type)
                 }
+                // TODO: extended chain_config to parse return results from transaction like this:
+                // https://suivision.xyz/txblock/5QMTpn34NuBvMMAU1LeKhWKSNTMoJEriEier3DA8tjNU
+                SuiCommand::MoveCall(_) => Ok(CoinObject::UnknownObject("Unknown".into())),
                 _ => Err(TransactionParseError::UnsupportedVersion(
                     "Parsing Sui native transfer expected `SplitCoins` or `MergeCoins`".into(),
                 )
@@ -126,7 +129,7 @@ fn resolve_object(
 fn resolve_amount(
     commands: &[SuiCommand],
     inputs: &[SuiCallArg],
-    object_argument: &SuiArgument,
+    object_argument: SuiArgument,
 ) -> Result<Option<u64>, VisualSignError> {
     let SuiArgument::Result(_) = object_argument else {
         return Ok(None);
@@ -139,7 +142,7 @@ fn resolve_amount(
     match command {
         SuiCommand::SplitCoins(_, input_coin_args) if input_coin_args.len() == 1 => {
             let amount_arg = inputs
-                .get(parse_numeric_argument(&input_coin_args[0])? as usize)
+                .get(parse_numeric_argument(input_coin_args[0])? as usize)
                 .ok_or(VisualSignError::MissingData(
                     "Amount argument not found".into(),
                 ))?;
@@ -154,7 +157,7 @@ fn visualize_transfer_command(
     context: &VisualizerContext,
     receiver: SuiAddress,
     object_sent_to_receiver: &CoinObject,
-    object_argument: &SuiArgument,
+    object_argument: SuiArgument,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     let amount = resolve_amount(context.commands(), context.inputs(), object_argument)?;
 
@@ -164,11 +167,11 @@ fn visualize_transfer_command(
                 CoinObject::Sui => {
                     format!("Transfer: {} MIST ({} SUI)", amount, amount / MIST_PER_SUI)
                 }
-                CoinObject::UnknownObject(id) => format!("Transfer: {} {}", amount, id),
+                CoinObject::UnknownObject(id) => format!("Transfer: {amount} {id}"),
             };
 
             (
-                format!("{} MIST", amount),
+                format!("{amount} MIST"),
                 title_text,
                 create_amount_field(
                     "Amount",
@@ -240,8 +243,10 @@ fn visualize_transfer_command(
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::{assert_has_field, payload_from_b64};
+    use crate::utils::payload_from_b64;
+
     use visualsign::SignablePayloadField;
+    use visualsign::test_utils::assert_has_field;
 
     #[test]
     fn test_transfer_commands() {

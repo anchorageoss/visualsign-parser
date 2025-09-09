@@ -13,7 +13,7 @@ pub fn get_index(sui_args: &[SuiArgument], index: Option<usize>) -> Result<u16, 
             .ok_or(VisualSignError::MissingData("No arguments provided".into()))?,
     };
 
-    parse_numeric_argument(arg)
+    parse_numeric_argument(*arg)
 }
 
 /// Gets a specific value from `NestedResult` by argument index and nested index
@@ -40,10 +40,9 @@ pub fn get_nested_result_value(
 }
 
 /// Parses a numeric argument from a Sui argument (`Input` or `Result`)
-pub fn parse_numeric_argument(arg: &SuiArgument) -> Result<u16, VisualSignError> {
+pub fn parse_numeric_argument(arg: SuiArgument) -> Result<u16, VisualSignError> {
     match arg {
-        Input(index) => Ok(*index),
-        SuiArgument::Result(index) => Ok(*index),
+        SuiArgument::Result(index) | Input(index) => Ok(index),
         _ => Err(VisualSignError::DecodeError(
             "Parsing numeric argument from Sui argument (expected `Input` or `Result`)".into(),
         )),

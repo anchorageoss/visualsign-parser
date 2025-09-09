@@ -1,18 +1,18 @@
 mod config;
 
-use config::{NATIVE_STAKING_CONFIG, SuiSystemFunctions};
+use config::{Config, NATIVE_STAKING_CONFIG, SuiSystemFunctions};
 
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
 use crate::utils::{decode_number, get_index, parse_numeric_argument, truncate_address};
 
-use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
+use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand, SuiProgrammableMoveCall};
 use sui_types::base_types::SuiAddress;
-use visualsign::errors::VisualSignError;
-use visualsign::field_builders::{create_address_field, create_text_field};
+
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
-    field_builders::create_amount_field,
+    errors::VisualSignError,
+    field_builders::{create_address_field, create_amount_field, create_text_field},
 };
 
 pub struct SuiNativeStakingVisualizer;
@@ -29,137 +29,142 @@ impl CommandVisualizer for SuiNativeStakingVisualizer {
             ));
         };
 
-        let function = match pwc.function.as_str().try_into() {
-            Ok(function) => function,
-            Err(e) => return Err(VisualSignError::DecodeError(e)),
-        };
-
-        match function {
-            SuiSystemFunctions::AddStake => {
-                let amount = get_stake_amount(context.commands(), context.inputs(), &pwc.arguments)
-                    .unwrap_or_default();
-                let receiver =
-                    get_stake_receiver(context.inputs(), &pwc.arguments).unwrap_or_default();
-
-                {
-                    let (title_text, amount_field) = match amount {
-                        Some(amount) => (
-                            format!("Stake: {} MIST", amount),
-                            create_amount_field("Amount", &amount.to_string(), "MIST")?,
-                        ),
-                        None => (
-                            "Stake Command".to_string(),
-                            create_text_field("Amount", "N/A MIST")?,
-                        ),
-                    };
-
-                    let subtitle_text = format!(
-                        "From {} to validator {}",
-                        truncate_address(&context.sender().to_string()),
-                        truncate_address(&receiver.to_string())
-                    );
-
-                    let condensed = SignablePayloadFieldListLayout {
-                        fields: vec![amount_field.clone()],
-                    };
-
-                    let expanded = SignablePayloadFieldListLayout {
-                        fields: vec![
-                            create_address_field(
-                                "From",
-                                &context.sender().to_string(),
-                                None,
-                                None,
-                                None,
-                                None,
-                            )?,
-                            create_address_field(
-                                "Validator",
-                                &receiver.to_string(),
-                                None,
-                                None,
-                                None,
-                                None,
-                            )?,
-                            amount_field,
-                        ],
-                    };
-
-                    Ok(vec![AnnotatedPayloadField {
-                        static_annotation: None,
-                        dynamic_annotation: None,
-                        signable_payload_field: SignablePayloadField::PreviewLayout {
-                            common: SignablePayloadFieldCommon {
-                                fallback_text: title_text.clone(),
-                                label: "Stake Command".to_string(),
-                            },
-                            preview_layout: SignablePayloadFieldPreviewLayout {
-                                title: Some(SignablePayloadFieldTextV2 { text: title_text }),
-                                subtitle: Some(SignablePayloadFieldTextV2 {
-                                    text: subtitle_text,
-                                }),
-                                condensed: Some(condensed),
-                                expanded: Some(expanded),
-                            },
-                        },
-                    }])
-                }
-            }
-            SuiSystemFunctions::WithdrawStake => {
-                let title_text = "Withdraw Stake".to_string();
-                let subtitle_text =
-                    format!("From {}", truncate_address(&context.sender().to_string()));
-
-                let condensed = SignablePayloadFieldListLayout {
-                    fields: vec![create_address_field(
-                        "From",
-                        &context.sender().to_string(),
-                        None,
-                        None,
-                        None,
-                        None,
-                    )?],
-                };
-
-                let expanded = SignablePayloadFieldListLayout {
-                    fields: vec![create_address_field(
-                        "From",
-                        &context.sender().to_string(),
-                        None,
-                        None,
-                        None,
-                        None,
-                    )?],
-                };
-
-                Ok(vec![AnnotatedPayloadField {
-                    static_annotation: None,
-                    dynamic_annotation: None,
-                    signable_payload_field: SignablePayloadField::PreviewLayout {
-                        common: SignablePayloadFieldCommon {
-                            fallback_text: title_text.clone(),
-                            label: "Withdraw Command".to_string(),
-                        },
-                        preview_layout: SignablePayloadFieldPreviewLayout {
-                            title: Some(SignablePayloadFieldTextV2 { text: title_text }),
-                            subtitle: Some(SignablePayloadFieldTextV2 {
-                                text: subtitle_text,
-                            }),
-                            condensed: Some(condensed),
-                            expanded: Some(expanded),
-                        },
-                    },
-                }])
-            }
+        match pwc.function.as_str().try_into()? {
+            SuiSystemFunctions::AddStake => Self::handle_add_stake(context, pwc),
+            SuiSystemFunctions::WithdrawStake => Self::handle_withdraw_stake(context, pwc),
         }
     }
 
     fn get_config(&self) -> Option<&dyn SuiIntegrationConfig> {
-        Some(&*NATIVE_STAKING_CONFIG)
+        Some(NATIVE_STAKING_CONFIG.get_or_init(Config::new))
     }
 
     fn kind(&self) -> VisualizerKind {
         VisualizerKind::StakingPools("Sui Native Staking")
+    }
+}
+
+impl SuiNativeStakingVisualizer {
+    fn handle_add_stake(
+        context: &VisualizerContext,
+        pwc: &SuiProgrammableMoveCall,
+    ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+        let amount = get_stake_amount(context.commands(), context.inputs(), &pwc.arguments)
+            .unwrap_or_default();
+        let receiver = get_stake_receiver(context.inputs(), &pwc.arguments).unwrap_or_default();
+
+        {
+            let (title_text, amount_field) = match amount {
+                Some(amount) => (
+                    format!("Stake: {amount} MIST"),
+                    create_amount_field("Amount", &amount.to_string(), "MIST")?,
+                ),
+                None => (
+                    "Stake Command".to_string(),
+                    create_text_field("Amount", "N/A MIST")?,
+                ),
+            };
+
+            let subtitle_text = format!(
+                "From {} to validator {}",
+                truncate_address(&context.sender().to_string()),
+                truncate_address(&receiver.to_string())
+            );
+
+            let condensed = SignablePayloadFieldListLayout {
+                fields: vec![amount_field.clone()],
+            };
+
+            let expanded = SignablePayloadFieldListLayout {
+                fields: vec![
+                    create_address_field(
+                        "From",
+                        &context.sender().to_string(),
+                        None,
+                        None,
+                        None,
+                        None,
+                    )?,
+                    create_address_field(
+                        "Validator",
+                        &receiver.to_string(),
+                        None,
+                        None,
+                        None,
+                        None,
+                    )?,
+                    amount_field,
+                ],
+            };
+
+            Ok(vec![AnnotatedPayloadField {
+                static_annotation: None,
+                dynamic_annotation: None,
+                signable_payload_field: SignablePayloadField::PreviewLayout {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: title_text.clone(),
+                        label: "Stake Command".to_string(),
+                    },
+                    preview_layout: SignablePayloadFieldPreviewLayout {
+                        title: Some(SignablePayloadFieldTextV2 { text: title_text }),
+                        subtitle: Some(SignablePayloadFieldTextV2 {
+                            text: subtitle_text,
+                        }),
+                        condensed: Some(condensed),
+                        expanded: Some(expanded),
+                    },
+                },
+            }])
+        }
+    }
+
+    fn handle_withdraw_stake(
+        context: &VisualizerContext,
+        _pwc: &SuiProgrammableMoveCall,
+    ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+        let title_text = "Withdraw Stake".to_string();
+        let subtitle_text = format!("From {}", truncate_address(&context.sender().to_string()));
+
+        let condensed = SignablePayloadFieldListLayout {
+            fields: vec![create_address_field(
+                "From",
+                &context.sender().to_string(),
+                None,
+                None,
+                None,
+                None,
+            )?],
+        };
+
+        let expanded = SignablePayloadFieldListLayout {
+            fields: vec![create_address_field(
+                "From",
+                &context.sender().to_string(),
+                None,
+                None,
+                None,
+                None,
+            )?],
+        };
+
+        Ok(vec![AnnotatedPayloadField {
+            static_annotation: None,
+            dynamic_annotation: None,
+            signable_payload_field: SignablePayloadField::PreviewLayout {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: title_text.clone(),
+                    label: "Withdraw Command".to_string(),
+                },
+                preview_layout: SignablePayloadFieldPreviewLayout {
+                    title: Some(SignablePayloadFieldTextV2 { text: title_text }),
+                    subtitle: Some(SignablePayloadFieldTextV2 {
+                        text: subtitle_text,
+                    }),
+                    condensed: Some(condensed),
+                    expanded: Some(expanded),
+                },
+            },
+        }])
     }
 }
 
@@ -195,7 +200,7 @@ fn get_stake_amount(
     match command {
         SuiCommand::SplitCoins(_, input_coin_args) if input_coin_args.len() == 1 => {
             let amount_arg = inputs
-                .get(parse_numeric_argument(&input_coin_args[0])? as usize)
+                .get(parse_numeric_argument(input_coin_args[0])? as usize)
                 .ok_or(VisualSignError::MissingData(
                     "Amount argument not found".into(),
                 ))?;
@@ -208,7 +213,9 @@ fn get_stake_amount(
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::{assert_has_field, payload_from_b64};
+    use crate::utils::payload_from_b64;
+
+    use visualsign::test_utils::assert_has_field;
 
     #[test]
     fn test_stake_commands() {

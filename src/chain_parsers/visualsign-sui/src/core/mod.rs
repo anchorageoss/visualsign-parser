@@ -1,3 +1,4 @@
+mod chain_config;
 mod commands;
 mod helper;
 mod transaction;
@@ -44,8 +45,7 @@ pub trait SuiIntegrationConfig {
             .packages
             .get(package)
             .and_then(|modules| modules.get(module))
-            .map(|functions| functions.contains(&function))
-            .unwrap_or(false)
+            .is_some_and(|functions| functions.contains(&function))
     }
 }
 
@@ -59,9 +59,9 @@ pub struct VisualizerContext<'a> {
     /// Index of the command to visualize.
     command_index: usize,
     /// All commands in the transaction.
-    commands: &'a Vec<SuiCommand>,
+    commands: &'a [SuiCommand],
     /// All input arguments for the transaction.
-    inputs: &'a Vec<SuiCallArg>,
+    inputs: &'a [SuiCallArg],
 }
 
 impl<'a> VisualizerContext<'a> {
@@ -69,8 +69,8 @@ impl<'a> VisualizerContext<'a> {
     pub fn new(
         sender: &'a SuiAddress,
         command_index: usize,
-        commands: &'a Vec<SuiCommand>,
-        inputs: &'a Vec<SuiCallArg>,
+        commands: &'a [SuiCommand],
+        inputs: &'a [SuiCallArg],
     ) -> Self {
         Self {
             sender,
@@ -91,12 +91,12 @@ impl<'a> VisualizerContext<'a> {
     }
 
     /// Returns a reference to all commands.
-    pub fn commands(&self) -> &Vec<SuiCommand> {
+    pub fn commands(&self) -> &[SuiCommand] {
         self.commands
     }
 
     /// Returns a reference to all inputs.
-    pub fn inputs(&self) -> &Vec<SuiCallArg> {
+    pub fn inputs(&self) -> &[SuiCallArg] {
         self.inputs
     }
 }
@@ -163,7 +163,7 @@ pub fn visualize_with_any(
             context
                 .commands()
                 .get(context.command_index())
-                .map(|c| c.to_string()),
+                .map(std::string::ToString::to_string),
             v.kind()
         );
 

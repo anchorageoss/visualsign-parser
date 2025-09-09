@@ -4,7 +4,9 @@ pub mod encodings;
 pub mod errors;
 pub mod field_builders;
 pub mod registry;
+pub mod test_utils;
 pub mod vsptrait;
+
 // A function to check if a string is empty (used for skip_serializing_if)
 fn is_empty_string(s: &str) -> bool {
     s.is_empty()
