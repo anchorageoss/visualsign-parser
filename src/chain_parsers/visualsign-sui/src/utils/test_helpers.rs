@@ -3,12 +3,46 @@
 //! The aggregated runner reduces complexity when testing visualizers by loading a single
 //! JSON file (`aggregated_test_data.json`) per integration and verifying labeled fields.
 //!
-//! When a visualizer is created, the goal is to verify that specific fields appear with the correct values in the final output.
-//! The JSON file (e.g., `aggregated_test_data.json`) has the following structure:
-//! - `explorer_tx_prefix`: a prefix added to the test context
-//! - `modules`: a map from module names to category maps
-//! - `categories`: a map from category names to operations
-//! - `operations`: a map from operation names to operation data and assertions
+//! When a visualizer is created, the goal is to verify that specific fields appear with the
+//! correct values in the final output. The aggregated fixture (`aggregated_test_data.json`)
+//! is organized as a nested map of modules → categories → operations, and includes enough
+//! metadata for the runner to select the exact command and visualized result to assert.
+//!
+//! JSON structure (high-level):
+//! - `explorer_tx_prefix` (string): prefix used to build human‑readable context (e.g., explorer links)
+//! - `<moduleName>` (object): a group of categories for a Sui package/module family; for each module:
+//!   - `<categoryName>` (object):
+//!     - `label` (string): the expected title/label of the rendered field group
+//!     - `operations` (object): map of `<operationId>` → operation
+//!       - operation fields:
+//!         - `data` (string): base64‑encoded transaction block
+//!         - `command_index` (number): index of the `ProgrammableTransaction` command to visualize
+//!         - `visualize_result_index` (number): index into the visualizer's returned vector to assert
+//!         - `asserts` (object): map of field label → expected value(s)
+//!           - value can be a string (exact match) or an array of strings (exact order and length)
+//!
+//! Minimal example:
+//! ```json
+//! {
+//!   "explorer_tx_prefix": "https://suivision.xyz/txblock/",
+//!   "pool_script": {
+//!     "swap_a2b": {
+//!       "label": "CetusAMM Swap Command",
+//!       "operations": {
+//!         "<tx_digest>": {
+//!           "data": "<base64_transaction>",
+//!           "command_index": 2,
+//!           "visualize_result_index": 0,
+//!           "asserts": {
+//!             "User Address": "0x...",
+//!             "Amount In": "1000"
+//!           }
+//!         }
+//!       }
+//!     }
+//!   }
+//! }
+//! ```
 //!
 //! The data is mainly obtained from the `SuiVision` explorer. The raw format can be found in the Raw JSON tab.
 //!

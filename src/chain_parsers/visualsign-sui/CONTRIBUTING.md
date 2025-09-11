@@ -28,7 +28,8 @@ Thank you for helping expand VisualSign support on Sui. This guide explains how 
 
 4) Add tests with `aggregated_test_data.json`:
    - Follow the format documented in `src/utils/test_helpers.rs`.
-   - Each operation contains a base64-encoded `data` transaction and `asserts` for expected fields.
+   - Structure: modules → categories → operations. Each operation includes `data` (base64 tx),
+     `command_index`, `visualize_result_index`, and `asserts` (string or string array values).
    - In your module tests (in `mod.rs`), call `include_str!("./aggregated_test_data.json")` and pass it to `run_aggregated_fixture`.
 
 5) Build integration wiring: none required.
@@ -44,8 +45,8 @@ Thank you for helping expand VisualSign support on Sui. This guide explains how 
 ### Testing
 
 - Unit tests should use `run_aggregated_fixture` from `src/utils/test_helpers.rs` to assert on the rendered fields.
-- Add a `#[cfg(test)]` section in `mod.rs` to load `aggregated_test_data.json` and run the aggregated test.
-- Ensure tests include enough variety to cover branches in `visualize_tx_commands` and helper handlers.
+- Add a `#[cfg(test)]` section in `mod.rs` to load `aggregated_test_data.json` and run the aggregated test using `include_str!`.
+- Ensure tests include enough variety to cover branches in `visualize_tx_commands`. When multiple fields are rendered, use `visualize_result_index` to select the specific result to assert.
 
 ### Style and hygiene
 
