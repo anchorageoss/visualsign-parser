@@ -31,4 +31,8 @@ pub enum VisualSignError {
     InvalidNumberField(String),
     #[error("Empty field provided")]
     EmptyField(String),
+    #[error("Validation failed: {0}")]
+    ValidationError(String),
+    #[error("Serialization failed: {0}")]
+    SerializationError(String),
 }

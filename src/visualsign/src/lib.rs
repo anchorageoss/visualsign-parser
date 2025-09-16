@@ -1,3 +1,4 @@
+use crate::errors::VisualSignError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 pub mod encodings;
@@ -387,6 +388,56 @@ fn sort_json_alphabetically(value: serde_json::Value) -> serde_json::Value {
         }
         // Other value types (string, number, boolean, null) don't need sorting
         other => other,
+    }
+}
+
+impl SignablePayload {
+    /// Validates that the payload only contains safe ASCII characters to prevent unicode confusion
+    /// This should be called before returning any SignablePayload to ensure consistent character safety
+    /// I understand that this might be overly cautious, but it's better to be safe at launch and incrementally open up unicode support later
+    pub fn validate_charset(&self) -> Result<(), VisualSignError> {
+        let json_str = self.to_json().map_err(|e| {
+            VisualSignError::SerializationError(format!(
+                "Failed to serialize for validation: {}",
+                e
+            ))
+        })?;
+
+        // Check for unicode escapes
+        if json_str.contains("\\u") {
+            return Err(VisualSignError::ValidationError(
+                "JSON output contains unicode escape sequences".to_string(),
+            ));
+        }
+
+        // Use Rust's built-in ASCII validation
+        if !json_str.is_ascii() {
+            return Err(VisualSignError::ValidationError(
+                "JSON output contains non-ASCII characters".to_string(),
+            ));
+        }
+
+        // Additional validation for printable characters
+        for (i, ch) in json_str.char_indices() {
+            if !ch.is_ascii_graphic() && !ch.is_ascii_whitespace() {
+                return Err(VisualSignError::ValidationError(format!(
+                    "JSON output contains non-printable character '{}' (U+{:02X}) at position {}",
+                    ch.escape_default(),
+                    ch as u32,
+                    i
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validates and returns the JSON string, ensuring charset safety
+    pub fn to_validated_json(&self) -> Result<String, VisualSignError> {
+        self.validate_charset()?;
+        self.to_json().map_err(|e| {
+            VisualSignError::SerializationError(format!("Serialization failed: {}", e))
+        })
     }
 }
 

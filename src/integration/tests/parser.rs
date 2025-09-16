@@ -1,6 +1,7 @@
 use generated::health::{AppHealthRequest, AppHealthResponse};
 use generated::parser::{Chain, ParseRequest};
 use integration::TestArgs;
+use tracing;
 
 /// Recursively validates that all fields in expected are present in actual
 /// This catches missing fields but allows extra fields in actual implementation.
@@ -52,6 +53,36 @@ fn validate_json_structure(actual: &serde_json::Value, expected: &serde_json::Va
 /// Validates that actual contains at least all fields from expected (strict subset check)
 fn validate_required_fields_present(actual: &serde_json::Value, expected: &serde_json::Value) {
     validate_json_structure(actual, expected, "");
+}
+
+/// Validates that the JSON string only contains safe ASCII characters to prevent unicode confusion
+fn validate_safe_charset(json_str: &str) {
+    // Check for unicode escapes
+    assert!(
+        !json_str.contains("\\u"),
+        "JSON output contains unicode escape sequences: {}",
+        json_str
+    );
+
+    // Use Rust's built-in ASCII validation - much simpler and more reliable
+    assert!(
+        json_str.is_ascii(),
+        "JSON output contains non-ASCII characters: {}",
+        json_str
+    );
+
+    // Additional validation for printable characters (optional - can be more restrictive)
+    for (i, ch) in json_str.char_indices() {
+        if !ch.is_ascii_graphic() && !ch.is_ascii_whitespace() {
+            panic!(
+                "JSON output contains non-printable character '{}' (U+{:02X}) at position {}: {}",
+                ch.escape_default(),
+                ch as u32,
+                i,
+                &json_str[i.saturating_sub(20)..std::cmp::min(i + 20, json_str.len())]
+            );
+        }
+    }
 }
 
 // XXX: if you're iterating on these tests and the underlying code, make sure you run `cargo build --all`.
@@ -126,7 +157,7 @@ async fn parser_solana_native_transfer_e2e() {
         let solana_tx = visualsign_solana::utils::create_transaction_with_empty_signatures(
             solana_transfer_message,
         );
-        println!("Solana transaction: {}", solana_tx);
+        tracing::debug!("Solana transaction: {}", solana_tx);
         let parse_request = ParseRequest {
             unsigned_payload: solana_tx,
             chain: Chain::Solana as i32,
@@ -233,6 +264,13 @@ async fn parser_solana_native_transfer_e2e() {
         // Verify the transaction contains Solana-specific fields
         let signable_payload: serde_json::Value =
             serde_json::from_str(&parsed_transaction.signable_payload).unwrap();
+
+        // Validate charset safety - no unicode escapes or non-ASCII characters
+        let json_str = &parsed_transaction.signable_payload;
+        validate_safe_charset(json_str);
+
+        tracing::debug!("📄 Emitted JSON for visual inspection:");
+        tracing::debug!("{}", json_str);
 
         // Validate that the parsed transaction contains all expected fields
         validate_required_fields_present(&signable_payload, &expected_sp);

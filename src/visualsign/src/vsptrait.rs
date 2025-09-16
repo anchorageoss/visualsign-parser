@@ -17,6 +17,18 @@ pub trait VisualSignConverter<T: Transaction> {
         transaction: T,
         options: VisualSignOptions,
     ) -> Result<SignablePayload, VisualSignError>;
+
+    /// Convert to VisualSign payload with automatic charset validation
+    /// This method should be used instead of to_visual_sign_payload to ensure charset safety
+    fn to_validated_visual_sign_payload(
+        &self,
+        transaction: T,
+        options: VisualSignOptions,
+    ) -> Result<SignablePayload, VisualSignError> {
+        let payload = self.to_visual_sign_payload(transaction, options)?;
+        payload.validate_charset()?;
+        Ok(payload)
+    }
 }
 
 /// Trait for blockchain transactions that can be converted to VisualSign
@@ -52,14 +64,14 @@ pub trait Transaction: Debug + Clone {
 
 /// Convenience trait for converting from string directly
 pub trait VisualSignConverterFromString<T: Transaction>: VisualSignConverter<T> {
-    /// Convert a transaction string to a VisualSign payload
+    /// Convert a transaction string to a VisualSign payload with charset validation
     fn to_visual_sign_payload_from_string(
         &self,
         transaction_data: &str,
         options: VisualSignOptions,
     ) -> Result<SignablePayload, VisualSignError> {
         let transaction = T::from_string(transaction_data).map_err(VisualSignError::ParseError)?;
-        self.to_visual_sign_payload(transaction, options)
+        self.to_validated_visual_sign_payload(transaction, options)
     }
 }
 

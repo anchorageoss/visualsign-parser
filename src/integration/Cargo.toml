@@ -46,3 +46,4 @@ base64 = "0.22.1"
 
 [dev-dependencies]
 visualsign-solana = { path = "../chain_parsers/visualsign-solana" }
+tracing = { workspace = true }
