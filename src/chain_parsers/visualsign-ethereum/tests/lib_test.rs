@@ -107,7 +107,7 @@ fn test_ethereum_charset_validation() {
                 );
 
                 let json_string = json_result.unwrap();
-                
+
                 // Verify specific unicode escapes are not present
                 let unicode_escapes = vec!["\\u003e", "\\u003c", "\\u0026", "\\u0027", "\\u002b"];
                 for escape in unicode_escapes {
@@ -122,15 +122,18 @@ fn test_ethereum_charset_validation() {
 
                 // Verify the JSON is valid ASCII
                 assert!(
-                    json_string.is_ascii(), 
-                    "Ethereum parser JSON output should be ASCII only for test case '{}'", 
+                    json_string.is_ascii(),
+                    "Ethereum parser JSON output should be ASCII only for test case '{}'",
                     test_name
                 );
             }
             Err(error) => {
                 // If parsing fails, that's okay for this test - we're only testing
                 // that successful parses produce valid charsets
-                eprintln!("Skipping charset validation for test case '{}' due to parse error: {:?}", test_name, error);
+                eprintln!(
+                    "Skipping charset validation for test case '{}' due to parse error: {:?}",
+                    test_name, error
+                );
             }
         }
     }

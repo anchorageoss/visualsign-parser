@@ -35,7 +35,6 @@ mod tests {
             .to_validated_json()
             .expect("Should serialize to JSON with valid charset");
 
-
         tracing::info!("✅ Transaction decoded successfully without unicode escapes");
         tracing::info!("✅ Transaction type: {}", payload.payload_type);
         tracing::info!("✅ Number of fields: {}", payload.fields.len());
