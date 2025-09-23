@@ -65,10 +65,10 @@ mod tests {
             );
         }
 
-        println!("✅ Transaction decoded successfully without unicode escapes");
-        println!("✅ Transaction type: {}", payload.payload_type);
-        println!("✅ Number of fields: {}", payload.fields.len());
-        println!("📄 Emitted JSON for visual inspection:");
-        println!("{}", json_result);
+        tracing::info!("✅ Transaction decoded successfully without unicode escapes");
+        tracing::info!("✅ Transaction type: {}", payload.payload_type);
+        tracing::info!("✅ Number of fields: {}", payload.fields.len());
+        tracing::info!("📄 Emitted JSON for visual inspection:");
+        tracing::info!("{}", json_result);
     }
 }
