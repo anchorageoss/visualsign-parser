@@ -2,7 +2,7 @@ use alloy_primitives::hex;
 use std::fs;
 use std::path::PathBuf;
 use visualsign::vsptrait::VisualSignOptions;
-use visualsign_ethereum::partial_transaction::PartialEthereumTransaction;
+use visualsign_ethereum::partial_transaction::Eip7702TransactionWrapper;
 use visualsign_ethereum::transaction_string_to_visual_sign;
 
 // Helper function to get fixture path
@@ -146,7 +146,7 @@ fn test_ethereum_charset_validation() {
 #[test]
 fn test_empty_data_errors() {
     // Test that empty data returns an error instead of made-up values
-    let empty_result = PartialEthereumTransaction::decode_partial(&[]);
+    let empty_result = Eip7702TransactionWrapper::decode_partial(&[]);
     assert!(
         empty_result.is_err(),
         "Empty data should return error, not made-up values"
@@ -154,7 +154,7 @@ fn test_empty_data_errors() {
 
     // Test that minimal invalid data returns error instead of made-up values
     let minimal_data = vec![0x01, 0x02];
-    let minimal_result = PartialEthereumTransaction::decode_partial(&minimal_data);
+    let minimal_result = Eip7702TransactionWrapper::decode_partial(&minimal_data);
     assert!(
         minimal_result.is_err(),
         "Minimal invalid data should return error, not made-up values"
@@ -162,7 +162,7 @@ fn test_empty_data_errors() {
 
     // Test that completely invalid data returns error
     let invalid_data = vec![0xff; 10]; // All 0xff bytes
-    let invalid_result = PartialEthereumTransaction::decode_partial(&invalid_data);
+    let invalid_result = Eip7702TransactionWrapper::decode_partial(&invalid_data);
     assert!(
         invalid_result.is_err(),
         "Invalid data should return error, not made-up values"
@@ -172,29 +172,45 @@ fn test_empty_data_errors() {
 }
 
 #[test]
-fn test_original_partial_transaction() {
-    // Test the original failing transaction
-    let hex_data = "0xdf1180031482520894f39Fd6e51aad88F6F4ce6aB8827279cffFb922660180c0";
-    let clean_hex = hex_data.strip_prefix("0x").unwrap();
-    let bytes = hex::decode(clean_hex).expect("Valid hex");
+fn test_eip7702_transaction_roundtrip() {
+    // Test that we can create, encode, and decode an EIP-7702 transaction
+    use visualsign_ethereum::partial_transaction::Eip7702TransactionWrapper;
+    use alloy_consensus::TxEip7702;
+    use alloy_primitives::{ChainId, Address, U256, Bytes};
 
-    println!("Testing transaction: {}", hex_data);
-    println!("Bytes: {:?}", bytes);
-    println!("First byte: 0x{:02x} ({})", bytes[0], bytes[0]);
-    println!("Length: {}", bytes.len());
+    // Create a valid EIP-7702 transaction
+    let original_tx = Eip7702TransactionWrapper::from_inner(TxEip7702 {
+        chain_id: ChainId::from(17u64),
+        nonce: 0,
+        max_fee_per_gas: 23_000_000_000u128,
+        max_priority_fee_per_gas: 20_000_000_000u128,
+        gas_limit: 21000,
+        to: Address::from_slice(&hex::decode("f39Fd6e51aad88F6F4ce6aB8827279cffFb92266").unwrap()),
+        value: U256::from(1u64),
+        input: Bytes::new(),
+        access_list: Default::default(),
+        authorization_list: Default::default(),
+    });
 
-    let result = PartialEthereumTransaction::decode_partial(&bytes);
+    // Encode it
+    let encoded = original_tx.encode_partial();
+    let hex_data = format!("0x{}", hex::encode(&encoded));
+    
+    println!("Testing EIP-7702 transaction: {}", hex_data);
+    println!("Encoded length: {}", encoded.len());
+
+    // Decode it back
+    let result = Eip7702TransactionWrapper::decode_partial(&encoded);
     println!("Decode result: {:?}", result);
-
-    // This should succeed, not error
-    assert!(
-        result.is_ok(),
-        "Original partial transaction should decode successfully"
-    );
+    assert!(result.is_ok(), "EIP-7702 transaction should decode successfully");
 
     // Also test the hex function directly
-    use visualsign_ethereum::partial_transaction::decode_partial_transaction_from_hex;
-    let hex_result = decode_partial_transaction_from_hex(hex_data);
+    use visualsign_ethereum::partial_transaction::decode_eip7702_transaction_from_hex;
+    let hex_result = decode_eip7702_transaction_from_hex(&hex_data);
     println!("Hex decode result: {:?}", hex_result);
     assert!(hex_result.is_ok(), "Hex decode should also work");
+    
+    // Verify they're equal
+    assert_eq!(original_tx, result.unwrap());
+    assert_eq!(original_tx, hex_result.unwrap());
 }

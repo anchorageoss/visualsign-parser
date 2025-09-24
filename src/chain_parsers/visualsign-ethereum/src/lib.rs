@@ -299,8 +299,8 @@ pub fn transaction_string_to_visual_sign(
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     if options.partial_parsing {
-        // If partial parsing is enabled, try partial first, then fall back to standard
-        match partial_transaction_string_to_visual_sign(transaction_data, options.clone()) {
+        // If partial parsing is enabled, try EIP-7702 first, then fall back to standard
+        match eip7702_transaction_string_to_visual_sign(transaction_data, options.clone()) {
             Ok(payload) => Ok(payload),
             Err(_) => {
                 // Fall back to standard parsing
@@ -313,16 +313,16 @@ pub fn transaction_string_to_visual_sign(
     }
 }
 
-/// Public API to convert a partial transaction string to a VisualSign payload
-/// This function attempts to decode incomplete transaction data gracefully
-pub fn partial_transaction_string_to_visual_sign(
+/// Public API to convert an EIP-7702 transaction string to a VisualSign payload
+/// This function decodes EIP-7702 transaction data using Alloy's TxEip7702
+pub fn eip7702_transaction_string_to_visual_sign(
     raw_transaction: &str,
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
-    match partial_transaction::decode_partial_transaction_from_hex(raw_transaction) {
-        Ok(partial_tx) => Ok(partial_tx.to_visual_sign_payload(options)),
+    match partial_transaction::decode_eip7702_transaction_from_hex(raw_transaction) {
+        Ok(eip7702_tx) => Ok(eip7702_tx.to_visual_sign_payload(options)),
         Err(e) => Err(VisualSignError::DecodeError(format!(
-            "Failed to decode as partial transaction: {}",
+            "Failed to decode as EIP-7702 transaction: {}",
             e
         ))),
     }
