@@ -253,7 +253,7 @@ fn format_jupiter_swap_instruction(instruction: &JupiterSwapInstruction) -> Stri
             };
 
             format!(
-                "{}: {} {} → {} {} (slippage: {}bps)",
+                "{}: From {} {} To {} {} (slippage: {}bps)",
                 instruction_type,
                 format_token_amount(in_token),
                 format_token_symbol(in_token),
