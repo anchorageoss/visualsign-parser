@@ -256,11 +256,203 @@ Fallback Rendering: If a client doesn't understand a field type, it should fall 
 Security: Implementations should validate the ReplayProtection and EndorsedParamsDigest values
 
 
-#### Extending the Protocol
+## Extending SignablePayloadField Types
 
-New field types can be added to the protocol by:
+The VisualSign Protocol is designed to be extensible, allowing developers to safely add new field types while maintaining backward compatibility and ensuring data integrity.
 
-1. Defining a new type identifier
-2. Specifying the structure for the new field type
-3. Updating client implementations to handle the new field type
-4. Incrementing the protocol version
+### Architecture Overview
+
+The field serialization system uses a **trait-based architecture with runtime verification** that provides multiple layers of protection against incomplete implementations:
+
+```rust
+trait FieldSerializer {
+    fn serialize_to_map(&self) -> Result<BTreeMap<String, Value>, Error>;
+    fn get_expected_fields(&self) -> Vec<&'static str>;
+}
+```
+
+### Key Features
+
+- **🔒 Runtime Verification**: Automatically verifies all expected fields are present during serialization
+- **📝 Alphabetical Ordering**: Fields are automatically sorted alphabetically for consistent output
+- **🚨 Error Detection**: Missing or unexpected fields cause immediate serialization failure with detailed error messages
+- **🧪 Test-Driven**: Comprehensive test suite proves the verification system works correctly
+- **🔄 Extensible**: Adding new field types is straightforward and safe
+
+### How to Add New Field Types
+
+#### 1. Define the Field Structure
+
+First, create the data structure for your new field type:
+
+```rust
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SignablePayloadFieldCurrency {
+    #[serde(rename = "CurrencyCode")]
+    pub currency_code: String,
+    #[serde(rename = "Symbol")]
+    pub symbol: String,
+    #[serde(rename = "ExchangeRate", skip_serializing_if = "Option::is_none")]
+    pub exchange_rate: Option<String>,
+}
+```
+
+#### 2. Add the Enum Variant
+
+Add your new variant to the `SignablePayloadField` enum:
+
+```rust
+pub enum SignablePayloadField {
+    // ... existing variants ...
+
+    #[serde(rename = "currency")]
+    Currency {
+        #[serde(flatten)]
+        common: SignablePayloadFieldCommon,
+        #[serde(rename = "Currency")]
+        currency: SignablePayloadFieldCurrency,
+    },
+}
+```
+
+#### 3. Implement Serialization Logic
+
+Add your field to both required methods in the `FieldSerializer` implementation:
+
+```rust
+impl FieldSerializer for SignablePayloadField {
+    fn serialize_to_map(&self) -> Result<BTreeMap<String, Value>, Error> {
+        let mut fields = HashMap::new();
+        match self {
+            // ... existing variants ...
+
+            SignablePayloadField::Currency { common, currency } => {
+                serialize_field_variant!(fields, "currency", common, ("Currency", currency));
+            },
+        }
+        Ok(fields.into_iter().collect())
+    }
+
+    fn get_expected_fields(&self) -> Vec<&'static str> {
+        let mut base_fields = vec!["FallbackText", "Label", "Type"];
+        match self {
+            // ... existing variants ...
+
+            SignablePayloadField::Currency { .. } => base_fields.push("Currency"),
+        }
+        base_fields.sort();
+        base_fields
+    }
+}
+```
+
+#### 4. Update Helper Methods
+
+Add your variant to the existing helper methods:
+
+```rust
+impl SignablePayloadField {
+    pub fn field_type(&self) -> &str {
+        match self {
+            // ... existing variants ...
+            SignablePayloadField::Currency { .. } => "currency",
+        }
+    }
+
+    // Update other helper methods as needed...
+}
+```
+
+### Runtime Verification System
+
+The system automatically verifies field completeness during serialization:
+
+```rust
+// ✅ Successful serialization - all fields present
+let currency_field = SignablePayloadField::Currency {
+    common: SignablePayloadFieldCommon {
+        fallback_text: "USD ($)".to_string(),
+        label: "Payment Currency".to_string(),
+    },
+    currency: SignablePayloadFieldCurrency {
+        currency_code: "USD".to_string(),
+        symbol: "$".to_string(),
+        exchange_rate: None,
+    },
+};
+
+let json = serde_json::to_string(&currency_field)?;
+// Result: {"Currency":{"CurrencyCode":"USD","Symbol":"$"},"FallbackText":"USD ($)","Label":"Payment Currency","Type":"currency"}
+```
+
+If you forget to serialize a field or have mismatched expectations:
+
+```rust
+// ❌ This would fail with detailed error message:
+// "Missing expected field 'Currency'. Expected: ["Currency", "FallbackText", "Label", "Type"], Actual: ["FallbackText", "Label", "Type"]"
+```
+
+### Comprehensive Testing
+
+The system includes extensive tests that prove the verification works:
+
+```rust
+#[test]
+fn test_new_field_type() {
+    // Test that new field type serializes correctly with verification
+    let field = SignablePayloadField::Currency { /* ... */ };
+
+    // This will succeed only if ALL expected fields are present and correctly serialized
+    let result = serde_json::to_string(&field);
+    assert!(result.is_ok());
+
+    // Verify alphabetical ordering
+    let value: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+    if let serde_json::Value::Object(map) = value {
+        let keys: Vec<_> = map.keys().cloned().collect();
+        // Keys are automatically in alphabetical order
+        assert_eq!(keys, vec!["Currency", "FallbackText", "Label", "Type"]);
+    }
+}
+```
+
+### Benefits of This Approach
+
+1. **🛡️ Defense in Depth**:
+   - **Compile-time**: Exhaustive pattern matching ensures all variants are handled
+   - **Runtime**: Field verification catches missing/incorrect fields
+   - **Test-time**: Comprehensive tests prove the system works
+
+2. **🔍 Clear Error Messages**:
+   - Missing fields are immediately identified with specific field names
+   - Unexpected fields are caught and reported
+   - Detailed error context helps debugging
+
+3. **📊 Consistent Output**:
+   - All fields automatically ordered alphabetically
+   - Consistent JSON structure across all field types
+   - Backward compatibility maintained
+
+4. **🚀 Easy Extension**:
+   - Adding new field types requires minimal code changes
+   - Macro-based approach reduces boilerplate
+   - Impossible to miss required implementation steps
+
+### Migration from Legacy Approach
+
+The new system maintains full backward compatibility while adding safety:
+
+- All existing field types work unchanged
+- JSON output format is identical
+- No breaking changes to API
+- Existing tests continue to pass
+
+### Best Practices
+
+1. **Always test new field types** with the provided verification tests
+2. **Use descriptive field names** that clearly indicate their purpose
+3. **Follow the naming convention** of existing field types
+4. **Document new field types** in this README
+5. **Consider backward compatibility** when designing new field structures
+
+This extensible architecture transforms field extension from a error-prone manual process into a safe, verified, and automatic system that catches mistakes before they can cause issues in production.
