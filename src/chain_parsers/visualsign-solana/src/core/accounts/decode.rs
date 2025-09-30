@@ -323,13 +323,13 @@ mod tests {
         assert_eq!(accounts[1].address, account2.to_string());
         assert_eq!(accounts[1].original_index, 1);
 
-        // 3. Accounts that are writable and not signers (account3 at original index 2)
-        assert!(!accounts[2].is_signer && accounts[2].is_writable);
+        // 3. Accounts that are read-only and not signers (account3 at original index 2)
+        assert!(!accounts[2].is_signer && !accounts[2].is_writable);
         assert_eq!(accounts[2].address, account3.to_string());
         assert_eq!(accounts[2].original_index, 2);
 
-        // 4. Accounts that are read-only and not signers (account4 at original index 3)
-        assert!(!accounts[3].is_signer && !accounts[3].is_writable);
+        // 4. Accounts that are writable and not signers (account4 at original index 3)
+        assert!(!accounts[3].is_signer && accounts[3].is_writable);
         assert_eq!(accounts[3].address, account4.to_string());
         assert_eq!(accounts[3].original_index, 3);
     }
