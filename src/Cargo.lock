@@ -5466,6 +5466,7 @@ dependencies = [
  "bs58 0.5.1",
  "clap",
  "generated",
+ "hex",
  "parser_app",
  "serde",
  "serde_json",
@@ -5476,6 +5477,7 @@ dependencies = [
  "tracing-log 0.2.0",
  "tracing-subscriber",
  "visualsign",
+ "visualsign-ethereum",
  "visualsign-solana",
  "visualsign-unspecified",
 ]
@@ -11200,7 +11202,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "base64 0.22.1",
- "hex",
  "log",
  "serde",
  "serde_json",

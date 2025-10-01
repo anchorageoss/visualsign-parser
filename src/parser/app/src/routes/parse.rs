@@ -31,6 +31,7 @@ pub fn parse(
     let options = VisualSignOptions {
         decode_transfers: true,
         transaction_name: None,
+        partial_parsing: false,
     };
     let registry = create_registry();
     let proto_chain = ProtoChain::from_i32(parse_request.chain)

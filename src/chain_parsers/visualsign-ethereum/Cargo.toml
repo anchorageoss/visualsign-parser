@@ -9,7 +9,6 @@ alloy-primitives = "1.0.20"
 alloy-eips = "1.0.20"
 alloy-rlp = "0.3.12"
 base64 = "0.22.1"
-hex = "0.4.3"
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

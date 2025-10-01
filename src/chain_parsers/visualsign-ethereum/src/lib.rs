@@ -1,5 +1,5 @@
 use alloy_consensus::{Transaction as _, TxType, TypedTransaction};
-use alloy_primitives::{U256, utils::format_units};
+use alloy_primitives::{U256, hex, utils::format_units};
 use alloy_rlp::{Buf, Decodable};
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use visualsign::{
@@ -12,6 +12,7 @@ use visualsign::{
 };
 
 pub mod chains;
+pub mod partial_transaction;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub enum EthereumParserError {
@@ -93,7 +94,16 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
     }
 }
 
-impl VisualSignConverterFromString<EthereumTransactionWrapper> for EthereumVisualSignConverter {}
+impl VisualSignConverterFromString<EthereumTransactionWrapper> for EthereumVisualSignConverter {
+    fn to_visual_sign_payload_from_string(
+        &self,
+        transaction_data: &str,
+        options: VisualSignOptions,
+    ) -> Result<SignablePayload, VisualSignError> {
+        // Use our enhanced function that handles partial parsing
+        transaction_string_to_visual_sign(transaction_data, options)
+    }
+}
 fn decode_transaction_bytes(mut buf: &[u8]) -> Result<TypedTransaction, EthereumParserError> {
     let tx = if buf.is_empty() {
         Err(EthereumParserError::FailedToDecodeTransaction(
@@ -273,12 +283,49 @@ pub fn transaction_to_visual_sign(
     converter.to_visual_sign_payload(wrapper, options)
 }
 
+/// Internal function for standard transaction parsing (no partial parsing)
+fn standard_transaction_parsing(
+    transaction_data: &str,
+    options: VisualSignOptions,
+) -> Result<SignablePayload, VisualSignError> {
+    let transaction = EthereumTransactionWrapper::from_string(transaction_data)
+        .map_err(VisualSignError::ParseError)?;
+    let converter = EthereumVisualSignConverter;
+    converter.to_visual_sign_payload(transaction, options)
+}
+
 pub fn transaction_string_to_visual_sign(
     transaction_data: &str,
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
-    let converter = EthereumVisualSignConverter;
-    converter.to_visual_sign_payload_from_string(transaction_data, options)
+    if options.partial_parsing {
+        // If partial parsing is enabled, try EIP-7702 first, then fall back to standard
+        match eip7702_transaction_string_to_visual_sign(transaction_data, options.clone()) {
+            Ok(payload) => Ok(payload),
+            Err(_) => {
+                // Fall back to standard parsing
+                standard_transaction_parsing(transaction_data, options)
+            }
+        }
+    } else {
+        // Regular parsing - completely unaffected
+        standard_transaction_parsing(transaction_data, options)
+    }
+}
+
+/// Public API to convert an EIP-7702 transaction string to a VisualSign payload
+/// This function decodes EIP-7702 transaction data using Alloy's TxEip7702
+pub fn eip7702_transaction_string_to_visual_sign(
+    raw_transaction: &str,
+    options: VisualSignOptions,
+) -> Result<SignablePayload, VisualSignError> {
+    match partial_transaction::decode_eip7702_transaction_from_hex(raw_transaction) {
+        Ok(eip7702_tx) => Ok(eip7702_tx.to_visual_sign_payload(options)),
+        Err(e) => Err(VisualSignError::DecodeError(format!(
+            "Failed to decode as EIP-7702 transaction: {}",
+            e
+        ))),
+    }
 }
 
 #[cfg(test)]
@@ -445,6 +492,7 @@ mod tests {
         let options = VisualSignOptions {
             decode_transfers: false,
             transaction_name: Some("Custom Transaction Title".to_string()),
+            partial_parsing: false,
         };
         let payload = transaction_to_visual_sign(tx, options).unwrap();
 
@@ -471,7 +519,7 @@ mod tests {
         assert_eq!(
             EthereumTransactionWrapper::from_string("0x123"),
             Err(TransactionParseError::DecodeError(
-                "Failed to decode transaction: Failed to decode hex: Odd number of digits"
+                "Failed to decode transaction: Failed to decode hex: odd number of digits"
                     .to_string()
             )),
         );
@@ -670,6 +718,7 @@ mod tests {
                 VisualSignOptions {
                     decode_transfers: true,
                     transaction_name: Some("Test Transaction".to_string()),
+                    partial_parsing: false,
                 }
             ),
             Ok(SignablePayload::new(

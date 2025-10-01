@@ -8,6 +8,7 @@ pub use crate::errors::{TransactionParseError, VisualSignError};
 pub struct VisualSignOptions {
     pub decode_transfers: bool,
     pub transaction_name: Option<String>,
+    pub partial_parsing: bool,
     // Add more options as needed - we can extend this struct later
 }
 
@@ -256,6 +257,7 @@ mod tests {
         let options = VisualSignOptions {
             decode_transfers: true,
             transaction_name: Some("Custom Transaction".to_string()),
+            partial_parsing: false,
         };
 
         let result = converter.to_visual_sign_payload(transaction, options);

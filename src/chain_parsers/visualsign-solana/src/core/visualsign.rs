@@ -382,6 +382,7 @@ mod tests {
             VisualSignOptions {
                 decode_transfers: true,
                 transaction_name: Some("Solana Transaction".to_string()),
+                partial_parsing: false,
             },
         );
 
@@ -463,6 +464,7 @@ mod tests {
             VisualSignOptions {
                 decode_transfers: true,
                 transaction_name: Some("V0 Transaction".to_string()),
+                partial_parsing: false,
             },
         );
 
@@ -623,6 +625,7 @@ mod tests {
             VisualSignOptions {
                 decode_transfers: true,
                 transaction_name: Some("Legacy Transfer Test".to_string()),
+                partial_parsing: false,
             },
         );
 
@@ -665,6 +668,7 @@ mod tests {
             VisualSignOptions {
                 decode_transfers: true,
                 transaction_name: Some("V0 Transfer Test".to_string()),
+                partial_parsing: false,
             },
         );
 
@@ -791,6 +795,7 @@ mod tests {
                     VisualSignOptions {
                         decode_transfers: true,
                         transaction_name: Some("Manual V0 Transfer Test".to_string()),
+                        partial_parsing: false,
                     },
                 );
 

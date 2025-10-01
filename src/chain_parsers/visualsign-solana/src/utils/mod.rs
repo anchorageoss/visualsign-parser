@@ -142,6 +142,7 @@ pub mod test_utils {
             VisualSignOptions {
                 decode_transfers: true,
                 transaction_name: None,
+                partial_parsing: false,
             },
         )
         .expect("Failed to visualize tx commands")
