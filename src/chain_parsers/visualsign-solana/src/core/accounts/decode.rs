@@ -318,6 +318,64 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_all_account_categories() {
+        // Test decode_accounts with all 4 categories of accounts in proper Solana spec order
+        let writable_signer = Pubkey::new_unique(); // index 0
+        let readonly_signer = Pubkey::new_unique(); // index 1
+        let writable_non_signer = Pubkey::new_unique(); // index 2
+        let readonly_non_signer = Pubkey::new_unique(); // index 3
+
+        // Create message following Solana spec:
+        // - First 2 accounts are signers (indices 0-1)
+        // - Last signer (index 1) is readonly (num_readonly_signed_accounts: 1)
+        // - Last non-signer (index 3) is readonly (num_readonly_unsigned_accounts: 1)
+        let message = Message {
+            header: MessageHeader {
+                num_required_signatures: 2,
+                num_readonly_signed_accounts: 1,
+                num_readonly_unsigned_accounts: 1,
+            },
+            account_keys: vec![
+                writable_signer,
+                readonly_signer,
+                writable_non_signer,
+                readonly_non_signer,
+            ],
+            recent_blockhash: Hash::new_unique(),
+            instructions: vec![],
+        };
+
+        let accounts = decode_accounts(&message).unwrap();
+
+        assert_eq!(accounts.len(), 4);
+
+        // Verify accounts are decoded and ordered correctly per Solana spec:
+        // 1. Writable signers
+        assert_eq!(accounts[0].address, writable_signer.to_string());
+        assert!(accounts[0].is_signer);
+        assert!(accounts[0].is_writable);
+        assert_eq!(accounts[0].original_index, 0);
+
+        // 2. Readonly signers
+        assert_eq!(accounts[1].address, readonly_signer.to_string());
+        assert!(accounts[1].is_signer);
+        assert!(!accounts[1].is_writable);
+        assert_eq!(accounts[1].original_index, 1);
+
+        // 3. Writable non-signers
+        assert_eq!(accounts[2].address, writable_non_signer.to_string());
+        assert!(!accounts[2].is_signer);
+        assert!(accounts[2].is_writable);
+        assert_eq!(accounts[2].original_index, 2);
+
+        // 4. Readonly non-signers
+        assert_eq!(accounts[3].address, readonly_non_signer.to_string());
+        assert!(!accounts[3].is_signer);
+        assert!(!accounts[3].is_writable);
+        assert_eq!(accounts[3].original_index, 3);
+    }
+
+    #[test]
     fn test_accounts_to_payload_fields() {
         let accounts = vec![
             SolanaAccountInfo {
