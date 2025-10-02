@@ -1,0 +1,68 @@
+FROM stagex/pallet-rust:sx2025.06.0@sha256:740b9ed5f2a897d45cafdc806976d84231aa50a64998610750b42a48f8daacab AS build
+
+# Rust configuration
+ENV RUSTFLAGS='-C target-feature=+crt-static'
+ENV CARGOFLAGS='--target x86_64-unknown-linux-musl --no-default-features --locked --release'
+
+# Directory for Rust artifacts
+ENV RELEASE_DIR=/src/target/x86_64-unknown-linux-musl/release
+
+# Load Rust sources - only needed for simulator_enclave and ephemeral file
+ADD src /src
+WORKDIR /src/
+
+# pre-fetch all workspace deps
+RUN cargo fetch
+
+# Build only simulator_enclave (the other two come from existing containers)
+WORKDIR /src/integration
+RUN --network=none <<-EOF
+    set -eu
+    cargo build ${CARGOFLAGS} --bin simulator_enclave
+
+    # Copy simulator_enclave to /rootfs
+    mkdir -p /rootfs/usr/local/bin
+    cp ${RELEASE_DIR}/simulator_enclave /rootfs/usr/local/bin/
+
+    # Copy the ephemeral secret file needed by parser_app
+    mkdir -p /rootfs/etc/parser
+    cp /src/integration/fixtures/ephemeral.secret /rootfs/etc/parser/
+EOF
+
+# Copy the startup script
+ADD scripts/start-parser.sh /rootfs/usr/local/bin/start-parser.sh
+RUN chmod +x /rootfs/usr/local/bin/start-parser.sh
+
+# Copy binaries from existing containers
+FROM anchorageoss-visualsign-parser/parser_host AS host_bin
+FROM anchorageoss-visualsign-parser/parser_app AS app_bin
+
+FROM stagex/core-busybox:1.36.1@sha256:cac5d773db1c69b832d022c469ccf5f52daf223b91166e6866d42d6983a3b374 AS package
+
+# Copy parser_host binary from parser_host container
+COPY --from=host_bin /usr/local/bin/parser_host /usr/local/bin/
+
+# Copy parser_app binary from parser_app container
+COPY --from=app_bin /parser_app /usr/local/bin/
+
+# Copy simulator_enclave, ephemeral file, and startup script from build stage
+COPY --from=build /rootfs/. .
+
+# Set environment defaults for container
+ENV PARSER_HOST=0.0.0.0
+ENV PARSER_PORT=44020
+ENV PARSER_METRICS_PORT=44021
+ENV PARSER_OUTER_SOCKET_PATH=/tmp/outer_parser.sock
+ENV PARSER_INNER_SOCKET_PATH=/tmp/inner_parser.sock
+ENV EPHEMERAL_FILE=/etc/parser/ephemeral.secret
+
+# Override binary locations to use direct paths in container
+ENV PARSER_APP_BIN=/usr/local/bin/parser_app
+ENV SIMULATOR_ENCLAVE_BIN=/usr/local/bin/simulator_enclave
+ENV PARSER_HOST_BIN=/usr/local/bin/parser_host
+
+# Expose the gRPC port and metrics port
+EXPOSE 44020 44021
+
+# Use the startup script as entrypoint
+ENTRYPOINT ["/usr/local/bin/start-parser.sh"]
