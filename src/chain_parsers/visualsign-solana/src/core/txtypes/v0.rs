@@ -6,7 +6,7 @@ use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::transaction::VersionedTransaction;
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
-    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2, 
+    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
     vsptrait::VisualSignError,
 };
 
@@ -201,7 +201,7 @@ pub fn create_address_lookup_table_field(
         .map(|lookup| lookup.account_key.to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    
+
     // Create the expanded fields manually for more detailed view
     let mut expanded_fields = vec![AnnotatedPayloadField {
         signable_payload_field: SignablePayloadField::TextV2 {
