@@ -145,6 +145,7 @@ async fn parser_k8_health() {
 // This is deliberately using a more "high level test" that only handles the native transfer - any chain specific logic is handled by the tests in chain_parsers
 // This allows us to focus on the parser's ability to handle different chain types without getting bogged down in chain-specific libraries
 #[tokio::test]
+#[tracing_test::traced_test]
 async fn parser_solana_native_transfer_e2e() {
     async fn test(test_args: TestArgs) {
         // Base64 encoded Solana transfer transaction
@@ -175,115 +176,143 @@ async fn parser_solana_native_transfer_e2e() {
 
         // this is currently optimized around just being able to copy the json output from parser as-is and pass the eye-test
         let expected_sp = serde_json::json!({
-          "Fields": [
-            {
-              "FallbackText": "Solana",
-              "Label": "Network",
-              "TextV2": {
+    "Fields": [
+        {
+            "FallbackText": "Solana",
+            "Label": "Network",
+            "TextV2": {
                 "Text": "Solana"
-              },
-              "Type": "text_v2"
             },
-            {
-              "FallbackText": "Transfer 1: From HdD2N8HDzNEM6vwAq5mBLiUbgy1P9wyJfbASt93ndDsD To 8jSCrV9xWkmMRSyf6xH3phL7SretagdqP3LRqkUYUp73 For 1000000000",
-              "Label": "Transfer 1",
-              "TextV2": {
+            "Type": "text_v2"
+        },
+        {
+            "FallbackText": "Transfer 1: From HdD2N8HDzNEM6vwAq5mBLiUbgy1P9wyJfbASt93ndDsD To 8jSCrV9xWkmMRSyf6xH3phL7SretagdqP3LRqkUYUp73 For 1000000000",
+            "Label": "Transfer 1",
+            "TextV2": {
                 "Text": "From: HdD2N8HDzNEM6vwAq5mBLiUbgy1P9wyJfbASt93ndDsD\nTo: 8jSCrV9xWkmMRSyf6xH3phL7SretagdqP3LRqkUYUp73\nAmount: 1000000000"
-              },
-              "Type": "text_v2"
             },
-            {
-              "FallbackText": "Program ID: 11111111111111111111111111111111\nData: 0200000000ca9a3b00000000",
-              "Label": "Instruction 1",
-              "PreviewLayout": {
+            "Type": "text_v2"
+        },
+        {
+            "FallbackText": "Program ID: 11111111111111111111111111111111\nData: 0200000000ca9a3b00000000",
+            "Label": "Instruction 1",
+            "PreviewLayout": {
                 "Condensed": {
-                  "Fields": [
-                    {
-                      "FallbackText": "Transfer: 1000000000 lamports",
-                      "Label": "Instruction",
-                      "TextV2": {
-                        "Text": "Transfer: 1000000000 lamports"
-                      },
-                      "Type": "text_v2"
-                    }
-                  ]
+                    "Fields": [
+                        {
+                            "FallbackText": "Transfer: 1000000000 lamports",
+                            "Label": "Instruction",
+                            "TextV2": {
+                                "Text": "Transfer: 1000000000 lamports"
+                            },
+                            "Type": "text_v2"
+                        }
+                    ]
                 },
                 "Expanded": {
-                  "Fields": [
-                    {
-                      "FallbackText": "11111111111111111111111111111111",
-                      "Label": "Program ID",
-                      "TextV2": {
-                        "Text": "11111111111111111111111111111111"
-                      },
-                      "Type": "text_v2"
-                    },
-                    {
-                      "AmountV2": {
-                        "Abbreviation": "lamports",
-                        "Amount": "1000000000"
-                      },
-                      "FallbackText": "1 SOL",
-                      "Label": "Transfer Amount",
-                      "Type": "amount_v2"
-                    },
-                    {
-                      "FallbackText": "0200000000ca9a3b00000000",
-                      "Label": "Raw Data",
-                      "TextV2": {
-                        "Text": "0200000000ca9a3b00000000"
-                      },
-                      "Type": "text_v2"
-                    }
-                  ]
+                    "Fields": [
+                        {
+                            "FallbackText": "11111111111111111111111111111111",
+                            "Label": "Program ID",
+                            "TextV2": {
+                                "Text": "11111111111111111111111111111111"
+                            },
+                            "Type": "text_v2"
+                        },
+                        {
+                            "AmountV2": {
+                                "Abbreviation": "lamports",
+                                "Amount": "1000000000"
+                            },
+                            "FallbackText": "1 SOL",
+                            "Label": "Transfer Amount",
+                            "Type": "amount_v2"
+                        },
+                        {
+                            "FallbackText": "0200000000ca9a3b00000000",
+                            "Label": "Raw Data",
+                            "TextV2": {
+                                "Text": "0200000000ca9a3b00000000"
+                            },
+                            "Type": "text_v2"
+                        }
+                    ]
                 },
                 "Subtitle": {
-                  "Text": ""
+                    "Text": ""
                 },
                 "Title": {
-                  "Text": "Transfer: 1000000000 lamports"
+                    "Text": "Transfer: 1000000000 lamports"
                 }
-              },
-              "Type": "preview_layout"
             },
-            {
-              "FallbackText": "3 accounts",
-              "Label": "Accounts",
-              "ListLayout": {
-                "Fields": [
-                  {
-                    "FallbackText": "Address: 8jSCrV9xWkmMRSyf6xH3phL7SretagdqP3LRqkUYUp73, Signer, Writable",
-                    "Label": "Account",
-                    "TextV2": {
-                      "Text": "Address: 8jSCrV9xWkmMRSyf6xH3phL7SretagdqP3LRqkUYUp73, Signer, Writable"
-                    },
-                    "Type": "text_v2"
-                  },
-                  {
-                    "FallbackText": "Address: HdD2N8HDzNEM6vwAq5mBLiUbgy1P9wyJfbASt93ndDsD, Signer, Writable",
-                    "Label": "Account",
-                    "TextV2": {
-                      "Text": "Address: HdD2N8HDzNEM6vwAq5mBLiUbgy1P9wyJfbASt93ndDsD, Signer, Writable"
-                    },
-                    "Type": "text_v2"
-                  },
-                  {
-                    "FallbackText": "Address: 11111111111111111111111111111111",
-                    "Label": "Account",
-                    "TextV2": {
-                      "Text": "Address: 11111111111111111111111111111111"
-                    },
-                    "Type": "text_v2"
-                  }
-                ]
-              },
-              "Type": "list_layout"
-            }
-          ],
-          "PayloadType": "SolanaTx",
-          "Title": "Solana Transaction",
-          "Version": "0"
-        });
+            "Type": "preview_layout"
+        },
+        {
+            "FallbackText": "8jSCrV9xWkmMRSyf6xH3phL7SretagdqP3LRqkUYUp73[SW], HdD2N8HDzNEM6vwAq5mBLiUbgy1P9wyJfbASt93ndDsD[SW], 11111111111111111111111111111111[R]",
+            "Label": "Accounts",
+            "PreviewLayout": {
+                "Condensed": {
+                    "Fields": [
+                        {
+                            "FallbackText": "2 Signers",
+                            "Label": "Signers",
+                            "TextV2": {
+                                "Text": "2 Signers"
+                            },
+                            "Type": "text_v2"
+                        },
+                        {
+                            "FallbackText": "1 Read Only",
+                            "Label": "Read Only",
+                            "TextV2": {
+                                "Text": "1 Read Only"
+                            },
+                            "Type": "text_v2"
+                        }
+                    ]
+                },
+                "Expanded": {
+                    "Fields": [
+                        {
+                            "FallbackText": "8jSCrV9xWkmMRSyf6xH3phL7SretagdqP3LRqkUYUp73, Signer, Writable",
+                            "Label": "Account",
+                            "TextV2": {
+                                "Text": "8jSCrV9xWkmMRSyf6xH3phL7SretagdqP3LRqkUYUp73, Signer, Writable"
+                            },
+                            "Type": "text_v2"
+                        },
+                        {
+                            "FallbackText": "HdD2N8HDzNEM6vwAq5mBLiUbgy1P9wyJfbASt93ndDsD, Signer, Writable",
+                            "Label": "Account",
+                            "TextV2": {
+                                "Text": "HdD2N8HDzNEM6vwAq5mBLiUbgy1P9wyJfbASt93ndDsD, Signer, Writable"
+                            },
+                            "Type": "text_v2"
+                        },
+                        {
+                            "FallbackText": "11111111111111111111111111111111",
+                            "Label": "Account",
+                            "TextV2": {
+                                "Text": "11111111111111111111111111111111"
+                            },
+                            "Type": "text_v2"
+                        }
+                    ]
+                },
+                "Subtitle": {
+                    "Text": "3 accounts"
+                },
+                "Title": {
+                    "Text": "Accounts"
+                }
+            },
+            "Type": "preview_layout"
+        }
+    ],
+    "PayloadType": "SolanaTx",
+    "Title": "Solana Transaction",
+    "Version": "0"
+});
 
         // Verify the transaction contains Solana-specific fields
         let signable_payload: serde_json::Value =
