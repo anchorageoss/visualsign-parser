@@ -919,4 +919,60 @@ mod tests {
             "Invalid transaction data should fail to parse"
         );
     }
+
+    #[test]
+    fn test_unknown_program_tokenkeg() {
+        // Test case from GitHub issue #76
+        // Transaction with TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA program
+        let tokenkeg_tx = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAEDGtcy7Vc3xB54TVH4H/JNV6GLORFZVW2eiFky1mqlJTJHohT28K37lWNJzHkspHGumVg0rwhDxT5hd/JUEGupaAbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpiz/aiPOGc/sEVBMImlZdQN5iFK0CVj9fTne9d3VuvB0BAgIBACMGAAF5QmVCZ074eW/VU/D+KlEJonY3BgtzkD1DFS0OaNFWDA==";
+
+        let tx_result = SolanaTransactionWrapper::from_string(tokenkeg_tx);
+        assert!(tx_result.is_ok(), "Should parse TokenKeg transaction");
+
+        let tx = tx_result.unwrap();
+        let payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
+            tx,
+            VisualSignOptions {
+                decode_transfers: true,
+                transaction_name: Some("TokenKeg Test".to_string()),
+            },
+        );
+
+        assert!(
+            payload_result.is_ok(),
+            "Should convert TokenKeg transaction to payload"
+        );
+
+        let payload = payload_result.unwrap();
+
+        // Verify we have instruction fields (should not be empty)
+        let instruction_fields: Vec<_> = payload
+            .fields
+            .iter()
+            .filter(|f| f.label().starts_with("Instruction"))
+            .collect();
+
+        assert!(
+            !instruction_fields.is_empty(),
+            "Should have at least one instruction field for TokenKeg program"
+        );
+
+        // Verify we have exactly 1 instruction (as shown in the issue)
+        assert_eq!(
+            instruction_fields.len(),
+            1,
+            "Should have exactly 1 instruction"
+        );
+
+        // Verify the instruction contains the TokenKeg program ID
+        let json_str = payload.to_json().unwrap();
+        assert!(
+            json_str.contains("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+            "Should contain TokenKeg program ID in the output"
+        );
+
+        println!("✅ TokenKeg transaction parsed successfully");
+        println!("Number of instruction fields: {}", instruction_fields.len());
+        println!("JSON output:\n{}", json_str);
+    }
 }

@@ -33,6 +33,8 @@ pub enum VisualSignError {
     EmptyField(String),
     #[error("Validation failed: {0}")]
     ValidationError(String),
+    #[error("Invariant violation: {0}")]
+    InvariantViolation(String),
     #[error("Serialization failed: {0}")]
     SerializationError(String),
 }

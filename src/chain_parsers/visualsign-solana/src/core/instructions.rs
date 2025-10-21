@@ -43,10 +43,10 @@ pub fn decode_instructions(
         })
         .collect();
 
-    instructions
+    let results: Result<Vec<AnnotatedPayloadField>, VisualSignError> = instructions
         .iter()
         .enumerate()
-        .filter_map(|(instruction_index, _)| {
+        .map(|(instruction_index, instruction)| {
             // Create sender account from first account key (typically the fee payer)
             let sender = SolanaAccount {
                 account_key: account_keys[0].to_string(),
@@ -54,13 +54,32 @@ pub fn decode_instructions(
                 writable: false,
             };
 
-            visualize_with_any(
-                &visualizers_refs,
-                &VisualizerContext::new(&sender, instruction_index, &instructions),
-            )
+            let context = VisualizerContext::new(&sender, instruction_index, &instructions);
+
+            // Try to visualize with available visualizers (including unknown_program fallback)
+            visualize_with_any(&visualizers_refs, &context)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "No visualizer available for instruction {} at index {}",
+                        instruction.program_id, instruction_index
+                    )
+                })
+                .map(|viz_result| viz_result.field)
         })
-        .map(|res| res.map(|viz_result| viz_result.field))
-        .collect()
+        .collect();
+
+    let fields = results?;
+
+    // Self-check: ensure we have the same number of instruction fields as input instructions
+    if fields.len() != instructions.len() {
+        return Err(VisualSignError::InvariantViolation(format!(
+            "Instruction count mismatch: expected {} instructions, got {} fields. This should never happen with unknown_program fallback.",
+            instructions.len(),
+            fields.len()
+        )));
+    }
+
+    Ok(fields)
 }
 
 pub fn decode_transfers(
