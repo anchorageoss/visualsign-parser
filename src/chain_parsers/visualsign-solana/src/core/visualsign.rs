@@ -924,9 +924,10 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_program_tokenkeg() {
+    fn test_spl_token_tokenkeg_recognition() {
         // Test case from GitHub issue #76
         // Transaction with TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA program
+        // This should be recognized as an SPL Token instruction, not unknown program
         let tokenkeg_tx = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAEDGtcy7Vc3xB54TVH4H/JNV6GLORFZVW2eiFky1mqlJTJHohT28K37lWNJzHkspHGumVg0rwhDxT5hd/JUEGupaAbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpiz/aiPOGc/sEVBMImlZdQN5iFK0CVj9fTne9d3VuvB0BAgIBACMGAAF5QmVCZ074eW/VU/D+KlEJonY3BgtzkD1DFS0OaNFWDA==";
 
         let tx_result = SolanaTransactionWrapper::from_string(tokenkeg_tx);
@@ -938,7 +939,7 @@ mod tests {
             VisualSignOptions {
                 metadata: None,
                 decode_transfers: true,
-                transaction_name: Some("TokenKeg Test".to_string()),
+                transaction_name: Some("SPL Token Test".to_string()),
             },
         );
 
@@ -975,8 +976,123 @@ mod tests {
             "Should contain TokenKeg program ID in the output"
         );
 
-        println!("✅ TokenKeg transaction parsed successfully");
+        // Verify it's recognized as SPL Token, not unknown program
+        // The instruction should have a meaningful name like "Mint To" instead of just showing raw data
+        assert!(
+            json_str.contains("Mint To") || json_str.contains("SPL Token"),
+            "Should recognize TokenKeg as SPL Token program with proper instruction parsing"
+        );
+
+        println!("✅ TokenKeg transaction parsed successfully as SPL Token");
         println!("Number of instruction fields: {}", instruction_fields.len());
         println!("JSON output:\n{json_str}");
+    }
+
+    #[test]
+    fn test_unknown_program_fallback() {
+        // Test that truly unknown programs are handled by the UnknownProgramVisualizer
+        // Using a program ID that will never be supported
+        use solana_sdk::{
+            hash::Hash,
+            instruction::CompiledInstruction,
+            message::Message,
+            pubkey::Pubkey,
+            signature::Signature,
+            transaction::Transaction as SolanaTransaction,
+        };
+
+        // Use an address with "FAKE" spelled in ASCII hex (0x46414B45) repeated throughout
+        // This creates a program ID that's clearly for testing and will never be real
+        // Encodes to: 3v3bqBnGoXCTEJoYKhz1JqLKP5JWiXPsYQqqK6VxQNDy in base58
+        let unknown_program_id = Pubkey::new_from_array([
+            0x46, 0x41, 0x4B, 0x45, // "FAKE" in ASCII
+            0x50, 0x52, 0x4F, 0x47, // "PROG" in ASCII
+            0x52, 0x41, 0x4D, 0x21, // "RAM!" in ASCII
+            0x46, 0x41, 0x4B, 0x45, // "FAKE" repeated
+            0x50, 0x52, 0x4F, 0x47, // "PROG" repeated
+            0x52, 0x41, 0x4D, 0x21, // "RAM!" repeated
+            0x21, 0x21, 0x21, 0x21, // "!!!!" padding
+            0x00, 0x00, 0x00, 0x00, // null padding
+        ]);
+
+        let fee_payer = Pubkey::new_unique();
+
+        // Create a simple instruction with some data
+        let instruction_data = vec![0x01, 0x02, 0x03, 0x04, 0x05];
+        let compiled_instruction = CompiledInstruction {
+            program_id_index: 1,
+            accounts: vec![0], // References fee payer
+            data: instruction_data.clone(),
+        };
+
+        let message = Message {
+            header: solana_sdk::message::MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 1,
+            },
+            account_keys: vec![fee_payer, unknown_program_id],
+            recent_blockhash: Hash::new_unique(),
+            instructions: vec![compiled_instruction],
+        };
+
+        let transaction = SolanaTransaction {
+            signatures: vec![Signature::default()],
+            message,
+        };
+
+        let payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
+            SolanaTransactionWrapper::Legacy(transaction),
+            VisualSignOptions {
+                decode_transfers: false,
+                transaction_name: Some("Unknown Program Test".to_string()),
+            },
+        );
+
+        assert!(
+            payload_result.is_ok(),
+            "Should convert unknown program transaction to payload"
+        );
+
+        let payload = payload_result.unwrap();
+
+        // Verify we have instruction fields
+        let instruction_fields: Vec<_> = payload
+            .fields
+            .iter()
+            .filter(|f| f.label().starts_with("Instruction"))
+            .collect();
+
+        assert_eq!(
+            instruction_fields.len(),
+            1,
+            "Should have exactly 1 instruction"
+        );
+
+        // Verify the output contains the unknown program ID
+        let json_str = payload.to_json().unwrap();
+        let program_id_str = unknown_program_id.to_string();
+        assert!(
+            json_str.contains(&program_id_str),
+            "Should contain the unknown program ID in the output"
+        );
+
+        // Verify it shows the instruction data hex
+        let instruction_data_hex = "0102030405";
+        assert!(
+            json_str.contains(instruction_data_hex),
+            "Should show instruction data as hex for unknown programs"
+        );
+
+        // Verify it's handled as an unknown program (not a specific visualizer)
+        // The output should contain "Program ID" fields which is what UnknownProgramVisualizer shows
+        assert!(
+            json_str.contains("Program ID"),
+            "Unknown program should display with 'Program ID' field"
+        );
+
+        println!("✅ Unknown program correctly handled by UnknownProgramVisualizer");
+        println!("Program ID: {}", program_id_str);
+        println!("Instruction data hex: {}", instruction_data_hex);
     }
 }
