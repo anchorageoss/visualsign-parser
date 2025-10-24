@@ -20,7 +20,15 @@ struct CheckedTestCase {
     expected_name: &'static str,
     amount: u64,
     decimals: u8,
-    builder: fn(&Pubkey, &Pubkey, &Pubkey, &Pubkey, &Pubkey, u64, u8) -> solana_sdk::instruction::Instruction,
+    builder: fn(
+        &Pubkey,
+        &Pubkey,
+        &Pubkey,
+        &Pubkey,
+        &Pubkey,
+        u64,
+        u8,
+    ) -> solana_sdk::instruction::Instruction,
     variant_check: fn(&TokenInstruction) -> bool,
 }
 
@@ -41,8 +49,17 @@ fn run_amount_test(test: &AmountTestCase) {
     let instruction = (test.builder)(&key1, &key2, &key3, &key4, test.amount);
     let parsed = TokenInstruction::unpack(&instruction.data).unwrap();
 
-    assert!((test.variant_check)(&parsed), "{}: variant mismatch", test.name);
-    assert_eq!(format_token_instruction(&parsed), test.expected_name, "{}: name mismatch", test.name);
+    assert!(
+        (test.variant_check)(&parsed),
+        "{}: variant mismatch",
+        test.name
+    );
+    assert_eq!(
+        format_token_instruction(&parsed),
+        test.expected_name,
+        "{}: name mismatch",
+        test.name
+    );
 
     // Verify amount
     let parsed_amount = match parsed {
@@ -62,11 +79,28 @@ fn run_checked_test(test: &CheckedTestCase) {
     let key4 = Pubkey::new_unique();
     let key5 = Pubkey::new_unique();
 
-    let instruction = (test.builder)(&key1, &key2, &key3, &key4, &key5, test.amount, test.decimals);
+    let instruction = (test.builder)(
+        &key1,
+        &key2,
+        &key3,
+        &key4,
+        &key5,
+        test.amount,
+        test.decimals,
+    );
     let parsed = TokenInstruction::unpack(&instruction.data).unwrap();
 
-    assert!((test.variant_check)(&parsed), "{}: variant mismatch", test.name);
-    assert_eq!(format_token_instruction(&parsed), test.expected_name, "{}: name mismatch", test.name);
+    assert!(
+        (test.variant_check)(&parsed),
+        "{}: variant mismatch",
+        test.name
+    );
+    assert_eq!(
+        format_token_instruction(&parsed),
+        test.expected_name,
+        "{}: name mismatch",
+        test.name
+    );
 
     // Verify amount and decimals
     let (parsed_amount, parsed_decimals) = match parsed {
@@ -77,7 +111,11 @@ fn run_checked_test(test: &CheckedTestCase) {
         _ => panic!("{}: Expected checked instruction", test.name),
     };
     assert_eq!(parsed_amount, test.amount, "{}: amount mismatch", test.name);
-    assert_eq!(parsed_decimals, test.decimals, "{}: decimals mismatch", test.name);
+    assert_eq!(
+        parsed_decimals, test.decimals,
+        "{}: decimals mismatch",
+        test.name
+    );
 }
 
 fn run_simple_test(test: &SimpleTestCase) {
@@ -88,8 +126,17 @@ fn run_simple_test(test: &SimpleTestCase) {
     let instruction = (test.builder)(&key1, &key2, &key3);
     let parsed = TokenInstruction::unpack(&instruction.data).unwrap();
 
-    assert!((test.variant_check)(&parsed), "{}: variant mismatch", test.name);
-    assert_eq!(format_token_instruction(&parsed), test.expected_name, "{}: name mismatch", test.name);
+    assert!(
+        (test.variant_check)(&parsed),
+        "{}: variant mismatch",
+        test.name
+    );
+    assert_eq!(
+        format_token_instruction(&parsed),
+        test.expected_name,
+        "{}: name mismatch",
+        test.name
+    );
 }
 
 #[test]
@@ -100,7 +147,8 @@ fn test_amount_instructions() {
             expected_name: "Transfer",
             amount: 1000,
             builder: |source, dest, owner, _unused, amount| {
-                token_instruction::transfer(&spl_token::id(), source, dest, owner, &[], amount).unwrap()
+                token_instruction::transfer(&spl_token::id(), source, dest, owner, &[], amount)
+                    .unwrap()
             },
             variant_check: |i| matches!(i, TokenInstruction::Transfer { .. }),
         },
@@ -109,7 +157,8 @@ fn test_amount_instructions() {
             expected_name: "Burn",
             amount: 250,
             builder: |account, mint, owner, _unused, amount| {
-                token_instruction::burn(&spl_token::id(), account, mint, owner, &[], amount).unwrap()
+                token_instruction::burn(&spl_token::id(), account, mint, owner, &[], amount)
+                    .unwrap()
             },
             variant_check: |i| matches!(i, TokenInstruction::Burn { .. }),
         },
@@ -118,7 +167,8 @@ fn test_amount_instructions() {
             expected_name: "Approve",
             amount: 10000,
             builder: |source, delegate, owner, _unused, amount| {
-                token_instruction::approve(&spl_token::id(), source, delegate, owner, &[], amount).unwrap()
+                token_instruction::approve(&spl_token::id(), source, delegate, owner, &[], amount)
+                    .unwrap()
             },
             variant_check: |i| matches!(i, TokenInstruction::Approve { .. }),
         },
@@ -138,7 +188,17 @@ fn test_checked_instructions() {
             amount: 5000,
             decimals: 6,
             builder: |source, mint, dest, owner, _unused, amount, decimals| {
-                token_instruction::transfer_checked(&spl_token::id(), source, mint, dest, owner, &[], amount, decimals).unwrap()
+                token_instruction::transfer_checked(
+                    &spl_token::id(),
+                    source,
+                    mint,
+                    dest,
+                    owner,
+                    &[],
+                    amount,
+                    decimals,
+                )
+                .unwrap()
             },
             variant_check: |i| matches!(i, TokenInstruction::TransferChecked { .. }),
         },
@@ -148,7 +208,16 @@ fn test_checked_instructions() {
             amount: 750,
             decimals: 9,
             builder: |account, mint, owner, _unused1, _unused2, amount, decimals| {
-                token_instruction::burn_checked(&spl_token::id(), account, mint, owner, &[], amount, decimals).unwrap()
+                token_instruction::burn_checked(
+                    &spl_token::id(),
+                    account,
+                    mint,
+                    owner,
+                    &[],
+                    amount,
+                    decimals,
+                )
+                .unwrap()
             },
             variant_check: |i| matches!(i, TokenInstruction::BurnChecked { .. }),
         },
@@ -158,7 +227,17 @@ fn test_checked_instructions() {
             amount: 15000,
             decimals: 6,
             builder: |source, mint, delegate, owner, _unused, amount, decimals| {
-                token_instruction::approve_checked(&spl_token::id(), source, mint, delegate, owner, &[], amount, decimals).unwrap()
+                token_instruction::approve_checked(
+                    &spl_token::id(),
+                    source,
+                    mint,
+                    delegate,
+                    owner,
+                    &[],
+                    amount,
+                    decimals,
+                )
+                .unwrap()
             },
             variant_check: |i| matches!(i, TokenInstruction::ApproveChecked { .. }),
         },
@@ -184,7 +263,8 @@ fn test_simple_instructions() {
             name: "CloseAccount",
             expected_name: "Close Account",
             builder: |account, destination, owner| {
-                token_instruction::close_account(&spl_token::id(), account, destination, owner, &[]).unwrap()
+                token_instruction::close_account(&spl_token::id(), account, destination, owner, &[])
+                    .unwrap()
             },
             variant_check: |i| matches!(i, TokenInstruction::CloseAccount),
         },
@@ -192,7 +272,14 @@ fn test_simple_instructions() {
             name: "FreezeAccount",
             expected_name: "Freeze Account",
             builder: |account, mint, freeze_authority| {
-                token_instruction::freeze_account(&spl_token::id(), account, mint, freeze_authority, &[]).unwrap()
+                token_instruction::freeze_account(
+                    &spl_token::id(),
+                    account,
+                    mint,
+                    freeze_authority,
+                    &[],
+                )
+                .unwrap()
             },
             variant_check: |i| matches!(i, TokenInstruction::FreezeAccount),
         },
@@ -200,7 +287,14 @@ fn test_simple_instructions() {
             name: "ThawAccount",
             expected_name: "Thaw Account",
             builder: |account, mint, freeze_authority| {
-                token_instruction::thaw_account(&spl_token::id(), account, mint, freeze_authority, &[]).unwrap()
+                token_instruction::thaw_account(
+                    &spl_token::id(),
+                    account,
+                    mint,
+                    freeze_authority,
+                    &[],
+                )
+                .unwrap()
             },
             variant_check: |i| matches!(i, TokenInstruction::ThawAccount),
         },
@@ -325,10 +419,7 @@ fn test_transfer_visualization_with_addresses() {
             assert_eq!(common.label, "Instruction 1");
 
             // Check title
-            assert_eq!(
-                preview_layout.title.as_ref().unwrap().text,
-                "Transfer"
-            );
+            assert_eq!(preview_layout.title.as_ref().unwrap().text, "Transfer");
 
             // Check that we have expanded fields
             let expanded = preview_layout.expanded.as_ref().unwrap();
@@ -364,15 +455,9 @@ fn test_mint_to_visualization_with_amount() {
     let authority = Pubkey::new_unique();
     let amount = 5000u64;
 
-    let instruction = token_instruction::mint_to(
-        &spl_token::id(),
-        &mint,
-        &account,
-        &authority,
-        &[],
-        amount,
-    )
-    .unwrap();
+    let instruction =
+        token_instruction::mint_to(&spl_token::id(), &mint, &account, &authority, &[], amount)
+            .unwrap();
 
     // Create a context
     let sender = SolanaAccount {
@@ -389,9 +474,7 @@ fn test_mint_to_visualization_with_amount() {
 
     // Verify the result
     match result.signable_payload_field {
-        SignablePayloadField::PreviewLayout {
-            preview_layout, ..
-        } => {
+        SignablePayloadField::PreviewLayout { preview_layout, .. } => {
             // Check title contains amount
             let title = &preview_layout.title.as_ref().unwrap().text;
             assert!(title.contains("Mint To"));
@@ -442,9 +525,7 @@ fn test_freeze_account_visualization() {
 
     // Verify the result
     match result.signable_payload_field {
-        SignablePayloadField::PreviewLayout {
-            preview_layout, ..
-        } => {
+        SignablePayloadField::PreviewLayout { preview_layout, .. } => {
             // Check title
             assert_eq!(
                 preview_layout.title.as_ref().unwrap().text,
@@ -466,14 +547,9 @@ fn test_thaw_account_visualization() {
     let mint = Pubkey::new_unique();
     let freeze_authority = Pubkey::new_unique();
 
-    let instruction = token_instruction::thaw_account(
-        &spl_token::id(),
-        &account,
-        &mint,
-        &freeze_authority,
-        &[],
-    )
-    .unwrap();
+    let instruction =
+        token_instruction::thaw_account(&spl_token::id(), &account, &mint, &freeze_authority, &[])
+            .unwrap();
 
     // Create a context
     let sender = SolanaAccount {
@@ -490,14 +566,9 @@ fn test_thaw_account_visualization() {
 
     // Verify the result
     match result.signable_payload_field {
-        SignablePayloadField::PreviewLayout {
-            preview_layout, ..
-        } => {
+        SignablePayloadField::PreviewLayout { preview_layout, .. } => {
             // Check title
-            assert_eq!(
-                preview_layout.title.as_ref().unwrap().text,
-                "Thaw Account"
-            );
+            assert_eq!(preview_layout.title.as_ref().unwrap().text, "Thaw Account");
 
             // Check expanded fields contain program info
             let expanded = preview_layout.expanded.as_ref().unwrap();
@@ -544,9 +615,7 @@ fn test_transfer_checked_visualization_with_decimals() {
 
     // Verify the result
     match result.signable_payload_field {
-        SignablePayloadField::PreviewLayout {
-            preview_layout, ..
-        } => {
+        SignablePayloadField::PreviewLayout { preview_layout, .. } => {
             // Check title
             let title = &preview_layout.title.as_ref().unwrap().text;
             assert_eq!(title, "Transfer (Checked)");
