@@ -80,9 +80,7 @@ fn create_unknown_program_preview_layout(
         signable_payload_field: SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
                 label: format!("Instruction {}", context.instruction_index() + 1),
-                fallback_text: format!(
-                    "Program ID: {program_id}\nData: {instruction_data_hex}"
-                ),
+                fallback_text: format!("Program ID: {program_id}\nData: {instruction_data_hex}"),
             },
             preview_layout,
         },

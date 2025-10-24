@@ -39,9 +39,7 @@ fn decode_transaction(
 
     // Parse and return the Tron transaction
     transaction::Raw::parse_from_bytes(&bytes).map_err(|e| {
-        TronParserError::FailedToDecodeTransaction(format!(
-            "Failed to parse Tron transaction: {e}"
-        ))
+        TronParserError::FailedToDecodeTransaction(format!("Failed to parse Tron transaction: {e}"))
     })
 }
 

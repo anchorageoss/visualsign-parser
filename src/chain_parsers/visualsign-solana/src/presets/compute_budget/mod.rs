@@ -110,9 +110,7 @@ fn format_compute_budget_instruction(instruction: &ComputeBudgetInstruction) -> 
             format!("Set Compute Unit Limit: {units} units")
         }
         ComputeBudgetInstruction::SetComputeUnitPrice(micro_lamports) => {
-            format!(
-                "Set Compute Unit Price: {micro_lamports} micro-lamports per compute unit"
-            )
+            format!("Set Compute Unit Price: {micro_lamports} micro-lamports per compute unit")
         }
         ComputeBudgetInstruction::SetLoadedAccountsDataSizeLimit(bytes) => {
             format!("Set Loaded Accounts Data Size Limit: {bytes} bytes")

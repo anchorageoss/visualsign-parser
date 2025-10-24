@@ -156,15 +156,11 @@ fn decode_transaction(
                 .strip_prefix("0x")
                 .unwrap_or(raw_transaction);
             hex::decode(clean_hex).map_err(|e| {
-                EthereumParserError::FailedToDecodeTransaction(format!(
-                    "Failed to decode hex: {e}"
-                ))
+                EthereumParserError::FailedToDecodeTransaction(format!("Failed to decode hex: {e}"))
             })?
         }
         SupportedEncodings::Base64 => b64.decode(raw_transaction).map_err(|e| {
-            EthereumParserError::FailedToDecodeTransaction(format!(
-                "Failed to decode base64: {e}"
-            ))
+            EthereumParserError::FailedToDecodeTransaction(format!("Failed to decode base64: {e}"))
         })?,
     };
     decode_transaction_bytes(&bytes)

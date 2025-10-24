@@ -33,9 +33,7 @@ mod tests {
                         transaction_name: Some(description.to_string()),
                     },
                 )
-                .unwrap_or_else(|e| {
-                    panic!("Failed to convert {description} to payload: {e:?}")
-                });
+                .unwrap_or_else(|e| panic!("Failed to convert {description} to payload: {e:?}"));
 
             // Test charset validation
             let validation_result = payload.validate_charset();

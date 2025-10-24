@@ -22,9 +22,9 @@ pub fn system_instruction_label(instruction: &SystemInstruction) -> String {
         SystemInstruction::AllocateWithSeed { owner, .. } => {
             format!("Allocate With Seed (owner: {owner})")
         }
-        SystemInstruction::AssignWithSeed { base, seed, owner } => format!(
-            "Assign With Seed (base: {base}, seed: {seed}, owner: {owner})"
-        ),
+        SystemInstruction::AssignWithSeed { base, seed, owner } => {
+            format!("Assign With Seed (base: {base}, seed: {seed}, owner: {owner})")
+        }
         SystemInstruction::TransferWithSeed { from_owner, .. } => {
             format!("Transfer With Seed (from_owner: {from_owner})")
         }
