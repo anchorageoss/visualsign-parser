@@ -30,7 +30,7 @@ impl InstructionVisualizer for SplTokenVisualizer {
             .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
 
         let token_instruction = TokenInstruction::unpack(&instruction.data).map_err(|e| {
-            VisualSignError::DecodeError(format!("Failed to unpack SPL token instruction: {}", e))
+            VisualSignError::DecodeError(format!("Failed to unpack SPL token instruction: {e}"))
         })?;
 
         create_token_preview_layout(&token_instruction, instruction, context)
@@ -52,7 +52,7 @@ fn create_token_preview_layout(
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     match token_instruction {
         TokenInstruction::MintTo { amount } => {
-            let instruction_name = format!("Mint To: {}", amount);
+            let instruction_name = format!("Mint To: {amount}");
 
             let condensed_fields = vec![create_text_field("Instruction", &instruction_name)?];
 
@@ -72,7 +72,7 @@ fn create_token_preview_layout(
             )
         }
         TokenInstruction::MintToChecked { amount, decimals } => {
-            let instruction_name = format!("Mint To: {} (decimals: {})", amount, decimals);
+            let instruction_name = format!("Mint To: {amount} (decimals: {decimals})");
 
             let condensed_fields = vec![create_text_field("Instruction", &instruction_name)?];
 

@@ -993,12 +993,8 @@ mod tests {
         // Test that truly unknown programs are handled by the UnknownProgramVisualizer
         // Using a program ID that will never be supported
         use solana_sdk::{
-            hash::Hash,
-            instruction::CompiledInstruction,
-            message::Message,
-            pubkey::Pubkey,
-            signature::Signature,
-            transaction::Transaction as SolanaTransaction,
+            hash::Hash, instruction::CompiledInstruction, message::Message, pubkey::Pubkey,
+            signature::Signature, transaction::Transaction as SolanaTransaction,
         };
 
         // Use an address with "FAKE" spelled in ASCII hex (0x46414B45) repeated throughout
@@ -1092,7 +1088,7 @@ mod tests {
         );
 
         println!("✅ Unknown program correctly handled by UnknownProgramVisualizer");
-        println!("Program ID: {}", program_id_str);
-        println!("Instruction data hex: {}", instruction_data_hex);
+        println!("Program ID: {program_id_str}");
+        println!("Instruction data hex: {instruction_data_hex}");
     }
 }
