@@ -176,8 +176,8 @@ fn format_token_instruction(instruction: &TokenInstruction) -> String {
         TokenInstruction::ApproveChecked { .. } => "Approve (Checked)".to_string(),
         TokenInstruction::Revoke => "Revoke".to_string(),
         TokenInstruction::SetAuthority { .. } => "Set Authority".to_string(),
-        TokenInstruction::MintTo { .. } => "Mint To".to_string(),
-        TokenInstruction::MintToChecked { .. } => "Mint To (Checked)".to_string(),
+        // Note: MintTo and MintToChecked are handled specially in create_token_preview_layout
+        // and never reach this function, so they are intentionally omitted here
         TokenInstruction::Burn { .. } => "Burn".to_string(),
         TokenInstruction::BurnChecked { .. } => "Burn (Checked)".to_string(),
         TokenInstruction::CloseAccount => "Close Account".to_string(),
@@ -188,5 +188,12 @@ fn format_token_instruction(instruction: &TokenInstruction) -> String {
         TokenInstruction::InitializeImmutableOwner => "Initialize Immutable Owner".to_string(),
         TokenInstruction::AmountToUiAmount { .. } => "Amount To UI Amount".to_string(),
         TokenInstruction::UiAmountToAmount { .. } => "UI Amount To Amount".to_string(),
+        // These cases are handled specially above and should never reach here
+        TokenInstruction::MintTo { .. } | TokenInstruction::MintToChecked { .. } => {
+            unreachable!("MintTo instructions are handled specially in create_token_preview_layout")
+        }
     }
 }
+
+#[cfg(test)]
+mod tests;
