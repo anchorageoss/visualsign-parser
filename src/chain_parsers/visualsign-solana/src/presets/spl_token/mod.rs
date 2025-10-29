@@ -7,7 +7,8 @@ use crate::core::{
     InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
 };
 use config::SplTokenConfig;
-use spl_token::instruction::TokenInstruction;
+use solana_program::program_option::COption;
+use spl_token::instruction::{AuthorityType, TokenInstruction};
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::*;
 use visualsign::{
@@ -45,6 +46,22 @@ impl InstructionVisualizer for SplTokenVisualizer {
     }
 }
 
+fn format_authority_type(authority_type: &AuthorityType) -> &'static str {
+    match authority_type {
+        AuthorityType::MintTokens => "Mint Tokens",
+        AuthorityType::FreezeAccount => "Freeze Account",
+        AuthorityType::AccountOwner => "Account Owner",
+        AuthorityType::CloseAccount => "Close Account",
+    }
+}
+
+fn format_coption_pubkey(coption: &COption<solana_sdk::pubkey::Pubkey>) -> String {
+    match coption {
+        COption::Some(pubkey) => pubkey.to_string(),
+        COption::None => "None".to_string(),
+    }
+}
+
 fn create_token_preview_layout(
     token_instruction: &TokenInstruction,
     instruction: &solana_sdk::instruction::Instruction,
@@ -56,12 +73,26 @@ fn create_token_preview_layout(
 
             let condensed_fields = vec![create_text_field("Instruction", &instruction_name)?];
 
-            let expanded_fields = vec![
+            let mut expanded_fields = vec![
                 create_text_field("Program ID", &instruction.program_id.to_string())?,
                 create_text_field("Instruction", "Mint To")?,
                 create_text_field("Amount", &amount.to_string())?,
-                create_text_field("Raw Data", &hex::encode(&instruction.data))?,
             ];
+
+            // MintTo accounts: [0] mint, [1] destination account, [2] mint authority
+            if let Some(mint_account) = instruction.accounts.get(0) {
+                expanded_fields.push(create_text_field("mint", &mint_account.pubkey.to_string())?);
+            }
+            if let Some(destination) = instruction.accounts.get(1) {
+                expanded_fields.push(create_text_field("account", &destination.pubkey.to_string())?);
+            }
+            if let Some(authority) = instruction.accounts.get(2) {
+                expanded_fields.push(create_text_field("mintAuthority", &authority.pubkey.to_string())?);
+            }
+
+            expanded_fields.push(create_text_field("Raw Data", &hex::encode(&instruction.data))?);
+
+            let expanded_fields = expanded_fields;
 
             create_preview_layout_field(
                 &instruction_name,
@@ -76,16 +107,259 @@ fn create_token_preview_layout(
 
             let condensed_fields = vec![create_text_field("Instruction", &instruction_name)?];
 
-            let expanded_fields = vec![
+            let mut expanded_fields = vec![
                 create_text_field("Program ID", &instruction.program_id.to_string())?,
                 create_text_field("Instruction", "Mint To (Checked)")?,
                 create_text_field("Amount", &amount.to_string())?,
                 create_text_field("Decimals", &decimals.to_string())?,
-                create_text_field("Raw Data", &hex::encode(&instruction.data))?,
             ];
+
+            // MintToChecked accounts: [0] mint, [1] destination account, [2] mint authority
+            if let Some(mint_account) = instruction.accounts.get(0) {
+                expanded_fields.push(create_text_field("mint", &mint_account.pubkey.to_string())?);
+            }
+            if let Some(destination) = instruction.accounts.get(1) {
+                expanded_fields.push(create_text_field("account", &destination.pubkey.to_string())?);
+            }
+            if let Some(authority) = instruction.accounts.get(2) {
+                expanded_fields.push(create_text_field("mintAuthority", &authority.pubkey.to_string())?);
+            }
+
+            expanded_fields.push(create_text_field("Raw Data", &hex::encode(&instruction.data))?);
+
+            let expanded_fields = expanded_fields;
 
             create_preview_layout_field(
                 &instruction_name,
+                condensed_fields,
+                expanded_fields,
+                instruction,
+                context,
+            )
+        }
+        TokenInstruction::SetAuthority {
+            authority_type,
+            new_authority,
+        } => {
+            let authority_type_str = format_authority_type(authority_type);
+            let new_authority_str = format_coption_pubkey(new_authority);
+            let instruction_name = format!("Set Authority: {}", authority_type_str);
+
+            let condensed_fields = vec![create_text_field("Instruction", &instruction_name)?];
+
+            let mut expanded_fields = vec![
+                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Instruction", "Set Authority")?,
+                create_text_field("Authority Type", authority_type_str)?,
+                create_text_field("New Authority", &new_authority_str)?,
+            ];
+
+            // SetAuthority accounts: [0] account whose authority is being set, [1] current authority
+            if let Some(account) = instruction.accounts.get(0) {
+                expanded_fields.push(create_text_field("Account", &account.pubkey.to_string())?);
+            }
+
+            expanded_fields.push(create_text_field("Raw Data", &hex::encode(&instruction.data))?);
+
+            let expanded_fields = expanded_fields;
+
+            create_preview_layout_field(
+                &instruction_name,
+                condensed_fields,
+                expanded_fields,
+                instruction,
+                context,
+            )
+        }
+        TokenInstruction::Transfer { amount } => {
+            let instruction_name = "Transfer";
+
+            let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
+
+            let mut expanded_fields = vec![
+                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Instruction", instruction_name)?,
+                create_text_field("Amount", &amount.to_string())?,
+            ];
+
+            // Transfer accounts: [0] source account, [1] destination account, [2] owner
+            if let Some(source) = instruction.accounts.get(0) {
+                expanded_fields.push(create_text_field("Source", &source.pubkey.to_string())?);
+            }
+            if let Some(destination) = instruction.accounts.get(1) {
+                expanded_fields.push(create_text_field("Destination", &destination.pubkey.to_string())?);
+            }
+
+            expanded_fields.push(create_text_field("Raw Data", &hex::encode(&instruction.data))?);
+
+            let expanded_fields = expanded_fields;
+
+            create_preview_layout_field(
+                instruction_name,
+                condensed_fields,
+                expanded_fields,
+                instruction,
+                context,
+            )
+        }
+        TokenInstruction::TransferChecked { amount, decimals } => {
+            let instruction_name = "Transfer (Checked)";
+
+            let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
+
+            let mut expanded_fields = vec![
+                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Instruction", instruction_name)?,
+                create_text_field("Amount", &amount.to_string())?,
+                create_text_field("Decimals", &decimals.to_string())?,
+            ];
+
+            // TransferChecked accounts: [0] source account, [1] mint, [2] destination account, [3] owner
+            if let Some(source) = instruction.accounts.get(0) {
+                expanded_fields.push(create_text_field("Source", &source.pubkey.to_string())?);
+            }
+            if let Some(mint) = instruction.accounts.get(1) {
+                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+            }
+            if let Some(destination) = instruction.accounts.get(2) {
+                expanded_fields.push(create_text_field("Destination", &destination.pubkey.to_string())?);
+            }
+
+            expanded_fields.push(create_text_field("Raw Data", &hex::encode(&instruction.data))?);
+
+            let expanded_fields = expanded_fields;
+
+            create_preview_layout_field(
+                instruction_name,
+                condensed_fields,
+                expanded_fields,
+                instruction,
+                context,
+            )
+        }
+        TokenInstruction::Burn { amount } => {
+            let instruction_name = "Burn";
+
+            let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
+
+            let mut expanded_fields = vec![
+                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Instruction", instruction_name)?,
+                create_text_field("Amount", &amount.to_string())?,
+            ];
+
+            // Burn accounts: [0] token account to burn from, [1] mint, [2] owner
+            if let Some(account) = instruction.accounts.get(0) {
+                expanded_fields.push(create_text_field("Account", &account.pubkey.to_string())?);
+            }
+            if let Some(mint) = instruction.accounts.get(1) {
+                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+            }
+
+            expanded_fields.push(create_text_field("Raw Data", &hex::encode(&instruction.data))?);
+
+            let expanded_fields = expanded_fields;
+
+            create_preview_layout_field(
+                instruction_name,
+                condensed_fields,
+                expanded_fields,
+                instruction,
+                context,
+            )
+        }
+        TokenInstruction::BurnChecked { amount, decimals } => {
+            let instruction_name = "Burn (Checked)";
+
+            let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
+
+            let mut expanded_fields = vec![
+                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Instruction", instruction_name)?,
+                create_text_field("Amount", &amount.to_string())?,
+                create_text_field("Decimals", &decimals.to_string())?,
+            ];
+
+            // BurnChecked accounts: [0] token account to burn from, [1] mint, [2] owner
+            if let Some(account) = instruction.accounts.get(0) {
+                expanded_fields.push(create_text_field("Account", &account.pubkey.to_string())?);
+            }
+            if let Some(mint) = instruction.accounts.get(1) {
+                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+            }
+
+            expanded_fields.push(create_text_field("Raw Data", &hex::encode(&instruction.data))?);
+
+            let expanded_fields = expanded_fields;
+
+            create_preview_layout_field(
+                instruction_name,
+                condensed_fields,
+                expanded_fields,
+                instruction,
+                context,
+            )
+        }
+        TokenInstruction::Approve { amount } => {
+            let instruction_name = "Approve";
+
+            let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
+
+            let mut expanded_fields = vec![
+                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Instruction", instruction_name)?,
+                create_text_field("Amount", &amount.to_string())?,
+            ];
+
+            // Approve accounts: [0] source account, [1] delegate, [2] owner
+            if let Some(source) = instruction.accounts.get(0) {
+                expanded_fields.push(create_text_field("Source", &source.pubkey.to_string())?);
+            }
+            if let Some(delegate) = instruction.accounts.get(1) {
+                expanded_fields.push(create_text_field("Delegate", &delegate.pubkey.to_string())?);
+            }
+
+            expanded_fields.push(create_text_field("Raw Data", &hex::encode(&instruction.data))?);
+
+            let expanded_fields = expanded_fields;
+
+            create_preview_layout_field(
+                instruction_name,
+                condensed_fields,
+                expanded_fields,
+                instruction,
+                context,
+            )
+        }
+        TokenInstruction::ApproveChecked { amount, decimals } => {
+            let instruction_name = "Approve (Checked)";
+
+            let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
+
+            let mut expanded_fields = vec![
+                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Instruction", instruction_name)?,
+                create_text_field("Amount", &amount.to_string())?,
+                create_text_field("Decimals", &decimals.to_string())?,
+            ];
+
+            // ApproveChecked accounts: [0] source account, [1] mint, [2] delegate, [3] owner
+            if let Some(source) = instruction.accounts.get(0) {
+                expanded_fields.push(create_text_field("Source", &source.pubkey.to_string())?);
+            }
+            if let Some(mint) = instruction.accounts.get(1) {
+                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+            }
+            if let Some(delegate) = instruction.accounts.get(2) {
+                expanded_fields.push(create_text_field("Delegate", &delegate.pubkey.to_string())?);
+            }
+
+            expanded_fields.push(create_text_field("Raw Data", &hex::encode(&instruction.data))?);
+
+            let expanded_fields = expanded_fields;
+
+            create_preview_layout_field(
+                instruction_name,
                 condensed_fields,
                 expanded_fields,
                 instruction,
