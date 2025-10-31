@@ -1,6 +1,7 @@
 use generated::health::{AppHealthRequest, AppHealthResponse};
 use generated::parser::{Chain, ParseRequest};
 use integration::TestArgs;
+use tonic::Code;
 
 /// Recursively validates that all fields in expected are present in actual
 /// This catches missing fields but allows extra fields in actual implementation.
@@ -107,6 +108,29 @@ async fn parser_e2e() {
             parsed_transaction.signable_payload,
             "{\"Fields\":[{\"FallbackText\":\"Unspecified Chain\",\"Label\":\"Network\",\"TextV2\":{\"Text\":\"Unspecified Chain\"},\"Type\":\"text_v2\"},{\"FallbackText\":\"Raw Data\",\"Label\":\"Raw Data\",\"TextV2\":{\"Text\":\"unsignedpayload\"},\"Type\":\"text_v2\"}],\"PayloadType\":\"fill in parsed signable payload\",\"Title\":\"Unspecified Transaction\",\"Version\":\"0\"}"
         );
+    }
+
+    integration::Builder::new().execute(test).await
+}
+
+#[tokio::test]
+async fn propagates_grpc_errors() {
+    async fn test(test_args: TestArgs) {
+        let parse_request = ParseRequest {
+            unsigned_payload: "no-no-that-is-not-valid-hex".to_string(),
+            chain: Chain::Ethereum as i32,
+            chain_metadata: None,
+        };
+
+        let parse_error = test_args
+            .parser_client
+            .unwrap()
+            .parse(tonic::Request::new(parse_request))
+            .await
+            .unwrap_err();
+
+        assert_eq!(parse_error.code(), Code::InvalidArgument);
+        assert_eq!(parse_error.message(), "Failed to parse transaction");
     }
 
     integration::Builder::new().execute(test).await

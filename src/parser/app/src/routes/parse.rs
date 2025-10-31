@@ -39,12 +39,7 @@ pub fn parse(
 
     let signable_payload_str = registry
         .convert_transaction(&registry_chain, request_payload.as_str(), options)
-        .map_err(|e| {
-            GrpcError::new(
-                Code::InvalidArgument,
-                &format!("Failed to parse transaction: {e}"),
-            )
-        })?;
+        .map_err(|e| GrpcError::new(Code::InvalidArgument, &format!("{e}")))?;
 
     // Convert SignablePayload to String (assuming you want JSON)
     let signable_payload = serde_json::to_string(&signable_payload_str).map_err(|e| {

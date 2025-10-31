@@ -63,7 +63,7 @@ impl RequestProcessor for Processor {
                 .input
                 .ok_or({
                     qos_parser_response::Output::Status(Status {
-                        code: Code::Internal as i32,
+                        code: Code::InvalidArgument as i32,
                         message: "missing request input".to_string(),
                         details: vec![],
                     })
@@ -80,8 +80,8 @@ impl RequestProcessor for Processor {
                         .map(qos_parser_response::Output::ParseResponse)
                         .map_err(|e| {
                             qos_parser_response::Output::Status(Status {
-                                code: Code::Internal as i32,
-                                message: format!("{e:?}"),
+                                code: e.code as i32,
+                                message: e.message,
                                 details: vec![],
                             })
                         }) {
