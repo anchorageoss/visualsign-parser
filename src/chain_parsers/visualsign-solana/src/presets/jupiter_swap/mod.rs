@@ -44,35 +44,39 @@ pub enum JupiterSwapInstruction {
 }
 
 impl JupiterSwapInstruction {
-    /// Parse amounts from the last 16 bytes of instruction data
-    fn parse_amounts_from_data(data: &[u8]) -> Result<(u64, u64), &'static str> {
-        if data.len() < 16 {
+    /// Parse amounts and slippage from instruction data
+    fn parse_amounts_and_slippage_from_data(data: &[u8]) -> Result<(u64, u64, u16), &'static str> {
+        if data.len() < 18 {
             return Err("Instruction data too short");
         }
 
         let len = data.len();
         let in_amount = u64::from_le_bytes([
+            data[len - 18],
+            data[len - 17],
             data[len - 16],
             data[len - 15],
             data[len - 14],
             data[len - 13],
             data[len - 12],
             data[len - 11],
-            data[len - 10],
-            data[len - 9],
         ]);
         let out_amount = u64::from_le_bytes([
+            data[len - 10],
+            data[len - 9],
             data[len - 8],
             data[len - 7],
             data[len - 6],
             data[len - 5],
             data[len - 4],
             data[len - 3],
+        ]);
+        let slippage_bps = u16::from_le_bytes([
             data[len - 2],
             data[len - 1],
         ]);
 
-        Ok((in_amount, out_amount))
+        Ok((in_amount, out_amount, slippage_bps))
     }
 }
 
@@ -182,7 +186,7 @@ fn parse_route_instruction(
     data: &[u8],
     accounts: &[String],
 ) -> Result<JupiterSwapInstruction, &'static str> {
-    let (in_amount, out_amount) = JupiterSwapInstruction::parse_amounts_from_data(data)?;
+    let (in_amount, out_amount, slippage_bps) = JupiterSwapInstruction::parse_amounts_and_slippage_from_data(data)?;
 
     let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
     let out_token = accounts.get(1).map(|addr| get_token_info(addr, out_amount));
@@ -190,7 +194,7 @@ fn parse_route_instruction(
     Ok(JupiterSwapInstruction::Route {
         in_token,
         out_token,
-        slippage_bps: 50, // Default slippage
+        slippage_bps,
     })
 }
 
@@ -198,7 +202,7 @@ fn parse_exact_out_route_instruction(
     data: &[u8],
     accounts: &[String],
 ) -> Result<JupiterSwapInstruction, &'static str> {
-    let (in_amount, out_amount) = JupiterSwapInstruction::parse_amounts_from_data(data)?;
+    let (in_amount, out_amount, slippage_bps) = JupiterSwapInstruction::parse_amounts_and_slippage_from_data(data)?;
 
     let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
     let out_token = accounts.get(1).map(|addr| get_token_info(addr, out_amount));
@@ -206,7 +210,7 @@ fn parse_exact_out_route_instruction(
     Ok(JupiterSwapInstruction::ExactOutRoute {
         in_token,
         out_token,
-        slippage_bps: 50, // Default slippage
+        slippage_bps,
     })
 }
 
@@ -214,7 +218,7 @@ fn parse_shared_accounts_route_instruction(
     data: &[u8],
     accounts: &[String],
 ) -> Result<JupiterSwapInstruction, &'static str> {
-    let (in_amount, out_amount) = JupiterSwapInstruction::parse_amounts_from_data(data)?;
+    let (in_amount, out_amount, slippage_bps) = JupiterSwapInstruction::parse_amounts_and_slippage_from_data(data)?;
 
     let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
     let out_token = accounts.get(1).map(|addr| get_token_info(addr, out_amount));
@@ -222,7 +226,7 @@ fn parse_shared_accounts_route_instruction(
     Ok(JupiterSwapInstruction::SharedAccountsRoute {
         in_token,
         out_token,
-        slippage_bps: 50, // Default slippage
+        slippage_bps,
     })
 }
 
@@ -383,7 +387,7 @@ mod tests {
             0x01, 0x00, 0x00, 0x00, 0x26, 0x64, 0x00, 0x00, // Additional data
             0xa0, 0x86, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // Input amount: 100000
             0x93, 0x3e, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // Output amount: 99150
-            0x32, 0x00, // Slippage: 50 bps
+            0x0a, 0x00, // Slippage: 10 bps
         ];
 
         // Mock accounts for testing
@@ -399,7 +403,7 @@ mod tests {
         // Verify it parsed as a Route instruction
         match parsed_instruction {
             JupiterSwapInstruction::Route { slippage_bps, .. } => {
-                assert_eq!(slippage_bps, 50, "Slippage should be 50 bps");
+                assert_eq!(slippage_bps, 10, "Slippage should be 10 bps");
             }
             _ => panic!("Expected Route instruction, got {parsed_instruction:?}"),
         }
@@ -411,7 +415,7 @@ mod tests {
             "Formatted string should contain 'Jupiter'"
         );
         assert!(
-            formatted.contains("50bps"),
+            formatted.contains("10bps"),
             "Formatted string should contain slippage"
         );
 
@@ -460,7 +464,7 @@ mod tests {
             0x01, 0x00, 0x00, 0x00, 0x26, 0x64, 0x00, 0x00, // Additional data
             0xa0, 0x86, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // Input amount: 100000
             0x93, 0x3e, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // Output amount: 99150
-            0x32, 0x00, // Slippage: 50 bps
+            0x0a, 0x00, // Slippage: 10 bps
         ];
 
         let accounts = vec!["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4".to_string()];
@@ -471,7 +475,7 @@ mod tests {
         // Verify parsing result using pattern matching
         match result {
             JupiterSwapInstruction::Route { slippage_bps, .. } => {
-                assert_eq!(slippage_bps, 50);
+                assert_eq!(slippage_bps, 10);
 
                 // Create fields and verify their structure
                 let fields = create_jupiter_swap_expanded_fields(
@@ -582,30 +586,34 @@ mod tests {
     #[test]
     fn test_jupiter_discriminator_matching() {
         // Test that our discriminators match correctly
-        // Each instruction needs at least 24 bytes: 8 for discriminator + 16 for amounts (in_amount + out_amount)
+        // Each instruction needs at least 26 bytes: 8 for discriminator + 16 for amounts (in_amount + out_amount) + 2 for slippage
         let route_data = [
             0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a, // discriminator
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // padding/intermediate data
             0x00, 0xe1, 0xf5, 0x05, 0x00, 0x00, 0x00, 0x00, // in_amount (100000000)
             0x00, 0xc2, 0xeb, 0x0b, 0x00, 0x00, 0x00, 0x00, // out_amount (200000000)
+            0x0a, 0x00, // slippage (10 bps)
         ];
         let exact_out_data = [
             0x4b, 0xd7, 0xdf, 0xa8, 0x0c, 0xd0, 0xb6, 0x2a, // discriminator
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // padding/intermediate data
             0x00, 0xe1, 0xf5, 0x05, 0x00, 0x00, 0x00, 0x00, // in_amount (100000000)
             0x00, 0xc2, 0xeb, 0x0b, 0x00, 0x00, 0x00, 0x00, // out_amount (200000000)
+            0x0a, 0x00, // slippage (10 bps)
         ];
         let shared_accounts_data = [
             0x3a, 0xf2, 0xaa, 0xae, 0x2f, 0xb6, 0xd4, 0x2a, // discriminator
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // padding/intermediate data
             0x00, 0xe1, 0xf5, 0x05, 0x00, 0x00, 0x00, 0x00, // in_amount (100000000)
             0x00, 0xc2, 0xeb, 0x0b, 0x00, 0x00, 0x00, 0x00, // out_amount (200000000)
+            0x0a, 0x00, // slippage (10 bps)
         ];
         let unknown_data = [
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // unknown discriminator
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // padding/intermediate data
             0x00, 0xe1, 0xf5, 0x05, 0x00, 0x00, 0x00, 0x00, // in_amount (100000000)
             0x00, 0xc2, 0xeb, 0x0b, 0x00, 0x00, 0x00, 0x00, // out_amount (200000000)
+            0x0a, 0x00, // slippage (10 bps)
         ];
 
         let accounts = vec!["test".to_string()];
