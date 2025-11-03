@@ -54,6 +54,7 @@ impl JupiterSwapInstruction {
     /// - 8 bytes: out_amount
     /// - 2 bytes: slippage_bps
     /// - 1 byte: platform_fee_bps
+    ///
     /// Total: 19 bytes at the end of instruction data
     fn parse_amounts_and_slippage_from_data(
         data: &[u8],
@@ -286,7 +287,7 @@ fn format_jupiter_swap_instruction(instruction: &JupiterSwapInstruction) -> Stri
             );
 
             if *platform_fee_bps > 0 {
-                result.push_str(&format!(", platform fee: {}bps", platform_fee_bps));
+                result.push_str(&format!(", platform fee: {platform_fee_bps}bps"));
             }
 
             result.push(')');
@@ -690,5 +691,72 @@ mod tests {
             }
             _ => panic!("Unknown discriminator should return Unknown variant"),
         }
+    }
+
+    #[test]
+    fn test_jupiter_with_platform_fee() {
+        // Test Jupiter Route instruction with non-zero platform fee
+        let instruction_data = [
+            0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a, // Route discriminator
+            0x01, 0x00, 0x00, 0x00, 0x26, 0x64, 0x00, 0x00, // Additional data
+            0x00, 0xe1, 0xf5, 0x05, 0x00, 0x00, 0x00, 0x00, // in_amount (100000000)
+            0x00, 0xc2, 0xeb, 0x0b, 0x00, 0x00, 0x00, 0x00, // out_amount (200000000)
+            0x32, 0x00, // slippage (50 bps)
+            0x64, // platform_fee_bps (100 bps)
+        ];
+
+        let accounts = vec!["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4".to_string()];
+
+        // Parse the instruction
+        let result = parse_jupiter_swap_instruction(&instruction_data, &accounts).unwrap();
+
+        // Verify parsing
+        match result {
+            JupiterSwapInstruction::Route {
+                slippage_bps,
+                platform_fee_bps,
+                ..
+            } => {
+                assert_eq!(slippage_bps, 50, "Slippage should be 50 bps");
+                assert_eq!(platform_fee_bps, 100, "Platform fee should be 100 bps");
+                println!("✅ Correctly parsed slippage: {} bps", slippage_bps);
+                println!("✅ Correctly parsed platform fee: {} bps", platform_fee_bps);
+            }
+            _ => panic!("Expected Route instruction"),
+        }
+
+        // Test the formatting includes platform fee
+        let formatted = format_jupiter_swap_instruction(&result);
+        assert!(
+            formatted.contains("50bps"),
+            "Formatted string should contain slippage"
+        );
+        assert!(
+            formatted.contains("platform fee: 100bps"),
+            "Formatted string should contain platform fee when non-zero"
+        );
+        println!("✅ Formatted output: {}", formatted);
+
+        // Test expanded fields include platform fee
+        let fields = create_jupiter_swap_expanded_fields(
+            &result,
+            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+            &instruction_data,
+        )
+        .unwrap();
+
+        // Check that we have a Platform Fee field
+        let platform_fee_field = fields.iter().find(|f| {
+            if let SignablePayloadField::Number { common, .. } = &f.signable_payload_field {
+                common.label == "Platform Fee"
+            } else {
+                false
+            }
+        });
+        assert!(
+            platform_fee_field.is_some(),
+            "Should have Platform Fee field when platform_fee_bps > 0"
+        );
+        println!("✅ Platform Fee field present in expanded fields");
     }
 }
