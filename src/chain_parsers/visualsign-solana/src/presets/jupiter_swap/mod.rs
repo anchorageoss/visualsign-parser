@@ -719,8 +719,8 @@ mod tests {
             } => {
                 assert_eq!(slippage_bps, 50, "Slippage should be 50 bps");
                 assert_eq!(platform_fee_bps, 100, "Platform fee should be 100 bps");
-                println!("✅ Correctly parsed slippage: {} bps", slippage_bps);
-                println!("✅ Correctly parsed platform fee: {} bps", platform_fee_bps);
+                println!("✅ Correctly parsed slippage: {slippage_bps} bps");
+                println!("✅ Correctly parsed platform fee: {platform_fee_bps} bps");
             }
             _ => panic!("Expected Route instruction"),
         }
@@ -735,7 +735,7 @@ mod tests {
             formatted.contains("platform fee: 100bps"),
             "Formatted string should contain platform fee when non-zero"
         );
-        println!("✅ Formatted output: {}", formatted);
+        println!("✅ Formatted output: {formatted}");
 
         // Test expanded fields include platform fee
         let fields = create_jupiter_swap_expanded_fields(
