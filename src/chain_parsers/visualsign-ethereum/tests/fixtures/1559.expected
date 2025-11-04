@@ -38,6 +38,24 @@ SignablePayload {
         },
         TextV2 {
             common: SignablePayloadFieldCommon {
+                fallback_text: "1.722539144 gwei",
+                label: "Gas Price",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "1.722539144 gwei",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0.000064826 gwei",
+                label: "Max Priority Fee Per Gas",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "0.000064826 gwei",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
                 fallback_text: "502",
                 label: "Nonce",
             },

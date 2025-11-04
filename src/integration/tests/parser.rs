@@ -388,6 +388,7 @@ async fn parser_ethereum_native_transfer_e2e() {
             "Type": "text_v2"
           },
           {
+            "FallbackText": "0x3535353535353535353535353535353535353535",
             "Label": "To",
             "TextV2": {
             "Text": "0x3535353535353535353535353535353535353535"
@@ -395,6 +396,7 @@ async fn parser_ethereum_native_transfer_e2e() {
             "Type": "text_v2"
           },
           {
+            "FallbackText": "1 ETH",
             "Label": "Value",
             "TextV2": {
             "Text": "1 ETH"
@@ -402,6 +404,7 @@ async fn parser_ethereum_native_transfer_e2e() {
             "Type": "text_v2"
           },
           {
+            "FallbackText": "21000",
             "Label": "Gas Limit",
             "TextV2": {
             "Text": "21000"
@@ -409,13 +412,15 @@ async fn parser_ethereum_native_transfer_e2e() {
             "Type": "text_v2"
           },
           {
+            "FallbackText": "20 gwei",
             "Label": "Gas Price",
             "TextV2": {
-            "Text": "0.00000002 ETH"
+            "Text": "20 gwei"
             },
             "Type": "text_v2"
           },
           {
+            "FallbackText": "0",
             "Label": "Nonce",
             "TextV2": {
             "Text": "0"

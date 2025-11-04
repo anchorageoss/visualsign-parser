@@ -38,11 +38,11 @@ SignablePayload {
         },
         TextV2 {
             common: SignablePayloadFieldCommon {
-                fallback_text: "0.000001171602790622 ETH",
+                fallback_text: "1171.602790622 gwei",
                 label: "Gas Price",
             },
             text_v2: SignablePayloadFieldTextV2 {
-                text: "0.000001171602790622 ETH",
+                text: "1171.602790622 gwei",
             },
         },
         TextV2 {
