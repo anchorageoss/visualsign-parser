@@ -21,6 +21,8 @@ spl-stake-pool = "2.0.2"
 solana-system-interface = "1.0"
 
 [dev-dependencies]
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 jupiter-swap-api-client = "0.2.0"
 base64 = "0.22.1"
+bs58 = "0.5"
