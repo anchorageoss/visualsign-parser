@@ -161,8 +161,8 @@
   ],
   "expected_fields": {
     "program_id": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
-    "input_amount": "1704961004145737728",
-    "quoted_output_amount": "54975581388800",
+    "input_amount": "2000000",
+    "quoted_output_amount": "1550653",
     "input_token_address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
     "output_token_address": "B7hSadyLX8YhNT8RDcK8RbnR3KAfX4HbWvV89XmeqitA",
     "slippage": "50",
