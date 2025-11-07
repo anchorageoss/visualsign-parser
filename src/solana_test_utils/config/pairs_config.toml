@@ -1,0 +1,76 @@
+# Jupiter Trading Pairs Configuration for Nightly Tests
+#
+# This file defines which trading pairs to test in the nightly test suite.
+# Each pair represents a common swap route that should be tested regularly.
+
+[[pairs]]
+name = "SOL-USDC"
+input_mint = "So11111111111111111111111111111111111111112"
+output_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+enabled = true
+min_transactions = 5
+
+[[pairs]]
+name = "SOL-USDT"
+input_mint = "So11111111111111111111111111111111111111112"
+output_mint = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+enabled = true
+min_transactions = 5
+
+[[pairs]]
+name = "USDC-USDT"
+input_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+output_mint = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+enabled = true
+min_transactions = 5
+
+[[pairs]]
+name = "SOL-mSOL"
+input_mint = "So11111111111111111111111111111111111111112"
+output_mint = "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So"
+enabled = true
+min_transactions = 5
+
+[[pairs]]
+name = "BONK-SOL"
+input_mint = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+output_mint = "So11111111111111111111111111111111111111112"
+enabled = true
+min_transactions = 5
+
+# Additional pairs (disabled by default, enable as needed)
+
+[[pairs]]
+name = "JUP-SOL"
+input_mint = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN"
+output_mint = "So11111111111111111111111111111111111111112"
+enabled = false
+min_transactions = 3
+
+[[pairs]]
+name = "PYTH-SOL"
+input_mint = "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3"
+output_mint = "So11111111111111111111111111111111111111112"
+enabled = false
+min_transactions = 3
+
+[[pairs]]
+name = "ORCA-SOL"
+input_mint = "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE"
+output_mint = "So11111111111111111111111111111111111111112"
+enabled = false
+min_transactions = 3
+
+[[pairs]]
+name = "RAY-SOL"
+input_mint = "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R"
+output_mint = "So11111111111111111111111111111111111111112"
+enabled = false
+min_transactions = 3
+
+[[pairs]]
+name = "WIF-SOL"
+input_mint = "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"
+output_mint = "So11111111111111111111111111111111111111112"
+enabled = false
+min_transactions = 3

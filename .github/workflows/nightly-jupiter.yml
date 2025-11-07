@@ -1,0 +1,142 @@
+name: Nightly Jupiter Trading Pairs Test
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Allow manual triggering
+    inputs:
+      min_success_rate:
+        description: 'Minimum success rate percentage (default: 80)'
+        required: false
+        default: '80'
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+
+jobs:
+  nightly-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache target directory
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-target-
+
+      - name: Install Surfpool (optional)
+        run: |
+          # Install surfpool from source
+          git clone https://github.com/txtx/surfpool.git /tmp/surfpool
+          cd /tmp/surfpool
+          cargo xtask install || echo "Surfpool installation skipped"
+
+      - name: Run nightly tests
+        env:
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+          SURFPOOL_ENABLED: ${{ secrets.SURFPOOL_ENABLED || '0' }}
+          MIN_SUCCESS_RATE: ${{ github.event.inputs.min_success_rate || '80' }}
+          RUST_LOG: info
+        working-directory: src
+        run: |
+          cargo test -p solana_test_utils --test nightly_jupiter -- --ignored --nocapture
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-test-reports-${{ github.run_number }}
+          path: |
+            src/solana_test_utils/reports/nightly/*.json
+            src/solana_test_utils/reports/nightly/*.md
+          retention-days: 30
+
+      - name: Read latest report
+        if: always()
+        id: report
+        run: |
+          if [ -f src/solana_test_utils/reports/nightly/latest.md ]; then
+            echo "report_exists=true" >> $GITHUB_OUTPUT
+            # Read first 1000 chars of report for summary
+            head -c 1000 src/solana_test_utils/reports/nightly/latest.md > /tmp/report_summary.txt
+          else
+            echo "report_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on commit (if report exists)
+        if: always() && steps.report.outputs.report_exists == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = 'src/solana_test_utils/reports/nightly/latest.md';
+
+            if (fs.existsSync(reportPath)) {
+              const report = fs.readFileSync(reportPath, 'utf8');
+
+              // Post as workflow summary
+              await core.summary
+                .addHeading('Jupiter Nightly Test Report')
+                .addRaw(report)
+                .write();
+            }
+
+      - name: Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue_number = context.issue.number;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 1, // Adjust to your notification issue number
+              body: '❌ Nightly Jupiter test failed. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.'
+            });
+
+      - name: Post to Slack (optional)
+        if: failure() && secrets.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "❌ Jupiter nightly tests failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Jupiter Nightly Test Failed*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

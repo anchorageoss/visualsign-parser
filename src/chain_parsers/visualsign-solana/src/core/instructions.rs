@@ -7,7 +7,7 @@ use visualsign::AnnotatedPayloadField;
 use visualsign::errors::{TransactionParseError, VisualSignError};
 
 /// Extract SPL transfer information from parsed transaction
-fn extract_spl_transfers(parsed_transaction: &dyn std::any::Any) -> Vec<SplTransferInfo> {
+fn extract_spl_transfers(_parsed_transaction: &dyn std::any::Any) -> Vec<SplTransferInfo> {
     // Note: We use dynamic dispatch here because the parsed_transaction type
     // is from the solana_parser crate and we need to extract transfer metadata
     // For now, return empty vec - will be populated by visualizers that have access to raw data

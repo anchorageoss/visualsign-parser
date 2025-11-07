@@ -15,6 +15,7 @@ members = [
   "chain_parsers/visualsign-sui",
   "chain_parsers/visualsign-tron",
   "chain_parsers/visualsign-unspecified",
+  "solana_test_utils",
 ]
 
 resolver = "3"

@@ -263,7 +263,7 @@ fn extract_mints_from_accounts(accounts: &[String]) -> Result<(String, String), 
     ];
 
     // Strategy: Find two known mints in the accounts array
-    let mut mints_found: Vec<String> = accounts.iter()
+    let mints_found: Vec<String> = accounts.iter()
         .filter(|acc| KNOWN_MINTS.contains(&acc.as_str()))
         .cloned()
         .collect();

@@ -1,0 +1,29 @@
+[package]
+name = "solana_test_utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+solana-sdk = "2.1.15"
+solana-client = "2.1.15"
+solana-transaction-status = "2.2.7"
+spl-token = "7.0.0"
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bs58 = "0.5"
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }
+toml = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+hex = "0.4"
+async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3.0"
+integration = { path = "../integration" }
+generated = { path = "../generated" }
+tonic = "0.12"
+tracing-subscriber = "0.3"
