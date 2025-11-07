@@ -1,10 +1,18 @@
-use crate::core::{InstructionVisualizer, VisualizerContext, visualize_with_any};
+use crate::core::{InstructionVisualizer, SplTransferInfo, VisualizerContext, visualize_with_any};
 use solana_parser::solana::parser::parse_transaction;
 use solana_parser::solana::structs::SolanaAccount;
 use solana_sdk::instruction::Instruction;
 use solana_sdk::transaction::Transaction as SolanaTransaction;
 use visualsign::AnnotatedPayloadField;
 use visualsign::errors::{TransactionParseError, VisualSignError};
+
+/// Extract SPL transfer information from parsed transaction
+fn extract_spl_transfers(parsed_transaction: &dyn std::any::Any) -> Vec<SplTransferInfo> {
+    // Note: We use dynamic dispatch here because the parsed_transaction type
+    // is from the solana_parser crate and we need to extract transfer metadata
+    // For now, return empty vec - will be populated by visualizers that have access to raw data
+    Vec::new()
+}
 
 // The following include! macro pulls in visualizer implementations generated at build time.
 // The file "generated_visualizers.rs" is created by the build script and contains code for
@@ -22,6 +30,21 @@ pub fn decode_instructions(
 
     let message = &transaction.message;
     let account_keys = &message.account_keys;
+
+    // Parse the transaction to extract transfer metadata
+    let message_clone = transaction.message.clone();
+    let parsed_transaction = parse_transaction(
+        hex::encode(message_clone.serialize()),
+        false, /* because we're passing the message only */
+    )
+    .map_err(|e| {
+        VisualSignError::ParseError(TransactionParseError::DecodeError(format!(
+            "Failed to parse transaction: {e}"
+        )))
+    })?;
+
+    // Extract SPL transfer information from transaction metadata
+    let spl_transfers = extract_spl_transfers(&parsed_transaction);
 
     // Convert compiled instructions to full instructions
     let instructions: Vec<Instruction> = message
@@ -54,7 +77,12 @@ pub fn decode_instructions(
                 writable: false,
             };
 
-            let context = VisualizerContext::new(&sender, instruction_index, &instructions);
+            let context = VisualizerContext::new_with_transfers(
+                &sender,
+                instruction_index,
+                &instructions,
+                &spl_transfers,
+            );
 
             // Try to visualize with available visualizers (including unknown_program fallback)
             visualize_with_any(&visualizers_refs, &context)
