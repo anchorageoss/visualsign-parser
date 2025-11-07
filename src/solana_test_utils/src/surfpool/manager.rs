@@ -4,7 +4,7 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     pubkey::Pubkey,
-    signature::{Keypair, Signature},
+    signature::Signature,
 };
 use std::process::{Child, Command};
 use std::thread;
@@ -16,6 +16,7 @@ pub struct SurfpoolManager {
     process: Option<Child>,
     rpc_url: String,
     ws_url: String,
+    #[allow(dead_code)]
     config: SurfpoolConfig,
 }
 
@@ -62,7 +63,7 @@ impl SurfpoolManager {
             .spawn()
             .context("Failed to spawn surfpool process. Is surfpool installed?")?;
 
-        let mut manager = Self {
+        let manager = Self {
             process: Some(child),
             rpc_url: rpc_url.clone(),
             ws_url,
@@ -171,7 +172,7 @@ impl Drop for SurfpoolManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solana_sdk::signer::Signer;
+    use solana_sdk::signer::{keypair::Keypair, Signer};
 
     #[tokio::test]
     #[ignore] // Requires surfpool to be installed

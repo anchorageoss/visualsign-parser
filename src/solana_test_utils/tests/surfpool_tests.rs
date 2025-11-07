@@ -1,9 +1,7 @@
 use solana_test_utils::prelude::*;
-use solana_sdk::{
-    pubkey::Pubkey,
-    signature::{Keypair, Signer},
-    system_instruction,
-};
+use solana_sdk::signature::{Keypair, Signer};
+#[allow(deprecated)]
+use solana_sdk::system_instruction;
 
 #[tokio::test]
 #[ignore] // Requires surfpool to be installed and running

@@ -95,6 +95,7 @@ impl SolanaAssertions for Transaction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(deprecated)]
     use solana_sdk::{
         hash::Hash, message::Message, signature::Keypair, signer::Signer,
         system_instruction,

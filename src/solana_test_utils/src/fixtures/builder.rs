@@ -131,6 +131,7 @@ impl Default for SolanaTransactionBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(deprecated)]
     use solana_sdk::system_instruction;
 
     #[test]

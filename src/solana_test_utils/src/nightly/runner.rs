@@ -13,9 +13,12 @@ pub type ParserClient = Box<dyn std::any::Any + Send + Sync>;
 /// Runner for nightly Jupiter trading pair tests
 pub struct NightlyTestRunner {
     config: PairsConfig,
+    #[allow(dead_code)]
     surfpool: Option<SurfpoolManager>,
     fetcher: TransactionFetcher,
+    #[allow(dead_code)]
     fixture_manager: FixtureManager,
+    #[allow(dead_code)]
     parser_client: Option<ParserClient>,
 }
 
@@ -145,20 +148,33 @@ impl NightlyTestRunner {
         solana_sdk::signature::Signature::from_str(&tx_data.signature)
             .context("Invalid signature format")?;
 
-        // If parser client is available, test actual parsing
-        if self.parser_client.is_some() {
-            // In a full implementation with gRPC client:
-            // 1. Convert transaction data to hex format
-            // 2. Call parser via gRPC with Chain::Solana
-            // 3. Validate response has signable_payload
-            // 4. Check for Jupiter-specific fields
-
-            // TODO: Implement actual gRPC call when transaction format is ready
-            // For now, just validate the transaction data structure exists
-            if tx_data.transaction.message.is_null() {
-                anyhow::bail!("Transaction message is null");
-            }
+        // Validate transaction structure
+        if tx_data.transaction.message.is_null() {
+            anyhow::bail!("Transaction message is null");
         }
+
+        // Validate transaction is serializable
+        let tx_bytes = serde_json::to_vec(&tx_data.transaction)
+            .context("Failed to serialize transaction")?;
+
+        // If parser client is available, validate actual parsing
+        // Note: The parser client is passed via gRPC from the test harness
+        // For now, we validate structure. Full validation requires implementing
+        // the gRPC call in the test harness with the parser client.
+        if !self.parser_client.is_none() {
+            tracing::debug!(
+                "Parser client available for transaction {}, but gRPC integration pending",
+                tx_data.signature
+            );
+        }
+
+        // Helius already validated this is a real transaction from the chain
+        tracing::trace!(
+            "Validated transaction {} (slot: {}, size: {} bytes)",
+            tx_data.signature,
+            tx_data.slot,
+            tx_bytes.len()
+        );
 
         Ok(())
     }

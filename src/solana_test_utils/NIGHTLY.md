@@ -152,11 +152,31 @@ solana_test_utils/config/
 2. **Fetch Transactions**: Query Helius API for recent Jupiter swaps
 3. **Test Each Pair**:
    - Fetch 5+ recent transactions per pair
-   - Parse each transaction with Jupiter visualizer
-   - Validate parser output
+   - Validate transaction structure and signature format
+   - Confirm transaction exists on mainnet via Helius
    - Record success/failure
 4. **Generate Report**: Create JSON and Markdown reports
 5. **Upload Artifacts**: Save reports for review
+
+## Current Testing Scope
+
+The nightly test currently validates:
+- ✅ Real Jupiter transactions exist on mainnet
+- ✅ Transactions can be fetched and deserialized
+- ✅ Transaction signatures are valid
+- ✅ Transactions are from the correct program (Jupiter)
+
+**Not yet validated:**
+- ❌ Parsed transaction contains correct token mints
+- ❌ Actual gRPC parser integration for full validation
+- ❌ Jupiter-specific instruction fields
+
+To fully test mint address extraction and Jupiter visualization, the test needs to:
+1. Connect to the running parser via gRPC
+2. Send transaction hex to the parser
+3. Validate the response contains expected mints and Jupiter fields
+
+This is marked as a TODO for integration with the gRPC parser interface.
 
 ## Troubleshooting
 
@@ -189,9 +209,21 @@ https://solscan.io/tx/<signature>
 
 Surfpool is optional. Tests will run without it but won't use mainnet fork.
 
-To install Surfpool:
+To install Surfpool from source:
 ```bash
-cargo install surfpool --git https://github.com/surfpool/surfpool
+# Clone the repository
+git clone https://github.com/txtx/surfpool.git
+
+# Navigate to the directory
+cd surfpool
+
+# Compile and install
+cargo xtask install
+
+# Verify installation
+surfpool -V
+
+# Make sure surfpool is on your PATH
 ```
 
 ## Adding New Pairs

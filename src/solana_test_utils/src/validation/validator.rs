@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use solana_sdk::{pubkey::Pubkey, transaction::Transaction};
 use std::collections::HashMap;
 
@@ -175,6 +175,7 @@ pub struct TransactionMetadata {
 }
 
 /// Validate parsed instruction fields
+#[allow(dead_code)]
 pub fn validate_instruction_fields(
     actual: &HashMap<String, serde_json::Value>,
     expected: &HashMap<String, serde_json::Value>,
@@ -210,6 +211,7 @@ pub fn validate_instruction_fields(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(deprecated)]
     use solana_sdk::{
         hash::Hash, message::Message, signature::Keypair, signer::Signer,
         system_instruction,

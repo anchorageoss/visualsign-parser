@@ -51,11 +51,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-target-
 
-      - name: Install Surfpool
+      - name: Install Surfpool (optional)
         run: |
-          # Install surfpool from GitHub releases or cargo
-          # Adjust based on actual installation method
-          cargo install surfpool --git https://github.com/surfpool/surfpool || echo "Surfpool installation skipped"
+          # Install surfpool from source
+          git clone https://github.com/txtx/surfpool.git /tmp/surfpool
+          cd /tmp/surfpool
+          cargo xtask install || echo "Surfpool installation skipped"
 
       - name: Run nightly tests
         env:
@@ -121,7 +122,7 @@ jobs:
             });
 
       - name: Post to Slack (optional)
-        if: failure() && secrets.SLACK_WEBHOOK_URL
+        if: failure() && secrets.SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v1
         with:
           payload: |

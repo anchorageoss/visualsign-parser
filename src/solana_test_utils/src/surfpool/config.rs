@@ -19,8 +19,15 @@ pub struct SurfpoolConfig {
 
 impl Default for SurfpoolConfig {
     fn default() -> Self {
+        // Use Helius RPC if API key is available (faster and more reliable than public endpoints)
+        // Otherwise fall back to public Solana RPC
+        let fork_url = std::env::var("HELIUS_API_KEY")
+            .ok()
+            .map(|api_key| format!("https://mainnet.helius-rpc.com/?api-key={}", api_key))
+            .unwrap_or_else(|| "https://api.mainnet-beta.solana.com".to_string());
+
         Self {
-            fork_url: Some("https://api.mainnet-beta.solana.com".to_string()),
+            fork_url: Some(fork_url),
             rpc_port: None,
             ws_port: None,
             ledger_path: None,

@@ -10882,9 +10882,11 @@ name = "solana_test_utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bs58 0.5.1",
  "chrono",
  "generated",
+ "hex",
  "integration",
  "reqwest",
  "serde",
@@ -10899,6 +10901,7 @@ dependencies = [
  "toml 0.8.22",
  "tonic 0.12.3",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
