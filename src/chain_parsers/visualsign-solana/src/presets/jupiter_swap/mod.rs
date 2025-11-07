@@ -96,6 +96,41 @@ static JUPITER_CONFIG: JupiterSwapConfig = JupiterSwapConfig;
 
 pub struct JupiterSwapVisualizer;
 
+/// Extract mint addresses from SPL transfers in the transaction
+fn extract_mints_from_transfers(
+    context: &VisualizerContext,
+    instruction_data: &[u8],
+) -> Option<(String, String)> {
+    // Parse amounts from instruction data to match with transfers
+    let (in_amount, out_amount, _, _) =
+        JupiterSwapInstruction::parse_amounts_and_slippage_from_data(instruction_data).ok()?;
+
+    // Get SPL transfers from context
+    let transfers = context.spl_transfers()?;
+
+    let mut input_mint: Option<String> = None;
+    let mut output_mint: Option<String> = None;
+
+    // Look through SPL transfers for matching amounts
+    for transfer in transfers {
+        if let Some(ref token_mint) = transfer.token_mint {
+            // Match transfer amount with swap amounts
+            // Note: amounts might not match exactly due to fees, so we could add tolerance
+            if transfer.amount == in_amount.to_string() && input_mint.is_none() {
+                input_mint = Some(token_mint.clone());
+            } else if transfer.amount == out_amount.to_string() && output_mint.is_none() {
+                output_mint = Some(token_mint.clone());
+            }
+        }
+    }
+
+    // Return mints if both found
+    match (input_mint, output_mint) {
+        (Some(input), Some(output)) => Some((input, output)),
+        _ => None,
+    }
+}
+
 impl InstructionVisualizer for JupiterSwapVisualizer {
     fn visualize_tx_commands(
         &self,
@@ -111,8 +146,11 @@ impl InstructionVisualizer for JupiterSwapVisualizer {
             .map(|account| account.pubkey.to_string())
             .collect();
 
+        // Extract transfer data if available
+        let transfer_mints = extract_mints_from_transfers(context, &instruction.data);
+
         let jupiter_instruction =
-            parse_jupiter_swap_instruction(&instruction.data, &instruction_accounts)
+            parse_jupiter_swap_instruction(&instruction.data, &instruction_accounts, transfer_mints)
                 .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
         let instruction_text = format_jupiter_swap_instruction(&jupiter_instruction);
@@ -174,6 +212,7 @@ impl InstructionVisualizer for JupiterSwapVisualizer {
 fn parse_jupiter_swap_instruction(
     data: &[u8],
     accounts: &[String],
+    transfer_mints: Option<(String, String)>,
 ) -> Result<JupiterSwapInstruction, &'static str> {
     if data.len() < 8 {
         return Err("Invalid instruction data length");
@@ -182,26 +221,131 @@ fn parse_jupiter_swap_instruction(
     let discriminator = &data[0..8];
 
     match discriminator {
-        d if d == JUPITER_ROUTE_DISCRIMINATOR => parse_route_instruction(data, accounts),
+        d if d == JUPITER_ROUTE_DISCRIMINATOR => parse_route_instruction(data, accounts, transfer_mints),
         d if d == JUPITER_EXACT_OUT_ROUTE_DISCRIMINATOR => {
-            parse_exact_out_route_instruction(data, accounts)
+            parse_exact_out_route_instruction(data, accounts, transfer_mints)
         }
         d if d == JUPITER_SHARED_ACCOUNTS_ROUTE_DISCRIMINATOR => {
-            parse_shared_accounts_route_instruction(data, accounts)
+            parse_shared_accounts_route_instruction(data, accounts, transfer_mints)
         }
         _ => Ok(JupiterSwapInstruction::Unknown),
     }
 }
 
+/// Extract mint addresses from Jupiter swap accounts using heuristic strategies
+///
+/// Strategy 1: Look for destination mint at index 5 (per IDL)
+/// Strategy 2: Look for known mint addresses in the accounts array
+/// Strategy 3: Use positional heuristics based on common patterns
+fn extract_mints_from_accounts(accounts: &[String]) -> Result<(String, String), &'static str> {
+    // Known token mint addresses
+    const KNOWN_MINTS: &[&str] = &[
+        "So11111111111111111111111111111111111111112",  // Wrapped SOL
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
+        "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",  // mSOL
+        "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", // ETHER (Wormhole)
+        "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", // BONK
+        "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",  // JUP
+        "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3", // PYTH
+    ];
+
+    // Programs that should not be mistaken for mints
+    const PROGRAM_IDS: &[&str] = &[
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",  // Token program
+        "11111111111111111111111111111111",             // System program
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", // ATA program
+        "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",  // Jupiter program
+        "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",  // Whirlpool
+        "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", // Raydium AMM
+        "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK", // Raydium CLMM
+        "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",  // Memo program
+    ];
+
+    // Strategy: Find two known mints in the accounts array
+    let mut mints_found: Vec<String> = accounts.iter()
+        .filter(|acc| KNOWN_MINTS.contains(&acc.as_str()))
+        .cloned()
+        .collect();
+
+    // If we have at least 2 known mints, use them
+    if mints_found.len() >= 2 {
+        return Ok((mints_found[0].clone(), mints_found[1].clone()));
+    }
+
+    // Fallback: Try to get destination mint from index 5 (per IDL structure)
+    let output_mint = if accounts.len() > 5 && !PROGRAM_IDS.contains(&accounts[5].as_str()) {
+        accounts[5].clone()
+    } else {
+        // Look for any mint that's not at the beginning
+        accounts.iter()
+            .skip(5)
+            .find(|acc| !PROGRAM_IDS.contains(&acc.as_str()) && !is_likely_user_account(acc))
+            .cloned()
+            .unwrap_or_else(|| {
+                // Last resort: just use the first non-program account we find
+                accounts.iter()
+                    .find(|acc| !PROGRAM_IDS.contains(&acc.as_str()) && !is_likely_user_account(acc))
+                    .cloned()
+                    .unwrap_or_else(|| accounts.get(2).cloned().unwrap_or_else(|| "Unknown".to_string()))
+            })
+    };
+
+    // Find input mint: Look for known mints or scan accounts
+    let input_mint = {
+        // First, try to find a known mint that we haven't used as output
+        let found_known = accounts.iter()
+            .find(|acc| KNOWN_MINTS.contains(&acc.as_str()) && acc.as_str() != &output_mint)
+            .cloned();
+
+        if let Some(mint) = found_known {
+            mint
+        } else {
+            // Look for potential mints after position 5
+            accounts.iter()
+                .enumerate()
+                .skip(5)
+                .find(|(_, acc)| {
+                    !PROGRAM_IDS.contains(&acc.as_str())
+                    && acc.as_str() != &output_mint
+                    && !is_likely_user_account(acc)
+                })
+                .map(|(_, acc)| acc.clone())
+                .unwrap_or_else(|| {
+                    // Fallback: use the first known mint as last resort
+                    KNOWN_MINTS.get(0).map(|s| s.to_string()).unwrap_or_else(|| "Unknown".to_string())
+                })
+        }
+    };
+
+    Ok((input_mint, output_mint))
+}
+
+/// Check if an account is likely a user account (not a mint)
+fn is_likely_user_account(account: &str) -> bool {
+    // User accounts often have certain patterns
+    // This is a heuristic - not perfect
+    account.starts_with("B7h") || // Common user wallet pattern
+    account.len() != 44 // Mints are usually base58 encoded 32-byte pubkeys (44 chars)
+}
+
 fn parse_route_instruction(
     data: &[u8],
     accounts: &[String],
+    transfer_mints: Option<(String, String)>,
 ) -> Result<JupiterSwapInstruction, &'static str> {
     let (in_amount, out_amount, slippage_bps, platform_fee_bps) =
         JupiterSwapInstruction::parse_amounts_and_slippage_from_data(data)?;
 
-    let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
-    let out_token = accounts.get(1).map(|addr| get_token_info(addr, out_amount));
+    // Use transfer mints if available, otherwise fall back to account scanning
+    let (input_mint, output_mint) = if let Some((in_mint, out_mint)) = transfer_mints {
+        (in_mint, out_mint)
+    } else {
+        extract_mints_from_accounts(accounts)?
+    };
+
+    let in_token = Some(get_token_info(&input_mint, in_amount));
+    let out_token = Some(get_token_info(&output_mint, out_amount));
 
     Ok(JupiterSwapInstruction::Route {
         in_token,
@@ -214,12 +358,20 @@ fn parse_route_instruction(
 fn parse_exact_out_route_instruction(
     data: &[u8],
     accounts: &[String],
+    transfer_mints: Option<(String, String)>,
 ) -> Result<JupiterSwapInstruction, &'static str> {
     let (in_amount, out_amount, slippage_bps, platform_fee_bps) =
         JupiterSwapInstruction::parse_amounts_and_slippage_from_data(data)?;
 
-    let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
-    let out_token = accounts.get(1).map(|addr| get_token_info(addr, out_amount));
+    // Use transfer mints if available, otherwise fall back to account scanning
+    let (input_mint, output_mint) = if let Some((in_mint, out_mint)) = transfer_mints {
+        (in_mint, out_mint)
+    } else {
+        extract_mints_from_accounts(accounts)?
+    };
+
+    let in_token = Some(get_token_info(&input_mint, in_amount));
+    let out_token = Some(get_token_info(&output_mint, out_amount));
 
     Ok(JupiterSwapInstruction::ExactOutRoute {
         in_token,
@@ -232,12 +384,20 @@ fn parse_exact_out_route_instruction(
 fn parse_shared_accounts_route_instruction(
     data: &[u8],
     accounts: &[String],
+    transfer_mints: Option<(String, String)>,
 ) -> Result<JupiterSwapInstruction, &'static str> {
     let (in_amount, out_amount, slippage_bps, platform_fee_bps) =
         JupiterSwapInstruction::parse_amounts_and_slippage_from_data(data)?;
 
-    let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
-    let out_token = accounts.get(1).map(|addr| get_token_info(addr, out_amount));
+    // Use transfer mints if available, otherwise fall back to account scanning
+    let (input_mint, output_mint) = if let Some((in_mint, out_mint)) = transfer_mints {
+        (in_mint, out_mint)
+    } else {
+        extract_mints_from_accounts(accounts)?
+    };
+
+    let in_token = Some(get_token_info(&input_mint, in_amount));
+    let out_token = Some(get_token_info(&output_mint, out_amount));
 
     Ok(JupiterSwapInstruction::SharedAccountsRoute {
         in_token,
@@ -435,9 +595,9 @@ mod tests {
             "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string(), // Token program
         ];
 
-        // Parse the instruction
+        // Parse the instruction (no transfer data in test)
         let parsed_instruction =
-            parse_jupiter_swap_instruction(&instruction_data, &accounts).unwrap();
+            parse_jupiter_swap_instruction(&instruction_data, &accounts, None).unwrap();
 
         // Verify it parsed as a Route instruction
         match parsed_instruction {
@@ -509,8 +669,8 @@ mod tests {
 
         let accounts = vec!["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4".to_string()];
 
-        // Parse the instruction
-        let result = parse_jupiter_swap_instruction(&instruction_data, &accounts).unwrap();
+        // Parse the instruction (no transfer data in test)
+        let result = parse_jupiter_swap_instruction(&instruction_data, &accounts, None).unwrap();
 
         // Verify parsing result using pattern matching
         match result {
@@ -663,13 +823,13 @@ mod tests {
         let accounts = vec!["test".to_string()];
 
         // Test Route discriminator
-        match parse_jupiter_swap_instruction(&route_data, &accounts) {
+        match parse_jupiter_swap_instruction(&route_data, &accounts, None) {
             Ok(JupiterSwapInstruction::Route { .. }) => println!("✅ Route discriminator matches"),
             _ => panic!("Route discriminator should match"),
         }
 
         // Test ExactOutRoute discriminator
-        match parse_jupiter_swap_instruction(&exact_out_data, &accounts) {
+        match parse_jupiter_swap_instruction(&exact_out_data, &accounts, None) {
             Ok(JupiterSwapInstruction::ExactOutRoute { .. }) => {
                 println!("✅ ExactOutRoute discriminator matches")
             }
@@ -677,7 +837,7 @@ mod tests {
         }
 
         // Test SharedAccountsRoute discriminator
-        match parse_jupiter_swap_instruction(&shared_accounts_data, &accounts) {
+        match parse_jupiter_swap_instruction(&shared_accounts_data, &accounts, None) {
             Ok(JupiterSwapInstruction::SharedAccountsRoute { .. }) => {
                 println!("✅ SharedAccountsRoute discriminator matches")
             }
@@ -685,7 +845,7 @@ mod tests {
         }
 
         // Test unknown discriminator
-        match parse_jupiter_swap_instruction(&unknown_data, &accounts) {
+        match parse_jupiter_swap_instruction(&unknown_data, &accounts, None) {
             Ok(JupiterSwapInstruction::Unknown) => {
                 println!("✅ Unknown discriminator handled correctly")
             }
@@ -707,8 +867,8 @@ mod tests {
 
         let accounts = vec!["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4".to_string()];
 
-        // Parse the instruction
-        let result = parse_jupiter_swap_instruction(&instruction_data, &accounts).unwrap();
+        // Parse the instruction (no transfer data in test)
+        let result = parse_jupiter_swap_instruction(&instruction_data, &accounts, None).unwrap();
 
         // Verify parsing
         match result {

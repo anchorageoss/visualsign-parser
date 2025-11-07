@@ -28,11 +28,20 @@ pub enum VisualizerKind {
     Payments(&'static str),
 }
 
+/// SPL Token transfer data extracted from transaction metadata
+#[derive(Debug, Clone)]
+pub struct SplTransferInfo {
+    pub from: String,
+    pub to: String,
+    pub token_mint: Option<String>,
+    pub amount: String,
+    pub decimals: Option<u8>,
+}
+
 /// Context for visualizing a Solana instruction.
 ///
 /// Holds all necessary information to visualize a specific command
 /// within a transaction.
-#[derive(Debug, Clone)]
 pub struct VisualizerContext<'a> {
     /// The address sending the transaction.
     sender: &'a SolanaAccount,
@@ -41,6 +50,8 @@ pub struct VisualizerContext<'a> {
     /// All instruction in the transaction.
     /// Instruction struct contains data
     instructions: &'a Vec<Instruction>,
+    /// SPL token transfers in this transaction
+    spl_transfers: Option<&'a Vec<SplTransferInfo>>,
 }
 
 impl<'a> VisualizerContext<'a> {
@@ -54,6 +65,22 @@ impl<'a> VisualizerContext<'a> {
             sender,
             instruction_index,
             instructions,
+            spl_transfers: None,
+        }
+    }
+
+    /// Creates a new `VisualizerContext` with SPL transfer data.
+    pub fn new_with_transfers(
+        sender: &'a SolanaAccount,
+        instruction_index: usize,
+        instructions: &'a Vec<Instruction>,
+        spl_transfers: &'a Vec<SplTransferInfo>,
+    ) -> Self {
+        Self {
+            sender,
+            instruction_index,
+            instructions,
+            spl_transfers: Some(spl_transfers),
         }
     }
 
@@ -75,6 +102,11 @@ impl<'a> VisualizerContext<'a> {
     /// Returns the current instruction being visualized.
     pub fn current_instruction(&self) -> Option<&Instruction> {
         self.instructions.get(self.instruction_index)
+    }
+
+    /// Returns SPL transfers if available.
+    pub fn spl_transfers(&self) -> Option<&Vec<SplTransferInfo>> {
+        self.spl_transfers
     }
 }
 
