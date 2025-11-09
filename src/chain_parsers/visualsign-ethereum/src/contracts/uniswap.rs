@@ -84,15 +84,15 @@ impl UniswapV4Visualizer {
 
                 detail_fields.push(SignablePayloadField::PreviewLayout {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("{:?} input: {}", cmd, input_hex),
+                        fallback_text: format!("{cmd:?} input: {input_hex}"),
                         label: format!("Command {}", i + 1),
                     },
                     preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
                         title: Some(visualsign::SignablePayloadFieldTextV2 {
-                            text: format!("{:?}", cmd),
+                            text: format!("{cmd:?}"),
                         }),
                         subtitle: Some(visualsign::SignablePayloadFieldTextV2 {
-                            text: format!("Input: {}", input_hex),
+                            text: format!("Input: {input_hex}"),
                         }),
                         condensed: None,
                         expanded: None,
@@ -214,8 +214,7 @@ mod tests {
             SignablePayloadField::PreviewLayout {
                 common: SignablePayloadFieldCommon {
                     fallback_text: format!(
-                        "Universal Router Execute: 1 commands ([V3SwapExactIn]), deadline {}",
-                        deadline_str
+                        "Universal Router Execute: 1 commands ([V3SwapExactIn]), deadline {deadline_str}"
                     ),
                     label: "Universal Router".to_string(),
                 },
@@ -224,7 +223,7 @@ mod tests {
                         text: "Universal Router Execute".to_string(),
                     }),
                     subtitle: Some(SignablePayloadFieldTextV2 {
-                        text: format!("1 commands, deadline {}", deadline_str),
+                        text: format!("1 commands, deadline {deadline_str}"),
                     }),
                     condensed: None,
                     expanded: Some(SignablePayloadFieldListLayout {
@@ -387,8 +386,7 @@ mod tests {
             SignablePayloadField::PreviewLayout {
                 common: SignablePayloadFieldCommon {
                     fallback_text: format!(
-                        "Universal Router Execute: 1 commands ([Sweep]), deadline {}",
-                        deadline_str
+                        "Universal Router Execute: 1 commands ([Sweep]), deadline {deadline_str}",
                     ),
                     label: "Universal Router".to_string(),
                 },
@@ -397,7 +395,7 @@ mod tests {
                         text: "Universal Router Execute".to_string(),
                     }),
                     subtitle: Some(SignablePayloadFieldTextV2 {
-                        text: format!("1 commands, deadline {}", deadline_str),
+                        text: format!("1 commands, deadline {deadline_str}"),
                     }),
                     condensed: None,
                     expanded: Some(SignablePayloadFieldListLayout {

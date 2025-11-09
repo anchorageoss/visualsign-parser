@@ -39,7 +39,7 @@ fn test_with_fixtures() {
 
         let actual_output = match result {
             Ok(payload) => payload.to_json().unwrap(),
-            Err(error) => format!("Error: {:?}", error),
+            Err(error) => format!("Error: {error:?}"),
         };
 
         // Construct expected output path
