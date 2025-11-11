@@ -859,7 +859,7 @@ fn visualize_inner_instruction(instruction: Instruction) -> Option<String> {
     visualize_with_any(&visualizer_refs, &context)
         .and_then(|result| result.ok())
         .and_then(|viz_result| match viz_result.kind {
-            VisualizerKind::Payments(label) if label == "UnknownProgram" => None,
+            VisualizerKind::Payments("UnknownProgram") => None,
             _ => summarize_visualized_field(&viz_result.field),
         })
 }
@@ -945,10 +945,17 @@ fn format_token_instruction_summary(
     accounts: &[InnerAccountMeta],
 ) -> Option<String> {
     let account_label = |idx: usize, fallback: &str| {
-        accounts
-            .get(idx)
-            .map(|meta| meta.display.clone())
-            .unwrap_or_else(|| fallback.to_string())
+        if idx == 0 {
+            accounts
+                .first()
+                .map(|meta| meta.display.clone())
+                .unwrap_or_else(|| fallback.to_string())
+        } else {
+            accounts
+                .get(idx)
+                .map(|meta| meta.display.clone())
+                .unwrap_or_else(|| fallback.to_string())
+        }
     };
 
     match ix {
@@ -1049,7 +1056,7 @@ fn format_token_instruction_summary(
 
 fn format_native_sol_transfer(accounts: &[InnerAccountMeta], lamports: u64) -> String {
     let from = accounts
-        .get(0)
+        .first()
         .map(|meta| meta.display.clone())
         .unwrap_or_else(|| "Source".to_string());
     let to = accounts
@@ -1777,7 +1784,7 @@ fn describe_action(permission: u16, data: &[u8]) -> Option<String> {
             }
             let mint = Pubkey::new_from_array(data[0..32].try_into().ok()?);
             let amount = u64::from_le_bytes(data[32..40].try_into().ok()?);
-            Some(format!("Token limit: mint {} remaining {}", mint, amount))
+            Some(format!("Token limit: mint {mint} remaining {amount}"))
         }
         6 => {
             if data.len() != 64 {
@@ -1789,8 +1796,7 @@ fn describe_action(permission: u16, data: &[u8]) -> Option<String> {
             let current = u64::from_le_bytes(data[48..56].try_into().ok()?);
             let last_reset = u64::from_le_bytes(data[56..64].try_into().ok()?);
             Some(format!(
-                "Token recurring limit: mint {} limit {} per {} slot(s); current {} (last reset {})",
-                mint, limit, window, current, last_reset
+                "Token recurring limit: mint {mint} limit {limit} per {window} slot(s); current {current} (last reset {last_reset})"
             ))
         }
         7 => Some("All permissions (full access)".to_string()),
@@ -1810,8 +1816,7 @@ fn describe_action(permission: u16, data: &[u8]) -> Option<String> {
                 Pubkey::new_from_array(target_bytes).to_string()
             };
             Some(format!(
-                "Sub-account permission: target {}, role {}, bump {}, enabled {}, swig id {}",
-                target, role_id, bump, enabled, swig_id
+                "Sub-account permission: target {target}, role {role_id}, bump {bump}, enabled {enabled}, swig id {swig_id}"
             ))
         }
         10 => {
@@ -1822,8 +1827,7 @@ fn describe_action(permission: u16, data: &[u8]) -> Option<String> {
             let destination = Pubkey::new_from_array(data[32..64].try_into().ok()?);
             let amount = u64::from_le_bytes(data[64..72].try_into().ok()?);
             Some(format!(
-                "Token destination limit: mint {} destination {} remaining {}",
-                mint, destination, amount
+                "Token destination limit: mint {mint} destination {destination} remaining {amount}"
             ))
         }
         11 => {
@@ -1837,8 +1841,7 @@ fn describe_action(permission: u16, data: &[u8]) -> Option<String> {
             let last_reset = u64::from_le_bytes(data[80..88].try_into().ok()?);
             let current = u64::from_le_bytes(data[88..96].try_into().ok()?);
             Some(format!(
-                "Token recurring destination limit: mint {} destination {} limit {} per {} slot(s); current {} (last reset {})",
-                mint, destination, recurring_amount, window, current, last_reset
+                "Token recurring destination limit: mint {mint} destination {destination} limit {recurring_amount} per {window} slot(s); current {current} (last reset {last_reset})"
             ))
         }
         12 => {
@@ -2225,7 +2228,7 @@ mod tests {
 
     fn convert_example_to_payload(base64_tx: &str, description: &str) -> SignablePayload {
         let tx_wrapper =
-            SolanaTransactionWrapper::from_string(&base64_tx).expect("example transaction invalid");
+            SolanaTransactionWrapper::from_string(base64_tx).expect("example transaction invalid");
         SolanaVisualSignConverter
             .to_visual_sign_payload(
                 tx_wrapper,
