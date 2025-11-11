@@ -33,6 +33,7 @@ impl InstructionVisualizer for SwigWalletVisualizer {
             .current_instruction()
             .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
 
+        let instruction_number = context.instruction_index() + 1;
         let decoded = parse_swig_instruction(&instruction.data, &instruction.accounts)
             .map_err(|err| VisualSignError::DecodeError(err.to_string()))?;
 
@@ -72,7 +73,7 @@ impl InstructionVisualizer for SwigWalletVisualizer {
             dynamic_annotation: None,
             signable_payload_field: SignablePayloadField::PreviewLayout {
                 common: SignablePayloadFieldCommon {
-                    label: format!("Instruction {}", context.instruction_index() + 1),
+                    label: format!("Instruction {instruction_number}"),
                     fallback_text,
                 },
                 preview_layout,
@@ -774,33 +775,35 @@ fn describe_inner_instruction(
     data: &[u8],
 ) -> String {
     let Some(program_id) = program_id else {
-        return format!("Program {} ({} bytes)", program_display, data.len());
+        let byte_len = data.len();
+        return format!("Program {program_display} ({byte_len} bytes)");
     };
 
     if program_id == &system_program::ID {
         if let Ok(ix) = bincode::deserialize::<SystemInstruction>(data) {
             return format_system_instruction_summary(&ix);
         }
-        return format!("System program ({} bytes)", data.len());
+        let byte_len = data.len();
+        return format!("System program ({byte_len} bytes)");
     }
 
     if program_id == &spl_token::ID {
         if let Ok(ix) = TokenInstruction::unpack(data) {
             return format_token_instruction_summary(ix);
         }
-        return format!("SPL Token program ({} bytes)", data.len());
+        let byte_len = data.len();
+        return format!("SPL Token program ({byte_len} bytes)");
     }
 
-    format!("Program {} ({} bytes)", program_display, data.len())
+    let byte_len = data.len();
+    format!("Program {program_display} ({byte_len} bytes)")
 }
 
 fn format_system_instruction_summary(ix: &SystemInstruction) -> String {
     match ix {
         SystemInstruction::Transfer { lamports } => {
-            format!(
-                "System: transfer {lamports} lamports (~{:.9} SOL)",
-                lamports_as_sol(*lamports)
-            )
+            let sol = lamports_as_sol(*lamports);
+            format!("System: transfer {lamports} lamports (~{sol:.9} SOL)")
         }
         SystemInstruction::CreateAccount {
             lamports,
@@ -823,10 +826,8 @@ fn format_system_instruction_summary(ix: &SystemInstruction) -> String {
         }
         SystemInstruction::AdvanceNonceAccount => "System: advance nonce".to_string(),
         SystemInstruction::WithdrawNonceAccount(lamports) => {
-            format!(
-                "System: withdraw nonce {lamports} lamports (~{:.9} SOL)",
-                lamports_as_sol(*lamports)
-            )
+            let sol = lamports_as_sol(*lamports);
+            format!("System: withdraw nonce {lamports} lamports (~{sol:.9} SOL)")
         }
         SystemInstruction::AuthorizeNonceAccount(authority) => {
             format!("System: authorize nonce for {authority}")
@@ -845,7 +846,7 @@ fn format_system_instruction_summary(ix: &SystemInstruction) -> String {
         SystemInstruction::AssignWithSeed { base, seed, owner } => {
             format!("System: assign with seed (base {base}, seed {seed}, owner {owner})")
         }
-        _ => format!("System: {:?}", ix),
+        _ => format!("System: {ix:?}"),
     }
 }
 
@@ -894,7 +895,7 @@ fn format_token_instruction_summary(ix: TokenInstruction) -> String {
         }
         TokenInstruction::CloseAccount => "SPL Token: close account".to_string(),
         TokenInstruction::SyncNative => "SPL Token: sync native account".to_string(),
-        other => format!("SPL Token: {:?}", other),
+        other => format!("SPL Token: {other:?}"),
     }
 }
 
@@ -925,7 +926,7 @@ fn build_variant_fields(
                 make_text_field("Wallet ID (hex)", hex::encode(wallet_id))?,
                 make_text_field(
                     "Authority Data Length",
-                    format!("{} bytes", authority_data.len()),
+                    format_byte_length(authority_data.len()),
                 )?,
             ];
             if let Some(authority_details) =
@@ -967,7 +968,7 @@ fn build_variant_fields(
                 make_text_field("Declared Action Count", num_actions.to_string())?,
                 make_text_field(
                     "Authority Data Length",
-                    format!("{} bytes", authority_data.len()),
+                    format_byte_length(authority_data.len()),
                 )?,
             ];
             if let Some(authority_details) =
@@ -1147,7 +1148,7 @@ fn build_sign_fields(
         make_text_field("Role ID", sign.role_id.to_string())?,
         make_text_field(
             "Instruction Payload Length",
-            format!("{} bytes", sign.instruction_payload_len),
+            format_byte_length(sign.instruction_payload_len),
         )?,
         make_text_field(
             "Inner Instruction Count",
@@ -1291,9 +1292,14 @@ fn count_actions(bytes: &[u8]) -> usize {
     count
 }
 
+fn format_byte_length(len: usize) -> String {
+    format!("{len} bytes")
+}
+
 fn format_actions_summary(bytes: &[u8]) -> String {
     let count = count_actions(bytes);
-    format!("{} bytes (~{} action(s))", bytes.len(), count)
+    let len = bytes.len();
+    format!("{len} bytes (~{count} action(s))")
 }
 
 fn decode_authority_details(authority_type: u16, data: &[u8]) -> Option<Vec<(String, String)>> {
@@ -1732,11 +1738,10 @@ fn describe_action(permission: u16, data: &[u8]) -> Option<String> {
         17 => Some("Program access: all programs (unrestricted CPI)".to_string()),
         18 => Some("Program access: curated set of well-known programs".to_string()),
         19 => Some("All operations except authority management".to_string()),
-        _ => Some(format!(
-            "Unknown permission {} ({} bytes)",
-            permission,
-            data.len()
-        )),
+        _ => {
+            let len = data.len();
+            Some(format!("Unknown permission {permission} ({len} bytes)"))
+        }
     }
 }
 
@@ -1745,16 +1750,20 @@ fn derive_eth_address_from_uncompressed(uncompressed: &[u8]) -> Option<String> {
         return None;
     }
     let hash = solana_sdk::keccak::hash(uncompressed);
-    Some(format!("0x{}", hex::encode(&hash.0[12..32])))
+    let address = hex::encode(&hash.0[12..32]);
+    Some(format!("0x{address}"))
 }
 
 fn format_lamports_with_sol(lamports: u64) -> String {
     let mut sol = format!("{:.9}", lamports_as_sol(lamports));
-    while sol.contains('.') && sol.ends_with('0') {
-        sol.pop();
-    }
-    if sol.ends_with('.') {
-        sol.pop();
+    let has_decimal = sol.contains('.');
+    if has_decimal {
+        while sol.ends_with('0') {
+            sol.pop();
+        }
+        if sol.ends_with('.') {
+            sol.pop();
+        }
     }
     format!("{lamports} lamports (~{sol} SOL)")
 }
@@ -1869,7 +1878,10 @@ fn decode_webauthn_payload(
         ));
     }
 
-    let auth_len = u16::from_le_bytes(payload[2..4].try_into().unwrap()) as usize;
+    let auth_len =
+        u16::from_le_bytes(payload[2..4].try_into().map_err(|_| {
+            VisualSignError::DecodeError("WebAuthn payload missing auth length".into())
+        })?) as usize;
     if payload.len() < 4 + auth_len + 4 + 2 + 2 + 2 {
         return Err(VisualSignError::DecodeError(
             "WebAuthn payload truncated".to_string(),
@@ -1887,7 +1899,9 @@ fn decode_webauthn_payload(
             "WebAuthn payload missing origin length".to_string(),
         ));
     }
-    let origin_len = u16::from_le_bytes(payload[offset..offset + 2].try_into().unwrap()) as usize;
+    let origin_len = u16::from_le_bytes(payload[offset..offset + 2].try_into().map_err(|_| {
+        VisualSignError::DecodeError("WebAuthn payload missing origin length".into())
+    })?) as usize;
     offset += 2;
 
     if payload.len() < offset + 2 {
@@ -1896,7 +1910,9 @@ fn decode_webauthn_payload(
         ));
     }
     let huffman_tree_len =
-        u16::from_le_bytes(payload[offset..offset + 2].try_into().unwrap()) as usize;
+        u16::from_le_bytes(payload[offset..offset + 2].try_into().map_err(|_| {
+            VisualSignError::DecodeError("WebAuthn payload missing huffman tree length".into())
+        })?) as usize;
     offset += 2;
 
     if payload.len() < offset + 2 {
@@ -1905,7 +1921,9 @@ fn decode_webauthn_payload(
         ));
     }
     let huffman_encoded_len =
-        u16::from_le_bytes(payload[offset..offset + 2].try_into().unwrap()) as usize;
+        u16::from_le_bytes(payload[offset..offset + 2].try_into().map_err(|_| {
+            VisualSignError::DecodeError("WebAuthn payload missing huffman encoded length".into())
+        })?) as usize;
     offset += 2;
 
     if payload.len() < offset + huffman_tree_len + huffman_encoded_len {
