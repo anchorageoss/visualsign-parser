@@ -6,10 +6,16 @@ use std::fmt;
 
 use crate::core::{
     InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    available_visualizers, visualize_with_any,
 };
 use config::SwigWalletConfig;
+use solana_parser::solana::structs::SolanaAccount;
 use solana_program::system_instruction::SystemInstruction;
-use solana_sdk::{instruction::AccountMeta, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey,
+};
 use solana_system_interface::program as system_program;
 use spl_token::instruction::{AuthorityType as SplAuthorityType, TokenInstruction};
 use std::convert::TryInto;
@@ -731,6 +737,7 @@ fn decode_compact_instructions(
             program_meta.pubkey.as_ref(),
             &program_meta.display,
             &data_slice,
+            &inner_accounts,
         );
         instructions.push(DecodedInnerInstruction {
             program_id: program_meta.pubkey,
@@ -773,109 +780,237 @@ fn describe_inner_instruction(
     program_id: Option<&Pubkey>,
     program_display: &str,
     data: &[u8],
+    accounts: &[InnerAccountMeta],
 ) -> String {
-    let Some(program_id) = program_id else {
+    let fallback = || {
         let byte_len = data.len();
-        return format!("Program {program_display} ({byte_len} bytes)");
+        format!("Program {program_display} ({byte_len} bytes)")
     };
 
-    if program_id == &system_program::ID {
-        if let Ok(ix) = bincode::deserialize::<SystemInstruction>(data) {
-            return format_system_instruction_summary(&ix);
+    let Some(program_id) = program_id else {
+        return fallback();
+    };
+
+    if let Some(instruction) = build_inner_instruction(program_id, accounts, data) {
+        if let Some(summary) = visualize_inner_instruction(instruction) {
+            return summary;
         }
-        let byte_len = data.len();
-        return format!("System program ({byte_len} bytes)");
     }
 
     if program_id == &spl_token::ID {
         if let Ok(ix) = TokenInstruction::unpack(data) {
-            return format_token_instruction_summary(ix);
+            if let Some(summary) = format_token_instruction_summary(ix, accounts) {
+                return summary;
+            }
         }
-        let byte_len = data.len();
-        return format!("SPL Token program ({byte_len} bytes)");
+    } else if program_id == &system_program::ID {
+        if let Ok(SystemInstruction::Transfer { lamports }) =
+            bincode::deserialize::<SystemInstruction>(data)
+        {
+            return format_native_sol_transfer(accounts, lamports);
+        }
     }
 
-    let byte_len = data.len();
-    format!("Program {program_display} ({byte_len} bytes)")
+    fallback()
 }
 
-fn format_system_instruction_summary(ix: &SystemInstruction) -> String {
-    match ix {
-        SystemInstruction::Transfer { lamports } => {
-            let sol = lamports_as_sol(*lamports);
-            format!("System: transfer {lamports} lamports (~{sol:.9} SOL)")
+fn build_inner_instruction(
+    program_id: &Pubkey,
+    accounts: &[InnerAccountMeta],
+    data: &[u8],
+) -> Option<Instruction> {
+    let metas: Option<Vec<AccountMeta>> = accounts
+        .iter()
+        .map(|meta| {
+            let pubkey = meta.pubkey?;
+            let account_meta = if meta.is_writable {
+                AccountMeta::new(pubkey, meta.is_signer)
+            } else {
+                AccountMeta::new_readonly(pubkey, meta.is_signer)
+            };
+            Some(account_meta)
+        })
+        .collect();
+
+    metas.map(|accounts| Instruction {
+        program_id: *program_id,
+        accounts,
+        data: data.to_vec(),
+    })
+}
+
+fn visualize_inner_instruction(instruction: Instruction) -> Option<String> {
+    let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
+    let visualizer_refs: Vec<&dyn InstructionVisualizer> =
+        visualizers.iter().map(|viz| viz.as_ref()).collect();
+
+    let sender = SolanaAccount {
+        account_key: instruction
+            .accounts
+            .first()
+            .map(|meta| meta.pubkey.to_string())
+            .unwrap_or_else(|| instruction.program_id.to_string()),
+        signer: false,
+        writable: false,
+    };
+    let instructions = vec![instruction];
+    let context = VisualizerContext::new(&sender, 0, &instructions);
+
+    visualize_with_any(&visualizer_refs, &context)
+        .and_then(|result| result.ok())
+        .and_then(|viz_result| match viz_result.kind {
+            VisualizerKind::Payments(label) if label == "UnknownProgram" => None,
+            _ => summarize_visualized_field(&viz_result.field),
+        })
+}
+
+fn summarize_visualized_field(field: &AnnotatedPayloadField) -> Option<String> {
+    use SignablePayloadField::*;
+
+    match &field.signable_payload_field {
+        PreviewLayout {
+            common,
+            preview_layout,
+        } => preview_layout
+            .title
+            .as_ref()
+            .map(|title| title.text.clone())
+            .filter(|text| !text.is_empty())
+            .or_else(|| fallback_summary(common)),
+        Text { common, text } => {
+            if text.text.is_empty() {
+                fallback_summary(common)
+            } else {
+                Some(text.text.clone())
+            }
         }
-        SystemInstruction::CreateAccount {
-            lamports,
-            space,
-            owner,
-        } => {
-            format!("System: create account with {lamports} lamports, {space} bytes, owner {owner}")
+        TextV2 { common, text_v2 } => {
+            if text_v2.text.is_empty() {
+                fallback_summary(common)
+            } else {
+                Some(text_v2.text.clone())
+            }
         }
-        SystemInstruction::CreateAccountWithSeed {
-            base,
-            seed,
-            owner,
-            lamports,
-            space,
-        } => format!(
-            "System: create account with seed (base {base}, seed {seed}, owner {owner}, {lamports} lamports, {space} bytes)"
-        ),
-        SystemInstruction::Assign { owner } => {
-            format!("System: assign account to {owner}")
+        Number { common, number } => {
+            if number.number.is_empty() {
+                fallback_summary(common)
+            } else {
+                Some(number.number.clone())
+            }
         }
-        SystemInstruction::AdvanceNonceAccount => "System: advance nonce".to_string(),
-        SystemInstruction::WithdrawNonceAccount(lamports) => {
-            let sol = lamports_as_sol(*lamports);
-            format!("System: withdraw nonce {lamports} lamports (~{sol:.9} SOL)")
+        Amount { common, amount } => {
+            if amount.amount.is_empty() {
+                fallback_summary(common)
+            } else {
+                Some(amount.amount.clone())
+            }
         }
-        SystemInstruction::AuthorizeNonceAccount(authority) => {
-            format!("System: authorize nonce for {authority}")
+        AmountV2 { common, amount_v2 } => {
+            if amount_v2.amount.is_empty() {
+                fallback_summary(common)
+            } else {
+                Some(amount_v2.amount.clone())
+            }
         }
-        SystemInstruction::Allocate { space } => {
-            format!("System: allocate {space} bytes")
+        Address { common, address } => {
+            if address.address.is_empty() {
+                fallback_summary(common)
+            } else {
+                Some(address.address.clone())
+            }
         }
-        SystemInstruction::AllocateWithSeed {
-            base,
-            seed,
-            space,
-            owner,
-        } => format!(
-            "System: allocate with seed (base {base}, seed {seed}, {space} bytes, owner {owner})"
-        ),
-        SystemInstruction::AssignWithSeed { base, seed, owner } => {
-            format!("System: assign with seed (base {base}, seed {seed}, owner {owner})")
+        AddressV2 { common, address_v2 } => {
+            if address_v2.address.is_empty() {
+                fallback_summary(common)
+            } else {
+                Some(address_v2.address.clone())
+            }
         }
-        _ => format!("System: {ix:?}"),
+        ListLayout { common, .. } | Divider { common, .. } | Unknown { common, .. } => {
+            fallback_summary(common)
+        }
     }
 }
 
-fn format_token_instruction_summary(ix: TokenInstruction) -> String {
+fn fallback_summary(common: &SignablePayloadFieldCommon) -> Option<String> {
+    if common.fallback_text.is_empty() {
+        None
+    } else {
+        Some(common.fallback_text.clone())
+    }
+}
+
+fn format_token_instruction_summary(
+    ix: TokenInstruction,
+    accounts: &[InnerAccountMeta],
+) -> Option<String> {
+    let account_label = |idx: usize, fallback: &str| {
+        accounts
+            .get(idx)
+            .map(|meta| meta.display.clone())
+            .unwrap_or_else(|| fallback.to_string())
+    };
+
     match ix {
         TokenInstruction::Transfer { amount } => {
-            format!("SPL Token: transfer {amount}")
+            let from = account_label(0, "Source");
+            let to = account_label(1, "Destination");
+            let owner = account_label(2, "Owner");
+            Some(format!(
+                "From: {from}\nTo: {to}\nOwner: {owner}\nAmount: {amount}"
+            ))
         }
         TokenInstruction::TransferChecked { amount, decimals } => {
-            format!("SPL Token: transfer {amount} (checked, {decimals} decimals)")
-        }
-        TokenInstruction::Approve { amount } => {
-            format!("SPL Token: approve spender for {amount}")
-        }
-        TokenInstruction::ApproveChecked { amount, decimals } => {
-            format!("SPL Token: approve checked for {amount} ({decimals} decimals)")
+            let from = account_label(0, "Source");
+            let mint = account_label(1, "Mint");
+            let to = account_label(2, "Destination");
+            let owner = account_label(3, "Owner");
+            Some(format!(
+                "From: {from}\nTo: {to}\nOwner: {owner}\nAmount: {amount}\nMint: {mint}\nDecimals: {decimals}"
+            ))
         }
         TokenInstruction::MintTo { amount } => {
-            format!("SPL Token: mint {amount}")
+            let mint = account_label(0, "Mint");
+            let destination = account_label(1, "Destination");
+            let authority = account_label(2, "Authority");
+            Some(format!(
+                "Mint: {mint}\nDestination: {destination}\nAuthority: {authority}\nAmount: {amount}"
+            ))
         }
         TokenInstruction::MintToChecked { amount, decimals } => {
-            format!("SPL Token: mint {amount} (checked, {decimals} decimals)")
+            let destination = account_label(1, "Destination");
+            let mint = account_label(0, "Mint");
+            let authority = account_label(2, "Authority");
+            Some(format!(
+                "Mint: {mint}\nDestination: {destination}\nAuthority: {authority}\nAmount: {amount}\nDecimals: {decimals}"
+            ))
         }
         TokenInstruction::Burn { amount } => {
-            format!("SPL Token: burn {amount}")
+            let source = account_label(0, "Source");
+            let mint = account_label(1, "Mint");
+            let authority = account_label(2, "Authority");
+            Some(format!(
+                "Source: {source}\nMint: {mint}\nAuthority: {authority}\nAmount: {amount}"
+            ))
         }
         TokenInstruction::BurnChecked { amount, decimals } => {
-            format!("SPL Token: burn {amount} (checked, {decimals} decimals)")
+            let source = account_label(0, "Source");
+            let mint = account_label(1, "Mint");
+            let authority = account_label(2, "Authority");
+            Some(format!(
+                "Source: {source}\nMint: {mint}\nAuthority: {authority}\nAmount: {amount}\nDecimals: {decimals}"
+            ))
         }
+        TokenInstruction::Approve { amount } => {
+            let owner = account_label(0, "Owner");
+            let delegate = account_label(1, "Delegate");
+            Some(format!(
+                "Owner: {owner}\nDelegate: {delegate}\nAmount: {amount}"
+            ))
+        }
+        TokenInstruction::ApproveChecked { amount, decimals } => Some(format!(
+            "SPL Token: approve checked for {amount} ({decimals} decimals)"
+        )),
         TokenInstruction::SetAuthority {
             authority_type,
             new_authority,
@@ -891,12 +1026,37 @@ fn format_token_instruction_summary(ix: TokenInstruction) -> String {
             let target = new_authority
                 .map(|pk| pk.to_string())
                 .unwrap_or_else(|| "None".to_string());
-            format!("SPL Token: set authority {authority_type} -> {target}")
+            let account = account_label(0, "Account");
+            Some(format!(
+                "Account: {account}\nAuthority Type: {authority_type}\nNew Authority: {target}"
+            ))
         }
-        TokenInstruction::CloseAccount => "SPL Token: close account".to_string(),
-        TokenInstruction::SyncNative => "SPL Token: sync native account".to_string(),
-        other => format!("SPL Token: {other:?}"),
+        TokenInstruction::CloseAccount => {
+            let account = account_label(0, "Account");
+            let destination = account_label(1, "Destination");
+            let authority = account_label(2, "Authority");
+            Some(format!(
+                "Account: {account}\nDestination: {destination}\nAuthority: {authority}"
+            ))
+        }
+        TokenInstruction::SyncNative => {
+            let account = account_label(0, "Account");
+            Some(format!("Account: {account}\nAction: Sync Native"))
+        }
+        _ => None,
     }
+}
+
+fn format_native_sol_transfer(accounts: &[InnerAccountMeta], lamports: u64) -> String {
+    let from = accounts
+        .get(0)
+        .map(|meta| meta.display.clone())
+        .unwrap_or_else(|| "Source".to_string());
+    let to = accounts
+        .get(1)
+        .map(|meta| meta.display.clone())
+        .unwrap_or_else(|| "Destination".to_string());
+    format!("From: {from}\nTo: {to}\nAmount: {lamports}")
 }
 
 fn make_text_field(
@@ -2371,7 +2531,7 @@ mod tests {
         assert_text_field(
             swig_expanded,
             "Inner Instruction 1 Summary",
-            "SPL Token: transfer 1000000",
+            "From: 597A8Cxf3rrD1svuCYD8fpoXrwyBVgyCkAC2X8ZY1WWp\nTo: e9RnUuELJyhgRqEjtVRN4T1Zxu8t4YXr5q4PHhvvwi4\nOwner: EwYXm44uBFw4SPmyKsRBiTemWan13ikp1q3w84CUBtAg\nAmount: 1000000",
         );
         assert_text_field(
             swig_expanded,
