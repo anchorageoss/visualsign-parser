@@ -85,20 +85,16 @@ pub fn decode_instructions(
 pub fn decode_transfers(
     transaction: &SolanaTransaction,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
-    // Serialize the full transaction (signatures + message) for proper parsing
-    let transaction_bytes = bincode::serialize(transaction).map_err(|e| {
+    let message_clone = transaction.message.clone();
+    let parsed_transaction = parse_transaction(
+        hex::encode(message_clone.serialize()),
+        false, /* because we're passing the message only */
+    )
+    .map_err(|e| {
         VisualSignError::ParseError(TransactionParseError::DecodeError(format!(
-            "Failed to serialize transaction: {e}"
+            "Failed to parse transaction: {e}"
         )))
     })?;
-
-    let is_full_transaction = true; // true because we're passing the full transaction with signatures
-    let parsed_transaction = parse_transaction(hex::encode(transaction_bytes), is_full_transaction)
-        .map_err(|e| {
-            VisualSignError::ParseError(TransactionParseError::DecodeError(format!(
-                "Failed to parse transaction: {e}"
-            )))
-        })?;
 
     let mut fields = Vec::new();
 

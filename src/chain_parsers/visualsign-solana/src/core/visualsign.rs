@@ -164,25 +164,12 @@ fn convert_to_visual_sign_payload(
     }];
 
     if decode_transfers {
-        // Transfer decoding is best-effort - some complex transactions may not be parseable by solana-parser
-        // We log any errors but continue without transfer information rather than failing completely
-        match instructions::decode_transfers(transaction) {
-            Ok(transfer_fields) => {
-                fields.extend(
-                    transfer_fields
-                        .iter()
-                        .map(|e| e.signable_payload_field.clone()),
-                );
-            }
-            Err(_e) => {
-                tracing::debug!(
-                    "Could not decode transfers (continuing without them): {}",
-                    _e
-                );
-                // Transfer decoding failed but we continue - this is expected for complex transactions
-                // that solana-parser cannot fully parse (e.g., Jupiter swaps with complex instruction data)
-            }
-        }
+        let transfer_fields = instructions::decode_transfers(transaction)?;
+        fields.extend(
+            transfer_fields
+                .iter()
+                .map(|e| e.signable_payload_field.clone()),
+        );
     }
 
     // Process instructions with visualizers
