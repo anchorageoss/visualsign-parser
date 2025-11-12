@@ -107,7 +107,7 @@ message Idl {
   string value = 1;                         // JSON IDL (Interface Definition Language) definition
   optional SolanaIdlType idl_type = 2;      // Type of Solana IDL (e.g., Anchor)
   optional string idl_version = 3;          // IDL version (e.g., "0.30.0")
-  optional SignatureMetadata signature = 4; // Optional IDL signature with metadata (can be verified against on-chain transaction signatures)
+  optional SignatureMetadata signature = 4; // Optional IDL signature with metadata
 }
 
 enum SolanaIdlType {
