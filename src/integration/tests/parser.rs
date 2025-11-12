@@ -390,18 +390,21 @@ async fn parser_ethereum_native_transfer_e2e() {
           {
             "FallbackText": "0x3535353535353535353535353535353535353535",
             "Label": "To",
-            "TextV2": {
-            "Text": "0x3535353535353535353535353535353535353535"
+            "AddressV2": {
+              "Address": "0x3535353535353535353535353535353535353535",
+              "Name": "To",
+              "AssetLabel": "Test Asset"
             },
-            "Type": "text_v2"
+            "Type": "address_v2"
           },
           {
             "FallbackText": "1 ETH",
             "Label": "Value",
-            "TextV2": {
-            "Text": "1 ETH"
+            "AmountV2": {
+              "Amount": "1",
+              "Abbreviation": "ETH"
             },
-            "Type": "text_v2"
+            "Type": "amount_v2"
           },
           {
             "FallbackText": "21000",
@@ -436,7 +439,7 @@ async fn parser_ethereum_native_transfer_e2e() {
         // Verify the transaction contains Ethereum-specific fields
         let signable_payload: serde_json::Value =
             serde_json::from_str(&parsed_transaction.signable_payload).unwrap();
-
+        assert_eq!(&signable_payload, &expected_sp);
         // Validate that the parsed transaction contains all expected fields
         validate_required_fields_present(&signable_payload, &expected_sp);
     }
@@ -451,6 +454,7 @@ async fn parser_charset_validation_all_chains() {
         // These should all pass charset validation
 
         // Solana transaction with Jupiter swap (previously had Unicode arrow issue)
+        // Fixed transaction with proper 0-signature wrapping
         let solana_jupiter_tx = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAkSTXq/T5ciKTTbZJhKN+HNd2Q3/i8mDBxbxpek3krZ664CMz4dTWd4gwDq6aKU/sqHgTzleVA7bTCOy59kSOO+0EPkGS7bWuT/2yiCuaADtj/v6d+KwyTj46OQM2MjIq6hTqzVdwLTW8t+UsWMrwHEvc/r814OmVR9yLVQZujbWvpTh0XSNlF7uoIvuHyKD/16mBElrNa/eT8vB1KVUaN8IoaTvZbN4b7iiv8Q8cl5bDecNqCXzTS1Xmsmh5b2UVZniTbtX0AYG5QKiSDC10m0caM6frmEVukpjEWOk7F/0OzFKL0A0HdMWTIMuQj4xBuP3csLyGzVO/MXtPu6woNViO2O9ocxd1YSDcIwhrzHY3a9ewvycRH5q662TcQqdxD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEedVb8jHAbu50xW7OaBUH/bGy3qP0jlECsc2iVrwTjwabiFf+q4GE+2h/Y0YYwDXaxDncGus7VZig8AAAAAABBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkOA2hfjpCQU+RYEhxm9adq7cdwaqEcgviqlSqPK3h5qVJNNVq4xx0JIWWE9kFLvpQK5lvS5UCde3W3QfWYLIxYjJclj04kifG7PRApFI4NgwtaE5na/xCEBI572Nvp+Fm0P/on9df2SnTAmx8pWHneSwmrNt/J3VFLMhqns4zl6Mb6evO+2606PWXzaqvJdDGxu+TC0vbg5HymAgNFL11hXuFhKBWRymmouYdcNxL6PjM1Bkcio0R+AtqA/P3C3jAFDwYABgALCQwBAQkCAAYMAgAAAEBCDwAAAAAADAEGAREKFQwABgUKEQoQCg0MAAQGAwUHCAECDiTlF8uXeuOtKgEAAAARAWQAAUBCDwAAAAAAtEADAAAAAAAyAAAMAwYAAAEJ";
 
         // Ethereum transaction

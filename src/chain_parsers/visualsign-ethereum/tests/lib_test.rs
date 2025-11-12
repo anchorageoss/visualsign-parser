@@ -38,13 +38,8 @@ fn test_with_fixtures() {
         let result = transaction_string_to_visual_sign(transaction_hex, options);
 
         let actual_output = match result {
-            Ok(payload) => {
-                // Format the payload as a debug string or custom format
-                format!("{payload:#?}")
-            }
-            Err(error) => {
-                format!("Error: {error:?}")
-            }
+            Ok(payload) => payload.to_json().unwrap(),
+            Err(error) => format!("Error: {error:?}"),
         };
 
         // Construct expected output path

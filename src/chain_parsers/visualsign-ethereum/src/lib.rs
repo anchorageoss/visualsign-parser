@@ -1,9 +1,10 @@
+use crate::fmt::{format_ether, format_gwei};
 use alloy_consensus::{Transaction as _, TxType, TypedTransaction};
-use alloy_primitives::{U256, utils::format_units};
 use alloy_rlp::{Buf, Decodable};
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use visualsign::{
-    SignablePayload, SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2,
+    SignablePayload, SignablePayloadField, SignablePayloadFieldAddressV2,
+    SignablePayloadFieldAmountV2, SignablePayloadFieldCommon, SignablePayloadFieldTextV2,
     encodings::SupportedEncodings,
     vsptrait::{
         Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
@@ -12,6 +13,8 @@ use visualsign::{
 };
 
 pub mod chains;
+pub mod contracts;
+pub mod fmt;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub enum EthereumParserError {
@@ -23,25 +26,6 @@ pub enum EthereumParserError {
     UnsupportedTransactionType(String),
     #[error("Failed to decode transaction: {0}")]
     FailedToDecodeTransaction(String),
-}
-
-fn trim_trailing_zeros(s: String) -> String {
-    if s.contains('.') {
-        s.trim_end_matches('0').trim_end_matches('.').to_string()
-    } else {
-        s.to_string()
-    }
-}
-
-// Helper function to format wei to ether
-fn format_ether(wei: U256) -> String {
-    trim_trailing_zeros(format_units(wei, 18).unwrap_or_else(|_| wei.to_string()))
-}
-
-// Helper function to format wei to gwei
-fn format_gwei(wei: u128) -> String {
-    let wei_u256 = alloy_primitives::U256::from(wei);
-    trim_trailing_zeros(format_units(wei_u256, "gwei").unwrap_or_else(|_| wei.to_string()))
 }
 
 // Helper function to extract gas price from different transaction types
@@ -236,24 +220,29 @@ fn convert_to_visual_sign_payload(
         text_v2: SignablePayloadFieldTextV2 { text: chain_name },
     }];
     if let Some(to) = transaction.to() {
-        fields.push(SignablePayloadField::TextV2 {
+        fields.push(SignablePayloadField::AddressV2 {
             common: SignablePayloadFieldCommon {
                 fallback_text: to.to_string(),
                 label: "To".to_string(),
             },
-            text_v2: SignablePayloadFieldTextV2 {
-                text: to.to_string(),
+            address_v2: SignablePayloadFieldAddressV2 {
+                address: to.to_string(),
+                name: "To".to_string(),
+                asset_label: "Test Asset".to_string(),
+                memo: None,
+                badge_text: None,
             },
         });
     }
     fields.extend([
-        SignablePayloadField::TextV2 {
+        SignablePayloadField::AmountV2 {
             common: SignablePayloadFieldCommon {
                 fallback_text: format!("{} ETH", format_ether(transaction.value())),
                 label: "Value".to_string(),
             },
-            text_v2: SignablePayloadFieldTextV2 {
-                text: format!("{} ETH", format_ether(transaction.value())),
+            amount_v2: SignablePayloadFieldAmountV2 {
+                amount: format_ether(transaction.value()),
+                abbreviation: Some("ETH".to_string()),
             },
         },
         SignablePayloadField::TextV2 {
@@ -298,15 +287,30 @@ fn convert_to_visual_sign_payload(
     // Add contract call data if present
     let input = transaction.input();
     if !input.is_empty() {
-        fields.push(SignablePayloadField::TextV2 {
-            common: SignablePayloadFieldCommon {
-                fallback_text: format!("0x{}", hex::encode(input)),
-                label: "Input Data".to_string(),
-            },
-            text_v2: SignablePayloadFieldTextV2 {
-                text: format!("0x{}", hex::encode(input)),
-            },
-        });
+        let mut input_fields: Vec<SignablePayloadField> = Vec::new();
+        if options.decode_transfers {
+            if let Some(field) = (contracts::erc20::ERC20Visualizer {}).visualize_tx_commands(input)
+            {
+                input_fields.push(field);
+            }
+        }
+        if let Some(field) =
+            (contracts::uniswap::UniswapV4Visualizer {}).visualize_tx_commands(input)
+        {
+            input_fields.push(field);
+        }
+        if input_fields.is_empty() {
+            input_fields.push(SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!("0x{}", hex::encode(input)),
+                    label: "Input Data".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 {
+                    text: format!("0x{}", hex::encode(input)),
+                },
+            });
+        }
+        fields.append(&mut input_fields);
     }
 
     let title = options
@@ -338,6 +342,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{SignableTransaction, TxLegacy, TypedTransaction};
     use alloy_primitives::{Address, Bytes, ChainId, U256};
+    use visualsign::SignablePayloadFieldAddressV2;
 
     fn unsigned_to_hex(tx: &TypedTransaction) -> String {
         let mut encoded = Vec::new();
@@ -738,22 +743,27 @@ mod tests {
                             text: "Ethereum Mainnet".to_string(),
                         },
                     },
-                    SignablePayloadField::TextV2 {
+                    SignablePayloadField::AddressV2 {
                         common: SignablePayloadFieldCommon {
                             fallback_text: "0x0000000000000000000000000000000000000000".to_string(),
                             label: "To".to_string(),
                         },
-                        text_v2: SignablePayloadFieldTextV2 {
-                            text: "0x0000000000000000000000000000000000000000".to_string(),
+                        address_v2: SignablePayloadFieldAddressV2 {
+                            address: "0x0000000000000000000000000000000000000000".to_string(),
+                            name: "To".to_string(),
+                            asset_label: "Test Asset".to_string(),
+                            memo: None,
+                            badge_text: None,
                         },
                     },
-                    SignablePayloadField::TextV2 {
+                    SignablePayloadField::AmountV2 {
                         common: SignablePayloadFieldCommon {
                             fallback_text: "1 ETH".to_string(),
                             label: "Value".to_string(),
                         },
-                        text_v2: SignablePayloadFieldTextV2 {
-                            text: "1 ETH".to_string(),
+                        amount_v2: SignablePayloadFieldAmountV2 {
+                            amount: "1".to_string(),
+                            abbreviation: Some("ETH".to_string()),
                         },
                     },
                     SignablePayloadField::TextV2 {
