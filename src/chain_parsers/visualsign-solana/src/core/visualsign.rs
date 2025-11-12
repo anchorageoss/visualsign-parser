@@ -369,6 +369,7 @@ mod tests {
         let payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
             solana_tx,
             VisualSignOptions {
+                metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("Solana Transaction".to_string()),
             },
@@ -450,6 +451,7 @@ mod tests {
         let payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
             solana_tx,
             VisualSignOptions {
+                metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("V0 Transaction".to_string()),
             },
@@ -615,6 +617,7 @@ mod tests {
         let legacy_payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
             legacy_tx,
             VisualSignOptions {
+                metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("Legacy Transfer Test".to_string()),
             },
@@ -657,6 +660,7 @@ mod tests {
         let v0_payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
             v0_tx,
             VisualSignOptions {
+                metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("V0 Transfer Test".to_string()),
             },
@@ -782,6 +786,7 @@ mod tests {
                 let payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
                     wrapper,
                     VisualSignOptions {
+                metadata: None,
                         decode_transfers: true,
                         transaction_name: Some("Manual V0 Transfer Test".to_string()),
                     },
@@ -931,6 +936,7 @@ mod tests {
         let payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
             tx,
             VisualSignOptions {
+                metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("TokenKeg Test".to_string()),
             },

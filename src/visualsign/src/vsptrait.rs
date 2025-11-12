@@ -3,11 +3,13 @@ use std::fmt::Debug;
 use crate::SignablePayload;
 
 pub use crate::errors::{TransactionParseError, VisualSignError};
+pub use generated::parser::ChainMetadata;
 
 #[derive(Default, Debug, Clone)]
 pub struct VisualSignOptions {
     pub decode_transfers: bool,
     pub transaction_name: Option<String>,
+    pub metadata: Option<ChainMetadata>,
     // Add more options as needed - we can extend this struct later
 }
 
