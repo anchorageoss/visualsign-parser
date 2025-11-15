@@ -25,7 +25,7 @@ pub struct VisualizerContextParams {
 /// Context for visualizing Ethereum transactions and calls
 #[derive(Clone)]
 pub struct VisualizerContext {
-    /// The blockchain chain ID (e.g., 1 for Ethereum mainnet)
+    /// The chain ID for the network
     pub chain_id: u64,
     /// The sender of the transaction
     pub sender: Address,
