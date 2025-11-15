@@ -132,10 +132,10 @@ mod tests {
     fn test_visualizer_context_clone() {
         let registry = Arc::new(MockRegistryBackend);
         let visualizers = Arc::new(MockVisualizerRegistry);
-        let sender = "0x1234567890123456789012345678901234567890"
+        let sender: Address = "0x1234567890123456789012345678901234567890"
             .parse()
             .unwrap();
-        let contract = "0xabcdefabcdefabcdefabcdefabcdefabcdefabce"
+        let contract: Address = "0xabcdefabcdefabcdefabcdefabcdefabcdefabce"
             .parse()
             .unwrap();
         let calldata = vec![0x12, 0x34, 0x56, 0x78];
@@ -169,13 +169,13 @@ mod tests {
     fn test_for_nested_call() {
         let registry = Arc::new(MockRegistryBackend);
         let visualizers = Arc::new(MockVisualizerRegistry);
-        let sender = "0x1234567890123456789012345678901234567890"
+        let sender: Address = "0x1234567890123456789012345678901234567890"
             .parse()
             .unwrap();
-        let contract1 = "0xabcdefabcdefabcdefabcdefabcdefabcdefabce"
+        let contract1: Address = "0xabcdefabcdefabcdefabcdefabcdefabcdefabce"
             .parse()
             .unwrap();
-        let contract2 = "0xfedcbafedcbafedcbafedcbafedcbafedcbafeda"
+        let contract2: Address = "0xfedcbafedcbafedcbafedcbafedcbafedcbafeda"
             .parse()
             .unwrap();
         let calldata1 = vec![0x12, 0x34, 0x56, 0x78];
