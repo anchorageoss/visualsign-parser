@@ -16,6 +16,8 @@ pub mod chains;
 pub mod context;
 pub mod contracts;
 pub mod fmt;
+pub mod protocols;
+pub mod visualizer;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub enum EthereumParserError {
