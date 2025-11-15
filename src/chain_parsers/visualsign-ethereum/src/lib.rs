@@ -13,6 +13,7 @@ use visualsign::{
 };
 
 pub mod chains;
+pub mod context;
 pub mod contracts;
 pub mod fmt;
 
