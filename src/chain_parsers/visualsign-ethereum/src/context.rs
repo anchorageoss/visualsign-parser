@@ -44,7 +44,7 @@ impl VisualizerContext {
             chain_id,
             sender,
             current_contract,
-            call_depth: 0, // Enforce 0 for new contexts
+            call_depth: 0,                 // Enforce 0 for new contexts
             calldata: Arc::from(calldata), // Convert to Arc
             registry,
             visualizers,
@@ -83,10 +83,9 @@ mod tests {
 
     impl ContractRegistry for MockContractRegistry {
         fn format_token_amount(&self, amount: u128, decimals: u8) -> String {
-            let divisor = 10_u128.pow(decimals as u32);
-            let integer_part = amount / divisor;
-            let fractional_part = amount % divisor;
-            format!("{}.{:0width$}", integer_part, fractional_part, width = decimals as usize)
+            // Use Alloy's format_units utility
+            alloy_primitives::utils::format_units(amount, decimals)
+                .unwrap_or_else(|_| amount.to_string())
         }
     }
 
@@ -99,18 +98,16 @@ mod tests {
     fn test_visualizer_context_creation() {
         let registry = Arc::new(MockContractRegistry);
         let visualizers = Arc::new(MockVisualizerRegistry);
-        let sender = "0x1234567890123456789012345678901234567890".parse().unwrap();
-        let contract = "0xabcdefabcdefabcdefabcdefabcdefabcdefabce".parse().unwrap();
+        let sender = "0x1234567890123456789012345678901234567890"
+            .parse()
+            .unwrap();
+        let contract = "0xabcdefabcdefabcdefabcdefabcdefabcdefabce"
+            .parse()
+            .unwrap();
         let calldata = vec![0x12, 0x34, 0x56, 0x78];
 
-        let context = VisualizerContext::new(
-            1,
-            sender,
-            contract,
-            calldata.clone(),
-            registry,
-            visualizers,
-        );
+        let context =
+            VisualizerContext::new(1, sender, contract, calldata.clone(), registry, visualizers);
 
         assert_eq!(context.chain_id, 1);
         assert_eq!(context.call_depth, 0);
@@ -124,18 +121,16 @@ mod tests {
     fn test_visualizer_context_clone() {
         let registry = Arc::new(MockContractRegistry);
         let visualizers = Arc::new(MockVisualizerRegistry);
-        let sender = "0x1234567890123456789012345678901234567890".parse().unwrap();
-        let contract = "0xabcdefabcdefabcdefabcdefabcdefabcdefabce".parse().unwrap();
+        let sender = "0x1234567890123456789012345678901234567890"
+            .parse()
+            .unwrap();
+        let contract = "0xabcdefabcdefabcdefabcdefabcdefabcdefabce"
+            .parse()
+            .unwrap();
         let calldata = vec![0x12, 0x34, 0x56, 0x78];
 
-        let context = VisualizerContext::new(
-            1,
-            sender,
-            contract,
-            calldata.clone(),
-            registry,
-            visualizers,
-        );
+        let context =
+            VisualizerContext::new(1, sender, contract, calldata.clone(), registry, visualizers);
 
         let cloned = context.clone();
 
@@ -156,20 +151,20 @@ mod tests {
     fn test_for_nested_call() {
         let registry = Arc::new(MockContractRegistry);
         let visualizers = Arc::new(MockVisualizerRegistry);
-        let sender = "0x1234567890123456789012345678901234567890".parse().unwrap();
-        let contract1 = "0xabcdefabcdefabcdefabcdefabcdefabcdefabce".parse().unwrap();
-        let contract2 = "0xfedcbafedcbafedcbafedcbafedcbafedcbafeda".parse().unwrap();
+        let sender = "0x1234567890123456789012345678901234567890"
+            .parse()
+            .unwrap();
+        let contract1 = "0xabcdefabcdefabcdefabcdefabcdefabcdefabce"
+            .parse()
+            .unwrap();
+        let contract2 = "0xfedcbafedcbafedcbafedcbafedcbafedcbafeda"
+            .parse()
+            .unwrap();
         let calldata1 = vec![0x12, 0x34, 0x56, 0x78];
         let calldata2 = vec![0xaa, 0xbb, 0xcc, 0xdd];
 
-        let context = VisualizerContext::new(
-            1,
-            sender,
-            contract1,
-            calldata1,
-            registry,
-            visualizers,
-        );
+        let context =
+            VisualizerContext::new(1, sender, contract1, calldata1, registry, visualizers);
 
         let nested = context.for_nested_call(contract2, calldata2.clone());
 
@@ -184,7 +179,7 @@ mod tests {
     fn test_format_token_amount() {
         let registry = Arc::new(MockContractRegistry);
         let visualizers = Arc::new(MockVisualizerRegistry);
-        
+
         let context = VisualizerContext::new(
             1,
             Address::ZERO,
@@ -195,8 +190,14 @@ mod tests {
         );
 
         // Test with 18 decimals (like ETH/USDC)
-        assert_eq!(context.format_token_amount(1000000000000000000, 18), "1.000000000000000000");
-        assert_eq!(context.format_token_amount(1500000000000000000, 18), "1.500000000000000000");
+        assert_eq!(
+            context.format_token_amount(1000000000000000000, 18),
+            "1.000000000000000000"
+        );
+        assert_eq!(
+            context.format_token_amount(1500000000000000000, 18),
+            "1.500000000000000000"
+        );
 
         // Test with 6 decimals (like USDT)
         assert_eq!(context.format_token_amount(1000000, 6), "1.000000");
@@ -207,18 +208,18 @@ mod tests {
     fn test_nested_call_increments_depth() {
         let registry = Arc::new(MockContractRegistry);
         let visualizers = Arc::new(MockVisualizerRegistry);
-        let contract1 = "0xabcdefabcdefabcdefabcdefabcdefabcdefabce".parse().unwrap();
-        let contract2 = "0xfedcbafedcbafedcbafedcbafedcbafedcbafeda".parse().unwrap();
-        let contract3 = "0x1111111111111111111111111111111111111111".parse().unwrap();
+        let contract1 = "0xabcdefabcdefabcdefabcdefabcdefabcdefabce"
+            .parse()
+            .unwrap();
+        let contract2 = "0xfedcbafedcbafedcbafedcbafedcbafedcbafeda"
+            .parse()
+            .unwrap();
+        let contract3 = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
 
-        let context = VisualizerContext::new(
-            1,
-            Address::ZERO,
-            contract1,
-            vec![],
-            registry,
-            visualizers,
-        );
+        let context =
+            VisualizerContext::new(1, Address::ZERO, contract1, vec![], registry, visualizers);
 
         let nested1 = context.for_nested_call(contract2, vec![]);
         assert_eq!(nested1.call_depth, 1);

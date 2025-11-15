@@ -4,6 +4,8 @@ use visualsign::AnnotatedPayloadField;
 use visualsign::vsptrait::VisualSignError;
 
 /// Trait for visualizing specific contract types
+/// We're using Arc so that visualizers can be shared across threads 
+/// (we don't have guarantee it's only going to be one thread in tokio)
 pub trait ContractVisualizer: Send + Sync {
     /// Returns the contract type this visualizer handles
     fn contract_type(&self) -> &str;
