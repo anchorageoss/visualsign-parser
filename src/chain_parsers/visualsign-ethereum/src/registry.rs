@@ -1,19 +1,9 @@
 use alloy_primitives::{Address, utils::format_units};
 use std::collections::HashMap;
+use crate::token_metadata::{TokenMetadata, ChainMetadata, parse_network_id};
 
 /// Type alias for chain ID to avoid depending on external chain types
 pub type ChainId = u64;
-
-/// Metadata for an ERC-20 token
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TokenMetadata {
-    /// The token's symbol (e.g., "USDC", "WETH")
-    pub symbol: String,
-    /// The token's decimal places (e.g., 6 for USDC, 18 for WETH)
-    pub decimals: u8,
-    /// The token's full name (e.g., "USD Coin")
-    pub name: String,
-}
 
 /// Registry for managing Ethereum contract types and token metadata
 ///
@@ -66,24 +56,15 @@ impl ContractRegistry {
     ///
     /// # Arguments
     /// * `chain_id` - The chain ID
-    /// * `address` - The token's contract address
-    /// * `symbol` - The token's symbol (e.g., "USDC")
-    /// * `decimals` - The token's decimal places
-    /// * `name` - The token's full name
+    /// * `metadata` - The TokenMetadata containing all token information
     pub fn register_token(
         &mut self,
         chain_id: ChainId,
-        address: Address,
-        symbol: impl Into<String>,
-        decimals: u8,
-        name: impl Into<String>,
+        metadata: TokenMetadata,
     ) {
-        let metadata = TokenMetadata {
-            symbol: symbol.into(),
-            decimals,
-            name: name.into(),
-        };
-
+        let address: Address = metadata.contract_address
+            .parse()
+            .expect("Invalid contract address");
         self.token_metadata.insert((chain_id, address), metadata);
     }
 
@@ -153,25 +134,24 @@ impl ContractRegistry {
         Some((formatted, metadata.symbol.clone()))
     }
 
-    /// Loads token metadata from a ChainMetadata structure
+    /// Loads token metadata from wallet ChainMetadata structure
     ///
     /// This method parses network_id to determine the chain ID and registers
     /// all tokens from the metadata's assets collection.
     ///
     /// # Arguments
     /// * `chain_metadata` - Reference to ChainMetadata containing token information
-    pub fn load_chain_metadata(&mut self, chain_metadata: &ChainMetadata) {
-        let chain_id = chain_metadata.network_id;
+    ///
+    /// # Returns
+    /// `Ok(())` on success, `Err(String)` if network_id is unknown
+    pub fn load_chain_metadata(&mut self, chain_metadata: &ChainMetadata) -> Result<(), String> {
+        let chain_id = parse_network_id(&chain_metadata.network_id)
+            .map_err(|e| e.to_string())?;
 
-        for (token_address, asset_info) in &chain_metadata.assets {
-            self.register_token(
-                chain_id,
-                *token_address,
-                asset_info.symbol.clone(),
-                asset_info.decimals,
-                asset_info.name.clone(),
-            );
+        for (_symbol, token_metadata) in &chain_metadata.assets {
+            self.register_token(chain_id, token_metadata.clone());
         }
+        Ok(())
     }
 }
 
@@ -181,32 +161,10 @@ impl Default for ContractRegistry {
     }
 }
 
-/// ChainMetadata structure representing network and token information
-///
-/// This is typically loaded from wallet metadata and contains all the information
-/// needed to properly format and display transaction details.
-#[derive(Debug, Clone)]
-pub struct ChainMetadata {
-    /// Network ID corresponding to chain ID (1 for Ethereum, 137 for Polygon, etc.)
-    pub network_id: ChainId,
-    /// Map of token addresses to their metadata
-    pub assets: HashMap<Address, AssetInfo>,
-}
-
-/// Information about a token asset
-#[derive(Debug, Clone)]
-pub struct AssetInfo {
-    /// Token symbol (e.g., "USDC")
-    pub symbol: String,
-    /// Token decimal places
-    pub decimals: u8,
-    /// Token full name
-    pub name: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::token_metadata::ErcStandard;
 
     fn usdc_address() -> Address {
         "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
@@ -224,6 +182,21 @@ mod tests {
         "0x6b175474e89094c44da98b954eedeac495271d0f"
             .parse()
             .unwrap()
+    }
+
+    fn create_token_metadata(
+        symbol: &str,
+        name: &str,
+        address: &str,
+        decimals: u8,
+    ) -> TokenMetadata {
+        TokenMetadata {
+            symbol: symbol.to_string(),
+            name: name.to_string(),
+            erc_standard: ErcStandard::Erc20,
+            contract_address: address.to_string(),
+            decimals,
+        }
     }
 
     #[test]
@@ -262,7 +235,13 @@ mod tests {
     #[test]
     fn test_register_token() {
         let mut registry = ContractRegistry::new();
-        registry.register_token(1, usdc_address(), "USDC", 6, "USD Coin");
+        let usdc = create_token_metadata(
+            "USDC",
+            "USD Coin",
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            6,
+        );
+        registry.register_token(1, usdc);
 
         assert_eq!(registry.token_metadata.len(), 1);
         assert_eq!(
@@ -274,7 +253,13 @@ mod tests {
     #[test]
     fn test_format_token_amount_6_decimals() {
         let mut registry = ContractRegistry::new();
-        registry.register_token(1, usdc_address(), "USDC", 6, "USD Coin");
+        let usdc = create_token_metadata(
+            "USDC",
+            "USD Coin",
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            6,
+        );
+        registry.register_token(1, usdc);
 
         // Test: 1.5 USDC = 1_500_000 in raw units
         let result = registry.format_token_amount(1, usdc_address(), 1_500_000);
@@ -284,7 +269,13 @@ mod tests {
     #[test]
     fn test_format_token_amount_18_decimals() {
         let mut registry = ContractRegistry::new();
-        registry.register_token(1, weth_address(), "WETH", 18, "Wrapped Ether");
+        let weth = create_token_metadata(
+            "WETH",
+            "Wrapped Ether",
+            "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+            18,
+        );
+        registry.register_token(1, weth);
 
         // Test: 1 WETH = 1_000_000_000_000_000_000 in raw units
         let result = registry.format_token_amount(1, weth_address(), 1_000_000_000_000_000_000);
@@ -297,7 +288,13 @@ mod tests {
     #[test]
     fn test_format_token_amount_with_trailing_zeros() {
         let mut registry = ContractRegistry::new();
-        registry.register_token(1, usdc_address(), "USDC", 6, "USD Coin");
+        let usdc = create_token_metadata(
+            "USDC",
+            "USD Coin",
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            6,
+        );
+        registry.register_token(1, usdc);
 
         // Test: 1 USDC = 1_000_000 in raw units
         let result = registry.format_token_amount(1, usdc_address(), 1_000_000);
@@ -307,7 +304,13 @@ mod tests {
     #[test]
     fn test_format_token_amount_multiple_decimals() {
         let mut registry = ContractRegistry::new();
-        registry.register_token(1, usdc_address(), "USDC", 6, "USD Coin");
+        let usdc = create_token_metadata(
+            "USDC",
+            "USD Coin",
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            6,
+        );
+        registry.register_token(1, usdc);
 
         // Test: 12.345678 USDC (should trim to 6 decimals: 12.345678)
         let result = registry.format_token_amount(1, usdc_address(), 12_345_678);
@@ -326,7 +329,13 @@ mod tests {
     #[test]
     fn test_format_token_amount_zero_amount() {
         let mut registry = ContractRegistry::new();
-        registry.register_token(1, usdc_address(), "USDC", 6, "USD Coin");
+        let usdc = create_token_metadata(
+            "USDC",
+            "USD Coin",
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            6,
+        );
+        registry.register_token(1, usdc);
 
         // Test: 0 USDC
         let result = registry.format_token_amount(1, usdc_address(), 0);
@@ -339,28 +348,30 @@ mod tests {
 
         let mut assets = HashMap::new();
         assets.insert(
-            usdc_address(),
-            AssetInfo {
-                symbol: "USDC".to_string(),
-                decimals: 6,
-                name: "USD Coin".to_string(),
-            },
+            "USDC".to_string(),
+            create_token_metadata(
+                "USDC",
+                "USD Coin",
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                6,
+            ),
         );
         assets.insert(
-            dai_address(),
-            AssetInfo {
-                symbol: "DAI".to_string(),
-                decimals: 18,
-                name: "Dai Stablecoin".to_string(),
-            },
+            "DAI".to_string(),
+            create_token_metadata(
+                "DAI",
+                "Dai Stablecoin",
+                "0x6b175474e89094c44da98b954eedeac495271d0f",
+                18,
+            ),
         );
 
         let metadata = ChainMetadata {
-            network_id: 1,
+            network_id: "ETHEREUM_MAINNET".to_string(),
             assets,
         };
 
-        registry.load_chain_metadata(&metadata);
+        registry.load_chain_metadata(&metadata).unwrap();
 
         assert_eq!(registry.token_metadata.len(), 2);
         assert_eq!(
@@ -393,9 +404,33 @@ mod tests {
     fn test_register_multiple_tokens() {
         let mut registry = ContractRegistry::new();
 
-        registry.register_token(1, usdc_address(), "USDC", 6, "USD Coin");
-        registry.register_token(1, weth_address(), "WETH", 18, "Wrapped Ether");
-        registry.register_token(1, dai_address(), "DAI", 18, "Dai Stablecoin");
+        registry.register_token(
+            1,
+            create_token_metadata(
+                "USDC",
+                "USD Coin",
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                6,
+            ),
+        );
+        registry.register_token(
+            1,
+            create_token_metadata(
+                "WETH",
+                "Wrapped Ether",
+                "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                18,
+            ),
+        );
+        registry.register_token(
+            1,
+            create_token_metadata(
+                "DAI",
+                "Dai Stablecoin",
+                "0x6b175474e89094c44da98b954eedeac495271d0f",
+                18,
+            ),
+        );
 
         assert_eq!(registry.token_metadata.len(), 3);
 
@@ -424,16 +459,26 @@ mod tests {
     fn test_same_token_different_chains() {
         let mut registry = ContractRegistry::new();
 
-        // Register USDC on Ethereum (chain 1) and Polygon (chain 137)
-        registry.register_token(1, usdc_address(), "USDC", 6, "USD Coin");
+        // Register USDC on Ethereum (chain 1)
+        registry.register_token(
+            1,
+            create_token_metadata(
+                "USDC",
+                "USD Coin",
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                6,
+            ),
+        );
+
+        // Register USDC on Polygon (chain 137) with different address
         registry.register_token(
             137,
-            "0x2791bca1f2de4661ed88a30c99a7a9449aa84174"
-                .parse()
-                .unwrap(),
-            "USDC",
-            6,
-            "USD Coin",
+            create_token_metadata(
+                "USDC",
+                "USD Coin",
+                "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+                6,
+            ),
         );
 
         let eth_result = registry.format_token_amount(1, usdc_address(), 1_000_000);

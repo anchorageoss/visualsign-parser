@@ -10,6 +10,18 @@ pub trait ContractRegistry: Send + Sync {
 /// Registry for managing contract visualizers
 pub trait VisualizerRegistry: Send + Sync {}
 
+/// Arguments for creating a new VisualizerContext
+/// This is safer than making a new() with many arguments directly
+/// which clippy doesn't like and is bug prone to missing fields or mixing them
+pub struct VisualizerContextParams {
+    pub chain_id: u64,
+    pub sender: Address,
+    pub current_contract: Address,
+    pub calldata: Vec<u8>,
+    pub registry: Arc<dyn ContractRegistry>,
+    pub visualizers: Arc<dyn VisualizerRegistry>,
+}
+
 /// Context for visualizing Ethereum transactions and calls
 #[derive(Clone)]
 pub struct VisualizerContext {
@@ -31,23 +43,15 @@ pub struct VisualizerContext {
 
 impl VisualizerContext {
     /// Creates a new, top-level visualizer context
-    #[allow(clippy::too_many_arguments)] // Constructors can often have many args
-    pub fn new(
-        chain_id: u64,
-        sender: Address,
-        current_contract: Address,
-        calldata: Vec<u8>, // Take a Vec for convenience
-        registry: Arc<dyn ContractRegistry>,
-        visualizers: Arc<dyn VisualizerRegistry>,
-    ) -> Self {
+    pub fn new(params: VisualizerContextParams) -> Self {
         Self {
-            chain_id,
-            sender,
-            current_contract,
-            call_depth: 0,                 // Enforce 0 for new contexts
-            calldata: Arc::from(calldata), // Convert to Arc
-            registry,
-            visualizers,
+            chain_id: params.chain_id,
+            sender: params.sender,
+            current_contract: params.current_contract,
+            call_depth: 0, // Set defaults inside the constructor
+            calldata: Arc::from(params.calldata),
+            registry: params.registry,
+            visualizers: params.visualizers,
         }
     }
 
@@ -106,8 +110,16 @@ mod tests {
             .unwrap();
         let calldata = vec![0x12, 0x34, 0x56, 0x78];
 
+        let params = VisualizerContextParams {
+            chain_id: 1,
+            sender,
+            current_contract: contract,
+            calldata: calldata.clone(),
+            registry: registry.clone(),
+            visualizers: visualizers.clone(),
+        };
         let context =
-            VisualizerContext::new(1, sender, contract, calldata.clone(), registry, visualizers);
+            VisualizerContext::new(params);
 
         assert_eq!(context.chain_id, 1);
         assert_eq!(context.call_depth, 0);
@@ -129,8 +141,16 @@ mod tests {
             .unwrap();
         let calldata = vec![0x12, 0x34, 0x56, 0x78];
 
+        let params = VisualizerContextParams {
+            chain_id: 1,
+            sender,
+            current_contract: contract,
+            calldata: calldata.clone(),
+            registry: registry.clone(),
+            visualizers: visualizers.clone(),
+        };
         let context =
-            VisualizerContext::new(1, sender, contract, calldata.clone(), registry, visualizers);
+            VisualizerContext::new(params);
 
         let cloned = context.clone();
 
@@ -162,9 +182,15 @@ mod tests {
             .unwrap();
         let calldata1 = vec![0x12, 0x34, 0x56, 0x78];
         let calldata2 = vec![0xaa, 0xbb, 0xcc, 0xdd];
-
-        let context =
-            VisualizerContext::new(1, sender, contract1, calldata1, registry, visualizers);
+        let params = VisualizerContextParams {
+            chain_id: 1,
+            sender,
+            current_contract: contract1,
+            calldata: calldata1.clone(),
+            registry: registry.clone(),
+            visualizers: visualizers.clone(),
+        };
+        let context = VisualizerContext::new(params);
 
         let nested = context.for_nested_call(contract2, calldata2.clone());
 
@@ -180,14 +206,15 @@ mod tests {
         let registry = Arc::new(MockContractRegistry);
         let visualizers = Arc::new(MockVisualizerRegistry);
 
-        let context = VisualizerContext::new(
-            1,
-            Address::ZERO,
-            Address::ZERO,
-            vec![],
-            registry,
-            visualizers,
-        );
+        let params = VisualizerContextParams {
+            chain_id: 1,
+            sender: Address::ZERO,
+            current_contract: Address::ZERO,
+            calldata: vec![],
+            registry: registry.clone(),
+            visualizers: visualizers.clone(),
+        };
+        let context = VisualizerContext::new(params);
 
         // Test with 18 decimals (like ETH/USDC)
         assert_eq!(
@@ -217,9 +244,15 @@ mod tests {
         let contract3 = "0x1111111111111111111111111111111111111111"
             .parse()
             .unwrap();
-
-        let context =
-            VisualizerContext::new(1, Address::ZERO, contract1, vec![], registry, visualizers);
+        let params = VisualizerContextParams {
+            chain_id: 1,
+            sender: Address::ZERO,
+            current_contract: contract1,
+            calldata: vec![],
+            registry: registry.clone(),
+            visualizers: visualizers.clone(),
+        };
+        let context = VisualizerContext::new(params);
 
         let nested1 = context.for_nested_call(contract2, vec![]);
         assert_eq!(nested1.call_depth, 1);

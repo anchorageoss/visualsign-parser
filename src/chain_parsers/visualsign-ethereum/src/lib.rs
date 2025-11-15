@@ -18,6 +18,7 @@ pub mod contracts;
 pub mod fmt;
 pub mod protocols;
 pub mod registry;
+pub mod token_metadata;
 pub mod visualizer;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
