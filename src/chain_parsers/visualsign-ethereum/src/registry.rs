@@ -10,6 +10,11 @@ pub type ChainId = u64;
 /// Maintains two types of mappings:
 /// 1. Contract type registry: Maps (chain_id, address) to contract type (e.g., "UniswapV3Router")
 /// 2. Token metadata registry: Maps (chain_id, token_address) to token information
+///
+/// # TODO
+/// Extract a ChainRegistry trait that all chains can implement for handling token metadata,
+/// contract types, and other chain-specific information. This will allow Solana, Tron, Sui,
+/// and other chains to use the same interface pattern.
 pub struct ContractRegistry {
     /// Maps (chain_id, address) to contract type
     address_to_type: HashMap<(ChainId, Address), String>,
