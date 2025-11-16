@@ -3,6 +3,8 @@ use chrono::{TimeZone, Utc};
 use num_enum::TryFromPrimitive;
 use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2};
 
+use crate::registry::ContractRegistry;
+
 // From: https://github.com/Uniswap/universal-router/blob/main/contracts/interfaces/IUniversalRouter.sol
 sol! {
     interface IUniversalRouter {
@@ -11,6 +13,41 @@ sol! {
         /// @param inputs An array of byte strings containing abi encoded inputs for each command
         /// @param deadline The deadline by which the transaction must be executed
         function execute(bytes calldata commands, bytes[] calldata inputs, uint256 deadline) external payable;
+    }
+}
+
+// Command parameter structures
+// From: https://github.com/Uniswap/universal-router/blob/main/contracts/modules/uniswap/v3/V3SwapRouter.sol
+sol! {
+    /// Parameters for V3_SWAP_EXACT_IN command
+    struct V3SwapExactInputParams {
+        address recipient;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+        bytes path;
+        bool payerIsUser;
+    }
+
+    /// Parameters for V3_SWAP_EXACT_OUT command
+    struct V3SwapExactOutputParams {
+        address recipient;
+        uint256 amountOut;
+        uint256 amountInMaximum;
+        bytes path;
+        bool payerIsUser;
+    }
+
+    /// Parameters for PAY_PORTION command
+    struct PayPortionParams {
+        address token;
+        address recipient;
+        uint256 bips;
+    }
+
+    /// Parameters for UNWRAP_WETH command
+    struct UnwrapWethParams {
+        address recipient;
+        uint256 amountMinimum;
     }
 }
 
@@ -53,10 +90,25 @@ fn map_commands(raw: &[u8]) -> Vec<Command> {
     out
 }
 
-pub struct UniswapV4Visualizer {}
+/// Visualizer for Uniswap Universal Router
+///
+/// Handles the `execute` function from IUniversalRouter interface:
+/// <https://github.com/Uniswap/universal-router/blob/dev/contracts/interfaces/IUniversalRouter.sol>
+pub struct UniversalRouterVisualizer {}
 
-impl UniswapV4Visualizer {
-    pub fn visualize_tx_commands(&self, input: &[u8]) -> Option<SignablePayloadField> {
+impl UniversalRouterVisualizer {
+    /// Visualizes Universal Router execute commands
+    ///
+    /// # Arguments
+    /// * `input` - The calldata bytes
+    /// * `chain_id` - The chain ID for registry lookups
+    /// * `registry` - Optional registry for resolving token symbols
+    pub fn visualize_tx_commands(
+        &self,
+        input: &[u8],
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
+    ) -> Option<SignablePayloadField> {
         if input.len() < 4 {
             return None;
         }
@@ -76,12 +128,13 @@ impl UniswapV4Visualizer {
             let mut detail_fields = Vec::new();
 
             for (i, cmd) in mapped.iter().enumerate() {
-                let input_hex = call
-                    .inputs
-                    .get(i)
-                    .map(|b| format!("0x{}", hex::encode(&b.0)))
-                    .unwrap_or_else(|| "None".to_string()); // TODO: decode into readable values
+                let input_bytes = call.inputs.get(i).map(|b| &b.0[..]);
+                let input_hex = input_bytes
+                    .map(|b| format!("0x{}", hex::encode(b)))
+                    .unwrap_or_else(|| "None".to_string());
 
+                // Decode command-specific parameters (TODO: implement actual decoding)
+                // For now, all commands use the same hex format until decoders are implemented
                 detail_fields.push(SignablePayloadField::PreviewLayout {
                     common: SignablePayloadFieldCommon {
                         fallback_text: format!("{cmd:?} input: {input_hex}"),
@@ -158,6 +211,40 @@ impl UniswapV4Visualizer {
         }
         None
     }
+
+    // TODO: Implement command decoders
+    //
+    // /// Decodes V3_SWAP_EXACT_IN command parameters
+    // fn decode_v3_swap_exact_in(
+    //     bytes: &[u8],
+    //     chain_id: u64,
+    //     registry: Option<&ContractRegistry>,
+    // ) -> SignablePayloadField {
+    //     // Decode V3SwapExactInputParams
+    //     // Parse path to extract tokens and fees
+    //     // Resolve token symbols from registry
+    //     // Display: "Swap X TOKEN_A for ≥Y TOKEN_B"
+    // }
+    //
+    // /// Decodes PAY_PORTION command parameters
+    // fn decode_pay_portion(
+    //     bytes: &[u8],
+    //     chain_id: u64,
+    //     registry: Option<&ContractRegistry>,
+    // ) -> SignablePayloadField {
+    //     // Decode PayPortionParams
+    //     // Display: "Pay X% of TOKEN to RECIPIENT"
+    // }
+    //
+    // /// Decodes UNWRAP_WETH command parameters
+    // fn decode_unwrap_weth(
+    //     bytes: &[u8],
+    //     chain_id: u64,
+    //     registry: Option<&ContractRegistry>,
+    // ) -> SignablePayloadField {
+    //     // Decode UnwrapWethParams
+    //     // Display: "Unwrap ≥X WETH to ETH for RECIPIENT"
+    // }
 }
 
 #[cfg(test)]
@@ -182,9 +269,9 @@ mod tests {
 
     #[test]
     fn test_visualize_tx_commands_empty_input() {
-        assert_eq!(UniswapV4Visualizer {}.visualize_tx_commands(&[]), None);
+        assert_eq!(UniversalRouterVisualizer {}.visualize_tx_commands(&[], 1, None), None);
         assert_eq!(
-            UniswapV4Visualizer {}.visualize_tx_commands(&[0x01, 0x02, 0x03]),
+            UniversalRouterVisualizer {}.visualize_tx_commands(&[0x01, 0x02, 0x03], 1, None),
             None
         );
     }
@@ -193,7 +280,7 @@ mod tests {
     fn test_visualize_tx_commands_invalid_deadline() {
         // deadline is not convertible to i64 (u64::MAX)
         let input = encode_execute_call(&[0x00], vec![vec![0x01, 0x02]], u64::MAX);
-        assert_eq!(UniswapV4Visualizer {}.visualize_tx_commands(&input), None);
+        assert_eq!(UniversalRouterVisualizer {}.visualize_tx_commands(&input, 1, None), None);
     }
 
     #[test]
@@ -208,8 +295,8 @@ mod tests {
         let deadline_str = dt.to_string();
 
         assert_eq!(
-            UniswapV4Visualizer {}
-                .visualize_tx_commands(&input)
+            UniversalRouterVisualizer {}
+                .visualize_tx_commands(&input, 1, None)
                 .unwrap(),
             SignablePayloadField::PreviewLayout {
                 common: SignablePayloadFieldCommon {
@@ -281,8 +368,8 @@ mod tests {
         let input = encode_execute_call(&commands, inputs.clone(), deadline);
 
         assert_eq!(
-            UniswapV4Visualizer {}
-                .visualize_tx_commands(&input)
+            UniversalRouterVisualizer {}
+                .visualize_tx_commands(&input, 1, None)
                 .unwrap(),
             SignablePayloadField::PreviewLayout {
                 common: SignablePayloadFieldCommon {
@@ -380,8 +467,8 @@ mod tests {
         let deadline_str = dt.to_string();
 
         assert_eq!(
-            UniswapV4Visualizer {}
-                .visualize_tx_commands(&input)
+            UniversalRouterVisualizer {}
+                .visualize_tx_commands(&input, 1, None)
                 .unwrap(),
             SignablePayloadField::PreviewLayout {
                 common: SignablePayloadFieldCommon {
@@ -449,8 +536,8 @@ mod tests {
         let input = encode_execute_call(&commands, inputs.clone(), deadline);
 
         assert_eq!(
-            UniswapV4Visualizer {}
-                .visualize_tx_commands(&input)
+            UniversalRouterVisualizer {}
+                .visualize_tx_commands(&input, 1, None)
                 .unwrap(),
             SignablePayloadField::PreviewLayout {
                 common: SignablePayloadFieldCommon {

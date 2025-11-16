@@ -10,7 +10,7 @@ use crate::registry::ContractRegistry;
 use crate::visualizer::EthereumVisualizerRegistryBuilder;
 
 pub use config::UniswapConfig;
-pub use contracts::UniswapV4Visualizer;
+pub use contracts::{Permit2Visualizer, UniversalRouterVisualizer, V4PoolManagerVisualizer};
 
 /// Registers all Uniswap protocol contracts and visualizers
 ///
