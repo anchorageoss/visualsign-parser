@@ -1,3 +1,4 @@
+pub mod morpho;
 pub mod uniswap;
 
 use crate::registry::ContractRegistry;
@@ -12,6 +13,9 @@ pub fn register_all(
     contract_reg: &mut ContractRegistry,
     visualizer_reg: &mut EthereumVisualizerRegistryBuilder,
 ) {
+    // Register Morpho protocol
+    morpho::register(contract_reg, visualizer_reg);
+
     // Register Uniswap protocol
     uniswap::register(contract_reg, visualizer_reg);
 }
