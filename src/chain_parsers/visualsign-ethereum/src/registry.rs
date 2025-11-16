@@ -5,6 +5,41 @@ use crate::token_metadata::{TokenMetadata, ChainMetadata, parse_network_id};
 /// Type alias for chain ID to avoid depending on external chain types
 pub type ChainId = u64;
 
+/// Trait for contract type markers
+///
+/// Implement this trait on unit structs to create compile-time unique contract type identifiers.
+/// The type name is automatically used as the contract type string.
+///
+/// # Example
+/// ```rust
+/// pub struct UniswapUniversalRouter;
+/// impl ContractType for UniswapUniversalRouter {}
+///
+/// // The type_id is automatically "UniswapUniversalRouter"
+/// ```
+///
+/// # Compile-time Uniqueness
+/// Because Rust doesn't allow duplicate type names in the same scope, this provides
+/// compile-time guarantees that contract types are unique. If someone copies a protocol
+/// directory and forgets to rename the type, the code won't compile.
+pub trait ContractType: 'static {
+    /// Returns the unique identifier for this contract type
+    ///
+    /// By default, uses the Rust type name. Can be overridden for custom strings.
+    fn type_id() -> &'static str {
+        std::any::type_name::<Self>()
+    }
+
+    /// Returns a shortened type ID without module path
+    ///
+    /// Strips the module path to get just the struct name.
+    /// Example: "visualsign_ethereum::protocols::uniswap::UniswapUniversalRouter" -> "UniswapUniversalRouter"
+    fn short_type_id() -> &'static str {
+        let full_name = Self::type_id();
+        full_name.rsplit("::").next().unwrap_or(full_name)
+    }
+}
+
 /// Registry for managing Ethereum contract types and token metadata
 ///
 /// Maintains two types of mappings:
@@ -34,7 +69,53 @@ impl ContractRegistry {
         }
     }
 
-    /// Registers a contract type on a specific chain
+    /// Creates a new registry with default protocols registered
+    ///
+    /// This is the recommended way to create a ContractRegistry with
+    /// built-in support for known protocols like Uniswap, Aave, etc.
+    pub fn with_default_protocols() -> Self {
+        let mut registry = Self::new();
+        let mut visualizer_builder = crate::visualizer::EthereumVisualizerRegistryBuilder::new();
+        crate::protocols::register_all(&mut registry, &mut visualizer_builder);
+        registry
+    }
+
+    /// Registers a contract type on a specific chain (type-safe version)
+    ///
+    /// This is the preferred method for registering contracts. It uses the ContractType
+    /// trait to ensure compile-time uniqueness of contract type identifiers.
+    ///
+    /// # Arguments
+    /// * `chain_id` - The chain ID (1 for Ethereum, 137 for Polygon, etc.)
+    /// * `addresses` - List of contract addresses on this chain
+    ///
+    /// # Example
+    /// ```rust
+    /// pub struct UniswapUniversalRouter;
+    /// impl ContractType for UniswapUniversalRouter {}
+    ///
+    /// registry.register_contract_typed::<UniswapUniversalRouter>(1, vec![address]);
+    /// ```
+    pub fn register_contract_typed<T: ContractType>(
+        &mut self,
+        chain_id: ChainId,
+        addresses: Vec<Address>,
+    ) {
+        let contract_type_str = T::short_type_id().to_string();
+
+        for address in &addresses {
+            self.address_to_type
+                .insert((chain_id, *address), contract_type_str.clone());
+        }
+
+        self.type_to_addresses
+            .insert((chain_id, contract_type_str), addresses);
+    }
+
+    /// Registers a contract type on a specific chain (string version)
+    ///
+    /// This method is kept for backward compatibility and dynamic registration.
+    /// Prefer `register_contract_typed` for compile-time safety.
     ///
     /// # Arguments
     /// * `chain_id` - The chain ID (1 for Ethereum, 137 for Polygon, etc.)
