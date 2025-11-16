@@ -37,6 +37,9 @@ pub fn register(
         );
     }
 
+    // Register common tokens (WETH, USDC, USDT, DAI, etc.)
+    UniswapConfig::register_common_tokens(contract_reg);
+
     // TODO: Register visualizers once we implement ContractVisualizer for UniswapV4Visualizer
     // For now, we just register the contract addresses
     // Future: visualizer_reg.register(Box::new(UniswapUniversalRouterVisualizer::new()));

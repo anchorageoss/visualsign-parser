@@ -16,7 +16,8 @@
 //! contract type markers below.
 
 use alloy_primitives::Address;
-use crate::registry::ContractType;
+use crate::registry::{ContractRegistry, ContractType};
+use crate::token_metadata::{TokenMetadata, ErcStandard};
 
 /// Contract type marker for Uniswap Universal Router V1.2
 ///
@@ -102,6 +103,121 @@ impl UniswapConfig {
     //
     // pub fn v4_pool_manager_address() -> Address { ... }
     // pub fn v4_pool_manager_chains() -> &'static [u64] { ... }
+
+    /// Registers common tokens used in Uniswap transactions
+    ///
+    /// This registers tokens like WETH across multiple chains so they can be
+    /// resolved by symbol during transaction visualization.
+    pub fn register_common_tokens(registry: &mut ContractRegistry) {
+        // WETH on Ethereum Mainnet
+        registry.register_token(
+            1,
+            TokenMetadata {
+                symbol: "WETH".to_string(),
+                name: "Wrapped Ether".to_string(),
+                erc_standard: ErcStandard::Erc20,
+                contract_address: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2".to_string(),
+                decimals: 18,
+            },
+        );
+
+        // WETH on Optimism
+        registry.register_token(
+            10,
+            TokenMetadata {
+                symbol: "WETH".to_string(),
+                name: "Wrapped Ether".to_string(),
+                erc_standard: ErcStandard::Erc20,
+                contract_address: "0x4200000000000000000000000000000000000006".to_string(),
+                decimals: 18,
+            },
+        );
+
+        // WETH on Polygon
+        registry.register_token(
+            137,
+            TokenMetadata {
+                symbol: "WETH".to_string(),
+                name: "Wrapped Ether".to_string(),
+                erc_standard: ErcStandard::Erc20,
+                contract_address: "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619".to_string(),
+                decimals: 18,
+            },
+        );
+
+        // WETH on Base
+        registry.register_token(
+            8453,
+            TokenMetadata {
+                symbol: "WETH".to_string(),
+                name: "Wrapped Ether".to_string(),
+                erc_standard: ErcStandard::Erc20,
+                contract_address: "0x4200000000000000000000000000000000000006".to_string(),
+                decimals: 18,
+            },
+        );
+
+        // WETH on Arbitrum
+        registry.register_token(
+            42161,
+            TokenMetadata {
+                symbol: "WETH".to_string(),
+                name: "Wrapped Ether".to_string(),
+                erc_standard: ErcStandard::Erc20,
+                contract_address: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1".to_string(),
+                decimals: 18,
+            },
+        );
+
+        // Add common tokens on Ethereum Mainnet
+        // USDC
+        registry.register_token(
+            1,
+            TokenMetadata {
+                symbol: "USDC".to_string(),
+                name: "USD Coin".to_string(),
+                erc_standard: ErcStandard::Erc20,
+                contract_address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".to_string(),
+                decimals: 6,
+            },
+        );
+
+        // USDT
+        registry.register_token(
+            1,
+            TokenMetadata {
+                symbol: "USDT".to_string(),
+                name: "Tether USD".to_string(),
+                erc_standard: ErcStandard::Erc20,
+                contract_address: "0xdac17f958d2ee523a2206206994597c13d831ec7".to_string(),
+                decimals: 6,
+            },
+        );
+
+        // DAI
+        registry.register_token(
+            1,
+            TokenMetadata {
+                symbol: "DAI".to_string(),
+                name: "Dai Stablecoin".to_string(),
+                erc_standard: ErcStandard::Erc20,
+                contract_address: "0x6b175474e89094c44da98b954eedeac495271d0f".to_string(),
+                decimals: 18,
+            },
+        );
+
+        // SETH (Sonne Ethereum - or other SETH variant)
+        registry.register_token(
+            1,
+            TokenMetadata {
+                symbol: "SETH".to_string(),
+                name: "SETH".to_string(),
+                erc_standard: ErcStandard::Erc20,
+                contract_address: "0xe71bdfe1df69284f00ee185cf0d95d0c7680c0d4".to_string(),
+                decimals: 18,
+            },
+        );
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
-use alloy_sol_types::{SolCall as _, sol};
+use alloy_sol_types::{SolCall as _, SolValue as _, sol};
+use alloy_primitives::Address;
 use chrono::{TimeZone, Utc};
 use num_enum::TryFromPrimitive;
 use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2};
@@ -129,28 +130,68 @@ impl UniversalRouterVisualizer {
 
             for (i, cmd) in mapped.iter().enumerate() {
                 let input_bytes = call.inputs.get(i).map(|b| &b.0[..]);
-                let input_hex = input_bytes
-                    .map(|b| format!("0x{}", hex::encode(b)))
-                    .unwrap_or_else(|| "None".to_string());
 
-                // Decode command-specific parameters (TODO: implement actual decoding)
-                // For now, all commands use the same hex format until decoders are implemented
-                detail_fields.push(SignablePayloadField::PreviewLayout {
-                    common: SignablePayloadFieldCommon {
-                        fallback_text: format!("{cmd:?} input: {input_hex}"),
-                        label: format!("Command {}", i + 1),
-                    },
-                    preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
-                        title: Some(visualsign::SignablePayloadFieldTextV2 {
-                            text: format!("{cmd:?}"),
-                        }),
-                        subtitle: Some(visualsign::SignablePayloadFieldTextV2 {
-                            text: format!("Input: {input_hex}"),
-                        }),
-                        condensed: None,
-                        expanded: None,
-                    },
-                });
+                // Decode command-specific parameters
+                let field = if let Some(bytes) = input_bytes {
+                    match cmd {
+                        Command::V3SwapExactIn => {
+                            Self::decode_v3_swap_exact_in(bytes, chain_id, registry)
+                        }
+                        Command::PayPortion => {
+                            Self::decode_pay_portion(bytes, chain_id, registry)
+                        }
+                        Command::UnwrapWeth => {
+                            Self::decode_unwrap_weth(bytes, chain_id, registry)
+                        }
+                        _ => {
+                            // For unimplemented commands, show hex
+                            let input_hex = format!("0x{}", hex::encode(bytes));
+                            SignablePayloadField::TextV2 {
+                                common: SignablePayloadFieldCommon {
+                                    fallback_text: format!("{cmd:?} input: {input_hex}"),
+                                    label: format!("{:?}", cmd),
+                                },
+                                text_v2: SignablePayloadFieldTextV2 {
+                                    text: format!("Input: {input_hex}"),
+                                },
+                            }
+                        }
+                    }
+                } else {
+                    SignablePayloadField::TextV2 {
+                        common: SignablePayloadFieldCommon {
+                            fallback_text: format!("{cmd:?} input: None"),
+                            label: format!("{:?}", cmd),
+                        },
+                        text_v2: SignablePayloadFieldTextV2 {
+                            text: "Input: None".to_string(),
+                        },
+                    }
+                };
+
+                // Wrap the field in a PreviewLayout for consistency
+                let label = format!("Command {}", i + 1);
+                let wrapped_field = match field {
+                    SignablePayloadField::TextV2 { common, text_v2 } => {
+                        SignablePayloadField::PreviewLayout {
+                            common: SignablePayloadFieldCommon {
+                                fallback_text: common.fallback_text,
+                                label,
+                            },
+                            preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
+                                title: Some(visualsign::SignablePayloadFieldTextV2 {
+                                    text: common.label,
+                                }),
+                                subtitle: Some(text_v2),
+                                condensed: None,
+                                expanded: None,
+                            },
+                        }
+                    }
+                    _ => field,
+                };
+
+                detail_fields.push(wrapped_field);
             }
 
             // Deadline field (optional)
@@ -212,39 +253,205 @@ impl UniversalRouterVisualizer {
         None
     }
 
-    // TODO: Implement command decoders
-    //
-    // /// Decodes V3_SWAP_EXACT_IN command parameters
-    // fn decode_v3_swap_exact_in(
-    //     bytes: &[u8],
-    //     chain_id: u64,
-    //     registry: Option<&ContractRegistry>,
-    // ) -> SignablePayloadField {
-    //     // Decode V3SwapExactInputParams
-    //     // Parse path to extract tokens and fees
-    //     // Resolve token symbols from registry
-    //     // Display: "Swap X TOKEN_A for ≥Y TOKEN_B"
-    // }
-    //
-    // /// Decodes PAY_PORTION command parameters
-    // fn decode_pay_portion(
-    //     bytes: &[u8],
-    //     chain_id: u64,
-    //     registry: Option<&ContractRegistry>,
-    // ) -> SignablePayloadField {
-    //     // Decode PayPortionParams
-    //     // Display: "Pay X% of TOKEN to RECIPIENT"
-    // }
-    //
-    // /// Decodes UNWRAP_WETH command parameters
-    // fn decode_unwrap_weth(
-    //     bytes: &[u8],
-    //     chain_id: u64,
-    //     registry: Option<&ContractRegistry>,
-    // ) -> SignablePayloadField {
-    //     // Decode UnwrapWethParams
-    //     // Display: "Unwrap ≥X WETH to ETH for RECIPIENT"
-    // }
+    /// Decodes V3_SWAP_EXACT_IN command parameters
+    fn decode_v3_swap_exact_in(
+        bytes: &[u8],
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
+    ) -> SignablePayloadField {
+        // Try to decode the parameters
+        let params = match V3SwapExactInputParams::abi_decode(bytes) {
+            Ok(p) => p,
+            Err(_) => {
+                // Failed to decode - show truncated hex for readability
+                let input_hex = hex::encode(bytes);
+                let truncated = if input_hex.len() > 32 {
+                    format!("0x{}...{} ({} bytes)", &input_hex[..16], &input_hex[input_hex.len()-8..], bytes.len())
+                } else {
+                    format!("0x{}", input_hex)
+                };
+                return SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("V3SwapExactIn input: {}", truncated),
+                        label: "V3SwapExactIn".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("Unable to decode parameters: {}", truncated),
+                    },
+                };
+            }
+        };
+
+        // Parse the path (at least 43 bytes for single hop: 20 + 3 + 20)
+        let path = &params.path;
+        if path.len() < 43 {
+            return SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!("V3SwapExactIn: Invalid path length"),
+                    label: "V3 Swap Exact In".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 {
+                    text: format!("Invalid path length: {} bytes", path.len()),
+                },
+            };
+        }
+
+        // Extract token addresses and fee
+        let token_in = Address::from_slice(&path[0..20]);
+        let fee_bytes = [0, path[20], path[21], path[22]];
+        let fee = u32::from_be_bytes(fee_bytes);
+        let token_out = Address::from_slice(&path[23..43]);
+
+        // Resolve token symbols
+        let token_in_symbol = registry
+            .and_then(|r| r.get_token_symbol(chain_id, token_in))
+            .unwrap_or_else(|| format!("{:?}", token_in));
+        let token_out_symbol = registry
+            .and_then(|r| r.get_token_symbol(chain_id, token_out))
+            .unwrap_or_else(|| format!("{:?}", token_out));
+
+        // Format amounts
+        let amount_in_u128: u128 = params.amountIn.to_string().parse().unwrap_or(0);
+        let amount_out_min_u128: u128 = params.amountOutMinimum.to_string().parse().unwrap_or(0);
+
+        let (amount_in_str, _) = registry
+            .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_u128))
+            .unwrap_or_else(|| (params.amountIn.to_string(), token_in_symbol.clone()));
+
+        let (amount_out_min_str, _) = registry
+            .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_min_u128))
+            .unwrap_or_else(|| (params.amountOutMinimum.to_string(), token_out_symbol.clone()));
+
+        // Calculate fee percentage
+        let fee_pct = fee as f64 / 10000.0;
+
+        let text = format!(
+            "Swap {} {} for >={} {} via V3 ({}% fee)",
+            amount_in_str, token_in_symbol, amount_out_min_str, token_out_symbol, fee_pct
+        );
+
+        SignablePayloadField::TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: text.clone(),
+                label: "V3 Swap Exact In".to_string(),
+            },
+            text_v2: SignablePayloadFieldTextV2 { text },
+        }
+    }
+
+    /// Decodes PAY_PORTION command parameters
+    fn decode_pay_portion(
+        bytes: &[u8],
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
+    ) -> SignablePayloadField {
+        let params = match PayPortionParams::abi_decode(bytes) {
+            Ok(p) => p,
+            Err(_) => {
+                return SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("PayPortion: 0x{}", hex::encode(bytes)),
+                        label: "Pay Portion".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("Failed to decode parameters"),
+                    },
+                };
+            }
+        };
+
+        let token_symbol = registry
+            .and_then(|r| r.get_token_symbol(chain_id, params.token))
+            .unwrap_or_else(|| format!("{:?}", params.token));
+
+        // Convert bips to percentage (10000 bips = 100%)
+        let bips_u128: u128 = params.bips.to_string().parse().unwrap_or(0);
+
+        // Format bips directly to avoid floating point precision issues
+        // 100 bips = 1%, so we can format as "X.XX%" by dividing by 100
+        let percentage_str = if bips_u128 > 0 {
+            let percent_x100 = bips_u128;
+            if percent_x100 >= 100 {
+                // >= 1%, show as "X.XX%"
+                format!("{:.2}%", percent_x100 as f64 / 100.0)
+            } else {
+                // < 1%, show as "0.XX%"
+                format!("{}%", percent_x100 as f64 / 100.0)
+            }
+        } else {
+            "0%".to_string()
+        };
+
+        let text = format!(
+            "Pay {} of {} to {:?}",
+            percentage_str, token_symbol, params.recipient
+        );
+
+        SignablePayloadField::TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: text.clone(),
+                label: "Pay Portion".to_string(),
+            },
+            text_v2: SignablePayloadFieldTextV2 { text },
+        }
+    }
+
+    /// Decodes UNWRAP_WETH command parameters
+    fn decode_unwrap_weth(
+        bytes: &[u8],
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
+    ) -> SignablePayloadField {
+        let params = match UnwrapWethParams::abi_decode(bytes) {
+            Ok(p) => p,
+            Err(_) => {
+                return SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("UnwrapWeth: 0x{}", hex::encode(bytes)),
+                        label: "Unwrap WETH".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("Failed to decode parameters"),
+                    },
+                };
+            }
+        };
+
+        let amount_min_u128: u128 = params.amountMinimum.to_string().parse().unwrap_or(0);
+
+        // TODO: Antipattern - hardcoding WETH addresses here instead of using registry
+        // Should use registry to look up WETH token by symbol for this chain
+        // In future, we can augment the registry with pool tokens or other tokens dynamically
+        // For now, this works but needs to be revisited when we refactor token resolution
+        let weth_addresses: Vec<(u64, &str)> = vec![
+            (1, "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
+            (10, "0x4200000000000000000000000000000000000006"),
+            (137, "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619"),
+            (8453, "0x4200000000000000000000000000000000000006"),
+            (42161, "0x82af49447d8a07e3bd95bd0d56f35241523fbab1"),
+        ];
+
+        let amount_min_str = weth_addresses
+            .iter()
+            .find(|(cid, _)| *cid == chain_id)
+            .and_then(|(_, addr)| addr.parse::<Address>().ok())
+            .and_then(|weth_addr| registry.and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_min_u128)))
+            .map(|(amt, _)| amt)
+            .unwrap_or_else(|| params.amountMinimum.to_string());
+
+        let text = format!(
+            "Unwrap >={} WETH to ETH for {:?}",
+            amount_min_str, params.recipient
+        );
+
+        SignablePayloadField::TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: text.clone(),
+                label: "Unwrap WETH".to_string(),
+            },
+            text_v2: SignablePayloadFieldTextV2 { text },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -327,7 +534,7 @@ mod tests {
                                             text: "V3SwapExactIn".to_string(),
                                         }),
                                         subtitle: Some(SignablePayloadFieldTextV2 {
-                                            text: "Input: 0xdeadbeef".to_string(),
+                                            text: "Unable to decode parameters: 0xdeadbeef".to_string(),
                                         }),
                                         condensed: None,
                                         expanded: None,
@@ -399,7 +606,7 @@ mod tests {
                                             text: "V3SwapExactIn".to_string(),
                                         }),
                                         subtitle: Some(SignablePayloadFieldTextV2 {
-                                            text: "Input: 0x0102".to_string(),
+                                            text: "Unable to decode parameters: 0x0102".to_string(),
                                         }),
                                         condensed: None,
                                         expanded: None,
@@ -525,6 +732,94 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn test_v3_swap_exact_in_decode_debug() {
+        // Test decoding the first V3SwapExactIn command from the real transaction
+        let input_hex = "000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000d02ab486cedc00000000000000000000000000000000000000000000000000000000cb274a57755e600000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002be71bdfe1df69284f00ee185cf0d95d0c7680c0d4000bb8c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000000000000000000000";
+        let input = hex::decode(input_hex).unwrap();
+
+        println!("Input bytes length: {}", input.len());
+        println!("Input hex: {}", hex::encode(&input));
+
+        match V3SwapExactInputParams::abi_decode(&input) {
+            Ok(params) => {
+                println!("Successfully decoded!");
+                println!("  recipient: {:?}", params.recipient);
+                println!("  amountIn: {}", params.amountIn);
+                println!("  amountOutMinimum: {}", params.amountOutMinimum);
+                println!("  path length: {}", params.path.len());
+                println!("  payerIsUser: {}", params.payerIsUser);
+            }
+            Err(e) => {
+                println!("Failed to decode: {:?}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_visualize_tx_commands_real_transaction() {
+        // Real transaction from Etherscan with 4 commands:
+        // 1. V3SwapExactIn (0x00)
+        // 2. V3SwapExactIn (0x00)
+        // 3. PayPortion (0x06)
+        // 4. UnwrapWeth (0x0c)
+        let registry = crate::registry::ContractRegistry::with_default_protocols();
+
+        // Transaction input data (execute function call)
+        let input_hex = "3593564c000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000006918f83f00000000000000000000000000000000000000000000000000000000000000040000060c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000002c000000000000000000000000000000000000000000000000000000000000003400000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000d02ab486cedc00000000000000000000000000000000000000000000000000000000cb274a57755e600000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002be71bdfe1df69284f00ee185cf0d95d0c7680c0d4000bb8c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000340aad21b3b70000000000000000000000000000000000000000000000000000000032e42284d704100000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002be71bdfe1df69284f00ee185cf0d95d0c7680c0d4002710c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000060000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000000000fee13a103a10d593b9ae06b3e05f2e7e1c000000000000000000000000000000000000000000000000000000000000001900000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000fe0b6cdc4c628c0";
+        let input = hex::decode(input_hex).unwrap();
+
+        let result = UniversalRouterVisualizer {}.visualize_tx_commands(&input, 1, Some(&registry));
+        assert!(result.is_some(), "Should decode transaction successfully");
+
+        // Verify the result contains decoded information
+        let field = result.unwrap();
+        if let SignablePayloadField::PreviewLayout { common, preview_layout } = field {
+            // Check that the fallback text mentions 4 commands
+            assert!(common.fallback_text.contains("4 commands"),
+                "Expected '4 commands' in: {}", common.fallback_text);
+
+            // Check that expanded section exists
+            assert!(preview_layout.expanded.is_some(), "Expected expanded section");
+
+            if let Some(list_layout) = preview_layout.expanded {
+                // Should have 5 fields: 4 commands + 1 deadline
+                assert_eq!(list_layout.fields.len(), 5, "Expected 5 fields (4 commands + deadline)");
+
+                // Print decoded commands to verify they're human-readable
+                println!("\n=== Decoded Transaction ===");
+                println!("Fallback text: {}", common.fallback_text);
+                for (i, annotated_field) in list_layout.fields.iter().enumerate() {
+                    match &annotated_field.signable_payload_field {
+                        SignablePayloadField::PreviewLayout { common: field_common, preview_layout: field_preview } => {
+                            println!("\nCommand {}: {}", i + 1, field_common.label);
+                            if let Some(title) = &field_preview.title {
+                                println!("  Title: {}", title.text);
+                            }
+                            if let Some(subtitle) = &field_preview.subtitle {
+                                println!("  Detail: {}", subtitle.text);
+
+                                // Verify that decoded commands contain tokens or amounts
+                                if i < 2 {
+                                    // First two are swaps - should mention WETH
+                                    assert!(subtitle.text.contains("WETH") || subtitle.text.contains("0x"),
+                                        "Swap command should mention WETH or token address");
+                                }
+                            }
+                        }
+                        SignablePayloadField::TextV2 { common: field_common, text_v2 } => {
+                            println!("\n{}: {}", field_common.label, text_v2.text);
+                        }
+                        _ => {}
+                    }
+                }
+                println!("\n=== End Decoded Transaction ===\n");
+            }
+        } else {
+            panic!("Expected PreviewLayout, got different field type");
+        }
     }
 
     #[test]
