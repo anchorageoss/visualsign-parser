@@ -28,6 +28,35 @@ pub trait ContractVisualizer: Send + Sync {
     ) -> Result<Option<Vec<AnnotatedPayloadField>>, VisualSignError>;
 }
 
+/// Trait for visualizers that can handle raw calldata inputs
+///
+/// Some visualizers can work directly with calldata bytes (with or without
+/// function selectors), automatically detecting which function was called.
+/// Visualizers that require specific structured input don't implement this trait.
+pub trait CalldataVisualizer: Send + Sync {
+    /// Attempts to decode and visualize calldata
+    ///
+    /// Implementations should accept calldata in flexible formats:
+    /// - With 4-byte function selector
+    /// - Without selector (raw parameters)
+    /// - Custom encodings
+    ///
+    /// # Arguments
+    /// * `calldata` - The raw calldata bytes
+    /// * `chain_id` - The chain ID for lookups
+    /// * `registry` - Optional contract registry for metadata
+    ///
+    /// # Returns
+    /// * `Some(SignablePayloadField)` if decoding succeeds
+    /// * `None` if the input doesn't match any known function
+    fn visualize_calldata(
+        &self,
+        calldata: &[u8],
+        chain_id: u64,
+        registry: Option<&crate::registry::ContractRegistry>,
+    ) -> Option<visualsign::SignablePayloadField>;
+}
+
 /// Registry for managing Ethereum contract visualizers (Immutable)
 ///
 /// This registry is designed to be built once and shared immutably (e.g., in an Arc).
@@ -47,6 +76,13 @@ impl EthereumVisualizerRegistry {
     /// * `None` - No visualizer registered for this type
     pub fn get(&self, contract_type: &str) -> Option<&dyn ContractVisualizer> {
         self.visualizers.get(contract_type).map(Box::as_ref)
+    }
+}
+
+// Implement VisualizerRegistry trait for EthereumVisualizerRegistry
+impl crate::context::VisualizerRegistry for EthereumVisualizerRegistry {
+    fn get_visualizer(&self, contract_type: &str) -> Option<&dyn ContractVisualizer> {
+        self.get(contract_type)
     }
 }
 

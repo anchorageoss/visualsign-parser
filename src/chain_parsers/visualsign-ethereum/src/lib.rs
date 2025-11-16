@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::fmt::{format_ether, format_gwei};
+use crate::registry::ContractType;
 use alloy_consensus::{Transaction as _, TxType, TypedTransaction};
 use alloy_rlp::{Buf, Decodable};
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
@@ -22,6 +23,7 @@ pub mod fmt;
 pub mod protocols;
 pub mod registry;
 pub mod token_metadata;
+pub mod utils;
 pub mod visualizer;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
@@ -121,20 +123,25 @@ impl EthereumTransactionWrapper {
 /// the request layer first before falling back to the global registry.
 pub struct EthereumVisualSignConverter {
     registry: Arc<registry::ContractRegistry>,
+    visualizer_registry: visualizer::EthereumVisualizerRegistry,
 }
 
 impl EthereumVisualSignConverter {
     /// Creates a new converter with a custom registry wrapped in Arc.
     pub fn with_registry(registry: Arc<registry::ContractRegistry>) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            visualizer_registry: visualizer::EthereumVisualizerRegistryBuilder::new().build(),
+        }
     }
 
     /// Creates a new converter with a default registry including all known protocols.
     pub fn new() -> Self {
-        let (contract_registry, _visualizer_builder) =
+        let (contract_registry, visualizer_builder) =
             registry::ContractRegistry::with_default_protocols();
         Self {
             registry: Arc::new(contract_registry),
+            visualizer_registry: visualizer_builder.build(),
         }
     }
 
@@ -200,6 +207,7 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
                 transaction,
                 options,
                 &layered_registry,
+                &self.visualizer_registry,
             ));
         }
         Err(VisualSignError::DecodeError(format!(
@@ -286,6 +294,7 @@ fn convert_to_visual_sign_payload(
     transaction: TypedTransaction,
     options: VisualSignOptions,
     layered_registry: &LayeredRegistry<registry::ContractRegistry>,
+    visualizer_registry: &visualizer::EthereumVisualizerRegistry,
 ) -> SignablePayload {
     // Extract chain ID to determine the network
     let chain_id = transaction.chain_id();
@@ -368,25 +377,58 @@ fn convert_to_visual_sign_payload(
     let input = transaction.input();
     if !input.is_empty() {
         let mut input_fields: Vec<SignablePayloadField> = Vec::new();
-        if options.decode_transfers {
+
+        // Try to visualize using the registered visualizers
+        let chain_id_val = chain_id.unwrap_or(1);
+        if let Some(to_address) = transaction.to() {
+            if let Some(contract_type) =
+                layered_registry.lookup(|r| r.get_contract_type(chain_id_val, to_address))
+            {
+                if visualizer_registry.get(&contract_type).is_some() {
+                    // Check if this is a Universal Router contract and visualize it
+                    if contract_type
+                        == crate::protocols::uniswap::config::UniswapUniversalRouter::short_type_id(
+                        )
+                    {
+                        if let Some(field) = (protocols::uniswap::UniversalRouterVisualizer {})
+                            .visualize_tx_commands(
+                                input,
+                                chain_id_val,
+                                Some(layered_registry.global()),
+                            )
+                        {
+                            input_fields.push(field);
+                        }
+                    }
+                    // Check if this is a Permit2 contract and visualize it
+                    else if contract_type
+                        == crate::protocols::uniswap::config::Permit2Contract::short_type_id()
+                    {
+                        if let Some(field) = (protocols::uniswap::Permit2Visualizer)
+                            .visualize_tx_commands(
+                                input,
+                                chain_id_val,
+                                Some(layered_registry.global()),
+                            )
+                        {
+                            input_fields.push(field);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: Try ERC20 if decode_transfers is enabled
+        if input_fields.is_empty() && options.decode_transfers {
             if let Some(field) = (contracts::core::ERC20Visualizer {}).visualize_tx_commands(input)
             {
                 input_fields.push(field);
             }
         }
-        if let Some(field) = (protocols::uniswap::UniversalRouterVisualizer {})
-            .visualize_tx_commands(
-                input,
-                chain_id.unwrap_or(1),
-                Some(layered_registry.global()),
-            )
-        {
-            input_fields.push(field);
-        }
         if input_fields.is_empty() {
-            // Use fallback visualizer for unknown contract calls
             input_fields.push(contracts::core::FallbackVisualizer::new().visualize_hex(input));
         }
+
         fields.append(&mut input_fields);
     }
 

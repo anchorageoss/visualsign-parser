@@ -210,3 +210,122 @@ registry.load_chain_metadata(&wallet_metadata)?;
 
 // Now all tokens from wallet are indexed by (chain_id, address)
 ```
+
+## Solidity Protocol Decoders
+
+All protocol decoders (Uniswap, future Aave, etc.) follow a clean, repeatable pattern using the `sol!` macro from alloy.
+
+### Decoder Pattern
+
+Every decoder has 4 steps:
+
+1. **Define struct with sol!** - Type-safe parameter structure
+2. **Decode or handle error** - Use `StructName::abi_decode(bytes)`
+3. **Resolve tokens from registry** - Get symbols and format amounts
+4. **Return TextV2 field** - Human-readable summary
+
+### Example: Simple Decoder
+
+```rust
+fn decode_operation(
+    bytes: &[u8],
+    chain_id: u64,
+    registry: Option<&ContractRegistry>,
+) -> SignablePayloadField {
+    // Step 1: Decode parameters
+    let params = match OperationParams::abi_decode(bytes) {
+        Ok(p) => p,
+        Err(_) => {
+            return SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!("Operation: 0x{}", hex::encode(bytes)),
+                    label: "Operation".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 {
+                    text: "Failed to decode parameters".to_string(),
+                },
+            };
+        }
+    };
+
+    // Step 2: Resolve token symbols via registry
+    let token_symbol = registry
+        .and_then(|r| r.get_token_symbol(chain_id, params.token))
+        .unwrap_or_else(|| format!("{:?}", params.token));
+
+    // Step 3: Format amount with decimals
+    let (amount_str, _) = registry
+        .and_then(|r| {
+            let amount: u128 = params.amount.to_string().parse().ok()?;
+            r.format_token_amount(chain_id, params.token, amount)
+        })
+        .unwrap_or_else(|| (params.amount.to_string(), token_symbol.clone()));
+
+    // Step 4: Create human-readable summary
+    let text = format!("Operation with {} {}", amount_str, token_symbol);
+
+    SignablePayloadField::TextV2 {
+        common: SignablePayloadFieldCommon {
+            fallback_text: text.clone(),
+            label: "Operation".to_string(),
+        },
+        text_v2: SignablePayloadFieldTextV2 { text },
+    }
+}
+```
+
+### Defining Parameter Structs
+
+Use the `sol!` macro to define all parameters:
+
+```rust
+sol! {
+    struct SwapParams {
+        address tokenIn;
+        address tokenOut;
+        uint256 amountIn;
+        uint256 minAmountOut;
+    }
+
+    struct TransferParams {
+        address to;
+        uint256 amount;
+        bytes data;
+    }
+}
+```
+
+**Benefits:**
+- Automatic type-safe ABI decoding
+- No manual byte parsing needed
+- Compile-time correctness
+
+### Reusable Address Utilities
+
+For canonical contracts like WETH:
+
+```rust
+use crate::utils::address_utils::WellKnownAddresses;
+
+let weth = WellKnownAddresses::weth(chain_id)?;  // Get WETH for this chain
+let usdc = WellKnownAddresses::usdc(chain_id)?;  // Get USDC for this chain
+let permit2 = WellKnownAddresses::permit2();     // Same on all chains
+```
+
+### No ASCII Restrictions
+
+Always use ASCII for terminal compatibility:
+- Use `>=` instead of `≥`
+- Use `<=` instead of `≤`
+- Use `->` instead of `→`
+
+### Adding New Protocols
+
+To add Aave, Curve, or any other protocol:
+
+1. Create `src/protocols/aave/` directory
+2. Define Aave function structs with `sol!`
+3. Create decoder functions (20-40 lines each)
+4. Add to main visualizer registry
+
+See `DECODER_GUIDE.md` for complete examples.

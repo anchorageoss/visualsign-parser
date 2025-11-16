@@ -8,7 +8,20 @@ pub trait RegistryBackend: Send + Sync {
 }
 
 /// Registry for managing contract visualizers
-pub trait VisualizerRegistry: Send + Sync {}
+pub trait VisualizerRegistry: Send + Sync {
+    /// Retrieves a visualizer by contract type
+    ///
+    /// # Arguments
+    /// * `contract_type` - The contract type to look up
+    ///
+    /// # Returns
+    /// * `Some(&dyn ContractVisualizer)` if found
+    /// * `None` if not found
+    fn get_visualizer(
+        &self,
+        contract_type: &str,
+    ) -> Option<&dyn crate::visualizer::ContractVisualizer>;
+}
 
 /// Arguments for creating a new VisualizerContext
 /// This is safer than making a new() with many arguments directly
@@ -76,6 +89,23 @@ impl VisualizerContext {
     pub fn format_token_amount(&self, amount: u128, decimals: u8) -> String {
         self.registry.format_token_amount(amount, decimals)
     }
+
+    /// Retrieves a visualizer by contract type from the registry
+    ///
+    /// Enables visualizers to delegate to other visualizers during execution.
+    ///
+    /// # Arguments
+    /// * `contract_type` - The contract type identifier
+    ///
+    /// # Returns
+    /// * `Some(&dyn ContractVisualizer)` if found
+    /// * `None` if not registered
+    pub fn get_visualizer(
+        &self,
+        contract_type: &str,
+    ) -> Option<&dyn crate::visualizer::ContractVisualizer> {
+        self.visualizers.get_visualizer(contract_type)
+    }
 }
 
 #[cfg(test)]
@@ -96,7 +126,14 @@ mod tests {
     /// Mock implementation of VisualizerRegistry for testing
     struct MockVisualizerRegistry;
 
-    impl VisualizerRegistry for MockVisualizerRegistry {}
+    impl VisualizerRegistry for MockVisualizerRegistry {
+        fn get_visualizer(
+            &self,
+            _contract_type: &str,
+        ) -> Option<&dyn crate::visualizer::ContractVisualizer> {
+            None
+        }
+    }
 
     #[test]
     fn test_visualizer_context_creation() {

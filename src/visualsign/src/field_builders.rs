@@ -1,8 +1,8 @@
 use crate::errors;
 use crate::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldAddressV2,
-    SignablePayloadFieldAmountV2, SignablePayloadFieldCommon, SignablePayloadFieldNumber,
-    SignablePayloadFieldTextV2,
+    SignablePayloadFieldAmountV2, SignablePayloadFieldCommon, SignablePayloadFieldListLayout,
+    SignablePayloadFieldNumber, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
 };
 
 use regex::Regex;
@@ -173,6 +173,42 @@ pub fn create_raw_data_field(
         static_annotation: None,
         dynamic_annotation: None,
     })
+}
+
+/// Wrap a SignablePayloadField in an AnnotatedPayloadField with no annotations
+pub fn annotate_field(field: SignablePayloadField) -> AnnotatedPayloadField {
+    AnnotatedPayloadField {
+        signable_payload_field: field,
+        static_annotation: None,
+        dynamic_annotation: None,
+    }
+}
+
+/// Create a preview layout field with title, subtitle (fallback text), and expanded fields
+/// This is useful for operation summaries that show a collapsible preview
+pub fn create_preview_layout(
+    title: &str,
+    subtitle: String,
+    fields: Vec<AnnotatedPayloadField>,
+) -> AnnotatedPayloadField {
+    AnnotatedPayloadField {
+        signable_payload_field: SignablePayloadField::PreviewLayout {
+            common: SignablePayloadFieldCommon {
+                fallback_text: subtitle.clone(),
+                label: title.to_string(),
+            },
+            preview_layout: SignablePayloadFieldPreviewLayout {
+                title: Some(SignablePayloadFieldTextV2 {
+                    text: title.to_string(),
+                }),
+                subtitle: Some(SignablePayloadFieldTextV2 { text: subtitle }),
+                condensed: None,
+                expanded: Some(SignablePayloadFieldListLayout { fields }),
+            },
+        },
+        static_annotation: None,
+        dynamic_annotation: None,
+    }
 }
 
 #[cfg(test)]
