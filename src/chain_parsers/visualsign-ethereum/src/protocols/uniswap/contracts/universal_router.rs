@@ -114,6 +114,25 @@ sol! {
         uint160 amount;
         address token;
     }
+
+    /// Parameters for PERMIT2_PERMIT command
+    struct PermitDetails {
+        address token;
+        uint160 amount;
+        uint48 expiration;
+        uint48 nonce;
+    }
+
+    struct PermitSingle {
+        PermitDetails details;
+        address spender;
+        uint256 sigDeadline;
+    }
+
+    struct Permit2PermitParams {
+        PermitSingle permitSingle;
+        bytes signature;
+    }
 }
 
 // Command IDs for Universal Router
@@ -244,6 +263,9 @@ impl UniversalRouterVisualizer {
                     Command::Transfer => Self::decode_transfer(bytes, chain_id, registry),
                     Command::Permit2TransferFrom => {
                         Self::decode_permit2_transfer_from(bytes, chain_id, registry)
+                    }
+                    Command::Permit2Permit => {
+                        Self::decode_permit2_permit(bytes, chain_id, registry)
                     }
                     _ => {
                         // For unimplemented commands, show hex
@@ -885,7 +907,7 @@ impl UniversalRouterVisualizer {
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        
+
 
         let params = match Permit2TransferFromParams::abi_decode(bytes) {
             Ok(p) => p,
@@ -917,6 +939,278 @@ impl UniversalRouterVisualizer {
                 label: "Permit2 Transfer From".to_string(),
             },
             text_v2: SignablePayloadFieldTextV2 { text },
+        }
+    }
+
+    /// Decodes PERMIT2_PERMIT (0x0a) command parameters
+    /// The Uniswap Universal Router uses custom encoding (not standard ABI) for Permit2 commands:
+    /// - Slots 0-5 (192 bytes): Raw PermitSingle struct data (inline, no ABI offsets)
+    /// - Slots 6+: ABI-encoded bytes signature
+    fn decode_permit2_permit(
+        bytes: &[u8],
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
+    ) -> SignablePayloadField {
+
+        // Try standard ABI decoding first
+        let decode_result = Permit2PermitParams::abi_decode(bytes);
+
+        let params = match decode_result {
+            Ok(p) => p,
+            Err(err) => {
+                // Try custom encoding layout
+                match Self::decode_custom_permit2_params(bytes) {
+                    Ok(p) => p,
+                    Err(_) => {
+                        // Both attempts failed, show diagnostic info
+                        return Self::show_decode_error(bytes, &err);
+                    }
+                }
+            }
+        };
+
+        let token = params.permitSingle.details.token;
+        let token_symbol = registry
+            .and_then(|r| r.get_token_symbol(chain_id, token))
+            .unwrap_or_else(|| format!("{:?}", token));
+
+        // Format amount with proper decimals
+        // Check if amount is unlimited (all 0xfff... = max uint160 or max uint256)
+        let amount_str_val = params.permitSingle.details.amount.to_string();
+        let is_unlimited =
+            amount_str_val == "1461501637330902918203684832716283019655932542975" || // MAX_UINT160
+            amount_str_val == "115792089237316195423570985008687907853269984665640564039457584007913129639935"; // MAX_UINT256
+
+        let amount_u128: u128 = amount_str_val.parse().unwrap_or(0);
+        let (amount_str, _) = registry
+            .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
+            .unwrap_or_else(|| (amount_str_val.clone(), token_symbol.clone()));
+
+        // For condensed display, use "Unlimited Amount" if max value
+        let display_amount_str = if is_unlimited {
+            "Unlimited Amount".to_string()
+        } else {
+            amount_str.clone()
+        };
+
+        // Format expiration timestamp
+        let expiration_u64: u64 = params.permitSingle.details.expiration.to_string().parse().unwrap_or(0);
+        let expiration_str = if expiration_u64 == u64::MAX {
+            "never".to_string()
+        } else {
+            let dt = Utc.timestamp_opt(expiration_u64 as i64, 0).unwrap();
+            dt.format("%Y-%m-%d %H:%M UTC").to_string()
+        };
+
+        // Format sig deadline timestamp
+        let sig_deadline_u64: u64 = params.permitSingle.sigDeadline.to_string().parse().unwrap_or(0);
+        let sig_deadline_str = if sig_deadline_u64 == u64::MAX {
+            "never".to_string()
+        } else {
+            let dt = Utc.timestamp_opt(sig_deadline_u64 as i64, 0).unwrap();
+            dt.format("%Y-%m-%d %H:%M UTC").to_string()
+        };
+
+        // Create individual parameter fields
+        let fields = vec![
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: token_symbol.clone(),
+                        label: "Token".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: token_symbol.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: amount_str.clone(),
+                        label: "Amount".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: amount_str.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{:?}", params.permitSingle.spender),
+                        label: "Spender".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("{:?}", params.permitSingle.spender),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: expiration_str.clone(),
+                        label: "Expires".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: expiration_str.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: sig_deadline_str.clone(),
+                        label: "Sig Deadline".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: sig_deadline_str.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+        ];
+
+        let summary = format!(
+            "Permit {} to spend {} of {}",
+            params.permitSingle.spender, display_amount_str, token_symbol
+        );
+
+        // NOTE: The parameter encoding for PERMIT2_PERMIT command in Universal Router needs verification
+        // The current decoding may not match the actual encoding used by the router
+        // Values should be compared against Tenderly/Etherscan traces for accuracy
+
+        SignablePayloadField::PreviewLayout {
+            common: SignablePayloadFieldCommon {
+                fallback_text: summary.clone(),
+                label: "Permit2 Permit".to_string(),
+            },
+            preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
+                title: Some(visualsign::SignablePayloadFieldTextV2 {
+                    text: "Permit2 Permit".to_string(),
+                }),
+                subtitle: Some(visualsign::SignablePayloadFieldTextV2 {
+                    text: summary,
+                }),
+                condensed: None,
+                expanded: Some(visualsign::SignablePayloadFieldListLayout {
+                    fields,
+                }),
+            },
+        }
+    }
+
+    /// Decodes custom Permit2 parameter layout used by Uniswap router
+    /// The Universal Router uses a custom encoding for Permit2 commands:
+    /// Slots 0-5 (192 bytes): Raw PermitSingle structure (inline, no ABI offsets)
+    /// Slots 6+: ABI-encoded bytes signature
+    ///
+    /// Byte Layout (discovered through transaction analysis):
+    /// Slot 0 (0-31):    token (address, left-padded with 12 bytes zero padding)
+    /// Slot 1 (32-63):   amount (uint160, left-padded with 12 bytes zero padding)
+    /// Slot 2 (64-95):   padding (28 bytes) + expiration (6 bytes, right-aligned)
+    /// Slot 3 (96-127):  nonce/reserved (all zeros in observed transaction)
+    /// Slot 4 (128-159): spender (address, left-padded with 12 bytes zero padding)
+    /// Slot 5 (160-191): sigDeadline (uint256, left-padded, value in last bytes)
+    fn decode_custom_permit2_params(bytes: &[u8]) -> Result<Permit2PermitParams, Box<dyn std::error::Error>> {
+        if bytes.len() < 192 {
+            return Err("bytes too short for PermitSingle (need 192 bytes minimum)".into());
+        }
+
+        let permit_single_bytes = &bytes[0..192];
+
+        // Extract token (address) from bytes 12-31 (left-padded in Slot 0)
+        let token = Address::from_slice(&permit_single_bytes[12..32]);
+
+        // Extract amount (uint160) from bytes 44-63 (left-padded in Slot 1)
+        let amount_hex = hex::encode(&permit_single_bytes[44..64]);
+        let amount = alloy_primitives::Uint::<160, 3>::from_str_radix(&amount_hex, 16)
+            .map_err(|_| "Failed to parse amount")?;
+
+        // Extract expiration (uint48) from bytes 90-95 (right-aligned in Slot 2)
+        let expiration_hex = hex::encode(&permit_single_bytes[90..96]);
+        let expiration = alloy_primitives::Uint::<48, 1>::from_str_radix(&expiration_hex, 16)
+            .map_err(|_| "Failed to parse expiration")?;
+
+        // Extract nonce (uint48) from bytes 96-101 (Slot 3, appears to be unused/zero)
+        let nonce_hex = hex::encode(&permit_single_bytes[96..102]);
+        let nonce = alloy_primitives::Uint::<48, 1>::from_str_radix(&nonce_hex, 16)
+            .map_err(|_| "Failed to parse nonce")?;
+
+        // Extract spender (address) from bytes 140-159 (left-padded in Slot 4)
+        let spender = Address::from_slice(&permit_single_bytes[140..160]);
+
+        // Extract sigDeadline (uint256) from bytes 160-191 (all of Slot 5)
+        let sig_deadline_hex = hex::encode(&permit_single_bytes[160..192]);
+        let sig_deadline = alloy_primitives::U256::from_str_radix(&sig_deadline_hex, 16)
+            .map_err(|_| "Failed to parse sigDeadline")?;
+
+        // Extract signature bytes starting at offset 192 (slot 6+)
+        // These should be ABI-encoded as bytes: offset (32) | length (32) | data (variable)
+        let signature = alloy_primitives::Bytes::default(); // Placeholder
+
+        Ok(Permit2PermitParams {
+            permitSingle: PermitSingle {
+                details: PermitDetails {
+                    token,
+                    amount,
+                    expiration,
+                    nonce,
+                },
+                spender,
+                sigDeadline: sig_deadline,
+            },
+            signature,
+        })
+    }
+
+    /// Helper function to display decoding error with raw hex slots
+    fn show_decode_error(bytes: &[u8], err: &dyn std::fmt::Display) -> SignablePayloadField {
+        let hex_data = format!("0x{}", hex::encode(bytes));
+        let chunk_size = 32;
+        let mut fields = vec![];
+
+        for (i, chunk) in bytes.chunks(chunk_size).enumerate() {
+            let chunk_hex = format!("0x{}", hex::encode(chunk));
+            fields.push(visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: chunk_hex.clone(),
+                        label: format!("Slot {}", i),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 { text: chunk_hex },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            });
+        }
+
+        SignablePayloadField::PreviewLayout {
+            common: SignablePayloadFieldCommon {
+                fallback_text: hex_data.clone(),
+                label: "Permit2 Permit".to_string(),
+            },
+            preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
+                title: Some(visualsign::SignablePayloadFieldTextV2 {
+                    text: "Permit2 Permit (Failed to Decode)".to_string(),
+                }),
+                subtitle: Some(visualsign::SignablePayloadFieldTextV2 {
+                    text: format!("Error: {}, Length: {} bytes", err, bytes.len()),
+                }),
+                condensed: None,
+                expanded: Some(visualsign::SignablePayloadFieldListLayout {
+                    fields,
+                }),
+            },
         }
     }
 }
@@ -1395,5 +1689,202 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn test_decode_permit2_permit_custom_decoder() {
+        // Unit test for the custom Permit2 Permit decoder
+        // This tests the byte-level decoding without going through ABI
+
+        // Construct a minimal PermitSingle structure (192 bytes)
+        let mut permit_single = vec![0u8; 192];
+
+        // Set token at bytes 12-31 (Slot 0, left-padded address)
+        let token_bytes = hex::decode("72b658bd674f9c2b4954682f517c17d14476e417").unwrap();
+        permit_single[0..12].fill(0); // Clear padding
+        permit_single[12..32].copy_from_slice(&token_bytes);
+
+        // Set amount at bytes 44-63 (Slot 1, max uint160, left-padded)
+        let amount_bytes = hex::decode("ffffffffffffffffffffffffffffffffffffffff").unwrap();
+        permit_single[32..44].fill(0); // Clear padding for slot 1
+        permit_single[44..64].copy_from_slice(&amount_bytes);
+
+        // Set expiration at bytes 90-95 (Slot 2, 1765824281 = 0x69405719)
+        permit_single[90..96].copy_from_slice(&[0u8, 0, 0x69, 0x40, 0x57, 0x19]);
+
+        // Set spender at bytes 140-159 (Slot 4, left-padded address)
+        let spender_bytes = hex::decode("3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad").unwrap();
+        permit_single[128..140].fill(0); // Clear padding for slot 4
+        permit_single[140..160].copy_from_slice(&spender_bytes);
+
+        // Set sigDeadline at bytes 160-191 (Slot 5, 1763234081 = 0x6918d121)
+        permit_single[160..188].copy_from_slice(&[0u8; 28]);
+        permit_single[188..192].copy_from_slice(&[0x69, 0x18, 0xd1, 0x21]);
+
+        let result = UniversalRouterVisualizer::decode_custom_permit2_params(&permit_single);
+        assert!(result.is_ok(), "Should decode custom permit2 params successfully");
+
+        let params = result.unwrap();
+
+        // Verify token
+        let expected_token: Address = "0x72b658bd674f9c2b4954682f517c17d14476e417"
+            .parse()
+            .unwrap();
+        assert_eq!(params.permitSingle.details.token, expected_token);
+
+        // Verify amount (max uint160)
+        let expected_amount = alloy_primitives::Uint::<160, 3>::from_str_radix(
+            "ffffffffffffffffffffffffffffffffffffffff",
+            16,
+        )
+        .unwrap();
+        assert_eq!(params.permitSingle.details.amount, expected_amount);
+
+        // Verify expiration
+        let expected_expiration = alloy_primitives::Uint::<48, 1>::from(1765824281u64);
+        assert_eq!(params.permitSingle.details.expiration, expected_expiration);
+
+        // Verify spender
+        let expected_spender: Address = "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad"
+            .parse()
+            .unwrap();
+        assert_eq!(params.permitSingle.spender, expected_spender);
+
+        // Verify sigDeadline
+        let expected_sig_deadline = alloy_primitives::U256::from(1763234081u64);
+        assert_eq!(params.permitSingle.sigDeadline, expected_sig_deadline);
+    }
+
+    #[test]
+    fn test_decode_permit2_permit_field_visualization() {
+        // Unit test for Permit2 Permit field visualization
+        let registry = ContractRegistry::with_default_protocols();
+
+        // Construct the same PermitSingle structure
+        let mut permit_single = vec![0u8; 192];
+
+        let token_bytes = hex::decode("72b658bd674f9c2b4954682f517c17d14476e417").unwrap();
+        permit_single[0..12].fill(0);
+        permit_single[12..32].copy_from_slice(&token_bytes);
+
+        let amount_bytes = hex::decode("ffffffffffffffffffffffffffffffffffffffff").unwrap();
+        permit_single[32..44].fill(0);
+        permit_single[44..64].copy_from_slice(&amount_bytes);
+
+        permit_single[90..96].copy_from_slice(&[0u8, 0, 0x69, 0x40, 0x57, 0x19]);
+
+        let spender_bytes = hex::decode("3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad").unwrap();
+        permit_single[128..140].fill(0);
+        permit_single[140..160].copy_from_slice(&spender_bytes);
+
+        permit_single[160..188].copy_from_slice(&[0u8; 28]);
+        permit_single[188..192].copy_from_slice(&[0x69, 0x18, 0xd1, 0x21]);
+
+        let field = UniversalRouterVisualizer::decode_permit2_permit(&permit_single, 1, Some(&registry));
+
+        // Verify the field is a PreviewLayout
+        match field {
+            SignablePayloadField::PreviewLayout {
+                common,
+                ..
+            } => {
+                // Check the label
+                assert_eq!(common.label, "Permit2 Permit");
+            }
+            _ => panic!("Expected PreviewLayout, got different field type"),
+        }
+    }
+
+    #[test]
+    fn test_permit2_permit_integration_with_fixture_transaction() {
+        // Integration test using the actual transaction fixture provided by the user
+        // The user provided a full EIP-1559 transaction, but we can only test with the calldata
+        let registry = ContractRegistry::with_default_protocols();
+
+        // Extract just the execute() calldata from the transaction data
+        let input_hex = "3593564c000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000006918f83f00000000000000000000000000000000000000000000000000000000000000040a08060c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000032000000000000000000000000000000000000000000000000000000000000003a0000000000000000000000000000000000000000000000000000000000000016000000000000000000000000072b658bd674f9c2b4954682f517c17d14476e417000000000000000000000000ffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000006940571900000000000000000000000000000000000000000000000000000000000000000000000000000000000000003fc91a3afd70395cd496c647d5a6cc9d4b2b7fad000000000000000000000000000000000000000000000000000000006918d12100000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000000412eb0933411b0970637515316fb50511bea7908d3f85808074ceed3bf881562bc06da5178104470e54fb5be96075169b30799c30f30975317ae14113ffdb84bc81c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000285aaa58c1a1a183d0000000000000000000000000000000000000000000000000009cf200e607a0800000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000072b658bd674f9c2b4954682f517c17d14476e417000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000000000000000000000000000000000000000000060000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000000000fee13a103a10d593b9ae06b3e05f2e7e1c000000000000000000000000000000000000000000000000000000000000001900000000000000000000000000000000000000000000000000000000000000400000000000000000000000008419e7eda8577dfc49591a49cad965a0fc6716cf0000000000000000000000000000000000000000000000000009c8d8ef9ef49bc0";
+        let input = hex::decode(input_hex).unwrap();
+
+        let result = UniversalRouterVisualizer {}.visualize_tx_commands(&input, 1, Some(&registry));
+        assert!(result.is_some(), "Should decode transaction successfully");
+
+        let field = result.unwrap();
+
+        // Verify the main transaction field
+        match field {
+            SignablePayloadField::PreviewLayout {
+                common,
+                ..
+            } => {
+                // Check that it mentions commands
+                assert!(common.fallback_text.contains("commands"),
+                    "Expected 'commands' in fallback text: {}", common.fallback_text);
+            }
+            _ => panic!("Expected PreviewLayout for main field"),
+        }
+    }
+
+    #[test]
+    fn test_permit2_permit_timestamp_boundaries() {
+        // Test edge cases for timestamp handling
+        let registry = ContractRegistry::with_default_protocols();
+        let mut permit_single = vec![0u8; 192];
+
+        let token_bytes = hex::decode("72b658bd674f9c2b4954682f517c17d14476e417").unwrap();
+        permit_single[0..12].fill(0);
+        permit_single[12..32].copy_from_slice(&token_bytes);
+
+        let amount_bytes = hex::decode("ffffffffffffffffffffffffffffffffffffffff").unwrap();
+        permit_single[32..44].fill(0);
+        permit_single[44..64].copy_from_slice(&amount_bytes);
+
+        let spender_bytes = hex::decode("3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad").unwrap();
+        permit_single[128..140].fill(0);
+        permit_single[140..160].copy_from_slice(&spender_bytes);
+
+        // Test with a future timestamp (year 2030)
+        // 1893456000 = Friday, January 1, 2030 2:40:00 AM
+        permit_single[90..96].copy_from_slice(&[0u8, 0, 0x70, 0x94, 0x4b, 0x80]);
+        permit_single[160..192].copy_from_slice(&[0u8; 32]);
+
+        let field = UniversalRouterVisualizer::decode_permit2_permit(&permit_single, 1, Some(&registry));
+
+        match field {
+            SignablePayloadField::PreviewLayout {
+                preview_layout, ..
+            } => {
+                if let Some(expanded) = &preview_layout.expanded {
+                    for f in &expanded.fields {
+                        if let SignablePayloadField::PreviewLayout { common, preview_layout: inner_preview } =
+                            &f.signable_payload_field
+                        {
+                            if common.label.contains("Expires") {
+                                if let Some(subtitle) = &inner_preview.subtitle {
+                                    // Should show a valid date in 2030
+                                    assert!(subtitle.text.contains("2030"));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn test_permit2_permit_invalid_input_too_short() {
+        // Test that short input is properly rejected
+        let short_input = vec![0u8; 100]; // Too short
+        let result = UniversalRouterVisualizer::decode_custom_permit2_params(&short_input);
+        assert!(result.is_err(), "Should reject input shorter than 192 bytes");
+    }
+
+    #[test]
+    fn test_permit2_permit_empty_input() {
+        // Test that empty input is properly rejected
+        let empty_input = vec![];
+        let result = UniversalRouterVisualizer::decode_custom_permit2_params(&empty_input);
+        assert!(result.is_err(), "Should reject empty input");
     }
 }

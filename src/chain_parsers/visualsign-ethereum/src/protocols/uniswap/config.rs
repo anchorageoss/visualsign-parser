@@ -30,6 +30,17 @@ pub struct UniswapUniversalRouter;
 
 impl ContractType for UniswapUniversalRouter {}
 
+/// Contract type marker for Permit2
+///
+/// Permit2 is a token approval contract that unifies the approval experience across all applications.
+/// It is deployed at the same address (0x000000000022D473030F116dDEE9F6B43aC78BA3) on all chains.
+///
+/// Reference: <https://github.com/Uniswap/permit2>
+#[derive(Debug, Clone, Copy)]
+pub struct Permit2Contract;
+
+impl ContractType for Permit2Contract {}
+
 // TODO: Add contract type markers for other Universal Router versions
 //
 // /// Universal Router V1 (legacy) - 0xEf1c6E67703c7BD7107eed8303Fbe6EC2554BF6B
@@ -81,6 +92,15 @@ impl UniswapConfig {
     /// <https://github.com/Uniswap/universal-router/tree/main/deploy-addresses>
     pub fn universal_router_chains() -> &'static [u64] {
         &[1, 10, 137, 8453, 42161]
+    }
+
+    /// Returns the Permit2 contract address
+    ///
+    /// Permit2 is deployed at the same address across all chains.
+    ///
+    /// Source: <https://github.com/Uniswap/permit2>
+    pub fn permit2_address() -> Address {
+        crate::utils::address_utils::WellKnownAddresses::permit2()
     }
 
     // TODO: Add methods for other Universal Router versions

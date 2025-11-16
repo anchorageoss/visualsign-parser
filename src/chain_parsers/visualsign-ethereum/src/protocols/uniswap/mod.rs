@@ -11,8 +11,8 @@ use crate::visualizer::EthereumVisualizerRegistryBuilder;
 
 pub use config::UniswapConfig;
 pub use contracts::{
-    Permit2Visualizer, UniversalRouterContractVisualizer, UniversalRouterVisualizer,
-    V4PoolManagerVisualizer,
+    Permit2ContractVisualizer, Permit2Visualizer, UniversalRouterContractVisualizer,
+    UniversalRouterVisualizer, V4PoolManagerVisualizer,
 };
 
 /// Registers all Uniswap protocol contracts and visualizers
@@ -28,23 +28,33 @@ pub fn register(
     contract_reg: &mut ContractRegistry,
     visualizer_reg: &mut EthereumVisualizerRegistryBuilder,
 ) {
-    use config::UniswapUniversalRouter;
+    use config::{Permit2Contract, UniswapUniversalRouter};
 
-    let address = UniswapConfig::universal_router_address();
+    let ur_address = UniswapConfig::universal_router_address();
 
     // Register Universal Router on all supported chains
     for &chain_id in UniswapConfig::universal_router_chains() {
         contract_reg.register_contract_typed::<UniswapUniversalRouter>(
             chain_id,
-            vec![address],
+            vec![ur_address],
+        );
+    }
+
+    // Register Permit2 (same address on all chains)
+    let permit2_address = UniswapConfig::permit2_address();
+    for &chain_id in UniswapConfig::universal_router_chains() {
+        contract_reg.register_contract_typed::<Permit2Contract>(
+            chain_id,
+            vec![permit2_address],
         );
     }
 
     // Register common tokens (WETH, USDC, USDT, DAI, etc.)
     UniswapConfig::register_common_tokens(contract_reg);
 
-    // Register Universal Router visualizer
+    // Register visualizers
     visualizer_reg.register(Box::new(UniversalRouterContractVisualizer::new()));
+    visualizer_reg.register(Box::new(Permit2ContractVisualizer::new()));
 }
 
 #[cfg(test)]

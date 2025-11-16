@@ -417,6 +417,14 @@ fn convert_to_visual_sign_payload(
                             input_fields.push(field);
                         }
                     }
+                    // Check if this is a Permit2 contract and visualize it
+                    else if contract_type == crate::protocols::uniswap::config::Permit2Contract::short_type_id() {
+                        if let Some(field) = (protocols::uniswap::Permit2Visualizer)
+                            .visualize_tx_commands(input, chain_id_val, Some(registry))
+                        {
+                            input_fields.push(field);
+                        }
+                    }
                 }
             }
         }
