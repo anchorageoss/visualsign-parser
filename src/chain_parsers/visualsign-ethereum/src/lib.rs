@@ -185,8 +185,8 @@ impl EthereumVisualSignConverter {
     pub fn with_registry(registry: registry::ContractRegistry) -> Self {
         Self {
             registry,
-            visualizer_registry: visualizer::EthereumVisualizerRegistryBuilder::with_default_protocols()
-                .build(),
+            visualizer_registry:
+                visualizer::EthereumVisualizerRegistryBuilder::with_default_protocols().build(),
         }
     }
 
@@ -409,8 +409,21 @@ fn convert_to_visual_sign_payload(
         if let Some(to_address) = transaction.to() {
             if let Some(contract_type) = registry.get_contract_type(chain_id_val, to_address) {
                 if visualizer_registry.get(&contract_type).is_some() {
+                    // Check if this is a Morpho Bundler3 contract and visualize it
+                    if contract_type
+                        == crate::protocols::morpho::config::Bundler3Contract::short_type_id()
+                    {
+                        if let Some(field) = (protocols::morpho::BundlerVisualizer {})
+                            .visualize_multicall(input, chain_id_val, Some(registry))
+                        {
+                            input_fields.push(field);
+                        }
+                    }
                     // Check if this is a Universal Router contract and visualize it
-                    if contract_type == crate::protocols::uniswap::config::UniswapUniversalRouter::short_type_id() {
+                    else if contract_type
+                        == crate::protocols::uniswap::config::UniswapUniversalRouter::short_type_id(
+                        )
+                    {
                         if let Some(field) = (protocols::uniswap::UniversalRouterVisualizer {})
                             .visualize_tx_commands(input, chain_id_val, Some(registry))
                         {
@@ -418,7 +431,9 @@ fn convert_to_visual_sign_payload(
                         }
                     }
                     // Check if this is a Permit2 contract and visualize it
-                    else if contract_type == crate::protocols::uniswap::config::Permit2Contract::short_type_id() {
+                    else if contract_type
+                        == crate::protocols::uniswap::config::Permit2Contract::short_type_id()
+                    {
                         if let Some(field) = (protocols::uniswap::Permit2Visualizer)
                             .visualize_tx_commands(input, chain_id_val, Some(registry))
                         {
@@ -608,7 +623,12 @@ mod tests {
         let payload = transaction_to_visual_sign(tx, options).unwrap();
 
         // Check that contract call data field is present (FallbackVisualizer)
-        assert!(payload.fields.iter().any(|f| f.label() == "Contract Call Data"));
+        assert!(
+            payload
+                .fields
+                .iter()
+                .any(|f| f.label() == "Contract Call Data")
+        );
         let input_field = payload
             .fields
             .iter()
