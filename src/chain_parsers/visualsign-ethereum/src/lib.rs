@@ -172,10 +172,10 @@ impl EthereumVisualSignConverter {
         Self { registry }
     }
 
-    /// Creates a new converter with a default registry
+    /// Creates a new converter with a default registry including all known protocols
     pub fn new() -> Self {
         Self {
-            registry: registry::ContractRegistry::default(),
+            registry: registry::ContractRegistry::with_default_protocols(),
         }
     }
 }
@@ -376,26 +376,19 @@ fn convert_to_visual_sign_payload(
     if !input.is_empty() {
         let mut input_fields: Vec<SignablePayloadField> = Vec::new();
         if options.decode_transfers {
-            if let Some(field) = (contracts::erc20::ERC20Visualizer {}).visualize_tx_commands(input)
+            if let Some(field) = (contracts::core::ERC20Visualizer {}).visualize_tx_commands(input)
             {
                 input_fields.push(field);
             }
         }
         if let Some(field) =
-            (contracts::uniswap::UniswapV4Visualizer {}).visualize_tx_commands(input)
+            (protocols::uniswap::UniswapV4Visualizer {}).visualize_tx_commands(input)
         {
             input_fields.push(field);
         }
         if input_fields.is_empty() {
-            input_fields.push(SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: format!("0x{}", hex::encode(input)),
-                    label: "Input Data".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 {
-                    text: format!("0x{}", hex::encode(input)),
-                },
-            });
+            // Use fallback visualizer for unknown contract calls
+            input_fields.push(contracts::core::FallbackVisualizer::new().visualize_hex(input));
         }
         fields.append(&mut input_fields);
     }
@@ -562,12 +555,12 @@ mod tests {
         let options = VisualSignOptions::default();
         let payload = transaction_to_visual_sign(tx, options).unwrap();
 
-        // Check that input data field is present
-        assert!(payload.fields.iter().any(|f| f.label() == "Input Data"));
+        // Check that contract call data field is present (FallbackVisualizer)
+        assert!(payload.fields.iter().any(|f| f.label() == "Contract Call Data"));
         let input_field = payload
             .fields
             .iter()
-            .find(|f| f.label() == "Input Data")
+            .find(|f| f.label() == "Contract Call Data")
             .unwrap();
         if let SignablePayloadField::TextV2 { text_v2, .. } = input_field {
             assert_eq!(text_v2.text, "0x12345678");

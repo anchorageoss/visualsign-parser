@@ -70,7 +70,8 @@ impl EthereumVisualizerRegistryBuilder {
     /// Creates a new builder pre-populated with default protocols
     pub fn with_default_protocols() -> Self {
         let mut builder = Self::new();
-        crate::protocols::register_all(&mut builder);
+        let mut contract_reg = crate::registry::ContractRegistry::new();
+        crate::protocols::register_all(&mut contract_reg, &mut builder);
         builder
     }
 
