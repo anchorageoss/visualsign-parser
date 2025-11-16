@@ -208,7 +208,7 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
             TxType::Legacy | TxType::Eip1559 => true,
         };
         if is_supported {
-            return Ok(convert_to_visual_sign_payload(transaction, options));
+            return Ok(convert_to_visual_sign_payload(transaction, options, &self.registry));
         }
         Err(VisualSignError::DecodeError(format!(
             "Unsupported transaction type: {}",
@@ -293,6 +293,7 @@ fn decode_transaction(
 fn convert_to_visual_sign_payload(
     transaction: TypedTransaction,
     options: VisualSignOptions,
+    registry: &registry::ContractRegistry,
 ) -> SignablePayload {
     // Extract chain ID to determine the network
     let chain_id = transaction.chain_id();
@@ -381,8 +382,8 @@ fn convert_to_visual_sign_payload(
                 input_fields.push(field);
             }
         }
-        if let Some(field) =
-            (protocols::uniswap::UniswapV4Visualizer {}).visualize_tx_commands(input)
+        if let Some(field) = (protocols::uniswap::UniversalRouterVisualizer {})
+            .visualize_tx_commands(input, chain_id.unwrap_or(1), Some(registry))
         {
             input_fields.push(field);
         }
