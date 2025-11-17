@@ -117,7 +117,7 @@ async fn parser_e2e() {
 async fn propagates_grpc_errors() {
     async fn test(test_args: TestArgs) {
         let parse_request = ParseRequest {
-            unsigned_payload: "no-no-that-is-not-valid-hex".to_string(),
+            unsigned_payload: "no-no-that-is-not-valid-base64".to_string(),
             chain: Chain::Ethereum as i32,
             chain_metadata: None,
         };
@@ -130,7 +130,10 @@ async fn propagates_grpc_errors() {
             .unwrap_err();
 
         assert_eq!(parse_error.code(), Code::InvalidArgument);
-        assert_eq!(parse_error.message(), "Failed to parse transaction");
+        assert_eq!(
+            parse_error.message(),
+            "Failed to parse transaction: Decode error: Failed to decode transaction: Failed to decode base64: Invalid symbol 45, offset 2."
+        );
     }
 
     integration::Builder::new().execute(test).await
