@@ -639,60 +639,44 @@ impl UniversalRouterVisualizer {
     }
 
     /// Decodes V2_SWAP_EXACT_IN command parameters
-    ///
-    /// Uses manual ABI decoding due to compatibility issues with Alloy's automatic decoder.
-    /// Structure: (address recipient, uint256 amountIn, uint256 amountOutMinimum, address[] path, address payer)
+    /// (address recipient, uint256 amountIn, uint256 amountOutMinimum, address[] path, address payerIsUser)
     fn decode_v2_swap_exact_in(
         bytes: &[u8],
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        if bytes.len() < 160 {
-            return SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: format!("V2 Swap Exact In: 0x{}", hex::encode(bytes)),
-                    label: "V2 Swap Exact In".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 {
-                    text: "Data too short".to_string(),
-                },
-            };
-        }
+        use alloy_sol_types::sol_data;
 
-        // Parse fixed fields
-        let amount_in = alloy_primitives::U256::from_be_slice(&bytes[32..64]);
-        let amount_out_minimum = alloy_primitives::U256::from_be_slice(&bytes[64..96]);
-        let path_offset = alloy_primitives::U256::from_be_slice(&bytes[96..128]);
+        type V2SwapParams = (
+            sol_data::Address,
+            sol_data::Uint<256>,
+            sol_data::Uint<256>,
+            sol_data::Array<sol_data::Address>,
+            sol_data::Address,
+        );
 
-        // Parse path array at the offset
-        let offset_usize: usize = path_offset.to_string().parse().unwrap_or(0);
-        if offset_usize + 32 > bytes.len() {
-            return SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: format!("V2 Swap Exact In: invalid offset"),
-                    label: "V2 Swap Exact In".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 {
-                    text: "Invalid path offset".to_string(),
-                },
-            };
-        }
-
-        let path_length = alloy_primitives::U256::from_be_slice(&bytes[offset_usize..offset_usize + 32]);
-        let path_len_usize: usize = path_length.to_string().parse().unwrap_or(0);
-        let mut path = Vec::new();
-        for i in 0..path_len_usize {
-            let addr_offset = offset_usize + 32 + (i * 32);
-            if addr_offset + 32 <= bytes.len() {
-                let addr = Address::from_slice(&bytes[addr_offset + 12..addr_offset + 32]); // addresses are right-aligned in 32 bytes
-                path.push(addr);
+        let params = match V2SwapParams::abi_decode_params(bytes) {
+            Ok(p) => p,
+            Err(_) => {
+                return SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("V2 Swap Exact In: 0x{}", hex::encode(bytes)),
+                        label: "V2 Swap Exact In".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "Failed to decode parameters".to_string(),
+                    },
+                };
             }
-        }
+        };
+
+        let (_recipient, amount_in, amount_out_minimum, path_array, _payer) = params;
+        let path = path_array.as_slice();
 
         if path.is_empty() {
             return SignablePayloadField::TextV2 {
                 common: SignablePayloadFieldCommon {
-                    fallback_text: "V2SwapExactIn: Empty path".to_string(),
+                    fallback_text: "V2 Swap Exact In: Empty path".to_string(),
                     label: "V2 Swap Exact In".to_string(),
                 },
                 text_v2: SignablePayloadFieldTextV2 {
@@ -738,14 +722,22 @@ impl UniversalRouterVisualizer {
     }
 
     /// Decodes V2_SWAP_EXACT_OUT command parameters
+    /// (uint256 amountOut, uint256 amountInMaximum, address[] path, address recipient)
     fn decode_v2_swap_exact_out(
         bytes: &[u8],
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        
+        use alloy_sol_types::sol_data;
 
-        let params = match <V2SwapExactOutputParams as SolValue>::abi_decode(bytes) {
+        type V2SwapOutParams = (
+            sol_data::Uint<256>,
+            sol_data::Uint<256>,
+            sol_data::Array<sol_data::Address>,
+            sol_data::Address,
+        );
+
+        let params = match V2SwapOutParams::abi_decode_params(bytes) {
             Ok(p) => p,
             Err(_) => {
                 return SignablePayloadField::TextV2 {
@@ -760,10 +752,13 @@ impl UniversalRouterVisualizer {
             }
         };
 
-        if params.path.is_empty() {
+        let (amount_out, amount_in_maximum, path_array, _recipient) = params;
+        let path = path_array.as_slice();
+
+        if path.is_empty() {
             return SignablePayloadField::TextV2 {
                 common: SignablePayloadFieldCommon {
-                    fallback_text: "V2SwapExactOut: Empty path".to_string(),
+                    fallback_text: "V2 Swap Exact Out: Empty path".to_string(),
                     label: "V2 Swap Exact Out".to_string(),
                 },
                 text_v2: SignablePayloadFieldTextV2 {
@@ -772,8 +767,8 @@ impl UniversalRouterVisualizer {
             };
         }
 
-        let token_in = params.path[0];
-        let token_out = params.path[params.path.len() - 1];
+        let token_in = path[0];
+        let token_out = path[path.len() - 1];
 
         let token_in_symbol = registry
             .and_then(|r| r.get_token_symbol(chain_id, token_in))
@@ -782,18 +777,18 @@ impl UniversalRouterVisualizer {
             .and_then(|r| r.get_token_symbol(chain_id, token_out))
             .unwrap_or_else(|| format!("{:?}", token_out));
 
-        let amount_out_u128: u128 = params.amountOut.to_string().parse().unwrap_or(0);
-        let amount_in_max_u128: u128 = params.amountInMaximum.to_string().parse().unwrap_or(0);
+        let amount_out_u128: u128 = amount_out.to_string().parse().unwrap_or(0);
+        let amount_in_max_u128: u128 = amount_in_maximum.to_string().parse().unwrap_or(0);
 
         let (amount_out_str, _) = registry
             .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_u128))
-            .unwrap_or_else(|| (params.amountOut.to_string(), token_out_symbol.clone()));
+            .unwrap_or_else(|| (amount_out.to_string(), token_out_symbol.clone()));
 
         let (amount_in_max_str, _) = registry
             .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_max_u128))
-            .unwrap_or_else(|| (params.amountInMaximum.to_string(), token_in_symbol.clone()));
+            .unwrap_or_else(|| (amount_in_maximum.to_string(), token_in_symbol.clone()));
 
-        let hops = params.path.len() - 1;
+        let hops = path.len() - 1;
         let text = format!(
             "Swap <={} {} for {} {} via V2 ({} hops)",
             amount_in_max_str, token_in_symbol, amount_out_str, token_out_symbol, hops
