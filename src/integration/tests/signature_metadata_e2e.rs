@@ -5,12 +5,12 @@
 /// 2. The parser receives and processes it correctly
 /// 3. The signature can be verified by the parser using the metadata algorithm and public key
 use generated::parser::{
-    chain_metadata, Abi, Chain, ChainMetadata, EthereumMetadata, Idl, Metadata, ParseRequest,
-    SignatureMetadata, SolanaIdlType, SolanaMetadata,
+    Abi, Chain, ChainMetadata, EthereumMetadata, Idl, Metadata, ParseRequest, SignatureMetadata,
+    SolanaIdlType, SolanaMetadata, chain_metadata,
 };
-use k256::ecdsa::signature::Signer;
 use k256::ecdsa::SigningKey;
 use k256::ecdsa::VerifyingKey;
+use k256::ecdsa::signature::Signer;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
@@ -35,11 +35,8 @@ fn sign_with_secp256k1(content: &str) -> (String, String) {
     let signature: k256::ecdsa::Signature = signing_key.sign(&message_hash);
     // Use DER encoding for consistency with Turnkey API
     let signature_der = signature.to_der();
-    let signature_hex = format!("{}", hex::encode(signature_der.as_ref()));
-    let public_key_hex = format!(
-        "{}",
-        hex::encode(verifying_key.to_encoded_point(false).as_bytes())
-    );
+    let signature_hex = hex::encode(signature_der.as_ref()).to_string();
+    let public_key_hex = hex::encode(verifying_key.to_encoded_point(false).as_bytes()).to_string();
 
     (signature_hex, public_key_hex)
 }
@@ -58,8 +55,8 @@ fn sign_with_ed25519(content: &str) -> (String, String) {
     signature_bytes[0..32].copy_from_slice(&seed);
     signature_bytes[32..64].copy_from_slice(&message_hash);
 
-    let signature_hex = hex::encode(&signature_bytes);
-    let public_key_hex = hex::encode(&seed);
+    let signature_hex = hex::encode(signature_bytes);
+    let public_key_hex = hex::encode(seed);
 
     (signature_hex, public_key_hex)
 }
@@ -74,22 +71,22 @@ fn verify_secp256k1(
     use k256::ecdsa::signature::Verifier;
 
     let signature_bytes =
-        hex::decode(signature_hex).map_err(|e| format!("Failed to decode signature: {}", e))?;
+        hex::decode(signature_hex).map_err(|e| format!("Failed to decode signature: {e}"))?;
     let public_key_bytes =
-        hex::decode(public_key_hex).map_err(|e| format!("Failed to decode public key: {}", e))?;
+        hex::decode(public_key_hex).map_err(|e| format!("Failed to decode public key: {e}"))?;
 
     let encoded_point = EncodedPoint::from_bytes(&public_key_bytes)
-        .map_err(|e| format!("Failed to parse public key: {}", e))?;
+        .map_err(|e| format!("Failed to parse public key: {e}"))?;
     let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)
-        .map_err(|e| format!("Failed to create verifying key: {}", e))?;
+        .map_err(|e| format!("Failed to create verifying key: {e}"))?;
 
     let signature = k256::ecdsa::Signature::from_der(&signature_bytes)
-        .map_err(|e| format!("Failed to parse DER signature: {}", e))?;
+        .map_err(|e| format!("Failed to parse DER signature: {e}"))?;
 
     let message_hash = hash_content_sha256(content);
     verifying_key
         .verify(&message_hash, &signature)
-        .map_err(|e| format!("Signature verification failed: {}", e))?;
+        .map_err(|e| format!("Signature verification failed: {e}"))?;
 
     Ok(())
 }
@@ -98,22 +95,28 @@ fn verify_secp256k1(
 /// This is a simplified verification that matches our test signing
 fn verify_ed25519(content: &str, signature_hex: &str, public_key_hex: &str) -> Result<(), String> {
     let signature_bytes =
-        hex::decode(signature_hex).map_err(|e| format!("Failed to decode signature: {}", e))?;
+        hex::decode(signature_hex).map_err(|e| format!("Failed to decode signature: {e}"))?;
     let public_key_bytes =
-        hex::decode(public_key_hex).map_err(|e| format!("Failed to decode public key: {}", e))?;
+        hex::decode(public_key_hex).map_err(|e| format!("Failed to decode public key: {e}"))?;
 
     if signature_bytes.len() != 64 {
-        return Err(format!("Invalid signature length: expected 64, got {}", signature_bytes.len()));
+        return Err(format!(
+            "Invalid signature length: expected 64, got {}",
+            signature_bytes.len()
+        ));
     }
     if public_key_bytes.len() != 32 {
-        return Err(format!("Invalid public key length: expected 32, got {}", public_key_bytes.len()));
+        return Err(format!(
+            "Invalid public key length: expected 32, got {}",
+            public_key_bytes.len()
+        ));
     }
 
     let message_hash = hash_content_sha256(content);
 
     // For our test signing, the second half of the signature is the message hash
     // So we can verify by checking if they match
-    if &signature_bytes[32..64] == &message_hash {
+    if signature_bytes[32..64] == message_hash {
         Ok(())
     } else {
         Err("Signature verification failed".to_string())
@@ -136,7 +139,7 @@ fn verify_signature_metadata(
     match algorithm.as_str() {
         "secp256k1" => verify_secp256k1(content, &sig_metadata.value, public_key),
         "ed25519" => verify_ed25519(content, &sig_metadata.value, public_key),
-        _ => Err(format!("Unsupported algorithm: {}", algorithm)),
+        _ => Err(format!("Unsupported algorithm: {algorithm}")),
     }
 }
 
@@ -271,9 +274,7 @@ fn test_solana_idl_with_ed25519_signature() {
 
     // Simulate parser receiving and verifying the cryptographic signature
     if let Some(chain_meta) = parse_request.chain_metadata {
-        if let Some(chain_metadata::Metadata::Solana(solana_meta)) =
-            chain_meta.metadata
-        {
+        if let Some(chain_metadata::Metadata::Solana(solana_meta)) = chain_meta.metadata {
             if let Some(idl_data) = solana_meta.idl {
                 assert_eq!(
                     idl_data.idl_type,

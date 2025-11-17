@@ -5,7 +5,6 @@
 /// 2. Signature is computed over the content using a specified algorithm
 /// 3. SignatureMetadata contains algorithm, issuer, timestamp - but NOT included in signature computation
 /// 4. Verification computes hash of content using algorithm from metadata and compares to signature
-
 #[cfg(test)]
 mod signature_metadata_validation {
     use sha2::{Digest, Sha256};
@@ -40,7 +39,7 @@ mod signature_metadata_validation {
                 hasher.update(content.as_bytes());
                 format!("{:x}", hasher.finalize())
             }
-            _ => panic!("Unknown algorithm: {}", algorithm),
+            _ => panic!("Unknown algorithm: {algorithm}"),
         }
     }
 
@@ -165,10 +164,9 @@ mod signature_metadata_validation {
 
             assert!(
                 verify_signature(content, &sig_metadata),
-                "Failed for content type: {}",
-                content_type
+                "Failed for content type: {content_type}"
             );
-            println!("✓ {} signature verified", content_type);
+            println!("✓ {content_type} signature verified");
         }
     }
 
