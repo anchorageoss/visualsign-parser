@@ -1,5 +1,5 @@
-use alloy_primitives::Address;
-use alloy_sol_types::{SolCall as _, SolValue as _, sol};
+use alloy_primitives::{Address, Bytes, U256};
+use alloy_sol_types::{SolCall as _, SolType, SolValue, sol};
 use chrono::{TimeZone, Utc};
 use num_enum::TryFromPrimitive;
 use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2};
@@ -376,68 +376,39 @@ impl UniversalRouterVisualizer {
     }
 
     /// Decodes V3_SWAP_EXACT_IN command parameters
-    /// Manual ABI decoding since the raw calldata bytes cannot be decoded with sol! macro
+    /// Uses abi_decode_params for proper ABI decoding of raw calldata bytes
     fn decode_v3_swap_exact_in(
         bytes: &[u8],
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        // Expected structure: (address recipient, uint256 amountIn, uint256 amountOutMin, bytes path, bool payerIsUser)
-        // In ABI encoding: [0-32) recipient, [32-64) amountIn, [64-96) amountOutMin, [96-128) path offset, [128-160) payerIsUser
-        if bytes.len() < 160 {
-            return SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: format!("V3 Swap Exact In: 0x{}", hex::encode(bytes)),
-                    label: "V3 Swap Exact In".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 {
-                    text: "Failed to decode parameters".to_string(),
-                },
-            };
-        }
+        // Define the parameter types for V3SwapExactIn
+        // (address recipient, uint256 amountIn, uint256 amountOutMinimum, bytes path, bool payerIsUser)
+        type V3SwapParams = (Address, U256, U256, Bytes, bool);
 
-        // Parse fixed fields
-        let amount_in = alloy_primitives::U256::from_be_slice(&bytes[32..64]);
-        let amount_out_min = alloy_primitives::U256::from_be_slice(&bytes[64..96]);
-        let path_offset = u32::from_be_bytes([bytes[124], bytes[125], bytes[126], bytes[127]]) as usize;
+        // Decode the ABI-encoded parameters
+        let params = match V3SwapParams::abi_decode_params(bytes) {
+            Ok(p) => p,
+            Err(_) => {
+                return SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("V3 Swap Exact In: 0x{}", hex::encode(bytes)),
+                        label: "V3 Swap Exact In".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "Failed to decode parameters".to_string(),
+                    },
+                };
+            }
+        };
 
-        // Parse dynamic bytes (path)
-        if bytes.len() < path_offset + 32 {
-            return SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: "V3SwapExactIn: Invalid path offset".to_string(),
-                    label: "V3 Swap Exact In".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 {
-                    text: "Path data missing".to_string(),
-                },
-            };
-        }
+        let (_recipient, amount_in, amount_out_min, path, _payer_is_user) = params;
 
-        let path_len = u32::from_be_bytes([
-            bytes[path_offset + 28],
-            bytes[path_offset + 29],
-            bytes[path_offset + 30],
-            bytes[path_offset + 31]
-        ]) as usize;
-
-        if bytes.len() < path_offset + 32 + path_len {
-            return SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: "V3SwapExactIn: Invalid path length".to_string(),
-                    label: "V3 Swap Exact In".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 {
-                    text: format!("Expected {} bytes, got {}", path_offset + 32 + path_len, bytes.len()),
-                },
-            };
-        }
-
-        let path = &bytes[path_offset + 32..path_offset + 32 + path_len];
+        // Validate path length (minimum 43 bytes for single hop: token + fee + token)
         if path.len() < 43 {
             return SignablePayloadField::TextV2 {
                 common: SignablePayloadFieldCommon {
-                    fallback_text: "V3SwapExactIn: Invalid path length".to_string(),
+                    fallback_text: "V3 Swap Exact In: Invalid path".to_string(),
                     label: "V3 Swap Exact In".to_string(),
                 },
                 text_v2: SignablePayloadFieldTextV2 {
@@ -446,10 +417,9 @@ impl UniversalRouterVisualizer {
             };
         }
 
-        // Extract token addresses and fee
+        // Extract token addresses and fee from path
         let token_in = Address::from_slice(&path[0..20]);
-        let fee_bytes = [0, path[20], path[21], path[22]];
-        let fee = u32::from_be_bytes(fee_bytes);
+        let fee = u32::from_be_bytes([0, path[20], path[21], path[22]]);
         let token_out = Address::from_slice(&path[23..43]);
 
         // Resolve token symbols
@@ -494,7 +464,7 @@ impl UniversalRouterVisualizer {
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        let params = match PayPortionParams::abi_decode(bytes) {
+        let params = match <PayPortionParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
             Err(_) => {
                 return SignablePayloadField::TextV2 {
@@ -545,7 +515,7 @@ impl UniversalRouterVisualizer {
         
         
 
-        let params = match UnwrapWethParams::abi_decode(bytes) {
+        let params = match <UnwrapWethParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
             Err(_) => {
                 return SignablePayloadField::TextV2 {
@@ -585,14 +555,18 @@ impl UniversalRouterVisualizer {
     }
 
     /// Decodes V3_SWAP_EXACT_OUT command parameters
+    /// Uses abi_decode_params for proper ABI decoding of raw calldata bytes
     fn decode_v3_swap_exact_out(
         bytes: &[u8],
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        
+        // Define the parameter types for V3SwapExactOut
+        // (address recipient, uint256 amountOut, uint256 amountInMaximum, bytes path, bool payerIsUser)
+        type V3SwapOutParams = (Address, U256, U256, Bytes, bool);
 
-        let params = match V3SwapExactOutputParams::abi_decode(bytes) {
+        // Decode the ABI-encoded parameters
+        let params = match V3SwapOutParams::abi_decode_params(bytes) {
             Ok(p) => p,
             Err(_) => {
                 return SignablePayloadField::TextV2 {
@@ -607,23 +581,27 @@ impl UniversalRouterVisualizer {
             }
         };
 
-        if params.path.0.len() < 43 {
+        let (_recipient, amount_out, amount_in_max, path, _payer_is_user) = params;
+
+        // Validate path length (minimum 43 bytes for single hop: token + fee + token)
+        if path.len() < 43 {
             return SignablePayloadField::TextV2 {
                 common: SignablePayloadFieldCommon {
-                    fallback_text: "V3SwapExactOut: Invalid path".to_string(),
+                    fallback_text: "V3 Swap Exact Out: Invalid path".to_string(),
                     label: "V3 Swap Exact Out".to_string(),
                 },
                 text_v2: SignablePayloadFieldTextV2 {
-                    text: format!("Path length: {} bytes (expected >=43)", params.path.0.len()),
+                    text: format!("Path length: {} bytes (expected >=43)", path.len()),
                 },
             };
         }
 
-        let path_bytes = &params.path.0;
-        let token_in = Address::from_slice(&path_bytes[0..20]);
-        let fee = u32::from_be_bytes([0, path_bytes[20], path_bytes[21], path_bytes[22]]);
-        let token_out = Address::from_slice(&path_bytes[23..43]);
+        // Extract token addresses and fee from path
+        let token_in = Address::from_slice(&path[0..20]);
+        let fee = u32::from_be_bytes([0, path[20], path[21], path[22]]);
+        let token_out = Address::from_slice(&path[23..43]);
 
+        // Resolve token symbols
         let token_in_symbol = registry
             .and_then(|r| r.get_token_symbol(chain_id, token_in))
             .unwrap_or_else(|| format!("{:?}", token_in));
@@ -631,17 +609,20 @@ impl UniversalRouterVisualizer {
             .and_then(|r| r.get_token_symbol(chain_id, token_out))
             .unwrap_or_else(|| format!("{:?}", token_out));
 
-        let amount_out_u128: u128 = params.amountOut.to_string().parse().unwrap_or(0);
-        let amount_in_max_u128: u128 = params.amountInMaximum.to_string().parse().unwrap_or(0);
+        // Convert amounts to u128 for formatting
+        let amount_out_u128: u128 = amount_out.to_string().parse().unwrap_or(0);
+        let amount_in_max_u128: u128 = amount_in_max.to_string().parse().unwrap_or(0);
 
+        // Format amounts with token decimals
         let (amount_out_str, _) = registry
             .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_u128))
-            .unwrap_or_else(|| (params.amountOut.to_string(), token_out_symbol.clone()));
+            .unwrap_or_else(|| (amount_out.to_string(), token_out_symbol.clone()));
 
         let (amount_in_max_str, _) = registry
             .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_max_u128))
-            .unwrap_or_else(|| (params.amountInMaximum.to_string(), token_in_symbol.clone()));
+            .unwrap_or_else(|| (amount_in_max.to_string(), token_in_symbol.clone()));
 
+        // Calculate fee percentage
         let fee_pct = fee as f64 / 10000.0;
         let text = format!(
             "Swap <={} {} for {} {} via V3 ({}% fee)",
@@ -764,7 +745,7 @@ impl UniversalRouterVisualizer {
     ) -> SignablePayloadField {
         
 
-        let params = match V2SwapExactOutputParams::abi_decode(bytes) {
+        let params = match <V2SwapExactOutputParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
             Err(_) => {
                 return SignablePayloadField::TextV2 {
@@ -835,7 +816,7 @@ impl UniversalRouterVisualizer {
     ) -> SignablePayloadField {
         
 
-        let params = match WrapEthParams::abi_decode(bytes) {
+        let params = match <WrapEthParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
             Err(_) => {
                 return SignablePayloadField::TextV2 {
@@ -870,7 +851,7 @@ impl UniversalRouterVisualizer {
     ) -> SignablePayloadField {
         
 
-        let params = match SweepParams::abi_decode(bytes) {
+        let params = match <SweepParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
             Err(_) => {
                 return SignablePayloadField::TextV2 {
@@ -911,7 +892,7 @@ impl UniversalRouterVisualizer {
     ) -> SignablePayloadField {
         
 
-        let params = match TransferParams::abi_decode(bytes) {
+        let params = match <TransferParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
             Err(_) => {
                 return SignablePayloadField::TextV2 {
@@ -948,7 +929,7 @@ impl UniversalRouterVisualizer {
     ) -> SignablePayloadField {
 
 
-        let params = match Permit2TransferFromParams::abi_decode(bytes) {
+        let params = match <Permit2TransferFromParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
             Err(_) => {
                 return SignablePayloadField::TextV2 {
@@ -992,7 +973,7 @@ impl UniversalRouterVisualizer {
     ) -> SignablePayloadField {
 
         // Try standard ABI decoding first
-        let decode_result = Permit2PermitParams::abi_decode(bytes);
+        let decode_result = <Permit2PermitParams as SolValue>::abi_decode(bytes);
 
         let params = match decode_result {
             Ok(p) => p,
