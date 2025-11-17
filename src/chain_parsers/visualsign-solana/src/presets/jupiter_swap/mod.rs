@@ -201,6 +201,7 @@ fn parse_route_instruction(
         JupiterSwapInstruction::parse_amounts_and_slippage_from_data(data)?;
 
     let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
+    // Account index hardcoded to 5 for output token address (destination mint)
     let out_token = accounts.get(5).map(|addr| get_token_info(addr, out_amount));
 
     Ok(JupiterSwapInstruction::Route {
@@ -219,6 +220,7 @@ fn parse_exact_out_route_instruction(
         JupiterSwapInstruction::parse_amounts_and_slippage_from_data(data)?;
 
     let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
+    // Account index hardcoded to 5 for output token address (destination mint)
     let out_token = accounts.get(5).map(|addr| get_token_info(addr, out_amount));
 
     Ok(JupiterSwapInstruction::ExactOutRoute {
@@ -237,6 +239,7 @@ fn parse_shared_accounts_route_instruction(
         JupiterSwapInstruction::parse_amounts_and_slippage_from_data(data)?;
 
     let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
+    // Account index hardcoded to 5 for output token address (destination mint)
     let out_token = accounts.get(5).map(|addr| get_token_info(addr, out_amount));
 
     Ok(JupiterSwapInstruction::SharedAccountsRoute {
@@ -406,6 +409,7 @@ fn create_jupiter_swap_expanded_fields(
 mod tests {
     use super::*;
     use base64::engine::{Engine, general_purpose::STANDARD};
+    mod fixture_test;
 
     #[test]
     fn test_jupiter_swap_instruction_parsing() {
@@ -758,5 +762,4 @@ mod tests {
         );
         println!("✅ Platform Fee field present in expanded fields");
     }
-    mod fixture_test;
 }
