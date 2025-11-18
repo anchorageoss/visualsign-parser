@@ -8,7 +8,7 @@
 #![allow(unused_imports)]
 
 use alloy_primitives::Address;
-use alloy_sol_types::{sol, SolCall};
+use alloy_sol_types::{SolCall, sol};
 use chrono::{TimeZone, Utc};
 use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2};
 
@@ -108,11 +108,7 @@ impl Permit2Visualizer {
 
         let text = format!(
             "Approve {} {} {} to spend {} (expires: {})",
-            call.spender,
-            amount_str,
-            token_symbol,
-            token_symbol,
-            expiration_str
+            call.spender, amount_str, token_symbol, token_symbol, expiration_str
         );
 
         SignablePayloadField::TextV2 {
@@ -136,29 +132,40 @@ impl Permit2Visualizer {
             .unwrap_or_else(|| format!("{:?}", token));
 
         // Format amount with proper decimals
-        let amount_u128: u128 = call.permitSingle.details.amount.to_string().parse().unwrap_or(0);
+        let amount_u128: u128 = call
+            .permitSingle
+            .details
+            .amount
+            .to_string()
+            .parse()
+            .unwrap_or(0);
         let (amount_str, _) = registry
             .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
-            .unwrap_or_else(|| (call.permitSingle.details.amount.to_string(), token_symbol.clone()));
+            .unwrap_or_else(|| {
+                (
+                    call.permitSingle.details.amount.to_string(),
+                    token_symbol.clone(),
+                )
+            });
 
         // Format expiration timestamp
-        let expiration_u64: u64 = call.permitSingle.details.expiration.to_string().parse().unwrap_or(0);
+        let expiration_u64: u64 = call
+            .permitSingle
+            .details
+            .expiration
+            .to_string()
+            .parse()
+            .unwrap_or(0);
         let expiration_str = if expiration_u64 == u64::MAX {
             "never".to_string()
         } else {
-            let dt = Utc
-                .timestamp_opt(expiration_u64 as i64, 0)
-                .unwrap();
+            let dt = Utc.timestamp_opt(expiration_u64 as i64, 0).unwrap();
             dt.format("%Y-%m-%d %H:%M UTC").to_string()
         };
 
         let text = format!(
             "Permit {} to spend {} {} from {} (expires: {})",
-            call.permitSingle.spender,
-            amount_str,
-            token_symbol,
-            call.owner,
-            expiration_str
+            call.permitSingle.spender, amount_str, token_symbol, call.owner, expiration_str
         );
 
         SignablePayloadField::TextV2 {
@@ -214,7 +221,10 @@ mod tests {
     #[test]
     fn test_visualize_too_short() {
         let visualizer = Permit2Visualizer;
-        assert_eq!(visualizer.visualize_tx_commands(&[0x01, 0x02], 1, None), None);
+        assert_eq!(
+            visualizer.visualize_tx_commands(&[0x01, 0x02], 1, None),
+            None
+        );
     }
 
     // TODO: Add tests for Permit2 functions once implemented
@@ -247,7 +257,8 @@ impl crate::visualizer::ContractVisualizer for Permit2ContractVisualizer {
     fn visualize(
         &self,
         context: &crate::context::VisualizerContext,
-    ) -> Result<Option<Vec<visualsign::AnnotatedPayloadField>>, visualsign::vsptrait::VisualSignError> {
+    ) -> Result<Option<Vec<visualsign::AnnotatedPayloadField>>, visualsign::vsptrait::VisualSignError>
+    {
         let contract_registry = crate::registry::ContractRegistry::with_default_protocols();
 
         if let Some(field) = self.inner.visualize_tx_commands(

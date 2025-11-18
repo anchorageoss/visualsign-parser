@@ -216,12 +216,24 @@ impl UniversalRouterVisualizer {
             } else {
                 None
             };
-            return Self::visualize_commands(&call.commands.0, &call.inputs, deadline, chain_id, registry);
+            return Self::visualize_commands(
+                &call.commands.0,
+                &call.inputs,
+                deadline,
+                chain_id,
+                registry,
+            );
         }
 
         // Try decoding without deadline (2-parameter version)
         if let Ok(call) = IUniversalRouter::execute_1Call::abi_decode(input) {
-            return Self::visualize_commands(&call.commands.0, &call.inputs, None, chain_id, registry);
+            return Self::visualize_commands(
+                &call.commands.0,
+                &call.inputs,
+                None,
+                chain_id,
+                registry,
+            );
         }
 
         None
@@ -449,12 +461,88 @@ impl UniversalRouterVisualizer {
             amount_in_str, token_in_symbol, amount_out_min_str, token_out_symbol, fee_pct
         );
 
-        SignablePayloadField::TextV2 {
+        // Create individual parameter fields
+        let fields = vec![
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: token_in_symbol.clone(),
+                        label: "Input Token".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: token_in_symbol.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: amount_in_str.clone(),
+                        label: "Input Amount".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: amount_in_str.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: token_out_symbol.clone(),
+                        label: "Output Token".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: token_out_symbol.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!(">={}", amount_out_min_str),
+                        label: "Minimum Output".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!(">={}", amount_out_min_str),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{}%", fee_pct),
+                        label: "Fee Tier".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("{}%", fee_pct),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+        ];
+
+        SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: text.clone(),
                 label: "V3 Swap Exact In".to_string(),
             },
-            text_v2: SignablePayloadFieldTextV2 { text },
+            preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
+                title: Some(visualsign::SignablePayloadFieldTextV2 {
+                    text: "V3 Swap Exact In".to_string(),
+                }),
+                subtitle: Some(visualsign::SignablePayloadFieldTextV2 { text }),
+                condensed: None,
+                expanded: Some(visualsign::SignablePayloadFieldListLayout { fields }),
+            },
         }
     }
 
@@ -492,17 +580,67 @@ impl UniversalRouterVisualizer {
             format!("{:.4}%", bips_pct)
         };
 
+        // Create individual parameter fields
+        let fields = vec![
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: token_symbol.clone(),
+                        label: "Token".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: token_symbol.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: percentage_str.clone(),
+                        label: "Percentage".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: percentage_str.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{:?}", params.recipient),
+                        label: "Recipient".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("{:?}", params.recipient),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+        ];
+
         let text = format!(
-            "Pay {} of {} to {:?}",
+            "Pay {} of {} to {}",
             percentage_str, token_symbol, params.recipient
         );
 
-        SignablePayloadField::TextV2 {
+        SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: text.clone(),
                 label: "Pay Portion".to_string(),
             },
-            text_v2: SignablePayloadFieldTextV2 { text },
+            preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
+                title: Some(visualsign::SignablePayloadFieldTextV2 {
+                    text: "Pay Portion".to_string(),
+                }),
+                subtitle: Some(visualsign::SignablePayloadFieldTextV2 { text }),
+                condensed: None,
+                expanded: Some(visualsign::SignablePayloadFieldListLayout { fields }),
+            },
         }
     }
 
@@ -512,9 +650,6 @@ impl UniversalRouterVisualizer {
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        
-        
-
         let params = match <UnwrapWethParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
             Err(_) => {
@@ -532,25 +667,65 @@ impl UniversalRouterVisualizer {
 
         // Get WETH address for this chain and format the amount
         // WETH is registered in the token registry via UniswapConfig::register_common_tokens
-        let amount_min_str = crate::protocols::uniswap::config::UniswapConfig::weth_address(chain_id)
-            .and_then(|weth_addr| {
-                let amount_min_u128: u128 = params.amountMinimum.to_string().parse().unwrap_or(0);
-                registry.and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_min_u128))
-            })
-            .map(|(amt, _)| amt)
-            .unwrap_or_else(|| params.amountMinimum.to_string());
+        let amount_min_str =
+            crate::protocols::uniswap::config::UniswapConfig::weth_address(chain_id)
+                .and_then(|weth_addr| {
+                    let amount_min_u128: u128 =
+                        params.amountMinimum.to_string().parse().unwrap_or(0);
+                    registry
+                        .and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_min_u128))
+                })
+                .map(|(amt, _)| amt)
+                .unwrap_or_else(|| params.amountMinimum.to_string());
+
+        // Create individual parameter fields
+        let fields = vec![
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: amount_min_str.clone(),
+                        label: "Minimum Amount".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!(">={} WETH", amount_min_str),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{:?}", params.recipient),
+                        label: "Recipient".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("{:?}", params.recipient),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+        ];
 
         let text = format!(
-            "Unwrap >={} WETH to ETH for {:?}",
+            "Unwrap >={} WETH to ETH for {}",
             amount_min_str, params.recipient
         );
 
-        SignablePayloadField::TextV2 {
+        SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: text.clone(),
                 label: "Unwrap WETH".to_string(),
             },
-            text_v2: SignablePayloadFieldTextV2 { text },
+            preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
+                title: Some(visualsign::SignablePayloadFieldTextV2 {
+                    text: "Unwrap WETH".to_string(),
+                }),
+                subtitle: Some(visualsign::SignablePayloadFieldTextV2 { text }),
+                condensed: None,
+                expanded: Some(visualsign::SignablePayloadFieldListLayout { fields }),
+            },
         }
     }
 
@@ -629,12 +804,88 @@ impl UniversalRouterVisualizer {
             amount_in_max_str, token_in_symbol, amount_out_str, token_out_symbol, fee_pct
         );
 
-        SignablePayloadField::TextV2 {
+        // Create individual parameter fields
+        let fields = vec![
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: token_in_symbol.clone(),
+                        label: "Input Token".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: token_in_symbol.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("<={}", amount_in_max_str),
+                        label: "Maximum Input".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("<={}", amount_in_max_str),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: token_out_symbol.clone(),
+                        label: "Output Token".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: token_out_symbol.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: amount_out_str.clone(),
+                        label: "Output Amount".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: amount_out_str.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{}%", fee_pct),
+                        label: "Fee Tier".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("{}%", fee_pct),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+        ];
+
+        SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: text.clone(),
                 label: "V3 Swap Exact Out".to_string(),
             },
-            text_v2: SignablePayloadFieldTextV2 { text },
+            preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
+                title: Some(visualsign::SignablePayloadFieldTextV2 {
+                    text: "V3 Swap Exact Out".to_string(),
+                }),
+                subtitle: Some(visualsign::SignablePayloadFieldTextV2 { text }),
+                condensed: None,
+                expanded: Some(visualsign::SignablePayloadFieldListLayout { fields }),
+            },
         }
     }
 
@@ -712,12 +963,88 @@ impl UniversalRouterVisualizer {
             amount_in_str, token_in_symbol, amount_out_min_str, token_out_symbol, hops
         );
 
-        SignablePayloadField::TextV2 {
+        // Create individual parameter fields
+        let fields = vec![
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: token_in_symbol.clone(),
+                        label: "Input Token".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: token_in_symbol.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: amount_in_str.clone(),
+                        label: "Input Amount".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: amount_in_str.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: token_out_symbol.clone(),
+                        label: "Output Token".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: token_out_symbol.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!(">={}", amount_out_min_str),
+                        label: "Minimum Output".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!(">={}", amount_out_min_str),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: hops.to_string(),
+                        label: "Hops".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: hops.to_string(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+        ];
+
+        SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: text.clone(),
                 label: "V2 Swap Exact In".to_string(),
             },
-            text_v2: SignablePayloadFieldTextV2 { text },
+            preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
+                title: Some(visualsign::SignablePayloadFieldTextV2 {
+                    text: "V2 Swap Exact In".to_string(),
+                }),
+                subtitle: Some(visualsign::SignablePayloadFieldTextV2 { text }),
+                condensed: None,
+                expanded: Some(visualsign::SignablePayloadFieldListLayout { fields }),
+            },
         }
     }
 
@@ -794,12 +1121,88 @@ impl UniversalRouterVisualizer {
             amount_in_max_str, token_in_symbol, amount_out_str, token_out_symbol, hops
         );
 
-        SignablePayloadField::TextV2 {
+        // Create individual parameter fields
+        let fields = vec![
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: token_in_symbol.clone(),
+                        label: "Input Token".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: token_in_symbol.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("<={}", amount_in_max_str),
+                        label: "Maximum Input".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("<={}", amount_in_max_str),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: token_out_symbol.clone(),
+                        label: "Output Token".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: token_out_symbol.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: amount_out_str.clone(),
+                        label: "Output Amount".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: amount_out_str.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: hops.to_string(),
+                        label: "Hops".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: hops.to_string(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+        ];
+
+        SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: text.clone(),
                 label: "V2 Swap Exact Out".to_string(),
             },
-            text_v2: SignablePayloadFieldTextV2 { text },
+            preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
+                title: Some(visualsign::SignablePayloadFieldTextV2 {
+                    text: "V2 Swap Exact Out".to_string(),
+                }),
+                subtitle: Some(visualsign::SignablePayloadFieldTextV2 { text }),
+                condensed: None,
+                expanded: Some(visualsign::SignablePayloadFieldListLayout { fields }),
+            },
         }
     }
 
@@ -809,8 +1212,6 @@ impl UniversalRouterVisualizer {
         _chain_id: u64,
         _registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        
-
         let params = match <WrapEthParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
             Err(_) => {
@@ -844,8 +1245,6 @@ impl UniversalRouterVisualizer {
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        
-
         let params = match <SweepParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
             Err(_) => {
@@ -885,8 +1284,6 @@ impl UniversalRouterVisualizer {
         _chain_id: u64,
         _registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        
-
         let params = match <TransferParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
             Err(_) => {
@@ -922,8 +1319,6 @@ impl UniversalRouterVisualizer {
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-
-
         let params = match <Permit2TransferFromParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
             Err(_) => {
@@ -943,17 +1338,86 @@ impl UniversalRouterVisualizer {
             .and_then(|r| r.get_token_symbol(chain_id, params.token))
             .unwrap_or_else(|| format!("{:?}", params.token));
 
-        let text = format!(
-            "Transfer {} {} from {:?} to {:?}",
-            params.amount, token_symbol, params.from, params.to
+        // Format amount with proper decimals
+        let amount_u128: u128 = params.amount.to_string().parse().unwrap_or(0);
+        let (amount_str, _) = registry
+            .and_then(|r| r.format_token_amount(chain_id, params.token, amount_u128))
+            .unwrap_or_else(|| (params.amount.to_string(), token_symbol.clone()));
+
+        // Create individual parameter fields
+        let fields = vec![
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: token_symbol.clone(),
+                        label: "Token".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: token_symbol.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: amount_str.clone(),
+                        label: "Amount".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: amount_str.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{:?}", params.from),
+                        label: "From".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("{:?}", params.from),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            visualsign::AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{:?}", params.to),
+                        label: "To".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("{:?}", params.to),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+        ];
+
+        let summary = format!(
+            "Transfer {} {} from {} to {}",
+            amount_str, token_symbol, params.from, params.to
         );
 
-        SignablePayloadField::TextV2 {
+        SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
-                fallback_text: text.clone(),
+                fallback_text: summary.clone(),
                 label: "Permit2 Transfer From".to_string(),
             },
-            text_v2: SignablePayloadFieldTextV2 { text },
+            preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
+                title: Some(visualsign::SignablePayloadFieldTextV2 {
+                    text: "Permit2 Transfer From".to_string(),
+                }),
+                subtitle: Some(visualsign::SignablePayloadFieldTextV2 { text: summary }),
+                condensed: None,
+                expanded: Some(visualsign::SignablePayloadFieldListLayout { fields }),
+            },
         }
     }
 
@@ -966,7 +1430,6 @@ impl UniversalRouterVisualizer {
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-
         // Try standard ABI decoding first
         let decode_result = <Permit2PermitParams as SolValue>::abi_decode(bytes);
 
@@ -992,8 +1455,7 @@ impl UniversalRouterVisualizer {
         // Format amount with proper decimals
         // Check if amount is unlimited (all 0xfff... = max uint160 or max uint256)
         let amount_str_val = params.permitSingle.details.amount.to_string();
-        let is_unlimited =
-            amount_str_val == "1461501637330902918203684832716283019655932542975" || // MAX_UINT160
+        let is_unlimited = amount_str_val == "1461501637330902918203684832716283019655932542975" || // MAX_UINT160
             amount_str_val == "115792089237316195423570985008687907853269984665640564039457584007913129639935"; // MAX_UINT256
 
         let amount_u128: u128 = amount_str_val.parse().unwrap_or(0);
@@ -1009,7 +1471,13 @@ impl UniversalRouterVisualizer {
         };
 
         // Format expiration timestamp
-        let expiration_u64: u64 = params.permitSingle.details.expiration.to_string().parse().unwrap_or(0);
+        let expiration_u64: u64 = params
+            .permitSingle
+            .details
+            .expiration
+            .to_string()
+            .parse()
+            .unwrap_or(0);
         let expiration_str = if expiration_u64 == u64::MAX {
             "never".to_string()
         } else {
@@ -1018,7 +1486,12 @@ impl UniversalRouterVisualizer {
         };
 
         // Format sig deadline timestamp
-        let sig_deadline_u64: u64 = params.permitSingle.sigDeadline.to_string().parse().unwrap_or(0);
+        let sig_deadline_u64: u64 = params
+            .permitSingle
+            .sigDeadline
+            .to_string()
+            .parse()
+            .unwrap_or(0);
         let sig_deadline_str = if sig_deadline_u64 == u64::MAX {
             "never".to_string()
         } else {
@@ -1113,13 +1586,9 @@ impl UniversalRouterVisualizer {
                 title: Some(visualsign::SignablePayloadFieldTextV2 {
                     text: "Permit2 Permit".to_string(),
                 }),
-                subtitle: Some(visualsign::SignablePayloadFieldTextV2 {
-                    text: summary,
-                }),
+                subtitle: Some(visualsign::SignablePayloadFieldTextV2 { text: summary }),
                 condensed: None,
-                expanded: Some(visualsign::SignablePayloadFieldListLayout {
-                    fields,
-                }),
+                expanded: Some(visualsign::SignablePayloadFieldListLayout { fields }),
             },
         }
     }
@@ -1136,7 +1605,9 @@ impl UniversalRouterVisualizer {
     /// Slot 3 (96-127):  nonce/reserved (all zeros in observed transaction)
     /// Slot 4 (128-159): spender (address, left-padded with 12 bytes zero padding)
     /// Slot 5 (160-191): sigDeadline (uint256, left-padded, value in last bytes)
-    fn decode_custom_permit2_params(bytes: &[u8]) -> Result<Permit2PermitParams, Box<dyn std::error::Error>> {
+    fn decode_custom_permit2_params(
+        bytes: &[u8],
+    ) -> Result<Permit2PermitParams, Box<dyn std::error::Error>> {
         if bytes.len() < 192 {
             return Err("bytes too short for PermitSingle (need 192 bytes minimum)".into());
         }
@@ -1222,9 +1693,7 @@ impl UniversalRouterVisualizer {
                     text: format!("Error: {}, Length: {} bytes", err, bytes.len()),
                 }),
                 condensed: None,
-                expanded: Some(visualsign::SignablePayloadFieldListLayout {
-                    fields,
-                }),
+                expanded: Some(visualsign::SignablePayloadFieldListLayout { fields }),
             },
         }
     }
@@ -1257,7 +1726,8 @@ impl crate::visualizer::ContractVisualizer for UniversalRouterContractVisualizer
     fn visualize(
         &self,
         context: &crate::context::VisualizerContext,
-    ) -> Result<Option<Vec<visualsign::AnnotatedPayloadField>>, visualsign::vsptrait::VisualSignError> {
+    ) -> Result<Option<Vec<visualsign::AnnotatedPayloadField>>, visualsign::vsptrait::VisualSignError>
+    {
         let contract_registry = crate::registry::ContractRegistry::with_default_protocols();
 
         if let Some(field) = self.inner.visualize_tx_commands(
@@ -1355,8 +1825,7 @@ mod tests {
                             AnnotatedPayloadField {
                                 signable_payload_field: SignablePayloadField::PreviewLayout {
                                     common: SignablePayloadFieldCommon {
-                                        fallback_text: "V3 Swap Exact In: 0xdeadbeef"
-                                            .to_string(),
+                                        fallback_text: "V3 Swap Exact In: 0xdeadbeef".to_string(),
                                         label: "Command 1".to_string(),
                                     },
                                     preview_layout: SignablePayloadFieldPreviewLayout {
@@ -1364,8 +1833,7 @@ mod tests {
                                             text: "V3 Swap Exact In".to_string(),
                                         }),
                                         subtitle: Some(SignablePayloadFieldTextV2 {
-                                            text: "Failed to decode parameters"
-                                                .to_string(),
+                                            text: "Failed to decode parameters".to_string(),
                                         }),
                                         condensed: None,
                                         expanded: None,
@@ -1737,7 +2205,10 @@ mod tests {
         permit_single[188..192].copy_from_slice(&[0x69, 0x18, 0xd1, 0x21]);
 
         let result = UniversalRouterVisualizer::decode_custom_permit2_params(&permit_single);
-        assert!(result.is_ok(), "Should decode custom permit2 params successfully");
+        assert!(
+            result.is_ok(),
+            "Should decode custom permit2 params successfully"
+        );
 
         let params = result.unwrap();
 
@@ -1795,14 +2266,12 @@ mod tests {
         permit_single[160..188].copy_from_slice(&[0u8; 28]);
         permit_single[188..192].copy_from_slice(&[0x69, 0x18, 0xd1, 0x21]);
 
-        let field = UniversalRouterVisualizer::decode_permit2_permit(&permit_single, 1, Some(&registry));
+        let field =
+            UniversalRouterVisualizer::decode_permit2_permit(&permit_single, 1, Some(&registry));
 
         // Verify the field is a PreviewLayout
         match field {
-            SignablePayloadField::PreviewLayout {
-                common,
-                ..
-            } => {
+            SignablePayloadField::PreviewLayout { common, .. } => {
                 // Check the label
                 assert_eq!(common.label, "Permit2 Permit");
             }
@@ -1827,13 +2296,13 @@ mod tests {
 
         // Verify the main transaction field
         match field {
-            SignablePayloadField::PreviewLayout {
-                common,
-                ..
-            } => {
+            SignablePayloadField::PreviewLayout { common, .. } => {
                 // Check that it mentions commands
-                assert!(common.fallback_text.contains("commands"),
-                    "Expected 'commands' in fallback text: {}", common.fallback_text);
+                assert!(
+                    common.fallback_text.contains("commands"),
+                    "Expected 'commands' in fallback text: {}",
+                    common.fallback_text
+                );
             }
             _ => panic!("Expected PreviewLayout for main field"),
         }
@@ -1862,16 +2331,17 @@ mod tests {
         permit_single[90..96].copy_from_slice(&[0u8, 0, 0x70, 0x94, 0x4b, 0x80]);
         permit_single[160..192].copy_from_slice(&[0u8; 32]);
 
-        let field = UniversalRouterVisualizer::decode_permit2_permit(&permit_single, 1, Some(&registry));
+        let field =
+            UniversalRouterVisualizer::decode_permit2_permit(&permit_single, 1, Some(&registry));
 
         match field {
-            SignablePayloadField::PreviewLayout {
-                preview_layout, ..
-            } => {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => {
                 if let Some(expanded) = &preview_layout.expanded {
                     for f in &expanded.fields {
-                        if let SignablePayloadField::PreviewLayout { common, preview_layout: inner_preview } =
-                            &f.signable_payload_field
+                        if let SignablePayloadField::PreviewLayout {
+                            common,
+                            preview_layout: inner_preview,
+                        } = &f.signable_payload_field
                         {
                             if common.label.contains("Expires") {
                                 if let Some(subtitle) = &inner_preview.subtitle {
@@ -1892,7 +2362,10 @@ mod tests {
         // Test that short input is properly rejected
         let short_input = vec![0u8; 100]; // Too short
         let result = UniversalRouterVisualizer::decode_custom_permit2_params(&short_input);
-        assert!(result.is_err(), "Should reject input shorter than 192 bytes");
+        assert!(
+            result.is_err(),
+            "Should reject input shorter than 192 bytes"
+        );
     }
 
     #[test]

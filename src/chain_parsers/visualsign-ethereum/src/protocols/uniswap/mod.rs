@@ -34,19 +34,13 @@ pub fn register(
 
     // Register Universal Router on all supported chains
     for &chain_id in UniswapConfig::universal_router_chains() {
-        contract_reg.register_contract_typed::<UniswapUniversalRouter>(
-            chain_id,
-            vec![ur_address],
-        );
+        contract_reg.register_contract_typed::<UniswapUniversalRouter>(chain_id, vec![ur_address]);
     }
 
     // Register Permit2 (same address on all chains)
     let permit2_address = UniswapConfig::permit2_address();
     for &chain_id in UniswapConfig::universal_router_chains() {
-        contract_reg.register_contract_typed::<Permit2Contract>(
-            chain_id,
-            vec![permit2_address],
-        );
+        contract_reg.register_contract_typed::<Permit2Contract>(chain_id, vec![permit2_address]);
     }
 
     // Register common tokens (WETH, USDC, USDT, DAI, etc.)
@@ -60,9 +54,9 @@ pub fn register(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Address;
     use crate::protocols::uniswap::config::UniswapUniversalRouter;
     use crate::registry::ContractType;
+    use alloy_primitives::Address;
 
     #[test]
     fn test_register_uniswap_contracts() {
