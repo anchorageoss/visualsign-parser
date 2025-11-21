@@ -4,7 +4,7 @@ use visualsign::AnnotatedPayloadField;
 use visualsign::vsptrait::VisualSignError;
 
 /// Trait for visualizing specific contract types
-/// We're using Arc so that visualizers can be shared across threads 
+/// We're using Arc so that visualizers can be shared across threads
 /// (we don't have guarantee it's only going to be one thread in tokio)
 pub trait ContractVisualizer: Send + Sync {
     /// Returns the contract type this visualizer handles
@@ -26,6 +26,35 @@ pub trait ContractVisualizer: Send + Sync {
         &self,
         context: &VisualizerContext,
     ) -> Result<Option<Vec<AnnotatedPayloadField>>, VisualSignError>;
+}
+
+/// Trait for visualizers that can handle raw calldata inputs
+///
+/// Some visualizers can work directly with calldata bytes (with or without
+/// function selectors), automatically detecting which function was called.
+/// Visualizers that require specific structured input don't implement this trait.
+pub trait CalldataVisualizer: Send + Sync {
+    /// Attempts to decode and visualize calldata
+    ///
+    /// Implementations should accept calldata in flexible formats:
+    /// - With 4-byte function selector
+    /// - Without selector (raw parameters)
+    /// - Custom encodings
+    ///
+    /// # Arguments
+    /// * `calldata` - The raw calldata bytes
+    /// * `chain_id` - The chain ID for lookups
+    /// * `registry` - Optional contract registry for metadata
+    ///
+    /// # Returns
+    /// * `Some(SignablePayloadField)` if decoding succeeds
+    /// * `None` if the input doesn't match any known function
+    fn visualize_calldata(
+        &self,
+        calldata: &[u8],
+        chain_id: u64,
+        registry: Option<&crate::registry::ContractRegistry>,
+    ) -> Option<visualsign::SignablePayloadField>;
 }
 
 /// Registry for managing Ethereum contract visualizers (Immutable)
@@ -51,7 +80,11 @@ impl EthereumVisualizerRegistry {
 }
 
 // Implement VisualizerRegistry trait for EthereumVisualizerRegistry
-impl crate::context::VisualizerRegistry for EthereumVisualizerRegistry {}
+impl crate::context::VisualizerRegistry for EthereumVisualizerRegistry {
+    fn get_visualizer(&self, contract_type: &str) -> Option<&dyn ContractVisualizer> {
+        self.get(contract_type)
+    }
+}
 
 /// Builder for creating a new EthereumVisualizerRegistry (Mutable)
 ///

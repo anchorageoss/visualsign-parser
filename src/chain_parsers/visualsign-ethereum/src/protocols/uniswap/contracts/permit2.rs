@@ -46,7 +46,7 @@ impl Permit2Visualizer {
     /// Attempts to decode and visualize Permit2 function calls
     ///
     /// # Arguments
-    /// * `input` - The calldata bytes
+    /// * `input` - The calldata bytes (with 4-byte function selector)
     /// * `chain_id` - The chain ID for token lookups
     /// * `registry` - Optional contract registry for token metadata
     ///
@@ -68,8 +68,18 @@ impl Permit2Visualizer {
             return Some(Self::decode_approve(call, chain_id, registry));
         }
 
-        // Try to decode as permit
+        // Try to decode as permit (standard ABI)
         if let Ok(call) = IPermit2::permitCall::abi_decode(input) {
+            return Some(Self::decode_permit(call, chain_id, registry));
+        }
+
+        // Try custom permit encoding (used by Universal Router)
+        if let Ok(params) = Self::decode_custom_permit_params(input) {
+            let call = IPermit2::permitCall {
+                owner: Address::ZERO,
+                permitSingle: params,
+                signature: alloy_primitives::Bytes::default(),
+            };
             return Some(Self::decode_permit(call, chain_id, registry));
         }
 
@@ -79,6 +89,57 @@ impl Permit2Visualizer {
         }
 
         None
+    }
+
+    /// Decodes custom permit parameter layout (used by Uniswap Universal Router)
+    /// Handles inline 192-byte PermitSingle struct without ABI offsets
+    pub(crate) fn decode_custom_permit_params(
+        bytes: &[u8],
+    ) -> Result<PermitSingle, Box<dyn std::error::Error>> {
+        use alloy_primitives::Address;
+
+        if bytes.len() < 192 {
+            return Err("bytes too short for PermitSingle (need 192 bytes minimum)".into());
+        }
+
+        let permit_single_bytes = &bytes[0..192];
+
+        // Extract token (address) from bytes 12-31 (left-padded in Slot 0)
+        let token = Address::from_slice(&permit_single_bytes[12..32]);
+
+        // Extract amount (uint160) from bytes 44-63 (left-padded in Slot 1)
+        let amount_hex = hex::encode(&permit_single_bytes[44..64]);
+        let amount = alloy_primitives::Uint::<160, 3>::from_str_radix(&amount_hex, 16)
+            .map_err(|_| "Failed to parse amount")?;
+
+        // Extract expiration (uint48) from bytes 90-95 (right-aligned in Slot 2)
+        let expiration_hex = hex::encode(&permit_single_bytes[90..96]);
+        let expiration = alloy_primitives::Uint::<48, 1>::from_str_radix(&expiration_hex, 16)
+            .map_err(|_| "Failed to parse expiration")?;
+
+        // Extract nonce (uint48) from bytes 96-101 (Slot 3)
+        let nonce_hex = hex::encode(&permit_single_bytes[96..102]);
+        let nonce = alloy_primitives::Uint::<48, 1>::from_str_radix(&nonce_hex, 16)
+            .map_err(|_| "Failed to parse nonce")?;
+
+        // Extract spender (address) from bytes 140-159 (left-padded in Slot 4)
+        let spender = Address::from_slice(&permit_single_bytes[140..160]);
+
+        // Extract sigDeadline (uint256) from bytes 160-191 (all of Slot 5)
+        let sig_deadline_hex = hex::encode(&permit_single_bytes[160..192]);
+        let sig_deadline = alloy_primitives::U256::from_str_radix(&sig_deadline_hex, 16)
+            .map_err(|_| "Failed to parse sigDeadline")?;
+
+        Ok(PermitSingle {
+            details: PermitDetails {
+                token,
+                amount,
+                expiration,
+                nonce,
+            },
+            spender,
+            sigDeadline: sig_deadline,
+        })
     }
 
     /// Decodes approve function call
@@ -205,6 +266,19 @@ impl Permit2Visualizer {
             },
             text_v2: SignablePayloadFieldTextV2 { text },
         }
+    }
+}
+
+/// CalldataVisualizer implementation for Permit2
+/// Allows delegating calldata directly to Permit2Visualizer
+impl crate::visualizer::CalldataVisualizer for Permit2Visualizer {
+    fn visualize_calldata(
+        &self,
+        calldata: &[u8],
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
+    ) -> Option<visualsign::SignablePayloadField> {
+        self.visualize_tx_commands(calldata, chain_id, registry)
     }
 }
 

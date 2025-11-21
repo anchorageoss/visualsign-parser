@@ -1,6 +1,6 @@
+use crate::token_metadata::{ChainMetadata, TokenMetadata, parse_network_id};
 use alloy_primitives::{Address, utils::format_units};
 use std::collections::HashMap;
-use crate::token_metadata::{TokenMetadata, ChainMetadata, parse_network_id};
 
 /// Type alias for chain ID to avoid depending on external chain types
 pub type ChainId = u64;
@@ -143,12 +143,9 @@ impl ContractRegistry {
     /// # Arguments
     /// * `chain_id` - The chain ID
     /// * `metadata` - The TokenMetadata containing all token information
-    pub fn register_token(
-        &mut self,
-        chain_id: ChainId,
-        metadata: TokenMetadata,
-    ) {
-        let address: Address = metadata.contract_address
+    pub fn register_token(&mut self, chain_id: ChainId, metadata: TokenMetadata) {
+        let address: Address = metadata
+            .contract_address
             .parse()
             .expect("Invalid contract address");
         self.token_metadata.insert((chain_id, address), metadata);
@@ -231,8 +228,7 @@ impl ContractRegistry {
     /// # Returns
     /// `Ok(())` on success, `Err(String)` if network_id is unknown
     pub fn load_chain_metadata(&mut self, chain_metadata: &ChainMetadata) -> Result<(), String> {
-        let chain_id = parse_network_id(&chain_metadata.network_id)
-            .map_err(|e| e.to_string())?;
+        let chain_id = parse_network_id(&chain_metadata.network_id).map_err(|e| e.to_string())?;
 
         for (_symbol, token_metadata) in &chain_metadata.assets {
             self.register_token(chain_id, token_metadata.clone());
