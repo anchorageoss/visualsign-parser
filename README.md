@@ -2,6 +2,8 @@
 
 This repo contains an enclave application to parse unsigned transactions and return VisualSign output.
 
+**If you're participating in ETHGlobal Buenos Aires Hackathon - please use `ethglobal/buenos-aires` branch**
+
 ## Running tests
 
 ```
