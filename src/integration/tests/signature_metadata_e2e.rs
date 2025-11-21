@@ -6,14 +6,14 @@ use ed25519_dalek::{SigningKey as Ed25519SigningKey, VerifyingKey as Ed25519Veri
 /// 2. The parser receives and processes it correctly
 /// 3. The signature can be verified by the parser using the metadata algorithm and public key
 use generated::parser::{
-    Abi, Chain, ChainMetadata, EthereumMetadata, Idl, Metadata, ParseRequest, SignatureMetadata,
-    SolanaIdlType, SolanaMetadata, chain_metadata,
+    chain_metadata, Abi, Chain, ChainMetadata, EthereumMetadata, Idl, Metadata, ParseRequest,
+    SignatureMetadata, SolanaIdlType, SolanaMetadata,
 };
-use k256::EncodedPoint;
-use k256::ecdsa::SigningKey;
-use k256::ecdsa::VerifyingKey;
 use k256::ecdsa::signature::Signer;
 use k256::ecdsa::signature::Verifier;
+use k256::ecdsa::SigningKey;
+use k256::ecdsa::VerifyingKey;
+use k256::EncodedPoint;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
@@ -21,10 +21,7 @@ use sha2::{Digest, Sha256};
 fn hash_content_sha256(content: &str) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
-    let result = hasher.finalize();
-    let mut output = [0u8; 32];
-    output.copy_from_slice(result.as_ref());
-    output
+    hasher.finalize().into()
 }
 
 /// Sign content with secp256k1 (Ethereum-style) using DER encoding
