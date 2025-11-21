@@ -85,11 +85,7 @@ impl ContractType for UniswapUniversalRouter {}
 pub struct UniswapUniversalRouter; // ❌ Compile error: duplicate type!
 ```
 
-**Benefits:**
-- ✅ Compile-time uniqueness - can't have duplicate type names
-- ✅ No manual string maintenance
-- ✅ Type-safe at API boundaries
-- ✅ Automatic type ID generation from type name
+This ensures compile-time uniqueness and automatic type ID generation from type names.
 
 ## Registration System
 
@@ -164,6 +160,68 @@ pub fn register_all(
 4. **Fallback Visualization** ([lib.rs:389](src/lib.rs#L389))
    - If no specific visualizer handles the call
    - Use `FallbackVisualizer` to display raw hex
+
+## Scope and Limitations
+
+### Calldata Decoding vs Transaction Simulation
+
+This module **decodes transaction calldata** to show user intent. It does **not simulate transaction execution** to show results or state changes.
+
+#### What We Can Decode (Calldata Analysis):
+✅ Function calls and parameters (e.g., `execute(commands, inputs, deadline)`)
+✅ **Outgoing amounts** - Exact amounts user is sending (e.g., "240 SETH", "60 SETH")
+✅ **Minimum expected outputs** - Slippage protection (e.g., ">=0.0035 WETH")
+✅ Token symbols from registry (e.g., "SETH", "WETH" instead of addresses)
+✅ Pool fee tiers (e.g., "0.3% fee" indicates which V3 pool tier)
+✅ Recipients and addresses for transfers and payments
+✅ Deadline timestamps
+✅ Command sequences showing transaction flow (e.g., swap → pay fee → unwrap)
+
+**Example output:**
+```
+Command 1: Swap 240 SETH for >=0.00357 WETH via V3 (0.3% fee)
+Command 2: Swap 60 SETH for >=0.000895 WETH via V3 (1% fee)
+Command 3: Pay 0.25% of WETH to 0x000000fee13a103a10d593b9ae06b3e05f2e7e1c
+Command 4: Unwrap >=0.00446920 WETH to ETH
+```
+
+#### What Requires Simulation (Out of Scope):
+
+❌ **Actual received amounts** - Exact output after execution (vs minimum expected)
+  - We show: ">=0.00357 WETH" (from calldata)
+  - Simulation shows: "0.003573913782539750 WETH received" (actual result)
+  - Requires: EVM execution to compute exact amounts after slippage
+
+❌ **Pool address resolution** - Which specific pool contract handles each swap
+  - We show: "via V3 (0.3% fee)" (fee tier from calldata)
+  - Simulation shows: "via pool 0xd6e420f6...34cd" (actual pool address)
+  - Requires: RPC queries to find pools for token pairs + fee tier
+
+❌ **Balance changes in external contracts** - State deltas in pools, routers, etc.
+  - We show: User intent (swap X for Y, pay fee, unwrap)
+  - Simulation shows: "Pool 0xd6e420f6: WETH -0.0036, SETH +240"
+  - Requires: State tracking during execution for all touched contracts
+
+❌ **Multi-hop routing** - Intermediate tokens in complex swap paths
+  - Current: Single-hop decoding (token A → token B)
+  - Future enhancement: Parse multi-hop paths from calldata (no simulation needed)
+
+❌ **Gas estimation** - Actual gas consumed
+  - Requires: EVM execution
+
+**Why these are out of scope:**
+
+1. **Architectural separation**: Visualizers decode calldata (signing time), not execution results (runtime)
+2. **No RPC dependency**: This module is pure calldata → human-readable transformation
+3. **Deterministic behavior**: Decoding doesn't depend on chain state or external data
+4. **Performance**: No network calls or heavy computation required
+
+**Tools that provide simulation:**
+- [Tenderly](https://tenderly.co) - Full EVM simulation with state tracking
+- [Foundry's cast](https://book.getfoundry.sh/cast/) - Local simulation
+- Block explorers with internal transaction tracing
+
+This module's goal is to make **what the user is signing** clear, not to predict execution outcomes.
 
 ## Adding New Protocols
 
@@ -278,13 +336,6 @@ impl UniswapConfig {
 }
 ```
 
-Benefits:
-- ✅ Single source of truth for contract addresses
-- ✅ Easy to add new chains
-- ✅ Compile-time type safety with `ContractType` trait
-- ✅ Simple, stateless design
-- ✅ Easy to test
-
 ## Future Enhancements
 
 ### 1. Visualizer Trait Implementation
@@ -324,35 +375,3 @@ contracts/
 ├── staking/       # Generic staking (not protocol-specific)
 └── governance/    # Generic governance contracts
 ```
-
-## Testing
-
-Each module should include tests:
-
-- **Config tests**: Verify addresses are registered correctly
-- **Visualizer tests**: Test calldata decoding and field generation
-- **Integration tests**: End-to-end transaction visualization
-
-Example from [protocols/uniswap/mod.rs](src/protocols/uniswap/mod.rs#L48):
-```rust
-#[test]
-fn test_register_uniswap_contracts() {
-    let mut contract_reg = ContractRegistry::new();
-    let mut visualizer_reg = EthereumVisualizerRegistryBuilder::new();
-
-    register(&mut contract_reg, &mut visualizer_reg);
-
-    let addr = "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD".parse().unwrap();
-
-    for chain_id in [1, 10, 137, 8453, 42161] {
-        let contract_type = contract_reg.get_contract_type(chain_id, addr);
-        assert_eq!(contract_type.unwrap(), UNISWAP_UNIVERSAL_ROUTER);
-    }
-}
-```
-
-## References
-
-- [CLAUDE.md](CLAUDE.md) - Development guidelines and best practices
-- [visualsign crate](../../visualsign/) - Field builders and core types
-- [Registry TODO](src/lib.rs#L116) - Future registry architecture improvements
