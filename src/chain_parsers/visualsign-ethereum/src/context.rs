@@ -258,6 +258,7 @@ mod tests {
             calldata: vec![],
             registry: registry.clone(),
             visualizers: visualizers.clone(),
+            abi_registry: None,
         };
         let context = VisualizerContext::new(params);
 
@@ -296,6 +297,7 @@ mod tests {
             calldata: vec![],
             registry: registry.clone(),
             visualizers: visualizers.clone(),
+            abi_registry: None,
         };
         let context = VisualizerContext::new(params);
 

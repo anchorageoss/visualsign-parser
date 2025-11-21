@@ -18,6 +18,7 @@ pub mod abi_registry;
 pub mod chains;
 pub mod context;
 pub mod contracts;
+pub mod embedded_abis;
 pub mod fmt;
 pub mod protocols;
 pub mod registry;

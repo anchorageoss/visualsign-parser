@@ -181,7 +181,7 @@ mod tests {
         let abi: JsonAbi = serde_json::from_str(SIMPLE_ABI).expect("Failed to parse ABI");
         let decoder = AbiDecoder::new(Arc::new(abi));
 
-        let result = decoder.visualize("transfer", &[], 1, None);
+        let result = decoder.visualize(&[], 1, None);
         assert!(result.is_err());
     }
 }
