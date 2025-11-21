@@ -1,4 +1,5 @@
 pub mod morpho;
+pub mod safe;
 pub mod uniswap;
 
 use crate::registry::ContractRegistry;
@@ -15,6 +16,9 @@ pub fn register_all(
 ) {
     // Register Morpho protocol
     morpho::register(contract_reg, visualizer_reg);
+
+    // Register Safe protocol
+    safe::register(contract_reg, visualizer_reg);
 
     // Register Uniswap protocol
     uniswap::register(contract_reg, visualizer_reg);
