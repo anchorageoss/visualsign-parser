@@ -14,7 +14,7 @@ parser_app = { path = "../app" }
 borsh = { version = "1.5.7", features = ["std"], default-features = false }
 generated = { path = "../../generated" }
 visualsign = { workspace = true }
-#visualsign-ethereum = { path = "../../chain_parsers/visualsign-ethereum" }
+visualsign-ethereum = { path = "../../chain_parsers/visualsign-ethereum" }
 visualsign-solana = { path = "../../chain_parsers/visualsign-solana" }
 visualsign-unspecified = { path = "../../chain_parsers/visualsign-unspecified" }
 
