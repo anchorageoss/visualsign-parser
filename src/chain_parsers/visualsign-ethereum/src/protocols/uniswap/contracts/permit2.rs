@@ -7,10 +7,13 @@
 
 #![allow(unused_imports)]
 
-use alloy_primitives::Address;
+use alloy_primitives::{Address, U160};
 use alloy_sol_types::{SolCall, sol};
 use chrono::{TimeZone, Utc};
-use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2};
+use visualsign::{
+    AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
+    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
+};
 
 use crate::registry::{ContractRegistry, ContractType};
 
@@ -92,54 +95,20 @@ impl Permit2Visualizer {
     }
 
     /// Decodes custom permit parameter layout (used by Uniswap Universal Router)
-    /// Handles inline 192-byte PermitSingle struct without ABI offsets
+    /// Universal Router encodes PermitSingle as inline 192 bytes (no ABI encoding with offsets)
     pub(crate) fn decode_custom_permit_params(
         bytes: &[u8],
     ) -> Result<PermitSingle, Box<dyn std::error::Error>> {
-        use alloy_primitives::Address;
+        use alloy_sol_types::SolValue;
 
         if bytes.len() < 192 {
             return Err("bytes too short for PermitSingle (need 192 bytes minimum)".into());
         }
 
+        // Extract the 192-byte inline struct and decode as PermitSingle
         let permit_single_bytes = &bytes[0..192];
-
-        // Extract token (address) from bytes 12-31 (left-padded in Slot 0)
-        let token = Address::from_slice(&permit_single_bytes[12..32]);
-
-        // Extract amount (uint160) from bytes 44-63 (left-padded in Slot 1)
-        let amount_hex = hex::encode(&permit_single_bytes[44..64]);
-        let amount = alloy_primitives::Uint::<160, 3>::from_str_radix(&amount_hex, 16)
-            .map_err(|_| "Failed to parse amount")?;
-
-        // Extract expiration (uint48) from bytes 90-95 (right-aligned in Slot 2)
-        let expiration_hex = hex::encode(&permit_single_bytes[90..96]);
-        let expiration = alloy_primitives::Uint::<48, 1>::from_str_radix(&expiration_hex, 16)
-            .map_err(|_| "Failed to parse expiration")?;
-
-        // Extract nonce (uint48) from bytes 96-101 (Slot 3)
-        let nonce_hex = hex::encode(&permit_single_bytes[96..102]);
-        let nonce = alloy_primitives::Uint::<48, 1>::from_str_radix(&nonce_hex, 16)
-            .map_err(|_| "Failed to parse nonce")?;
-
-        // Extract spender (address) from bytes 140-159 (left-padded in Slot 4)
-        let spender = Address::from_slice(&permit_single_bytes[140..160]);
-
-        // Extract sigDeadline (uint256) from bytes 160-191 (all of Slot 5)
-        let sig_deadline_hex = hex::encode(&permit_single_bytes[160..192]);
-        let sig_deadline = alloy_primitives::U256::from_str_radix(&sig_deadline_hex, 16)
-            .map_err(|_| "Failed to parse sigDeadline")?;
-
-        Ok(PermitSingle {
-            details: PermitDetails {
-                token,
-                amount,
-                expiration,
-                nonce,
-            },
-            spender,
-            sigDeadline: sig_deadline,
-        })
+        PermitSingle::abi_decode(permit_single_bytes)
+            .map_err(|e| format!("Failed to decode PermitSingle: {}", e).into())
     }
 
     /// Decodes approve function call
@@ -224,17 +193,119 @@ impl Permit2Visualizer {
             dt.format("%Y-%m-%d %H:%M UTC").to_string()
         };
 
-        let text = format!(
-            "Permit {} to spend {} {} from {} (expires: {})",
-            call.permitSingle.spender, amount_str, token_symbol, call.owner, expiration_str
+        // Format sig deadline timestamp
+        let sig_deadline_u64: u64 = call
+            .permitSingle
+            .sigDeadline
+            .to_string()
+            .parse()
+            .unwrap_or(0);
+        let sig_deadline_str = if sig_deadline_u64 == u64::MAX {
+            "never".to_string()
+        } else {
+            let dt = Utc.timestamp_opt(sig_deadline_u64 as i64, 0).unwrap();
+            dt.format("%Y-%m-%d %H:%M UTC").to_string()
+        };
+
+        // Determine if amount is "unlimited" (max u160)
+        let amount_display = if call.permitSingle.details.amount == U160::MAX {
+            "Unlimited Amount".to_string()
+        } else {
+            amount_str.clone()
+        };
+
+        let token_lowercase = token.to_string().to_lowercase();
+        let subtitle_text = format!(
+            "Permit {} to spend {} of {}",
+            call.permitSingle.spender, amount_display, token_lowercase
         );
 
-        SignablePayloadField::TextV2 {
-            common: SignablePayloadFieldCommon {
-                fallback_text: text.clone(),
-                label: "Permit2 Permit".to_string(),
+        let title_text = "Permit2 Permit".to_string();
+
+        // Build expanded fields
+        let expanded_fields = vec![
+            AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: token_lowercase.clone(),
+                        label: "Token".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: token_lowercase.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
             },
-            text_v2: SignablePayloadFieldTextV2 { text },
+            AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: call.permitSingle.details.amount.to_string(),
+                        label: "Amount".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: call.permitSingle.details.amount.to_string(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: call.permitSingle.spender.to_string().to_lowercase(),
+                        label: "Spender".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: call.permitSingle.spender.to_string().to_lowercase(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: expiration_str.clone(),
+                        label: "Expires".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: expiration_str,
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: sig_deadline_str.clone(),
+                        label: "Sig Deadline".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: sig_deadline_str,
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+        ];
+
+        SignablePayloadField::PreviewLayout {
+            common: SignablePayloadFieldCommon {
+                fallback_text: subtitle_text.clone(),
+                label: title_text.clone(),
+            },
+            preview_layout: SignablePayloadFieldPreviewLayout {
+                title: Some(SignablePayloadFieldTextV2 { text: title_text }),
+                subtitle: Some(SignablePayloadFieldTextV2 {
+                    text: subtitle_text,
+                }),
+                condensed: None,
+                expanded: Some(SignablePayloadFieldListLayout {
+                    fields: expanded_fields,
+                }),
+            },
         }
     }
 
