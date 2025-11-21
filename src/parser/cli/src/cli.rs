@@ -5,10 +5,12 @@ use generated::parser::{
     ChainMetadata, EthereumMetadata, SolanaMetadata, chain_metadata::Metadata,
 };
 use parser_app::registry::create_registry;
+use std::sync::Arc;
 use visualsign::registry::Chain;
 use visualsign::vsptrait::VisualSignOptions;
 use visualsign::{SignablePayload, SignablePayloadField};
-use visualsign_ethereum::embedded_abis::parse_abi_address_mapping;
+use visualsign_ethereum::abi_registry::AbiRegistry;
+use visualsign_ethereum::embedded_abis::load_and_map_abi;
 use visualsign_ethereum::networks::parse_network;
 
 #[derive(Parser, Debug)]
@@ -46,10 +48,11 @@ struct Args {
 
     #[arg(
         long,
+        long = "abi-json-mappings",
         value_name = "ABI_NAME:0xADDRESS",
-        help = "Map custom ABI to contract address (format: AbiName:0xAddress). Can be used multiple times"
+        help = "Map custom ABI JSON file to contract address. Format: AbiName:/path/to/abi.json:0xAddress. Can be used multiple times"
     )]
-    abi: Vec<String>,
+    abi_json_mappings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -226,45 +229,84 @@ fn common_label(field: &SignablePayloadField) -> String {
     }
 }
 
-/// Validates ABI address mappings from CLI arguments
-/// Returns the number of valid mappings and logs any errors
-fn validate_abi_mappings(abi_mappings: &[String]) -> usize {
+/// Parses full ABI mapping with file path: "AbiName:/path/to/file.json:0xAddress"
+fn parse_abi_file_mapping(mapping_str: &str) -> Option<(String, String, String)> {
+    let parts: Vec<&str> = mapping_str.rsplitn(2, ':').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let address_str = parts[0];
+    let rest = parts[1];
+
+    let name_file_parts: Vec<&str> = rest.splitn(2, ':').collect();
+    if name_file_parts.len() != 2 {
+        return None;
+    }
+
+    let abi_name = name_file_parts[0].to_string();
+    let file_path = name_file_parts[1].to_string();
+    let address_str = address_str.to_string();
+
+    Some((abi_name, file_path, address_str))
+}
+
+/// Builds an ABI registry from CLI mappings with file paths
+/// Returns (registry, valid_count) and logs any errors
+fn build_abi_registry_from_mappings(abi_json_mappings: &[String]) -> (AbiRegistry, usize) {
+    let mut registry = AbiRegistry::new();
     let mut valid_count = 0;
-    for mapping in abi_mappings {
-        match parse_abi_address_mapping(mapping) {
-            Some((abi_name, address)) => {
-                valid_count += 1;
-                eprintln!("  Mapped ABI '{abi_name}' to address: {address}");
+
+    for mapping in abi_json_mappings {
+        match parse_abi_file_mapping(mapping) {
+            Some((abi_name, file_path, address_str)) => {
+                let chain_id = 1u64; // TODO: Make chain_id configurable
+                match load_and_map_abi(&mut registry, &abi_name, &file_path, chain_id, &address_str)
+                {
+                    Ok(()) => {
+                        valid_count += 1;
+                        eprintln!(
+                            "  Loaded ABI '{}' from {} and mapped to {}",
+                            abi_name, file_path, address_str
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("  Warning: Failed to load/map ABI '{}': {}", abi_name, e);
+                    }
+                }
             }
             None => {
                 eprintln!(
-                    "  Warning: Invalid ABI mapping '{mapping}' (expected format: AbiName:0xAddress)",
+                    "  Warning: Invalid ABI mapping '{}' (expected format: AbiName:/path/to/file.json:0xAddress)",
+                    mapping
                 );
             }
         }
     }
-    valid_count
+
+    (registry, valid_count)
 }
 
 fn parse_and_display(
     chain: &str,
     raw_tx: &str,
-    options: VisualSignOptions,
+    mut options: VisualSignOptions,
     output_format: OutputFormat,
     condensed_only: bool,
-    abi_mappings: &[String],
+    abi_json_mappings: &[String],
 ) {
     let registry_chain = parse_chain(chain);
 
-    // Validate and report ABI mappings
-    if !abi_mappings.is_empty() {
+    // Build and report ABI registry from mappings
+    if !abi_json_mappings.is_empty() {
         eprintln!("Registering custom ABIs:");
-        let valid_count = validate_abi_mappings(abi_mappings);
+        let (registry, valid_count) = build_abi_registry_from_mappings(abi_json_mappings);
         eprintln!(
             "Successfully registered {}/{} ABI mappings\n",
             valid_count,
-            abi_mappings.len()
+            abi_json_mappings.len()
         );
+        options.abi_registry = Some(Arc::new(registry));
     }
 
     let registry = create_registry();
@@ -345,12 +387,13 @@ impl Cli {
         let args = Args::parse();
 
         let chain = parse_chain(&args.chain);
-        let metadata = create_chain_metadata(&chain, args.network);
+        let chain_metadata = create_chain_metadata(&chain, args.network);
 
         let options = VisualSignOptions {
             decode_transfers: true,
             transaction_name: None,
-            metadata,
+            metadata: chain_metadata,
+            abi_registry: None,
         };
 
         parse_and_display(
@@ -359,7 +402,7 @@ impl Cli {
             options,
             args.output,
             args.condensed_only,
-            &args.abi,
+            &args.abi_json_mappings,
         );
     }
 }

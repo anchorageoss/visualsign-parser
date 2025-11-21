@@ -42,7 +42,7 @@ To enable visualization for your custom contract:
    cargo run --release -- \
      --chain ethereum \
      --transaction 0x... \
-     --abi SimpleToken:0x1234567890123456789012345678901234567890
+     --abi-json-mappings SimpleToken:0x1234567890123456789012345678901234567890
    ```
 
 5. **Or via Rust code** in your application
@@ -60,7 +60,7 @@ cargo run --example using_abijson -- --help
 cargo run --example using_abijson -- \
   --chain ethereum \
   --transaction 0x... \
-  --abi SimpleToken:0x<contract_address>
+  --abi-json-mappings SimpleToken:0x<contract_address>
 ```
 
 #### Via Rust Code
@@ -117,24 +117,24 @@ mint(address,uint256)
 
 ## CLI Integration
 
-The parser CLI now supports the `--abi` flag for mapping custom ABIs to contract addresses:
+The parser CLI now supports the `--abi-json-mappings` flag for mapping custom ABI JSON files to contract addresses:
 
 ### Format
 
 ```
---abi AbiName:0xAddress
+--abi-json-mappings AbiName:0xAddress
 ```
 
 ### Multiple Mappings
 
-You can provide multiple `--abi` flags to register different ABIs:
+You can provide multiple `--abi-json-mappings` flags to register different ABIs:
 
 ```bash
 cargo run --release -- \
   --chain ethereum \
   --transaction 0x... \
-  --abi Token:0x1111111111111111111111111111111111111111 \
-  --abi Router:0x2222222222222222222222222222222222222222
+  --abi-json-mappings Token:0x1111111111111111111111111111111111111111 \
+  --abi-json-mappings Router:0x2222222222222222222222222222222222222222
 ```
 
 ### Validation
@@ -151,7 +151,7 @@ The CLI validates each ABI mapping and reports:
 - ✅ Function selector matching (4-byte opcodes)
 - ✅ Structured PreviewLayout visualization
 - ✅ Multiple ABIs per binary
-- ✅ CLI `--abi` flag for address mapping
+- ✅ CLI `--abi-json-mappings` flag for address mapping
 - ✅ Optional ABI signatures (secp256k1) for validation (planned)
 
 ## Limitations

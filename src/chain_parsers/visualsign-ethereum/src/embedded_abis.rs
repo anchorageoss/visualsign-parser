@@ -29,6 +29,9 @@ pub enum AbiEmbeddingError {
     /// Invalid JSON in ABI file
     #[error("Invalid ABI JSON: {0}")]
     InvalidJson(String),
+    /// File I/O error
+    #[error("Failed to read ABI file: {0}")]
+    FileError(String),
 }
 
 /// Registers a compile-time embedded ABI JSON string with an AbiRegistry
@@ -101,6 +104,42 @@ pub fn parse_abi_address_mapping(mapping_str: &str) -> Option<(&str, Address)> {
     let (abi_name, addr_str) = mapping_str.split_once(':')?;
     let address = addr_str.parse().ok()?;
     Some((abi_name, address))
+}
+
+/// Loads an ABI JSON from a file and registers it with the given name
+///
+/// # Arguments
+/// * `registry` - The ABI registry to register with (mutable)
+/// * `name` - Name for this ABI (e.g., "MyToken")
+/// * `file_path` - Path to the ABI JSON file
+///
+/// # Returns
+/// * `Ok(())` on successful registration
+/// * `Err(AbiEmbeddingError)` if file cannot be read or JSON is invalid
+pub fn load_abi_from_file(
+    registry: &mut AbiRegistry,
+    name: &str,
+    file_path: &str,
+) -> Result<(), AbiEmbeddingError> {
+    let abi_json = std::fs::read_to_string(file_path)
+        .map_err(|e| AbiEmbeddingError::FileError(format!("{}: {}", file_path, e)))?;
+    register_embedded_abi(registry, name, &abi_json)
+}
+
+/// Loads an ABI from a file and maps it to an address
+///
+/// Convenience function that combines loading and address mapping
+pub fn load_and_map_abi(
+    registry: &mut AbiRegistry,
+    name: &str,
+    file_path: &str,
+    chain_id: u64,
+    address_str: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    load_abi_from_file(registry, name, file_path)?;
+    let address = address_str.parse::<Address>()?;
+    registry.map_address(chain_id, address, name);
+    Ok(())
 }
 
 #[cfg(test)]
