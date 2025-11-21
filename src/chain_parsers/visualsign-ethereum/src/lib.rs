@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::fmt::{format_ether, format_gwei};
 use crate::registry::ContractType;
+use crate::visualizer::CalldataVisualizer;
 use alloy_consensus::{Transaction as _, TxEnvelope, TxType, TypedTransaction};
 use alloy_rlp::{Buf, Decodable};
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
@@ -381,14 +382,20 @@ fn convert_to_visual_sign_payload(
     // Extract chain ID to determine the network
     let chain_id = transaction.chain_id();
 
-    let chain_name = networks::get_network_name(chain_id);
+    // Try to extract AbiRegistry from options
+    let abi_registry = options
+        .abi_registry
+        .as_ref()
+        .and_then(|any_reg| any_reg.downcast_ref::<abi_registry::AbiRegistry>());
+
+    let network_name = networks::get_network_name(chain_id);
 
     let mut fields = vec![SignablePayloadField::TextV2 {
         common: SignablePayloadFieldCommon {
-            fallback_text: chain_name.clone(),
+            fallback_text: network_name.clone(),
             label: "Network".to_string(),
         },
-        text_v2: SignablePayloadFieldTextV2 { text: chain_name },
+        text_v2: SignablePayloadFieldTextV2 { text: network_name },
     }];
     if let Some(to) = transaction.to() {
         fields.push(SignablePayloadField::AddressV2 {
@@ -495,6 +502,20 @@ fn convert_to_visual_sign_payload(
                         {
                             input_fields.push(field);
                         }
+                    }
+                }
+            }
+        }
+
+        // Try dynamic ABI visualization if available
+        if input_fields.is_empty() {
+            if let (Some(to_address), Some(abi_reg)) = (transaction.to(), abi_registry) {
+                let chain_id_val = chain_id.unwrap_or(1);
+                if let Some(abi) = abi_reg.get_abi_for_address(chain_id_val, to_address) {
+                    if let Some(field) = (contracts::core::DynamicAbiVisualizer::new(abi))
+                        .visualize_calldata(input, chain_id_val, None)
+                    {
+                        input_fields.push(field);
                     }
                 }
             }

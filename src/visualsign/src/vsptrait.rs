@@ -1,4 +1,6 @@
+use std::any::Any;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use crate::SignablePayload;
 
@@ -13,13 +15,38 @@ pub struct DeveloperConfig {
     pub allow_signed_transactions: bool,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Clone)]
 pub struct VisualSignOptions {
     pub decode_transfers: bool,
     pub transaction_name: Option<String>,
     pub metadata: Option<ChainMetadata>,
     /// Developer-only options. None for production API use.
     pub developer_config: Option<DeveloperConfig>,
+    pub abi_registry: Option<Arc<dyn Any + Send + Sync>>,
+}
+
+impl Default for VisualSignOptions {
+    fn default() -> Self {
+        Self {
+            decode_transfers: false,
+            transaction_name: None,
+            metadata: None,
+            developer_config: None,
+            abi_registry: None,
+        }
+    }
+}
+
+impl Debug for VisualSignOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VisualSignOptions")
+            .field("decode_transfers", &self.decode_transfers)
+            .field("transaction_name", &self.transaction_name)
+            .field("metadata", &self.metadata)
+            .field("developer_config", &self.developer_config)
+            .field("abi_registry", &"<registry>")
+            .finish()
+    }
 }
 
 pub trait VisualSignConverter<T: Transaction> {
@@ -269,6 +296,7 @@ mod tests {
             transaction_name: Some("Custom Transaction".to_string()),
             metadata: None,
             developer_config: None,
+            abi_registry: None,
         };
 
         let result = converter.to_visual_sign_payload(transaction, options);
