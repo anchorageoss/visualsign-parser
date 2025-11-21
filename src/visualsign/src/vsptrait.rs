@@ -1,16 +1,41 @@
 use std::fmt::Debug;
+use std::sync::Arc;
+use std::any::Any;
 
 use crate::SignablePayload;
 
 pub use crate::errors::{TransactionParseError, VisualSignError};
 pub use generated::parser::ChainMetadata;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Clone)]
 pub struct VisualSignOptions {
     pub decode_transfers: bool,
     pub transaction_name: Option<String>,
     pub metadata: Option<ChainMetadata>,
+    pub abi_registry: Option<Arc<dyn Any + Send + Sync>>,
     // Add more options as needed - we can extend this struct later
+}
+
+impl Default for VisualSignOptions {
+    fn default() -> Self {
+        Self {
+            decode_transfers: false,
+            transaction_name: None,
+            metadata: None,
+            abi_registry: None,
+        }
+    }
+}
+
+impl Debug for VisualSignOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VisualSignOptions")
+            .field("decode_transfers", &self.decode_transfers)
+            .field("transaction_name", &self.transaction_name)
+            .field("metadata", &self.metadata)
+            .field("abi_registry", &"<registry>")
+            .finish()
+    }
 }
 
 pub trait VisualSignConverter<T: Transaction> {
