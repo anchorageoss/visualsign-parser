@@ -221,12 +221,11 @@ fn validate_abi_mappings(abi_mappings: &[String]) -> usize {
         match parse_abi_address_mapping(mapping) {
             Some((abi_name, address)) => {
                 valid_count += 1;
-                eprintln!("  Mapped ABI '{}' to address: {}", abi_name, address);
+                eprintln!("  Mapped ABI '{abi_name}' to address: {address}");
             }
             None => {
                 eprintln!(
-                    "  Warning: Invalid ABI mapping '{}' (expected format: AbiName:0xAddress)",
-                    mapping
+                    "  Warning: Invalid ABI mapping '{mapping}' (expected format: AbiName:0xAddress)",
                 );
             }
         }
@@ -248,7 +247,11 @@ fn parse_and_display(
     if !abi_mappings.is_empty() {
         eprintln!("Registering custom ABIs:");
         let valid_count = validate_abi_mappings(abi_mappings);
-        eprintln!("Successfully registered {}/{} ABI mappings\n", valid_count, abi_mappings.len());
+        eprintln!(
+            "Successfully registered {}/{} ABI mappings\n",
+            valid_count,
+            abi_mappings.len()
+        );
     }
 
     let registry = create_registry();
