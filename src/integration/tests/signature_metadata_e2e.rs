@@ -207,22 +207,24 @@ fn test_ethereum_abi_with_secp256k1_signature() {
     );
 
     // Simulate parser receiving and verifying the cryptographic signature
-    if let Some(chain_meta) = parse_request.chain_metadata {
-        if let Some(chain_metadata::Metadata::Ethereum(eth_meta)) = chain_meta.metadata {
-            if let Some(abi_data) = eth_meta.abi {
-                if let Some(sig_meta) = abi_data.signature {
-                    let verification_result =
-                        verify_signature_metadata(&abi_data.value, &sig_meta, &public_key_hex);
-                    assert!(
-                        verification_result.is_ok(),
-                        "Signature verification failed: {:?}",
-                        verification_result.err()
-                    );
-                    println!("✓ Ethereum ABI signature verified with secp256k1");
-                }
-            }
-        }
-    }
+    let chain_meta = parse_request
+        .chain_metadata
+        .expect("ChainMetadata should exist");
+    let eth_meta = match chain_meta.metadata.expect("Metadata should exist") {
+        chain_metadata::Metadata::Ethereum(eth_meta) => eth_meta,
+        _ => panic!("Expected EthereumMetadata, found other"),
+    };
+    let abi_data = eth_meta.abi.expect("ABI data should exist");
+    let sig_meta = abi_data.signature.expect("Signature metadata should exist");
+
+    let verification_result =
+        verify_signature_metadata(&abi_data.value, &sig_meta, &public_key_hex);
+    assert!(
+        verification_result.is_ok(),
+        "Signature verification failed: {:?}",
+        verification_result.err()
+    );
+    println!("✓ Ethereum ABI signature verified with secp256k1");
 }
 
 #[test]
@@ -282,33 +284,35 @@ fn test_solana_idl_with_ed25519_signature() {
     );
 
     // Simulate parser receiving and verifying the cryptographic signature
-    if let Some(chain_meta) = parse_request.chain_metadata {
-        if let Some(chain_metadata::Metadata::Solana(solana_meta)) = chain_meta.metadata {
-            if let Some(idl_data) = solana_meta.idl {
-                assert_eq!(
-                    idl_data.idl_type,
-                    Some(SolanaIdlType::Anchor as i32),
-                    "IDL type should be Anchor"
-                );
-                assert_eq!(
-                    idl_data.idl_version,
-                    Some("0.30.0".to_string()),
-                    "IDL version should be 0.30.0"
-                );
+    let chain_meta = parse_request
+        .chain_metadata
+        .expect("ChainMetadata should exist");
+    let solana_meta = match chain_meta.metadata.expect("Metadata should exist") {
+        chain_metadata::Metadata::Solana(solana_meta) => solana_meta,
+        _ => panic!("Expected SolanaMetadata, found other"),
+    };
+    let idl_data = solana_meta.idl.expect("IDL data should exist");
 
-                if let Some(sig_meta) = idl_data.signature {
-                    let verification_result =
-                        verify_signature_metadata(&idl_data.value, &sig_meta, &public_key_hex);
-                    assert!(
-                        verification_result.is_ok(),
-                        "Signature verification failed: {:?}",
-                        verification_result.err()
-                    );
-                    println!("✓ Solana IDL signature verified with ed25519");
-                }
-            }
-        }
-    }
+    assert_eq!(
+        idl_data.idl_type,
+        Some(SolanaIdlType::Anchor as i32),
+        "IDL type should be Anchor"
+    );
+    assert_eq!(
+        idl_data.idl_version,
+        Some("0.30.0".to_string()),
+        "IDL version should be 0.30.0"
+    );
+
+    let sig_meta = idl_data.signature.expect("Signature metadata should exist");
+    let verification_result =
+        verify_signature_metadata(&idl_data.value, &sig_meta, &public_key_hex);
+    assert!(
+        verification_result.is_ok(),
+        "Signature verification failed: {:?}",
+        verification_result.err()
+    );
+    println!("✓ Solana IDL signature verified with ed25519");
 }
 
 #[test]
@@ -349,22 +353,23 @@ fn test_signature_tampering_detection() {
     // Now verify with tampered ABI
     let tampered_abi = r#"[{"type":"function","name":"approve"}]"#;
 
-    if let Some(chain_meta) = parse_request.chain_metadata {
-        if let Some(chain_metadata::Metadata::Ethereum(eth_meta)) = chain_meta.metadata {
-            if let Some(abi_data) = eth_meta.abi {
-                if let Some(sig_meta) = abi_data.signature {
-                    // This should fail because we're verifying tampered content
-                    let verification_result =
-                        verify_signature_metadata(tampered_abi, &sig_meta, &public_key_hex);
-                    assert!(
-                        verification_result.is_err(),
-                        "Tampering should be detected!"
-                    );
-                    println!("✓ Tampering detected: {:?}", verification_result.err());
-                }
-            }
-        }
-    }
+    let chain_meta = parse_request
+        .chain_metadata
+        .expect("ChainMetadata should exist");
+    let eth_meta = match chain_meta.metadata.expect("Metadata should exist") {
+        chain_metadata::Metadata::Ethereum(eth_meta) => eth_meta,
+        _ => panic!("Expected EthereumMetadata, found other"),
+    };
+    let abi_data = eth_meta.abi.expect("ABI data should exist");
+    let sig_meta = abi_data.signature.expect("Signature metadata should exist");
+
+    // This should fail because we're verifying tampered content
+    let verification_result = verify_signature_metadata(tampered_abi, &sig_meta, &public_key_hex);
+    assert!(
+        verification_result.is_err(),
+        "Tampering should be detected!"
+    );
+    println!("✓ Tampering detected: {:?}", verification_result.err());
 }
 
 #[test]
