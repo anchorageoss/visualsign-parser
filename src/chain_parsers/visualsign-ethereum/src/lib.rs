@@ -20,6 +20,7 @@ pub mod abi_decoder;
 pub mod abi_registry;
 pub mod context;
 pub mod contracts;
+pub mod embedded_abis;
 pub mod fmt;
 pub mod networks;
 pub mod protocols;

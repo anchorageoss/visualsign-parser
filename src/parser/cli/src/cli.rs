@@ -8,6 +8,7 @@ use parser_app::registry::create_registry;
 use visualsign::registry::Chain;
 use visualsign::vsptrait::VisualSignOptions;
 use visualsign::{SignablePayload, SignablePayloadField};
+use visualsign_ethereum::embedded_abis::parse_abi_address_mapping;
 use visualsign_ethereum::networks::parse_network;
 
 #[derive(Parser, Debug)]
@@ -42,6 +43,13 @@ struct Args {
         help = "Network identifier - chain ID (e.g., 1, 137) or name (e.g., ETHEREUM_MAINNET, POLYGON_MAINNET)"
     )]
     network: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "ABI_NAME:0xADDRESS",
+        help = "Map custom ABI to contract address (format: AbiName:0xAddress). Can be used multiple times"
+    )]
+    abi: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -218,14 +226,47 @@ fn common_label(field: &SignablePayloadField) -> String {
     }
 }
 
+/// Validates ABI address mappings from CLI arguments
+/// Returns the number of valid mappings and logs any errors
+fn validate_abi_mappings(abi_mappings: &[String]) -> usize {
+    let mut valid_count = 0;
+    for mapping in abi_mappings {
+        match parse_abi_address_mapping(mapping) {
+            Some((abi_name, address)) => {
+                valid_count += 1;
+                eprintln!("  Mapped ABI '{}' to address: {}", abi_name, address);
+            }
+            None => {
+                eprintln!(
+                    "  Warning: Invalid ABI mapping '{}' (expected format: AbiName:0xAddress)",
+                    mapping
+                );
+            }
+        }
+    }
+    valid_count
+}
+
 fn parse_and_display(
     chain: &str,
     raw_tx: &str,
     options: VisualSignOptions,
     output_format: OutputFormat,
     condensed_only: bool,
+    abi_mappings: &[String],
 ) {
     let registry_chain = parse_chain(chain);
+
+    // Validate and report ABI mappings
+    if !abi_mappings.is_empty() {
+        eprintln!("Registering custom ABIs:");
+        let valid_count = validate_abi_mappings(abi_mappings);
+        eprintln!(
+            "Successfully registered {}/{} ABI mappings\n",
+            valid_count,
+            abi_mappings.len()
+        );
+    }
 
     let registry = create_registry();
     let signable_payload_str = registry.convert_transaction(&registry_chain, raw_tx, options);
@@ -319,6 +360,7 @@ impl Cli {
             options,
             args.output,
             args.condensed_only,
+            &args.abi,
         );
     }
 }

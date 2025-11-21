@@ -29,50 +29,73 @@ To enable visualization for your custom contract:
 
 3. **Register in ABI registry**:
    ```rust
+   use visualsign_ethereum::embedded_abis::register_embedded_abi;
    use visualsign_ethereum::abi_registry::AbiRegistry;
 
    let mut registry = AbiRegistry::new();
-   registry.register_abi("SimpleToken", MY_CONTRACT_ABI)?;
+   register_embedded_abi(&mut registry, "SimpleToken", MY_CONTRACT_ABI)?;
    registry.map_address(1, contract_address, "SimpleToken");
    ```
 
-4. **Pass to parser** via CLI or gRPC
+4. **Use in CLI** (pass address mappings):
+   ```bash
+   cargo run --release -- \
+     --chain ethereum \
+     --transaction 0x... \
+     --abi SimpleToken:0x1234567890123456789012345678901234567890
+   ```
+
+5. **Or via Rust code** in your application
 
 ### Using the Example
 
 #### Via CLI
 
 ```bash
-# Decode a transaction to a SimpleToken contract
+# List available ABIs and see help
+cargo run --example using_abijson -- --help
+
+# Test with a mock address mapping (validates format)
+# Note: You need to build a custom binary with embedded ABIs for actual usage
 cargo run --example using_abijson -- \
   --chain ethereum \
-  --transaction <hex_calldata> \
+  --transaction 0x... \
   --abi SimpleToken:0x<contract_address>
 ```
 
 #### Via Rust Code
 
 ```rust
+use visualsign_ethereum::embedded_abis::register_embedded_abi;
 use visualsign_ethereum::abi_registry::AbiRegistry;
 use visualsign_ethereum::contracts::core::DynamicAbiVisualizer;
 use visualsign_ethereum::visualizer::CalldataVisualizer;
+use std::sync::Arc;
 
 const SIMPLE_TOKEN_ABI: &str = include_str!("contracts/SimpleToken.abi.json");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Parse ABI
-    let abi: alloy_json_abi::JsonAbi = serde_json::from_str(SIMPLE_TOKEN_ABI)?;
+    // Create registry and register ABI
+    let mut registry = AbiRegistry::new();
+    register_embedded_abi(&mut registry, "SimpleToken", SIMPLE_TOKEN_ABI)?;
 
-    // Create visualizer
-    let visualizer = DynamicAbiVisualizer::new(std::sync::Arc::new(abi));
+    // Get the ABI for a specific address (requires prior registration)
+    let contract_address: alloy_primitives::Address =
+        "0x1234567890123456789012345678901234567890".parse()?;
+    registry.map_address(1, contract_address, "SimpleToken");
 
-    // Decode function call
-    let calldata = hex::decode("a9059cbb...")?; // Example calldata
-    let visualization = visualizer.visualize_calldata(&calldata, 1, None);
+    // Retrieve and create visualizer
+    if let Some(abi) = registry.get_abi_for_address(1, contract_address) {
+        let visualizer = DynamicAbiVisualizer::new(abi);
 
-    match visualization {
-        Some(field) => println!("Visualization: {:?}", field),
-        None => println!("Could not visualize"),
+        // Decode function call (transfer: a9059cbb)
+        let calldata = hex::decode("a9059cbb0000000000000000000000001234567890123456789012345678901234567890")?;
+
+        if let Some(field) = visualizer.visualize_calldata(&calldata, 1, None) {
+            println!("Visualization: {:#?}", field);
+        } else {
+            println!("Could not visualize");
+        }
     }
 
     Ok(())
@@ -92,20 +115,51 @@ mint(address,uint256)
 └── amount: 1000000000000000000
 ```
 
+## CLI Integration
+
+The parser CLI now supports the `--abi` flag for mapping custom ABIs to contract addresses:
+
+### Format
+
+```
+--abi AbiName:0xAddress
+```
+
+### Multiple Mappings
+
+You can provide multiple `--abi` flags to register different ABIs:
+
+```bash
+cargo run --release -- \
+  --chain ethereum \
+  --transaction 0x... \
+  --abi Token:0x1111111111111111111111111111111111111111 \
+  --abi Router:0x2222222222222222222222222222222222222222
+```
+
+### Validation
+
+The CLI validates each ABI mapping and reports:
+- Successfully mapped ABIs (logged to stderr)
+- Invalid format warnings (logged to stderr)
+- Final registration summary
+
 ## Supported Features
 
 - ✅ Compile-time ABI embedding with `include_str!`
-- ✅ Per-chain address mapping
+- ✅ Per-chain address mapping (register same ABI on multiple chains)
 - ✅ Function selector matching (4-byte opcodes)
 - ✅ Structured PreviewLayout visualization
 - ✅ Multiple ABIs per binary
-- ✅ Optional ABI signatures (secp256k1) for validation
+- ✅ CLI `--abi` flag for address mapping
+- ✅ Optional ABI signatures (secp256k1) for validation (planned)
 
 ## Limitations
 
 - ⚠️ No runtime parameter decoding (type-safe decoding requires compile-time generation)
 - ⚠️ Parameters shown with type names, not decoded values (future enhancement)
 - ⚠️ Fallback-only - doesn't override built-in visualizers (Uniswap, ERC20, etc.)
+- ⚠️ Signature validation not yet implemented (will be required when specified)
 
 ## Next Steps
 
