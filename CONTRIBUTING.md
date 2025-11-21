@@ -27,9 +27,9 @@ For details about authority, core team structure, and decision-making, please re
 - **One concern per PR:** Keep PRs focused on a single feature or bug fix
 
 ## Code Standards
-- Format your code using [rustfmt](https://github.com/rust-lang/rustfmt) by running `cargo fmt` before submitting
-- Address all linter warnings by running `cargo clippy` and fixing issues
-- Run `make test` to ensure all tests pass before submitting
+- Format your code using [rustfmt](https://github.com/rust-lang/rustfmt) by running `make -C src fmt` before submitting
+- Address all linter warnings by running `make -C src lint` and fixing issues
+- Run `make -C src test` to ensure all tests pass before submitting
 - No breaking changes without discussion
 
 ## Questions or Issues?
