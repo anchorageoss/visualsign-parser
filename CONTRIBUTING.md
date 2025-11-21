@@ -12,8 +12,9 @@ For details about authority, core team structure, and decision-making, please re
 1. **Fork** the repository
 2. **Create a feature branch** from `main`
 3. **Make your changes** following the code style and practices used in the project
-4. **Submit a Pull Request** with a clear description of your changes
-5. **Wait for Core Team review** - A Core Team member will review and approve your PR before it can be merged
+4. **Sign the Contributor License Agreement (CLA) if this is your first contribution. The CLA check will prompt you with instructions if needed.**
+5. **Submit a Pull Request** with a clear description of your changes
+6. **Wait for Core Team review** - A Core Team member will review and approve your PR before it can be merged
 
 ### For Core Team Members
 1. Core Team members can review, approve, and merge PRs from community contributors and other Core Team members
