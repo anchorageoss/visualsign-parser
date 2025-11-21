@@ -1,6 +1,8 @@
 use alloy_primitives::Address;
 use std::sync::Arc;
 
+use crate::abi_registry::AbiRegistry;
+
 /// Registry for managing contract ABIs and metadata
 pub trait ContractRegistry: Send + Sync {
     /// Format a token amount using the registry's token information
@@ -33,6 +35,7 @@ pub struct VisualizerContextParams {
     pub calldata: Vec<u8>,
     pub registry: Arc<dyn ContractRegistry>,
     pub visualizers: Arc<dyn VisualizerRegistry>,
+    pub abi_registry: Option<Arc<AbiRegistry>>,
 }
 
 /// Context for visualizing Ethereum transactions and calls
@@ -52,6 +55,8 @@ pub struct VisualizerContext {
     pub registry: Arc<dyn ContractRegistry>,
     /// Registry containing contract visualizers
     pub visualizers: Arc<dyn VisualizerRegistry>,
+    /// Optional registry of compile-time embedded ABIs for dynamic decoding
+    pub abi_registry: Option<Arc<AbiRegistry>>,
 }
 
 impl VisualizerContext {
@@ -65,6 +70,7 @@ impl VisualizerContext {
             calldata: Arc::from(params.calldata),
             registry: params.registry,
             visualizers: params.visualizers,
+            abi_registry: params.abi_registry,
         }
     }
 
@@ -82,6 +88,7 @@ impl VisualizerContext {
             calldata: Arc::from(calldata), // Convert to Arc
             registry: self.registry.clone(),
             visualizers: self.visualizers.clone(),
+            abi_registry: self.abi_registry.clone(),
         }
     }
 
@@ -154,6 +161,7 @@ mod tests {
             calldata: calldata.clone(),
             registry: registry.clone(),
             visualizers: visualizers.clone(),
+            abi_registry: None,
         };
         let context = VisualizerContext::new(params);
 
@@ -184,6 +192,7 @@ mod tests {
             calldata: calldata.clone(),
             registry: registry.clone(),
             visualizers: visualizers.clone(),
+            abi_registry: None,
         };
         let context = VisualizerContext::new(params);
 
@@ -224,6 +233,7 @@ mod tests {
             calldata: calldata1.clone(),
             registry: registry.clone(),
             visualizers: visualizers.clone(),
+            abi_registry: None,
         };
         let context = VisualizerContext::new(params);
 
