@@ -2,7 +2,7 @@
 
 ## Authority and The Core Team
 
-### Governance
+### Authority
 **Anchorage Digital** retains all rights, title, and interest in the repository. Final decision-making authority rests with the Anchorage Digital internal engineering leadership.
 
 ### The Core Team
