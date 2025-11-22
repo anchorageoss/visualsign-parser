@@ -284,6 +284,7 @@ mod tests {
             decode_transfers: true,
             transaction_name: Some("Custom Transaction".to_string()),
             metadata: None,
+            abi_registry: None,
         };
 
         let result = converter.to_visual_sign_payload(transaction, options);

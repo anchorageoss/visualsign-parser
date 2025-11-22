@@ -372,6 +372,7 @@ mod tests {
                 metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("Solana Transaction".to_string()),
+                abi_registry: None,
             },
         );
 
@@ -454,6 +455,7 @@ mod tests {
                 metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("V0 Transaction".to_string()),
+                abi_registry: None,
             },
         );
 
@@ -620,6 +622,7 @@ mod tests {
                 metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("Legacy Transfer Test".to_string()),
+                abi_registry: None,
             },
         );
 
@@ -663,6 +666,7 @@ mod tests {
                 metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("V0 Transfer Test".to_string()),
+                abi_registry: None,
             },
         );
 
@@ -789,6 +793,7 @@ mod tests {
                         metadata: None,
                         decode_transfers: true,
                         transaction_name: Some("Manual V0 Transfer Test".to_string()),
+                        abi_registry: None,
                     },
                 );
 
@@ -939,6 +944,7 @@ mod tests {
                 metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("TokenKeg Test".to_string()),
+                abi_registry: None,
             },
         );
 
