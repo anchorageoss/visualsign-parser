@@ -88,6 +88,24 @@ sol! {
             address asset,
             bool useAsCollateral
         ) external;
+
+        function flashLoan(
+            address receiverAddress,
+            address[] calldata assets,
+            uint256[] calldata amounts,
+            uint256[] calldata interestRateModes,
+            address onBehalfOf,
+            bytes calldata params,
+            uint16 referralCode
+        ) external;
+
+        function flashLoanSimple(
+            address receiverAddress,
+            address asset,
+            uint256 amount,
+            bytes calldata params,
+            uint16 referralCode
+        ) external;
     }
 }
 
@@ -160,6 +178,14 @@ impl PoolVisualizer {
             // setUserUseReserveAsCollateral(address,bool)
             _ if selector == IPool::setUserUseReserveAsCollateralCall::SELECTOR => {
                 Self::decode_set_user_use_reserve_as_collateral(input, chain_id, registry)
+            }
+            // flashLoan(address,address[],uint256[],uint256[],address,bytes,uint16)
+            _ if selector == IPool::flashLoanCall::SELECTOR => {
+                Self::decode_flash_loan(input, chain_id, registry)
+            }
+            // flashLoanSimple(address,address,uint256,bytes,uint16)
+            _ if selector == IPool::flashLoanSimpleCall::SELECTOR => {
+                Self::decode_flash_loan_simple(input, chain_id, registry)
             }
 
             // L2Pool functions - delegate to L2PoolVisualizer
@@ -1134,6 +1160,179 @@ impl PoolVisualizer {
             },
         })
     }
+
+    fn decode_flash_loan(
+        input: &[u8],
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
+    ) -> Option<SignablePayloadField> {
+        let call = IPool::flashLoanCall::abi_decode(input).ok()?;
+
+        let assets_count = call.assets.len();
+        let assets_text = if assets_count == 1 {
+            let asset = call.assets[0];
+            let token_symbol = registry
+                .and_then(|r| r.get_token_symbol(chain_id, asset))
+                .unwrap_or_else(|| format!("{:?}", asset));
+
+            let amount_u128: u128 = call.amounts[0].to_string().parse().unwrap_or(0);
+            let (amount_str, _) = registry
+                .and_then(|r| r.format_token_amount(chain_id, asset, amount_u128))
+                .unwrap_or_else(|| (call.amounts[0].to_string(), token_symbol.clone()));
+
+            format!("{} {}", amount_str, token_symbol)
+        } else {
+            format!("{} assets", assets_count)
+        };
+
+        let summary = format!("Flash loan {}", assets_text);
+
+        let mut fields = vec![];
+
+        for (i, (asset, amount)) in call.assets.iter().zip(call.amounts.iter()).enumerate() {
+            let token_symbol = registry
+                .and_then(|r| r.get_token_symbol(chain_id, *asset))
+                .unwrap_or_else(|| format!("{:?}", asset));
+
+            let amount_u128: u128 = amount.to_string().parse().unwrap_or(0);
+            let (amount_str, _) = registry
+                .and_then(|r| r.format_token_amount(chain_id, *asset, amount_u128))
+                .unwrap_or_else(|| (amount.to_string(), token_symbol.clone()));
+
+            fields.push(AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{} {}", amount_str, token_symbol),
+                        label: format!("Asset {}", i + 1),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("{} {} ({:?})", amount_str, token_symbol, asset),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            });
+        }
+
+        fields.push(AnnotatedPayloadField {
+            signable_payload_field: SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!("{:?}", call.receiverAddress),
+                    label: "Receiver".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 {
+                    text: format!("{:?}", call.receiverAddress),
+                },
+            },
+            static_annotation: None,
+            dynamic_annotation: None,
+        });
+
+        fields.push(AnnotatedPayloadField {
+            signable_payload_field: SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!("{:?}", call.onBehalfOf),
+                    label: "On Behalf Of".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 {
+                    text: format!("{:?}", call.onBehalfOf),
+                },
+            },
+            static_annotation: None,
+            dynamic_annotation: None,
+        });
+
+        Some(SignablePayloadField::PreviewLayout {
+            common: SignablePayloadFieldCommon {
+                fallback_text: summary.clone(),
+                label: "Aave Flash Loan".to_string(),
+            },
+            preview_layout: SignablePayloadFieldPreviewLayout {
+                title: Some(SignablePayloadFieldTextV2 {
+                    text: "Aave v3 Flash Loan".to_string(),
+                }),
+                subtitle: Some(SignablePayloadFieldTextV2 { text: summary }),
+                condensed: None,
+                expanded: Some(SignablePayloadFieldListLayout { fields }),
+            },
+        })
+    }
+
+    fn decode_flash_loan_simple(
+        input: &[u8],
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
+    ) -> Option<SignablePayloadField> {
+        let call = IPool::flashLoanSimpleCall::abi_decode(input).ok()?;
+
+        let token_symbol = registry
+            .and_then(|r| r.get_token_symbol(chain_id, call.asset))
+            .unwrap_or_else(|| format!("{:?}", call.asset));
+
+        let amount_u128: u128 = call.amount.to_string().parse().unwrap_or(0);
+        let (amount_str, _) = registry
+            .and_then(|r| r.format_token_amount(chain_id, call.asset, amount_u128))
+            .unwrap_or_else(|| (call.amount.to_string(), token_symbol.clone()));
+
+        let summary = format!("Flash loan {} {}", amount_str, token_symbol);
+
+        let fields = vec![
+            AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{} ({:?})", token_symbol, call.asset),
+                        label: "Asset".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("{} ({:?})", token_symbol, call.asset),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{} {}", amount_str, token_symbol),
+                        label: "Amount".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("{} {} (raw: {})", amount_str, token_symbol, call.amount),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+            AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{:?}", call.receiverAddress),
+                        label: "Receiver".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("{:?}", call.receiverAddress),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            },
+        ];
+
+        Some(SignablePayloadField::PreviewLayout {
+            common: SignablePayloadFieldCommon {
+                fallback_text: summary.clone(),
+                label: "Aave Flash Loan".to_string(),
+            },
+            preview_layout: SignablePayloadFieldPreviewLayout {
+                title: Some(SignablePayloadFieldTextV2 {
+                    text: "Aave v3 Simple Flash Loan".to_string(),
+                }),
+                subtitle: Some(SignablePayloadFieldTextV2 { text: summary }),
+                condensed: None,
+                expanded: Some(SignablePayloadFieldListLayout { fields }),
+            },
+        })
+    }
 }
 
 /// ContractVisualizer implementation for Aave v3 Pool
@@ -1754,6 +1953,108 @@ mod tests {
             }
         } else {
             panic!("Expected PreviewLayout");
+        }
+    }
+
+    #[test]
+    fn test_visualize_empty_input() {
+        let result = PoolVisualizer::new().visualize_pool_operation(&[], 1, None);
+        assert_eq!(result, None, "Empty input should return None");
+    }
+
+    #[test]
+    fn test_visualize_too_short_input() {
+        // Input shorter than function selector (4 bytes)
+        let result = PoolVisualizer::new().visualize_pool_operation(&[0x01, 0x02, 0x03], 1, None);
+        assert_eq!(result, None, "Too-short input should return None");
+    }
+
+    #[test]
+    fn test_visualize_invalid_function_selector() {
+        // Valid length but unrecognized function selector
+        let mut invalid_input = vec![0xff, 0xff, 0xff, 0xff]; // Invalid selector
+        invalid_input.extend_from_slice(&[0u8; 128]); // Add some data
+
+        let result = PoolVisualizer::new().visualize_pool_operation(&invalid_input, 1, None);
+        assert_eq!(
+            result, None,
+            "Unrecognized function selector should return None"
+        );
+    }
+
+    #[test]
+    fn test_decode_borrow_invalid_interest_rate_mode() {
+        let call = IPool::borrowCall {
+            asset: address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+            amount: U256::from(1000000u64),
+            interestRateMode: U256::from(999), // Invalid
+            referralCode: 0,
+            onBehalfOf: address!("0742d35Cc6634C0532925a3b844Bc9e7595f0bEb"),
+        };
+
+        let input = IPool::borrowCall::abi_encode(&call);
+        let result = PoolVisualizer::new().visualize_pool_operation(&input, 1, None);
+
+        assert!(result.is_some());
+        if let Some(SignablePayloadField::PreviewLayout { common, .. }) = result {
+            assert!(
+                common.fallback_text.contains("Unknown") || common.fallback_text.contains("999")
+            );
+        }
+    }
+
+    #[test]
+    fn test_supply_without_registry_shows_raw_address() {
+        let call = IPool::supplyCall {
+            asset: address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+            amount: U256::from(1000000000u64),
+            onBehalfOf: address!("0742d35Cc6634C0532925a3b844Bc9e7595f0bEb"),
+            referralCode: 0,
+        };
+
+        let input = IPool::supplyCall::abi_encode(&call);
+        let result = PoolVisualizer::new().visualize_pool_operation(&input, 1, None);
+
+        assert!(result.is_some());
+        if let Some(SignablePayloadField::PreviewLayout { common, .. }) = result {
+            assert!(
+                common.fallback_text.contains("0xA0b86991") || common.fallback_text.contains("0xa0b86991")
+            );
+        }
+    }
+
+    #[test]
+    fn test_supply_with_registry_shows_token_symbol() {
+        let call = IPool::supplyCall {
+            asset: address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+            amount: U256::from(1000000000u64),
+            onBehalfOf: address!("0742d35Cc6634C0532925a3b844Bc9e7595f0bEb"),
+            referralCode: 0,
+        };
+
+        let input = IPool::supplyCall::abi_encode(&call);
+        let registry = ContractRegistry::with_default_protocols();
+        let result = PoolVisualizer::new().visualize_pool_operation(&input, 1, Some(&registry));
+
+        assert!(result.is_some());
+        if let Some(SignablePayloadField::PreviewLayout { common, .. }) = result {
+            assert!(common.fallback_text.contains("USDC"));
+        }
+    }
+
+    #[test]
+    fn test_real_mainnet_borrow_transaction() {
+        let input_hex = "a415bcad000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000000000000000000000000000000000003b9aca0000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000b6559478b59836376da9937c4c697ddb21779e49";
+        let input = hex::decode(input_hex).unwrap();
+
+        let registry = ContractRegistry::with_default_protocols();
+        let result = PoolVisualizer::new().visualize_pool_operation(&input, 1, Some(&registry));
+
+        assert!(result.is_some());
+        if let Some(SignablePayloadField::PreviewLayout { common, .. }) = result {
+            assert_eq!(common.label, "Aave Borrow");
+            assert!(common.fallback_text.contains("USDC"));
+            assert!(common.fallback_text.contains("Variable"));
         }
     }
 }

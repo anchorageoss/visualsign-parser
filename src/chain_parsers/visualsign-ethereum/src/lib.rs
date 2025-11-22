@@ -451,6 +451,16 @@ fn convert_to_visual_sign_payload(
                             input_fields.push(field);
                         }
                     }
+                    // Check if this is an Aave V3 Pool contract and visualize it
+                    else if contract_type
+                        == crate::protocols::aave::config::AaveV3PoolContract::short_type_id()
+                    {
+                        if let Some(field) = (protocols::aave::PoolVisualizer::new())
+                            .visualize_pool_operation(input, chain_id_val, Some(registry))
+                        {
+                            input_fields.push(field);
+                        }
+                    }
                 }
             }
         }

@@ -56,7 +56,7 @@ fn main() {
     let result = match protocol {
         "aave" => {
             println!("🏦 Testing with Aave v3 Pool decoder...\n");
-            PoolVisualizer {}.visualize_pool_operation(&calldata, chain_id, Some(&registry))
+            PoolVisualizer::new().visualize_pool_operation(&calldata, chain_id, Some(&registry))
         }
         "morpho" => {
             println!("🦋 Testing with Morpho Bundler decoder...\n");
