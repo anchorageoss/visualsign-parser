@@ -144,6 +144,7 @@ pub mod test_utils {
                 decode_transfers: true,
                 transaction_name: None,
                 developer_config: None,
+                abi_registry: None,
             },
         )
         .expect("Failed to visualize tx commands")
