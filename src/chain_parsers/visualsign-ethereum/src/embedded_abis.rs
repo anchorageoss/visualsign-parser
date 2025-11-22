@@ -175,7 +175,8 @@ mod tests {
 
     #[test]
     fn test_parse_abi_address_mapping_valid() {
-        let result = parse_abi_address_mapping("TestToken:0x1234567890123456789012345678901234567890");
+        let result =
+            parse_abi_address_mapping("TestToken:0x1234567890123456789012345678901234567890");
         assert!(result.is_some());
         let (name, _addr) = result.unwrap();
         assert_eq!(name, "TestToken");
@@ -198,7 +199,9 @@ mod tests {
         let mut registry = AbiRegistry::new();
         register_embedded_abi(&mut registry, "TestToken", TEST_ABI).unwrap();
 
-        let address: Address = "0x1234567890123456789012345678901234567890".parse().unwrap();
+        let address: Address = "0x1234567890123456789012345678901234567890"
+            .parse()
+            .unwrap();
         map_abi_address(&mut registry, 1, address, "TestToken");
 
         // Verify it was mapped
@@ -234,8 +237,12 @@ mod tests {
         register_embedded_abi(&mut registry, "ExtendedToken", MULTI_ABI).unwrap();
 
         // Map addresses on different chains
-        let addr1: Address = "0x1111111111111111111111111111111111111111".parse().unwrap();
-        let addr2: Address = "0x2222222222222222222222222222222222222222".parse().unwrap();
+        let addr1: Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        let addr2: Address = "0x2222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
 
         map_abi_address(&mut registry, 1, addr1, "SimpleToken");
         map_abi_address(&mut registry, 1, addr2, "ExtendedToken");
@@ -254,7 +261,9 @@ mod tests {
         assert_ne!(abi1_on_mainnet, abi2_on_mainnet);
 
         // Verify unmapped addresses return None
-        let unmapped: Address = "0x9999999999999999999999999999999999999999".parse().unwrap();
+        let unmapped: Address = "0x9999999999999999999999999999999999999999"
+            .parse()
+            .unwrap();
         assert!(registry.get_abi_for_address(1, unmapped).is_none());
     }
 
@@ -264,7 +273,7 @@ mod tests {
         let mapping_strs = vec![
             "Token1:0x1111111111111111111111111111111111111111",
             "Token2:0x2222222222222222222222222222222222222222",
-            "InvalidFormat",  // Invalid mapping
+            "InvalidFormat", // Invalid mapping
             "Token3:0x3333333333333333333333333333333333333333",
         ];
 

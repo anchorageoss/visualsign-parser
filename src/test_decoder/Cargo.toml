@@ -1,0 +1,10 @@
+[package]
+name = "test_decoder"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+alloy-primitives = { version = "0.8", features = ["std"] }
+hex = "0.4"
+visualsign = { path = "../visualsign" }
+visualsign-ethereum = { path = "../chain_parsers/visualsign-ethereum" }

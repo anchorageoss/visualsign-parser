@@ -4,7 +4,7 @@
 //! using optional secp256k1 signatures.
 
 use crate::abi_registry::AbiRegistry;
-use crate::embedded_abis::{register_embedded_abi, AbiEmbeddingError};
+use crate::embedded_abis::{AbiEmbeddingError, register_embedded_abi};
 
 /// Error type for gRPC ABI operations
 #[derive(Debug, thiserror::Error)]
@@ -133,7 +133,12 @@ mod tests {
 
         let registry = result.unwrap();
         // Verify ABI was registered
-        assert!(registry.list_abis().iter().any(|name| *name == "wallet_provided"));
+        assert!(
+            registry
+                .list_abis()
+                .iter()
+                .any(|name| *name == "wallet_provided")
+        );
     }
 
     #[test]

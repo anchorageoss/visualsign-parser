@@ -331,9 +331,10 @@ fn convert_to_visual_sign_payload(
     let chain_id = transaction.chain_id();
 
     // Try to extract AbiRegistry from options
-    let abi_registry = options.abi_registry.as_ref().and_then(|any_reg| {
-        any_reg.downcast_ref::<abi_registry::AbiRegistry>()
-    });
+    let abi_registry = options
+        .abi_registry
+        .as_ref()
+        .and_then(|any_reg| any_reg.downcast_ref::<abi_registry::AbiRegistry>());
 
     let chain_name = chains::get_chain_name(chain_id);
 

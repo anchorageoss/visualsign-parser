@@ -2,11 +2,11 @@ use crate::chains;
 use chains::parse_chain;
 use clap::Parser;
 use parser_app::registry::create_registry;
+use std::sync::Arc;
 use visualsign::vsptrait::VisualSignOptions;
 use visualsign::{SignablePayload, SignablePayloadField};
-use visualsign_ethereum::embedded_abis::load_and_map_abi;
 use visualsign_ethereum::abi_registry::AbiRegistry;
-use std::sync::Arc;
+use visualsign_ethereum::embedded_abis::load_and_map_abi;
 
 #[derive(Parser, Debug)]
 #[command(name = "visualsign-parser")]
@@ -247,10 +247,14 @@ fn build_abi_registry_from_mappings(abi_json_mappings: &[String]) -> (AbiRegistr
         match parse_abi_file_mapping(mapping) {
             Some((abi_name, file_path, address_str)) => {
                 let chain_id = 1u64; // TODO: Make chain_id configurable
-                match load_and_map_abi(&mut registry, &abi_name, &file_path, chain_id, &address_str) {
+                match load_and_map_abi(&mut registry, &abi_name, &file_path, chain_id, &address_str)
+                {
                     Ok(()) => {
                         valid_count += 1;
-                        eprintln!("  Loaded ABI '{}' from {} and mapped to {}", abi_name, file_path, address_str);
+                        eprintln!(
+                            "  Loaded ABI '{}' from {} and mapped to {}",
+                            abi_name, file_path, address_str
+                        );
                     }
                     Err(e) => {
                         eprintln!("  Warning: Failed to load/map ABI '{}': {}", abi_name, e);
@@ -283,7 +287,11 @@ fn parse_and_display(
     if !abi_json_mappings.is_empty() {
         eprintln!("Registering custom ABIs:");
         let (registry, valid_count) = build_abi_registry_from_mappings(abi_json_mappings);
-        eprintln!("Successfully registered {}/{} ABI mappings\n", valid_count, abi_json_mappings.len());
+        eprintln!(
+            "Successfully registered {}/{} ABI mappings\n",
+            valid_count,
+            abi_json_mappings.len()
+        );
         options.abi_registry = Some(Arc::new(registry));
     }
 
