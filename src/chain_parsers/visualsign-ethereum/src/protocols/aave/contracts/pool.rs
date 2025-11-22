@@ -2018,7 +2018,8 @@ mod tests {
         assert!(result.is_some());
         if let Some(SignablePayloadField::PreviewLayout { common, .. }) = result {
             assert!(
-                common.fallback_text.contains("0xA0b86991") || common.fallback_text.contains("0xa0b86991")
+                common.fallback_text.contains("0xA0b86991")
+                    || common.fallback_text.contains("0xa0b86991")
             );
         }
     }

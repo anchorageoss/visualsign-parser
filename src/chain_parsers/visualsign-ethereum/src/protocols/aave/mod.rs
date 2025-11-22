@@ -24,7 +24,9 @@ use crate::registry::ContractRegistry;
 use crate::visualizer::EthereumVisualizerRegistryBuilder;
 
 pub use config::{AaveV3Config, AaveV3PoolContract};
-pub use contracts::{PoolContractVisualizer, PoolVisualizer};
+pub use contracts::{
+    AaveTokenVisualizer, PoolContractVisualizer, PoolVisualizer, VotingMachineVisualizer,
+};
 
 /// Registers all Aave v3 protocol contracts and visualizers
 ///

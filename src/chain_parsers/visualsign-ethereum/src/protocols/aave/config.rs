@@ -72,6 +72,43 @@ impl AaveV3Config {
         }
     }
 
+    /// Returns the AAVE governance token address
+    ///
+    /// The AAVE token only exists on Ethereum mainnet.
+    /// Source: https://github.com/bgd-labs/aave-governance-v3
+    pub fn aave_token_address() -> Option<Address> {
+        Some(
+            "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9"
+                .parse()
+                .unwrap(),
+        )
+    }
+
+    /// Returns the VotingMachine contract address for the given chain
+    ///
+    /// VotingMachine contracts enable cross-chain voting using storage proofs.
+    /// Source: https://github.com/bgd-labs/aave-governance-v3
+    pub fn voting_machine_address(chain_id: u64) -> Option<Address> {
+        match chain_id {
+            1 => Some(
+                "0x617332a777780F546261247F621051d0b98975Eb"
+                    .parse()
+                    .unwrap(),
+            ),
+            137 => Some(
+                "0xc8a2ADC4261c6b669CdFf69E717E77C9cFeB420d"
+                    .parse()
+                    .unwrap(),
+            ),
+            43114 => Some(
+                "0x9b6f5ef589A3DD08670Dd146C11C4Fb33E04494F"
+                    .parse()
+                    .unwrap(),
+            ),
+            _ => None,
+        }
+    }
+
     /// Returns the list of chain IDs where Aave v3 is deployed
     pub fn supported_chains() -> &'static [u64] {
         &[

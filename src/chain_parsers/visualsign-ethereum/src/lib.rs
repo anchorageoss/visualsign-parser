@@ -462,6 +462,35 @@ fn convert_to_visual_sign_payload(
                         }
                     }
                 }
+
+                // Check for Aave governance contracts by address
+                if let Some(to_addr) = transaction.to() {
+                    // Check if this is the AAVE token (delegation)
+                    if let Some(aave_token) =
+                        protocols::aave::config::AaveV3Config::aave_token_address()
+                    {
+                        if to_addr == aave_token {
+                            if let Some(field) = (protocols::aave::AaveTokenVisualizer)
+                                .visualize_governance(input, chain_id_val, Some(registry))
+                            {
+                                input_fields.push(field);
+                            }
+                        }
+                    }
+
+                    // Check if this is a VotingMachine contract
+                    if let Some(voting_machine) =
+                        protocols::aave::config::AaveV3Config::voting_machine_address(chain_id_val)
+                    {
+                        if to_addr == voting_machine {
+                            if let Some(field) = (protocols::aave::VotingMachineVisualizer)
+                                .visualize_vote(input, chain_id_val, Some(registry))
+                            {
+                                input_fields.push(field);
+                            }
+                        }
+                    }
+                }
             }
         }
 
