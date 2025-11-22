@@ -34,6 +34,7 @@ fn test_with_fixtures() {
             decode_transfers: true,
             transaction_name: None,
             metadata: None,
+            abi_registry: None,
         };
 
         let result = transaction_string_to_visual_sign(transaction_hex, options);
@@ -78,6 +79,7 @@ fn test_ethereum_charset_validation() {
             decode_transfers: true,
             transaction_name: None,
             metadata: None,
+            abi_registry: None,
         };
 
         let result = transaction_string_to_visual_sign(transaction_hex, options);
