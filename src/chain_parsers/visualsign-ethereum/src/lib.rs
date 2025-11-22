@@ -647,6 +647,7 @@ mod tests {
             decode_transfers: false,
             transaction_name: Some("Custom Transaction Title".to_string()),
             metadata: None,
+            abi_registry: None,
         };
         let payload = transaction_to_visual_sign(tx, options).unwrap();
 
@@ -873,6 +874,7 @@ mod tests {
                     decode_transfers: true,
                     transaction_name: Some("Test Transaction".to_string()),
                     metadata: None,
+                    abi_registry: None,
                 }
             ),
             Ok(SignablePayload::new(
