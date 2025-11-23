@@ -53,15 +53,13 @@ impl ContractType for Permit2Contract {}
 // pub struct UniswapUniversalRouterV2;
 // impl ContractType for UniswapUniversalRouterV2 {}
 
-// TODO: Add V4 PoolManager contract type
-//
 // V4 requires the PoolManager contract for liquidity pool management.
 // Deployments: <https://docs.uniswap.org/contracts/v4/deployments>
 //
-// /// Uniswap V4 PoolManager
-// #[derive(Debug, Clone, Copy)]
-// pub struct UniswapV4PoolManager;
-// impl ContractType for UniswapV4PoolManager {}
+/// Uniswap V4 PoolManager
+#[derive(Debug, Clone, Copy)]
+pub struct UniswapV4PoolManager;
+impl ContractType for UniswapV4PoolManager {}
 
 /// Uniswap protocol configuration
 pub struct UniswapConfig;
@@ -117,12 +115,25 @@ impl UniswapConfig {
     // }
     // pub fn universal_router_v2_chains() -> &'static [u64] { ... }
 
-    // TODO: Add methods for V4 PoolManager
-    //
-    // Source: https://docs.uniswap.org/contracts/v4/deployments
-    //
-    // pub fn v4_pool_manager_address() -> Address { ... }
-    // pub fn v4_pool_manager_chains() -> &'static [u64] { ... }
+    /// Returns the V4 PoolManager contract address
+    ///
+    /// Currently on Sepolia: 0x000000000004444c5dc75cB358380D2e3dE08A90
+    ///
+    /// Source: <https://docs.uniswap.org/contracts/v4/deployments>
+    pub fn v4_pool_manager_address(chain_id: u64) -> Option<Address> {
+        match chain_id {
+            11155111 => Some("0x000000000004444c5dc75cB358380D2e3dE08A90".parse().unwrap()),
+            _ => None,
+        }
+    }
+
+    /// Returns the chain IDs where V4 PoolManager is deployed
+    ///
+    /// Supported chains:
+    /// - 11155111 = Sepolia Testnet
+    pub fn v4_pool_manager_chains() -> &'static [u64] {
+        &[11155111]
+    }
 
     /// Returns the WETH address for a given chain
     ///

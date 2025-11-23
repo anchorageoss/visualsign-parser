@@ -177,6 +177,18 @@ impl ContractRegistry {
             .map(|m| m.symbol.clone())
     }
 
+    /// Gets the full metadata for a specific token on a chain
+    ///
+    /// # Arguments
+    /// * `chain_id` - The chain ID
+    /// * `token` - The token's contract address
+    ///
+    /// # Returns
+    /// `Some(&TokenMetadata)` if the token is registered, `None` otherwise
+    pub fn get_token_metadata(&self, chain_id: ChainId, token: Address) -> Option<&TokenMetadata> {
+        self.token_metadata.get(&(chain_id, token))
+    }
+
     /// Formats a raw token amount with the proper number of decimal places
     ///
     /// This method:
@@ -579,3 +591,4 @@ mod tests {
         );
     }
 }
+
