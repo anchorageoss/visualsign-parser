@@ -1,7 +1,7 @@
 use crate::fmt::{format_ether, format_gwei};
 use crate::registry::ContractType;
 use crate::visualizer::CalldataVisualizer;
-use alloy_consensus::{Transaction as _, TxType, TypedTransaction};
+use alloy_consensus::{Transaction as _, TxEnvelope, TxType, TypedTransaction};
 use alloy_rlp::{Buf, Decodable};
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use visualsign::{
@@ -100,8 +100,40 @@ impl Transaction for EthereumTransactionWrapper {
         } else {
             visualsign::encodings::SupportedEncodings::detect(data)
         };
-        let transaction = decode_transaction(data, format)
-            .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?;
+        
+        // Decode hex/base64 to bytes
+        let bytes = match format {
+            SupportedEncodings::Hex => {
+                let clean_hex = data.strip_prefix("0x").unwrap_or(data);
+                hex::decode(clean_hex).map_err(|e| {
+                    TransactionParseError::DecodeError(format!("Failed to decode hex: {e}"))
+                })?
+            }
+            SupportedEncodings::Base64 => b64.decode(data).map_err(|e| {
+                TransactionParseError::DecodeError(format!("Failed to decode base64: {e}"))
+            })?,
+        };
+        
+        // Try to decode as signed transaction first (TxEnvelope)
+        let mut tx_bytes = bytes.as_slice();
+        let transaction = match TxEnvelope::decode(&mut tx_bytes) {
+            Ok(envelope) => {
+                // Extract unsigned transaction from signed envelope
+                match envelope {
+                    TxEnvelope::Eip1559(signed) => TypedTransaction::Eip1559(signed.tx().clone()),
+                    TxEnvelope::Eip2930(signed) => TypedTransaction::Eip2930(signed.tx().clone()),
+                    TxEnvelope::Eip4844(signed) => TypedTransaction::Eip4844(signed.tx().clone()),
+                    TxEnvelope::Legacy(signed) => TypedTransaction::Legacy(signed.tx().clone()),
+                    TxEnvelope::Eip7702(signed) => TypedTransaction::Eip7702(signed.tx().clone()),
+                }
+            }
+            Err(_) => {
+                // Fall back to unsigned transaction decoding
+                decode_transaction(data, format)
+                    .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?
+            }
+        };
+        
         Ok(Self { transaction })
     }
     fn transaction_type(&self) -> String {
