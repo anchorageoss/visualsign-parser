@@ -98,8 +98,8 @@ pub fn register(
     }
 
     // Register V4 PoolManager
-    if let Some(pm_address) = UniswapConfig::v4_pool_manager_address() {
-        for &chain_id in UniswapConfig::v4_pool_manager_chains() {
+    for &chain_id in UniswapConfig::v4_pool_manager_chains() {
+        if let Some(pm_address) = UniswapConfig::v4_pool_manager_address(chain_id) {
             contract_reg.register_contract_typed::<UniswapV4PoolManager>(chain_id, vec![pm_address]);
         }
     }
@@ -150,9 +150,10 @@ mod tests {
         }
 
         // Verify V4 PoolManager is registered on Sepolia
-        if let Some(pm_address) = UniswapConfig::v4_pool_manager_address() {
+        chain_id = 11155111;
+        if let Some(pm_address) = UniswapConfig::v4_pool_manager_address(chain_id) {
             let pm_type = contract_reg
-                .get_contract_type(11155111, pm_address)
+                .get_contract_type(chain_id, pm_address)
                 .expect("PoolManager should be registered on Sepolia");
             assert_eq!(pm_type, UniswapV4PoolManager::short_type_id());
         }

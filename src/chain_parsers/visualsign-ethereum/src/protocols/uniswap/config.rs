@@ -119,8 +119,12 @@ impl UniswapConfig {
     ///
     ///
     /// Source: <https://docs.uniswap.org/contracts/v4/deployments>
-    pub fn v4_pool_manager_address() -> Option<Address> {
-        Some("0x000000000004444c5dc75cB358380D2e3dE08A90".parse().unwrap())
+    pub fn v4_pool_manager_address(chain_id: u64) -> Option<Address> {
+        match chain_id {
+            1 => Some("0x000000000004444c5dc75cB358380D2e3dE08A90".parse().unwrap()),
+            11155111 => Some("0x00B036B58a818B1BC34d502D3fE730Db729e62AC".parse().unwrap()),
+            _ => None,
+        }
     }
     
     /// Returns the V4 Test Router address found in examples/tests
