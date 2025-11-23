@@ -122,6 +122,11 @@ impl UniswapConfig {
     pub fn v4_pool_manager_address() -> Option<Address> {
         Some("0x000000000004444c5dc75cB358380D2e3dE08A90".parse().unwrap())
     }
+    
+    /// Returns the V4 Test Router address found in examples/tests
+    pub fn v4_test_router_address() -> Option<Address> {
+        Some("0x0Ba6d224169bBFaD4EB2D38c500D2c8E8eDE696C".parse().unwrap())
+    }
 
     /// Returns the chain IDs where V4 PoolManager is deployed
     ///
