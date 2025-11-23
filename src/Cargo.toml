@@ -9,7 +9,6 @@ members = [
   "parser/app",
   "parser/cli",
   "parser/host",
-  "test_decoder",
   "visualsign",
   "chain_parsers/visualsign-ethereum",
   "chain_parsers/visualsign-solana",
