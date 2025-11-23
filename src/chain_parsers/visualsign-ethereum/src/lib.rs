@@ -482,6 +482,16 @@ fn convert_to_visual_sign_payload(
                             input_fields.push(field);
                         }
                     }
+                    // Check if this is a V4 PoolManager contract and visualize it
+                    else if contract_type
+                        == crate::protocols::uniswap::config::UniswapV4PoolManager::short_type_id()
+                    {
+                        if let Some(field) = (protocols::uniswap::V4PoolManagerVisualizer {})
+                            .visualize_tx_commands(input, chain_id_val, Some(registry))
+                        {
+                            input_fields.push(field);
+                        }
+                    }
                 }
             }
         }

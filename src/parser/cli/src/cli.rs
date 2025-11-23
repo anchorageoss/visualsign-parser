@@ -20,9 +20,16 @@ struct Args {
         short,
         long,
         value_name = "RAW_TX",
-        help = "Raw transaction hex string"
+        help = "Raw transaction hex string (or use --transaction-file to read from file)"
     )]
-    transaction: String,
+    transaction: Option<String>,
+
+    #[arg(
+        long = "transaction-file",
+        value_name = "FILE",
+        help = "Read transaction hex from file (one hex string per line, can use 0x prefix)"
+    )]
+    transaction_file: Option<String>,
 
     #[arg(short, long, default_value = "text", help = "Output format")]
     output: OutputFormat,
@@ -328,6 +335,36 @@ impl Cli {
     pub fn execute() {
         let args = Args::parse();
 
+        // Get transaction from either --transaction or --transaction-file
+        let raw_tx = match (&args.transaction, &args.transaction_file) {
+            (Some(tx), None) => tx.clone(),
+            (None, Some(file_path)) => {
+                match std::fs::read_to_string(file_path) {
+                    Ok(content) => {
+                        // Clean up the content: trim whitespace, preserve 0x prefix if present
+                        let cleaned = content.trim().replace('\n', "").replace('\r', "").replace(' ', "");
+                        if cleaned.starts_with("0x") {
+                            cleaned
+                        } else {
+                            format!("0x{}", cleaned)
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error reading transaction file {}: {}", file_path, e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            (Some(_), Some(_)) => {
+                eprintln!("Error: Cannot specify both --transaction and --transaction-file");
+                std::process::exit(1);
+            }
+            (None, None) => {
+                eprintln!("Error: Must specify either --transaction or --transaction-file");
+                std::process::exit(1);
+            }
+        };
+
         let options = VisualSignOptions {
             decode_transfers: true,
             transaction_name: None,
@@ -337,7 +374,7 @@ impl Cli {
 
         parse_and_display(
             &args.chain,
-            &args.transaction,
+            &raw_tx,
             options,
             args.output,
             args.condensed_only,

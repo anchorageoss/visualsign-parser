@@ -99,7 +99,7 @@ pub fn register(
 
     // Register V4 PoolManager
     for &chain_id in UniswapConfig::v4_pool_manager_chains() {
-        if let Some(pm_address) = UniswapConfig::v4_pool_manager_address(chain_id) {
+        if let Some(pm_address) = UniswapConfig::v4_pool_manager_address() {
             contract_reg.register_contract_typed::<UniswapV4PoolManager>(chain_id, vec![pm_address]);
         }
     }

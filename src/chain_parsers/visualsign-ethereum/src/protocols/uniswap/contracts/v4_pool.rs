@@ -35,7 +35,7 @@ sol! {
             int256 amount1;
         }
 
-        function initialize(PoolKey memory key, uint160 sqrtPriceX96, bytes calldata hooksData) external returns (int24 tick);
+        function initialize(PoolKey memory key, uint160 sqrtPriceX96) external returns (int24 tick);
         function unlock(bytes calldata data) external returns (bytes memory);
         function swap(PoolKey memory key, SwapParams memory params, bytes calldata hookData) external returns (BalanceDelta memory delta);
         function modifyLiquidity(PoolKey memory key, ModifyLiquidityParams memory params, bytes calldata hookData) external returns (BalanceDelta memory delta);
@@ -80,6 +80,15 @@ fn visualize_initialize(
         .and_then(|r| r.get_token_symbol(chain_id, key.currency1))
         .unwrap_or_else(|| format!("{:?}", key.currency1));
 
+    create_initialize_preview_layout(symbol0, symbol1, key, call.sqrtPriceX96)
+}
+
+fn create_initialize_preview_layout(
+    symbol0: String,
+    symbol1: String,
+    key: IPoolManager::PoolKey,
+    sqrtPriceX96: alloy_primitives::Uint<160, 3>,
+) -> SignablePayloadField {
     // Create fields for the PreviewLayout
     let fields = vec![
         AnnotatedPayloadField {
@@ -137,11 +146,11 @@ fn visualize_initialize(
         AnnotatedPayloadField {
             signable_payload_field: SignablePayloadField::TextV2 {
                 common: SignablePayloadFieldCommon {
-                    fallback_text: format!("{}", call.sqrtPriceX96),
+                    fallback_text: format!("{}", U256::from(sqrtPriceX96)),
                     label: "Sqrt Price X96".to_string(),
                 },
                 text_v2: SignablePayloadFieldTextV2 {
-                    text: format!("{}", call.sqrtPriceX96),
+                    text: format!("{}", U256::from(sqrtPriceX96)),
                 },
             },
             static_annotation: None,

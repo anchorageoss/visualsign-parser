@@ -117,22 +117,19 @@ impl UniswapConfig {
 
     /// Returns the V4 PoolManager contract address
     ///
-    /// Currently on Sepolia: 0x000000000004444c5dc75cB358380D2e3dE08A90
     ///
     /// Source: <https://docs.uniswap.org/contracts/v4/deployments>
-    pub fn v4_pool_manager_address(chain_id: u64) -> Option<Address> {
-        match chain_id {
-            11155111 => Some("0x000000000004444c5dc75cB358380D2e3dE08A90".parse().unwrap()),
-            _ => None,
-        }
+    pub fn v4_pool_manager_address() -> Option<Address> {
+        Some("0x000000000004444c5dc75cB358380D2e3dE08A90".parse().unwrap())
     }
 
     /// Returns the chain IDs where V4 PoolManager is deployed
     ///
     /// Supported chains:
+    /// - 1 = Ethereum Mainnet
     /// - 11155111 = Sepolia Testnet
     pub fn v4_pool_manager_chains() -> &'static [u64] {
-        &[11155111]
+        &[1, 11155111]
     }
 
     /// Returns the WETH address for a given chain
