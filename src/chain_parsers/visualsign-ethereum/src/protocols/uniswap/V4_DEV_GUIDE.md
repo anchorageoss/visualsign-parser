@@ -47,15 +47,37 @@ cast calldata "swap((address,address,uint24,int24,address),(bool,int256,uint160)
 
 You can run the parser against any raw transaction hex using the CLI.
 
+**Note: All commands should be run from the `src` directory.**
+
 **Build the CLI:**
 ```bash
+cd src
 cargo build -p parser_cli
 ```
 
-**Run against generated calldata:**
-(Note: The parser expects a full transaction hex, but for simple calldata testing you might need to wrap it or use the unit tests. However, if you have a full raw transaction from `cast send --unsigned` or Etherscan, you can pipe it here).
+**Run against example transaction files:**
 
-Example:
+The repository includes example transaction files for V4 operations in `chain_parsers/visualsign-ethereum/examples/`.
+
+1.  **Initialize Pool:**
+    ```bash
+    cargo run -p parser_cli -- \
+      --chain ethereum \
+      --transaction-file chain_parsers/visualsign-ethereum/examples/tx_initializev4.txt \
+      --output human
+    ```
+
+2.  **Swap:**
+    ```bash
+    cargo run -p parser_cli -- \
+      --chain ethereum \
+      --transaction-file chain_parsers/visualsign-ethereum/examples/tx_swapv4.txt \
+      --output human
+    ```
+
+**Run against raw hex:**
+
+You can also pass the hex directly:
 ```bash
 cargo run -p parser_cli -- \
   --chain ethereum \
@@ -70,7 +92,7 @@ We have added test cases in `v4_pool.rs` that use the generated calldata.
 **Run tests:**
 
 ```bash
-./src/chain_parsers/visualsign-ethereum/scripts/test_v4.sh
+cargo test -p visualsign-ethereum --lib protocols::uniswap
 ```
 
 As you implement the decoding logic in `v4_pool.rs`, update the tests to assert `result.is_some()`.
