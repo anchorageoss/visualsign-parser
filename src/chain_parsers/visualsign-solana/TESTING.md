@@ -202,7 +202,7 @@ fn test_instruction_from_real_transaction() {
 }
 ```
 
-See `src/presets/spl_token/tests.rs` for a complete reference implementation.
+See `src/presets/jupiter_swap/tests.rs` for a reference implementation.
 
 #### Step 7: Run the Tests
 
@@ -383,34 +383,33 @@ visualsign-solana/
 ├── TESTING.md                          # This file
 ├── src/
 │   └── presets/
-│       ├── spl_token/
+│       ├── jupiter_swap/
 │       │   ├── mod.rs                  # Implementation
 │       │   └── tests.rs                # Tests
 │       ├── system/
 │       │   ├── mod.rs
 │       │   └── tests.rs
-│       └── stake_pool/
+│       └── stakepool/
 │           ├── mod.rs
 │           └── tests.rs
 └── tests/
     └── fixtures/
-        ├── spl_token/
+        ├── jupiter_swap/
         │   ├── README.md               # Program-specific notes
-        │   ├── mint_to_example.json
-        │   ├── transfer_example.json
-        │   └── ...
+        │   └── route_example.json
         ├── system/
         │   ├── README.md
-        │   ├── transfer_example.json
-        │   └── ...
-        └── stake_pool/
+        │   └── transfer_example.json
+        └── stakepool/
             ├── README.md
             └── ...
 ```
 
 ## Example: Complete Test Flow
 
-Let's walk through testing an SPL Token MintTo instruction:
+> **Note**: This example uses an SPL Token MintTo instruction for illustration. The same workflow applies to any program preset.
+
+Let's walk through the process:
 
 1. **Find transaction**: https://solscan.io/tx/35XirCzssnAVUB2FbLrf8vYUYmTq5omepqyR8tr5Y6eJ6yurs3LcRfzGxzn92wU3w5vBvM8BfodXsscz7nin8SbC?cluster=devnet
 
@@ -489,7 +488,7 @@ Then navigate to `src/presets/<program_name>/mod.rs` to see which instruction ma
 **Coverage-driven workflow:**
 
 1. Run coverage (see [project TESTING.md](/TESTING.md))
-2. Find uncovered match arms in `src/presets/spl_token/mod.rs` (or other program presets)
+2. Find uncovered match arms in `src/presets/<program_name>/mod.rs`
 3. Each uncovered instruction type → create a new fixture following the guide above
 4. Re-run coverage to verify the new fixture covers the code
 
