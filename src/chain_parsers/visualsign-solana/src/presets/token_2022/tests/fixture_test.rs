@@ -4,9 +4,9 @@
 // To add these tests to the existing tests module in mod.rs, add this line at the end
 // of the existing `mod tests` block (before the closing brace):
 //
-//     mod fixture_tests;
+//     mod fixture_test;
 //
-// This file will then be compiled as `tests::fixture_tests`
+// This file will then be compiled as `tests::fixture_test`
 
 use super::*;
 use solana_sdk::{
@@ -80,13 +80,12 @@ fn create_instruction_from_fixture(fixture: &TestFixture) -> Instruction {
     }
 }
 
-#[test]
-fn test_mint_to_checked_real_transaction() {
+fn test_real_transaction(fixture_name: &str, test_name: &str) {
     use crate::core::VisualizerContext;
     use solana_parser::solana::structs::SolanaAccount;
 
-    let fixture: TestFixture = load_fixture("mint_to_checked");
-    println!("\n=== Testing MintToChecked Transaction ===");
+    let fixture: TestFixture = load_fixture(fixture_name);
+    println!("\n=== Testing {test_name} Transaction ===");
     println!("Description: {}", fixture.description);
     println!("Source: {}", fixture.source);
     println!("Signature: {}", fixture.signature);
@@ -236,158 +235,13 @@ fn test_mint_to_checked_real_transaction() {
 }
 
 #[test]
+fn test_mint_to_checked_real_transaction() {
+    test_real_transaction("mint_to_checked", "MintToChecked");
+}
+
+#[test]
 fn test_burn_checked_real_transaction() {
-    use crate::core::VisualizerContext;
-    use solana_parser::solana::structs::SolanaAccount;
-
-    let fixture: TestFixture = load_fixture("burn_checked");
-    println!("\n=== Testing BurnChecked Transaction ===");
-    println!("Description: {}", fixture.description);
-    println!("Source: {}", fixture.source);
-    println!("Signature: {}", fixture.signature);
-    println!("Cluster: {}", fixture.cluster);
-    if let Some(note) = &fixture.full_transaction_note {
-        println!("Transaction Context: {note}");
-    }
-    println!();
-
-    let instruction = create_instruction_from_fixture(&fixture);
-    let instructions = vec![instruction.clone()];
-
-    // Create a context - using index 0 since we only loaded the one relevant instruction
-    // In reality, the fixture.instruction_index would be used with all transaction instructions
-    let sender = SolanaAccount {
-        account_key: fixture.accounts.first().unwrap().pubkey.clone(),
-        signer: false,
-        writable: false,
-    };
-    let context = VisualizerContext::new(&sender, 0, &instructions);
-
-    // Visualize
-    let visualizer = Token2022Visualizer;
-    let result = visualizer
-        .visualize_tx_commands(&context)
-        .expect("Failed to visualize instruction");
-
-    // Extract the preview layout
-    if let SignablePayloadField::PreviewLayout {
-        common,
-        preview_layout,
-    } = result.signable_payload_field
-    {
-        println!("\n=== Extracted Fields ===");
-        println!("Label: {}", common.label);
-        if let Some(title) = &preview_layout.title {
-            println!("Title: {}", title.text);
-        }
-
-        if let Some(expanded) = &preview_layout.expanded {
-            println!("\nExpanded Fields:");
-            for field in &expanded.fields {
-                match &field.signable_payload_field {
-                    SignablePayloadField::TextV2 { common, text_v2 } => {
-                        println!("  {}: {}", common.label, text_v2.text);
-                    }
-                    SignablePayloadField::Number { common, number } => {
-                        println!("  {}: {}", common.label, number.number);
-                    }
-                    SignablePayloadField::AmountV2 { common, amount_v2 } => {
-                        println!("  {}: {}", common.label, amount_v2.amount);
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        // Validate against expected fields
-        println!("\n=== Validation ===");
-        for (key, expected_value) in &fixture.expected_fields {
-            let expected_str = expected_value
-                .as_str()
-                .unwrap_or_else(|| panic!("Expected field '{key}' is not a string"));
-
-            if let Some(expanded) = &preview_layout.expanded {
-                let found =
-                    expanded
-                        .fields
-                        .iter()
-                        .any(|field| match &field.signable_payload_field {
-                            SignablePayloadField::TextV2 { common, text_v2 } => {
-                                let label_normalized =
-                                    common.label.to_lowercase().replace(" ", "_");
-                                let key_normalized = key.to_lowercase();
-                                let label_matches = label_normalized == key_normalized;
-                                let value_matches = text_v2.text == expected_str;
-
-                                if label_matches {
-                                    if value_matches {
-                                        println!("✓ {key}: {expected_str} (matches)");
-                                    } else {
-                                        println!(
-                                            "✗ {}: expected '{}', got '{}'",
-                                            key, expected_str, text_v2.text
-                                        );
-                                    }
-                                    return value_matches;
-                                }
-                                false
-                            }
-                            SignablePayloadField::Number { common, number } => {
-                                let label_normalized =
-                                    common.label.to_lowercase().replace(" ", "_");
-                                let key_normalized = key.to_lowercase();
-                                let label_matches = label_normalized == key_normalized;
-                                let value_matches = number.number == expected_str;
-
-                                if label_matches {
-                                    if value_matches {
-                                        println!("✓ {key}: {expected_str} (matches)");
-                                    } else {
-                                        println!(
-                                            "✗ {}: expected '{}', got '{}'",
-                                            key, expected_str, number.number
-                                        );
-                                    }
-                                    return value_matches;
-                                }
-                                false
-                            }
-                            SignablePayloadField::AmountV2 { common, amount_v2 } => {
-                                let label_normalized =
-                                    common.label.to_lowercase().replace(" ", "_");
-                                let key_normalized = key.to_lowercase();
-                                let label_matches = label_normalized == key_normalized;
-                                let value_matches = amount_v2.amount == expected_str;
-
-                                if label_matches {
-                                    if value_matches {
-                                        println!("✓ {key}: {expected_str} (matches)");
-                                    } else {
-                                        println!(
-                                            "✗ {}: expected '{}', got '{}'",
-                                            key, expected_str, amount_v2.amount
-                                        );
-                                    }
-                                    return value_matches;
-                                }
-                                false
-                            }
-                            _ => false,
-                        });
-
-                if !found {
-                    println!("✗ {key}: field not found in output");
-                }
-
-                assert!(
-                    found,
-                    "Expected field '{key}' with value '{expected_str}' not found in visualization"
-                );
-            }
-        }
-    } else {
-        panic!("Expected PreviewLayout field type");
-    }
+    test_real_transaction("burn_checked", "BurnChecked");
 }
 
 
