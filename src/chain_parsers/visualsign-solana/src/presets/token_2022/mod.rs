@@ -29,8 +29,9 @@ impl InstructionVisualizer for Token2022Visualizer {
             .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
 
         // Parse the Token 2022 instruction
-        let token_2022_instruction = parse_token_2022_instruction(&instruction.data, &instruction.accounts)
-            .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
+        let token_2022_instruction =
+            parse_token_2022_instruction(&instruction.data, &instruction.accounts)
+                .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
         // Generate proper preview layout
         create_token_2022_preview_layout(&token_2022_instruction, instruction, context)
@@ -219,8 +220,7 @@ fn create_token_2022_preview_layout(
                 label: format!("Instruction {}", context.instruction_index() + 1),
                 fallback_text: format!(
                     "Token 2022: {}\nProgram ID: {}",
-                    title,
-                    instruction.program_id
+                    title, instruction.program_id
                 ),
             },
             preview_layout,

@@ -11,8 +11,7 @@ impl SolanaIntegrationConfig for Token2022Config {
     }
 
     fn data(&self) -> &SolanaIntegrationConfigData {
-        static DATA: std::sync::OnceLock<SolanaIntegrationConfigData> = 
-            std::sync::OnceLock::new();
+        static DATA: std::sync::OnceLock<SolanaIntegrationConfigData> = std::sync::OnceLock::new();
         DATA.get_or_init(|| {
             let mut programs = HashMap::new();
             let mut token2022_instructions = HashMap::new();

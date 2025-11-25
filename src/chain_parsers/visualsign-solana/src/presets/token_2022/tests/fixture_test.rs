@@ -243,5 +243,3 @@ fn test_mint_to_checked_real_transaction() {
 fn test_burn_checked_real_transaction() {
     test_real_transaction("burn_checked", "BurnChecked");
 }
-
-
