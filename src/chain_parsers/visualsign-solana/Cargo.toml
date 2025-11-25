@@ -20,6 +20,7 @@ spl-token = "7.0.0"
 spl-associated-token-account = "6.0"
 spl-stake-pool = "2.0.2"
 solana-system-interface = "1.0"
+spl-token-2022 = "10.0.0"
 
 [dev-dependencies]
 serde = { version = "1.0", features = ["derive"] }
