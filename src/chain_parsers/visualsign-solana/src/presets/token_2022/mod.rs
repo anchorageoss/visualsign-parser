@@ -129,7 +129,9 @@ fn parse_token_2022_instruction(
         }
         _ => {
             let instruction_discriminator = data[0];
-            Err(format!("Unsupported Token 2022 instruction: {instruction_discriminator}"))
+            Err(format!(
+                "Unsupported Token 2022 instruction: {instruction_discriminator}"
+            ))
         }
     }
 }
