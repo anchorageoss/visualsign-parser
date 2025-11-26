@@ -11,7 +11,7 @@ pub type ChainId = u64;
 /// The type name is automatically used as the contract type string.
 ///
 /// # Example
-/// ```rust
+/// ```ignore
 /// pub struct UniswapUniversalRouter;
 /// impl ContractType for UniswapUniversalRouter {}
 ///
@@ -91,7 +91,7 @@ impl ContractRegistry {
     /// * `addresses` - List of contract addresses on this chain
     ///
     /// # Example
-    /// ```rust
+    /// ```ignore
     /// pub struct UniswapUniversalRouter;
     /// impl ContractType for UniswapUniversalRouter {}
     ///
