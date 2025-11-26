@@ -10,6 +10,8 @@
 
 use super::*;
 use crate::core::VisualizerContext;
+use crate::core::VisualizerContext;
+use solana_parser::solana::structs::SolanaAccount;
 use solana_parser::solana::structs::SolanaAccount;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -17,8 +19,6 @@ use solana_sdk::{
 };
 use std::str::FromStr;
 use visualsign::SignablePayloadField;
-use crate::core::VisualizerContext;
-use solana_parser::solana::structs::SolanaAccount;
 
 #[derive(Debug, serde::Deserialize)]
 struct TestFixture {
@@ -113,7 +113,7 @@ fn test_real_transaction(fixture_name: &str, test_name: &str) {
 
     // Visualize
     let visualizer = Token2022Visualizer;
-    
+
     // Check if this is an unhappy path test (expected to fail)
     if let Some(expected_error) = &fixture.expected_error {
         let result = visualizer.visualize_tx_commands(&context);
@@ -129,10 +129,13 @@ fn test_real_transaction(fixture_name: &str, test_name: &str) {
             expected_error,
             error_msg
         );
-        println!("✓ Correctly rejected unsupported instruction: {}", error_msg);
+        println!(
+            "✓ Correctly rejected unsupported instruction: {}",
+            error_msg
+        );
         return;
     }
-    
+
     let result = visualizer
         .visualize_tx_commands(&context)
         .expect("Failed to visualize instruction");
@@ -169,7 +172,10 @@ fn test_real_transaction(fixture_name: &str, test_name: &str) {
 
         // Validate against expected fields
         println!("\n=== Validation ===");
-        let expected_fields = fixture.expected_fields.as_ref().expect("Expected fields not provided for happy path test");
+        let expected_fields = fixture
+            .expected_fields
+            .as_ref()
+            .expect("Expected fields not provided for happy path test");
         for (key, expected_value) in expected_fields {
             let expected_str = expected_value
                 .as_str()
@@ -273,5 +279,3 @@ fn test_burn_checked_real_transaction() {
 fn test_transfer_checked_unsupported() {
     test_real_transaction("transfer_checked", "TransferChecked (Unsupported)");
 }
-
-

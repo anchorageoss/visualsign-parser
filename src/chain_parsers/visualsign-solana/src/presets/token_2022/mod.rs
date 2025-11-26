@@ -8,6 +8,7 @@ use crate::core::{
 use crate::utils::format_token_amount;
 use config::Token2022Config;
 use solana_sdk::instruction::AccountMeta;
+use spl_token_2022::instruction::TokenInstruction;
 use spl_token_2022_interface::instruction::TokenInstruction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_number_field, create_raw_data_field, create_text_field};
@@ -15,7 +16,6 @@ use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
 };
-use spl_token_2022::instruction::TokenInstruction;
 
 static TOKEN_2022_CONFIG: Token2022Config = Token2022Config;
 
