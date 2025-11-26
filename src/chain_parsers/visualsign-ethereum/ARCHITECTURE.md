@@ -21,6 +21,7 @@ src/
 │   └── core/                       - Core contract standards
 │       ├── mod.rs
 │       ├── erc20.rs                - ERC20 token standard visualizer
+│       ├── erc721.rs               - ERC721 NFT standard visualizer
 │       └── fallback.rs             - Catch-all hex visualizer for unknown contracts
 │
 └── protocols/                      - Protocol-specific implementations
