@@ -27,7 +27,6 @@ pub fn parse(
         ));
     }
 
-    // todo: make these request args or metadata
     let options = VisualSignOptions {
         decode_transfers: true,
         transaction_name: None,

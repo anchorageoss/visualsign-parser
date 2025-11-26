@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::fmt::{format_ether, format_gwei};
 use alloy_consensus::{Transaction as _, TxType, TypedTransaction};
 use alloy_rlp::{Buf, Decodable};
@@ -6,6 +8,7 @@ use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldAddressV2,
     SignablePayloadFieldAmountV2, SignablePayloadFieldCommon, SignablePayloadFieldTextV2,
     encodings::SupportedEncodings,
+    registry::LayeredRegistry,
     vsptrait::{
         Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
         VisualSignError, VisualSignOptions,
@@ -111,72 +114,51 @@ impl EthereumTransactionWrapper {
     }
 }
 
-/// Converter that knows how to format Ethereum transactions for VisualSign
+/// Converter that knows how to format Ethereum transactions for VisualSign.
 ///
-/// # TODO: Registry Architecture Refactor
-///
-/// The current design has a fundamental issue: the registry is owned by the converter,
-/// but it should be context-based and layered with provenance tracking.
-///
-/// ## Current Problems:
-/// 1. Registry is static per converter instance - can't change per transaction
-/// 2. No way to merge built-in parser registry with wallet-provided ChainMetadata
-/// 3. No provenance tracking - caller can't tell if data came from built-in or wallet
-/// 4. Registry is created at converter initialization, not passed per-request
-///
-/// ## Proper Architecture:
-///
-/// ```ignore
-/// // Registry with source tracking
-/// pub struct RegistrySource {
-///     source: RegistrySourceType,  // Builtin | Wallet
-///     registry: ContractRegistry,
-/// }
-///
-/// pub enum RegistrySourceType {
-///     Builtin,    // Parser's known contracts/tokens
-///     Wallet,     // From ChainMetadata
-/// }
-///
-/// // Layered lookup with provenance
-/// pub struct RegistryLayers {
-///     layers: Vec<RegistrySource>,  // Lookup order matters
-/// }
-///
-/// // Pass via context or options, not owned by converter
-/// pub struct VisualSignOptions {
-///     registries: Option<RegistryLayers>,
-///     // ... other fields
-/// }
-/// ```
-///
-/// ## Benefits of Refactor:
-/// - Wallets can provide ChainMetadata that gets merged transparently
-/// - Different transactions can use different registry combinations
-/// - Caller knows if token/contract info came from built-in or wallet source
-/// - Registry flows through VisualizerContext, enabling protocol-specific lookups
-///
-/// ## Migration Path:
-/// 1. Create RegistryLayers and RegistrySource types
-/// 2. Add optional registries field to VisualSignOptions
-/// 3. Update to_visual_sign_payload to accept options-based registries
-/// 4. Deprecate converter-owned registry field
-/// 5. Update all protocol visualizers to use context-based registry
+/// Uses `Arc<ContractRegistry>` for efficient sharing of the global registry across requests.
+/// Per-request wallet metadata is layered on top using `LayeredRegistry`, which checks
+/// the request layer first before falling back to the global registry.
 pub struct EthereumVisualSignConverter {
-    registry: registry::ContractRegistry,
+    registry: Arc<registry::ContractRegistry>,
 }
 
 impl EthereumVisualSignConverter {
-    /// Creates a new converter with a custom registry
-    pub fn with_registry(registry: registry::ContractRegistry) -> Self {
+    /// Creates a new converter with a custom registry wrapped in Arc.
+    pub fn with_registry(registry: Arc<registry::ContractRegistry>) -> Self {
         Self { registry }
     }
 
-    /// Creates a new converter with a default registry including all known protocols
+    /// Creates a new converter with a default registry including all known protocols.
     pub fn new() -> Self {
         Self {
-            registry: registry::ContractRegistry::with_default_protocols(),
+            registry: Arc::new(registry::ContractRegistry::with_default_protocols()),
         }
+    }
+
+    /// Creates a layered registry for the current request.
+    ///
+    /// The global registry is shared via Arc (O(1) clone). If wallet metadata contains
+    /// token information, it's loaded into a request-scoped registry that takes precedence
+    /// during lookups. The request registry is dropped after the request completes.
+    fn create_layered_registry(
+        &self,
+        _options: &VisualSignOptions,
+    ) -> LayeredRegistry<registry::ContractRegistry> {
+        // TODO: When wallet-provided ChainMetadata includes token metadata (not just ABIs),
+        // create a request registry and use LayeredRegistry::with_request:
+        //
+        // if let Some(ref chain_metadata) = options.metadata {
+        //     if let Some(chain_metadata::Metadata::Ethereum(eth_metadata)) = &chain_metadata.metadata {
+        //         let mut request_registry = registry::ContractRegistry::new();
+        //         // Load wallet tokens into request_registry
+        //         // request_registry.load_wallet_tokens(&eth_metadata.tokens)?;
+        //         return LayeredRegistry::with_request(Arc::clone(&self.registry), request_registry);
+        //     }
+        // }
+
+        // No wallet metadata, use global registry only
+        LayeredRegistry::new(Arc::clone(&self.registry))
     }
 }
 
@@ -194,11 +176,15 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
     ) -> Result<SignablePayload, VisualSignError> {
         let transaction = transaction_wrapper.inner().clone();
 
+        // Create layered registry: global (Arc-shared) + optional request-scoped wallet data.
+        // Lookups check request layer first, then fall back to global.
+        let layered_registry = self.create_layered_registry(&options);
+
         // Debug trace: Log registry usage for contract/token lookups (future enhancement)
         if let Some(to) = transaction.to() {
             if let Some(chain_id) = transaction.chain_id() {
-                let _contract_type = self.registry.get_contract_type(chain_id, to);
-                let _token_symbol = self.registry.get_token_symbol(chain_id, to);
+                let _contract_type = layered_registry.lookup(|r| r.get_contract_type(chain_id, to));
+                let _token_symbol = layered_registry.lookup(|r| r.get_token_symbol(chain_id, to));
                 // TODO: Use contract_type and token_symbol to enhance visualization
             }
         }
@@ -211,7 +197,7 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
             return Ok(convert_to_visual_sign_payload(
                 transaction,
                 options,
-                &self.registry,
+                &layered_registry,
             ));
         }
         Err(VisualSignError::DecodeError(format!(
@@ -297,7 +283,7 @@ fn decode_transaction(
 fn convert_to_visual_sign_payload(
     transaction: TypedTransaction,
     options: VisualSignOptions,
-    registry: &registry::ContractRegistry,
+    layered_registry: &LayeredRegistry<registry::ContractRegistry>,
 ) -> SignablePayload {
     // Extract chain ID to determine the network
     let chain_id = transaction.chain_id();
@@ -387,7 +373,11 @@ fn convert_to_visual_sign_payload(
             }
         }
         if let Some(field) = (protocols::uniswap::UniversalRouterVisualizer {})
-            .visualize_tx_commands(input, chain_id.unwrap_or(1), Some(registry))
+            .visualize_tx_commands(
+                input,
+                chain_id.unwrap_or(1),
+                Some(layered_registry.global()),
+            )
         {
             input_fields.push(field);
         }

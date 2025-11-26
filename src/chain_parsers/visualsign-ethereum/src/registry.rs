@@ -50,6 +50,7 @@ pub trait ContractType: 'static {
 /// Extract a ChainRegistry trait that all chains can implement for handling token metadata,
 /// contract types, and other chain-specific information. This will allow Solana, Tron, Sui,
 /// and other chains to use the same interface pattern.
+#[derive(Clone)]
 pub struct ContractRegistry {
     /// Maps (chain_id, address) to contract type
     address_to_type: HashMap<(ChainId, Address), String>,

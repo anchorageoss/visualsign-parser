@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use crate::{
     vsptrait::{
@@ -186,6 +187,113 @@ impl TransactionConverterRegistry {
 
     pub fn supported_chains(&self) -> Vec<Chain> {
         self.converters.keys().cloned().collect()
+    }
+}
+
+/// Generic layered registry for combining global and request-scoped data.
+///
+/// This struct enables efficient per-request registry overlays without cloning.
+/// The global registry is shared via `Arc` (O(1) clone), while wallet-provided
+/// data is owned and dropped after the request completes.
+///
+/// # Usage Pattern
+///
+/// ```ignore
+/// // Global registry created once at startup
+/// let global = Arc::new(MyRegistry::with_defaults());
+///
+/// // Per-request: create layered registry with optional wallet data
+/// let layered = if let Some(wallet_data) = request.wallet_metadata {
+///     LayeredRegistry::with_request(Arc::clone(&global), wallet_data)
+/// } else {
+///     LayeredRegistry::new(Arc::clone(&global))
+/// };
+///
+/// // Use layered registry for lookups (checks request first, then global)
+/// let symbol = layered.lookup(|r| r.get_token_symbol(chain_id, address));
+/// ```
+///
+/// # Type Parameter
+///
+/// `R` - The registry type (e.g., `ContractRegistry` for Ethereum)
+pub struct LayeredRegistry<R> {
+    /// Request-scoped data (checked first during lookups)
+    request: Option<R>,
+    /// Global registry shared across requests via Arc
+    global: Arc<R>,
+}
+
+impl<R> LayeredRegistry<R> {
+    /// Creates a layered registry with only the global layer.
+    ///
+    /// Use this when no request-specific data is available.
+    pub fn new(global: Arc<R>) -> Self {
+        Self {
+            request: None,
+            global,
+        }
+    }
+
+    /// Creates a layered registry with both global and request-scoped layers.
+    ///
+    /// Lookups will check the request layer first, then fall back to global.
+    pub fn with_request(global: Arc<R>, request: R) -> Self {
+        Self {
+            request: Some(request),
+            global,
+        }
+    }
+
+    /// Returns a reference to the global registry.
+    pub fn global(&self) -> &R {
+        &self.global
+    }
+
+    /// Returns a reference to the request-scoped registry, if present.
+    pub fn request(&self) -> Option<&R> {
+        self.request.as_ref()
+    }
+
+    /// Performs a layered lookup: checks request first, then global.
+    ///
+    /// The closure `f` is called on the request registry first (if present).
+    /// If it returns `None`, the closure is called on the global registry.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let symbol = layered.lookup(|r| r.get_token_symbol(chain_id, address));
+    /// ```
+    pub fn lookup<T, F>(&self, f: F) -> Option<T>
+    where
+        F: Fn(&R) -> Option<T>,
+    {
+        // Check request layer first
+        if let Some(ref request) = self.request {
+            if let Some(result) = f(request) {
+                return Some(result);
+            }
+        }
+        // Fall back to global
+        f(&self.global)
+    }
+
+    /// Performs a layered lookup that returns a Result.
+    ///
+    /// Similar to `lookup`, but for fallible operations. Checks request first,
+    /// then global. Returns the first `Ok` result, or the last `Err` if both fail.
+    pub fn lookup_result<T, E, F>(&self, f: F) -> Result<T, E>
+    where
+        F: Fn(&R) -> Result<T, E>,
+    {
+        // Check request layer first
+        if let Some(ref request) = self.request {
+            if let ok @ Ok(_) = f(request) {
+                return ok;
+            }
+        }
+        // Fall back to global
+        f(&self.global)
     }
 }
 
