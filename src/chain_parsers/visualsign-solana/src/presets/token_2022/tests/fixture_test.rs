@@ -10,8 +10,6 @@
 
 use super::*;
 use crate::core::VisualizerContext;
-use crate::core::VisualizerContext;
-use solana_parser::solana::structs::SolanaAccount;
 use solana_parser::solana::structs::SolanaAccount;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -125,14 +123,9 @@ fn test_real_transaction(fixture_name: &str, test_name: &str) {
         // The error message is wrapped, so check if it contains the expected text
         assert!(
             error_msg.contains(expected_error),
-            "Expected error message to contain '{}', but got: {}",
-            expected_error,
-            error_msg
+            "Expected error message to contain '{expected_error}', but got: {error_msg}"
         );
-        println!(
-            "✓ Correctly rejected unsupported instruction: {}",
-            error_msg
-        );
+        println!("✓ Correctly rejected unsupported instruction: {error_msg}");
         return;
     }
 
