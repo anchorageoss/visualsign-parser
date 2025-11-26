@@ -1,6 +1,6 @@
 {
   "description": "Token 2022 MintToChecked instruction - minting 1,000,000 tokens with 6 decimals",
-  "source": "https://solscan.io/tx/example",
+  "source": "http://localnet/tx",
   "signature": "AX4hGLPOpFsZpSowGaVvAk5q4n7TkTyJWEX3YPaNjr9vpsw/fA/+ssJ/R6XQ6nKND3uZwWxet8TwwuMjnGf0JA8BAAIFtWJBq4hctUN6Co6qxyHR+mzV7HesyzHO49cRlWUgP4uiIfwk3BJjcWXA1RgjIHelkb6I5e/tKF+A7q3x3nIvRfDae/N9iZHHaJjkv5a26zkZh15KBX0EHFE8sGMRYPeSAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAG3fbh7nWP3hhCXbzkbM3athr8TYO5DSf+vfko2KGL/CuAIcvnnNDFEcbV6JUVUI/f4r5+ARLQ10taUPDSf6UDAgQDAgEACg4AyBeoBAAAAAkDAAUCbwYAAA==",
   "cluster": "mainnet-beta",
   "full_transaction_note": "This is a test fixture for Token 2022 MintToChecked instruction. Amount: 1,000,000 raw units, 6 decimals = 1.0 tokens.",
@@ -38,4 +38,3 @@
     "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
   }
 }
-

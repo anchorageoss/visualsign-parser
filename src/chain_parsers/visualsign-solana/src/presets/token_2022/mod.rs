@@ -8,6 +8,7 @@ use crate::core::{
 use crate::utils::format_token_amount;
 use config::Token2022Config;
 use solana_sdk::instruction::AccountMeta;
+use spl_token_2022_interface::instruction::TokenInstruction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_number_field, create_raw_data_field, create_text_field};
 use visualsign::{
@@ -68,14 +69,9 @@ fn parse_token_2022_instruction(
     data: &[u8],
     accounts: &[AccountMeta],
 ) -> Result<Token2022Instruction, String> {
-    if data.is_empty() {
-        return Err("Empty instruction data".to_string());
-    }
+    let sdk_instruction = TokenInstruction::unpack(data)
+        .map_err(|e| format!("Failed to parse Token 2022 instruction: {e}"))?;
 
-    // Token 2022 instruction discriminators:
-    // mintToChecked = 14 (0x0E)
-    // burnChecked = 15 (0x0F)
-    let sdk_instruction = TokenInstruction::unpack(data).map_err(|e| format!("Failed to unpack Token 2022 instruction: {}", e))?;
     match sdk_instruction {
         TokenInstruction::MintToChecked { amount, decimals } => {
             if accounts.len() < 3 {
@@ -103,12 +99,7 @@ fn parse_token_2022_instruction(
                 authority: accounts[2].pubkey.to_string(),
             })
         }
-        _ => {
-            let instruction_discriminator = format!("{:?}", sdk_instruction);
-            Err(format!(
-                "Unsupported Token 2022 instruction: {instruction_discriminator}"
-            ))
-        }
+        other => Err(format!("Unsupported Token 2022 instruction: {other:?}")),
     }
 }
 

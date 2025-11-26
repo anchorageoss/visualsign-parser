@@ -1,6 +1,6 @@
 {
   "description": "Token 2022 BurnChecked instruction - burning 500,000 tokens with 9 decimals",
-  "source": "https://solscan.io/tx/example",
+  "source": "http://localnet/tx",
   "signature": "AcNTokOnWozotk+jqg3tnfLJirv+wCjUkZVW548jC/zZ6ixIFSHn0ytH2IS4WhblfAA5Bu6xcKaROzEGTkf2zg0BAAIFtWJBq4hctUN6Co6qxyHR+mzV7HesyzHO49cRlWUgP4uq+ftSJxlCHfdbp8OL9K8GF3sj2OH7CVr566gpsSdZaPDae/N9iZHHaJjkv5a26zkZh15KBX0EHFE8sGMRYPeSAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAG3fbh7nWP3hhCXbzkbM3athr8TYO5DSf+vfko2KGL/KZl8zdww6hyLBn5zofDiQmo+bEtdb9DYpDE/9C1TA3GAgQDAQIACg8A5AtUAgAAAAkDAAUCxgYAAA==",
   "cluster": "mainnet-beta",
   "full_transaction_note": "This is a test fixture for Token 2022 BurnChecked instruction. Amount: 500,000 raw units, 9 decimals = 0.0005 tokens.",
@@ -38,4 +38,3 @@
     "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
   }
 }
-

@@ -9,6 +9,8 @@
 // This file will then be compiled as `tests::fixture_test`
 
 use super::*;
+use crate::core::VisualizerContext;
+use solana_parser::solana::structs::SolanaAccount;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -86,7 +88,6 @@ fn create_instruction_from_fixture(fixture: &TestFixture) -> Instruction {
 }
 
 fn test_real_transaction(fixture_name: &str, test_name: &str) {
-
     let fixture: TestFixture = load_fixture(fixture_name);
     println!("\n=== Testing {test_name} Transaction ===");
     println!("Description: {}", fixture.description);
