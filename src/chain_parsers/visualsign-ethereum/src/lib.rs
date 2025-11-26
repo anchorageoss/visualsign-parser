@@ -13,8 +13,13 @@ use visualsign::{
 };
 
 pub mod chains;
+pub mod context;
 pub mod contracts;
 pub mod fmt;
+pub mod protocols;
+pub mod registry;
+pub mod token_metadata;
+pub mod visualizer;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub enum EthereumParserError {
@@ -107,7 +112,79 @@ impl EthereumTransactionWrapper {
 }
 
 /// Converter that knows how to format Ethereum transactions for VisualSign
-pub struct EthereumVisualSignConverter;
+///
+/// # TODO: Registry Architecture Refactor
+///
+/// The current design has a fundamental issue: the registry is owned by the converter,
+/// but it should be context-based and layered with provenance tracking.
+///
+/// ## Current Problems:
+/// 1. Registry is static per converter instance - can't change per transaction
+/// 2. No way to merge built-in parser registry with wallet-provided ChainMetadata
+/// 3. No provenance tracking - caller can't tell if data came from built-in or wallet
+/// 4. Registry is created at converter initialization, not passed per-request
+///
+/// ## Proper Architecture:
+///
+/// ```ignore
+/// // Registry with source tracking
+/// pub struct RegistrySource {
+///     source: RegistrySourceType,  // Builtin | Wallet
+///     registry: ContractRegistry,
+/// }
+///
+/// pub enum RegistrySourceType {
+///     Builtin,    // Parser's known contracts/tokens
+///     Wallet,     // From ChainMetadata
+/// }
+///
+/// // Layered lookup with provenance
+/// pub struct RegistryLayers {
+///     layers: Vec<RegistrySource>,  // Lookup order matters
+/// }
+///
+/// // Pass via context or options, not owned by converter
+/// pub struct VisualSignOptions {
+///     registries: Option<RegistryLayers>,
+///     // ... other fields
+/// }
+/// ```
+///
+/// ## Benefits of Refactor:
+/// - Wallets can provide ChainMetadata that gets merged transparently
+/// - Different transactions can use different registry combinations
+/// - Caller knows if token/contract info came from built-in or wallet source
+/// - Registry flows through VisualizerContext, enabling protocol-specific lookups
+///
+/// ## Migration Path:
+/// 1. Create RegistryLayers and RegistrySource types
+/// 2. Add optional registries field to VisualSignOptions
+/// 3. Update to_visual_sign_payload to accept options-based registries
+/// 4. Deprecate converter-owned registry field
+/// 5. Update all protocol visualizers to use context-based registry
+pub struct EthereumVisualSignConverter {
+    registry: registry::ContractRegistry,
+}
+
+impl EthereumVisualSignConverter {
+    /// Creates a new converter with a custom registry
+    pub fn with_registry(registry: registry::ContractRegistry) -> Self {
+        Self { registry }
+    }
+
+    /// Creates a new converter with a default registry
+    pub fn new() -> Self {
+        Self {
+            registry: registry::ContractRegistry::default(),
+        }
+    }
+}
+
+impl Default for EthereumVisualSignConverter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConverter {
     fn to_visual_sign_payload(
@@ -116,6 +193,16 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
         options: VisualSignOptions,
     ) -> Result<SignablePayload, VisualSignError> {
         let transaction = transaction_wrapper.inner().clone();
+
+        // Debug trace: Log registry usage for contract/token lookups (future enhancement)
+        if let Some(to) = transaction.to() {
+            if let Some(chain_id) = transaction.chain_id() {
+                let _contract_type = self.registry.get_contract_type(chain_id, to);
+                let _token_symbol = self.registry.get_token_symbol(chain_id, to);
+                // TODO: Use contract_type and token_symbol to enhance visualization
+            }
+        }
+
         let is_supported = match transaction.tx_type() {
             TxType::Eip2930 | TxType::Eip4844 | TxType::Eip7702 => false,
             TxType::Legacy | TxType::Eip1559 => true,
@@ -325,7 +412,7 @@ pub fn transaction_to_visual_sign(
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     let wrapper = EthereumTransactionWrapper::new(transaction);
-    let converter = EthereumVisualSignConverter;
+    let converter = EthereumVisualSignConverter::new();
     converter.to_visual_sign_payload(wrapper, options)
 }
 
@@ -333,7 +420,7 @@ pub fn transaction_string_to_visual_sign(
     transaction_data: &str,
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
-    let converter = EthereumVisualSignConverter;
+    let converter = EthereumVisualSignConverter::new();
     converter.to_visual_sign_payload_from_string(transaction_data, options)
 }
 
