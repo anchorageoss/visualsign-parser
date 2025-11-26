@@ -1,8 +1,8 @@
 use alloy_primitives::Address;
 use std::sync::Arc;
 
-/// Registry for managing contract ABIs and metadata
-pub trait ContractRegistry: Send + Sync {
+/// Backend registry for managing contract ABIs and metadata
+pub trait RegistryBackend: Send + Sync {
     /// Format a token amount using the registry's token information
     fn format_token_amount(&self, amount: u128, decimals: u8) -> String;
 }
@@ -18,7 +18,7 @@ pub struct VisualizerContextParams {
     pub sender: Address,
     pub current_contract: Address,
     pub calldata: Vec<u8>,
-    pub registry: Arc<dyn ContractRegistry>,
+    pub registry: Arc<dyn RegistryBackend>,
     pub visualizers: Arc<dyn VisualizerRegistry>,
 }
 
@@ -36,7 +36,7 @@ pub struct VisualizerContext {
     /// The raw calldata for the current call, shared via Arc
     pub calldata: Arc<[u8]>,
     /// Registry containing contract ABI and metadata
-    pub registry: Arc<dyn ContractRegistry>,
+    pub registry: Arc<dyn RegistryBackend>,
     /// Registry containing contract visualizers
     pub visualizers: Arc<dyn VisualizerRegistry>,
 }
@@ -82,10 +82,10 @@ impl VisualizerContext {
 mod tests {
     use super::*;
 
-    /// Mock implementation of ContractRegistry for testing
-    struct MockContractRegistry;
+    /// Mock implementation of RegistryBackend for testing
+    struct MockRegistryBackend;
 
-    impl ContractRegistry for MockContractRegistry {
+    impl RegistryBackend for MockRegistryBackend {
         fn format_token_amount(&self, amount: u128, decimals: u8) -> String {
             // Use Alloy's format_units utility
             alloy_primitives::utils::format_units(amount, decimals)
@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn test_visualizer_context_creation() {
-        let registry = Arc::new(MockContractRegistry);
+        let registry = Arc::new(MockRegistryBackend);
         let visualizers = Arc::new(MockVisualizerRegistry);
         let sender = "0x1234567890123456789012345678901234567890"
             .parse()
@@ -118,8 +118,7 @@ mod tests {
             registry: registry.clone(),
             visualizers: visualizers.clone(),
         };
-        let context =
-            VisualizerContext::new(params);
+        let context = VisualizerContext::new(params);
 
         assert_eq!(context.chain_id, 1);
         assert_eq!(context.call_depth, 0);
@@ -131,7 +130,7 @@ mod tests {
 
     #[test]
     fn test_visualizer_context_clone() {
-        let registry = Arc::new(MockContractRegistry);
+        let registry = Arc::new(MockRegistryBackend);
         let visualizers = Arc::new(MockVisualizerRegistry);
         let sender = "0x1234567890123456789012345678901234567890"
             .parse()
@@ -149,8 +148,7 @@ mod tests {
             registry: registry.clone(),
             visualizers: visualizers.clone(),
         };
-        let context =
-            VisualizerContext::new(params);
+        let context = VisualizerContext::new(params);
 
         let cloned = context.clone();
 
@@ -169,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_for_nested_call() {
-        let registry = Arc::new(MockContractRegistry);
+        let registry = Arc::new(MockRegistryBackend);
         let visualizers = Arc::new(MockVisualizerRegistry);
         let sender = "0x1234567890123456789012345678901234567890"
             .parse()
@@ -203,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_format_token_amount() {
-        let registry = Arc::new(MockContractRegistry);
+        let registry = Arc::new(MockRegistryBackend);
         let visualizers = Arc::new(MockVisualizerRegistry);
 
         let params = VisualizerContextParams {
@@ -233,7 +231,7 @@ mod tests {
 
     #[test]
     fn test_nested_call_increments_depth() {
-        let registry = Arc::new(MockContractRegistry);
+        let registry = Arc::new(MockRegistryBackend);
         let visualizers = Arc::new(MockVisualizerRegistry);
         let contract1 = "0xabcdefabcdefabcdefabcdefabcdefabcdefabce"
             .parse()

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 /// Standard for ERC token types
@@ -71,8 +71,8 @@ pub enum TokenMetadataError {
 impl std::fmt::Display for TokenMetadataError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TokenMetadataError::UnknownNetworkId(id) => write!(f, "Unknown network ID: {}", id),
-            TokenMetadataError::HashError(msg) => write!(f, "Hash error: {}", msg),
+            TokenMetadataError::UnknownNetworkId(id) => write!(f, "Unknown network ID: {id}"),
+            TokenMetadataError::HashError(msg) => write!(f, "Hash error: {msg}"),
         }
     }
 }
@@ -137,7 +137,7 @@ pub fn compute_metadata_hash(protobuf_bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(protobuf_bytes);
     let hash = hasher.finalize();
-    format!("{:x}", hash)
+    format!("{hash:x}")
 }
 
 #[cfg(test)]

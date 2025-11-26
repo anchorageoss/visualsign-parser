@@ -107,7 +107,7 @@ use crate::registry::ContractRegistry;
 let mut registry = ContractRegistry::new();
 
 // Register token with metadata
-registry.register_token(1, token_metadata);
+registry.register_token(1, token_metadata)?;
 
 // Get token symbol
 let symbol = registry.get_token_symbol(1, address);
@@ -124,16 +124,17 @@ registry.load_chain_metadata(&chain_metadata)?;
 The `VisualizerContext` provides execution context for transaction visualization:
 
 ```rust
-use crate::context::VisualizerContext;
+use crate::context::{VisualizerContext, VisualizerContextParams};
 
-let context = VisualizerContext::new(
+let params = VisualizerContextParams {
     chain_id,
-    sender_address,
-    contract_address,
+    sender: sender_address,
+    current_contract: contract_address,
     calldata,
     registry,
     visualizers,
-);
+};
+let context = VisualizerContext::new(params);
 
 // Create nested call context
 let nested = context.for_nested_call(nested_contract, nested_calldata);

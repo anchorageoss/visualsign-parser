@@ -126,7 +126,7 @@ impl EthereumTransactionWrapper {
 ///
 /// ## Proper Architecture:
 ///
-/// ```rust
+/// ```ignore
 /// // Registry with source tracking
 /// pub struct RegistrySource {
 ///     source: RegistrySourceType,  // Builtin | Wallet
