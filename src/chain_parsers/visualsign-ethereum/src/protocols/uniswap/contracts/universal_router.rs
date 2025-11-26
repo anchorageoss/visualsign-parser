@@ -106,8 +106,8 @@ impl UniversalRouterVisualizer {
     pub fn visualize_tx_commands(
         &self,
         input: &[u8],
-        chain_id: u64,
-        registry: Option<&ContractRegistry>,
+        _chain_id: u64,
+        _registry: Option<&ContractRegistry>,
     ) -> Option<SignablePayloadField> {
         if input.len() < 4 {
             return None;
@@ -269,7 +269,10 @@ mod tests {
 
     #[test]
     fn test_visualize_tx_commands_empty_input() {
-        assert_eq!(UniversalRouterVisualizer {}.visualize_tx_commands(&[], 1, None), None);
+        assert_eq!(
+            UniversalRouterVisualizer {}.visualize_tx_commands(&[], 1, None),
+            None
+        );
         assert_eq!(
             UniversalRouterVisualizer {}.visualize_tx_commands(&[0x01, 0x02, 0x03], 1, None),
             None
@@ -280,7 +283,10 @@ mod tests {
     fn test_visualize_tx_commands_invalid_deadline() {
         // deadline is not convertible to i64 (u64::MAX)
         let input = encode_execute_call(&[0x00], vec![vec![0x01, 0x02]], u64::MAX);
-        assert_eq!(UniversalRouterVisualizer {}.visualize_tx_commands(&input, 1, None), None);
+        assert_eq!(
+            UniversalRouterVisualizer {}.visualize_tx_commands(&input, 1, None),
+            None
+        );
     }
 
     #[test]

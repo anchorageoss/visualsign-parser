@@ -15,8 +15,8 @@
 //! Currently, only V1.2 is implemented. Future versions should be added as separate
 //! contract type markers below.
 
-use alloy_primitives::Address;
 use crate::registry::ContractType;
+use alloy_primitives::Address;
 
 /// Contract type marker for Uniswap Universal Router V1.2
 ///

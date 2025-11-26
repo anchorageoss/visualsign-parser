@@ -31,10 +31,7 @@ pub fn register(
 
     // Register Universal Router on all supported chains
     for &chain_id in UniswapConfig::universal_router_chains() {
-        contract_reg.register_contract_typed::<UniswapUniversalRouter>(
-            chain_id,
-            vec![address],
-        );
+        contract_reg.register_contract_typed::<UniswapUniversalRouter>(chain_id, vec![address]);
     }
 
     // TODO: Register visualizers once we implement ContractVisualizer for UniswapV4Visualizer
@@ -45,9 +42,9 @@ pub fn register(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Address;
     use crate::protocols::uniswap::config::UniswapUniversalRouter;
     use crate::registry::ContractType;
+    use alloy_primitives::Address;
 
     #[test]
     fn test_register_uniswap_contracts() {
@@ -64,10 +61,9 @@ mod tests {
         for chain_id in [1, 10, 137, 8453, 42161] {
             let contract_type = contract_reg
                 .get_contract_type(chain_id, universal_router_address)
-                .expect(&format!(
-                    "Universal Router should be registered on chain {}",
-                    chain_id
-                ));
+                .unwrap_or_else(|| {
+                    panic!("Universal Router should be registered on chain {chain_id}")
+                });
             assert_eq!(contract_type, UniswapUniversalRouter::short_type_id());
         }
     }

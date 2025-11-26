@@ -7,7 +7,7 @@
 
 #![allow(unused_imports)]
 
-use alloy_sol_types::{sol, SolCall};
+use alloy_sol_types::{SolCall, sol};
 use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2};
 
 // Simplified V4 PoolManager interface

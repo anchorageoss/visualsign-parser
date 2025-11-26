@@ -6,7 +6,7 @@
 
 #![allow(unused_imports)]
 
-use alloy_sol_types::{sol, SolCall};
+use alloy_sol_types::{SolCall, sol};
 use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2};
 
 // ERC-721 interface

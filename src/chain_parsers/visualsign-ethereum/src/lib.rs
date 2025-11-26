@@ -208,7 +208,11 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
             TxType::Legacy | TxType::Eip1559 => true,
         };
         if is_supported {
-            return Ok(convert_to_visual_sign_payload(transaction, options, &self.registry));
+            return Ok(convert_to_visual_sign_payload(
+                transaction,
+                options,
+                &self.registry,
+            ));
         }
         Err(VisualSignError::DecodeError(format!(
             "Unsupported transaction type: {}",
@@ -557,7 +561,12 @@ mod tests {
         let payload = transaction_to_visual_sign(tx, options).unwrap();
 
         // Check that contract call data field is present (FallbackVisualizer)
-        assert!(payload.fields.iter().any(|f| f.label() == "Contract Call Data"));
+        assert!(
+            payload
+                .fields
+                .iter()
+                .any(|f| f.label() == "Contract Call Data")
+        );
         let input_field = payload
             .fields
             .iter()
