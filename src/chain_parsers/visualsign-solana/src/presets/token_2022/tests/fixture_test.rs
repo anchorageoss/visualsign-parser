@@ -15,6 +15,8 @@ use solana_sdk::{
 };
 use std::str::FromStr;
 use visualsign::SignablePayloadField;
+use crate::core::VisualizerContext;
+use solana_parser::solana::structs::SolanaAccount;
 
 #[derive(Debug, serde::Deserialize)]
 struct TestFixture {
@@ -29,7 +31,10 @@ struct TestFixture {
     instruction_data: String,
     program_id: String,
     accounts: Vec<TestAccount>,
-    expected_fields: serde_json::Map<String, serde_json::Value>,
+    #[serde(default)]
+    expected_fields: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default)]
+    expected_error: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -81,8 +86,6 @@ fn create_instruction_from_fixture(fixture: &TestFixture) -> Instruction {
 }
 
 fn test_real_transaction(fixture_name: &str, test_name: &str) {
-    use crate::core::VisualizerContext;
-    use solana_parser::solana::structs::SolanaAccount;
 
     let fixture: TestFixture = load_fixture(fixture_name);
     println!("\n=== Testing {test_name} Transaction ===");
@@ -109,6 +112,26 @@ fn test_real_transaction(fixture_name: &str, test_name: &str) {
 
     // Visualize
     let visualizer = Token2022Visualizer;
+    
+    // Check if this is an unhappy path test (expected to fail)
+    if let Some(expected_error) = &fixture.expected_error {
+        let result = visualizer.visualize_tx_commands(&context);
+        assert!(
+            result.is_err(),
+            "Expected error for unsupported instruction, but parsing succeeded"
+        );
+        let error_msg = result.unwrap_err().to_string();
+        // The error message is wrapped, so check if it contains the expected text
+        assert!(
+            error_msg.contains(expected_error),
+            "Expected error message to contain '{}', but got: {}",
+            expected_error,
+            error_msg
+        );
+        println!("✓ Correctly rejected unsupported instruction: {}", error_msg);
+        return;
+    }
+    
     let result = visualizer
         .visualize_tx_commands(&context)
         .expect("Failed to visualize instruction");
@@ -145,7 +168,8 @@ fn test_real_transaction(fixture_name: &str, test_name: &str) {
 
         // Validate against expected fields
         println!("\n=== Validation ===");
-        for (key, expected_value) in &fixture.expected_fields {
+        let expected_fields = fixture.expected_fields.as_ref().expect("Expected fields not provided for happy path test");
+        for (key, expected_value) in expected_fields {
             let expected_str = expected_value
                 .as_str()
                 .unwrap_or_else(|| panic!("Expected field '{key}' is not a string"));
@@ -243,3 +267,10 @@ fn test_mint_to_checked_real_transaction() {
 fn test_burn_checked_real_transaction() {
     test_real_transaction("burn_checked", "BurnChecked");
 }
+
+#[test]
+fn test_transfer_checked_unsupported() {
+    test_real_transaction("transfer_checked", "TransferChecked (Unsupported)");
+}
+
+

@@ -14,6 +14,7 @@ use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
 };
+use spl_token_2022::instruction::TokenInstruction;
 
 static TOKEN_2022_CONFIG: Token2022Config = Token2022Config;
 
@@ -74,21 +75,9 @@ fn parse_token_2022_instruction(
     // Token 2022 instruction discriminators:
     // mintToChecked = 14 (0x0E)
     // burnChecked = 15 (0x0F)
-    match data[0] {
-        14 => {
-            // mintToChecked instruction format:
-            // [0] instruction discriminator (14)
-            // [1-8] amount (u64, little-endian)
-            // [9] decimals (u8)
-            if data.len() < 10 {
-                return Err("Invalid mintToChecked instruction: insufficient data".to_string());
-            }
-
-            let amount = u64::from_le_bytes([
-                data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8],
-            ]);
-            let decimals = data[9];
-
+    let sdk_instruction = TokenInstruction::unpack(data).map_err(|e| format!("Failed to unpack Token 2022 instruction: {}", e))?;
+    match sdk_instruction {
+        TokenInstruction::MintToChecked { amount, decimals } => {
             if accounts.len() < 3 {
                 return Err("Invalid mintToChecked: insufficient accounts".to_string());
             }
@@ -101,20 +90,7 @@ fn parse_token_2022_instruction(
                 mint_authority: accounts[2].pubkey.to_string(),
             })
         }
-        15 => {
-            // burnChecked instruction format:
-            // [0] instruction discriminator (15)
-            // [1-8] amount (u64, little-endian)
-            // [9] decimals (u8)
-            if data.len() < 10 {
-                return Err("Invalid burnChecked instruction: insufficient data".to_string());
-            }
-
-            let amount = u64::from_le_bytes([
-                data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8],
-            ]);
-            let decimals = data[9];
-
+        TokenInstruction::BurnChecked { amount, decimals } => {
             if accounts.len() < 3 {
                 return Err("Invalid burnChecked: insufficient accounts".to_string());
             }
@@ -128,7 +104,7 @@ fn parse_token_2022_instruction(
             })
         }
         _ => {
-            let instruction_discriminator = data[0];
+            let instruction_discriminator = format!("{:?}", sdk_instruction);
             Err(format!(
                 "Unsupported Token 2022 instruction: {instruction_discriminator}"
             ))
