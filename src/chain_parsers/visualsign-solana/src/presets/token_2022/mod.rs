@@ -127,7 +127,10 @@ fn parse_token_2022_instruction(
                 authority: accounts[2].pubkey.to_string(),
             })
         }
-        _ => Err(format!("Unsupported Token 2022 instruction: {}", data[0])),
+        _ => {
+            let instruction_discriminator = data[0];
+            Err(format!("Unsupported Token 2022 instruction: {instruction_discriminator}"))
+        }
     }
 }
 
@@ -145,7 +148,7 @@ fn create_token_2022_preview_layout(
             mint_authority,
         } => {
             let formatted_amount = format_token_amount(*amount, *decimals);
-            let title = format!("Mint To Checked: {} tokens", formatted_amount);
+            let title = format!("Mint To Checked: {formatted_amount} tokens");
 
             let condensed = vec![
                 create_text_field("Action", "Mint To Checked")?,
@@ -174,7 +177,7 @@ fn create_token_2022_preview_layout(
             authority,
         } => {
             let formatted_amount = format_token_amount(*amount, *decimals);
-            let title = format!("Burn Checked: {} tokens", formatted_amount);
+            let title = format!("Burn Checked: {formatted_amount} tokens");
 
             let condensed = vec![
                 create_text_field("Action", "Burn Checked")?,
@@ -217,11 +220,14 @@ fn create_token_2022_preview_layout(
         dynamic_annotation: None,
         signable_payload_field: SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
-                label: format!("Instruction {}", context.instruction_index() + 1),
-                fallback_text: format!(
-                    "Token 2022: {}\nProgram ID: {}",
-                    title, instruction.program_id
-                ),
+                label: {
+                    let instruction_num = context.instruction_index() + 1;
+                    format!("Instruction {instruction_num}")
+                },
+                fallback_text: {
+                    let program_id = instruction.program_id;
+                    format!("Token 2022: {title}\nProgram ID: {program_id}")
+                },
             },
             preview_layout,
         },
