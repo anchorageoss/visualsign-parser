@@ -31,7 +31,7 @@ impl FallbackVisualizer {
         SignablePayloadField::TextV2 {
             common: SignablePayloadFieldCommon {
                 fallback_text: hex_data.clone(),
-                label: "Contract Call Data".to_string(),
+                label: "Input Data".to_string(),
             },
             text_v2: SignablePayloadFieldTextV2 { text: hex_data },
         }
@@ -70,7 +70,7 @@ mod tests {
         match field {
             SignablePayloadField::TextV2 { text_v2, common } => {
                 assert_eq!(text_v2.text, "0x12345678abcdef");
-                assert_eq!(common.label, "Contract Call Data");
+                assert_eq!(common.label, "Input Data");
             }
             _ => panic!("Expected TextV2 field"),
         }

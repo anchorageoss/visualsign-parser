@@ -560,17 +560,12 @@ mod tests {
         let options = VisualSignOptions::default();
         let payload = transaction_to_visual_sign(tx, options).unwrap();
 
-        // Check that contract call data field is present (FallbackVisualizer)
-        assert!(
-            payload
-                .fields
-                .iter()
-                .any(|f| f.label() == "Contract Call Data")
-        );
+        // Check that input data field is present (FallbackVisualizer)
+        assert!(payload.fields.iter().any(|f| f.label() == "Input Data"));
         let input_field = payload
             .fields
             .iter()
-            .find(|f| f.label() == "Contract Call Data")
+            .find(|f| f.label() == "Input Data")
             .unwrap();
         if let SignablePayloadField::TextV2 { text_v2, .. } = input_field {
             assert_eq!(text_v2.text, "0x12345678");
