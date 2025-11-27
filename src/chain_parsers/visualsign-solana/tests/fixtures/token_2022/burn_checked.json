@@ -1,0 +1,40 @@
+{
+  "description": "Token 2022 BurnChecked instruction - burning 500,000 tokens with 9 decimals",
+  "source": "http://localnet/tx",
+  "signature": "AcNTokOnWozotk+jqg3tnfLJirv+wCjUkZVW548jC/zZ6ixIFSHn0ytH2IS4WhblfAA5Bu6xcKaROzEGTkf2zg0BAAIFtWJBq4hctUN6Co6qxyHR+mzV7HesyzHO49cRlWUgP4uq+ftSJxlCHfdbp8OL9K8GF3sj2OH7CVr566gpsSdZaPDae/N9iZHHaJjkv5a26zkZh15KBX0EHFE8sGMRYPeSAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAG3fbh7nWP3hhCXbzkbM3athr8TYO5DSf+vfko2KGL/KZl8zdww6hyLBn5zofDiQmo+bEtdb9DYpDE/9C1TA3GAgQDAQIACg8A5AtUAgAAAAkDAAUCxgYAAA==",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "This is a test fixture for Token 2022 BurnChecked instruction. Amount: 500,000 raw units, 9 decimals = 0.0005 tokens.",
+  "instruction_index": 0,
+  "instruction_data": "rJ2MEcBsXsr1v",
+  "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "accounts": [
+    {
+      "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      "signer": false,
+      "writable": true,
+      "description": "Token account to burn from"
+    },
+    {
+      "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "signer": false,
+      "writable": true,
+      "description": "Mint account"
+    },
+    {
+      "pubkey": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+      "signer": true,
+      "writable": false,
+      "description": "Authority"
+    }
+  ],
+  "expected_fields": {
+    "instruction": "Burn Checked",
+    "amount": "0.0005",
+    "raw_amount": "500000",
+    "decimals": "9",
+    "token_account": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "authority": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  }
+}

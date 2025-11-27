@@ -3,4 +3,5 @@ pub mod compute_budget;
 pub mod jupiter_swap;
 pub mod stakepool;
 pub mod system;
+pub mod token_2022;
 pub mod unknown_program;

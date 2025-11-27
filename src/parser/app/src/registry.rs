@@ -7,9 +7,11 @@
 #[must_use]
 pub fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
     let mut registry = visualsign::registry::TransactionConverterRegistry::new();
+    // TODO: Create a ChainRegistry trait that all chains can implement for token metadata,
+    // contract types, etc. Currently only Ethereum has a ContractRegistry.
     registry.register::<visualsign_ethereum::EthereumTransactionWrapper, _>(
         visualsign::registry::Chain::Ethereum,
-        visualsign_ethereum::EthereumVisualSignConverter,
+        visualsign_ethereum::EthereumVisualSignConverter::new(),
     );
     registry.register::<visualsign_solana::SolanaTransactionWrapper, _>(
         visualsign::registry::Chain::Solana,

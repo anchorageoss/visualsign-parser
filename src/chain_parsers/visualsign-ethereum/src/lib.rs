@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::fmt::{format_ether, format_gwei};
 use alloy_consensus::{Transaction as _, TxType, TypedTransaction};
 use alloy_rlp::{Buf, Decodable};
@@ -6,6 +8,7 @@ use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldAddressV2,
     SignablePayloadFieldAmountV2, SignablePayloadFieldCommon, SignablePayloadFieldTextV2,
     encodings::SupportedEncodings,
+    registry::LayeredRegistry,
     vsptrait::{
         Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
         VisualSignError, VisualSignOptions,
@@ -13,8 +16,13 @@ use visualsign::{
 };
 
 pub mod chains;
+pub mod context;
 pub mod contracts;
 pub mod fmt;
+pub mod protocols;
+pub mod registry;
+pub mod token_metadata;
+pub mod visualizer;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
 pub enum EthereumParserError {
@@ -106,8 +114,61 @@ impl EthereumTransactionWrapper {
     }
 }
 
-/// Converter that knows how to format Ethereum transactions for VisualSign
-pub struct EthereumVisualSignConverter;
+/// Converter that knows how to format Ethereum transactions for VisualSign.
+///
+/// Uses `Arc<ContractRegistry>` for efficient sharing of the global registry across requests.
+/// Per-request wallet metadata is layered on top using `LayeredRegistry`, which checks
+/// the request layer first before falling back to the global registry.
+pub struct EthereumVisualSignConverter {
+    registry: Arc<registry::ContractRegistry>,
+}
+
+impl EthereumVisualSignConverter {
+    /// Creates a new converter with a custom registry wrapped in Arc.
+    pub fn with_registry(registry: Arc<registry::ContractRegistry>) -> Self {
+        Self { registry }
+    }
+
+    /// Creates a new converter with a default registry including all known protocols.
+    pub fn new() -> Self {
+        let (contract_registry, _visualizer_builder) =
+            registry::ContractRegistry::with_default_protocols();
+        Self {
+            registry: Arc::new(contract_registry),
+        }
+    }
+
+    /// Creates a layered registry for the current request.
+    ///
+    /// The global registry is shared via Arc (O(1) clone). If wallet metadata contains
+    /// token information, it's loaded into a request-scoped registry that takes precedence
+    /// during lookups. The request registry is dropped after the request completes.
+    fn create_layered_registry(
+        &self,
+        _options: &VisualSignOptions,
+    ) -> LayeredRegistry<registry::ContractRegistry> {
+        // TODO: When wallet-provided ChainMetadata includes token metadata (not just ABIs),
+        // create a request registry and use LayeredRegistry::with_request:
+        //
+        // if let Some(ref chain_metadata) = options.metadata {
+        //     if let Some(chain_metadata::Metadata::Ethereum(eth_metadata)) = &chain_metadata.metadata {
+        //         let mut request_registry = registry::ContractRegistry::new();
+        //         // Load wallet tokens into request_registry
+        //         // request_registry.load_wallet_tokens(&eth_metadata.tokens)?;
+        //         return LayeredRegistry::with_request(Arc::clone(&self.registry), request_registry);
+        //     }
+        // }
+
+        // No wallet metadata, use global registry only
+        LayeredRegistry::new(Arc::clone(&self.registry))
+    }
+}
+
+impl Default for EthereumVisualSignConverter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConverter {
     fn to_visual_sign_payload(
@@ -116,12 +177,30 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
         options: VisualSignOptions,
     ) -> Result<SignablePayload, VisualSignError> {
         let transaction = transaction_wrapper.inner().clone();
+
+        // Create layered registry: global (Arc-shared) + optional request-scoped wallet data.
+        // Lookups check request layer first, then fall back to global.
+        let layered_registry = self.create_layered_registry(&options);
+
+        // Debug trace: Log registry usage for contract/token lookups (future enhancement)
+        if let Some(to) = transaction.to() {
+            if let Some(chain_id) = transaction.chain_id() {
+                let _contract_type = layered_registry.lookup(|r| r.get_contract_type(chain_id, to));
+                let _token_symbol = layered_registry.lookup(|r| r.get_token_symbol(chain_id, to));
+                // TODO: Use contract_type and token_symbol to enhance visualization
+            }
+        }
+
         let is_supported = match transaction.tx_type() {
             TxType::Eip2930 | TxType::Eip4844 | TxType::Eip7702 => false,
             TxType::Legacy | TxType::Eip1559 => true,
         };
         if is_supported {
-            return Ok(convert_to_visual_sign_payload(transaction, options));
+            return Ok(convert_to_visual_sign_payload(
+                transaction,
+                options,
+                &layered_registry,
+            ));
         }
         Err(VisualSignError::DecodeError(format!(
             "Unsupported transaction type: {}",
@@ -206,6 +285,7 @@ fn decode_transaction(
 fn convert_to_visual_sign_payload(
     transaction: TypedTransaction,
     options: VisualSignOptions,
+    layered_registry: &LayeredRegistry<registry::ContractRegistry>,
 ) -> SignablePayload {
     // Extract chain ID to determine the network
     let chain_id = transaction.chain_id();
@@ -289,26 +369,23 @@ fn convert_to_visual_sign_payload(
     if !input.is_empty() {
         let mut input_fields: Vec<SignablePayloadField> = Vec::new();
         if options.decode_transfers {
-            if let Some(field) = (contracts::erc20::ERC20Visualizer {}).visualize_tx_commands(input)
+            if let Some(field) = (contracts::core::ERC20Visualizer {}).visualize_tx_commands(input)
             {
                 input_fields.push(field);
             }
         }
-        if let Some(field) =
-            (contracts::uniswap::UniswapV4Visualizer {}).visualize_tx_commands(input)
+        if let Some(field) = (protocols::uniswap::UniversalRouterVisualizer {})
+            .visualize_tx_commands(
+                input,
+                chain_id.unwrap_or(1),
+                Some(layered_registry.global()),
+            )
         {
             input_fields.push(field);
         }
         if input_fields.is_empty() {
-            input_fields.push(SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: format!("0x{}", hex::encode(input)),
-                    label: "Input Data".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 {
-                    text: format!("0x{}", hex::encode(input)),
-                },
-            });
+            // Use fallback visualizer for unknown contract calls
+            input_fields.push(contracts::core::FallbackVisualizer::new().visualize_hex(input));
         }
         fields.append(&mut input_fields);
     }
@@ -325,7 +402,7 @@ pub fn transaction_to_visual_sign(
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     let wrapper = EthereumTransactionWrapper::new(transaction);
-    let converter = EthereumVisualSignConverter;
+    let converter = EthereumVisualSignConverter::new();
     converter.to_visual_sign_payload(wrapper, options)
 }
 
@@ -333,7 +410,7 @@ pub fn transaction_string_to_visual_sign(
     transaction_data: &str,
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
-    let converter = EthereumVisualSignConverter;
+    let converter = EthereumVisualSignConverter::new();
     converter.to_visual_sign_payload_from_string(transaction_data, options)
 }
 
@@ -475,7 +552,7 @@ mod tests {
         let options = VisualSignOptions::default();
         let payload = transaction_to_visual_sign(tx, options).unwrap();
 
-        // Check that input data field is present
+        // Check that input data field is present (FallbackVisualizer)
         assert!(payload.fields.iter().any(|f| f.label() == "Input Data"));
         let input_field = payload
             .fields

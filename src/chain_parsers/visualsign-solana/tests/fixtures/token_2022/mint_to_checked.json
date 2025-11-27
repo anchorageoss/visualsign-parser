@@ -1,0 +1,40 @@
+{
+  "description": "Token 2022 MintToChecked instruction - minting 1,000,000 tokens with 6 decimals",
+  "source": "http://localnet/tx",
+  "signature": "AX4hGLPOpFsZpSowGaVvAk5q4n7TkTyJWEX3YPaNjr9vpsw/fA/+ssJ/R6XQ6nKND3uZwWxet8TwwuMjnGf0JA8BAAIFtWJBq4hctUN6Co6qxyHR+mzV7HesyzHO49cRlWUgP4uiIfwk3BJjcWXA1RgjIHelkb6I5e/tKF+A7q3x3nIvRfDae/N9iZHHaJjkv5a26zkZh15KBX0EHFE8sGMRYPeSAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAG3fbh7nWP3hhCXbzkbM3athr8TYO5DSf+vfko2KGL/CuAIcvnnNDFEcbV6JUVUI/f4r5+ARLQ10taUPDSf6UDAgQDAgEACg4AyBeoBAAAAAkDAAUCbwYAAA==",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "This is a test fixture for Token 2022 MintToChecked instruction. Amount: 1,000,000 raw units, 6 decimals = 1.0 tokens.",
+  "instruction_index": 0,
+  "instruction_data": "oSNwHdcqW8m6D",
+  "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "accounts": [
+    {
+      "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "signer": false,
+      "writable": true,
+      "description": "Mint account"
+    },
+    {
+      "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      "signer": false,
+      "writable": true,
+      "description": "Destination token account"
+    },
+    {
+      "pubkey": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+      "signer": true,
+      "writable": false,
+      "description": "Mint authority"
+    }
+  ],
+  "expected_fields": {
+    "instruction": "Mint To Checked",
+    "amount": "1",
+    "raw_amount": "1000000",
+    "decimals": "6",
+    "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "destination_account": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    "mint_authority": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  }
+}

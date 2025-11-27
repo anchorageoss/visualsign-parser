@@ -1,0 +1,38 @@
+{
+  "description": "Token 2022 TransferChecked instruction - transferring tokens with decimals check (UNSUPPORTED - should fail)",
+  "source": "https://solscan.io/tx/pDxnsJ8RAucAfGKD54D9khP1GShcUQehyqAEhwbdogbxsD3UGdH2iFpyV2FXHDjV84WSvdXhrWYfW6vfjwy1vSe",
+  "signature": "pDxnsJ8RAucAfGKD54D9khP1GShcUQehyqAEhwbdogbxsD3UGdH2iFpyV2FXHDjV84WSvdXhrWYfW6vfjwy1vSe",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "This is a test fixture for Token 2022 TransferChecked instruction from a real mainnet transaction. Amount: 50,000,000 tokens (50000000000000000 raw units, 9 decimals). This instruction is NOT YET SUPPORTED and should fail parsing with an appropriate error message.",
+  "instruction_index": 0,
+  "instruction_data": "g6x5zqCAw5JB2",
+  "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "accounts": [
+    {
+      "pubkey": "FzHhqxHPNXrzoNRwVmDRcNprTcx5YAdLyuRNC5FYthi8",
+      "signer": false,
+      "writable": true,
+      "description": "Source token account"
+    },
+    {
+      "pubkey": "pc3gLpoZCe79SZAbABtes2fiWAaiTJuTk9NsNxR2ZSj",
+      "signer": false,
+      "writable": false,
+      "description": "Mint account"
+    },
+    {
+      "pubkey": "BE5Mi1nnQzxpuRWUUvWjEjsjB7sHGPNhS7TDM9PAR56j",
+      "signer": false,
+      "writable": true,
+      "description": "Destination token account"
+    },
+    {
+      "pubkey": "J46G7r1XKDyyw1sFzh8EPPf4nCxewBxudJNLojGnPLVS",
+      "signer": true,
+      "writable": false,
+      "description": "Authority (multisig)"
+    }
+  ],
+  "expected_error": "Unsupported Token 2022 instruction: TransferChecked"
+}
+
