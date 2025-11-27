@@ -196,21 +196,28 @@ impl TransactionConverterRegistry {
 /// The global registry is shared via `Arc` (O(1) clone), while wallet-provided
 /// data is owned and dropped after the request completes.
 ///
-/// # Usage Pattern
+/// # Example
 ///
-/// ```ignore
+/// ```
+/// use std::sync::Arc;
+/// use std::collections::HashMap;
+/// use visualsign::registry::LayeredRegistry;
+///
 /// // Global registry created once at startup
-/// let global = Arc::new(MyRegistry::with_defaults());
+/// let mut global_data = HashMap::new();
+/// global_data.insert("USDC", 6u8);
+/// global_data.insert("WETH", 18u8);
+/// let global = Arc::new(global_data);
 ///
-/// // Per-request: create layered registry with optional wallet data
-/// let layered = if let Some(wallet_data) = request.wallet_metadata {
-///     LayeredRegistry::with_request(Arc::clone(&global), wallet_data)
-/// } else {
-///     LayeredRegistry::new(Arc::clone(&global))
-/// };
+/// // Request with wallet-provided data that overrides global
+/// let mut wallet_data = HashMap::new();
+/// wallet_data.insert("USDC", 8u8); // Wallet says USDC has 8 decimals
+/// let layered = LayeredRegistry::with_request(Arc::clone(&global), wallet_data);
 ///
-/// // Use layered registry for lookups (checks request first, then global)
-/// let symbol = layered.lookup(|r| r.get_token_symbol(chain_id, address));
+/// // Lookup checks request first, then falls back to global
+/// assert_eq!(layered.lookup(|r| r.get("USDC").copied()), Some(8)); // From wallet
+/// assert_eq!(layered.lookup(|r| r.get("WETH").copied()), Some(18)); // From global
+/// assert_eq!(layered.lookup(|r| r.get("DAI").copied()), None); // Not found
 /// ```
 ///
 /// # Type Parameter
@@ -261,8 +268,17 @@ impl<R> LayeredRegistry<R> {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// let symbol = layered.lookup(|r| r.get_token_symbol(chain_id, address));
+    /// ```
+    /// use std::sync::Arc;
+    /// use std::collections::HashMap;
+    /// use visualsign::registry::LayeredRegistry;
+    ///
+    /// let mut global = HashMap::new();
+    /// global.insert("token", "USDC");
+    /// let layered = LayeredRegistry::new(Arc::new(global));
+    ///
+    /// let symbol = layered.lookup(|r| r.get("token").copied());
+    /// assert_eq!(symbol, Some("USDC"));
     /// ```
     pub fn lookup<T, F>(&self, f: F) -> Option<T>
     where
@@ -288,8 +304,9 @@ impl<R> LayeredRegistry<R> {
     {
         // Check request layer first
         if let Some(ref request) = self.request {
-            if let ok @ Ok(_) = f(request) {
-                return ok;
+            let result = f(request);
+            if result.is_ok() {
+                return result;
             }
         }
         // Fall back to global

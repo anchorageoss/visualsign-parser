@@ -146,11 +146,11 @@ pub fn register_all(
 
 ## Visualization Pipeline
 
-1. **Transaction Parsing** ([lib.rs:89](src/lib.rs#L89))
+1. **Transaction Parsing** (`decode_transaction()` / `EthereumTransactionWrapper::from_string()`)
    - Parse RLP-encoded transaction
    - Extract chain_id, to, value, input data
 
-2. **Contract Type Lookup** ([lib.rs:198](src/lib.rs#L198))
+2. **Contract Type Lookup** (`EthereumVisualSignConverter::to_visual_sign_payload()`)
    - Query `ContractRegistry` with (chain_id, to_address)
    - Get contract type string (e.g., "Uniswap_UniversalRouter")
 
@@ -158,7 +158,7 @@ pub fn register_all(
    - Query `EthereumVisualizerRegistry` with contract type
    - Invoke visualizer's `visualize()` method
 
-4. **Fallback Visualization** ([lib.rs:389](src/lib.rs#L389))
+4. **Fallback Visualization** (`convert_to_visual_sign_payload()`)
    - If no specific visualizer handles the call
    - Use `FallbackVisualizer` to display raw hex
 
@@ -357,7 +357,7 @@ impl ContractVisualizer for UniswapUniversalRouterVisualizer {
 ```
 
 ### 2. Registry Architecture Refactor
-See [lib.rs:116-164](src/lib.rs#L116) for detailed TODO about moving registries from converter ownership to context-based passing.
+See `EthereumVisualSignConverter::create_layered_registry()` for detailed TODO about moving registries from converter ownership to context-based passing.
 
 ### 3. Protocol Version Support
 Each protocol should support multiple versions:

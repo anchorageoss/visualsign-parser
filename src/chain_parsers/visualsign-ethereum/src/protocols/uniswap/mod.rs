@@ -34,9 +34,9 @@ pub fn register(
         contract_reg.register_contract_typed::<UniswapUniversalRouter>(chain_id, vec![address]);
     }
 
-    // TODO: Register visualizers once we implement ContractVisualizer for UniswapV4Visualizer
+    // TODO: Register visualizers once we implement ContractVisualizer for UniversalRouterVisualizer
     // For now, we just register the contract addresses
-    // Future: visualizer_reg.register(Box::new(UniswapUniversalRouterVisualizer::new()));
+    // Future: visualizer_reg.register(Box::new(UniversalRouterVisualizer::new()));
 }
 
 #[cfg(test)]

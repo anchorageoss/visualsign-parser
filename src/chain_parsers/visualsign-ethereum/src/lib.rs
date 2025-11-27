@@ -131,8 +131,10 @@ impl EthereumVisualSignConverter {
 
     /// Creates a new converter with a default registry including all known protocols.
     pub fn new() -> Self {
+        let (contract_registry, _visualizer_builder) =
+            registry::ContractRegistry::with_default_protocols();
         Self {
-            registry: Arc::new(registry::ContractRegistry::with_default_protocols()),
+            registry: Arc::new(contract_registry),
         }
     }
 

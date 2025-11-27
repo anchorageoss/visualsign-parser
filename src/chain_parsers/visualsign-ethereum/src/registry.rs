@@ -74,11 +74,15 @@ impl ContractRegistry {
     ///
     /// This is the recommended way to create a ContractRegistry with
     /// built-in support for known protocols like Uniswap, Aave, etc.
-    pub fn with_default_protocols() -> Self {
+    ///
+    /// Returns both the ContractRegistry and EthereumVisualizerRegistryBuilder since
+    /// protocol registration populates both registries. Discarding either would be wasteful.
+    pub fn with_default_protocols() -> (Self, crate::visualizer::EthereumVisualizerRegistryBuilder)
+    {
         let mut registry = Self::new();
         let mut visualizer_builder = crate::visualizer::EthereumVisualizerRegistryBuilder::new();
         crate::protocols::register_all(&mut registry, &mut visualizer_builder);
-        registry
+        (registry, visualizer_builder)
     }
 
     /// Registers a contract type on a specific chain (type-safe version)
