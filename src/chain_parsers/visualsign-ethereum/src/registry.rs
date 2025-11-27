@@ -5,6 +5,41 @@ use std::collections::HashMap;
 /// Type alias for chain ID to avoid depending on external chain types
 pub type ChainId = u64;
 
+/// Trait for contract type markers
+///
+/// Implement this trait on unit structs to create compile-time unique contract type identifiers.
+/// The type name is automatically used as the contract type string.
+///
+/// # Example
+/// ```ignore
+/// pub struct UniswapUniversalRouter;
+/// impl ContractType for UniswapUniversalRouter {}
+///
+/// // The type_id is automatically "UniswapUniversalRouter"
+/// ```
+///
+/// # Compile-time Uniqueness
+/// Because Rust doesn't allow duplicate type names in the same scope, this provides
+/// compile-time guarantees that contract types are unique. If someone copies a protocol
+/// directory and forgets to rename the type, the code won't compile.
+pub trait ContractType: 'static {
+    /// Returns the unique identifier for this contract type
+    ///
+    /// By default, uses the Rust type name. Can be overridden for custom strings.
+    fn type_id() -> &'static str {
+        std::any::type_name::<Self>()
+    }
+
+    /// Returns a shortened type ID without module path
+    ///
+    /// Strips the module path to get just the struct name.
+    /// Example: "visualsign_ethereum::protocols::uniswap::UniswapUniversalRouter" -> "UniswapUniversalRouter"
+    fn short_type_id() -> &'static str {
+        let full_name = Self::type_id();
+        full_name.rsplit("::").next().unwrap_or(full_name)
+    }
+}
+
 /// Registry for managing Ethereum contract types and token metadata
 ///
 /// Maintains two types of mappings:
@@ -15,6 +50,7 @@ pub type ChainId = u64;
 /// Extract a ChainRegistry trait that all chains can implement for handling token metadata,
 /// contract types, and other chain-specific information. This will allow Solana, Tron, Sui,
 /// and other chains to use the same interface pattern.
+#[derive(Clone)]
 pub struct ContractRegistry {
     /// Maps (chain_id, address) to contract type
     address_to_type: HashMap<(ChainId, Address), String>,
@@ -34,7 +70,57 @@ impl ContractRegistry {
         }
     }
 
-    /// Registers a contract type on a specific chain
+    /// Creates a new registry with default protocols registered
+    ///
+    /// This is the recommended way to create a ContractRegistry with
+    /// built-in support for known protocols like Uniswap, Aave, etc.
+    ///
+    /// Returns both the ContractRegistry and EthereumVisualizerRegistryBuilder since
+    /// protocol registration populates both registries. Discarding either would be wasteful.
+    pub fn with_default_protocols() -> (Self, crate::visualizer::EthereumVisualizerRegistryBuilder)
+    {
+        let mut registry = Self::new();
+        let mut visualizer_builder = crate::visualizer::EthereumVisualizerRegistryBuilder::new();
+        crate::protocols::register_all(&mut registry, &mut visualizer_builder);
+        (registry, visualizer_builder)
+    }
+
+    /// Registers a contract type on a specific chain (type-safe version)
+    ///
+    /// This is the preferred method for registering contracts. It uses the ContractType
+    /// trait to ensure compile-time uniqueness of contract type identifiers.
+    ///
+    /// # Arguments
+    /// * `chain_id` - The chain ID (1 for Ethereum, 137 for Polygon, etc.)
+    /// * `addresses` - List of contract addresses on this chain
+    ///
+    /// # Example
+    /// ```ignore
+    /// pub struct UniswapUniversalRouter;
+    /// impl ContractType for UniswapUniversalRouter {}
+    ///
+    /// registry.register_contract_typed::<UniswapUniversalRouter>(1, vec![address]);
+    /// ```
+    pub fn register_contract_typed<T: ContractType>(
+        &mut self,
+        chain_id: ChainId,
+        addresses: Vec<Address>,
+    ) {
+        let contract_type_str = T::short_type_id().to_string();
+
+        for address in &addresses {
+            self.address_to_type
+                .insert((chain_id, *address), contract_type_str.clone());
+        }
+
+        self.type_to_addresses
+            .insert((chain_id, contract_type_str), addresses);
+    }
+
+    /// Registers a contract type on a specific chain (string version)
+    ///
+    /// This method is kept for backward compatibility and dynamic registration.
+    /// Prefer `register_contract_typed` for compile-time safety.
     ///
     /// # Arguments
     /// * `chain_id` - The chain ID (1 for Ethereum, 137 for Polygon, etc.)
@@ -153,14 +239,23 @@ impl ContractRegistry {
     /// * `chain_metadata` - Reference to ChainMetadata containing token information
     ///
     /// # Returns
-    /// `Ok(())` on success, `Err(String)` if network_id is unknown
+    /// `Ok(())` on success, `Err(String)` if network_id is unknown or any token registration fails
     pub fn load_chain_metadata(&mut self, chain_metadata: &ChainMetadata) -> Result<(), String> {
         let chain_id = parse_network_id(&chain_metadata.network_id).map_err(|e| e.to_string())?;
 
-        for token_metadata in chain_metadata.assets.values() {
-            self.register_token(chain_id, token_metadata.clone())?;
+        let errors: Vec<String> = chain_metadata
+            .assets
+            .values()
+            .filter_map(|token_metadata| {
+                self.register_token(chain_id, token_metadata.clone()).err()
+            })
+            .collect();
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
         }
-        Ok(())
     }
 }
 
@@ -514,5 +609,81 @@ mod tests {
             poly_result,
             Some(("1.000000".to_string(), "USDC".to_string()))
         );
+    }
+
+    #[test]
+    fn test_load_chain_metadata_with_invalid_addresses() {
+        let mut registry = ContractRegistry::new();
+
+        let mut assets = HashMap::new();
+        // Valid token
+        assets.insert(
+            "USDC".to_string(),
+            create_token_metadata(
+                "USDC",
+                "USD Coin",
+                "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                6,
+            ),
+        );
+        // Invalid address - too short
+        assets.insert(
+            "BAD1".to_string(),
+            TokenMetadata {
+                symbol: "BAD1".to_string(),
+                name: "Bad Token 1".to_string(),
+                erc_standard: ErcStandard::Erc20,
+                contract_address: "0xinvalid".to_string(),
+                decimals: 18,
+            },
+        );
+        // Invalid address - not hex
+        assets.insert(
+            "BAD2".to_string(),
+            TokenMetadata {
+                symbol: "BAD2".to_string(),
+                name: "Bad Token 2".to_string(),
+                erc_standard: ErcStandard::Erc20,
+                contract_address: "not_an_address".to_string(),
+                decimals: 18,
+            },
+        );
+
+        let metadata = ChainMetadata {
+            network_id: "ETHEREUM_MAINNET".to_string(),
+            assets,
+        };
+
+        let result = registry.load_chain_metadata(&metadata);
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        // Verify both invalid addresses are mentioned in the error
+        assert!(err.contains("0xinvalid"), "Error should mention 0xinvalid");
+        assert!(
+            err.contains("not_an_address"),
+            "Error should mention not_an_address"
+        );
+
+        // Valid token should still be registered
+        assert_eq!(registry.token_metadata.len(), 1);
+        assert_eq!(
+            registry.get_token_symbol(1, usdc_address()),
+            Some("USDC".to_string())
+        );
+    }
+
+    #[test]
+    fn test_load_chain_metadata_unknown_network() {
+        let mut registry = ContractRegistry::new();
+
+        let metadata = ChainMetadata {
+            network_id: "UNKNOWN_NETWORK".to_string(),
+            assets: HashMap::new(),
+        };
+
+        let result = registry.load_chain_metadata(&metadata);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("UNKNOWN_NETWORK"));
     }
 }

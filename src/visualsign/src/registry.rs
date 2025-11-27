@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use crate::{
     vsptrait::{
@@ -186,6 +187,130 @@ impl TransactionConverterRegistry {
 
     pub fn supported_chains(&self) -> Vec<Chain> {
         self.converters.keys().cloned().collect()
+    }
+}
+
+/// Generic layered registry for combining global and request-scoped data.
+///
+/// This struct enables efficient per-request registry overlays without cloning.
+/// The global registry is shared via `Arc` (O(1) clone), while wallet-provided
+/// data is owned and dropped after the request completes.
+///
+/// # Example
+///
+/// ```
+/// use std::sync::Arc;
+/// use std::collections::HashMap;
+/// use visualsign::registry::LayeredRegistry;
+///
+/// // Global registry created once at startup
+/// let mut global_data = HashMap::new();
+/// global_data.insert("USDC", 6u8);
+/// global_data.insert("WETH", 18u8);
+/// let global = Arc::new(global_data);
+///
+/// // Request with wallet-provided data that overrides global
+/// let mut wallet_data = HashMap::new();
+/// wallet_data.insert("USDC", 8u8); // Wallet says USDC has 8 decimals
+/// let layered = LayeredRegistry::with_request(Arc::clone(&global), wallet_data);
+///
+/// // Lookup checks request first, then falls back to global
+/// assert_eq!(layered.lookup(|r| r.get("USDC").copied()), Some(8)); // From wallet
+/// assert_eq!(layered.lookup(|r| r.get("WETH").copied()), Some(18)); // From global
+/// assert_eq!(layered.lookup(|r| r.get("DAI").copied()), None); // Not found
+/// ```
+///
+/// # Type Parameter
+///
+/// `R` - The registry type (e.g., `ContractRegistry` for Ethereum)
+pub struct LayeredRegistry<R> {
+    /// Request-scoped data (checked first during lookups)
+    request: Option<R>,
+    /// Global registry shared across requests via Arc
+    global: Arc<R>,
+}
+
+impl<R> LayeredRegistry<R> {
+    /// Creates a layered registry with only the global layer.
+    ///
+    /// Use this when no request-specific data is available.
+    pub fn new(global: Arc<R>) -> Self {
+        Self {
+            request: None,
+            global,
+        }
+    }
+
+    /// Creates a layered registry with both global and request-scoped layers.
+    ///
+    /// Lookups will check the request layer first, then fall back to global.
+    pub fn with_request(global: Arc<R>, request: R) -> Self {
+        Self {
+            request: Some(request),
+            global,
+        }
+    }
+
+    /// Returns a reference to the global registry.
+    pub fn global(&self) -> &R {
+        &self.global
+    }
+
+    /// Returns a reference to the request-scoped registry, if present.
+    pub fn request(&self) -> Option<&R> {
+        self.request.as_ref()
+    }
+
+    /// Performs a layered lookup: checks request first, then global.
+    ///
+    /// The closure `f` is called on the request registry first (if present).
+    /// If it returns `None`, the closure is called on the global registry.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use std::collections::HashMap;
+    /// use visualsign::registry::LayeredRegistry;
+    ///
+    /// let mut global = HashMap::new();
+    /// global.insert("token", "USDC");
+    /// let layered = LayeredRegistry::new(Arc::new(global));
+    ///
+    /// let symbol = layered.lookup(|r| r.get("token").copied());
+    /// assert_eq!(symbol, Some("USDC"));
+    /// ```
+    pub fn lookup<T, F>(&self, f: F) -> Option<T>
+    where
+        F: Fn(&R) -> Option<T>,
+    {
+        // Check request layer first
+        if let Some(ref request) = self.request {
+            if let Some(result) = f(request) {
+                return Some(result);
+            }
+        }
+        // Fall back to global
+        f(&self.global)
+    }
+
+    /// Performs a layered lookup that returns a Result.
+    ///
+    /// Similar to `lookup`, but for fallible operations. Checks request first,
+    /// then global. Returns the first `Ok` result, or the last `Err` if both fail.
+    pub fn lookup_result<T, E, F>(&self, f: F) -> Result<T, E>
+    where
+        F: Fn(&R) -> Result<T, E>,
+    {
+        // Check request layer first
+        if let Some(ref request) = self.request {
+            let result = f(request);
+            if result.is_ok() {
+                return result;
+            }
+        }
+        // Fall back to global
+        f(&self.global)
     }
 }
 
@@ -459,5 +584,125 @@ mod tests {
         assert_eq!(Chain::Polkadot.as_str(), "Polkadot");
         assert_eq!(Chain::Tron.as_str(), "Tron");
         assert_eq!(Chain::Custom("MyChain".to_string()).as_str(), "MyChain");
+    }
+
+    // Mock registry for LayeredRegistry tests
+    #[derive(Default)]
+    struct MockRegistry {
+        values: HashMap<String, String>,
+    }
+
+    impl MockRegistry {
+        fn with_value(key: &str, value: &str) -> Self {
+            let mut values = HashMap::new();
+            values.insert(key.to_string(), value.to_string());
+            Self { values }
+        }
+
+        fn get(&self, key: &str) -> Option<String> {
+            self.values.get(key).cloned()
+        }
+    }
+
+    #[test]
+    fn test_layered_registry_global_only() {
+        let global = Arc::new(MockRegistry::with_value("token", "USDC"));
+        let layered = LayeredRegistry::new(global);
+
+        // Should find value in global
+        let result = layered.lookup(|r| r.get("token"));
+        assert_eq!(result, Some("USDC".to_string()));
+
+        // Should return None for missing key
+        let result = layered.lookup(|r| r.get("missing"));
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_layered_registry_request_overrides_global() {
+        let global = Arc::new(MockRegistry::with_value("token", "USDC"));
+        let request = MockRegistry::with_value("token", "WETH");
+        let layered = LayeredRegistry::with_request(global, request);
+
+        // Request layer should override global
+        let result = layered.lookup(|r| r.get("token"));
+        assert_eq!(result, Some("WETH".to_string()));
+    }
+
+    #[test]
+    fn test_layered_registry_fallback_to_global() {
+        let global = Arc::new(MockRegistry::with_value("global_key", "global_value"));
+        let request = MockRegistry::with_value("request_key", "request_value");
+        let layered = LayeredRegistry::with_request(global, request);
+
+        // Key only in request layer
+        let result = layered.lookup(|r| r.get("request_key"));
+        assert_eq!(result, Some("request_value".to_string()));
+
+        // Key only in global layer - should fall back
+        let result = layered.lookup(|r| r.get("global_key"));
+        assert_eq!(result, Some("global_value".to_string()));
+
+        // Key in neither layer
+        let result = layered.lookup(|r| r.get("missing"));
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_layered_registry_accessors() {
+        let global = Arc::new(MockRegistry::with_value("key", "global"));
+        let request = MockRegistry::with_value("key", "request");
+        let layered = LayeredRegistry::with_request(Arc::clone(&global), request);
+
+        // Direct access to global
+        assert_eq!(layered.global().get("key"), Some("global".to_string()));
+
+        // Direct access to request
+        assert!(layered.request().is_some());
+        assert_eq!(
+            layered.request().unwrap().get("key"),
+            Some("request".to_string())
+        );
+    }
+
+    #[test]
+    fn test_layered_registry_no_request() {
+        let global = Arc::new(MockRegistry::with_value("key", "value"));
+        let layered: LayeredRegistry<MockRegistry> = LayeredRegistry::new(global);
+
+        assert!(layered.request().is_none());
+    }
+
+    #[test]
+    fn test_layered_registry_lookup_result_success() {
+        let global = Arc::new(MockRegistry::with_value("key", "value"));
+        let layered = LayeredRegistry::new(global);
+
+        let result: Result<String, &str> =
+            layered.lookup_result(|r| r.get("key").ok_or("not found"));
+        assert_eq!(result, Ok("value".to_string()));
+    }
+
+    #[test]
+    fn test_layered_registry_lookup_result_fallback() {
+        let global = Arc::new(MockRegistry::with_value("global_key", "global_value"));
+        let request = MockRegistry::default(); // Empty request registry
+        let layered = LayeredRegistry::with_request(global, request);
+
+        // Request fails, should fall back to global
+        let result: Result<String, &str> =
+            layered.lookup_result(|r| r.get("global_key").ok_or("not found"));
+        assert_eq!(result, Ok("global_value".to_string()));
+    }
+
+    #[test]
+    fn test_layered_registry_lookup_result_both_fail() {
+        let global = Arc::new(MockRegistry::default());
+        let request = MockRegistry::default();
+        let layered = LayeredRegistry::with_request(global, request);
+
+        let result: Result<String, &str> =
+            layered.lookup_result(|r| r.get("missing").ok_or("not found"));
+        assert_eq!(result, Err("not found"));
     }
 }

@@ -68,10 +68,14 @@ impl EthereumVisualizerRegistryBuilder {
     }
 
     /// Creates a new builder pre-populated with default protocols
-    pub fn with_default_protocols() -> Self {
+    ///
+    /// Returns both the EthereumVisualizerRegistryBuilder and ContractRegistry since
+    /// protocol registration populates both registries. Discarding either would be wasteful.
+    pub fn with_default_protocols() -> (Self, crate::registry::ContractRegistry) {
         let mut builder = Self::new();
-        crate::protocols::register_all(&mut builder);
-        builder
+        let mut contract_reg = crate::registry::ContractRegistry::new();
+        crate::protocols::register_all(&mut contract_reg, &mut builder);
+        (builder, contract_reg)
     }
 
     /// Registers a visualizer for a specific contract type
@@ -223,7 +227,7 @@ mod tests {
 
     #[test]
     fn test_builder_with_default_protocols() {
-        let builder = EthereumVisualizerRegistryBuilder::with_default_protocols();
+        let (builder, _contract_reg) = EthereumVisualizerRegistryBuilder::with_default_protocols();
         let registry = builder.build();
         // Even though with_default_protocols is called, no protocols are registered
         // because crate::protocols::register_all is a placeholder
