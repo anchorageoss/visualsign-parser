@@ -91,15 +91,20 @@ sol! {
     }
 
     /// Parameters for WRAP_ETH command
+    /// Source: https://github.com/Uniswap/universal-router/blob/main/contracts/libraries/Dispatcher.sol
+    /// (address recipient, uint256 amountMin) = abi.decode(inputs, (address, uint256));
     struct WrapEthParams {
+        address recipient;
         uint256 amountMin;
     }
 
     /// Parameters for SWEEP command
+    /// Source: https://github.com/Uniswap/universal-router/blob/main/contracts/libraries/Dispatcher.sol
+    /// (address token, address recipient, uint256 amountMin) = abi.decode(inputs, (address, address, uint256));
     struct SweepParams {
         address token;
-        uint256 amountMinimum;
         address recipient;
+        uint256 amountMinimum;
     }
 
     /// Parameters for TRANSFER command
@@ -1205,10 +1210,12 @@ impl UniversalRouterVisualizer {
     }
 
     /// Decodes WRAP_ETH command parameters
+    /// Note: WRAP_ETH wraps msg.value and checks that it's >= amountMin.
+    /// The amountMin is a minimum check, not the actual amount being wrapped.
     fn decode_wrap_eth(
         bytes: &[u8],
-        _chain_id: u64,
-        _registry: Option<&ContractRegistry>,
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
         let params = match <WrapEthParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
@@ -1225,8 +1232,22 @@ impl UniversalRouterVisualizer {
             }
         };
 
-        let amount_min_str = params.amountMin.to_string();
-        let text = format!("Wrap {amount_min_str} ETH to WETH");
+        // Format amount with ETH decimals (18)
+        // Get WETH address for this chain to use its decimals
+        let amount_min_str =
+            crate::protocols::uniswap::config::UniswapConfig::weth_address(chain_id)
+                .and_then(|weth_addr| {
+                    let amount_min_u128: u128 = params.amountMin.to_string().parse().unwrap_or(0);
+                    registry
+                        .and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_min_u128))
+                })
+                .map(|(amt, _)| amt)
+                .unwrap_or_else(|| {
+                    // Fallback: format as ETH with 18 decimals manually
+                    crate::fmt::format_ether(params.amountMin)
+                });
+
+        let text = format!("Wrap >={amount_min_str} ETH to WETH");
 
         SignablePayloadField::TextV2 {
             common: SignablePayloadFieldCommon {
@@ -1262,9 +1283,15 @@ impl UniversalRouterVisualizer {
             .and_then(|r| r.get_token_symbol(chain_id, params.token))
             .unwrap_or_else(|| format!("{:?}", params.token));
 
+        // Format amount with token decimals
+        let amount_min_u128: u128 = params.amountMinimum.to_string().parse().unwrap_or(0);
+        let (amount_min_str, _) = registry
+            .and_then(|r| r.format_token_amount(chain_id, params.token, amount_min_u128))
+            .unwrap_or_else(|| (params.amountMinimum.to_string(), token_symbol.clone()));
+
         let text = format!(
-            "Sweep >={} {} to {:?}",
-            params.amountMinimum, token_symbol, params.recipient
+            "Sweep >={amount_min_str} {token_symbol} to {:?}",
+            params.recipient
         );
 
         SignablePayloadField::TextV2 {
@@ -2060,5 +2087,165 @@ mod tests {
         let empty_input = vec![];
         let result = Permit2Visualizer::decode_custom_permit_params(&empty_input);
         assert!(result.is_err(), "Should reject empty input");
+    }
+
+    #[test]
+    fn test_decode_wrap_eth_params_order() {
+        // WRAP_ETH params: (address recipient, uint256 amountMin)
+        // This test verifies we decode (recipient, amountMin) not just (amountMin)
+        let recipient: Address = "0xd27f4bbd67bd4ad1674c9c2c5a75ca8c3e389f3b"
+            .parse()
+            .unwrap();
+        let amount_min = U256::from(3_200_000_000_000_000u64); // 0.0032 ETH in wei
+
+        // ABI encode: (address, uint256)
+        let encoded = (recipient, amount_min).abi_encode();
+
+        let field = UniversalRouterVisualizer::decode_wrap_eth(&encoded, 1, None);
+
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                // Should show ~0.0032 ETH, not a huge number from misinterpreting address as amount
+                assert!(
+                    text_v2.text.contains("0.0032"),
+                    "Expected 0.0032 ETH, got: {}",
+                    text_v2.text
+                );
+                assert!(
+                    !text_v2.text.contains("1201726854"), // This was the buggy value
+                    "Should not contain buggy large number"
+                );
+            }
+            _ => panic!("Expected TextV2 field"),
+        }
+    }
+
+    #[test]
+    fn test_decode_wrap_eth_formats_amount_with_decimals() {
+        // Verify amount is formatted with 18 decimals (ETH)
+        let recipient: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let amount_min = U256::from(1_000_000_000_000_000_000u64); // 1 ETH
+
+        let encoded = (recipient, amount_min).abi_encode();
+        let field = UniversalRouterVisualizer::decode_wrap_eth(&encoded, 1, None);
+
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                assert!(
+                    text_v2.text.contains("1.0") || text_v2.text.contains("1 ETH"),
+                    "Expected ~1 ETH formatted, got: {}",
+                    text_v2.text
+                );
+            }
+            _ => panic!("Expected TextV2 field"),
+        }
+    }
+
+    #[test]
+    fn test_decode_sweep_params_order() {
+        // SWEEP params: (address token, address recipient, uint256 amountMin)
+        // This test verifies correct field order - NOT (token, amountMin, recipient)
+        let token: Address = "0x255494b830bd4fe7220b3ec4842cba75600b6c80"
+            .parse()
+            .unwrap();
+        let recipient: Address = "0xd27f4bbd67bd4ad1674c9c2c5a75ca8c3e389f3b"
+            .parse()
+            .unwrap();
+        let amount_min = U256::from(2264700707120u64); // ~2264 tokens (if 9 decimals)
+
+        // ABI encode: (address, address, uint256)
+        let encoded = (token, recipient, amount_min).abi_encode();
+
+        let field = UniversalRouterVisualizer::decode_sweep(&encoded, 1, None);
+
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                // Should contain the correct amount, not a huge number from wrong field order
+                assert!(
+                    text_v2.text.contains("2264700707120"),
+                    "Expected amount 2264700707120, got: {}",
+                    text_v2.text
+                );
+                // Should contain correct recipient
+                assert!(
+                    text_v2.text.to_lowercase().contains("d27f4bbd"),
+                    "Expected recipient address, got: {}",
+                    text_v2.text
+                );
+                // Should NOT contain astronomically large numbers from wrong decoding
+                assert!(
+                    !text_v2.text.contains("120172685438592526"),
+                    "Should not contain buggy large number from wrong field order"
+                );
+            }
+            _ => panic!("Expected TextV2 field"),
+        }
+    }
+
+    #[test]
+    fn test_decode_sweep_with_known_token() {
+        // Test SWEEP with WETH (which is in registry) to verify amount formatting
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        // WETH on mainnet
+        let token: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let recipient: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let amount_min = U256::from(500_000_000_000_000_000u64); // 0.5 WETH
+
+        let encoded = (token, recipient, amount_min).abi_encode();
+
+        let field = UniversalRouterVisualizer::decode_sweep(&encoded, 1, Some(&registry));
+
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                // With registry, should format as 0.5 WETH
+                assert!(
+                    text_v2.text.contains("0.5") || text_v2.text.contains("WETH"),
+                    "Expected formatted WETH amount, got: {}",
+                    text_v2.text
+                );
+            }
+            _ => panic!("Expected TextV2 field"),
+        }
+    }
+
+    #[test]
+    fn test_decode_wrap_eth_invalid_input() {
+        // Test with invalid/short input
+        let short_input = vec![0u8; 10];
+        let field = UniversalRouterVisualizer::decode_wrap_eth(&short_input, 1, None);
+
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                assert!(
+                    text_v2.text.contains("Failed to decode"),
+                    "Expected decode failure message"
+                );
+            }
+            _ => panic!("Expected TextV2 field"),
+        }
+    }
+
+    #[test]
+    fn test_decode_sweep_invalid_input() {
+        // Test with invalid/short input
+        let short_input = vec![0u8; 10];
+        let field = UniversalRouterVisualizer::decode_sweep(&short_input, 1, None);
+
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                assert!(
+                    text_v2.text.contains("Failed to decode"),
+                    "Expected decode failure message"
+                );
+            }
+            _ => panic!("Expected TextV2 field"),
+        }
     }
 }
