@@ -5,11 +5,11 @@
 //! # Deployment Addresses
 //!
 //! Official Uniswap Universal Router deployments are documented at:
-//! <https://github.com/Uniswap/universal-router/tree/main/deploy-addresses>
+//! <https://github.com/Uniswap/universal-router/tree/67553d8b067249dd7841d9d1b0eb2997b19d4bf9/deploy-addresses>
 //!
 //! Each network has a JSON file (e.g., mainnet.json, optimism.json) containing:
 //! - `UniversalRouterV1`: Legacy V1 router
-//! - `UniversalRouterV1_2_V2Support`: V1.2 with V2 support (0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD)
+//! - `UniversalRouterV1_2_V2Support`: V1.2 with V2 support
 //! - `UniversalRouterV2`: Latest V2 router
 //!
 //! Currently, only V1.2 is implemented. Future versions should be added as separate
@@ -19,12 +19,47 @@ use crate::registry::{ContractRegistry, ContractType};
 use crate::token_metadata::{ErcStandard, TokenMetadata};
 use alloy_primitives::Address;
 
+/// Re-export chain ID constants from crate::networks::id
+///
+/// This provides access to chain constants like `networks::ethereum::MAINNET`
+/// for use in Uniswap configuration.
+///
+/// Note: Not all networks in `crate::networks::id` have Universal Router V1.2 deployments.
+/// See `UniswapConfig::universal_router_chains()` for the list of supported networks.
+pub use crate::networks::id as networks;
+
+/// Error type for Uniswap configuration operations
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UniswapConfigError {
+    /// Chain ID is not supported for Universal Router V1.2
+    UnsupportedChain(u64),
+    /// Address string failed to parse (should never happen with hardcoded addresses)
+    InvalidAddress(String),
+}
+
+impl std::fmt::Display for UniswapConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UniswapConfigError::UnsupportedChain(chain_id) => {
+                write!(
+                    f,
+                    "Unsupported chain ID for Universal Router V1.2: {chain_id}"
+                )
+            }
+            UniswapConfigError::InvalidAddress(addr) => {
+                write!(f, "Invalid address: {addr}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for UniswapConfigError {}
+
 /// Contract type marker for Uniswap Universal Router V1.2
 ///
-/// This is the V1.2 router with V2 support, deployed at 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD
-/// across multiple chains (Mainnet, Optimism, Polygon, Base, Arbitrum).
+/// This is the V1.2 router with V2 support. Addresses vary by chain.
 ///
-/// Reference: <https://github.com/Uniswap/universal-router/tree/main/deploy-addresses>
+/// Reference: <https://github.com/Uniswap/universal-router/tree/67553d8b067249dd7841d9d1b0eb2997b19d4bf9/deploy-addresses>
 #[derive(Debug, Clone, Copy)]
 pub struct UniswapUniversalRouter;
 
@@ -67,31 +102,50 @@ impl ContractType for Permit2Contract {}
 pub struct UniswapConfig;
 
 impl UniswapConfig {
-    /// Returns the Universal Router V1.2 address
+    /// Returns the Universal Router V1.2 address for a specific chain
     ///
-    /// This is the `UniversalRouterV1_2_V2Support` address from Uniswap's deployment files.
-    /// It is deployed at the same address across multiple chains.
-    ///
-    /// Source: <https://github.com/Uniswap/universal-router/tree/main/deploy-addresses>
-    pub fn universal_router_address() -> Address {
-        "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+    /// Source: <https://github.com/Uniswap/universal-router/tree/67553d8b067249dd7841d9d1b0eb2997b19d4bf9/deploy-addresses>
+    pub fn universal_router_address(chain_id: u64) -> Result<Address, UniswapConfigError> {
+        let addr_str = match chain_id {
+            // Mainnets
+            networks::ethereum::MAINNET => "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD",
+            networks::optimism::MAINNET => "0xCb1355ff08Ab38bBCE60111F1bb2B784bE25D7e8",
+            networks::bsc::MAINNET => "0x4Dae2f939ACf50408e13d58534Ff8c2776d45265",
+            networks::polygon::MAINNET => "0xec7BE89e9d109e7e3Fec59c222CF297125FEFda2",
+            networks::worldchain::MAINNET => "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+            networks::base::MAINNET => "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD",
+            networks::arbitrum::MAINNET => "0x5E325eDA8064b456f4781070C0738d849c824258",
+            networks::celo::MAINNET => "0x643770e279d5d0733f21d6dc03a8efbabf3255b4",
+            networks::avalanche::MAINNET => "0x4Dae2f939ACf50408e13d58534Ff8c2776d45265",
+            networks::blast::MAINNET => "0x643770E279d5D0733F21d6DC03A8efbABf3255B4",
+            // Testnets
+            networks::ethereum::SEPOLIA => "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD",
+            _ => return Err(UniswapConfigError::UnsupportedChain(chain_id)),
+        };
+        addr_str
             .parse()
-            .expect("Valid Universal Router address")
+            .map_err(|_| UniswapConfigError::InvalidAddress(addr_str.to_string()))
     }
 
     /// Returns the chain IDs where Universal Router V1.2 is deployed
     ///
-    /// Supported chains:
-    /// - 1 = Ethereum Mainnet
-    /// - 10 = Optimism
-    /// - 137 = Polygon
-    /// - 8453 = Base
-    /// - 42161 = Arbitrum One
-    ///
-    /// Note: Other chains may be supported. See deployment files:
-    /// <https://github.com/Uniswap/universal-router/tree/main/deploy-addresses>
+    /// Source: <https://github.com/Uniswap/universal-router/tree/67553d8b067249dd7841d9d1b0eb2997b19d4bf9/deploy-addresses>
     pub fn universal_router_chains() -> &'static [u64] {
-        &[1, 10, 137, 8453, 42161]
+        &[
+            // Mainnets
+            networks::ethereum::MAINNET,
+            networks::optimism::MAINNET,
+            networks::bsc::MAINNET,
+            networks::polygon::MAINNET,
+            networks::worldchain::MAINNET,
+            networks::base::MAINNET,
+            networks::arbitrum::MAINNET,
+            networks::celo::MAINNET,
+            networks::avalanche::MAINNET,
+            networks::blast::MAINNET,
+            // Testnets
+            networks::ethereum::SEPOLIA,
+        ]
     }
 
     /// Returns the Permit2 contract address
@@ -130,11 +184,11 @@ impl UniswapConfig {
     /// WETH address for supported chains.
     pub fn weth_address(chain_id: u64) -> Option<Address> {
         let addr_str = match chain_id {
-            1 => "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // Ethereum Mainnet
-            10 => "0x4200000000000000000000000000000000000006", // Optimism
-            137 => "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619", // Polygon
-            8453 => "0x4200000000000000000000000000000000000006", // Base
-            42161 => "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // Arbitrum
+            networks::ethereum::MAINNET => "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+            networks::optimism::MAINNET => "0x4200000000000000000000000000000000000006",
+            networks::polygon::MAINNET => "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619",
+            networks::base::MAINNET => "0x4200000000000000000000000000000000000006",
+            networks::arbitrum::MAINNET => "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
             _ => return None,
         };
         addr_str.parse().ok()
@@ -147,7 +201,7 @@ impl UniswapConfig {
     pub fn register_common_tokens(registry: &mut ContractRegistry) {
         // WETH on Ethereum Mainnet (WETH9 contract)
         let _ = registry.register_token(
-            1,
+            networks::ethereum::MAINNET,
             TokenMetadata {
                 symbol: "WETH".to_string(),
                 name: "WETH9".to_string(),
@@ -159,7 +213,7 @@ impl UniswapConfig {
 
         // WETH on Optimism
         let _ = registry.register_token(
-            10,
+            networks::optimism::MAINNET,
             TokenMetadata {
                 symbol: "WETH".to_string(),
                 name: "WETH9".to_string(),
@@ -171,7 +225,7 @@ impl UniswapConfig {
 
         // WETH on Polygon
         let _ = registry.register_token(
-            137,
+            networks::polygon::MAINNET,
             TokenMetadata {
                 symbol: "WETH".to_string(),
                 name: "WETH9".to_string(),
@@ -183,7 +237,7 @@ impl UniswapConfig {
 
         // WETH on Base
         let _ = registry.register_token(
-            8453,
+            networks::base::MAINNET,
             TokenMetadata {
                 symbol: "WETH".to_string(),
                 name: "WETH9".to_string(),
@@ -195,7 +249,7 @@ impl UniswapConfig {
 
         // WETH on Arbitrum
         let _ = registry.register_token(
-            42161,
+            networks::arbitrum::MAINNET,
             TokenMetadata {
                 symbol: "WETH".to_string(),
                 name: "WETH9".to_string(),
@@ -208,7 +262,7 @@ impl UniswapConfig {
         // Add common tokens on Ethereum Mainnet
         // USDC
         let _ = registry.register_token(
-            1,
+            networks::ethereum::MAINNET,
             TokenMetadata {
                 symbol: "USDC".to_string(),
                 name: "USD Coin".to_string(),
@@ -220,7 +274,7 @@ impl UniswapConfig {
 
         // USDT
         let _ = registry.register_token(
-            1,
+            networks::ethereum::MAINNET,
             TokenMetadata {
                 symbol: "USDT".to_string(),
                 name: "Tether USD".to_string(),
@@ -232,7 +286,7 @@ impl UniswapConfig {
 
         // DAI
         let _ = registry.register_token(
-            1,
+            networks::ethereum::MAINNET,
             TokenMetadata {
                 symbol: "DAI".to_string(),
                 name: "Dai Stablecoin".to_string(),
@@ -244,7 +298,7 @@ impl UniswapConfig {
 
         // SETH (Sonne Ethereum - or other SETH variant)
         let _ = registry.register_token(
-            1,
+            networks::ethereum::MAINNET,
             TokenMetadata {
                 symbol: "SETH".to_string(),
                 name: "SETH".to_string(),
@@ -261,22 +315,73 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_universal_router_address() {
+    fn test_universal_router_address_ethereum() {
         let expected: Address = "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
             .parse()
             .unwrap();
-        assert_eq!(UniswapConfig::universal_router_address(), expected);
+        assert_eq!(
+            UniswapConfig::universal_router_address(networks::ethereum::MAINNET).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_universal_router_address_arbitrum() {
+        let expected: Address = "0x5E325eDA8064b456f4781070C0738d849c824258"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            UniswapConfig::universal_router_address(networks::arbitrum::MAINNET).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_universal_router_address_optimism() {
+        let expected: Address = "0xCb1355ff08Ab38bBCE60111F1bb2B784bE25D7e8"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            UniswapConfig::universal_router_address(networks::optimism::MAINNET).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_universal_router_address_unsupported_chain() {
+        let result = UniswapConfig::universal_router_address(999999);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            UniswapConfigError::UnsupportedChain(999999)
+        );
     }
 
     #[test]
     fn test_universal_router_chains() {
         let chains = UniswapConfig::universal_router_chains();
-        assert_eq!(chains, &[1, 10, 137, 8453, 42161]);
+        assert!(chains.contains(&networks::ethereum::MAINNET));
+        assert!(chains.contains(&networks::optimism::MAINNET));
+        assert!(chains.contains(&networks::arbitrum::MAINNET));
+        assert!(chains.contains(&networks::base::MAINNET));
+        assert!(chains.contains(&networks::polygon::MAINNET));
+        assert!(chains.contains(&networks::ethereum::SEPOLIA)); // testnet
     }
 
     #[test]
     fn test_contract_type_id() {
         let type_id = UniswapUniversalRouter::short_type_id();
         assert_eq!(type_id, "UniswapUniversalRouter");
+    }
+
+    #[test]
+    fn test_all_chains_have_valid_addresses() {
+        for &chain_id in UniswapConfig::universal_router_chains() {
+            let result = UniswapConfig::universal_router_address(chain_id);
+            assert!(
+                result.is_ok(),
+                "Chain {chain_id} should have a valid address"
+            );
+        }
     }
 }

@@ -30,11 +30,11 @@ pub fn register(
 ) {
     use config::{Permit2Contract, UniswapUniversalRouter};
 
-    let ur_address = UniswapConfig::universal_router_address();
-
-    // Register Universal Router on all supported chains
+    // Register Universal Router on each supported chain with correct address
     for &chain_id in UniswapConfig::universal_router_chains() {
-        contract_reg.register_contract_typed::<UniswapUniversalRouter>(chain_id, vec![ur_address]);
+        let addr = UniswapConfig::universal_router_address(chain_id)
+            .expect("universal_router_chains should only contain valid chains");
+        contract_reg.register_contract_typed::<UniswapUniversalRouter>(chain_id, vec![addr]);
     }
 
     // Register Permit2 (same address on all chains)
@@ -54,9 +54,8 @@ pub fn register(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocols::uniswap::config::UniswapUniversalRouter;
+    use crate::protocols::uniswap::config::{UniswapUniversalRouter, chains};
     use crate::registry::ContractType;
-    use alloy_primitives::Address;
 
     #[test]
     fn test_register_uniswap_contracts() {
@@ -65,18 +64,33 @@ mod tests {
 
         register(&mut contract_reg, &mut visualizer_reg);
 
-        let universal_router_address: Address = "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
-            .parse()
-            .unwrap();
-
-        // Verify Universal Router is registered on all supported chains
-        for chain_id in [1, 10, 137, 8453, 42161] {
+        // Verify Universal Router is registered on all supported chains with correct addresses
+        for &chain_id in UniswapConfig::universal_router_chains() {
+            let expected_addr = UniswapConfig::universal_router_address(chain_id)
+                .expect("Chain should have valid address");
             let contract_type = contract_reg
-                .get_contract_type(chain_id, universal_router_address)
+                .get_contract_type(chain_id, expected_addr)
                 .unwrap_or_else(|| {
                     panic!("Universal Router should be registered on chain {chain_id}")
                 });
             assert_eq!(contract_type, UniswapUniversalRouter::short_type_id());
         }
+    }
+
+    #[test]
+    fn test_different_addresses_per_chain() {
+        // Verify that some chains have different addresses
+        let eth_addr = UniswapConfig::universal_router_address(chains::ethereum::MAINNET).unwrap();
+        let arb_addr = UniswapConfig::universal_router_address(chains::arbitrum::MAINNET).unwrap();
+        let opt_addr = UniswapConfig::universal_router_address(chains::optimism::MAINNET).unwrap();
+
+        // Ethereum and Base share the same address
+        let base_addr = UniswapConfig::universal_router_address(chains::base::MAINNET).unwrap();
+        assert_eq!(eth_addr, base_addr);
+
+        // But Arbitrum and Optimism have different addresses
+        assert_ne!(eth_addr, arb_addr);
+        assert_ne!(eth_addr, opt_addr);
+        assert_ne!(arb_addr, opt_addr);
     }
 }

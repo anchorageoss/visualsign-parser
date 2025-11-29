@@ -16,7 +16,7 @@ use visualsign::{
     },
 };
 
-pub mod chains;
+pub mod networks;
 pub mod context;
 pub mod contracts;
 pub mod fmt;
@@ -299,7 +299,7 @@ fn convert_to_visual_sign_payload(
     // Extract chain ID to determine the network
     let chain_id = transaction.chain_id();
 
-    let chain_name = chains::get_chain_name(chain_id);
+    let chain_name = networks::get_network_name(chain_id);
 
     let mut fields = vec![SignablePayloadField::TextV2 {
         common: SignablePayloadFieldCommon {

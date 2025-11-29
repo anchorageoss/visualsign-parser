@@ -1,15 +1,102 @@
+//! EVM chain definitions and utilities
+//!
+//! This module provides chain ID constants and name lookups for EVM-compatible chains.
+//!
+//! Chain ID source: <https://github.com/DefiLlama/chainlist/tree/main/constants/additionalChainRegistry>
+//! For additional chains, consult the DefiLlama chainlist repository.
+
+/// Chain ID constants grouped by network family
+///
+/// Use these constants instead of magic numbers throughout the codebase.
+/// Example: `chains::id::ethereum::MAINNET` instead of `1u64`
+///
+/// Source: <https://github.com/DefiLlama/chainlist/tree/main/constants/additionalChainRegistry>
+pub mod id {
+    // L1 Chains
+    pub mod ethereum {
+        pub const MAINNET: u64 = 1;
+        pub const SEPOLIA: u64 = 11155111;
+        pub const GOERLI: u64 = 5; // deprecated
+        pub const HOLESKY: u64 = 17000;
+    }
+    pub mod bsc {
+        pub const MAINNET: u64 = 56;
+        pub const TESTNET: u64 = 97;
+    }
+    pub mod polygon {
+        pub const MAINNET: u64 = 137;
+        pub const AMOY: u64 = 80002;
+    }
+    pub mod avalanche {
+        pub const MAINNET: u64 = 43114;
+        pub const FUJI: u64 = 43113;
+    }
+    pub mod fantom {
+        pub const MAINNET: u64 = 250;
+    }
+    pub mod gnosis {
+        pub const MAINNET: u64 = 100;
+    }
+    pub mod celo {
+        pub const MAINNET: u64 = 42220;
+        pub const ALFAJORES: u64 = 44787;
+    }
+
+    // L2 Chains - Optimistic Rollups
+    pub mod optimism {
+        pub const MAINNET: u64 = 10;
+        pub const SEPOLIA: u64 = 11155420;
+    }
+    pub mod arbitrum {
+        pub const MAINNET: u64 = 42161;
+        pub const SEPOLIA: u64 = 421614;
+    }
+    pub mod base {
+        pub const MAINNET: u64 = 8453;
+        pub const SEPOLIA: u64 = 84532;
+    }
+    pub mod blast {
+        pub const MAINNET: u64 = 81457;
+    }
+    pub mod mantle {
+        pub const MAINNET: u64 = 5000;
+    }
+    pub mod worldchain {
+        pub const MAINNET: u64 = 480;
+    }
+
+    // L2 Chains - ZK Rollups
+    pub mod zksync {
+        pub const MAINNET: u64 = 324;
+    }
+    pub mod linea {
+        pub const MAINNET: u64 = 59144;
+    }
+    pub mod scroll {
+        pub const MAINNET: u64 = 534352;
+    }
+
+    // App-Specific Chains
+    pub mod zora {
+        pub const MAINNET: u64 = 7777777;
+    }
+    pub mod unichain {
+        pub const MAINNET: u64 = 130;
+    }
+}
+
 // Helper function to get network name from chain ID
-pub fn get_chain_name(chain_id: Option<u64>) -> String {
+pub fn get_network_name(chain_id: Option<u64>) -> String {
     match chain_id {
-        Some(1) => "Ethereum Mainnet".to_string(),
+        Some(id::ethereum::MAINNET) => "Ethereum Mainnet".to_string(),
         Some(2) => "Expanse Network".to_string(),
         Some(3) => "Ropsten".to_string(),
         Some(4) => "Rinkeby".to_string(),
-        Some(5) => "Goerli".to_string(),
+        Some(id::ethereum::GOERLI) => "Goerli".to_string(),
         Some(7) => "ThaiChain".to_string(),
         Some(8) => "Ubiq".to_string(),
         Some(9) => "Ubiq Network Testnet".to_string(),
-        Some(10) => "OP Mainnet".to_string(),
+        Some(id::optimism::MAINNET) => "OP Mainnet".to_string(),
         Some(11) => "Metadium Mainnet".to_string(),
         Some(12) => "Metadium Testnet".to_string(),
         Some(13) => "Diode Testnet Staging".to_string(),
@@ -54,7 +141,7 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(53) => "CoinEx Smart Chain Testnet".to_string(),
         Some(54) => "Openpiece Mainnet".to_string(),
         Some(55) => "Zyx Mainnet".to_string(),
-        Some(56) => "BNB Smart Chain Mainnet".to_string(),
+        Some(id::bsc::MAINNET) => "BNB Smart Chain Mainnet".to_string(),
         Some(57) => "Syscoin Mainnet".to_string(),
         Some(58) => "Ontology Mainnet".to_string(),
         Some(60) => "GoChain".to_string(),
@@ -93,10 +180,10 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(94) => "SwissDLT".to_string(),
         Some(95) => "CamDL Mainnet".to_string(),
         Some(96) => "KUB Mainnet".to_string(),
-        Some(97) => "BNB Smart Chain Testnet".to_string(),
+        Some(id::bsc::TESTNET) => "BNB Smart Chain Testnet".to_string(),
         Some(98) => "Six Protocol".to_string(),
         Some(99) => "POA Network Core".to_string(),
-        Some(100) => "Gnosis".to_string(),
+        Some(id::gnosis::MAINNET) => "Gnosis".to_string(),
         Some(101) => "EtherInc".to_string(),
         Some(102) => "Web3Games Testnet".to_string(),
         Some(103) => "WorldLand Mainnet".to_string(),
@@ -124,14 +211,14 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(127) => "Factory 127 Mainnet".to_string(),
         Some(128) => "Huobi ECO Chain Mainnet".to_string(),
         Some(129) => "Innovator Chain".to_string(),
-        Some(130) => "Unichain".to_string(),
+        Some(id::unichain::MAINNET) => "Unichain".to_string(),
         Some(131) => "Engram Testnet".to_string(),
         Some(132) => "Namefi Chain Mainnet".to_string(),
         Some(133) => "HashKey Chain Testnet".to_string(),
         Some(134) => "iExec Sidechain".to_string(),
         Some(135) => "Alyx Chain Testnet".to_string(),
         Some(136) => "Deamchain Mainnet".to_string(),
-        Some(137) => "Polygon Mainnet".to_string(),
+        Some(id::polygon::MAINNET) => "Polygon Mainnet".to_string(),
         Some(138) => "Defi Oracle Meta Mainnet".to_string(),
         Some(139) => "WoopChain Mainnet".to_string(),
         Some(140) => "Eteria Mainnet".to_string(),
@@ -226,7 +313,7 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(246) => "Energy Web Chain".to_string(),
         Some(247) => "ChooChain".to_string(),
         Some(248) => "Oasys Mainnet".to_string(),
-        Some(250) => "Fantom Opera".to_string(),
+        Some(id::fantom::MAINNET) => "Fantom Opera".to_string(),
         Some(251) => "Glide L1 Protocol XP".to_string(),
         Some(252) => "Fraxtal".to_string(),
         Some(253) => "Glide L2 Protocol XP".to_string(),
@@ -269,7 +356,7 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(321) => "KCC Mainnet".to_string(),
         Some(322) => "KCC Testnet".to_string(),
         Some(323) => "BuyCex Infinity Chain".to_string(),
-        Some(324) => "zkSync Mainnet".to_string(),
+        Some(id::zksync::MAINNET) => "zkSync Mainnet".to_string(),
         Some(325) => "GRVT Exchange".to_string(),
         Some(326) => "GRVT Exchange Testnet".to_string(),
         Some(331) => "Telos zkEVM Testnet".to_string(),
@@ -317,7 +404,7 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(463) => "Areon Network Mainnet".to_string(),
         Some(466) => "AppChain".to_string(),
         Some(478) => "Form Network".to_string(),
-        Some(480) => "World Chain".to_string(),
+        Some(id::worldchain::MAINNET) => "World Chain".to_string(),
         Some(486) => "Standard Mainnet".to_string(),
         Some(488) => "BlackFort Exchange Network".to_string(),
         Some(495) => "Landstars".to_string(),
@@ -938,7 +1025,7 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(4913) => "OEV Network".to_string(),
         Some(4918) => "Venidium Testnet".to_string(),
         Some(4919) => "Venidium Mainnet".to_string(),
-        Some(5000) => "Mantle".to_string(),
+        Some(id::mantle::MAINNET) => "Mantle".to_string(),
         Some(5001) => "Mantle Testnet".to_string(),
         Some(5002) => "Treasurenet Mainnet Alpha".to_string(),
         Some(5003) => "Mantle Sepolia Testnet".to_string(),
@@ -1131,7 +1218,7 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(8387) => "Dracones Financial Services".to_string(),
         Some(8408) => "ZenChain Testnet".to_string(),
         Some(8428) => "THAT Mainnet".to_string(),
-        Some(8453) => "Base".to_string(),
+        Some(id::base::MAINNET) => "Base".to_string(),
         Some(8545) => "Chakra Testnet".to_string(),
         Some(8569) => "New Reality Blockchain".to_string(),
         Some(8654) => "Toki Network".to_string(),
@@ -1496,9 +1583,9 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(42070) => "WMC Testnet".to_string(),
         Some(42072) => "AgentLayer Testnet".to_string(),
         Some(42096) => "Heurist Testnet".to_string(),
-        Some(42161) => "Arbitrum One".to_string(),
+        Some(id::arbitrum::MAINNET) => "Arbitrum One".to_string(),
         Some(42170) => "Arbitrum Nova".to_string(),
-        Some(42220) => "Celo Mainnet".to_string(),
+        Some(id::celo::MAINNET) => "Celo Mainnet".to_string(),
         Some(42261) => "Oasis Emerald Testnet".to_string(),
         Some(42262) => "Oasis Emerald".to_string(),
         Some(42355) => "GoldXChain Mainnet".to_string(),
@@ -1511,7 +1598,7 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(43110) => "Athereum".to_string(),
         Some(43111) => "Hemi".to_string(),
         Some(43113) => "Avalanche Fuji Testnet".to_string(),
-        Some(43114) => "Avalanche C-Chain".to_string(),
+        Some(id::avalanche::MAINNET) => "Avalanche C-Chain".to_string(),
         Some(43419) => "GUNZ".to_string(),
         Some(43521) => "Formicarium".to_string(),
         Some(43851) => "ZKFair Testnet".to_string(),
@@ -1591,7 +1678,7 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(58680) => "Lumoz Quidditch Testnet".to_string(),
         Some(59140) => "Linea Goerli".to_string(),
         Some(59141) => "Linea Sepolia".to_string(),
-        Some(59144) => "Linea".to_string(),
+        Some(id::linea::MAINNET) => "Linea".to_string(),
         Some(59902) => "Metis Sepolia Testnet".to_string(),
         Some(59971) => "Genesys Code Mainnet".to_string(),
         Some(60000) => "Thinkium Testnet Chain 0".to_string(),
@@ -1684,7 +1771,7 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(81361) => "Mizana Testnet".to_string(),
         Some(81362) => "Mizana Mixnet".to_string(),
         Some(81363) => "Mizana Privnet".to_string(),
-        Some(81457) => "Blast".to_string(),
+        Some(id::blast::MAINNET) => "Blast".to_string(),
         Some(81720) => "Quantum Chain Mainnet".to_string(),
         Some(82459) => "Smart Layer Network Testnet".to_string(),
         Some(82614) => "VEMP Horizon".to_string(),
@@ -1940,7 +2027,7 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(513100) => "EthereumFair".to_string(),
         Some(526916) => "DoCoin Community Chain".to_string(),
         Some(534351) => "Scroll Sepolia Testnet".to_string(),
-        Some(534352) => "Scroll".to_string(),
+        Some(id::scroll::MAINNET) => "Scroll".to_string(),
         Some(534849) => "Shinarium Beta".to_string(),
         Some(535037) => "BeanEco SmartChain".to_string(),
         Some(541764) => "OverProtocol Testnet".to_string(),
@@ -2090,7 +2177,7 @@ pub fn get_chain_name(chain_id: Option<u64>) -> String {
         Some(7355310) => "OpenVessel".to_string(),
         Some(7668378) => "QL1 Testnet".to_string(),
         Some(7762959) => "Musicoin".to_string(),
-        Some(7777777) => "Zora".to_string(),
+        Some(id::zora::MAINNET) => "Zora".to_string(),
         Some(7849306) => "Ozean Poseidon Testnet".to_string(),
         Some(8007736) => "Plian Mainnet Subchain 1".to_string(),
         Some(8008135) => "Fhenix Helium".to_string(),
