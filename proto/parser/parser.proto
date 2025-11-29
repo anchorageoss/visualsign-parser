@@ -95,10 +95,14 @@ message Signature {
 }
 
 message EthereumMetadata {
+  // Network identifier string (e.g., "ETHEREUM_MAINNET", "POLYGON_MAINNET", "ARBITRUM_MAINNET")
+  optional string network_id = 2;
   optional Abi abi = 1;
 }
 
 message SolanaMetadata {
+  // Network identifier string (e.g., "SOLANA_MAINNET", "SOLANA_DEVNET")
+  optional string network_id = 2;
   optional Idl idl = 1;
 }
 

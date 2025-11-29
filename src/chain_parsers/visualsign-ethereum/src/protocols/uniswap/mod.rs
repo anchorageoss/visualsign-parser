@@ -54,7 +54,7 @@ pub fn register(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocols::uniswap::config::{UniswapUniversalRouter, chains};
+    use crate::protocols::uniswap::config::{UniswapUniversalRouter, networks as chains};
     use crate::registry::ContractType;
 
     #[test]

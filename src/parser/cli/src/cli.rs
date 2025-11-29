@@ -1,7 +1,11 @@
 use crate::chains;
 use chains::parse_chain;
 use clap::Parser;
+use generated::parser::{
+    ChainMetadata, EthereumMetadata, SolanaMetadata, chain_metadata::Metadata,
+};
 use parser_app::registry::create_registry;
+use visualsign::registry::Chain;
 use visualsign::vsptrait::VisualSignOptions;
 use visualsign::{SignablePayload, SignablePayloadField};
 
@@ -29,6 +33,13 @@ struct Args {
         help = "Show only condensed view (what hardware wallets display)"
     )]
     condensed_only: bool,
+
+    #[arg(
+        long,
+        value_name = "NETWORK_ID",
+        help = "Network identifier (e.g., ETHEREUM_MAINNET, POLYGON_MAINNET, SOLANA_MAINNET)"
+    )]
+    network_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -244,6 +255,27 @@ fn parse_and_display(
     }
 }
 
+/// Creates chain-specific metadata from the `network_id` argument
+fn create_chain_metadata(chain: &Chain, network_id: Option<String>) -> Option<ChainMetadata> {
+    network_id.map(|nid| {
+        let metadata = match chain {
+            Chain::Solana => Metadata::Solana(SolanaMetadata {
+                network_id: Some(nid),
+                idl: None,
+            }),
+            // For Ethereum and other chains, use EthereumMetadata structure
+            // TODO: Add specific metadata types for other chains as needed
+            _ => Metadata::Ethereum(EthereumMetadata {
+                network_id: Some(nid),
+                abi: None,
+            }),
+        };
+        ChainMetadata {
+            metadata: Some(metadata),
+        }
+    })
+}
+
 /// app cli
 pub struct Cli;
 impl Cli {
@@ -255,10 +287,13 @@ impl Cli {
     pub fn execute() {
         let args = Args::parse();
 
+        let chain = parse_chain(&args.chain);
+        let metadata = create_chain_metadata(&chain, args.network_id);
+
         let options = VisualSignOptions {
             decode_transfers: true,
             transaction_name: None,
-            metadata: None,
+            metadata,
         };
 
         parse_and_display(

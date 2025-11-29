@@ -192,6 +192,9 @@ pub struct Signature {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EthereumMetadata {
+    /// Network identifier string (e.g., "ETHEREUM_MAINNET", "POLYGON_MAINNET", "ARBITRUM_MAINNET")
+    #[prost(string, optional, tag = "2")]
+    pub network_id: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(message, optional, tag = "1")]
     pub abi: ::core::option::Option<Abi>,
 }
@@ -203,6 +206,9 @@ pub struct EthereumMetadata {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SolanaMetadata {
+    /// Network identifier string (e.g., "SOLANA_MAINNET", "SOLANA_DEVNET")
+    #[prost(string, optional, tag = "2")]
+    pub network_id: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(message, optional, tag = "1")]
     pub idl: ::core::option::Option<Idl>,
 }
