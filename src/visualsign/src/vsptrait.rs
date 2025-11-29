@@ -5,12 +5,21 @@ use crate::SignablePayload;
 pub use crate::errors::{TransactionParseError, VisualSignError};
 pub use generated::parser::ChainMetadata;
 
+/// Developer-only configuration options. Not for production API use.
+#[derive(Default, Debug, Clone)]
+pub struct DeveloperConfig {
+    /// Allow decoding signed transactions by extracting the unsigned portion.
+    /// Only enable for CLI/developer tools.
+    pub allow_signed_transactions: bool,
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct VisualSignOptions {
     pub decode_transfers: bool,
     pub transaction_name: Option<String>,
     pub metadata: Option<ChainMetadata>,
-    // Add more options as needed - we can extend this struct later
+    /// Developer-only options. None for production API use.
+    pub developer_config: Option<DeveloperConfig>,
 }
 
 pub trait VisualSignConverter<T: Transaction> {
@@ -259,6 +268,7 @@ mod tests {
             decode_transfers: true,
             transaction_name: Some("Custom Transaction".to_string()),
             metadata: None,
+            developer_config: None,
         };
 
         let result = converter.to_visual_sign_payload(transaction, options);
@@ -342,5 +352,6 @@ mod tests {
         let options = VisualSignOptions::default();
         assert!(!options.decode_transfers);
         assert!(options.transaction_name.is_none());
+        assert!(options.developer_config.is_none());
     }
 }

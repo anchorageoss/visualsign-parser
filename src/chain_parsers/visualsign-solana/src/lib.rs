@@ -32,6 +32,7 @@ mod tests {
                         metadata: None,
                         decode_transfers: true,
                         transaction_name: Some(description.to_string()),
+                        developer_config: None,
                     },
                 )
                 .unwrap_or_else(|e| panic!("Failed to convert {description} to payload: {e:?}"));
@@ -88,6 +89,7 @@ mod tests {
                     metadata: None,
                     decode_transfers: true,
                     transaction_name: Some("Unicode Escape Test".to_string()),
+                    developer_config: None,
                 },
             )
             .expect("Should convert to payload successfully");

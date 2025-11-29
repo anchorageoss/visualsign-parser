@@ -72,6 +72,7 @@ pub fn payload_from_b64(data: &str) -> SignablePayload {
             decode_transfers: true,
             transaction_name: None,
             metadata: None,
+            developer_config: None,
         },
     )
     .expect("Failed to visualize tx commands")
@@ -85,6 +86,7 @@ pub fn payload_from_b64_with_context(data: &str, context: &str) -> SignablePaylo
             decode_transfers: true,
             transaction_name: None,
             metadata: None,
+            developer_config: None,
         },
     ) {
         Ok(payload) => payload,

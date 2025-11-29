@@ -2,7 +2,7 @@ use crate::chains;
 use chains::parse_chain;
 use clap::Parser;
 use parser_app::registry::create_registry;
-use visualsign::vsptrait::VisualSignOptions;
+use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
 
 #[derive(Parser, Debug)]
@@ -259,6 +259,9 @@ impl Cli {
             decode_transfers: true,
             transaction_name: None,
             metadata: None,
+            developer_config: Some(DeveloperConfig {
+                allow_signed_transactions: true,
+            }),
         };
 
         parse_and_display(
