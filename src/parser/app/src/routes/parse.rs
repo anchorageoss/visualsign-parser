@@ -31,6 +31,7 @@ pub fn parse(
         decode_transfers: true,
         transaction_name: None,
         metadata: parse_request.chain_metadata.clone(),
+        developer_config: None, // Production API: only accept unsigned transactions
     };
     let registry = create_registry();
     let proto_chain = ProtoChain::from_i32(parse_request.chain)
