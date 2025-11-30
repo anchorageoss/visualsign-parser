@@ -796,33 +796,43 @@ mod tests {
 
     #[test]
     fn test_decode_permit() {
-        // Minimal permit parameters
-        let mut bytes = vec![0u8; 224];
+        // Create proper ERC-2612 permit calldata with function selector
+        let mut calldata = Vec::new();
 
-        // Owner (address at offset 12-32)
+        // Add ERC-2612 permit function selector: permit(address,address,uint256,uint256,uint8,bytes32,bytes32)
+        // Selector: 0xd505accf
+        calldata.extend_from_slice(&[0xd5, 0x05, 0xac, 0xcf]);
+
+        // ABI encode the parameters
         let owner =
             Address::from_slice(&hex::decode("078473fc814d2581c0e9b06efb2443ea503421cb").unwrap());
-        bytes[12..32].copy_from_slice(owner.as_slice());
-
-        // Spender
         let spender =
             Address::from_slice(&hex::decode("4a6c312ec70e8747a587ee860a0353cd42be0ae0").unwrap());
-        bytes[44..64].copy_from_slice(spender.as_slice());
+        let value = U256::from(1000000u64); // 1 USDC (6 decimals)
+        let deadline = U256::from(1758288535u64); // Future timestamp
+        let v = 27u8;
+        let r = [1u8; 32]; // Dummy signature
+        let s = [2u8; 32]; // Dummy signature
 
-        // Value (1000000 = 1 USDC with 6 decimals)
-        let value = U256::from(1000000u64);
-        bytes[64..96].copy_from_slice(&value.to_be_bytes::<32>());
-
-        // Deadline (some future timestamp)
-        let deadline = U256::from(1758288535u64);
-        bytes[96..128].copy_from_slice(&deadline.to_be_bytes::<32>());
+        // Encode parameters (each is 32 bytes in ABI encoding)
+        calldata.extend_from_slice(&[0u8; 12]); // padding for address
+        calldata.extend_from_slice(owner.as_slice()); // owner
+        calldata.extend_from_slice(&[0u8; 12]); // padding for address  
+        calldata.extend_from_slice(spender.as_slice()); // spender
+        calldata.extend_from_slice(&value.to_be_bytes::<32>()); // value
+        calldata.extend_from_slice(&deadline.to_be_bytes::<32>()); // deadline
+        calldata.extend_from_slice(&[0u8; 31]); // padding for uint8
+        calldata.push(v); // v
+        calldata.extend_from_slice(&r); // r
+        calldata.extend_from_slice(&s); // s
 
         let token_address: Address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
             .parse()
             .unwrap(); // USDC
 
         let (registry, _) = ContractRegistry::with_default_protocols();
-        let result = BundlerVisualizer::decode_permit(&bytes, &token_address, 1, Some(&registry));
+        let result =
+            BundlerVisualizer::decode_permit(&calldata, &token_address, 1, Some(&registry));
 
         match result {
             SignablePayloadField::PreviewLayout {
@@ -838,7 +848,7 @@ mod tests {
                     assert_eq!(expanded.fields.len(), 5, "Should have 5 parameter fields");
                 }
             }
-            _ => panic!("Expected PreviewLayout field"),
+            other => panic!("Expected PreviewLayout field, got: {:?}", other),
         }
     }
 }

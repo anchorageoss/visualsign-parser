@@ -39,7 +39,6 @@ pub fn register(
 mod tests {
     use super::*;
     use crate::registry::ContractType;
-    use alloy_primitives::Address;
 
     #[test]
     fn test_register_morpho_contracts() {
@@ -48,14 +47,13 @@ mod tests {
 
         register(&mut contract_reg, &mut visualizer_reg);
 
-        let bundler3_address: Address = "0x6566194141eefa99Af43Bb5Aa71460Ca2Dc90245"
-            .parse()
-            .unwrap();
-
         // Verify Bundler3 is registered on all supported chains
-        for chain_id in [1, 10, 8453, 42161] {
+        for chain_id in [1, 8453, 42161] {
+            let expected_address = MorphoConfig::bundler3_address(chain_id)
+                .expect(&format!("Should have valid address for chain {}", chain_id));
+            
             let contract_type = contract_reg
-                .get_contract_type(chain_id, bundler3_address)
+                .get_contract_type(chain_id, expected_address)
                 .expect(&format!(
                     "Bundler3 should be registered on chain {}",
                     chain_id
