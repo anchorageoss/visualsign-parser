@@ -45,18 +45,26 @@ fn decode_solidity_value(ty: &str, data: &[u8], offset: &mut usize) -> String {
     } else if ty == "address[]" {
         // Dynamic address arrays - offset points to location of array
         if *offset + 32 <= data.len() {
-            let array_offset = U256::from_be_bytes(data[*offset..*offset + 32].try_into().unwrap_or([0; 32]));
+            let array_offset =
+                U256::from_be_bytes(data[*offset..*offset + 32].try_into().unwrap_or([0; 32]));
             *offset += 32;
 
             // Read array length at the offset
             let array_offset_usize = array_offset.try_into().unwrap_or(0usize);
             if array_offset_usize + 32 <= data.len() {
-                let array_len_val = U256::from_be_bytes(data[array_offset_usize..array_offset_usize + 32].try_into().unwrap_or([0; 32]));
+                let array_len_val = U256::from_be_bytes(
+                    data[array_offset_usize..array_offset_usize + 32]
+                        .try_into()
+                        .unwrap_or([0; 32]),
+                );
                 let array_len: usize = array_len_val.try_into().unwrap_or(0);
                 let mut addresses = Vec::new();
 
                 for i in 0..array_len {
-                    let addr_offset_val: usize = (U256::from(array_offset_usize) + U256::from(32) + U256::from(i * 32)).try_into().unwrap_or(0);
+                    let addr_offset_val: usize =
+                        (U256::from(array_offset_usize) + U256::from(32) + U256::from(i * 32))
+                            .try_into()
+                            .unwrap_or(0);
                     if addr_offset_val + 32 <= data.len() {
                         let addr_bytes = &data[addr_offset_val + 12..addr_offset_val + 32]; // Take last 20 bytes
                         addresses.push(format!("0x{}", hex::encode(addr_bytes)));
@@ -73,7 +81,8 @@ fn decode_solidity_value(ty: &str, data: &[u8], offset: &mut usize) -> String {
     } else if ty.ends_with("[]") {
         // Other dynamic arrays - just show offset for now
         if *offset + 32 <= data.len() {
-            let array_offset_val = U256::from_be_bytes(data[*offset..*offset + 32].try_into().unwrap_or([0; 32]));
+            let array_offset_val =
+                U256::from_be_bytes(data[*offset..*offset + 32].try_into().unwrap_or([0; 32]));
             *offset += 32;
             return format!("(dynamic array at offset {})", array_offset_val);
         }
