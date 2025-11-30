@@ -16,10 +16,10 @@ use visualsign::{
     },
 };
 
-pub mod networks;
 pub mod context;
 pub mod contracts;
 pub mod fmt;
+pub mod networks;
 pub mod protocols;
 pub mod registry;
 pub mod token_metadata;
