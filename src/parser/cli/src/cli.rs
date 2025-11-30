@@ -1,9 +1,14 @@
 use crate::chains;
 use chains::parse_chain;
 use clap::Parser;
+use generated::parser::{
+    ChainMetadata, EthereumMetadata, SolanaMetadata, chain_metadata::Metadata,
+};
 use parser_app::registry::create_registry;
+use visualsign::registry::Chain;
 use visualsign::vsptrait::VisualSignOptions;
 use visualsign::{SignablePayload, SignablePayloadField};
+use visualsign_ethereum::networks::parse_network;
 
 #[derive(Parser, Debug)]
 #[command(name = "visualsign-parser")]
@@ -29,6 +34,14 @@ struct Args {
         help = "Show only condensed view (what hardware wallets display)"
     )]
     condensed_only: bool,
+
+    #[arg(
+        long,
+        short = 'n',
+        value_name = "NETWORK",
+        help = "Network identifier - chain ID (e.g., 1, 137) or name (e.g., ETHEREUM_MAINNET, POLYGON_MAINNET)"
+    )]
+    network: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -244,6 +257,42 @@ fn parse_and_display(
     }
 }
 
+/// Creates chain-specific metadata from the `network` argument
+///
+/// The network can be specified as either:
+/// - A chain ID number (e.g., 1, 137, 42161)
+/// - A canonical network name (e.g., `ETHEREUM_MAINNET`, `POLYGON_MAINNET`)
+///
+/// Returns `None` if no network is specified.
+/// Prints an error and exits if the network identifier is invalid.
+fn create_chain_metadata(chain: &Chain, network: Option<String>) -> Option<ChainMetadata> {
+    let network = network?;
+
+    // Parse and validate the network identifier
+    let Some(network_id) = parse_network(&network) else {
+        eprintln!(
+            "Error: Invalid network '{network}'. Use a chain ID (e.g., 1, 137) or name (e.g., ETHEREUM_MAINNET, POLYGON_MAINNET)"
+        );
+        std::process::exit(1);
+    };
+
+    let metadata = match chain {
+        Chain::Solana => Metadata::Solana(SolanaMetadata {
+            network_id: Some(network_id),
+            idl: None,
+        }),
+        // For Ethereum and other chains, use EthereumMetadata structure
+        _ => Metadata::Ethereum(EthereumMetadata {
+            network_id: Some(network_id),
+            abi: None,
+        }),
+    };
+
+    Some(ChainMetadata {
+        metadata: Some(metadata),
+    })
+}
+
 /// app cli
 pub struct Cli;
 impl Cli {
@@ -255,10 +304,13 @@ impl Cli {
     pub fn execute() {
         let args = Args::parse();
 
+        let chain = parse_chain(&args.chain);
+        let metadata = create_chain_metadata(&chain, args.network);
+
         let options = VisualSignOptions {
             decode_transfers: true,
             transaction_name: None,
-            metadata: None,
+            metadata,
         };
 
         parse_and_display(

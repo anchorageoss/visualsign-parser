@@ -6134,6 +6134,7 @@ dependencies = [
  "tracing-log 0.2.0",
  "tracing-subscriber",
  "visualsign",
+ "visualsign-ethereum",
  "visualsign-solana",
  "visualsign-unspecified",
 ]

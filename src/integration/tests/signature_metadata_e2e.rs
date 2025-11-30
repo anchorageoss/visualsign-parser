@@ -188,7 +188,10 @@ fn test_ethereum_abi_with_secp256k1_signature() {
     };
 
     // Create ParseRequest with EthereumMetadata containing signed ABI
-    let ethereum_metadata = EthereumMetadata { abi: Some(abi) };
+    let ethereum_metadata = EthereumMetadata {
+        network_id: None,
+        abi: Some(abi),
+    };
     let parse_request = ParseRequest {
         unsigned_payload: "0x".to_string(),
         chain: Chain::Ethereum as i32,
@@ -265,7 +268,10 @@ fn test_solana_idl_with_ed25519_signature() {
     };
 
     // Create ParseRequest with SolanaMetadata containing signed IDL
-    let solana_metadata = SolanaMetadata { idl: Some(idl) };
+    let solana_metadata = SolanaMetadata {
+        network_id: None,
+        idl: Some(idl),
+    };
     let parse_request = ParseRequest {
         unsigned_payload: "0x".to_string(),
         chain: Chain::Solana as i32,
@@ -339,7 +345,10 @@ fn test_signature_tampering_detection() {
         signature: Some(signature_metadata.clone()),
     };
 
-    let ethereum_metadata = EthereumMetadata { abi: Some(abi) };
+    let ethereum_metadata = EthereumMetadata {
+        network_id: None,
+        abi: Some(abi),
+    };
     let parse_request = ParseRequest {
         unsigned_payload: "0x".to_string(),
         chain: Chain::Ethereum as i32,
