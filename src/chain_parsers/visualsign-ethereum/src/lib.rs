@@ -425,6 +425,20 @@ fn convert_to_visual_sign_payload(
                             input_fields.push(field);
                         }
                     }
+                    // Check if this is a Morpho Bundler3 contract and visualize it
+                    else if contract_type
+                        == crate::protocols::morpho::config::Bundler3Contract::short_type_id()
+                    {
+                        if let Some(field) = (protocols::morpho::BundlerVisualizer {})
+                            .visualize_multicall(
+                                input,
+                                chain_id_val,
+                                Some(layered_registry.global()),
+                            )
+                        {
+                            input_fields.push(field);
+                        }
+                    }
                 }
             }
         }
