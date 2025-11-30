@@ -12837,6 +12837,7 @@ dependencies = [
  "hex",
  "log",
  "num_enum 0.7.5",
+ "phf",
  "serde",
  "serde_json",
  "sha2 0.10.9",
