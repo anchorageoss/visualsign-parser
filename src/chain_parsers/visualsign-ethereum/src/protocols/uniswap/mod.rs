@@ -54,7 +54,7 @@ pub fn register(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocols::uniswap::config::{UniswapUniversalRouter, networks as chains};
+    use crate::protocols::uniswap::config::{UniswapUniversalRouter, networks};
     use crate::registry::ContractType;
 
     #[test]
@@ -80,12 +80,15 @@ mod tests {
     #[test]
     fn test_different_addresses_per_chain() {
         // Verify that some chains have different addresses
-        let eth_addr = UniswapConfig::universal_router_address(chains::ethereum::MAINNET).unwrap();
-        let arb_addr = UniswapConfig::universal_router_address(chains::arbitrum::MAINNET).unwrap();
-        let opt_addr = UniswapConfig::universal_router_address(chains::optimism::MAINNET).unwrap();
+        let eth_addr =
+            UniswapConfig::universal_router_address(networks::ethereum::MAINNET).unwrap();
+        let arb_addr =
+            UniswapConfig::universal_router_address(networks::arbitrum::MAINNET).unwrap();
+        let opt_addr =
+            UniswapConfig::universal_router_address(networks::optimism::MAINNET).unwrap();
 
         // Ethereum and Base share the same address
-        let base_addr = UniswapConfig::universal_router_address(chains::base::MAINNET).unwrap();
+        let base_addr = UniswapConfig::universal_router_address(networks::base::MAINNET).unwrap();
         assert_eq!(eth_addr, base_addr);
 
         // But Arbitrum and Optimism have different addresses
