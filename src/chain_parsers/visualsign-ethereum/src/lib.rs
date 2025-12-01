@@ -23,7 +23,6 @@ pub mod networks;
 pub mod protocols;
 pub mod registry;
 pub mod token_metadata;
-pub mod utils;
 pub mod visualizer;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]

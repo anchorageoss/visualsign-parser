@@ -43,6 +43,9 @@ pub fn register(
         contract_reg.register_contract_typed::<Permit2Contract>(chain_id, vec![permit2_address]);
     }
 
+    // Register well-known addresses used by Uniswap
+    UniswapConfig::register_well_known_addresses(contract_reg);
+
     // Register common tokens (WETH, USDC, USDT, DAI, etc.)
     UniswapConfig::register_common_tokens(contract_reg);
 

@@ -151,10 +151,62 @@ impl UniswapConfig {
     /// Returns the Permit2 contract address
     ///
     /// Permit2 is deployed at the same address across all chains.
+    /// This method provides backward compatibility - prefer using the registry's
+    /// get_well_known_address("permit2", chain_id) method.
     ///
     /// Source: <https://github.com/Uniswap/permit2>
     pub fn permit2_address() -> Address {
-        crate::utils::address_utils::WellKnownAddresses::permit2()
+        "0x000000000022d473030f116ddee9f6b43ac78ba3"
+            .parse()
+            .expect("Valid PERMIT2 address")
+    }
+
+    /// Registers well-known addresses used by Uniswap protocols
+    ///
+    /// This should be called during registry initialization to populate
+    /// well-known addresses that Uniswap protocols depend on.
+    pub fn register_well_known_addresses(registry: &mut ContractRegistry) {
+        use crate::registry::WellKnownAddress;
+
+        // Permit2 is universal across all chains
+        registry.register_universal_address(
+            WellKnownAddress::Permit2,
+            "0x000000000022d473030f116ddee9f6b43ac78ba3"
+                .parse()
+                .expect("Valid PERMIT2 address"),
+        );
+
+        // WETH addresses are chain-specific
+        let weth_addresses = [
+            (
+                networks::ethereum::MAINNET,
+                "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+            ),
+            (
+                networks::optimism::MAINNET,
+                "0x4200000000000000000000000000000000000006",
+            ),
+            (
+                networks::polygon::MAINNET,
+                "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619",
+            ),
+            (
+                networks::base::MAINNET,
+                "0x4200000000000000000000000000000000000006",
+            ),
+            (
+                networks::arbitrum::MAINNET,
+                "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+            ),
+        ];
+
+        for (chain_id, address_str) in weth_addresses {
+            registry.register_chain_specific_address(
+                WellKnownAddress::Weth,
+                chain_id,
+                address_str.parse().expect("Valid WETH address"),
+            );
+        }
     }
 
     // TODO: Add methods for other Universal Router versions

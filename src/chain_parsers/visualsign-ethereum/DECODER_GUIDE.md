@@ -78,6 +78,7 @@ sol! {
 ```
 
 **Why?** The `sol!` macro from alloy automatically generates:
+
 - Type-safe `abi_decode()` function
 - Proper ABI encoding/decoding
 - Clean field access without manual byte parsing
@@ -256,31 +257,40 @@ fn decode_v3_swap_exact_in(
 ## Key Principles
 
 ### 1. Type Safety First
+
 Use the `sol!` macro to generate type-safe decoders. Avoid manual byte parsing.
 
 ### 2. Registry as Single Source of Truth
+
 All token symbols and decimals come from `ContractRegistry`. This ensures consistency and allows wallets to customize metadata.
 
 ### 3. Graceful Error Handling
+
 Always handle decode failures by returning a TextV2 field with the hex input. This gives users visibility into what failed.
 
 ### 4. Clean, Human-Readable Output
+
 Format amounts with proper decimals and symbols. Make the transaction intent clear.
 
 ### 5. No ASCII Characters in Strings
+
 Use `>=` and `<=` instead of non-ASCII characters like `≥` and `≤` for terminal compatibility.
 
 ## Reusable Utilities
 
-### WellKnownAddresses
+### Well-Known Address Resolution
 
-For contracts like WETH that don't need registry lookups:
+Use the registry to resolve well-known addresses that protocols depend on:
 
 ```rust
-use crate::utils::address_utils::WellKnownAddresses;
+use crate::registry::WellKnownAddress;
 
-let weth_address = WellKnownAddresses::weth(chain_id)?;
-let permit2_address = WellKnownAddresses::permit2();
+// Get well-known addresses from the registry
+let permit2_addr = registry.get_well_known_address(WellKnownAddress::Permit2, chain_id)?;
+let weth_addr = registry.get_well_known_address(WellKnownAddress::Weth, chain_id)?;
+
+// Token symbol resolution
+let token_symbol = registry.get_token_symbol(chain_id, token_address);
 ```
 
 ### Error Fields
@@ -299,9 +309,10 @@ SignablePayloadField::TextV2 {
 }
 ```
 
-## Adding Support for Aave
+## Example: Adding Support for Aave using Solidity
 
 When you're ready to add Aave support, follow this pattern:
+This was also implemented fully in a hackathon project https://github.com/anchorageoss/visualsign-parser/pull/111,
 
 ```rust
 // 1. Define Aave structs using sol!
@@ -336,6 +347,7 @@ match aave_operation {
 ## Summary
 
 The pattern is simple and scales:
+
 1. Define structs with `sol!`
 2. Create decoder function (20-40 lines)
 3. Add to match statement
