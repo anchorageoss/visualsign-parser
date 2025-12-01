@@ -68,7 +68,11 @@ impl AbiRegistry {
     /// const ABI_JSON: &str = include_str!("abi.json");
     /// registry.register_abi("MyContract", ABI_JSON)?;
     /// ```
-    pub fn register_abi(&mut self, name: &str, abi_json: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn register_abi(
+        &mut self,
+        name: &str,
+        abi_json: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let abi = serde_json::from_str::<JsonAbi>(abi_json)?;
         Arc::get_mut(&mut self.abis)
             .expect("ABI map should be mutable")
@@ -155,7 +159,9 @@ mod tests {
     #[test]
     fn test_register_and_retrieve_abi() {
         let mut registry = AbiRegistry::new();
-        registry.register_abi("TestToken", TEST_ABI).expect("Failed to register ABI");
+        registry
+            .register_abi("TestToken", TEST_ABI)
+            .expect("Failed to register ABI");
 
         let abi = registry.get_abi("TestToken");
         assert!(abi.is_some());
@@ -171,7 +177,9 @@ mod tests {
     #[test]
     fn test_address_mapping() {
         let mut registry = AbiRegistry::new();
-        registry.register_abi("TestToken", TEST_ABI).expect("Failed to register ABI");
+        registry
+            .register_abi("TestToken", TEST_ABI)
+            .expect("Failed to register ABI");
 
         let addr = "0x1234567890123456789012345678901234567890"
             .parse::<Address>()
@@ -196,7 +204,9 @@ mod tests {
     #[test]
     fn test_different_chains_separate() {
         let mut registry = AbiRegistry::new();
-        registry.register_abi("TestToken", TEST_ABI).expect("Failed to register ABI");
+        registry
+            .register_abi("TestToken", TEST_ABI)
+            .expect("Failed to register ABI");
 
         let addr = "0x1234567890123456789012345678901234567890"
             .parse::<Address>()
@@ -214,8 +224,12 @@ mod tests {
     #[test]
     fn test_list_abis() {
         let mut registry = AbiRegistry::new();
-        registry.register_abi("TokenA", TEST_ABI).expect("Failed to register");
-        registry.register_abi("TokenB", TEST_ABI).expect("Failed to register");
+        registry
+            .register_abi("TokenA", TEST_ABI)
+            .expect("Failed to register");
+        registry
+            .register_abi("TokenB", TEST_ABI)
+            .expect("Failed to register");
 
         let abis = registry.list_abis();
         assert_eq!(abis.len(), 2);

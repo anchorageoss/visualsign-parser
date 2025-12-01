@@ -1,3 +1,4 @@
+pub mod aave;
 pub mod morpho;
 pub mod uniswap;
 
@@ -13,6 +14,9 @@ pub fn register_all(
     contract_reg: &mut ContractRegistry,
     visualizer_reg: &mut EthereumVisualizerRegistryBuilder,
 ) {
+    // Register Aave protocol
+    aave::register(contract_reg, visualizer_reg);
+
     // Register Morpho protocol
     morpho::register(contract_reg, visualizer_reg);
 

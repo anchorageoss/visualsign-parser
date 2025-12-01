@@ -331,9 +331,10 @@ fn convert_to_visual_sign_payload(
     let chain_id = transaction.chain_id();
 
     // Try to extract AbiRegistry from options
-    let abi_registry = options.abi_registry.as_ref().and_then(|any_reg| {
-        any_reg.downcast_ref::<abi_registry::AbiRegistry>()
-    });
+    let abi_registry = options
+        .abi_registry
+        .as_ref()
+        .and_then(|any_reg| any_reg.downcast_ref::<abi_registry::AbiRegistry>());
 
     let chain_name = chains::get_chain_name(chain_id);
 
@@ -448,6 +449,45 @@ fn convert_to_visual_sign_payload(
                             .visualize_tx_commands(input, chain_id_val, Some(registry))
                         {
                             input_fields.push(field);
+                        }
+                    }
+                    // Check if this is an Aave V3 Pool contract and visualize it
+                    else if contract_type
+                        == crate::protocols::aave::config::AaveV3PoolContract::short_type_id()
+                    {
+                        if let Some(field) = (protocols::aave::PoolVisualizer::new())
+                            .visualize_pool_operation(input, chain_id_val, Some(registry))
+                        {
+                            input_fields.push(field);
+                        }
+                    }
+                }
+
+                // Check for Aave governance contracts by address
+                if let Some(to_addr) = transaction.to() {
+                    // Check if this is the AAVE token (delegation)
+                    if let Some(aave_token) =
+                        protocols::aave::config::AaveV3Config::aave_token_address()
+                    {
+                        if to_addr == aave_token {
+                            if let Some(field) = (protocols::aave::AaveTokenVisualizer)
+                                .visualize_governance(input, chain_id_val, Some(registry))
+                            {
+                                input_fields.push(field);
+                            }
+                        }
+                    }
+
+                    // Check if this is a VotingMachine contract
+                    if let Some(voting_machine) =
+                        protocols::aave::config::AaveV3Config::voting_machine_address(chain_id_val)
+                    {
+                        if to_addr == voting_machine {
+                            if let Some(field) = (protocols::aave::VotingMachineVisualizer)
+                                .visualize_vote(input, chain_id_val, Some(registry))
+                            {
+                                input_fields.push(field);
+                            }
                         }
                     }
                 }

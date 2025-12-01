@@ -34,9 +34,7 @@ impl CalldataVisualizer for DynamicAbiVisualizer {
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> Option<SignablePayloadField> {
-        self.decoder
-            .visualize(calldata, chain_id, registry)
-            .ok()
+        self.decoder.visualize(calldata, chain_id, registry).ok()
     }
 }
 
