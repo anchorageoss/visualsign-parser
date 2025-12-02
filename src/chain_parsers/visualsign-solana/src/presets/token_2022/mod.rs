@@ -81,6 +81,30 @@ fn parse_token_2022_instruction(
     data: &[u8],
     accounts: &[AccountMeta],
 ) -> Result<Token2022Instruction, String> {
+    // Check for Pause instruction
+    if is_pause_instruction(data) {
+        if accounts.len() < 2 {
+            return Err("Invalid pause: insufficient accounts".to_string());
+        }
+
+        return Ok(Token2022Instruction::Pause {
+            mint: accounts[0].pubkey.to_string(),
+            pause_authority: accounts[1].pubkey.to_string(),
+        });
+    }
+
+    // Check for Resume instruction
+    if is_resume_instruction(data) {
+        if accounts.len() < 2 {
+            return Err("Invalid resume: insufficient accounts".to_string());
+        }
+
+        return Ok(Token2022Instruction::Resume {
+            mint: accounts[0].pubkey.to_string(),
+            pause_authority: accounts[1].pubkey.to_string(),
+        });
+    }
+
     // Try to parse as standard TokenInstruction first
     if let Ok(sdk_instruction) = TokenInstruction::unpack(data) {
         match sdk_instruction {
@@ -111,41 +135,17 @@ fn parse_token_2022_instruction(
                 });
             }
             _ => {
-                // Not a standard TokenInstruction, fall through to check extension instructions
+                // Not a standard TokenInstruction, return error
+                return Err(format!(
+                    "Unsupported Token 2022 instruction: unknown discriminator {}",
+                    if data.is_empty() {
+                        "empty".to_string()
+                    } else {
+                        format!("0x{:02x}", data[0])
+                    }
+                ));
             }
         }
-    }
-
-    // Check for Pause instruction (extension discriminator: 44 and pausable discriminator: 1)
-    if !data.is_empty()
-        && data[0] == PAUSABLE_EXTENSION_DISCRIMINATOR
-        && data.len() > 1
-        && data[1] == PAUSABLE_PAUSE_DISCRIMINATOR
-    {
-        if accounts.len() < 2 {
-            return Err("Invalid pause: insufficient accounts".to_string());
-        }
-
-        return Ok(Token2022Instruction::Pause {
-            mint: accounts[0].pubkey.to_string(),
-            pause_authority: accounts[1].pubkey.to_string(),
-        });
-    }
-
-    // Check for Resume instruction (extension discriminator: 44 and pausable discriminator: 2)
-    if !data.is_empty()
-        && data[0] == PAUSABLE_EXTENSION_DISCRIMINATOR
-        && data.len() > 1
-        && data[1] == PAUSABLE_RESUME_DISCRIMINATOR
-    {
-        if accounts.len() < 2 {
-            return Err("Invalid resume: insufficient accounts".to_string());
-        }
-
-        return Ok(Token2022Instruction::Resume {
-            mint: accounts[0].pubkey.to_string(),
-            pause_authority: accounts[1].pubkey.to_string(),
-        });
     }
 
     Err(format!(
@@ -156,6 +156,22 @@ fn parse_token_2022_instruction(
             format!("0x{:02x}", data[0])
         }
     ))
+}
+
+// Check if the instruction is a Pause instruction
+fn is_pause_instruction(data: &[u8]) -> bool {
+    !data.is_empty()
+        && data[0] == PAUSABLE_EXTENSION_DISCRIMINATOR
+        && data.len() > 1
+        && data[1] == PAUSABLE_PAUSE_DISCRIMINATOR
+}
+
+// Check if the instruction is a Resume instruction
+fn is_resume_instruction(data: &[u8]) -> bool {
+    !data.is_empty()
+        && data[0] == PAUSABLE_EXTENSION_DISCRIMINATOR
+        && data.len() > 1
+        && data[1] == PAUSABLE_RESUME_DISCRIMINATOR
 }
 
 fn create_token_2022_preview_layout(
