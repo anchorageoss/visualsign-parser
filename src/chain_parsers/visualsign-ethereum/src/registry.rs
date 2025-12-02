@@ -5,6 +5,31 @@ use std::collections::HashMap;
 /// Type alias for chain ID to avoid depending on external chain types
 pub type ChainId = u64;
 
+/// Well-known addresses that protocols can register and look up
+///
+/// This enum provides type safety for well-known contract addresses,
+/// preventing typos and enabling compile-time checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WellKnownAddress {
+    /// Permit2 contract - universal across all chains
+    Permit2,
+    /// WETH contract - chain-specific addresses
+    Weth,
+    /// USDC contract - chain-specific addresses
+    Usdc,
+}
+
+impl WellKnownAddress {
+    /// Returns the string identifier for this address type
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            WellKnownAddress::Permit2 => "permit2",
+            WellKnownAddress::Weth => "weth",
+            WellKnownAddress::Usdc => "usdc",
+        }
+    }
+}
+
 /// Trait for contract type markers
 ///
 /// Implement this trait on unit structs to create compile-time unique contract type identifiers.
@@ -58,6 +83,9 @@ pub struct ContractRegistry {
     type_to_addresses: HashMap<(ChainId, String), Vec<Address>>,
     /// Maps (chain_id, token_address) to token metadata
     token_metadata: HashMap<(ChainId, Address), TokenMetadata>,
+    /// Maps (well_known_address, optional_chain_id) to address
+    /// For chain-specific addresses, use Some(chain_id); for universal addresses, use None
+    well_known_addresses: HashMap<(WellKnownAddress, Option<ChainId>), Address>,
 }
 
 impl ContractRegistry {
@@ -67,6 +95,7 @@ impl ContractRegistry {
             address_to_type: HashMap::new(),
             type_to_addresses: HashMap::new(),
             token_metadata: HashMap::new(),
+            well_known_addresses: HashMap::new(),
         }
     }
 
@@ -190,6 +219,76 @@ impl ContractRegistry {
             .map(|m| m.symbol.clone())
     }
 
+    /// Registers a well-known address that exists on all chains at the same address
+    ///
+    /// # Arguments
+    /// * `address_type` - The well-known address type
+    /// * `address` - The address (same across all chains)
+    ///
+    /// # Example
+    /// ```ignore
+    /// registry.register_universal_address(WellKnownAddress::Permit2, "0x000000000022d473030f116ddee9f6b43ac78ba3".parse().unwrap());
+    /// ```
+    pub fn register_universal_address(&mut self, address_type: WellKnownAddress, address: Address) {
+        self.well_known_addresses
+            .insert((address_type, None), address);
+    }
+
+    /// Registers a well-known address for a specific chain
+    ///
+    /// # Arguments
+    /// * `address_type` - The well-known address type
+    /// * `chain_id` - The specific chain ID
+    /// * `address` - The address on that chain
+    ///
+    /// # Example
+    /// ```ignore
+    /// registry.register_chain_specific_address(WellKnownAddress::Weth, 1, "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2".parse().unwrap());
+    /// ```
+    pub fn register_chain_specific_address(
+        &mut self,
+        address_type: WellKnownAddress,
+        chain_id: ChainId,
+        address: Address,
+    ) {
+        self.well_known_addresses
+            .insert((address_type, Some(chain_id)), address);
+    }
+
+    /// Gets a well-known address
+    ///
+    /// First checks for chain-specific address, then falls back to universal address.
+    ///
+    /// # Arguments
+    /// * `address_type` - The well-known address type
+    /// * `chain_id` - The chain ID to look up
+    ///
+    /// # Returns
+    /// `Some(address)` if found, `None` otherwise
+    ///
+    /// # Example
+    /// ```ignore
+    /// let permit2_addr = registry.get_well_known_address(WellKnownAddress::Permit2, 1)?; // Universal address
+    /// let weth_addr = registry.get_well_known_address(WellKnownAddress::Weth, 1)?;     // Chain-specific address
+    /// ```
+    pub fn get_well_known_address(
+        &self,
+        address_type: WellKnownAddress,
+        chain_id: ChainId,
+    ) -> Option<Address> {
+        // Try chain-specific first
+        if let Some(addr) = self
+            .well_known_addresses
+            .get(&(address_type, Some(chain_id)))
+        {
+            return Some(*addr);
+        }
+        // Fall back to universal
+        self.well_known_addresses
+            .get(&(address_type, None))
+            .copied()
+    }
+
     /// Formats a raw token amount with the proper number of decimal places
     ///
     /// This method:
@@ -309,6 +408,7 @@ mod tests {
         assert_eq!(registry.address_to_type.len(), 0);
         assert_eq!(registry.type_to_addresses.len(), 0);
         assert_eq!(registry.token_metadata.len(), 0);
+        assert_eq!(registry.well_known_addresses.len(), 0);
     }
 
     #[test]
@@ -685,5 +785,182 @@ mod tests {
         let result = registry.load_chain_metadata(&metadata);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("UNKNOWN_NETWORK"));
+    }
+
+    #[test]
+    fn test_register_universal_address() {
+        let mut registry = ContractRegistry::new();
+        let permit2_addr: Address = "0x000000000022d473030f116ddee9f6b43ac78ba3"
+            .parse()
+            .unwrap();
+
+        registry.register_universal_address(WellKnownAddress::Permit2, permit2_addr);
+
+        // Should work on any chain
+        assert_eq!(
+            registry.get_well_known_address(WellKnownAddress::Permit2, 1),
+            Some(permit2_addr)
+        );
+        assert_eq!(
+            registry.get_well_known_address(WellKnownAddress::Permit2, 137),
+            Some(permit2_addr)
+        );
+        assert_eq!(
+            registry.get_well_known_address(WellKnownAddress::Permit2, 42161),
+            Some(permit2_addr)
+        );
+    }
+
+    #[test]
+    fn test_register_chain_specific_address() {
+        let mut registry = ContractRegistry::new();
+        let weth_mainnet: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let weth_polygon: Address = "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619"
+            .parse()
+            .unwrap();
+
+        registry.register_chain_specific_address(WellKnownAddress::Weth, 1, weth_mainnet);
+        registry.register_chain_specific_address(WellKnownAddress::Weth, 137, weth_polygon);
+
+        // Should return correct address for each chain
+        assert_eq!(
+            registry.get_well_known_address(WellKnownAddress::Weth, 1),
+            Some(weth_mainnet)
+        );
+        assert_eq!(
+            registry.get_well_known_address(WellKnownAddress::Weth, 137),
+            Some(weth_polygon)
+        );
+
+        // Should return None for chains without this address
+        assert_eq!(
+            registry.get_well_known_address(WellKnownAddress::Weth, 999),
+            None
+        );
+    }
+
+    #[test]
+    fn test_well_known_address_priority() {
+        let mut registry = ContractRegistry::new();
+        let universal_addr: Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        let chain_specific_addr: Address = "0x2222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
+
+        // Register both universal and chain-specific for the same address type
+        registry.register_universal_address(WellKnownAddress::Weth, universal_addr);
+        registry.register_chain_specific_address(WellKnownAddress::Weth, 1, chain_specific_addr);
+
+        // Chain-specific should take priority over universal
+        assert_eq!(
+            registry.get_well_known_address(WellKnownAddress::Weth, 1),
+            Some(chain_specific_addr)
+        );
+
+        // Other chains should fall back to universal
+        assert_eq!(
+            registry.get_well_known_address(WellKnownAddress::Weth, 137),
+            Some(universal_addr)
+        );
+    }
+
+    #[test]
+    fn test_get_well_known_address_not_found() {
+        let registry = ContractRegistry::new();
+
+        assert_eq!(
+            registry.get_well_known_address(WellKnownAddress::Weth, 1),
+            None
+        );
+    }
+
+    #[test]
+    fn test_all_well_known_addresses_resolvable() {
+        // Create registry with default protocols (includes well-known addresses)
+        let (registry, _) = ContractRegistry::with_default_protocols();
+
+        // Test chains that should have comprehensive coverage
+        let test_chains = [
+            1u64,     // Ethereum Mainnet
+            137u64,   // Polygon
+            42161u64, // Arbitrum
+            10u64,    // Optimism
+            8453u64,  // Base
+        ];
+
+        // Test each variant of WellKnownAddress
+        let well_known_variants = [
+            WellKnownAddress::Permit2,
+            WellKnownAddress::Weth,
+            WellKnownAddress::Usdc,
+        ];
+
+        for &variant in &well_known_variants {
+            let variant_name = variant.as_str();
+
+            match variant {
+                WellKnownAddress::Permit2 => {
+                    // Permit2 should be universal - resolvable on any chain
+                    for &chain_id in &test_chains {
+                        let addr = registry
+                            .get_well_known_address(variant, chain_id)
+                            .unwrap_or_else(|| {
+                                panic!("{variant_name} should be resolvable on chain {chain_id}",)
+                            });
+
+                        // Should be the same address on all chains (universal)
+                        let expected_permit2: Address =
+                            "0x000000000022d473030f116ddee9f6b43ac78ba3"
+                                .parse()
+                                .unwrap();
+                        assert_eq!(
+                            addr, expected_permit2,
+                            "Permit2 address should be {expected_permit2} on chain {chain_id}",
+                        );
+                    }
+                }
+                WellKnownAddress::Weth => {
+                    // WETH should be chain-specific - different addresses per chain
+                    let mut addresses = std::collections::HashSet::new();
+
+                    for &chain_id in &test_chains {
+                        let addr = registry
+                            .get_well_known_address(variant, chain_id)
+                            .unwrap_or_else(|| {
+                                panic!("{variant_name} should be resolvable on chain {chain_id}",)
+                            });
+                        addresses.insert(addr);
+                    }
+
+                    // Should have multiple different addresses (chain-specific)
+                    assert!(
+                        addresses.len() > 1,
+                        "WETH should have different addresses on different chains, but got: {addresses:?}",
+                    );
+                }
+                WellKnownAddress::Usdc => {
+                    // USDC is chain-specific but may not be registered yet
+                    // For now, we just verify the enum variant exists
+                    // Future implementations can register USDC addresses
+
+                    // Check that the variant has a string representation
+                    assert_eq!(variant.as_str(), "usdc");
+
+                    // Note: We don't require USDC to be registered yet,
+                    // but the enum should be ready for future use
+                }
+            }
+        }
+
+        // Verify that all enum variants were tested
+        assert_eq!(
+            well_known_variants.len(),
+            3,
+            "Update this test when adding new WellKnownAddress variants"
+        );
     }
 }

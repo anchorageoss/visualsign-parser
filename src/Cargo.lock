@@ -6134,6 +6134,7 @@ dependencies = [
  "tracing-log 0.2.0",
  "tracing-subscriber",
  "visualsign",
+ "visualsign-ethereum",
  "visualsign-solana",
  "visualsign-unspecified",
 ]
@@ -12837,6 +12838,7 @@ dependencies = [
  "hex",
  "log",
  "num_enum 0.7.5",
+ "phf",
  "serde",
  "serde_json",
  "sha2 0.10.9",

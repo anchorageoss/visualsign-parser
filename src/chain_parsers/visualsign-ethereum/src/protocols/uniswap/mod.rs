@@ -10,7 +10,10 @@ use crate::registry::ContractRegistry;
 use crate::visualizer::EthereumVisualizerRegistryBuilder;
 
 pub use config::UniswapConfig;
-pub use contracts::{Permit2Visualizer, UniversalRouterVisualizer, V4PoolManagerVisualizer};
+pub use contracts::{
+    Permit2ContractVisualizer, Permit2Visualizer, UniversalRouterContractVisualizer,
+    UniversalRouterVisualizer, V4PoolManagerVisualizer,
+};
 
 /// Registers all Uniswap protocol contracts and visualizers
 ///
@@ -23,28 +26,39 @@ pub use contracts::{Permit2Visualizer, UniversalRouterVisualizer, V4PoolManagerV
 /// * `visualizer_reg` - The visualizer registry to register visualizers
 pub fn register(
     contract_reg: &mut ContractRegistry,
-    _visualizer_reg: &mut EthereumVisualizerRegistryBuilder,
+    visualizer_reg: &mut EthereumVisualizerRegistryBuilder,
 ) {
-    use config::UniswapUniversalRouter;
+    use config::{Permit2Contract, UniswapUniversalRouter};
 
-    let address = UniswapConfig::universal_router_address();
-
-    // Register Universal Router on all supported chains
+    // Register Universal Router on each supported chain with correct address
     for &chain_id in UniswapConfig::universal_router_chains() {
-        contract_reg.register_contract_typed::<UniswapUniversalRouter>(chain_id, vec![address]);
+        let addr = UniswapConfig::universal_router_address(chain_id)
+            .expect("universal_router_chains should only contain valid chains");
+        contract_reg.register_contract_typed::<UniswapUniversalRouter>(chain_id, vec![addr]);
     }
 
-    // TODO: Register visualizers once we implement ContractVisualizer for UniversalRouterVisualizer
-    // For now, we just register the contract addresses
-    // Future: visualizer_reg.register(Box::new(UniversalRouterVisualizer::new()));
+    // Register Permit2 (same address on all chains)
+    let permit2_address = UniswapConfig::permit2_address();
+    for &chain_id in UniswapConfig::universal_router_chains() {
+        contract_reg.register_contract_typed::<Permit2Contract>(chain_id, vec![permit2_address]);
+    }
+
+    // Register well-known addresses used by Uniswap
+    UniswapConfig::register_well_known_addresses(contract_reg);
+
+    // Register common tokens (WETH, USDC, USDT, DAI, etc.)
+    UniswapConfig::register_common_tokens(contract_reg);
+
+    // Register visualizers
+    visualizer_reg.register(Box::new(UniversalRouterContractVisualizer::new()));
+    visualizer_reg.register(Box::new(Permit2ContractVisualizer::new()));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocols::uniswap::config::UniswapUniversalRouter;
+    use crate::protocols::uniswap::config::{UniswapUniversalRouter, networks};
     use crate::registry::ContractType;
-    use alloy_primitives::Address;
 
     #[test]
     fn test_register_uniswap_contracts() {
@@ -53,18 +67,36 @@ mod tests {
 
         register(&mut contract_reg, &mut visualizer_reg);
 
-        let universal_router_address: Address = "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
-            .parse()
-            .unwrap();
-
-        // Verify Universal Router is registered on all supported chains
-        for chain_id in [1, 10, 137, 8453, 42161] {
+        // Verify Universal Router is registered on all supported chains with correct addresses
+        for &chain_id in UniswapConfig::universal_router_chains() {
+            let expected_addr = UniswapConfig::universal_router_address(chain_id)
+                .expect("Chain should have valid address");
             let contract_type = contract_reg
-                .get_contract_type(chain_id, universal_router_address)
+                .get_contract_type(chain_id, expected_addr)
                 .unwrap_or_else(|| {
                     panic!("Universal Router should be registered on chain {chain_id}")
                 });
             assert_eq!(contract_type, UniswapUniversalRouter::short_type_id());
         }
+    }
+
+    #[test]
+    fn test_different_addresses_per_chain() {
+        // Verify that some chains have different addresses
+        let eth_addr =
+            UniswapConfig::universal_router_address(networks::ethereum::MAINNET).unwrap();
+        let arb_addr =
+            UniswapConfig::universal_router_address(networks::arbitrum::MAINNET).unwrap();
+        let opt_addr =
+            UniswapConfig::universal_router_address(networks::optimism::MAINNET).unwrap();
+
+        // Ethereum and Base share the same address
+        let base_addr = UniswapConfig::universal_router_address(networks::base::MAINNET).unwrap();
+        assert_eq!(eth_addr, base_addr);
+
+        // But Arbitrum and Optimism have different addresses
+        assert_ne!(eth_addr, arb_addr);
+        assert_ne!(eth_addr, opt_addr);
+        assert_ne!(arb_addr, opt_addr);
     }
 }

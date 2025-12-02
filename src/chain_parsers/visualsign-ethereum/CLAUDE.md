@@ -9,6 +9,7 @@ The `visualsign` crate provides field builder functions that reduce boilerplate 
 Import from `visualsign::field_builders`:
 
 #### `create_text_field(label: &str, text: &str) -> Result<AnnotatedPayloadField>`
+
 Creates a TextV2 field. Use for simple text display (network names, addresses, etc).
 
 ```rust
@@ -18,6 +19,7 @@ let field = create_text_field("Network", "Ethereum Mainnet")?;
 ```
 
 #### `create_amount_field(label: &str, amount: &str, abbreviation: &str) -> Result<AnnotatedPayloadField>`
+
 Creates an AmountV2 field with token symbol. Validates that amount is a proper signed decimal number.
 
 ```rust
@@ -27,6 +29,7 @@ let field = create_amount_field("Value", "1.5", "USDC")?;
 ```
 
 #### `create_number_field(label: &str, number: &str, unit: &str) -> Result<AnnotatedPayloadField>`
+
 Creates a Number field with optional unit. Similar to amount but without requiring a symbol.
 
 ```rust
@@ -36,6 +39,7 @@ let field = create_number_field("Gas Limit", "21000", "units")?;
 ```
 
 #### `create_address_field(label: &str, address: &str, name: Option<&str>, memo: Option<&str>, asset_label: Option<&str>, badge_text: Option<&str>) -> Result<AnnotatedPayloadField>`
+
 Creates an AddressV2 field with optional metadata.
 
 ```rust
@@ -52,6 +56,7 @@ let field = create_address_field(
 ```
 
 #### `create_raw_data_field(data: &[u8], optional_fallback_string: Option<String>) -> Result<AnnotatedPayloadField>`
+
 Creates a TextV2 field for raw bytes. Displays as hex by default.
 
 ```rust
@@ -63,6 +68,7 @@ let field = create_raw_data_field(b"calldata", None)?;
 ### Number Validation
 
 All amount and number fields validate the input using a regex pattern:
+
 - Valid: `123`, `123.45`, `-123.45`, `+678.90`, `0`, `0.0`
 - Invalid: `-.45`, `123.`, `abc`, `12.3.4`, `--1`
 
@@ -210,3 +216,147 @@ registry.load_chain_metadata(&wallet_metadata)?;
 
 // Now all tokens from wallet are indexed by (chain_id, address)
 ```
+
+## Solidity Protocol Decoders
+
+All protocol decoders (Uniswap, future Aave, etc.) follow a clean, repeatable pattern using the `sol!` macro from alloy.
+
+### Decoder Pattern
+
+Every decoder has 4 steps:
+
+1. **Define struct with sol!** - Type-safe parameter structure
+2. **Decode or handle error** - Use `StructName::abi_decode(bytes)`
+3. **Resolve tokens from registry** - Get symbols and format amounts
+4. **Return TextV2 field** - Human-readable summary
+
+### Example: Simple Decoder
+
+```rust
+fn decode_operation(
+    bytes: &[u8],
+    chain_id: u64,
+    registry: Option<&ContractRegistry>,
+) -> SignablePayloadField {
+    // Step 1: Decode parameters
+    let params = match OperationParams::abi_decode(bytes) {
+        Ok(p) => p,
+        Err(_) => {
+            return SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!("Operation: 0x{}", hex::encode(bytes)),
+                    label: "Operation".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 {
+                    text: "Failed to decode parameters".to_string(),
+                },
+            };
+        }
+    };
+
+    // Step 2: Resolve token symbols via registry
+    let token_symbol = registry
+        .and_then(|r| r.get_token_symbol(chain_id, params.token))
+        .unwrap_or_else(|| format!("{:?}", params.token));
+
+    // Step 3: Format amount with decimals
+    let (amount_str, _) = registry
+        .and_then(|r| {
+            let amount: u128 = params.amount.to_string().parse().ok()?;
+            r.format_token_amount(chain_id, params.token, amount)
+        })
+        .unwrap_or_else(|| (params.amount.to_string(), token_symbol.clone()));
+
+    // Step 4: Create human-readable summary
+    let text = format!("Operation with {} {}", amount_str, token_symbol);
+
+    SignablePayloadField::TextV2 {
+        common: SignablePayloadFieldCommon {
+            fallback_text: text.clone(),
+            label: "Operation".to_string(),
+        },
+        text_v2: SignablePayloadFieldTextV2 { text },
+    }
+}
+```
+
+### Defining Parameter Structs
+
+Use the `sol!` macro to define all parameters:
+
+```rust
+sol! {
+    struct SwapParams {
+        address tokenIn;
+        address tokenOut;
+        uint256 amountIn;
+        uint256 minAmountOut;
+    }
+
+    struct TransferParams {
+        address to;
+        uint256 amount;
+        bytes data;
+    }
+}
+```
+
+**Benefits:**
+
+- Automatic type-safe ABI decoding
+- No manual byte parsing needed
+- Compile-time correctness
+
+### Well-Known Address Resolution
+
+Use the registry to get well-known addresses across protocols:
+
+```rust
+use crate::registry::WellKnownAddress;
+
+// Universal addresses (same on all chains)
+let permit2_addr = registry.get_well_known_address(WellKnownAddress::Permit2, chain_id)?;
+
+// Chain-specific addresses
+let weth_addr = registry.get_well_known_address(WellKnownAddress::Weth, chain_id)?;
+
+// Token metadata resolution
+if let Some(weth_symbol) = registry.get_token_symbol(chain_id, weth_addr) {
+    // Token is known in registry
+}
+```
+
+### Registering Well-Known Addresses
+
+Protocols should register their well-known addresses during initialization:
+
+```rust
+use crate::registry::WellKnownAddress;
+
+// Universal address (same on all chains)
+registry.register_universal_address(WellKnownAddress::Permit2, permit2_address);
+
+// Chain-specific addresses
+registry.register_chain_specific_address(WellKnownAddress::Weth, 1, weth_mainnet_address);
+registry.register_chain_specific_address(WellKnownAddress::Weth, 137, weth_polygon_address);
+```
+
+### ASCII-Only Restrictions
+
+Always use ASCII for terminal compatibility:
+
+- Use `>=` instead of `≥`
+- Use `<=` instead of `≤`
+- Use `->` instead of `→`
+
+### Adding New Protocols
+
+To add any other protocol:
+
+1. Create `src/protocols/{protocol}/` directory
+2. Create a config.rs with the addresses required
+3. Define Aave function structs with `sol!`
+4. Create decoder functions (20-40 lines each)
+5. Add to main visualizer registry
+
+See `DECODER_GUIDE.md` for complete examples.
