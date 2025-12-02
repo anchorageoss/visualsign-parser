@@ -383,10 +383,10 @@ async fn parser_ethereum_native_transfer_e2e() {
         let expected_sp = serde_json::json!({
           "Fields": [
           {
-            "FallbackText": "Xpla Mainnet",
+            "FallbackText": "Unknown Network (Chain ID: 37)",
             "Label": "Network",
             "TextV2": {
-            "Text": "Xpla Mainnet"
+            "Text": "Unknown Network (Chain ID: 37)"
             },
             "Type": "text_v2"
           },
