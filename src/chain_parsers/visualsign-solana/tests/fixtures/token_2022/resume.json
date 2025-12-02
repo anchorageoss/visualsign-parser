@@ -1,0 +1,31 @@
+{
+  "description": "Token 2022 Resume instruction - resuming all operations for a paused token mint",
+  "source": "http://localnet/tx",
+  "signature": "test_signature_unpause",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "This is a test fixture for Token 2022 Resume instruction. This will resume all minting, burning, and transferring operations for the token mint.",
+  "instruction_index": 0,
+  "instruction_data": "4MF",
+  "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "accounts": [
+    {
+      "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "signer": false,
+      "writable": true,
+      "description": "Mint account"
+    },
+    {
+      "pubkey": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+      "signer": true,
+      "writable": false,
+      "description": "Pause authority"
+    }
+  ],
+  "expected_fields": {
+    "instruction": "Resume",
+    "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "pause_authority": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  }
+}
+
