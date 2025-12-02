@@ -10,6 +10,7 @@
 /// Each entry: (chain_module, network_const, chain_id, display_name)
 /// Generates:
 /// - `id::{chain_module}::{network_const}` constants
+/// - `network_id::{chain_module}::{network_const}` string constants
 /// - `get_network_name()` - chain_id -> display name
 /// - `chain_id_to_network_id()` - chain_id -> canonical ID (e.g., "ETHEREUM_MAINNET")
 /// - `network_id_to_chain_id()` - canonical ID -> chain_id
@@ -29,6 +30,15 @@ macro_rules! define_networks {
             $(
                 pub mod $chain {
                     $( pub const $network: u64 = $id; )*
+                }
+            )*
+        }
+
+        /// Network ID string constants
+        pub mod network_id {
+            $(
+                pub mod $chain {
+                    $( pub const $network: &str = concat!(stringify!($chain), "_", stringify!($network)); )*
                 }
             )*
         }
@@ -53,7 +63,7 @@ macro_rules! define_networks {
         pub fn chain_id_to_network_id(chain_id: u64) -> Option<&'static str> {
             match chain_id {
                 $($(
-                    id::$chain::$network => Some(concat!(stringify!($chain), "_", stringify!($network)).to_uppercase().leak()),
+                    id::$chain::$network => Some(network_id::$chain::$network),
                 )*)*
                 _ => None,
             }
@@ -194,64 +204,64 @@ mod tests {
     const ALL_NETWORKS: &[(u64, &str, &str)] = &[
         (
             id::ethereum::MAINNET,
-            "ETHEREUM_MAINNET",
+            "ethereum_MAINNET",
             "Ethereum Mainnet",
         ),
         (
             id::ethereum::SEPOLIA,
-            "ETHEREUM_SEPOLIA",
+            "ethereum_SEPOLIA",
             "Ethereum Sepolia",
         ),
         (
             id::ethereum::GOERLI,
-            "ETHEREUM_GOERLI",
+            "ethereum_GOERLI",
             "Ethereum Goerli (deprecated)",
         ),
         (
             id::ethereum::HOLESKY,
-            "ETHEREUM_HOLESKY",
+            "ethereum_HOLESKY",
             "Ethereum Holesky",
         ),
-        (id::bsc::MAINNET, "BSC_MAINNET", "BNB Smart Chain Mainnet"),
-        (id::bsc::TESTNET, "BSC_TESTNET", "BNB Smart Chain Testnet"),
-        (id::polygon::MAINNET, "POLYGON_MAINNET", "Polygon Mainnet"),
-        (id::polygon::AMOY, "POLYGON_AMOY", "Polygon Amoy"),
+        (id::bsc::MAINNET, "bsc_MAINNET", "BNB Smart Chain Mainnet"),
+        (id::bsc::TESTNET, "bsc_TESTNET", "BNB Smart Chain Testnet"),
+        (id::polygon::MAINNET, "polygon_MAINNET", "Polygon Mainnet"),
+        (id::polygon::AMOY, "polygon_AMOY", "Polygon Amoy"),
         (
             id::avalanche::MAINNET,
-            "AVALANCHE_MAINNET",
+            "avalanche_MAINNET",
             "Avalanche C-Chain",
         ),
         (
             id::avalanche::FUJI,
-            "AVALANCHE_FUJI",
+            "avalanche_FUJI",
             "Avalanche Fuji Testnet",
         ),
-        (id::fantom::MAINNET, "FANTOM_MAINNET", "Fantom Opera"),
-        (id::gnosis::MAINNET, "GNOSIS_MAINNET", "Gnosis Chain"),
-        (id::celo::MAINNET, "CELO_MAINNET", "Celo Mainnet"),
+        (id::fantom::MAINNET, "fantom_MAINNET", "Fantom Opera"),
+        (id::gnosis::MAINNET, "gnosis_MAINNET", "Gnosis Chain"),
+        (id::celo::MAINNET, "celo_MAINNET", "Celo Mainnet"),
         (
             id::celo::ALFAJORES,
-            "CELO_ALFAJORES",
+            "celo_ALFAJORES",
             "Celo Alfajores Testnet",
         ),
-        (id::optimism::MAINNET, "OPTIMISM_MAINNET", "OP Mainnet"),
-        (id::optimism::SEPOLIA, "OPTIMISM_SEPOLIA", "OP Sepolia"),
-        (id::arbitrum::MAINNET, "ARBITRUM_MAINNET", "Arbitrum One"),
+        (id::optimism::MAINNET, "optimism_MAINNET", "OP Mainnet"),
+        (id::optimism::SEPOLIA, "optimism_SEPOLIA", "OP Sepolia"),
+        (id::arbitrum::MAINNET, "arbitrum_MAINNET", "Arbitrum One"),
         (
             id::arbitrum::SEPOLIA,
-            "ARBITRUM_SEPOLIA",
+            "arbitrum_SEPOLIA",
             "Arbitrum Sepolia",
         ),
-        (id::base::MAINNET, "BASE_MAINNET", "Base"),
-        (id::base::SEPOLIA, "BASE_SEPOLIA", "Base Sepolia"),
-        (id::blast::MAINNET, "BLAST_MAINNET", "Blast"),
-        (id::mantle::MAINNET, "MANTLE_MAINNET", "Mantle"),
-        (id::worldchain::MAINNET, "WORLDCHAIN_MAINNET", "World Chain"),
-        (id::zksync::MAINNET, "ZKSYNC_MAINNET", "zkSync Era"),
-        (id::linea::MAINNET, "LINEA_MAINNET", "Linea"),
-        (id::scroll::MAINNET, "SCROLL_MAINNET", "Scroll"),
-        (id::zora::MAINNET, "ZORA_MAINNET", "Zora"),
-        (id::unichain::MAINNET, "UNICHAIN_MAINNET", "Unichain"),
+        (id::base::MAINNET, "base_MAINNET", "Base"),
+        (id::base::SEPOLIA, "base_SEPOLIA", "Base Sepolia"),
+        (id::blast::MAINNET, "blast_MAINNET", "Blast"),
+        (id::mantle::MAINNET, "mantle_MAINNET", "Mantle"),
+        (id::worldchain::MAINNET, "worldchain_MAINNET", "World Chain"),
+        (id::zksync::MAINNET, "zksync_MAINNET", "zkSync Era"),
+        (id::linea::MAINNET, "linea_MAINNET", "Linea"),
+        (id::scroll::MAINNET, "scroll_MAINNET", "Scroll"),
+        (id::zora::MAINNET, "zora_MAINNET", "Zora"),
+        (id::unichain::MAINNET, "unichain_MAINNET", "Unichain"),
     ];
 
     #[test]
@@ -321,11 +331,11 @@ mod tests {
         );
         assert_eq!(
             parse_network("arbitrum_mainnet"),
-            Some("ARBITRUM_MAINNET".to_string())
+            Some("arbitrum_MAINNET".to_string())
         );
         assert_eq!(
             parse_network("Base_Mainnet"),
-            Some("BASE_MAINNET".to_string())
+            Some("base_MAINNET".to_string())
         );
     }
 
@@ -404,7 +414,7 @@ mod tests {
             assert!(
                 chain_part
                     .chars()
-                    .all(|c| c.is_uppercase() || c.is_numeric())
+                    .all(|c| c.is_lowercase() || c.is_numeric())
             );
             assert!(
                 network_part
