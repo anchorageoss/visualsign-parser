@@ -299,8 +299,8 @@ fn test_encode_pause_resume_instructions() {
     let pause_b58 = bs58::encode(&pause_bytes).into_string();
     let resume_b58 = bs58::encode(&resume_bytes).into_string();
 
-    println!("Pause [44,1] base58: {}", pause_b58);
-    println!("Resume [44,2] base58: {}", resume_b58);
+    println!("Pause [44,1] base58: {pause_b58}");
+    println!("Resume [44,2] base58: {resume_b58}");
 
     // Verify they decode correctly
     let pause_decoded = bs58::decode(&pause_b58).into_vec().unwrap();
