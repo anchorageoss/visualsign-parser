@@ -7,24 +7,13 @@ use crate::SignablePayload;
 pub use crate::errors::{TransactionParseError, VisualSignError};
 pub use generated::parser::ChainMetadata;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct VisualSignOptions {
     pub decode_transfers: bool,
     pub transaction_name: Option<String>,
     pub metadata: Option<ChainMetadata>,
     pub abi_registry: Option<Arc<dyn Any + Send + Sync>>,
     // Add more options as needed - we can extend this struct later
-}
-
-impl Default for VisualSignOptions {
-    fn default() -> Self {
-        Self {
-            decode_transfers: false,
-            transaction_name: None,
-            metadata: None,
-            abi_registry: None,
-        }
-    }
 }
 
 impl Debug for VisualSignOptions {

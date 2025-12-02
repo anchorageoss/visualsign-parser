@@ -122,7 +122,7 @@ pub fn load_abi_from_file(
     file_path: &str,
 ) -> Result<(), AbiEmbeddingError> {
     let abi_json = std::fs::read_to_string(file_path)
-        .map_err(|e| AbiEmbeddingError::FileError(format!("{}: {}", file_path, e)))?;
+        .map_err(|e| AbiEmbeddingError::FileError(format!("{file_path}: {e}")))?;
     register_embedded_abi(registry, name, &abi_json)
 }
 

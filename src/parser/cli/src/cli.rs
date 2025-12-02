@@ -229,7 +229,7 @@ fn common_label(field: &SignablePayloadField) -> String {
     }
 }
 
-/// Parses full ABI mapping with file path: "AbiName:/path/to/file.json:0xAddress"
+/// Parses full ABI mapping with file path: "<AbiName:/path/to/file.json:0xAddress>"
 fn parse_abi_file_mapping(mapping_str: &str) -> Option<(String, String, String)> {
     let parts: Vec<&str> = mapping_str.rsplitn(2, ':').collect();
     if parts.len() != 2 {
@@ -252,7 +252,7 @@ fn parse_abi_file_mapping(mapping_str: &str) -> Option<(String, String, String)>
 }
 
 /// Builds an ABI registry from CLI mappings with file paths
-/// Returns (registry, valid_count) and logs any errors
+/// Returns `registry` and `valid_count` and logs any errors
 fn build_abi_registry_from_mappings(abi_json_mappings: &[String]) -> (AbiRegistry, usize) {
     let mut registry = AbiRegistry::new();
     let mut valid_count = 0;
@@ -266,19 +266,17 @@ fn build_abi_registry_from_mappings(abi_json_mappings: &[String]) -> (AbiRegistr
                     Ok(()) => {
                         valid_count += 1;
                         eprintln!(
-                            "  Loaded ABI '{}' from {} and mapped to {}",
-                            abi_name, file_path, address_str
+                            "  Loaded ABI '{abi_name}' from {file_path} and mapped to {address_str}"
                         );
                     }
                     Err(e) => {
-                        eprintln!("  Warning: Failed to load/map ABI '{}': {}", abi_name, e);
+                        eprintln!("  Warning: Failed to load/map ABI '{abi_name}': {e}");
                     }
                 }
             }
             None => {
                 eprintln!(
-                    "  Warning: Invalid ABI mapping '{}' (expected format: AbiName:/path/to/file.json:0xAddress)",
-                    mapping
+                    "  Warning: Invalid ABI mapping '{mapping}' (expected format: AbiName:/path/to/file.json:0xAddress)",
                 );
             }
         }
