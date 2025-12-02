@@ -18,6 +18,11 @@ use visualsign::{
 
 static TOKEN_2022_CONFIG: Token2022Config = Token2022Config;
 
+// Token 2022 extension instruction discriminators
+const PAUSABLE_EXTENSION_DISCRIMINATOR: u8 = 44;
+const PAUSABLE_PAUSE_DISCRIMINATOR: u8 = 1;
+const PAUSABLE_RESUME_DISCRIMINATOR: u8 = 2;
+
 pub struct Token2022Visualizer;
 
 impl InstructionVisualizer for Token2022Visualizer {
@@ -111,8 +116,12 @@ fn parse_token_2022_instruction(
         }
     }
 
-    // Check for Pause instruction (discriminator: 44 and pausable discriminator: 1)
-    if !data.is_empty() && data[0] == 44 && data[1] == 1 {
+    // Check for Pause instruction (extension discriminator: 44 and pausable discriminator: 1)
+    if !data.is_empty()
+        && data[0] == PAUSABLE_EXTENSION_DISCRIMINATOR
+        && data.len() > 1
+        && data[1] == PAUSABLE_PAUSE_DISCRIMINATOR
+    {
         if accounts.len() < 2 {
             return Err("Invalid pause: insufficient accounts".to_string());
         }
@@ -123,8 +132,12 @@ fn parse_token_2022_instruction(
         });
     }
 
-    // Check for resume instruction (discriminator: 44 and pausable discriminator: 2)
-    if !data.is_empty() && data[0] == 44 && data[1] == 2 {
+    // Check for Resume instruction (extension discriminator: 44 and pausable discriminator: 2)
+    if !data.is_empty()
+        && data[0] == PAUSABLE_EXTENSION_DISCRIMINATOR
+        && data.len() > 1
+        && data[1] == PAUSABLE_RESUME_DISCRIMINATOR
+    {
         if accounts.len() < 2 {
             return Err("Invalid resume: insufficient accounts".to_string());
         }
