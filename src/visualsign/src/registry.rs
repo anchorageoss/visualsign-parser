@@ -223,6 +223,7 @@ impl TransactionConverterRegistry {
 /// # Type Parameter
 ///
 /// `R` - The registry type (e.g., `ContractRegistry` for Ethereum)
+#[derive(Clone)]
 pub struct LayeredRegistry<R> {
     /// Request-scoped data (checked first during lookups)
     request: Option<R>,
