@@ -1041,6 +1041,7 @@ mod tests {
             SolanaTransactionWrapper::Legacy(transaction),
             VisualSignOptions {
                 decode_transfers: false,
+                metadata: None,
                 transaction_name: Some("Unknown Program Test".to_string()),
             },
         );
