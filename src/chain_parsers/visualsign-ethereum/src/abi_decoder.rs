@@ -85,7 +85,7 @@ fn decode_solidity_value(ty: &str, data: &[u8], offset: &mut usize) -> String {
             let array_offset_val =
                 U256::from_be_bytes(data[*offset..*offset + 32].try_into().unwrap_or([0; 32]));
             *offset += 32;
-            return format!("(dynamic array at offset {})", array_offset_val);
+            return format!("(dynamic array at offset {array_offset_val})");
         }
     }
 
@@ -93,9 +93,9 @@ fn decode_solidity_value(ty: &str, data: &[u8], offset: &mut usize) -> String {
     if *offset + 32 <= data.len() {
         let hex_val = hex::encode(&data[*offset..(*offset + 32).min(data.len())]);
         *offset = (*offset + 32).min(data.len());
-        format!("{}: 0x{}", ty, hex_val)
+        format!("{ty}: 0x{hex_val}")
     } else {
-        format!("{}: (insufficient data)", ty)
+        format!("{ty}: (insufficient data)")
     }
 }
 

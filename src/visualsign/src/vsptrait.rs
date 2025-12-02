@@ -15,7 +15,7 @@ pub struct DeveloperConfig {
     pub allow_signed_transactions: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct VisualSignOptions {
     pub decode_transfers: bool,
     pub transaction_name: Option<String>,
@@ -25,17 +25,6 @@ pub struct VisualSignOptions {
     pub abi_registry: Option<Arc<dyn Any + Send + Sync>>,
 }
 
-impl Default for VisualSignOptions {
-    fn default() -> Self {
-        Self {
-            decode_transfers: false,
-            transaction_name: None,
-            metadata: None,
-            developer_config: None,
-            abi_registry: None,
-        }
-    }
-}
 
 impl Debug for VisualSignOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
