@@ -85,6 +85,12 @@ fn create_instruction_from_fixture(fixture: &TestFixture) -> Instruction {
     }
 }
 
+// Helper to encode instruction bytes to base58 for fixtures
+#[allow(dead_code)]
+fn encode_instruction_data(bytes: &[u8]) -> String {
+    bs58::encode(bytes).into_string()
+}
+
 fn test_real_transaction(fixture_name: &str, test_name: &str) {
     let fixture: TestFixture = load_fixture(fixture_name);
     println!("\n=== Testing {test_name} Transaction ===");
@@ -271,4 +277,35 @@ fn test_burn_checked_real_transaction() {
 #[test]
 fn test_transfer_checked_unsupported() {
     test_real_transaction("transfer_checked", "TransferChecked (Unsupported)");
+}
+
+#[test]
+fn test_pause_real_transaction() {
+    test_real_transaction("pause", "Pause");
+}
+
+#[test]
+fn test_resume_real_transaction() {
+    test_real_transaction("resume", "Resume");
+}
+
+#[test]
+#[ignore]
+fn test_encode_pause_resume_instructions() {
+    // Helper test to generate correct base58 encodings for Pause and Resume
+    let pause_bytes = [44u8, 1u8];
+    let resume_bytes = [44u8, 2u8];
+
+    let pause_b58 = bs58::encode(&pause_bytes).into_string();
+    let resume_b58 = bs58::encode(&resume_bytes).into_string();
+
+    println!("Pause [44,1] base58: {pause_b58}");
+    println!("Resume [44,2] base58: {resume_b58}");
+
+    // Verify they decode correctly
+    let pause_decoded = bs58::decode(&pause_b58).into_vec().unwrap();
+    let resume_decoded = bs58::decode(&resume_b58).into_vec().unwrap();
+
+    assert_eq!(pause_decoded, pause_bytes);
+    assert_eq!(resume_decoded, resume_bytes);
 }

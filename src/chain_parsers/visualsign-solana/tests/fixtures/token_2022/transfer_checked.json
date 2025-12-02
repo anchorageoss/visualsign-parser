@@ -33,6 +33,6 @@
       "description": "Authority (multisig)"
     }
   ],
-  "expected_error": "Unsupported Token 2022 instruction: TransferChecked"
+  "expected_error": "unknown discriminator"
 }
 

@@ -18,6 +18,11 @@ use visualsign::{
 
 static TOKEN_2022_CONFIG: Token2022Config = Token2022Config;
 
+// Token 2022 extension instruction discriminators
+const PAUSABLE_EXTENSION_DISCRIMINATOR: u8 = 44;
+const PAUSABLE_PAUSE_DISCRIMINATOR: u8 = 1;
+const PAUSABLE_RESUME_DISCRIMINATOR: u8 = 2;
+
 pub struct Token2022Visualizer;
 
 impl InstructionVisualizer for Token2022Visualizer {
@@ -62,44 +67,111 @@ enum Token2022Instruction {
         mint: String,
         authority: String,
     },
+    Pause {
+        mint: String,
+        pause_authority: String,
+    },
+    Resume {
+        mint: String,
+        pause_authority: String,
+    },
 }
 
 fn parse_token_2022_instruction(
     data: &[u8],
     accounts: &[AccountMeta],
 ) -> Result<Token2022Instruction, String> {
-    let sdk_instruction = TokenInstruction::unpack(data)
-        .map_err(|e| format!("Failed to parse Token 2022 instruction: {e}"))?;
-
-    match sdk_instruction {
-        TokenInstruction::MintToChecked { amount, decimals } => {
-            if accounts.len() < 3 {
-                return Err("Invalid mintToChecked: insufficient accounts".to_string());
-            }
-
-            Ok(Token2022Instruction::MintToChecked {
-                amount,
-                decimals,
-                mint: accounts[0].pubkey.to_string(),
-                account: accounts[1].pubkey.to_string(),
-                mint_authority: accounts[2].pubkey.to_string(),
-            })
+    // Check for Pause instruction
+    if is_pause_instruction(data) {
+        if accounts.len() < 2 {
+            return Err("Invalid pause: insufficient accounts".to_string());
         }
-        TokenInstruction::BurnChecked { amount, decimals } => {
-            if accounts.len() < 3 {
-                return Err("Invalid burnChecked: insufficient accounts".to_string());
-            }
 
-            Ok(Token2022Instruction::BurnChecked {
-                amount,
-                decimals,
-                account: accounts[0].pubkey.to_string(),
-                mint: accounts[1].pubkey.to_string(),
-                authority: accounts[2].pubkey.to_string(),
-            })
-        }
-        other => Err(format!("Unsupported Token 2022 instruction: {other:?}")),
+        return Ok(Token2022Instruction::Pause {
+            mint: accounts[0].pubkey.to_string(),
+            pause_authority: accounts[1].pubkey.to_string(),
+        });
     }
+
+    // Check for Resume instruction
+    if is_resume_instruction(data) {
+        if accounts.len() < 2 {
+            return Err("Invalid resume: insufficient accounts".to_string());
+        }
+
+        return Ok(Token2022Instruction::Resume {
+            mint: accounts[0].pubkey.to_string(),
+            pause_authority: accounts[1].pubkey.to_string(),
+        });
+    }
+
+    // Try to parse as standard TokenInstruction first
+    if let Ok(sdk_instruction) = TokenInstruction::unpack(data) {
+        match sdk_instruction {
+            TokenInstruction::MintToChecked { amount, decimals } => {
+                if accounts.len() < 3 {
+                    return Err("Invalid mintToChecked: insufficient accounts".to_string());
+                }
+
+                return Ok(Token2022Instruction::MintToChecked {
+                    amount,
+                    decimals,
+                    mint: accounts[0].pubkey.to_string(),
+                    account: accounts[1].pubkey.to_string(),
+                    mint_authority: accounts[2].pubkey.to_string(),
+                });
+            }
+            TokenInstruction::BurnChecked { amount, decimals } => {
+                if accounts.len() < 3 {
+                    return Err("Invalid burnChecked: insufficient accounts".to_string());
+                }
+
+                return Ok(Token2022Instruction::BurnChecked {
+                    amount,
+                    decimals,
+                    account: accounts[0].pubkey.to_string(),
+                    mint: accounts[1].pubkey.to_string(),
+                    authority: accounts[2].pubkey.to_string(),
+                });
+            }
+            _ => {
+                // Not a standard TokenInstruction, return error
+                return Err(format!(
+                    "Unsupported Token 2022 instruction: unknown discriminator {}",
+                    if data.is_empty() {
+                        "empty".to_string()
+                    } else {
+                        format!("0x{:02x}", data[0])
+                    }
+                ));
+            }
+        }
+    }
+
+    Err(format!(
+        "Unsupported Token 2022 instruction: unknown discriminator {}",
+        if data.is_empty() {
+            "empty".to_string()
+        } else {
+            format!("0x{:02x}", data[0])
+        }
+    ))
+}
+
+// Check if the instruction is a Pause instruction
+fn is_pause_instruction(data: &[u8]) -> bool {
+    !data.is_empty()
+        && data[0] == PAUSABLE_EXTENSION_DISCRIMINATOR
+        && data.len() > 1
+        && data[1] == PAUSABLE_PAUSE_DISCRIMINATOR
+}
+
+// Check if the instruction is a Resume instruction
+fn is_resume_instruction(data: &[u8]) -> bool {
+    !data.is_empty()
+        && data[0] == PAUSABLE_EXTENSION_DISCRIMINATOR
+        && data.len() > 1
+        && data[1] == PAUSABLE_RESUME_DISCRIMINATOR
 }
 
 fn create_token_2022_preview_layout(
@@ -160,6 +232,42 @@ fn create_token_2022_preview_layout(
                 create_text_field("Token Account", account)?,
                 create_text_field("Mint", mint)?,
                 create_text_field("Authority", authority)?,
+                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
+            ];
+
+            (title, condensed, expanded)
+        }
+        Token2022Instruction::Pause {
+            mint,
+            pause_authority,
+        } => {
+            let title = "Pause Token".to_string();
+
+            let condensed = vec![create_text_field("Action", "Pause Token")?];
+
+            let expanded = vec![
+                create_text_field("Instruction", "Pause")?,
+                create_text_field("Mint", mint)?,
+                create_text_field("Pause Authority", pause_authority)?,
+                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
+            ];
+
+            (title, condensed, expanded)
+        }
+        Token2022Instruction::Resume {
+            mint,
+            pause_authority,
+        } => {
+            let title = "Resume Token".to_string();
+
+            let condensed = vec![create_text_field("Action", "Resume Token")?];
+
+            let expanded = vec![
+                create_text_field("Instruction", "Resume")?,
+                create_text_field("Mint", mint)?,
+                create_text_field("Pause Authority", pause_authority)?,
                 create_text_field("Program ID", &instruction.program_id.to_string())?,
                 create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
             ];
