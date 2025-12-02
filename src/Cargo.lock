@@ -12887,6 +12887,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "hex",
+ "k256 0.12.0",
  "log",
  "num_enum 0.7.5",
  "phf",

@@ -5,6 +5,10 @@
 
 use crate::abi_registry::AbiRegistry;
 use crate::embedded_abis::{AbiEmbeddingError, register_embedded_abi};
+use k256::EncodedPoint;
+use k256::ecdsa::signature::Verifier;
+use k256::ecdsa::{Signature, VerifyingKey};
+use sha2::{Digest, Sha256};
 
 /// Error type for gRPC ABI operations
 #[derive(Debug, thiserror::Error)]
@@ -65,10 +69,12 @@ pub fn extract_abi_from_metadata(
 /// This mirrors the protobuf structure but is chain-agnostic
 #[derive(Debug, Clone)]
 pub struct SignatureMetadata {
-    /// Signature value (hex-encoded)
+    /// Signature value (hex-encoded, DER format for secp256k1)
     pub value: String,
-    /// Algorithm used (e.g., "secp256k1-sha256")
+    /// Algorithm used (e.g., "secp256k1")
     pub algorithm: Option<String>,
+    /// Public key for signature verification (hex-encoded)
+    pub public_key: Option<String>,
     /// Issuer of the signature
     pub issuer: Option<String>,
     /// Timestamp of signature
@@ -84,27 +90,54 @@ pub struct SignatureMetadata {
 /// # Returns
 /// * `Ok(())` if signature is valid
 /// * `Err(GrpcAbiError)` if signature validation fails
-///
-/// # Note
-/// This is a placeholder for the actual signature validation logic.
-/// The implementation would use:
-/// - SHA256 hash of abi_json
-/// - secp256k1::verify() with provided signature
-/// - Recovery of public key from signature
 fn validate_abi_signature(
     abi_json: &str,
-    _signature: &SignatureMetadata,
+    signature: &SignatureMetadata,
 ) -> Result<(), GrpcAbiError> {
-    // TODO: Implement actual secp256k1 signature validation
-    // For now, just verify the ABI can be parsed
-    serde_json::from_str::<serde_json::Value>(abi_json)
-        .map_err(|e| GrpcAbiError::SignatureValidation(format!("Invalid ABI JSON: {e}")))?;
+    // 1. Get algorithm - must be secp256k1
+    let algorithm = signature
+        .algorithm
+        .as_deref()
+        .ok_or_else(|| GrpcAbiError::SignatureValidation("Missing algorithm".to_string()))?;
 
-    // TODO: When secp256k1 validation is added:
-    // 1. Hash the ABI JSON with SHA256
-    // 2. Recover public key from signature
-    // 3. Verify signature matches
-    // 4. Log issuer and timestamp if present
+    if algorithm != "secp256k1" {
+        return Err(GrpcAbiError::SignatureValidation(format!(
+            "Unsupported algorithm: {algorithm}. Only secp256k1 is supported."
+        )));
+    }
+
+    // 2. Get public key
+    let public_key_hex = signature
+        .public_key
+        .as_deref()
+        .ok_or_else(|| GrpcAbiError::SignatureValidation("Missing public_key".to_string()))?;
+
+    // 3. Hash ABI JSON with SHA256
+    let mut hasher = Sha256::new();
+    hasher.update(abi_json.as_bytes());
+    let hash: [u8; 32] = hasher.finalize().into();
+
+    // 4. Decode signature (DER format) from hex
+    let sig_bytes = hex::decode(&signature.value)
+        .map_err(|e| GrpcAbiError::SignatureValidation(format!("Invalid signature hex: {e}")))?;
+
+    let sig = Signature::from_der(&sig_bytes)
+        .map_err(|e| GrpcAbiError::SignatureValidation(format!("Invalid DER signature: {e}")))?;
+
+    // 5. Decode public key from hex
+    let pubkey_bytes = hex::decode(public_key_hex)
+        .map_err(|e| GrpcAbiError::SignatureValidation(format!("Invalid public key hex: {e}")))?;
+
+    let encoded_point = EncodedPoint::from_bytes(&pubkey_bytes)
+        .map_err(|e| GrpcAbiError::SignatureValidation(format!("Invalid public key point: {e}")))?;
+
+    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)
+        .map_err(|e| GrpcAbiError::SignatureValidation(format!("Invalid verifying key: {e}")))?;
+
+    // 6. Verify signature
+    verifying_key.verify(&hash, &sig).map_err(|e| {
+        GrpcAbiError::SignatureValidation(format!("Signature verification failed: {e}"))
+    })?;
 
     Ok(())
 }
@@ -112,6 +145,8 @@ fn validate_abi_signature(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use k256::ecdsa::SigningKey;
+    use k256::ecdsa::signature::Signer;
 
     const VALID_ABI: &str = r#"[
         {
@@ -126,13 +161,35 @@ mod tests {
         }
     ]"#;
 
+    /// Helper to create a valid signature for testing
+    fn create_test_signature(content: &str) -> (String, String) {
+        // Use a deterministic test seed
+        let seed: [u8; 32] = [0x42u8; 32];
+        let signing_key = SigningKey::from_bytes(&seed).expect("valid key");
+        let verifying_key = VerifyingKey::from(&signing_key);
+
+        // Hash the content
+        let mut hasher = Sha256::new();
+        hasher.update(content.as_bytes());
+        let hash: [u8; 32] = hasher.finalize().into();
+
+        // Sign the hash
+        let signature: Signature = signing_key.sign(&hash);
+        let signature_der = signature.to_der();
+        let signature_hex = hex::encode(signature_der.as_bytes());
+
+        // Get public key (uncompressed format)
+        let public_key_hex = hex::encode(verifying_key.to_encoded_point(false).as_bytes());
+
+        (signature_hex, public_key_hex)
+    }
+
     #[test]
     fn test_extract_abi_from_metadata_valid() {
         let result = extract_abi_from_metadata(VALID_ABI, None);
         assert!(result.is_ok());
 
         let registry = result.unwrap();
-        // Verify ABI was registered
         assert!(registry.list_abis().contains(&"wallet_provided"));
     }
 
@@ -143,43 +200,120 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_abi_from_metadata_with_signature() {
+    fn test_valid_signature_verification() {
+        let (signature_hex, public_key_hex) = create_test_signature(VALID_ABI);
+
         let sig = SignatureMetadata {
-            value: "0x123456789abcdef".to_string(),
-            algorithm: Some("secp256k1-sha256".to_string()),
-            issuer: Some("wallet.example.com".to_string()),
-            timestamp: Some("2024-01-01T00:00:00Z".to_string()),
+            value: signature_hex,
+            algorithm: Some("secp256k1".to_string()),
+            public_key: Some(public_key_hex),
+            issuer: Some("test".to_string()),
+            timestamp: None,
         };
 
         let result = extract_abi_from_metadata(VALID_ABI, Some(&sig));
-        // Should succeed - signature validation is placeholder
-        assert!(result.is_ok());
+        assert!(
+            result.is_ok(),
+            "Valid signature should verify: {:?}",
+            result.err()
+        );
     }
 
     #[test]
-    fn test_extract_abi_from_metadata_signature_with_invalid_abi() {
+    fn test_tampering_detection() {
+        let (signature_hex, public_key_hex) = create_test_signature(VALID_ABI);
+
         let sig = SignatureMetadata {
-            value: "0x123456789abcdef".to_string(),
-            algorithm: None,
+            value: signature_hex,
+            algorithm: Some("secp256k1".to_string()),
+            public_key: Some(public_key_hex),
             issuer: None,
             timestamp: None,
         };
 
-        let result = extract_abi_from_metadata("invalid json", Some(&sig));
+        // Try to verify with tampered ABI
+        let tampered_abi = r#"[{"type":"function","name":"approve"}]"#;
+        let result = extract_abi_from_metadata(tampered_abi, Some(&sig));
+        assert!(result.is_err(), "Tampered content should fail verification");
+    }
+
+    #[test]
+    fn test_missing_algorithm_error() {
+        let sig = SignatureMetadata {
+            value: "deadbeef".to_string(),
+            algorithm: None,
+            public_key: Some("deadbeef".to_string()),
+            issuer: None,
+            timestamp: None,
+        };
+
+        let result = validate_abi_signature(VALID_ABI, &sig);
         assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Missing algorithm"), "Error: {err}");
+    }
+
+    #[test]
+    fn test_missing_public_key_error() {
+        let sig = SignatureMetadata {
+            value: "deadbeef".to_string(),
+            algorithm: Some("secp256k1".to_string()),
+            public_key: None,
+            issuer: None,
+            timestamp: None,
+        };
+
+        let result = validate_abi_signature(VALID_ABI, &sig);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Missing public_key"), "Error: {err}");
+    }
+
+    #[test]
+    fn test_unsupported_algorithm_error() {
+        let sig = SignatureMetadata {
+            value: "deadbeef".to_string(),
+            algorithm: Some("ed25519".to_string()),
+            public_key: Some("deadbeef".to_string()),
+            issuer: None,
+            timestamp: None,
+        };
+
+        let result = validate_abi_signature(VALID_ABI, &sig);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Unsupported algorithm"), "Error: {err}");
+    }
+
+    #[test]
+    fn test_invalid_signature_hex() {
+        let sig = SignatureMetadata {
+            value: "not_hex".to_string(),
+            algorithm: Some("secp256k1".to_string()),
+            public_key: Some("deadbeef".to_string()),
+            issuer: None,
+            timestamp: None,
+        };
+
+        let result = validate_abi_signature(VALID_ABI, &sig);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Invalid signature hex"), "Error: {err}");
     }
 
     #[test]
     fn test_signature_metadata_struct() {
         let sig = SignatureMetadata {
             value: "0xabc123".to_string(),
-            algorithm: Some("secp256k1-sha256".to_string()),
+            algorithm: Some("secp256k1".to_string()),
+            public_key: Some("04abcd1234".to_string()),
             issuer: Some("issuer.example.com".to_string()),
             timestamp: Some("2024-01-01T00:00:00Z".to_string()),
         };
 
         assert_eq!(sig.value, "0xabc123");
-        assert_eq!(sig.algorithm, Some("secp256k1-sha256".to_string()));
+        assert_eq!(sig.algorithm, Some("secp256k1".to_string()));
+        assert_eq!(sig.public_key, Some("04abcd1234".to_string()));
         assert_eq!(sig.issuer, Some("issuer.example.com".to_string()));
     }
 }

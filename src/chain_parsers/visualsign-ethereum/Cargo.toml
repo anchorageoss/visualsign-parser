@@ -13,6 +13,7 @@ alloy-sol-types = "1.4.1"
 base64 = "0.22.1"
 chrono = { version = "0.4", features = ["std", "clock"] }
 hex = "0.4.3"
+k256 = { version = "0.12", features = ["ecdsa"], default-features = false }
 log = "0.4"
 num_enum = "0.7.2"
 phf = { version = "0.11", features = ["macros"] }
