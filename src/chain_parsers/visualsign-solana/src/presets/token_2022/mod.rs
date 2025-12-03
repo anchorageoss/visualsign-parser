@@ -75,6 +75,16 @@ enum Token2022Instruction {
         mint: String,
         pause_authority: String,
     },
+    Freeze {
+        account: String,
+        mint: String,
+        freeze_authority: String,
+    },
+    Thaw {
+        account: String,
+        mint: String,
+        freeze_authority: String,
+    },
 }
 
 fn parse_token_2022_instruction(
@@ -132,6 +142,28 @@ fn parse_token_2022_instruction(
                     account: accounts[0].pubkey.to_string(),
                     mint: accounts[1].pubkey.to_string(),
                     authority: accounts[2].pubkey.to_string(),
+                });
+            }
+            TokenInstruction::FreezeAccount => {
+                if accounts.len() < 3 {
+                    return Err("Invalid freezeAccount: insufficient accounts".to_string());
+                }
+
+                return Ok(Token2022Instruction::Freeze {
+                    account: accounts[0].pubkey.to_string(),
+                    mint: accounts[1].pubkey.to_string(),
+                    freeze_authority: accounts[2].pubkey.to_string(),
+                });
+            }
+            TokenInstruction::ThawAccount => {
+                if accounts.len() < 3 {
+                    return Err("Invalid thawAccount: insufficient accounts".to_string());
+                }
+
+                return Ok(Token2022Instruction::Thaw {
+                    account: accounts[0].pubkey.to_string(),
+                    mint: accounts[1].pubkey.to_string(),
+                    freeze_authority: accounts[2].pubkey.to_string(),
                 });
             }
             _ => {
@@ -268,6 +300,46 @@ fn create_token_2022_preview_layout(
                 create_text_field("Instruction", "Resume")?,
                 create_text_field("Mint", mint)?,
                 create_text_field("Pause Authority", pause_authority)?,
+                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
+            ];
+
+            (title, condensed, expanded)
+        }
+        Token2022Instruction::Freeze {
+            account,
+            mint,
+            freeze_authority,
+        } => {
+            let title = "Freeze Account".to_string();
+
+            let condensed = vec![create_text_field("Action", "Freeze Account")?];
+
+            let expanded = vec![
+                create_text_field("Instruction", "Freeze")?,
+                create_text_field("Token Account", account)?,
+                create_text_field("Mint", mint)?,
+                create_text_field("Freeze Authority", freeze_authority)?,
+                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
+            ];
+
+            (title, condensed, expanded)
+        }
+        Token2022Instruction::Thaw {
+            account,
+            mint,
+            freeze_authority,
+        } => {
+            let title = "Thaw Account".to_string();
+
+            let condensed = vec![create_text_field("Action", "Thaw Account")?];
+
+            let expanded = vec![
+                create_text_field("Instruction", "Thaw")?,
+                create_text_field("Token Account", account)?,
+                create_text_field("Mint", mint)?,
+                create_text_field("Freeze Authority", freeze_authority)?,
                 create_text_field("Program ID", &instruction.program_id.to_string())?,
                 create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
             ];
