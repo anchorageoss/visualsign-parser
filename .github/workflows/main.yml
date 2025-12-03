@@ -37,6 +37,13 @@ jobs:
         with:
           version: "21.4"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: free disk space
+        run: |
+          sudo swapoff -a
+          sudo rm -f /swapfile
+          sudo apt clean
+          docker rmi $(docker image ls -aq)
+          df -h
       - name: Run codegen
         run: make -C src generated
       - name: Ensure working tree is clean
