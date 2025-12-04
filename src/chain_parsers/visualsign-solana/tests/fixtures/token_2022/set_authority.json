@@ -1,0 +1,40 @@
+{
+  "description": "Token 2022 SetAuthority instruction - setting mint tokens authority",
+  "source": "http://localnet/tx",
+  "signature": "test_signature_set_authority",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "This is a test fixture for Token 2022 SetAuthority instruction. This will set the MintTokens authority to a new authority.",
+  "instruction_index": 0,
+  "instruction_data": "bixzhZ1LUBZW9qgZjevrRFozY5TZSzS6ifRoVJTo3YaNQC1",
+  "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "accounts": [
+    {
+      "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "signer": false,
+      "writable": true,
+      "description": "Mint account"
+    },
+    {
+      "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      "signer": true,
+      "writable": false,
+      "description": "Current authority"
+    },
+    {
+      "pubkey": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+      "signer": false,
+      "writable": false,
+      "description": "New authority"
+    }
+  ],
+  "expected_fields": {
+    "instruction": "Set Authority",
+    "account": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "authority_type": "MintTokens",
+    "authority_type_id": "0",
+    "current_authority": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    "new_authority": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  }
+}
+
