@@ -295,7 +295,16 @@ fn test_set_authority_real_transaction() {
 }
 
 #[test]
-#[ignore]
+fn test_freeze_real_transaction() {
+    test_real_transaction("freeze", "Freeze");
+}
+
+#[test]
+fn test_thaw_real_transaction() {
+    test_real_transaction("thaw", "Thaw");
+}
+
+#[test]
 fn test_encode_pause_resume_instructions() {
     // Helper test to generate correct base58 encodings for Pause and Resume
     let pause_bytes = [44u8, 1u8];
@@ -316,7 +325,6 @@ fn test_encode_pause_resume_instructions() {
 }
 
 #[test]
-#[ignore]
 fn test_encode_set_authority_instruction() {
     // Helper test to generate correct base58 encoding for SetAuthority
     // Structure: [discriminator (6), authority_type (0 = MintTokens), option_flag (1 = Some), pubkey (32 bytes)]
@@ -337,4 +345,26 @@ fn test_encode_set_authority_instruction() {
     assert_eq!(decoded[0], 6);
     assert_eq!(decoded[1], 0);
     assert_eq!(decoded[2], 1);
+}
+
+#[test]
+fn test_encode_freeze_thaw_instructions() {
+    // Helper test to generate correct base58 encodings for Freeze and Thaw
+    // FreezeAccount is instruction variant 10 (0x0A)
+    // ThawAccount is instruction variant 11 (0x0B)
+    let freeze_bytes = [10u8];
+    let thaw_bytes = [11u8];
+
+    let freeze_b58 = bs58::encode(&freeze_bytes).into_string();
+    let thaw_b58 = bs58::encode(&thaw_bytes).into_string();
+
+    println!("Freeze [10] base58: {freeze_b58}");
+    println!("Thaw [11] base58: {thaw_b58}");
+
+    // Verify they decode correctly
+    let freeze_decoded = bs58::decode(&freeze_b58).into_vec().unwrap();
+    let thaw_decoded = bs58::decode(&thaw_b58).into_vec().unwrap();
+
+    assert_eq!(freeze_decoded, freeze_bytes);
+    assert_eq!(thaw_decoded, thaw_bytes);
 }
