@@ -1,0 +1,38 @@
+{
+  "description": "Token 2022 Thaw instruction - thawing a frozen token account to restore transfers",
+  "source": "http://localnet/tx",
+  "signature": "test_signature_thaw",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "This is a test fixture for Token 2022 Thaw instruction. This will thaw a frozen token account, restoring the ability to transfer and burn tokens.",
+  "instruction_index": 0,
+  "instruction_data": "C",
+  "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "accounts": [
+    {
+      "pubkey": "FzHhqxHPNXrzoNRwVmDRcNprTcx5YAdLyuRNC5FYthi8",
+      "signer": false,
+      "writable": true,
+      "description": "Token account to thaw"
+    },
+    {
+      "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "signer": false,
+      "writable": false,
+      "description": "Mint account"
+    },
+    {
+      "pubkey": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+      "signer": true,
+      "writable": false,
+      "description": "Freeze authority"
+    }
+  ],
+  "expected_fields": {
+    "instruction": "Thaw",
+    "token_account": "FzHhqxHPNXrzoNRwVmDRcNprTcx5YAdLyuRNC5FYthi8",
+    "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "freeze_authority": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  }
+}
+

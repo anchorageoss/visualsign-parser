@@ -290,6 +290,16 @@ fn test_resume_real_transaction() {
 }
 
 #[test]
+fn test_freeze_real_transaction() {
+    test_real_transaction("freeze", "Freeze");
+}
+
+#[test]
+fn test_thaw_real_transaction() {
+    test_real_transaction("thaw", "Thaw");
+}
+
+#[test]
 #[ignore]
 fn test_encode_pause_resume_instructions() {
     // Helper test to generate correct base58 encodings for Pause and Resume
@@ -308,4 +318,27 @@ fn test_encode_pause_resume_instructions() {
 
     assert_eq!(pause_decoded, pause_bytes);
     assert_eq!(resume_decoded, resume_bytes);
+}
+
+#[test]
+#[ignore]
+fn test_encode_freeze_thaw_instructions() {
+    // Helper test to generate correct base58 encodings for Freeze and Thaw
+    // FreezeAccount is instruction variant 10 (0x0A)
+    // ThawAccount is instruction variant 11 (0x0B)
+    let freeze_bytes = [10u8];
+    let thaw_bytes = [11u8];
+
+    let freeze_b58 = bs58::encode(&freeze_bytes).into_string();
+    let thaw_b58 = bs58::encode(&thaw_bytes).into_string();
+
+    println!("Freeze [10] base58: {freeze_b58}");
+    println!("Thaw [11] base58: {thaw_b58}");
+
+    // Verify they decode correctly
+    let freeze_decoded = bs58::decode(&freeze_b58).into_vec().unwrap();
+    let thaw_decoded = bs58::decode(&thaw_b58).into_vec().unwrap();
+
+    assert_eq!(freeze_decoded, freeze_bytes);
+    assert_eq!(thaw_decoded, thaw_bytes);
 }
