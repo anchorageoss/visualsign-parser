@@ -290,6 +290,11 @@ fn test_resume_real_transaction() {
 }
 
 #[test]
+fn test_set_authority_real_transaction() {
+    test_real_transaction("set_authority", "SetAuthority");
+}
+
+#[test]
 fn test_freeze_real_transaction() {
     test_real_transaction("freeze", "Freeze");
 }
@@ -300,7 +305,6 @@ fn test_thaw_real_transaction() {
 }
 
 #[test]
-#[ignore]
 fn test_encode_pause_resume_instructions() {
     // Helper test to generate correct base58 encodings for Pause and Resume
     let pause_bytes = [44u8, 1u8];
@@ -321,7 +325,29 @@ fn test_encode_pause_resume_instructions() {
 }
 
 #[test]
-#[ignore]
+fn test_encode_set_authority_instruction() {
+    // Helper test to generate correct base58 encoding for SetAuthority
+    // Structure: [discriminator (6), authority_type (0 = MintTokens), option_flag (1 = Some), pubkey (32 bytes)]
+    use solana_sdk::pubkey::Pubkey;
+
+    let new_authority = Pubkey::from_str("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM").unwrap();
+    let mut set_authority_bytes = vec![6u8, 0u8, 1u8]; // discriminator, authority_type (MintTokens), option_flag (Some)
+    set_authority_bytes.extend_from_slice(new_authority.as_ref());
+
+    let set_authority_b58 = bs58::encode(&set_authority_bytes).into_string();
+
+    println!("SetAuthority [6, 0, 1, <pubkey>] base58: {set_authority_b58}");
+    println!("SetAuthority bytes length: {}", set_authority_bytes.len());
+
+    // Verify it decodes correctly
+    let decoded = bs58::decode(&set_authority_b58).into_vec().unwrap();
+    assert_eq!(decoded, set_authority_bytes);
+    assert_eq!(decoded[0], 6);
+    assert_eq!(decoded[1], 0);
+    assert_eq!(decoded[2], 1);
+}
+
+#[test]
 fn test_encode_freeze_thaw_instructions() {
     // Helper test to generate correct base58 encodings for Freeze and Thaw
     // FreezeAccount is instruction variant 10 (0x0A)
