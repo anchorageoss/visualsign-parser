@@ -88,6 +88,11 @@ enum Token2022Instruction {
         mint: String,
         freeze_authority: String,
     },
+    CloseAccount {
+        account: String,
+        destination: String,
+        owner: String,
+    },
     SetAuthority {
         account: String,
         authority_type: u8,
@@ -220,6 +225,17 @@ fn parse_token_2022_instruction(
                     account: accounts[0].pubkey.to_string(),
                     mint: accounts[1].pubkey.to_string(),
                     freeze_authority: accounts[2].pubkey.to_string(),
+                });
+            }
+            TokenInstruction::CloseAccount => {
+                if accounts.len() < 3 {
+                    return Err("Invalid closeAccount: insufficient accounts".to_string());
+                }
+
+                return Ok(Token2022Instruction::CloseAccount {
+                    account: accounts[0].pubkey.to_string(),
+                    destination: accounts[1].pubkey.to_string(),
+                    owner: accounts[2].pubkey.to_string(),
                 });
             }
             _ => {
@@ -456,6 +472,26 @@ fn create_token_2022_preview_layout(
                 create_text_field("Token Account", account)?,
                 create_text_field("Mint", mint)?,
                 create_text_field("Freeze Authority", freeze_authority)?,
+                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
+            ];
+
+            (title, condensed, expanded)
+        }
+        Token2022Instruction::CloseAccount {
+            account,
+            destination,
+            owner,
+        } => {
+            let title = "Close Account".to_string();
+
+            let condensed = vec![create_text_field("Action", "Close Account")?];
+
+            let expanded = vec![
+                create_text_field("Instruction", "Close Account")?,
+                create_text_field("Token Account", account)?,
+                create_text_field("Destination", destination)?,
+                create_text_field("Owner", owner)?,
                 create_text_field("Program ID", &instruction.program_id.to_string())?,
                 create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
             ];
