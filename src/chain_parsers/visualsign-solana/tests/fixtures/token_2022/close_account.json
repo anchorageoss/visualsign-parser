@@ -1,0 +1,38 @@
+{
+  "description": "Token 2022 CloseAccount instruction - closing a token account and reclaiming rent",
+  "source": "http://localnet/tx",
+  "signature": "test_signature_close_account",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "This is a test fixture for Token 2022 CloseAccount instruction. This will close a token account and send the rent-exempt balance to the destination account.",
+  "instruction_index": 0,
+  "instruction_data": "A",
+  "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "accounts": [
+    {
+      "pubkey": "FzHhqxHPNXrzoNRwVmDRcNprTcx5YAdLyuRNC5FYthi8",
+      "signer": false,
+      "writable": true,
+      "description": "Token account to close"
+    },
+    {
+      "pubkey": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      "signer": false,
+      "writable": true,
+      "description": "Destination account (receives rent)"
+    },
+    {
+      "pubkey": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+      "signer": true,
+      "writable": false,
+      "description": "Account owner"
+    }
+  ],
+  "expected_fields": {
+    "instruction": "Close Account",
+    "token_account": "FzHhqxHPNXrzoNRwVmDRcNprTcx5YAdLyuRNC5FYthi8",
+    "destination": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    "owner": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  }
+}
+

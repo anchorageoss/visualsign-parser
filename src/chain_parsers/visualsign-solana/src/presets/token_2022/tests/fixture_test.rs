@@ -305,6 +305,11 @@ fn test_thaw_real_transaction() {
 }
 
 #[test]
+fn test_close_account_real_transaction() {
+    test_real_transaction("close_account", "CloseAccount");
+}
+
+#[test]
 fn test_encode_pause_resume_instructions() {
     // Helper test to generate correct base58 encodings for Pause and Resume
     let pause_bytes = [44u8, 1u8];
@@ -345,6 +350,22 @@ fn test_encode_set_authority_instruction() {
     assert_eq!(decoded[0], 6);
     assert_eq!(decoded[1], 0);
     assert_eq!(decoded[2], 1);
+}
+
+#[test]
+fn test_encode_close_account_instruction() {
+    // Helper test to generate correct base58 encoding for CloseAccount
+    // CloseAccount is instruction variant 9 (0x09)
+    let close_account_bytes = [9u8];
+
+    let close_account_b58 = bs58::encode(&close_account_bytes).into_string();
+
+    println!("CloseAccount [9] base58: {close_account_b58}");
+
+    // Verify it decodes correctly
+    let decoded = bs58::decode(&close_account_b58).into_vec().unwrap();
+    assert_eq!(decoded, close_account_bytes);
+    assert_eq!(decoded[0], 9);
 }
 
 #[test]
