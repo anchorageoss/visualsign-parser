@@ -11,6 +11,8 @@ permissions:
 
 jobs:
   check-cla-file:
+    # Skip CLA check for bots (e.g., github-actions[bot], dependabot[bot])
+    if: github.event.pull_request.user.type != 'Bot'
     runs-on: ubuntu-latest
 
     # Environment variables for easy configuration
