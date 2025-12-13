@@ -1,116 +1,102 @@
 # VisualSign Parser
 
-This repo contains an enclave application to parse unsigned transactions and return VisualSign output.
+Rust-based transaction parser that converts raw blockchain transactions into human-readable VisualSign payloads.
 
-## Running tests
+## What is VisualSign?
 
+VisualSign transforms opaque transaction data (hex strings, base64 blobs) into structured, human-readable JSON that describes what a transaction will do. See the [full documentation](https://anchorageoss.github.io/visualsign-display). 
+You can follow the [Wallet Integration Guide](https://github.com/anchorageoss/visualsign-turnkeyclient/blob/main/WALLET_INTEGRATION_GUIDE.md) that uses [AWS Nitro Verifier Library](https://github.com/anchorageoss/awsnitroverifier) and our minimal [VisualSign TurnkeyClient](https://github.com/anchorageoss/visualsign-turnkeyclient) to help you understand and bootstrap the security process
+
+## Supported Chains
+
+- Ethereum (+ L2s: Arbitrum, Optimism, Base, Polygon)
+- Solana
+- Sui
+- Tron
+
+You can follow the [Chain Addition Guide](https://github.com/anchorageoss/visualsign-parser/wiki/Adding-a-new-chain-to-Visualsign-Parser) to learn how to add a new chain. Often the basic chain addition can be done within a working day if you have a high quality Rust SDK but we're deploying a single binary at the moment and aren't focusing on expanding chains too broadly till we have some design patterns and deep Dapp Frameworks for key chains implemented. If you are a blockchain that wants to be added, [get in touch with Anchorage Digital team](https://www.anchorage.com/get-in-touch).
+
+## Architecture
+
+```mermaid
+flowchart TD
+    subgraph API ["API Layer"]
+        grpc["gRPC Server"]
+    end
+
+    subgraph Engine ["Parsing Engine"]
+        router["Chain Router"]
+        core["VisualSign Core"]
+    end
+
+    subgraph Chains ["Chain Parsers"]
+        eth["Ethereum"]
+        sol["Solana"]
+        sui["Sui"]
+        trn["Tron"]
+    end
+
+    grpc --> router
+    router --> eth & sol & sui & trn
+    eth & sol & sui & trn --> core
+    core --> grpc
 ```
-make -C src test
+
+## Quick Start
+
+### CLI
+
+```sh
+cargo run --bin parser_cli -- --chain ethereum -t '0xf86c...'
 ```
 
-## Running locally
-
-The following will start 3 sub-processes: an enclave simulator, a host, and an inner app:
-
-```
-make -C src parser
-```
-
-The parser will expose a gRPC interface on port `44020` by default.
-
-Once it's up and running, make requests with:
-
-```
-grpcurl -plaintext -d '{"unsigned_payload": "0xabcdef"}'  localhost:44020 parser.ParserService/Parse
-```
-
-If everything works you'll get a response like this:
-
-```
+Output:
+```json
 {
-  "parsedTransaction": {
-    "payload": {
-      "transactionMetadata": [
-        ...
-      ]
-    }
-  }
+  "Version": "0",
+  "Title": "Ethereum Transaction",
+  "PayloadType": "EthereumTx",
+  "Fields": [
+    {"Label": "To", "FallbackText": "0x3535...", "Type": "address_v2", "AddressV2": {"Address": "0x3535..."}},
+    {"Label": "Value", "FallbackText": "1 ETH", "Type": "amount_v2", "AmountV2": {"Amount": "1", "Abbreviation": "ETH"}}
+  ]
 }
 ```
 
-You can also manually exercise health checks. This is what Kubernetes will use to gauge whether the host is healthy or not:
-
-```
-grpcurl -plaintext -d '{"service":""}' localhost:44020 grpc.health.v1.Health/Check
-```
-
-## Building parser OCI containers
-
-This repository uses [StageX](https://stagex.tools) to build OCI containers. To build these locally, you'll need Docker > 26 and `containerd` for OCI compatibility:
-
-- If you are using Docker Desktop, go to Dashboard > Settings > "Use containerd for pulling and storing images"
-- If you are using a Linux-based system, add the following to `/etc/docker/daemon.json`:
-  ```
-  {
-    "features": {
-      "containerd-snapshotter": true
-    },
-    "registry-mirrors": ["https://ghcr.io/anchorageoss"]
-  }
-  ```
-
-Then build the OCI containers with the `Makefile` targets:
+### gRPC Server
 
 ```sh
-# Builds the parser app container
-make out/parser_app/index.json
-
-# Builds the parser host container
-make out/parser_host/index.json
+make -C src parser  # Starts server on port 44020
 ```
 
-Note: you can also build non-OCI versions with `make non-oci-docker-images`.
-
-## Manual Testing Notes
-
-## Example Solana tx
-
-### CLI
-
-```
-cargo run --bin parser_cli -- --chain solana -t 'AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAGDpVgWUMU7MEPPORo0ORMinVaO1ktDjHe3//f1qqIwJ2XYaz02Vuj7xyKHc5e6LXN5WxDxzUGN72irt3XVidnPQdbX1g0C8G9eZLm2AYo6hVEwP0bql0mb8fZLQW6g3h/XIjx/6Oi3+YXvcTjVzJRoyLj/K6B5aRXOQ5kdRwApGXinqdo/t9kTIqum44hiK3Qa8VQ+/cWyCK5zmPHeD2VLh8J5qP+7PmQMuHB32uXItyzY057jjRAk2vDSwzByOtSH/zRQemDLK8QrZF0lcoPJxtbKTzUcCfqc3AH7UDrOaC9BIo+CMO0lb4X9FQn2JvsW4DH4mlcGGTXZ0PbOb7TRtYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFTlniTAUaihSnsel5fw4Szfp0kCFmUxlaalEqbxZmArjJclj04kifG7PRApFI4NgwtaE5na/xCEBI572Nvp+FkDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAaBTtTK9ooXRnL9rIYDGmPoTqFe+h1EtyKT9tvbABZQBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKk7YUJFOy/o1K3RALVqqztUypoKMpR8OCcCt0Rr0FUhSAYIAgABDAIAAAAA5AtUAgAAAAoGAAIABggNAQEMCgcJBAECBQIGCA0JDgDkC1QCAAAACwAFAoAaBgALAAkDUMMAAAAAAAAIAgADDAIAAAAQJwAAAAAAAA=='
+```sh
+grpcurl -plaintext -d '{"unsigned_payload": "0x...", "chain": "CHAIN_ETHEREUM"}' \
+  localhost:44020 parser.ParserService/Parse
 ```
 
-### gRPC
+## Documentation
 
-```
-grpcurl -plaintext -d '{"unsigned_payload": "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAGDpVgWUMU7MEPPORo0ORMinVaO1ktDjHe3//f1qqIwJ2XYaz02Vuj7xyKHc5e6LXN5WxDxzUGN72irt3XVidnPQdbX1g0C8G9eZLm2AYo6hVEwP0bql0mb8fZLQW6g3h/XIjx/6Oi3+YXvcTjVzJRoyLj/K6B5aRXOQ5kdRwApGXinqdo/t9kTIqum44hiK3Qa8VQ+/cWyCK5zmPHeD2VLh8J5qP+7PmQMuHB32uXItyzY057jjRAk2vDSwzByOtSH/zRQemDLK8QrZF0lcoPJxtbKTzUcCfqc3AH7UDrOaC9BIo+CMO0lb4X9FQn2JvsW4DH4mlcGGTXZ0PbOb7TRtYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFTlniTAUaihSnsel5fw4Szfp0kCFmUxlaalEqbxZmArjJclj04kifG7PRApFI4NgwtaE5na/xCEBI572Nvp+FkDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAaBTtTK9ooXRnL9rIYDGmPoTqFe+h1EtyKT9tvbABZQBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKk7YUJFOy/o1K3RALVqqztUypoKMpR8OCcCt0Rr0FUhSAYIAgABDAIAAAAA5AtUAgAAAAoGAAIABggNAQEMCgcJBAECBQIGCA0JDgDkC1QCAAAACwAFAoAaBgALAAkDUMMAAAAAAAAIAgADDAIAAAAQJwAAAAAAAA==", "chain":"CHAIN_SOLANA"}'  localhost:44020 parser.ParserService/Parse
-```
+Full documentation at **https://anchorageoss.github.io/visualsign-display**:
+- [Field Types Reference](https://anchorageoss.github.io/visualsign-display/docs/field-types)
+- [Integration Guide](https://anchorageoss.github.io/visualsign-display/docs/integration)
+- [Parser CLI](https://anchorageoss.github.io/visualsign-display/docs/parser-cli)
 
-## Example Ethereum tx
+## Development
 
-### CLI
-
-```
-cargo run --bin parser_cli -- --chain ethereum -t '0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83'
-```
-
-### gRPC
-
-```
-grpcurl -plaintext -d '{"unsigned_payload": "0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83", "chain":"CHAIN_ETHEREUM"}'  localhost:44020 parser.ParserService/Parse
+```sh
+make -C src test    # Run tests
+make -C src fmt     # Format code
+make -C src lint    # Run clippy
 ```
 
-## Example Sui tx
+## Contributing
 
-### CLI
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and [GOVERNANCE.md](GOVERNANCE.md) for project governance.
 
-```
-cargo run --bin parser_cli -- --chain sui -t 'AQAAAAAABAAgoeOuVRwqvjxrzqItPxk1amRwhta9VqwNCeTu7QYpC3YBAMIA6wRHwZnY1Uq4kShmJ9MzSf09cido4hRbib9QxPr6GprUFwAAAAAgaLIB/QqiGeVY7g/t0gmAgBUq5KN1vBtUCNfQl+OWI4QACBAnAAAAAAAAAAggTgAAAAAAAAQCAQEAAQEDAAEBAgAAAQAAAgEBAAEBAgABAQICAAEAANbpLgAuJsOvsgiAAcG1ggtk8rw1G/2lojQqy/n1wcrCActIXvgKC6+QeaYhxCyLDLZc6ZhuHIH9Fu6IA48ASlrtGprUFwAAAAAgruP9lGIbTNb4l4WPdDGN2qrKMg4H7WiVr4iK3KnMEI/W6S4ALibDr7IIgAHBtYILZPK8NRv9paI0Ksv59cHKwugDAAAAAAAAQEtMAAAAAAAAAWEAmEURyDG9UG5JOixWeOweSlyhULQ2oNgiAUrKrio+mjI8yelPjyw5AFA8WOgv9T/RytUNWfnqKsStA67qnisQAwzQ7OmIzoPhw5nTC3tMzLjAySqs8CGINPAk+pl4i3Nm'
-```
+## Security
 
-### gRPC
+Report vulnerabilities per [SECURITY.md](SECURITY.md).
 
-```
-grpcurl -plaintext -d '{"unsigned_payload": "AQAAAAAABAAgoeOuVRwqvjxrzqItPxk1amRwhta9VqwNCeTu7QYpC3YBAMIA6wRHwZnY1Uq4kShmJ9MzSf09cido4hRbib9QxPr6GprUFwAAAAAgaLIB/QqiGeVY7g/t0gmAgBUq5KN1vBtUCNfQl+OWI4QACBAnAAAAAAAAAAggTgAAAAAAAAQCAQEAAQEDAAEBAgAAAQAAAgEBAAEBAgABAQICAAEAANbpLgAuJsOvsgiAAcG1ggtk8rw1G/2lojQqy/n1wcrCActIXvgKC6+QeaYhxCyLDLZc6ZhuHIH9Fu6IA48ASlrtGprUFwAAAAAgruP9lGIbTNb4l4WPdDGN2qrKMg4H7WiVr4iK3KnMEI/W6S4ALibDr7IIgAHBtYILZPK8NRv9paI0Ksv59cHKwugDAAAAAAAAQEtMAAAAAAAAAWEAmEURyDG9UG5JOixWeOweSlyhULQ2oNgiAUrKrio+mjI8yelPjyw5AFA8WOgv9T/RytUNWfnqKsStA67qnisQAwzQ7OmIzoPhw5nTC3tMzLjAySqs8CGINPAk+pl4i3Nm", "chain":"CHAIN_SUI"}'  localhost:44020 parser.ParserService/Parse
-```
+## License
+
+Apache 2.0

@@ -32,5 +32,23 @@ For details about authority, core team structure, and decision-making, please re
 - Run `make -C src test` to ensure all tests pass before submitting
 - No breaking changes without discussion
 
+## Building OCI Containers
+
+This repository uses [StageX](https://stagex.tools) to build OCI containers.
+
+**Requirements:**
+- Docker Desktop >= 26 with containerd enabled (Settings → "Use containerd for pulling and storing images")
+- Linux: Add to `/etc/docker/daemon.json`:
+  ```json
+  {"features": {"containerd-snapshotter": true}}
+  ```
+
+**Build:**
+```sh
+make out/parser_app/index.json   # Parser app container
+make out/parser_host/index.json  # Parser host container
+make non-oci-docker-images       # Non-OCI versions
+```
+
 ## Questions or Issues?
 If you have questions about the contribution process, please reach out to the Core Team through the repository's issue tracker.
