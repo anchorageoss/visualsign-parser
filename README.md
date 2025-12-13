@@ -5,7 +5,7 @@ Rust-based transaction parser that converts raw blockchain transactions into hum
 ## What is VisualSign?
 
 VisualSign transforms opaque transaction data (hex strings, base64 blobs) into structured, human-readable JSON that describes what a transaction will do. See the [full documentation](https://anchorageoss.github.io/visualsign-display). 
-You can follow the [Wallet Integration Guide](https://github.com/anchorageoss/visualsign-turnkeyclient/blob/main/WALLET_INTEGRATION_GUIDE.md) that uses [AWS Nitro Verifier Library](https://github.com/anchorageoss/awsnitroverifier) and our minimal [VisualSign TurnkeyClient](https://github.com/anchorageoss/visualsign-turnkeyclient) to help you understand and bootstrap the security process
+You can follow the [Wallet Integration Guide](https://github.com/anchorageoss/visualsign-turnkeyclient/blob/main/WALLET_INTEGRATION_GUIDE.md) that uses [AWS Nitro Verifier Library](https://github.com/anchorageoss/awsnitroverifier) and our minimal [VisualSign TurnkeyClient](https://github.com/anchorageoss/visualsign-turnkeyclient) to help you understand and bootstrap the security process.
 
 ## Supported Chains
 
