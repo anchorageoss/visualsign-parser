@@ -2235,6 +2235,7 @@ mod tests {
                 VisualSignOptions {
                     decode_transfers: true,
                     transaction_name: Some(description.to_string()),
+                    metadata: None,
                 },
             )
             .expect("visualization should succeed")
