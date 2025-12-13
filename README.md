@@ -14,7 +14,7 @@ You can follow the [Wallet Integration Guide](https://github.com/anchorageoss/vi
 - Sui
 - Tron
 
-You can follow the [Chain Addition Guide](https://github.com/anchorageoss/visualsign-parser/wiki/Adding-a-new-chain-to-Visualsign-Parser) to learn how to add a new chain. Often the basic chain addition can be done within a working day if you have a high quality Rust SDK but we're deploying a single binary at the moment and aren't focusing on expanding chains too broadly till we have some design patterns and deep Dapp Frameworks for key chains implemented. If you are a blockchain that wants to be added, [get in touch with Anchorage Digital team](https://www.anchorage.com/get-in-touch).
+You can follow the [Chain Addition Guide](https://github.com/anchorageoss/visualsign-parser/wiki/Adding-a-new-chain-to-Visualsign-Parser) to learn how to add a new chain. Often the basic chain addition can be done within a working day if you have a high quality Rust SDK but we're deploying a single binary at the moment and aren't focusing on expanding chains too broadly till we have some design patterns and deep DApp Frameworks for key chains implemented. If you are a blockchain that wants to be added, [get in touch with Anchorage Digital team](https://www.anchorage.com/get-in-touch).
 
 ## Architecture
 
