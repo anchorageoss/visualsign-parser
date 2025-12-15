@@ -2,9 +2,10 @@ use crate::chains;
 use chains::parse_chain;
 use clap::Parser;
 use generated::parser::{
-    ChainMetadata, EthereumMetadata, SolanaMetadata, chain_metadata::Metadata,
+    ChainMetadata, EthereumMetadata, SolanaIdlType, SolanaMetadata, chain_metadata::Metadata,
 };
 use parser_app::registry::create_registry;
+use std::collections::HashMap;
 use std::sync::Arc;
 use visualsign::registry::Chain;
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
@@ -54,6 +55,13 @@ struct Args {
         help = "Map custom ABI JSON file to contract address. Format: AbiName:/path/to/abi.json:0xAddress. Can be used multiple times"
     )]
     abi_json_mappings: Vec<String>,
+
+    #[arg(
+        long = "idl-json-mappings",
+        value_name = "NAME:PROGRAM_ID:PATH",
+        help = "Map custom IDL JSON file to Solana program. Format: IdlName:base58_program_id:/path/to/idl.json. Can be used multiple times"
+    )]
+    idl_json_mappings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -288,6 +296,79 @@ fn build_abi_registry_from_mappings(
     (registry, valid_count)
 }
 
+/// Parse IDL mapping format: "Name:ProgramId:/path/to/file.json"
+/// Returns: (`idl_name`, `program_id_str`, `file_path`)
+fn parse_idl_file_mapping(mapping_str: &str) -> Option<(String, String, String)> {
+    // Split from the right to get the file path (last : separator)
+    let (remainder, file_path) = mapping_str.rsplit_once(':')?;
+
+    // Split the remainder from the left to get name and program_id
+    let (idl_name, program_id) = remainder.split_once(':')?;
+
+    let idl_name = idl_name.trim();
+    let program_id = program_id.trim();
+    let file_path = file_path.trim();
+
+    // Basic validation
+    if idl_name.is_empty() || program_id.is_empty() || file_path.is_empty() {
+        return None;
+    }
+
+    Some((
+        idl_name.to_string(),
+        program_id.to_string(),
+        file_path.to_string(),
+    ))
+}
+
+/// Load IDL JSON files and create `HashMap` for `SolanaMetadata`
+fn build_idl_mappings_from_files(
+    idl_json_mappings: &[String],
+) -> (HashMap<String, generated::parser::Idl>, usize) {
+    let mut mappings = HashMap::new();
+    let mut valid_count = 0;
+
+    for mapping in idl_json_mappings {
+        match parse_idl_file_mapping(mapping) {
+            Some((idl_name, program_id, file_path)) => match load_idl_from_file(&file_path) {
+                Ok(idl_json) => {
+                    let idl = generated::parser::Idl {
+                        value: idl_json,
+                        idl_type: Some(SolanaIdlType::Anchor as i32),
+                        idl_version: None,
+                        signature: None,
+                    };
+                    mappings.insert(program_id.clone(), idl);
+                    valid_count += 1;
+                    eprintln!(
+                        "  Loaded IDL '{idl_name}' from {file_path} and mapped to {program_id}"
+                    );
+                }
+                Err(e) => {
+                    eprintln!("  Warning: Failed to load IDL '{idl_name}' from '{file_path}': {e}");
+                }
+            },
+            None => {
+                eprintln!(
+                    "  Warning: Invalid IDL mapping '{mapping}' (expected format: Name:ProgramId:/path/to/file.json)"
+                );
+            }
+        }
+    }
+
+    (mappings, valid_count)
+}
+
+/// Load IDL JSON file from disk and validate it
+fn load_idl_from_file(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let json_str = std::fs::read_to_string(file_path)?;
+
+    // Validate it's valid JSON
+    let _: serde_json::Value = serde_json::from_str(&json_str)?;
+
+    Ok(json_str)
+}
+
 fn parse_and_display(
     chain: &str,
     raw_tx: &str,
@@ -358,7 +439,11 @@ fn parse_and_display(
 /// Defaults to `ETHEREUM_MAINNET` if no network is specified for Ethereum chains.
 /// Returns `None` if no network is specified for non-Ethereum chains.
 /// Prints an error and exits if the network identifier is invalid.
-fn create_chain_metadata(chain: &Chain, network: Option<String>) -> Option<ChainMetadata> {
+fn create_chain_metadata(
+    chain: &Chain,
+    network: Option<String>,
+    idl_json_mappings: &[String],
+) -> Option<ChainMetadata> {
     // Default to Ethereum Mainnet for Ethereum chains if no network specified
     let network = match network {
         Some(n) => n,
@@ -388,10 +473,27 @@ fn create_chain_metadata(chain: &Chain, network: Option<String>) -> Option<Chain
     };
 
     let metadata = match chain {
-        Chain::Solana => Metadata::Solana(SolanaMetadata {
-            network_id: Some(network_id),
-            idl: None,
-        }),
+        Chain::Solana => {
+            // Build IDL mappings if provided
+            let idl_mappings = if idl_json_mappings.is_empty() {
+                HashMap::new()
+            } else {
+                eprintln!("Loading custom IDLs:");
+                let (mappings, valid_count) = build_idl_mappings_from_files(idl_json_mappings);
+                eprintln!(
+                    "Successfully loaded {}/{} IDL mappings\n",
+                    valid_count,
+                    idl_json_mappings.len()
+                );
+                mappings
+            };
+
+            Metadata::Solana(SolanaMetadata {
+                network_id: Some(network_id),
+                idl: None,
+                idl_mappings,
+            })
+        }
         // For Ethereum and other chains, use EthereumMetadata structure
         _ => Metadata::Ethereum(EthereumMetadata {
             network_id: Some(network_id),
@@ -416,7 +518,7 @@ impl Cli {
         let args = Args::parse();
 
         let chain = parse_chain(&args.chain);
-        let chain_metadata = create_chain_metadata(&chain, args.network);
+        let chain_metadata = create_chain_metadata(&chain, args.network, &args.idl_json_mappings);
 
         let options = VisualSignOptions {
             decode_transfers: true,
