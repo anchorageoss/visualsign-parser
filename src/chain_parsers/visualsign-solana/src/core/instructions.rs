@@ -89,6 +89,7 @@ pub fn decode_transfers(
     let parsed_transaction = parse_transaction(
         hex::encode(message_clone.serialize()),
         false, /* because we're passing the message only */
+        None,  // No custom IDLs for transfer parsing
     )
     .map_err(|e| {
         VisualSignError::ParseError(TransactionParseError::DecodeError(format!(
