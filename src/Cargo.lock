@@ -667,6 +667,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "anchor-lang-idl"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32e8599d21995f68e296265aa5ab0c3cef582fd58afec014d01bd0bce18a4418"
+dependencies = [
+ "anchor-lang-idl-spec",
+ "anyhow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "anchor-lang-idl-spec"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bdf143115440fe621bdac3a29a1f7472e09f6cd82b2aa569429a0c13f103838"
+dependencies = [
+ "anyhow",
+ "serde",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8977,6 +8999,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-idl-classic"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c1d97756a955ebbe202c2b92c7cfb8ba85936de474edc7e733bd5f8a1f26070"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "solana-idl-converter"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a1ae28868e1bfb26d542c636bc05163db7f04f17bdc5feda065eb32c8caab2a"
+dependencies = [
+ "anchor-lang-idl",
+ "serde",
+ "solana-idl-classic",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "solana-inflation"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10457,15 +10500,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana_idl"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae838dffc11f1858c80435dde65308685c3d8fc7cb8dfd9af08205a429907bf5"
+dependencies = [
+ "anchor-lang-idl",
+ "serde_json",
+ "solana-idl-classic",
+ "solana-idl-converter",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "solana_parser"
 version = "0.1.0"
-source = "git+https://github.com/tkhq/solana-parser.git?rev=1703030a0876b170c299d143247d808e2485a7bf#1703030a0876b170c299d143247d808e2485a7bf"
+source = "git+https://github.com/prasincs/solana-parser.git?branch=custom-idl-support#299cdc97d3a56c8da8af14227a1650111c6e62a0"
 dependencies = [
  "bincode",
+ "bs58 0.5.1",
+ "byteorder",
+ "heck 0.5.0",
  "hex",
  "log",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
  "solana-program",
  "solana-sdk",
+ "solana_idl",
 ]
 
 [[package]]
