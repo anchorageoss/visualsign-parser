@@ -104,6 +104,9 @@ message SolanaMetadata {
   // Network identifier string (e.g., "SOLANA_MAINNET", "SOLANA_DEVNET")
   optional string network_id = 2;
   optional Idl idl = 1;
+  // Map of program_id (base58 string) to IDL definitions
+  // Allows wallet to provide multiple IDLs, one per program
+  map<string, Idl> idl_mappings = 3;
 }
 
 message Abi {

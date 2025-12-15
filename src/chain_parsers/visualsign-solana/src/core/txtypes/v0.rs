@@ -26,12 +26,16 @@ pub fn decode_v0_transfers(
 
     let is_full_transaction = true; // true because we're passing full tx and not message
     // Parse using solana-parser which handles V0 transactions and lookup tables
-    let parsed_transaction = parse_transaction(hex::encode(transaction_bytes), is_full_transaction)
-        .map_err(|e| {
-            VisualSignError::ParseError(visualsign::vsptrait::TransactionParseError::DecodeError(
-                format!("Failed to parse V0 transaction: {e}"),
-            ))
-        })?;
+    let parsed_transaction = parse_transaction(
+        hex::encode(transaction_bytes),
+        is_full_transaction,
+        None,
+    )
+    .map_err(|e| {
+        VisualSignError::ParseError(visualsign::vsptrait::TransactionParseError::DecodeError(
+            format!("Failed to parse V0 transaction: {e}"),
+        ))
+    })?;
 
     let mut fields = Vec::new();
 
