@@ -211,6 +211,10 @@ pub struct SolanaMetadata {
     pub network_id: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(message, optional, tag = "1")]
     pub idl: ::core::option::Option<Idl>,
+    /// Map of program_id (base58 string) to IDL definitions
+    /// Allows wallet to provide multiple IDLs, one per program
+    #[prost(map = "string, message", tag = "3")]
+    pub idl_mappings: ::std::collections::HashMap<::prost::alloc::string::String, Idl>,
 }
 #[cfg_attr(
     feature = "serde_derive",

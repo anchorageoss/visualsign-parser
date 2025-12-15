@@ -117,6 +117,7 @@ pub fn decode_v0_transfers(
 /// This works for all V0 transactions, including those with lookup tables
 pub fn decode_v0_instructions(
     v0_message: &solana_sdk::message::v0::Message,
+    _idl_registry: &crate::idl::IdlRegistry,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     // Get visualizers
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();

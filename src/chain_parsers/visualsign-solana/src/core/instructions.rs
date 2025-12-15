@@ -1,4 +1,5 @@
 use crate::core::{InstructionVisualizer, VisualizerContext, visualize_with_any};
+use crate::idl::IdlRegistry;
 use solana_parser::solana::parser::parse_transaction;
 use solana_parser::solana::structs::SolanaAccount;
 use solana_sdk::instruction::Instruction;
@@ -14,6 +15,7 @@ include!(concat!(env!("OUT_DIR"), "/generated_visualizers.rs"));
 /// Visualizes all the instructions and related fields in a transaction/message
 pub fn decode_instructions(
     transaction: &SolanaTransaction,
+    _idl_registry: &IdlRegistry,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     // TODO: add comment that available_visualizers is generated
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();

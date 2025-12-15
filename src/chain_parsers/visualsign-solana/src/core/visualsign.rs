@@ -4,11 +4,13 @@ use crate::core::txtypes::{
 use crate::core::{
     create_accounts_advanced_preview_layout, decode_accounts, decode_v0_accounts, instructions,
 };
+use crate::idl::IdlRegistry;
 use base64::{self, Engine};
 use solana_sdk::{
     message::VersionedMessage,
     transaction::{Transaction as SolanaTransaction, VersionedTransaction},
 };
+use std::collections::HashMap;
 use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
     encodings::SupportedEncodings,
@@ -85,6 +87,30 @@ impl SolanaTransactionWrapper {
     }
 }
 
+/// Extract IDL mappings from VisualSignOptions metadata
+///
+/// Returns a HashMap of program_id (base58 string) -> IDL JSON string
+fn extract_idl_mappings(options: &VisualSignOptions) -> HashMap<String, String> {
+    options
+        .metadata
+        .as_ref()
+        .and_then(|meta| meta.metadata.as_ref())
+        .and_then(|m| {
+            if let generated::parser::chain_metadata::Metadata::Solana(solana_meta) = m {
+                Some(&solana_meta.idl_mappings)
+            } else {
+                None
+            }
+        })
+        .map(|mappings| {
+            mappings
+                .iter()
+                .map(|(k, v)| (k.clone(), v.value.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Converter that knows how to format Solana transactions for VisualSign
 pub struct SolanaVisualSignConverter;
 
@@ -100,7 +126,8 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
                 convert_to_visual_sign_payload(
                     &transaction,
                     options.decode_transfers,
-                    options.transaction_name,
+                    options.transaction_name.clone(),
+                    &options,
                 )
             }
             SolanaTransactionWrapper::Versioned(versioned_tx) => {
@@ -108,7 +135,8 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
                 convert_versioned_to_visual_sign_payload(
                     &versioned_tx,
                     options.decode_transfers,
-                    options.transaction_name,
+                    options.transaction_name.clone(),
+                    &options,
                 )
             }
         }
@@ -150,8 +178,19 @@ fn convert_to_visual_sign_payload(
     transaction: &SolanaTransaction,
     decode_transfers: bool,
     title: Option<String>,
+    options: &VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     let message = &transaction.message;
+
+    // Extract IDL mappings from options and create registry
+    let idl_mappings = extract_idl_mappings(options);
+    let idl_registry = if !idl_mappings.is_empty() {
+        IdlRegistry::from_idl_mappings(idl_mappings).map_err(|e| {
+            VisualSignError::ConversionError(format!("Failed to create IDL registry: {e}"))
+        })?
+    } else {
+        IdlRegistry::new()
+    };
 
     let mut fields = vec![SignablePayloadField::TextV2 {
         common: SignablePayloadFieldCommon {
@@ -172,9 +211,9 @@ fn convert_to_visual_sign_payload(
         );
     }
 
-    // Process instructions with visualizers
+    // Process instructions with visualizers (pass IDL registry for future use)
     fields.extend(
-        instructions::decode_instructions(transaction)?
+        instructions::decode_instructions(transaction, &idl_registry)?
             .iter()
             .map(|e| e.signable_payload_field.clone()),
     );
@@ -201,6 +240,7 @@ fn convert_versioned_to_visual_sign_payload(
     versioned_tx: &VersionedTransaction,
     decode_transfers: bool,
     title: Option<String>,
+    options: &VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     match &versioned_tx.message {
         VersionedMessage::Legacy(legacy_message) => {
@@ -209,11 +249,17 @@ fn convert_versioned_to_visual_sign_payload(
                 signatures: versioned_tx.signatures.clone(),
                 message: legacy_message.clone(),
             };
-            convert_to_visual_sign_payload(&legacy_tx, decode_transfers, title)
+            convert_to_visual_sign_payload(&legacy_tx, decode_transfers, title, options)
         }
         VersionedMessage::V0(v0_message) => {
             // Handle V0 transactions - try to use the same instruction processing pipeline
-            convert_v0_to_visual_sign_payload(versioned_tx, v0_message, decode_transfers, title)
+            convert_v0_to_visual_sign_payload(
+                versioned_tx,
+                v0_message,
+                decode_transfers,
+                title,
+                options,
+            )
         }
     }
 }
@@ -224,7 +270,18 @@ fn convert_v0_to_visual_sign_payload(
     v0_message: &solana_sdk::message::v0::Message,
     decode_transfers: bool,
     title: Option<String>,
+    options: &VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
+    // Extract IDL mappings from options and create registry
+    let idl_mappings = extract_idl_mappings(options);
+    let idl_registry = if !idl_mappings.is_empty() {
+        IdlRegistry::from_idl_mappings(idl_mappings).map_err(|e| {
+            VisualSignError::ConversionError(format!("Failed to create IDL registry: {e}"))
+        })?
+    } else {
+        IdlRegistry::new()
+    };
+
     // Decode and sort accounts using the dedicated function
     let accounts = decode_v0_accounts(v0_message)?;
 
@@ -246,7 +303,7 @@ fn convert_v0_to_visual_sign_payload(
 
     // Directly process V0 instructions using the visualizer framework
     // This approach works for all V0 transactions, including those with lookup tables
-    match decode_v0_instructions(v0_message) {
+    match decode_v0_instructions(v0_message, &idl_registry) {
         Ok(instruction_fields) => {
             for (index, instruction_field) in instruction_fields.iter().enumerate() {
                 tracing::debug!(
