@@ -424,50 +424,59 @@ fn parse_and_display(
 /// - A chain ID number (e.g., 1, 137, 42161)
 /// - A canonical network name (e.g., `ETHEREUM_MAINNET`, `POLYGON_MAINNET`)
 ///
-/// Returns `None` if no network is specified.
+/// Returns `None` if no network is specified and no IDL mappings are provided.
 /// Prints an error and exits if the network identifier is invalid.
 fn create_chain_metadata(
     chain: &Chain,
     network: Option<String>,
     idl_json_mappings: &[String],
 ) -> Option<ChainMetadata> {
-    let network = network?;
-
-    // Parse and validate the network identifier
-    let Some(network_id) = parse_network(&network) else {
-        eprintln!(
-            "Error: Invalid network '{network}'. Use a chain ID (e.g., 1, 137) or name (e.g., ETHEREUM_MAINNET, POLYGON_MAINNET)"
-        );
-        std::process::exit(1);
+    // Parse network if provided
+    let network_id = if let Some(network) = network {
+        let Some(network_id) = parse_network(&network) else {
+            eprintln!(
+                "Error: Invalid network '{network}'. Use a chain ID (e.g., 1, 137) or name (e.g., ETHEREUM_MAINNET, POLYGON_MAINNET)"
+            );
+            std::process::exit(1);
+        };
+        Some(network_id)
+    } else {
+        None
     };
 
-    let metadata = match chain {
-        Chain::Solana => {
-            // Build IDL mappings if provided
-            let idl_mappings = if idl_json_mappings.is_empty() {
-                HashMap::new()
-            } else {
-                eprintln!("Loading custom IDLs:");
-                let (mappings, valid_count) = build_idl_mappings_from_files(idl_json_mappings);
-                eprintln!(
-                    "Successfully loaded {}/{} IDL mappings\n",
-                    valid_count,
-                    idl_json_mappings.len()
-                );
-                mappings
-            };
+    let metadata = if chain == &Chain::Solana {
+        // Build IDL mappings if provided
+        let idl_mappings = if idl_json_mappings.is_empty() {
+            HashMap::new()
+        } else {
+            eprintln!("Loading custom IDLs:");
+            let (mappings, valid_count) = build_idl_mappings_from_files(idl_json_mappings);
+            eprintln!(
+                "Successfully loaded {}/{} IDL mappings\n",
+                valid_count,
+                idl_json_mappings.len()
+            );
+            mappings
+        };
 
-            Metadata::Solana(SolanaMetadata {
-                network_id: Some(network_id),
-                idl: None,
-                idl_mappings,
-            })
+        // Only create metadata if we have network or IDL mappings
+        if network_id.is_none() && idl_mappings.is_empty() {
+            return None;
         }
+
+        Metadata::Solana(SolanaMetadata {
+            network_id,
+            idl: None,
+            idl_mappings,
+        })
+    } else {
         // For Ethereum and other chains, use EthereumMetadata structure
-        _ => Metadata::Ethereum(EthereumMetadata {
+        // Ethereum requires network_id
+        let network_id = network_id?;
+        Metadata::Ethereum(EthereumMetadata {
             network_id: Some(network_id),
             abi: None,
-        }),
+        })
     };
 
     Some(ChainMetadata {

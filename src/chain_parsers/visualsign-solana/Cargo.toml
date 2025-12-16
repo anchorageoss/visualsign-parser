@@ -10,6 +10,7 @@ tracing = { workspace = true }
 solana_parser = { git = "https://github.com/prasincs/solana-parser.git", branch = "custom-idl-support" }
 visualsign = { workspace = true }
 generated = { path = "../../generated" }
+serde_json = { workspace = true }
 hex = "0.4.3"
 base64 = "0.22.1"
 borsh = "1.5.5"

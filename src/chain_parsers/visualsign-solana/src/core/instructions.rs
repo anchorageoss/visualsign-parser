@@ -15,9 +15,9 @@ include!(concat!(env!("OUT_DIR"), "/generated_visualizers.rs"));
 /// Visualizes all the instructions and related fields in a transaction/message
 pub fn decode_instructions(
     transaction: &SolanaTransaction,
-    _idl_registry: &IdlRegistry,
+    idl_registry: &IdlRegistry,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
-    // TODO: add comment that available_visualizers is generated
+    // available_visualizers is generated at build time by build.rs
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
     let visualizers_refs: Vec<&dyn InstructionVisualizer> =
         visualizers.iter().map(|v| v.as_ref()).collect::<Vec<_>>();
@@ -56,7 +56,8 @@ pub fn decode_instructions(
                 writable: false,
             };
 
-            let context = VisualizerContext::new(&sender, instruction_index, &instructions);
+            let context =
+                VisualizerContext::new(&sender, instruction_index, &instructions, idl_registry);
 
             // Try to visualize with available visualizers (including unknown_program fallback)
             visualize_with_any(&visualizers_refs, &context)

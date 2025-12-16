@@ -15,12 +15,14 @@ use std::collections::HashMap;
 /// 3. Determine if the IDL visualizer should handle a program
 ///
 /// Built-in IDLs are not stored here - they're checked via solana_parser's ProgramType.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 #[allow(dead_code)] // Library code for future IDL integration
 pub struct IdlRegistry {
     /// Maps program_id (base58 string) -> CustomIdlConfig
     /// These are user-provided IDLs that override built-ins
     configs: HashMap<String, CustomIdlConfig>,
+    /// Maps program_id -> human-readable name (extracted from IDL or provided by user)
+    names: HashMap<String, String>,
 }
 
 #[allow(dead_code)] // Library code for future IDL integration
@@ -29,30 +31,33 @@ impl IdlRegistry {
     pub fn new() -> Self {
         Self {
             configs: HashMap::new(),
+            names: HashMap::new(),
         }
     }
 
     /// Create registry with custom IDL mappings from IDL JSON strings
     ///
     /// # Arguments
-    /// * `idl_mappings` - Map of program_id (base58) to IDL JSON strings
+    /// * `idl_mappings` - Map of program_id (base58) to (IDL JSON string, user-provided name)
     ///
     /// # Returns
     /// * `Ok(IdlRegistry)` with the custom IDLs configured to override built-ins
     /// * `Err` if any IDL JSON is invalid
     pub fn from_idl_mappings(
-        idl_mappings: HashMap<String, String>,
+        idl_mappings: HashMap<String, (String, String)>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut configs = HashMap::new();
+        let mut names = HashMap::new();
 
-        for (program_id, idl_json) in idl_mappings {
+        for (program_id, (idl_json, program_name)) in idl_mappings {
             // Convert IDL JSON to solana_parser CustomIdlConfig
             // override_builtin = true so user IDLs override built-in ones
             let config = CustomIdlConfig::from_json(idl_json, true);
-            configs.insert(program_id, config);
+            configs.insert(program_id.clone(), config);
+            names.insert(program_id, program_name);
         }
 
-        Ok(Self { configs })
+        Ok(Self { configs, names })
     }
 
     /// Get all IDL configs for use with solana_parser
@@ -86,10 +91,16 @@ impl IdlRegistry {
     pub fn get_program_name(&self, program_id: &Pubkey) -> String {
         let program_id_str = program_id.to_string();
 
+        // First check if we have a custom name for this program
+        if let Some(name) = self.names.get(&program_id_str) {
+            return name.clone();
+        }
+
+        // Then check built-in IDLs
         if let Some(program_type) = ProgramType::from_program_id(&program_id_str) {
             program_type.program_name().to_string()
         } else {
-            // Unknown program with custom IDL or no IDL
+            // Unknown program with no IDL or no name
             format!("Program {}", &program_id_str[..8])
         }
     }

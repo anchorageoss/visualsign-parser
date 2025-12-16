@@ -89,8 +89,8 @@ impl SolanaTransactionWrapper {
 
 /// Extract IDL mappings from VisualSignOptions metadata
 ///
-/// Returns a HashMap of program_id (base58 string) -> IDL JSON string
-fn extract_idl_mappings(options: &VisualSignOptions) -> HashMap<String, String> {
+/// Returns a HashMap of program_id (base58 string) -> (IDL JSON string, program name)
+fn extract_idl_mappings(options: &VisualSignOptions) -> HashMap<String, (String, String)> {
     options
         .metadata
         .as_ref()
@@ -105,10 +105,31 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> HashMap<String, String> 
         .map(|mappings| {
             mappings
                 .iter()
-                .map(|(k, v)| (k.clone(), v.value.clone()))
+                .map(|(program_id, idl)| {
+                    // Extract name from IDL JSON, fallback to program_id prefix
+                    let name = extract_name_from_idl_json(&idl.value).unwrap_or_else(|| {
+                        format!("Program {}", &program_id[..8.min(program_id.len())])
+                    });
+                    (program_id.clone(), (idl.value.clone(), name))
+                })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Extract the program name from an IDL JSON string
+fn extract_name_from_idl_json(idl_json: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(idl_json).ok()?;
+
+    // Try "metadata.name" first (Anchor IDL format)
+    if let Some(metadata) = value.get("metadata") {
+        if let Some(name) = metadata.get("name").and_then(|n| n.as_str()) {
+            return Some(name.to_string());
+        }
+    }
+
+    // Try "name" field directly
+    value.get("name").and_then(|n| n.as_str()).map(String::from)
 }
 
 /// Converter that knows how to format Solana transactions for VisualSign
