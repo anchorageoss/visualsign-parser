@@ -337,6 +337,7 @@ fn build_idl_mappings_from_files(
                         idl_type: Some(SolanaIdlType::Anchor as i32),
                         idl_version: None,
                         signature: None,
+                        program_name: Some(idl_name.clone()),
                     };
                     mappings.insert(program_id.clone(), idl);
                     valid_count += 1;

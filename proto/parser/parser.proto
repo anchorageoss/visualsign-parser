@@ -119,6 +119,7 @@ message Idl {
   optional SolanaIdlType idl_type = 2;      // Type of Solana IDL (e.g., Anchor)
   optional string idl_version = 3;          // IDL version (e.g., "0.30.0")
   optional SignatureMetadata signature = 4; // Optional IDL signature with metadata
+  optional string program_name = 5;         // Wallet-provided name for the program (e.g., "JupiterLend")
 }
 
 enum SolanaIdlType {
