@@ -41,6 +41,8 @@ pub struct VisualizerContext<'a> {
     /// All instruction in the transaction.
     /// Instruction struct contains data
     instructions: &'a Vec<Instruction>,
+    /// IDL registry for parsing unknown programs with Anchor IDLs
+    idl_registry: &'a crate::idl::IdlRegistry,
 }
 
 impl<'a> VisualizerContext<'a> {
@@ -49,12 +51,19 @@ impl<'a> VisualizerContext<'a> {
         sender: &'a SolanaAccount,
         instruction_index: usize,
         instructions: &'a Vec<Instruction>,
+        idl_registry: &'a crate::idl::IdlRegistry,
     ) -> Self {
         Self {
             sender,
             instruction_index,
             instructions,
+            idl_registry,
         }
+    }
+
+    /// Returns a reference to the IDL registry
+    pub fn idl_registry(&self) -> &crate::idl::IdlRegistry {
+        self.idl_registry
     }
 
     /// Returns the sender address.

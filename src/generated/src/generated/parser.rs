@@ -211,6 +211,10 @@ pub struct SolanaMetadata {
     pub network_id: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(message, optional, tag = "1")]
     pub idl: ::core::option::Option<Idl>,
+    /// Map of program_id (base58 string) to IDL definitions
+    /// Allows wallet to provide multiple IDLs, one per program
+    #[prost(map = "string, message", tag = "3")]
+    pub idl_mappings: ::std::collections::HashMap<::prost::alloc::string::String, Idl>,
 }
 #[cfg_attr(
     feature = "serde_derive",
@@ -247,6 +251,9 @@ pub struct Idl {
     /// Optional IDL signature with metadata
     #[prost(message, optional, tag = "4")]
     pub signature: ::core::option::Option<SignatureMetadata>,
+    /// Wallet-provided name for the program (e.g., "JupiterLend")
+    #[prost(string, optional, tag = "5")]
+    pub program_name: ::core::option::Option<::prost::alloc::string::String>,
 }
 /// Chain represents supported blockchain networks
 #[cfg_attr(
