@@ -68,7 +68,7 @@ fn try_idl_parsing(
 
     // Format program display as "UserName (name: idl_name)" if IDL name exists
     let program_display = if let Some(idl_name) = &idl_name {
-        format!("{} (name: {})", program_name, idl_name)
+        format!("{program_name} (name: {idl_name})")
     } else {
         program_name.clone()
     };
@@ -300,27 +300,24 @@ fn try_parse_with_idl(
     instruction: &solana_sdk::instruction::Instruction,
     idl_registry: &crate::idl::IdlRegistry,
 ) -> Result<solana_parser::SolanaParsedInstructionData, Box<dyn std::error::Error>> {
-    use solana_parser::{parse_instruction_with_idl, SolanaParsedInstructionData};
+    use solana_parser::{SolanaParsedInstructionData, parse_instruction_with_idl};
     use std::collections::HashMap;
-    
+
     let program_id_str = instruction.program_id.to_string();
     let instruction_data = &instruction.data;
-    
+
     // Try to get the IDL for this program
     let idl = idl_registry
         .get_idl(&program_id_str)
         .ok_or("No IDL found for program")?;
-    
+
     // Parse the instruction with the IDL
-    let mut parsed: SolanaParsedInstructionData = parse_instruction_with_idl(
-        instruction_data,
-        &program_id_str,
-        &idl,
-    )?;
-    
+    let mut parsed: SolanaParsedInstructionData =
+        parse_instruction_with_idl(instruction_data, &program_id_str, &idl)?;
+
     // Manually create the named_accounts map by matching instruction accounts with IDL
     let mut named_accounts = HashMap::new();
-    
+
     // Find the matching instruction in the IDL to get account names
     if let Some(idl_instruction) = idl.instructions.iter().find(|inst| {
         if let Some(ref disc) = inst.discriminator {
@@ -332,15 +329,12 @@ fn try_parse_with_idl(
         // Match each account in the instruction with its name from the IDL
         for (index, account_meta) in instruction.accounts.iter().enumerate() {
             if let Some(idl_account) = idl_instruction.accounts.get(index) {
-                named_accounts.insert(
-                    idl_account.name.clone(),
-                    account_meta.pubkey.to_string(),
-                );
+                named_accounts.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
             }
         }
     }
-    
+
     parsed.named_accounts = named_accounts;
-    
+
     Ok(parsed)
 }
