@@ -437,68 +437,69 @@ fn parse_and_display(
 /// - A canonical network name (e.g., `ETHEREUM_MAINNET`, `POLYGON_MAINNET`)
 ///
 /// Defaults to `ETHEREUM_MAINNET` if no network is specified for Ethereum chains.
-/// Returns `None` if no network is specified for non-Ethereum chains.
+/// Returns `None` if no network is specified and no IDL mappings are provided for Solana.
 /// Prints an error and exits if the network identifier is invalid.
 fn create_chain_metadata(
     chain: &Chain,
     network: Option<String>,
     idl_json_mappings: &[String],
 ) -> Option<ChainMetadata> {
-    // Default to Ethereum Mainnet for Ethereum chains if no network specified
-    let network = match network {
-        Some(n) => n,
-        None => {
-            match chain {
-                Chain::Ethereum => {
-                    eprintln!(
-                        "Warning: No network specified, defaulting to ETHEREUM_MAINNET (chain_id: 1)"
-                    );
-                    "ETHEREUM_MAINNET".to_string()
-                }
-                _ => return None, // Other chains require explicit network
-            }
-        }
-    };
-
-    // Parse and validate the network identifier
-    let Some(network_id) = parse_network(&network) else {
+    // Parse network if provided, with Ethereum defaulting logic
+    let network_id = if let Some(network) = network {
+        let Some(network_id) = parse_network(&network) else {
+            eprintln!(
+                "Error: Invalid network '{network}'. Supported formats:\n\
+                 - Chain ID (numeric): 1 (Ethereum), 137 (Polygon), 42161 (Arbitrum)\n\
+                 - Canonical name: ETHEREUM_MAINNET, POLYGON_MAINNET, ARBITRUM_MAINNET\n\
+                 \n\
+                 Run with --help for full list of supported networks."
+            );
+            std::process::exit(1);
+        };
+        Some(network_id)
+    } else if chain == &Chain::Ethereum {
+        // Default to Ethereum Mainnet for Ethereum chains if no network specified
         eprintln!(
-            "Error: Invalid network '{network}'. Supported formats:\n\
-             - Chain ID (numeric): 1 (Ethereum), 137 (Polygon), 42161 (Arbitrum)\n\
-             - Canonical name: ETHEREUM_MAINNET, POLYGON_MAINNET, ARBITRUM_MAINNET\n\
-             \n\
-             Run with --help for full list of supported networks."
+            "Warning: No network specified, defaulting to ETHEREUM_MAINNET (chain_id: 1)"
         );
-        std::process::exit(1);
+        Some(parse_network("ETHEREUM_MAINNET").unwrap())
+    } else {
+        None
     };
 
-    let metadata = match chain {
-        Chain::Solana => {
-            // Build IDL mappings if provided
-            let idl_mappings = if idl_json_mappings.is_empty() {
-                HashMap::new()
-            } else {
-                eprintln!("Loading custom IDLs:");
-                let (mappings, valid_count) = build_idl_mappings_from_files(idl_json_mappings);
-                eprintln!(
-                    "Successfully loaded {}/{} IDL mappings\n",
-                    valid_count,
-                    idl_json_mappings.len()
-                );
-                mappings
-            };
+    let metadata = if chain == &Chain::Solana {
+        // Build IDL mappings if provided
+        let idl_mappings = if idl_json_mappings.is_empty() {
+            HashMap::new()
+        } else {
+            eprintln!("Loading custom IDLs:");
+            let (mappings, valid_count) = build_idl_mappings_from_files(idl_json_mappings);
+            eprintln!(
+                "Successfully loaded {}/{} IDL mappings\n",
+                valid_count,
+                idl_json_mappings.len()
+            );
+            mappings
+        };
 
-            Metadata::Solana(SolanaMetadata {
-                network_id: Some(network_id),
-                idl: None,
-                idl_mappings,
-            })
+        // Only create metadata if we have network or IDL mappings
+        if network_id.is_none() && idl_mappings.is_empty() {
+            return None;
         }
+
+        Metadata::Solana(SolanaMetadata {
+            network_id,
+            idl: None,
+            idl_mappings,
+        })
+    } else {
         // For Ethereum and other chains, use EthereumMetadata structure
-        _ => Metadata::Ethereum(EthereumMetadata {
+        // Ethereum requires network_id
+        let network_id = network_id?;
+        Metadata::Ethereum(EthereumMetadata {
             network_id: Some(network_id),
             abi: None,
-        }),
+        })
     };
 
     Some(ChainMetadata {
