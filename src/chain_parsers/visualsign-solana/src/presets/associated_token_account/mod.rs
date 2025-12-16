@@ -96,8 +96,11 @@ impl InstructionVisualizer for AssociatedTokenAccountVisualizer {
 }
 
 fn parse_ata_instruction(data: &[u8]) -> Result<AssociatedTokenAccountInstruction, &'static str> {
+    // The original SPL ATA "Create" instruction used empty data (no discriminator).
+    // Discriminator bytes were added later for CreateIdempotent and RecoverNested.
+    // Empty data or data[0] == 0 both mean "Create".
     if data.is_empty() {
-        return Err("Empty data");
+        return Ok(AssociatedTokenAccountInstruction::Create);
     }
     match data[0] {
         0 => Ok(AssociatedTokenAccountInstruction::Create),
