@@ -3,7 +3,7 @@
 //! This module provides utilities for managing Anchor IDLs and integrating them
 //! with the solana_parser library for instruction decoding.
 
-use solana_parser::{CustomIdlConfig, ProgramType};
+use solana_parser::{CustomIdl, CustomIdlConfig, Idl, ProgramType, decode_idl_data};
 use solana_sdk::pubkey::Pubkey;
 use std::collections::HashMap;
 
@@ -23,6 +23,8 @@ pub struct IdlRegistry {
     configs: HashMap<String, CustomIdlConfig>,
     /// Maps program_id -> human-readable name (extracted from IDL or provided by user)
     names: HashMap<String, String>,
+    /// Maps program_id -> IDL name from metadata.name in JSON
+    idl_names: HashMap<String, String>,
 }
 
 #[allow(dead_code)] // Library code for future IDL integration
@@ -32,6 +34,7 @@ impl IdlRegistry {
         Self {
             configs: HashMap::new(),
             names: HashMap::new(),
+            idl_names: HashMap::new(),
         }
     }
 
@@ -48,8 +51,18 @@ impl IdlRegistry {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut configs = HashMap::new();
         let mut names = HashMap::new();
+        let mut idl_names = HashMap::new();
 
         for (program_id, (idl_json, program_name)) in idl_mappings {
+            // Extract IDL name from JSON metadata
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&idl_json) {
+                if let Some(metadata) = json_value.get("metadata") {
+                    if let Some(idl_name) = metadata.get("name").and_then(|n| n.as_str()) {
+                        idl_names.insert(program_id.clone(), idl_name.to_string());
+                    }
+                }
+            }
+
             // Convert IDL JSON to solana_parser CustomIdlConfig
             // override_builtin = true so user IDLs override built-in ones
             let config = CustomIdlConfig::from_json(idl_json, true);
@@ -57,7 +70,7 @@ impl IdlRegistry {
             names.insert(program_id, program_name);
         }
 
-        Ok(Self { configs, names })
+        Ok(Self { configs, names, idl_names })
     }
 
     /// Get all IDL configs for use with solana_parser
@@ -102,6 +115,26 @@ impl IdlRegistry {
         } else {
             // Unknown program with no IDL or no name
             format!("Program {}", &program_id_str[..8])
+        }
+    }
+
+    /// Get the IDL name from metadata.name in the IDL JSON
+    ///
+    /// Returns the IDL name if found in metadata
+    pub fn get_idl_name(&self, program_id: &Pubkey) -> Option<String> {
+        let program_id_str = program_id.to_string();
+        self.idl_names.get(&program_id_str).cloned()
+    }
+
+    /// Get the parsed Idl for a program if available
+    pub fn get_idl(&self, program_id: &str) -> Option<Idl> {
+        if let Some(config) = self.configs.get(program_id) {
+            match &config.idl {
+                CustomIdl::Parsed(idl) => Some(idl.clone()),
+                CustomIdl::Json(json) => decode_idl_data(json).ok(),
+            }
+        } else {
+            None
         }
     }
 }
