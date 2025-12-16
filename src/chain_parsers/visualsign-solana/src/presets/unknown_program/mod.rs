@@ -60,27 +60,34 @@ fn try_idl_parsing(
 
     let program_id = &instruction.program_id;
     let program_name = idl_registry.get_program_name(program_id);
+    let idl_name = idl_registry.get_idl_name(program_id);
 
-    // For now, show that IDL is available but not yet fully integrated
-    // TODO: Integrate with solana_parser::parse_transaction_with_idls for full decoding
-    // This requires reconstructing the full transaction from context
+    // Try to parse the instruction with IDL
+    let parsed_result = try_parse_with_idl(instruction, idl_registry);
     let instruction_data_hex = hex::encode(&instruction.data);
 
-    let condensed_fields = vec![AnnotatedPayloadField {
+    // Format program display as "UserName (name: idl_name)" if IDL name exists
+    let program_display = if let Some(idl_name) = &idl_name {
+        format!("{} (name: {})", program_name, idl_name)
+    } else {
+        program_name.clone()
+    };
+
+    let mut condensed_fields = vec![AnnotatedPayloadField {
         signable_payload_field: SignablePayloadField::TextV2 {
             common: SignablePayloadFieldCommon {
-                fallback_text: format!("{program_name} (IDL available)"),
+                fallback_text: program_display.clone(),
                 label: "Program".to_string(),
             },
             text_v2: SignablePayloadFieldTextV2 {
-                text: format!("{program_name} (IDL available)"),
+                text: program_display,
             },
         },
         static_annotation: None,
         dynamic_annotation: None,
     }];
 
-    let expanded_fields = vec![
+    let mut expanded_fields = vec![
         AnnotatedPayloadField {
             signable_payload_field: SignablePayloadField::TextV2 {
                 common: SignablePayloadFieldCommon {
@@ -107,20 +114,106 @@ fn try_idl_parsing(
             static_annotation: None,
             dynamic_annotation: None,
         },
-        AnnotatedPayloadField {
-            signable_payload_field: SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: "IDL available - full parsing coming soon".to_string(),
-                    label: "Status".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 {
-                    text: "IDL available - full parsing coming soon".to_string(),
-                },
-            },
-            static_annotation: None,
-            dynamic_annotation: None,
-        },
     ];
+
+    // Add parsed instruction fields if IDL parsing succeeded
+    match parsed_result {
+        Ok(parsed) => {
+            // Add instruction name to condensed view
+            condensed_fields.push(AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: parsed.instruction_name.clone(),
+                        label: "Instruction".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: parsed.instruction_name.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            });
+
+            // Add instruction name to expanded view
+            expanded_fields.push(AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: parsed.instruction_name.clone(),
+                        label: "Instruction".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: parsed.instruction_name.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            });
+
+            // Add discriminator
+            expanded_fields.push(AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: parsed.discriminator.clone(),
+                        label: "Discriminator".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: parsed.discriminator.clone(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            });
+
+            // Add named accounts (e.g., mint, depositor_token_account, etc.)
+            for (account_name, account_address) in &parsed.named_accounts {
+                expanded_fields.push(AnnotatedPayloadField {
+                    signable_payload_field: SignablePayloadField::TextV2 {
+                        common: SignablePayloadFieldCommon {
+                            fallback_text: account_address.clone(),
+                            label: account_name.clone(),
+                        },
+                        text_v2: SignablePayloadFieldTextV2 {
+                            text: account_address.clone(),
+                        },
+                    },
+                    static_annotation: None,
+                    dynamic_annotation: None,
+                });
+            }
+
+            // Add each argument as a separate field in condensed view
+            for (key, value) in &parsed.program_call_args {
+                condensed_fields.push(AnnotatedPayloadField {
+                    signable_payload_field: SignablePayloadField::TextV2 {
+                        common: SignablePayloadFieldCommon {
+                            fallback_text: value.to_string(),
+                            label: key.clone(),
+                        },
+                        text_v2: SignablePayloadFieldTextV2 {
+                            text: value.to_string(),
+                        },
+                    },
+                    static_annotation: None,
+                    dynamic_annotation: None,
+                });
+            }
+        }
+        Err(_) => {
+            expanded_fields.push(AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: "IDL parsing failed - showing raw data".to_string(),
+                        label: "Status".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "IDL parsing failed - showing raw data".to_string(),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            });
+        }
+    }
 
     let condensed = visualsign::SignablePayloadFieldListLayout {
         fields: condensed_fields,
@@ -200,4 +293,54 @@ fn create_unknown_program_preview_layout(
             preview_layout,
         },
     })
+}
+
+/// Try to parse instruction using the new parse_instruction_with_idl function
+fn try_parse_with_idl(
+    instruction: &solana_sdk::instruction::Instruction,
+    idl_registry: &crate::idl::IdlRegistry,
+) -> Result<solana_parser::SolanaParsedInstructionData, Box<dyn std::error::Error>> {
+    use solana_parser::{parse_instruction_with_idl, SolanaParsedInstructionData};
+    use std::collections::HashMap;
+    
+    let program_id_str = instruction.program_id.to_string();
+    let instruction_data = &instruction.data;
+    
+    // Try to get the IDL for this program
+    let idl = idl_registry
+        .get_idl(&program_id_str)
+        .ok_or("No IDL found for program")?;
+    
+    // Parse the instruction with the IDL
+    let mut parsed: SolanaParsedInstructionData = parse_instruction_with_idl(
+        instruction_data,
+        &program_id_str,
+        &idl,
+    )?;
+    
+    // Manually create the named_accounts map by matching instruction accounts with IDL
+    let mut named_accounts = HashMap::new();
+    
+    // Find the matching instruction in the IDL to get account names
+    if let Some(idl_instruction) = idl.instructions.iter().find(|inst| {
+        if let Some(ref disc) = inst.discriminator {
+            instruction_data.len() >= 8 && &instruction_data[0..8] == disc.as_slice()
+        } else {
+            false
+        }
+    }) {
+        // Match each account in the instruction with its name from the IDL
+        for (index, account_meta) in instruction.accounts.iter().enumerate() {
+            if let Some(idl_account) = idl_instruction.accounts.get(index) {
+                named_accounts.insert(
+                    idl_account.name.clone(),
+                    account_meta.pubkey.to_string(),
+                );
+            }
+        }
+    }
+    
+    parsed.named_accounts = named_accounts;
+    
+    Ok(parsed)
 }
