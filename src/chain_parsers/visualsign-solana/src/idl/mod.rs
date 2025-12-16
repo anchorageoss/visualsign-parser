@@ -70,7 +70,11 @@ impl IdlRegistry {
             names.insert(program_id, program_name);
         }
 
-        Ok(Self { configs, names, idl_names })
+        Ok(Self {
+            configs,
+            names,
+            idl_names,
+        })
     }
 
     /// Get all IDL configs for use with solana_parser
