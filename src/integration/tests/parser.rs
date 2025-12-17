@@ -1,6 +1,7 @@
 use generated::health::{AppHealthRequest, AppHealthResponse};
 use generated::parser::{Chain, ParseRequest};
 use integration::TestArgs;
+use qos_crypto::sha_256;
 use tonic::Code;
 
 /// Recursively validates that all fields in expected are present in actual
@@ -105,8 +106,16 @@ async fn parser_e2e() {
 
         let parsed_transaction = parse_response.parsed_transaction.unwrap().payload.unwrap();
         assert_eq!(
-            parsed_transaction.signable_payload,
+            parsed_transaction.parsed_payload,
             "{\"Fields\":[{\"FallbackText\":\"Unspecified Chain\",\"Label\":\"Network\",\"TextV2\":{\"Text\":\"Unspecified Chain\"},\"Type\":\"text_v2\"},{\"FallbackText\":\"Raw Data\",\"Label\":\"Raw Data\",\"TextV2\":{\"Text\":\"unsignedpayload\"},\"Type\":\"text_v2\"}],\"PayloadType\":\"fill in parsed signable payload\",\"Title\":\"Unspecified Transaction\",\"Version\":\"0\"}"
+        );
+        assert_eq!(
+            parsed_transaction.input_payload_digest,
+            qos_hex::encode(&sha_256(b"unsignedpayload")),
+        );
+        assert_eq!(
+            parsed_transaction.metadata_digest,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
         );
     }
 
@@ -340,10 +349,10 @@ async fn parser_solana_native_transfer_e2e() {
 
         // Verify the transaction contains Solana-specific fields
         let signable_payload: serde_json::Value =
-            serde_json::from_str(&parsed_transaction.signable_payload).unwrap();
+            serde_json::from_str(&parsed_transaction.parsed_payload).unwrap();
 
         // Validate charset safety - no unicode escapes or non-ASCII characters
-        let json_str = &parsed_transaction.signable_payload;
+        let json_str = &parsed_transaction.parsed_payload;
         validate_safe_charset(json_str);
 
         tracing::debug!("📄 Emitted JSON for visual inspection:");
@@ -441,7 +450,7 @@ async fn parser_ethereum_native_transfer_e2e() {
 
         // Verify the transaction contains Ethereum-specific fields
         let signable_payload: serde_json::Value =
-            serde_json::from_str(&parsed_transaction.signable_payload).unwrap();
+            serde_json::from_str(&parsed_transaction.parsed_payload).unwrap();
         assert_eq!(&signable_payload, &expected_sp);
         // Validate that the parsed transaction contains all expected fields
         validate_required_fields_present(&signable_payload, &expected_sp);
@@ -496,7 +505,7 @@ async fn parser_charset_validation_all_chains() {
                 .payload
                 .unwrap_or_else(|| panic!("{description} should have payload"));
 
-            let json_str = &parsed_transaction.signable_payload;
+            let json_str = &parsed_transaction.parsed_payload;
 
             // Validate charset safety - this will catch ANY non-ASCII characters
             validate_safe_charset(json_str);
@@ -706,7 +715,7 @@ async fn parser_sui_native_transfer_e2e() {
         });
 
         let signable_payload: serde_json::Value =
-            serde_json::from_str(&parsed_transaction.signable_payload).unwrap();
+            serde_json::from_str(&parsed_transaction.parsed_payload).unwrap();
 
         validate_required_fields_present(&signable_payload, &expected_sp);
     }

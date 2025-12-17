@@ -50,11 +50,23 @@ pub fn parse(
         .map_err(|e| GrpcError::new(Code::InvalidArgument, &format!("{e}")))?;
 
     // Convert SignablePayload to String (assuming you want JSON)
-    let signable_payload = serde_json::to_string(&signable_payload_str).map_err(|e| {
+    let parsed_payload_str = serde_json::to_string(&signable_payload_str).map_err(|e| {
         GrpcError::new(Code::Internal, &format!("Failed to serialize payload: {e}"))
     })?;
 
-    let payload = ParsedTransactionPayload { signable_payload };
+    // Metadata can be empty; if so, we use an empty vec for hashing to avoid having to deal with
+    // optional types in ParsedTransactionPayload.
+    let metadata_bytes = if let Some(metadata) = parse_request.chain_metadata {
+        borsh::to_vec(&metadata).expect("chain_metadata implements borsh::Serialize")
+    } else {
+        vec![]
+    };
+
+    let payload = ParsedTransactionPayload {
+        parsed_payload: parsed_payload_str,
+        input_payload_digest: qos_hex::encode(&sha_256(request_payload.as_bytes())),
+        metadata_digest: qos_hex::encode(&sha_256(&metadata_bytes)),
+    };
 
     let digest = sha_256(&borsh::to_vec(&payload).expect("payload implements borsh::Serialize"));
     let sig = ephemeral_key
