@@ -109,6 +109,11 @@ async fn parser_e2e() {
             parsed_transaction.parsed_payload,
             "{\"Fields\":[{\"FallbackText\":\"Unspecified Chain\",\"Label\":\"Network\",\"TextV2\":{\"Text\":\"Unspecified Chain\"},\"Type\":\"text_v2\"},{\"FallbackText\":\"Raw Data\",\"Label\":\"Raw Data\",\"TextV2\":{\"Text\":\"unsignedpayload\"},\"Type\":\"text_v2\"}],\"PayloadType\":\"fill in parsed signable payload\",\"Title\":\"Unspecified Transaction\",\"Version\":\"0\"}"
         );
+        // TODO: remove me once clients have migrated and `signable_payload` is no longer relevant.
+        assert_eq!(
+            parsed_transaction.parsed_payload,
+            parsed_transaction.signable_payload
+        );
         assert_eq!(
             parsed_transaction.input_payload_digest,
             qos_hex::encode(&sha_256(b"unsignedpayload")),

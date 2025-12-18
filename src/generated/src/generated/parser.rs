@@ -168,6 +168,9 @@ pub struct ParsedTransactionPayload {
     /// (e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855)
     #[prost(string, tag = "3")]
     pub metadata_digest: ::prost::alloc::string::String,
+    /// Legacy field. Will be removed, please do not use!
+    #[prost(string, tag = "4")]
+    pub signable_payload: ::prost::alloc::string::String,
 }
 #[cfg_attr(
     feature = "serde_derive",
