@@ -121,3 +121,86 @@ fn format_ata_instruction(instruction: &AssociatedTokenAccountInstruction) -> St
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_ata_instruction_empty_data() {
+        // Test the case where instruction data is empty (original SPL ATA Create format)
+        // This is from a real transaction where the ATA instruction had no data bytes
+        let empty_data: &[u8] = &[];
+        let instruction = parse_ata_instruction(empty_data)
+            .expect("Failed to parse ATA instruction with empty data");
+
+        assert!(
+            matches!(instruction, AssociatedTokenAccountInstruction::Create),
+            "Expected Create instruction for empty data"
+        );
+
+        let formatted = format_ata_instruction(&instruction);
+        assert_eq!(formatted, "Create Associated Token Account");
+    }
+
+    #[test]
+    fn test_parse_ata_instruction_with_discriminator_0() {
+        // Test explicit discriminator byte 0 (also means Create)
+        let data = [0u8];
+        let instruction = parse_ata_instruction(&data)
+            .expect("Failed to parse ATA instruction with discriminator 0");
+
+        assert!(
+            matches!(instruction, AssociatedTokenAccountInstruction::Create),
+            "Expected Create instruction for discriminator 0"
+        );
+    }
+
+    #[test]
+    fn test_parse_ata_instruction_create_idempotent() {
+        // Test CreateIdempotent (discriminator 1)
+        let data = [1u8];
+        let instruction =
+            parse_ata_instruction(&data).expect("Failed to parse CreateIdempotent instruction");
+
+        assert!(
+            matches!(
+                instruction,
+                AssociatedTokenAccountInstruction::CreateIdempotent
+            ),
+            "Expected CreateIdempotent instruction for discriminator 1"
+        );
+
+        let formatted = format_ata_instruction(&instruction);
+        assert_eq!(formatted, "Create Associated Token Account (Idempotent)");
+    }
+
+    #[test]
+    fn test_parse_ata_instruction_recover_nested() {
+        // Test RecoverNested (discriminator 2)
+        let data = [2u8];
+        let instruction =
+            parse_ata_instruction(&data).expect("Failed to parse RecoverNested instruction");
+
+        assert!(
+            matches!(
+                instruction,
+                AssociatedTokenAccountInstruction::RecoverNested
+            ),
+            "Expected RecoverNested instruction for discriminator 2"
+        );
+
+        let formatted = format_ata_instruction(&instruction);
+        assert_eq!(formatted, "Recover Nested Associated Token Account");
+    }
+
+    #[test]
+    fn test_parse_ata_instruction_unknown() {
+        // Test unknown discriminator
+        let data = [99u8];
+        let result = parse_ata_instruction(&data);
+
+        assert!(result.is_err(), "Expected error for unknown discriminator");
+        assert_eq!(result.unwrap_err(), "Unknown ATA instruction");
+    }
+}
