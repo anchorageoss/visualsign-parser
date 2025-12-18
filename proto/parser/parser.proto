@@ -83,6 +83,8 @@ message ParsedTransactionPayload {
   // If there is no metadata, this field is the empty SHA-256 digest
   // (e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855)
   string metadata_digest = 3;
+  // Legacy field. Will be removed, please do not use!
+  string signable_payload = 4;
 }
 
 message ParsedTransaction {

@@ -63,9 +63,11 @@ pub fn parse(
     };
 
     let payload = ParsedTransactionPayload {
-        parsed_payload: parsed_payload_str,
+        parsed_payload: parsed_payload_str.clone(),
         input_payload_digest: qos_hex::encode(&sha_256(request_payload.as_bytes())),
         metadata_digest: qos_hex::encode(&sha_256(&metadata_bytes)),
+        // TODO: remove me once clients have migrated and rely on the fields above
+        signable_payload: parsed_payload_str,
     };
 
     let digest = sha_256(&borsh::to_vec(&payload).expect("payload implements borsh::Serialize"));
