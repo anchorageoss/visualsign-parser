@@ -1,0 +1,25 @@
+{
+  "description": "PLACEHOLDER - Replace with real Jupiter Route transaction data",
+  "source": "https://solscan.io/tx/<SIGNATURE>",
+  "signature": "<TRANSACTION_SIGNATURE>",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "This is an example fixture structure. To create a real fixture, follow the process in README.md",
+  "instruction_index": 0,
+  "instruction_data": "<base58_encoded_instruction_data_from_rpc>",
+  "program_id": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+  "accounts": [
+    {
+      "pubkey": "<ACCOUNT_PUBKEY>",
+      "signer": false,
+      "writable": true,
+      "description": "Example account - replace with real accounts from transaction"
+    }
+  ],
+  "expected_fields": {
+    "instruction": "Route",
+    "in_amount": "1000000",
+    "out_amount": "999000",
+    "slippage_bps": "50"
+  },
+  "_note": "This is a placeholder. To create a real fixture: 1) Find a Jupiter swap on Solscan, 2) Use getTransaction RPC with encoding:json, 3) Extract the instruction data (base58), 4) Get expected fields from the parsed transaction view"
+}
