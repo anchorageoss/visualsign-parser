@@ -47,7 +47,7 @@ flowchart TD
 ### CLI
 
 ```sh
-cargo run --bin parser_cli -- --chain ethereum -t '0xf86c...'
+cargo run --manifest-path src/Cargo.toml --bin parser_cli -- --chain ethereum -t '0xf86c...'
 ```
 
 Output:
