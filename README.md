@@ -47,7 +47,7 @@ flowchart TD
 ### CLI
 
 ```sh
-cd src && cargo run --bin parser_cli -- --chain ethereum -t '0xf86c...'
+cd src && cargo run --bin parser_cli -- --chain ethereum -t '0xf86a80847735940082520894582e394c83f23aa795f098f976e44a24ab813e81871f56d1046658008026a0afba1e61a7ac07e7503521bf52ef61f99424791127c8772f4ed5077f59fc2e1da008e3a3179ad436ffb079885ab5423044512b2fc373448b02e57b13c0fd42973a'
 ```
 
 Output:
