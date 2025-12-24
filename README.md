@@ -47,7 +47,7 @@ flowchart TD
 ### CLI
 
 ```sh
-parser_cli --chain <chain> -t <transaction_hex> --output <format>
+cargo run --manifest-path src/Cargo.toml --bin parser_cli -- --chain <chain> -t <transaction_hex> --output <format>
 ```
 
 #### Example
