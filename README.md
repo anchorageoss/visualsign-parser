@@ -47,19 +47,74 @@ flowchart TD
 ### CLI
 
 ```sh
-cargo run --bin parser_cli -- --chain ethereum -t '0xf86c...'
+cargo run --manifest-path src/Cargo.toml --bin parser_cli -- --chain <chain> -t <transaction_hex> --output <format>
+```
+
+#### Example
+
+```sh
+cargo run --manifest-path src/Cargo.toml --bin parser_cli -- --chain ethereum -t '0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83' --output json
 ```
 
 Output:
 ```json
 {
-  "Version": "0",
-  "Title": "Ethereum Transaction",
-  "PayloadType": "EthereumTx",
   "Fields": [
-    {"Label": "To", "FallbackText": "0x3535...", "Type": "address_v2", "AddressV2": {"Address": "0x3535..."}},
-    {"Label": "Value", "FallbackText": "1 ETH", "Type": "amount_v2", "AmountV2": {"Amount": "1", "Abbreviation": "ETH"}}
-  ]
+    {
+      "FallbackText": "Unknown Network (Chain ID: 37)",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Unknown Network (Chain ID: 37)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x3535353535353535353535353535353535353535",
+        "Name": "To",
+        "AssetLabel": "Test Asset"
+      },
+      "FallbackText": "0x3535353535353535353535353535353535353535",
+      "Label": "To",
+      "Type": "address_v2"
+    },
+    {
+      "AmountV2": {
+        "Abbreviation": "ETH",
+        "Amount": "1"
+      },
+      "FallbackText": "1 ETH",
+      "Label": "Value",
+      "Type": "amount_v2"
+    },
+    {
+      "FallbackText": "21000",
+      "Label": "Gas Limit",
+      "TextV2": {
+        "Text": "21000"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "20 gwei",
+      "Label": "Gas Price",
+      "TextV2": {
+        "Text": "20 gwei"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "0"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "EthereumTx",
+  "Title": "Ethereum Transaction",
+  "Version": "0"
 }
 ```
 
