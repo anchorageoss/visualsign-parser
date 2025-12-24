@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VisualSign WASM Test</title>
+  <style>
+    body {
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+    }
+    h1 {
+      color: #4ec9b0;
+      border-bottom: 2px solid #4ec9b0;
+      padding-bottom: 10px;
+    }
+    .test-section {
+      background: #252526;
+      border: 1px solid #3e3e42;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .test-header {
+      font-size: 18px;
+      color: #dcdcaa;
+      margin-bottom: 10px;
+    }
+    .success {
+      color: #4ec9b0;
+    }
+    .error {
+      color: #f48771;
+    }
+    pre {
+      background: #1e1e1e;
+      border: 1px solid #3e3e42;
+      border-radius: 4px;
+      padding: 15px;
+      overflow-x: auto;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    button {
+      background: #0e639c;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 10px 5px;
+    }
+    button:hover {
+      background: #1177bb;
+    }
+    button:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+    .input-section {
+      margin: 20px 0;
+    }
+    textarea {
+      width: 100%;
+      min-height: 100px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      border: 1px solid #3e3e42;
+      border-radius: 4px;
+      padding: 10px;
+      font-family: inherit;
+      font-size: 12px;
+    }
+    #output {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .loading {
+      color: #dcdcaa;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+  </style>
+</head>
+<body>
+  <h1>🔧 VisualSign WASM Test Suite</h1>
+
+  <div class="test-section">
+    <div class="test-header">Status</div>
+    <div id="status" class="loading">Initializing WASM module...</div>
+  </div>
+
+  <div class="test-section">
+    <div class="test-header">Quick Tests</div>
+    <button id="testEthTransfer">Test ETH Transfer</button>
+    <button id="testERC20">Test ERC-20 Transfer</button>
+    <button id="testAutoDetect">Test Auto-Detect</button>
+    <button id="testError">Test Error Handling</button>
+    <button id="runAll">Run All Tests</button>
+  </div>
+
+  <div class="test-section">
+    <div class="test-header">Custom Transaction Test</div>
+    <div class="input-section">
+      <label for="customTx">Enter hex-encoded transaction:</label>
+      <textarea id="customTx" placeholder="0xf86c..."></textarea>
+      <button id="parseCustom">Parse Transaction</button>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <div class="test-header">Output</div>
+    <pre id="output">Ready to test...</pre>
+  </div>
+
+  <script type="module">
+    import init, { parse_ethereum_transaction, parse_transaction } from './pkg/visualsign_wasm.js';
+
+    const output = document.getElementById('output');
+    const status = document.getElementById('status');
+
+    function log(message, isError = false) {
+      const timestamp = new Date().toLocaleTimeString();
+      const prefix = isError ? '❌' : '✅';
+      output.textContent += `[${timestamp}] ${prefix} ${message}\n`;
+      output.scrollTop = output.scrollHeight;
+    }
+
+    function logSection(title) {
+      output.textContent += `\n${'='.repeat(60)}\n${title}\n${'='.repeat(60)}\n`;
+    }
+
+    // Test data
+    const testTxs = {
+      ethTransfer: '0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83',
+      erc20Transfer: '0xf8a9808504a817c80082520894dac17f958d2ee523a2206206994597c13d831ec780b844a9059cbb0000000000000000000000001234567890123456789012345678901234567890000000000000000000000000000000000000000000000000000000003b9aca0025a0abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890a01234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+    };
+
+    // Initialize WASM
+    async function initWasm() {
+      try {
+        await init();
+        status.textContent = '✅ WASM module initialized successfully!';
+        status.className = 'success';
+        log('WASM module initialized');
+        enableButtons();
+      } catch (error) {
+        status.textContent = '❌ Failed to initialize WASM: ' + error;
+        status.className = 'error';
+        log('Initialization failed: ' + error, true);
+      }
+    }
+
+    function enableButtons() {
+      document.querySelectorAll('button').forEach(btn => btn.disabled = false);
+    }
+
+    // Test functions
+    function testEthTransfer() {
+      logSection('Test: ETH Transfer');
+      try {
+        const result = parse_ethereum_transaction(testTxs.ethTransfer);
+        const parsed = JSON.parse(result);
+        log(`Parsed ${parsed.PayloadType} - ${parsed.Title}`);
+        log(`Fields: ${parsed.Fields.length}`);
+        output.textContent += '\n' + JSON.stringify(parsed, null, 2) + '\n';
+      } catch (error) {
+        log('ETH transfer test failed: ' + error, true);
+      }
+    }
+
+    function testERC20() {
+      logSection('Test: ERC-20 Transfer');
+      try {
+        const result = parse_ethereum_transaction(testTxs.erc20Transfer);
+        const parsed = JSON.parse(result);
+        log(`Parsed ${parsed.PayloadType} - ${parsed.Title}`);
+        log(`Fields: ${parsed.Fields.length}`);
+        output.textContent += '\n' + JSON.stringify(parsed, null, 2) + '\n';
+      } catch (error) {
+        log('ERC-20 test failed: ' + error, true);
+      }
+    }
+
+    function testAutoDetect() {
+      logSection('Test: Auto-Detect');
+      try {
+        const result = parse_transaction(testTxs.ethTransfer);
+        const parsed = JSON.parse(result);
+        log(`Auto-detected as: ${parsed.PayloadType}`);
+      } catch (error) {
+        log('Auto-detect test failed: ' + error, true);
+      }
+    }
+
+    function testErrorHandling() {
+      logSection('Test: Error Handling');
+      try {
+        parse_ethereum_transaction('0xinvalid');
+        log('Error test FAILED - should have thrown!', true);
+      } catch (error) {
+        log('Error correctly caught: ' + error);
+      }
+    }
+
+    function runAllTests() {
+      output.textContent = 'Running all tests...\n';
+      testEthTransfer();
+      testERC20();
+      testAutoDetect();
+      testErrorHandling();
+      log('\n🎉 All tests completed!');
+    }
+
+    function parseCustom() {
+      const customTx = document.getElementById('customTx').value.trim();
+      if (!customTx) {
+        log('Please enter a transaction', true);
+        return;
+      }
+
+      logSection('Test: Custom Transaction');
+      try {
+        const result = parse_ethereum_transaction(customTx);
+        const parsed = JSON.parse(result);
+        log(`Parsed ${parsed.PayloadType} - ${parsed.Title}`);
+        output.textContent += '\n' + JSON.stringify(parsed, null, 2) + '\n';
+      } catch (error) {
+        log('Custom transaction parse failed: ' + error, true);
+      }
+    }
+
+    // Event listeners
+    document.getElementById('testEthTransfer').addEventListener('click', testEthTransfer);
+    document.getElementById('testERC20').addEventListener('click', testERC20);
+    document.getElementById('testAutoDetect').addEventListener('click', testAutoDetect);
+    document.getElementById('testError').addEventListener('click', testErrorHandling);
+    document.getElementById('runAll').addEventListener('click', runAllTests);
+    document.getElementById('parseCustom').addEventListener('click', parseCustom);
+
+    // Disable buttons until WASM loads
+    document.querySelectorAll('button').forEach(btn => btn.disabled = true);
+
+    // Initialize
+    initWasm();
+  </script>
+</body>
+</html>

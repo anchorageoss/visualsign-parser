@@ -1,0 +1,10 @@
+# Build outputs
+pkg/
+pkg-*/
+target/
+
+# Test artifacts
+node_modules/
+
+# Cargo config (may contain local settings)
+.cargo/config.toml

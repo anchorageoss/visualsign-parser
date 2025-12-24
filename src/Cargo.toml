@@ -10,6 +10,7 @@ members = [
   "parser/cli",
   "parser/host",
   "visualsign",
+  "wasm",
   "chain_parsers/visualsign-ethereum",
   "chain_parsers/visualsign-solana",
   "chain_parsers/visualsign-sui",

@@ -1,0 +1,38 @@
+[package]
+name = "visualsign-wasm"
+version = "0.1.0"
+edition = "2024"
+description = "WebAssembly bindings for VisualSign transaction parser"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = "0.1"
+# Both getrandom versions for WASM support
+getrandom = { version = "0.2", features = ["js"] }
+getrandom-v3 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+
+# VisualSign dependencies
+visualsign = { workspace = true }
+visualsign-ethereum = { path = "../chain_parsers/visualsign-ethereum" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Exclude these chains for WASM (dependency/build issues)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+visualsign-solana = { path = "../chain_parsers/visualsign-solana" }
+visualsign-sui = { path = "../chain_parsers/visualsign-sui" }
+visualsign-tron = { path = "../chain_parsers/visualsign-tron" }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[profile.release]
+opt-level = "s"  # Optimize for size
+lto = true       # Enable link-time optimization
