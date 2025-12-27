@@ -38,7 +38,6 @@ pub fn parse_ethereum_transaction(tx_data: &str) -> Result<String, JsValue> {
         .map_err(|e| JsValue::from_str(&format!("Failed to serialize JSON: {}", e)))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Parse a Solana transaction to VisualSign JSON
 ///
 /// # Arguments
@@ -102,7 +101,6 @@ pub fn parse_sui_transaction(tx_data: &str) -> Result<String, JsValue> {
         .map_err(|e| JsValue::from_str(&format!("Failed to serialize JSON: {}", e)))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Parse a Tron transaction to VisualSign JSON
 ///
 /// # Arguments
@@ -150,17 +148,17 @@ pub fn parse_transaction(tx_data: &str) -> Result<String, JsValue> {
         return Ok(result);
     }
 
+    if let Ok(result) = parse_solana_transaction(tx_data) {
+        return Ok(result);
+    }
+
+    if let Ok(result) = parse_tron_transaction(tx_data) {
+        return Ok(result);
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     {
-        if let Ok(result) = parse_solana_transaction(tx_data) {
-            return Ok(result);
-        }
-
         if let Ok(result) = parse_sui_transaction(tx_data) {
-            return Ok(result);
-        }
-
-        if let Ok(result) = parse_tron_transaction(tx_data) {
             return Ok(result);
         }
     }

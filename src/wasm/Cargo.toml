@@ -20,15 +20,19 @@ getrandom-v3 = { package = "getrandom", version = "0.3", features = ["wasm_js"] 
 # VisualSign dependencies
 visualsign = { workspace = true }
 visualsign-ethereum = { path = "../chain_parsers/visualsign-ethereum" }
+visualsign-solana = { path = "../chain_parsers/visualsign-solana" }
+visualsign-tron = { path = "../chain_parsers/visualsign-tron" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
 
 # Exclude these chains for WASM (dependency/build issues)
+#
+# Sui: Depends on tokio/hyper/tonic/reqwest with networking features that require
+#      OS-level primitives (TCP sockets, mio) which don't exist in WASM sandbox.
+#      Would need WASM-compatible Sui SDK or minimal transaction parser.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-visualsign-solana = { path = "../chain_parsers/visualsign-solana" }
 visualsign-sui = { path = "../chain_parsers/visualsign-sui" }
-visualsign-tron = { path = "../chain_parsers/visualsign-tron" }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
