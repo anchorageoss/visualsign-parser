@@ -1,0 +1,58 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Unknown Network (Chain ID: 37)",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Unknown Network (Chain ID: 37)"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x3535353535353535353535353535353535353535",
+        "Name": "To",
+        "AssetLabel": "Test Asset"
+      },
+      "FallbackText": "0x3535353535353535353535353535353535353535",
+      "Label": "To",
+      "Type": "address_v2"
+    },
+    {
+      "AmountV2": {
+        "Abbreviation": "ETH",
+        "Amount": "1"
+      },
+      "FallbackText": "1 ETH",
+      "Label": "Value",
+      "Type": "amount_v2"
+    },
+    {
+      "FallbackText": "21000",
+      "Label": "Gas Limit",
+      "TextV2": {
+        "Text": "21000"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "20 gwei",
+      "Label": "Gas Price",
+      "TextV2": {
+        "Text": "20 gwei"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "0"
+      },
+      "Type": "text_v2"
+    }
+  ],
+  "PayloadType": "EthereumTx",
+  "Title": "Ethereum Transaction",
+  "Version": "0"
+}

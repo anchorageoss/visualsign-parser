@@ -2,7 +2,7 @@ use crate::chains;
 use chains::parse_chain;
 use clap::Parser;
 use generated::parser::{
-    ChainMetadata, EthereumMetadata, SolanaMetadata, chain_metadata::Metadata,
+    Abi, ChainMetadata, EthereumMetadata, SolanaMetadata, chain_metadata::Metadata,
 };
 use parser_app::registry::create_registry;
 use visualsign::registry::Chain;
@@ -42,6 +42,14 @@ struct Args {
         help = "Network identifier - chain ID (e.g., 1, 137) or name (e.g., ETHEREUM_MAINNET, POLYGON_MAINNET)"
     )]
     network: Option<String>,
+
+    #[arg(
+        long,
+        short = 'a',
+        value_name = "ABI_JSON",
+        help = "ABI JSON string for Ethereum contract decoding"
+    )]
+    abi: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -257,34 +265,54 @@ fn parse_and_display(
     }
 }
 
-/// Creates chain-specific metadata from the `network` argument
+/// Creates chain-specific metadata from the `network` and `abi` arguments
 ///
 /// The network can be specified as either:
 /// - A chain ID number (e.g., 1, 137, 42161)
 /// - A canonical network name (e.g., `ETHEREUM_MAINNET`, `POLYGON_MAINNET`)
 ///
-/// Returns `None` if no network is specified.
+/// The ABI can be specified as a JSON string for Ethereum contract decoding.
+///
+/// Returns `None` if no network or ABI is specified.
 /// Prints an error and exits if the network identifier is invalid.
-fn create_chain_metadata(chain: &Chain, network: Option<String>) -> Option<ChainMetadata> {
-    let network = network?;
+fn create_chain_metadata(
+    chain: &Chain,
+    network: Option<String>,
+    abi: Option<String>,
+) -> Option<ChainMetadata> {
+    // Return None if neither network nor abi is provided
+    if network.is_none() && abi.is_none() {
+        return None;
+    }
 
-    // Parse and validate the network identifier
-    let Some(network_id) = parse_network(&network) else {
-        eprintln!(
-            "Error: Invalid network '{network}'. Use a chain ID (e.g., 1, 137) or name (e.g., ETHEREUM_MAINNET, POLYGON_MAINNET)"
-        );
-        std::process::exit(1);
+    // Parse and validate the network identifier if provided
+    let network_id = if let Some(network) = network {
+        let Some(network_id) = parse_network(&network) else {
+            eprintln!(
+                "Error: Invalid network '{network}'. Use a chain ID (e.g., 1, 137) or name (e.g., ETHEREUM_MAINNET, POLYGON_MAINNET)"
+            );
+            std::process::exit(1);
+        };
+        Some(network_id)
+    } else {
+        None
     };
+
+    // Create ABI struct if provided
+    let abi_struct = abi.map(|abi_json| Abi {
+        value: abi_json,
+        signature: None,
+    });
 
     let metadata = match chain {
         Chain::Solana => Metadata::Solana(SolanaMetadata {
-            network_id: Some(network_id),
+            network_id,
             idl: None,
         }),
         // For Ethereum and other chains, use EthereumMetadata structure
         _ => Metadata::Ethereum(EthereumMetadata {
-            network_id: Some(network_id),
-            abi: None,
+            network_id,
+            abi: abi_struct,
         }),
     };
 
@@ -305,7 +333,7 @@ impl Cli {
         let args = Args::parse();
 
         let chain = parse_chain(&args.chain);
-        let metadata = create_chain_metadata(&chain, args.network);
+        let metadata = create_chain_metadata(&chain, args.network, args.abi);
 
         let options = VisualSignOptions {
             decode_transfers: true,
