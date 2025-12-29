@@ -49,7 +49,7 @@ struct Args {
     #[arg(
         long,
         long = "abi-json-mappings",
-        value_name = "ABI_NAME:0xADDRESS",
+        value_name = "ABI_NAME:FILE_PATH:0xADDRESS",
         help = "Map custom ABI JSON file to contract address. Format: AbiName:/path/to/abi.json:0xAddress. Can be used multiple times"
     )]
     abi_json_mappings: Vec<String>,
