@@ -36,7 +36,7 @@ curl -s "https://api.etherscan.io/api" \
 curl -s "https://api.etherscan.io/api" \
   -d "module=contract" \
   -d "action=getabi" \
-  -d "address=0xc02aaa39b223fe8d0a0e8d0c9f8d0b21d0a0e8d0c" \
+  -d "address=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" \
   -d "apikey=$ETHERSCAN_API_KEY" | jq '.result' > weth.abi.json
 ```
 
@@ -55,18 +55,7 @@ cast abi-decode "transfer(address,uint256)" \
   "0xa9059cbb0000000000000000000000001234567890123456789012345678901234567890000000000000000000000000000000000000000000000000000000000f4240"
 ```
 
-### Method 3: Online ABI repositories
-
-- **Etherscan UI**: Visit `etherscan.io` → Search address → Contract tab → Copy ABI
-- **4byte.directory**: https://www.4byte.directory/ (for function signatures)
-- **OpenZeppelin**: Pre-made standard ABIs (ERC20, ERC721, etc.)
-
-Example (ERC20 standard):
-```bash
-# Save a standard ERC20 ABI
-curl -s https://raw.githubusercontent.com/OpenZeppelin/openzeppelin-contracts/master/build/contracts/ERC20.json \
-  | jq '.abi' > erc20_standard.abi.json
-```
+**Note**: Depending on your version of `cast`, you may need to use `cast calldata-decode` instead of `cast abi-decode`. Also, `cast abi-decode` expects just the parameter data without the function selector. Use `cast calldata-decode` for full calldata including the selector.
 
 ## Testing Locally
 
@@ -235,17 +224,17 @@ cargo test -p visualsign-ethereum --lib embedded_abis::tests
 ### USDC Token (0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48)
 ```bash
 # Minimal functions: transfer, transferFrom, approve, balanceOf, allowance
-cast abi 0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48 | jq '.[] | select(.name | IN("transfer", "transferFrom", "approve"))'
+cast interface 0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48 --json --etherscan-api-key $ETHERSCAN_API_KEY | jq '.[] | select(.name | IN("transfer", "transferFrom", "approve"))'
 ```
 
-### WETH (0xc02aaa39b223fe8d0a0e8d0c9f8d0b21d0a0e8d0c)
+### WETH (0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2)
 ```bash
-cast abi 0xc02aaa39b223fe8d0a0e8d0c9f8d0b21d0a0e8d0c | jq '.[] | select(.name | IN("deposit", "withdraw"))'
+cast interface 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 --json --etherscan-api-key $ETHERSCAN_API_KEY | jq '.[] | select(.name | IN("deposit", "withdraw"))'
 ```
 
 ### Uniswap V3 SwapRouter (0xe592427a0aece92de3edee1f18e0157c05861564)
 ```bash
-cast abi 0xe592427a0aece92de3edee1f18e0157c05861564 | jq '.[] | select(.name | IN("exactInputSingle", "exactOutputSingle"))'
+cast interface 0xe592427a0aece92de3edee1f18e0157c05861564 --json --etherscan-api-key $ETHERSCAN_API_KEY | jq '.[] | select(.name | IN("exactInputSingle", "exactOutputSingle"))'
 ```
 
 ## Validating ABI JSON

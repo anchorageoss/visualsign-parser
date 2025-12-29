@@ -22,6 +22,8 @@ To enable visualization for your custom contract:
    solc --abi SimpleToken.sol > SimpleToken.abi.json
    ```
 
+   **Note**: The `SimpleToken.abi.json` file in this example is generated using the command above. See TESTING.md for details on generating ABI JSON files from Solidity contracts.
+
 2. **Embed in your application** using `include_str!` macro:
    ```rust
    const MY_CONTRACT_ABI: &str = include_str!("path/to/SimpleToken.abi.json");
@@ -37,31 +39,19 @@ To enable visualization for your custom contract:
    registry.map_address(1, contract_address, "SimpleToken");
    ```
 
-4. **Use in CLI** (pass address mappings):
+   **Note**: The `contract_address` must include the `0x` prefix when parsing to `alloy_primitives::Address`.
+
+4. **Use with parser CLI** (pass ABI JSON file paths and address mappings):
    ```bash
-   cargo run --release -- \
+   cargo run -p parser_cli -- \
      --chain ethereum \
      --transaction 0x... \
-     --abi-json-mappings SimpleToken:0x1234567890123456789012345678901234567890
+     --abi-json-mappings SimpleToken:SimpleToken.json:0x1234567890123456789012345678901234567890
    ```
 
 5. **Or via Rust code** in your application
 
 ### Using the Example
-
-#### Via CLI
-
-```bash
-# List available ABIs and see help
-cargo run --example using_abijson -- --help
-
-# Test with a mock address mapping (validates format)
-# Note: You need to build a custom binary with embedded ABIs for actual usage
-cargo run --example using_abijson -- \
-  --chain ethereum \
-  --transaction 0x... \
-  --abi-json-mappings SimpleToken:0x<contract_address>
-```
 
 #### Via Rust Code
 
@@ -122,7 +112,7 @@ The parser CLI now supports the `--abi-json-mappings` flag for mapping custom AB
 ### Format
 
 ```
---abi-json-mappings AbiName:0xAddress
+--abi-json-mappings AbiName:FilePath:0xAddress
 ```
 
 ### Multiple Mappings
@@ -130,11 +120,11 @@ The parser CLI now supports the `--abi-json-mappings` flag for mapping custom AB
 You can provide multiple `--abi-json-mappings` flags to register different ABIs:
 
 ```bash
-cargo run --release -- \
+cargo run -p parser_cli -- \
   --chain ethereum \
   --transaction 0x... \
-  --abi-json-mappings Token:0x1111111111111111111111111111111111111111 \
-  --abi-json-mappings Router:0x2222222222222222222222222222222222222222
+  --abi-json-mappings Token:token.json:0x1111111111111111111111111111111111111111 \
+  --abi-json-mappings Router:router.json:0x2222222222222222222222222222222222222222
 ```
 
 ### Validation
@@ -152,7 +142,7 @@ The CLI validates each ABI mapping and reports:
 - ✅ Structured PreviewLayout visualization
 - ✅ Multiple ABIs per binary
 - ✅ CLI `--abi-json-mappings` flag for address mapping
-- ✅ Optional ABI signatures (secp256k1) for validation (planned)
+- 📋 Optional ABI signatures (secp256k1) for validation (planned)
 
 ## Limitations
 
