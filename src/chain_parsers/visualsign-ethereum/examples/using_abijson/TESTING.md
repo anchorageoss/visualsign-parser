@@ -121,7 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Test: Decode USDC transfer
-    println!("Testing USDC transfer decoding...");
+    println!("Testing USDT transfer decoding...");
     if let Some(abi) = registry.get_abi_for_address(1, usdc_addr) {
         let visualizer = DynamicAbiVisualizer::new(abi);
 
