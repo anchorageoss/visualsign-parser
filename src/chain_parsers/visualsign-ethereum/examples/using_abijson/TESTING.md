@@ -177,7 +177,7 @@ cast sig "transfer(address,uint256)"
 # Output: 0xa9059cbb
 
 # Generate full calldata using cast calldata
-CALLDATA=$(cast calldata "transfer(address,uint256)" \
+cast calldata "transfer(address,uint256)" 0x1234567890123456789012345678901234567890 1000000
   0x1234567890123456789012345678901234567890 \
   1000000)
 
