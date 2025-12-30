@@ -6,7 +6,7 @@ use generated::parser::{
 };
 use parser_app::registry::create_registry;
 use visualsign::registry::Chain;
-use visualsign::vsptrait::VisualSignOptions;
+use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
 use visualsign_ethereum::networks::parse_network;
 
@@ -311,6 +311,9 @@ impl Cli {
             decode_transfers: true,
             transaction_name: None,
             metadata,
+            developer_config: Some(DeveloperConfig {
+                allow_signed_transactions: true,
+            }),
         };
 
         parse_and_display(

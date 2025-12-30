@@ -2236,6 +2236,7 @@ mod tests {
                     decode_transfers: true,
                     transaction_name: Some(description.to_string()),
                     metadata: None,
+                    developer_config: None,
                 },
             )
             .expect("visualization should succeed")

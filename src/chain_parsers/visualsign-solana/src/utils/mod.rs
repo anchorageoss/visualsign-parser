@@ -143,6 +143,7 @@ pub mod test_utils {
                 metadata: None,
                 decode_transfers: true,
                 transaction_name: None,
+                developer_config: None,
             },
         )
         .expect("Failed to visualize tx commands")

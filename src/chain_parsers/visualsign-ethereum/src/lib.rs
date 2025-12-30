@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::fmt::{format_ether, format_gwei};
 use crate::registry::ContractType;
-use alloy_consensus::{Transaction as _, TxType, TypedTransaction};
+use alloy_consensus::{Transaction as _, TxEnvelope, TxType, TypedTransaction};
 use alloy_rlp::{Buf, Decodable};
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use visualsign::{
@@ -11,8 +11,8 @@ use visualsign::{
     encodings::SupportedEncodings,
     registry::LayeredRegistry,
     vsptrait::{
-        Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
-        VisualSignError, VisualSignOptions,
+        DeveloperConfig, Transaction, TransactionParseError, VisualSignConverter,
+        VisualSignConverterFromString, VisualSignError, VisualSignOptions,
     },
 };
 
@@ -92,14 +92,8 @@ pub struct EthereumTransactionWrapper {
 
 impl Transaction for EthereumTransactionWrapper {
     fn from_string(data: &str) -> Result<Self, TransactionParseError> {
-        let format = if data.starts_with("0x") {
-            SupportedEncodings::Hex
-        } else {
-            visualsign::encodings::SupportedEncodings::detect(data)
-        };
-        let transaction = decode_transaction(data, format)
-            .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?;
-        Ok(Self { transaction })
+        // Default: don't allow signed transactions (production API behavior)
+        Self::from_string_with_options(data, None)
     }
     fn transaction_type(&self) -> String {
         "Ethereum".to_string()
@@ -112,6 +106,26 @@ impl EthereumTransactionWrapper {
     }
     pub fn inner(&self) -> &TypedTransaction {
         &self.transaction
+    }
+
+    /// Parse transaction from string with developer options.
+    /// When developer_config.allow_signed_transactions is true, signed transactions
+    /// will be accepted and the unsigned portion extracted for visualization.
+    pub fn from_string_with_options(
+        data: &str,
+        developer_config: Option<&DeveloperConfig>,
+    ) -> Result<Self, TransactionParseError> {
+        let format = if data.starts_with("0x") {
+            SupportedEncodings::Hex
+        } else {
+            visualsign::encodings::SupportedEncodings::detect(data)
+        };
+        let allow_signed = developer_config
+            .map(|c| c.allow_signed_transactions)
+            .unwrap_or(false);
+        let transaction = decode_transaction(data, format, allow_signed)
+            .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?;
+        Ok(Self { transaction })
     }
 }
 
@@ -216,8 +230,72 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
     }
 }
 
-impl VisualSignConverterFromString<EthereumTransactionWrapper> for EthereumVisualSignConverter {}
-fn decode_transaction_bytes(mut buf: &[u8]) -> Result<TypedTransaction, EthereumParserError> {
+impl VisualSignConverterFromString<EthereumTransactionWrapper> for EthereumVisualSignConverter {
+    fn to_visual_sign_payload_from_string(
+        &self,
+        transaction_data: &str,
+        options: VisualSignOptions,
+    ) -> Result<SignablePayload, VisualSignError> {
+        let wrapper = EthereumTransactionWrapper::from_string_with_options(
+            transaction_data,
+            options.developer_config.as_ref(),
+        )
+        .map_err(VisualSignError::ParseError)?;
+        self.to_visual_sign_payload(wrapper, options)
+    }
+}
+
+/// Extract unsigned transaction from a signed transaction envelope.
+/// Only for developer tools - production API should only accept unsigned transactions.
+fn extract_unsigned_from_envelope(
+    envelope: TxEnvelope,
+) -> Result<TypedTransaction, EthereumParserError> {
+    match envelope {
+        TxEnvelope::Legacy(signed) => Ok(TypedTransaction::Legacy(signed.tx().clone())),
+        TxEnvelope::Eip1559(signed) => Ok(TypedTransaction::Eip1559(signed.tx().clone())),
+        TxEnvelope::Eip2930(_) => Err(EthereumParserError::UnsupportedTransactionType(
+            "eip-2930".to_string(),
+        )),
+        TxEnvelope::Eip4844(_) => Err(EthereumParserError::UnsupportedTransactionType(
+            "eip-4844".to_string(),
+        )),
+        TxEnvelope::Eip7702(_) => Err(EthereumParserError::UnsupportedTransactionType(
+            "eip-7702".to_string(),
+        )),
+    }
+}
+
+/// Decode transaction bytes, optionally allowing signed transactions (developer mode only).
+fn decode_transaction_bytes(
+    buf: &[u8],
+    allow_signed: bool,
+) -> Result<TypedTransaction, EthereumParserError> {
+    // First try unsigned decoding
+    match decode_unsigned_transaction_bytes(buf) {
+        Ok(tx) => Ok(tx),
+        Err(unsigned_err) => {
+            // If developer mode enabled, try signed transaction decoding
+            if allow_signed {
+                match TxEnvelope::decode(&mut &buf[..]) {
+                    Ok(envelope) => {
+                        log::info!(
+                            "Detected signed transaction, extracting unsigned portion for visualization"
+                        );
+                        extract_unsigned_from_envelope(envelope)
+                    }
+                    Err(_) => Err(unsigned_err),
+                }
+            } else {
+                Err(unsigned_err)
+            }
+        }
+    }
+}
+
+/// Decode unsigned transaction bytes only (standard API path).
+fn decode_unsigned_transaction_bytes(
+    mut buf: &[u8],
+) -> Result<TypedTransaction, EthereumParserError> {
     let tx = if buf.is_empty() {
         Err(EthereumParserError::FailedToDecodeTransaction(
             "Input too short".to_string(),
@@ -272,6 +350,7 @@ fn decode_transaction_bytes(mut buf: &[u8]) -> Result<TypedTransaction, Ethereum
 fn decode_transaction(
     raw_transaction: &str,
     encodings: SupportedEncodings,
+    allow_signed: bool,
 ) -> Result<TypedTransaction, EthereumParserError> {
     let bytes = match encodings {
         SupportedEncodings::Hex => {
@@ -286,7 +365,7 @@ fn decode_transaction(
             EthereumParserError::FailedToDecodeTransaction(format!("Failed to decode base64: {e}"))
         })?,
     };
-    decode_transaction_bytes(&bytes)
+    decode_transaction_bytes(&bytes, allow_signed)
 }
 
 fn convert_to_visual_sign_payload(
@@ -621,6 +700,7 @@ mod tests {
             decode_transfers: false,
             transaction_name: Some("Custom Transaction Title".to_string()),
             metadata: None,
+            developer_config: None,
         };
         let payload = transaction_to_visual_sign(tx, options).unwrap();
 
@@ -847,6 +927,7 @@ mod tests {
                     decode_transfers: true,
                     transaction_name: Some("Test Transaction".to_string()),
                     metadata: None,
+                    developer_config: None,
                 }
             ),
             Ok(SignablePayload::new(
@@ -926,5 +1007,44 @@ mod tests {
                 "EthereumTx".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn test_signed_transaction_rejected_by_default() {
+        // Signed EIP-1559 transaction from Etherscan (has signature r, s, v at the end)
+        let signed_tx = "0x02f9043801588477359400847a1e5be18303e05c943fc91a3afd70395cd496c647d5a6cc9d4b2b7fad870b5e620f480000b903c43593564c000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000692a575a00000000000000000000000000000000000000000000000000000000000000040b080604000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000b5e620f48000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000b5e620f480000000000000000000000000000000000000000000000000000000002109cfe602600000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000255494b830bd4fe7220b3ec4842cba75600b6c800000000000000000000000000000000000000000000000000000000000000060000000000000000000000000255494b830bd4fe7220b3ec4842cba75600b6c80000000000000000000000000000000fee13a103a10d593b9ae06b3e05f2e7e1c00000000000000000000000000000000000000000000000000000000000000190000000000000000000000000000000000000000000000000000000000000060000000000000000000000000255494b830bd4fe7220b3ec4842cba75600b6c80000000000000000000000000d27f4bbd67bd4ad1674c9c2c5a75ca8c3e389f3b0000000000000000000000000000000000000000000000000000020f4aae6130c080a0e25b5930432fd92177b2f62f7edbd4c029cee52fc196bc91f2071b7a2ac565f6a05e67015b7153d1330fe7f975d3ab6d0ab6b606ef1e40f685b110dfbb62d4439d";
+
+        // Should fail with default options (developer_config: None)
+        let result = EthereumTransactionWrapper::from_string(signed_tx);
+        assert!(
+            result.is_err(),
+            "Signed transaction should be rejected by default"
+        );
+    }
+
+    #[test]
+    fn test_signed_transaction_accepted_with_developer_config() {
+        // Same signed EIP-1559 transaction
+        let signed_tx = "0x02f9043801588477359400847a1e5be18303e05c943fc91a3afd70395cd496c647d5a6cc9d4b2b7fad870b5e620f480000b903c43593564c000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000692a575a00000000000000000000000000000000000000000000000000000000000000040b080604000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000b5e620f48000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000b5e620f480000000000000000000000000000000000000000000000000000000002109cfe602600000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000255494b830bd4fe7220b3ec4842cba75600b6c800000000000000000000000000000000000000000000000000000000000000060000000000000000000000000255494b830bd4fe7220b3ec4842cba75600b6c80000000000000000000000000000000fee13a103a10d593b9ae06b3e05f2e7e1c00000000000000000000000000000000000000000000000000000000000000190000000000000000000000000000000000000000000000000000000000000060000000000000000000000000255494b830bd4fe7220b3ec4842cba75600b6c80000000000000000000000000d27f4bbd67bd4ad1674c9c2c5a75ca8c3e389f3b0000000000000000000000000000000000000000000000000000020f4aae6130c080a0e25b5930432fd92177b2f62f7edbd4c029cee52fc196bc91f2071b7a2ac565f6a05e67015b7153d1330fe7f975d3ab6d0ab6b606ef1e40f685b110dfbb62d4439d";
+
+        // Should succeed with developer_config.allow_signed_transactions = true
+        let developer_config = DeveloperConfig {
+            allow_signed_transactions: true,
+        };
+        let result = EthereumTransactionWrapper::from_string_with_options(
+            signed_tx,
+            Some(&developer_config),
+        );
+        assert!(
+            result.is_ok(),
+            "Signed transaction should be accepted with allow_signed_transactions: true"
+        );
+
+        let wrapper = result.unwrap();
+        let tx = wrapper.inner();
+
+        // Verify we extracted the correct unsigned transaction fields
+        assert_eq!(tx.chain_id(), Some(1)); // Mainnet
+        assert_eq!(tx.nonce(), 88);
     }
 }
