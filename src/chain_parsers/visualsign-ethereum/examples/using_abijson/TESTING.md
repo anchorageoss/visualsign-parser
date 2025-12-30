@@ -281,7 +281,7 @@ curl -s "https://api.etherscan.io/api" \
   -d "address=0xINVALID" \
   -d "apikey=$ETHERSCAN_API_KEY" | jq .
 
-# You'll see: {"status":"0","message":"Contract source code not verified"}
+# You'll see: {"status":"0","message":"NOTOK", "result": "Invalid Address Format"}
 ```
 
 ### Address format issues
