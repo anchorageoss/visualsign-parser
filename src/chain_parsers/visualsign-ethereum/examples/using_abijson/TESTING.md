@@ -52,7 +52,7 @@ cast calldata "transfer(address,uint256)" \
 
 # Decode calldata with an ABI
 cast abi-decode "transfer(address,uint256)" \
-  "0xa9059cbb0000000000000000000000001234567890123456789012345678901234567890000000000000000000000000000000000000000000000000000000000f4240"
+  "0xa9059cbb000000000000000000000000123456789012345678901234567890123456789000000000000000000000000000000000000000000000000000000000000f4240"
 ```
 
 **Note**: Depending on your version of `cast`, you may need to use `cast calldata-decode` instead of `cast abi-decode`. Also, `cast abi-decode` expects just the parameter data without the function selector. Use `cast calldata-decode` for full calldata including the selector.
