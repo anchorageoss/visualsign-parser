@@ -42,12 +42,13 @@ struct Args {
         long,
         short = 'n',
         value_name = "NETWORK",
-        help = "Network identifier - chain ID (e.g., 1, 137) or name (e.g., ETHEREUM_MAINNET, POLYGON_MAINNET)"
+        help = "Network identifier - supports:\n\
+                Chain ID: 1, 137, 42161, etc.\n\
+                Canonical name: ETHEREUM_MAINNET, POLYGON_MAINNET, ARBITRUM_MAINNET, etc."
     )]
     network: Option<String>,
 
     #[arg(
-        long,
         long = "abi-json-mappings",
         value_name = "ABI_NAME:FILE_PATH:0xADDRESS",
         help = "Map custom ABI JSON file to contract address. Format: AbiName:/path/to/abi.json:0xAddress. Can be used multiple times"
@@ -253,14 +254,16 @@ fn parse_abi_file_mapping(mapping_str: &str) -> Option<(String, String, String)>
 
 /// Builds an ABI registry from CLI mappings with file paths
 /// Returns `registry` and `valid_count` and logs any errors
-fn build_abi_registry_from_mappings(abi_json_mappings: &[String]) -> (AbiRegistry, usize) {
+fn build_abi_registry_from_mappings(
+    abi_json_mappings: &[String],
+    chain_id: u64,
+) -> (AbiRegistry, usize) {
     let mut registry = AbiRegistry::new();
     let mut valid_count = 0;
 
     for mapping in abi_json_mappings {
         match parse_abi_file_mapping(mapping) {
             Some((abi_name, file_path, address_str)) => {
-                let chain_id = 1u64; // TODO: Make chain_id configurable
                 match load_and_map_abi(&mut registry, &abi_name, &file_path, chain_id, &address_str)
                 {
                     Ok(()) => {
@@ -295,10 +298,18 @@ fn parse_and_display(
 ) {
     let registry_chain = parse_chain(chain);
 
+    // Extract chain_id from metadata for ABI registry
+    let chain_id = if let Some(ref metadata) = options.metadata {
+        visualsign_ethereum::networks::extract_chain_id_from_metadata(Some(metadata))
+    } else {
+        eprintln!("Warning: No metadata provided for ABI registry, defaulting to chain_id 1");
+        1
+    };
+
     // Build and report ABI registry from mappings
     if !abi_json_mappings.is_empty() {
         eprintln!("Registering custom ABIs:");
-        let (registry, valid_count) = build_abi_registry_from_mappings(abi_json_mappings);
+        let (registry, valid_count) = build_abi_registry_from_mappings(abi_json_mappings, chain_id);
         eprintln!(
             "Successfully registered {}/{} ABI mappings\n",
             valid_count,
@@ -351,7 +362,11 @@ fn create_chain_metadata(chain: &Chain, network: Option<String>) -> Option<Chain
     // Parse and validate the network identifier
     let Some(network_id) = parse_network(&network) else {
         eprintln!(
-            "Error: Invalid network '{network}'. Use a chain ID (e.g., 1, 137) or name (e.g., ETHEREUM_MAINNET, POLYGON_MAINNET)"
+            "Error: Invalid network '{network}'. Supported formats:\n\
+             - Chain ID (numeric): 1 (Ethereum), 137 (Polygon), 42161 (Arbitrum)\n\
+             - Canonical name: ETHEREUM_MAINNET, POLYGON_MAINNET, ARBITRUM_MAINNET\n\
+             \n\
+             Run with --help for full list of supported networks."
         );
         std::process::exit(1);
     };

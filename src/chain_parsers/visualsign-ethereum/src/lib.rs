@@ -379,8 +379,19 @@ fn convert_to_visual_sign_payload(
     layered_registry: &LayeredRegistry<registry::ContractRegistry>,
     visualizer_registry: &visualizer::EthereumVisualizerRegistry,
 ) -> SignablePayload {
-    // Extract chain ID to determine the network
-    let chain_id = transaction.chain_id();
+    // Extract chain ID from metadata first (primary source)
+    let metadata_chain_id = networks::extract_chain_id_from_metadata(options.metadata.as_ref());
+
+    // Validate against transaction if present
+    if let Some(tx_chain_id) = transaction.chain_id() {
+        if tx_chain_id != metadata_chain_id {
+            eprintln!(
+                "Warning: Transaction chain_id ({tx_chain_id}) differs from metadata chain_id ({metadata_chain_id}). Using metadata."
+            );
+        }
+    }
+
+    let chain_id = metadata_chain_id;
 
     // Try to extract AbiRegistry from options
     let abi_registry = options
@@ -388,7 +399,7 @@ fn convert_to_visual_sign_payload(
         .as_ref()
         .and_then(|any_reg| any_reg.downcast_ref::<abi_registry::AbiRegistry>());
 
-    let network_name = networks::get_network_name(chain_id);
+    let network_name = networks::get_network_name(Some(chain_id));
 
     let mut fields = vec![SignablePayloadField::TextV2 {
         common: SignablePayloadFieldCommon {
@@ -468,7 +479,7 @@ fn convert_to_visual_sign_payload(
         let mut input_fields: Vec<SignablePayloadField> = Vec::new();
 
         // Try to visualize using the registered visualizers
-        let chain_id_val = chain_id.unwrap_or(1);
+        let chain_id_val = chain_id;
         if let Some(to_address) = transaction.to() {
             if let Some(contract_type) =
                 layered_registry.lookup(|r| r.get_contract_type(chain_id_val, to_address))
@@ -510,7 +521,7 @@ fn convert_to_visual_sign_payload(
         // Try dynamic ABI visualization if available
         if input_fields.is_empty() {
             if let (Some(to_address), Some(abi_reg)) = (transaction.to(), abi_registry) {
-                let chain_id_val = chain_id.unwrap_or(1);
+                let chain_id_val = chain_id;
                 if let Some(abi) = abi_reg.get_abi_for_address(chain_id_val, to_address) {
                     if let Some(field) = (contracts::core::DynamicAbiVisualizer::new(abi))
                         .visualize_calldata(input, chain_id_val, None)
