@@ -2,11 +2,14 @@
 //!
 //! Decodes function calls using compile-time embedded ABIs.
 //! Converts function calldata into structured visualizations.
+//!
+//! Uses alloy-dyn-abi for runtime type parsing and decoding, supporting
+//! all Solidity types including arrays, tuples, structs, and nested types.
 
 use std::sync::Arc;
 
+use alloy_dyn_abi::{DynSolType, DynSolValue};
 use alloy_json_abi::{Function, JsonAbi};
-use alloy_primitives::U256;
 
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
@@ -15,87 +18,29 @@ use visualsign::{
 
 use crate::registry::ContractRegistry;
 
-/// Decodes a single Solidity value from calldata
-/// Simple implementation that handles common types
-/// TODO: make this more comprehensive, use proper alloy library for this
-fn decode_solidity_value(ty: &str, data: &[u8], offset: &mut usize) -> String {
-    if ty == "address" {
-        // Addresses are 32 bytes (20 bytes address padded to 32)
-        if *offset + 32 <= data.len() {
-            let bytes = &data[*offset..*offset + 32];
-            let addr_bytes = &bytes[12..32]; // Take last 20 bytes
-            *offset += 32;
-            return format!("0x{}", hex::encode(addr_bytes));
-        }
-    } else if ty == "uint256" || ty == "uint" {
-        // uint256 is 32 bytes
-        if *offset + 32 <= data.len() {
-            let bytes = &data[*offset..*offset + 32];
-            let val = U256::from_be_bytes(bytes.try_into().unwrap_or([0; 32]));
-            *offset += 32;
-            return val.to_string();
-        }
-    } else if ty.starts_with("uint") {
-        // Other uint types - still 32 bytes in encoding
-        if *offset + 32 <= data.len() {
-            let bytes = &data[*offset..*offset + 32];
-            let val = U256::from_be_bytes(bytes.try_into().unwrap_or([0; 32]));
-            *offset += 32;
-            return val.to_string();
-        }
-    } else if ty == "address[]" {
-        // Dynamic address arrays - offset points to location of array
-        if *offset + 32 <= data.len() {
-            let array_offset =
-                U256::from_be_bytes(data[*offset..*offset + 32].try_into().unwrap_or([0; 32]));
-            *offset += 32;
-
-            // Read array length at the offset
-            let array_offset_usize = array_offset.try_into().unwrap_or(0usize);
-            if array_offset_usize + 32 <= data.len() {
-                let array_len_val = U256::from_be_bytes(
-                    data[array_offset_usize..array_offset_usize + 32]
-                        .try_into()
-                        .unwrap_or([0; 32]),
-                );
-                let array_len: usize = array_len_val.try_into().unwrap_or(0);
-                let mut addresses = Vec::new();
-
-                for i in 0..array_len {
-                    let addr_offset_val: usize =
-                        (U256::from(array_offset_usize) + U256::from(32) + U256::from(i * 32))
-                            .try_into()
-                            .unwrap_or(0);
-                    if addr_offset_val + 32 <= data.len() {
-                        let addr_bytes = &data[addr_offset_val + 12..addr_offset_val + 32]; // Take last 20 bytes
-                        addresses.push(format!("0x{}", hex::encode(addr_bytes)));
-                    }
-                }
-
-                if addresses.is_empty() {
-                    return "[]".to_string();
-                } else {
-                    return format!("[{}]", addresses.join(", "));
-                }
+/// Formats a DynSolValue into a human-readable string
+fn format_dyn_sol_value(value: &DynSolValue) -> String {
+    match value {
+        DynSolValue::Address(addr) => format!("{addr:?}"),
+        DynSolValue::Uint(val, _bits) => val.to_string(),
+        DynSolValue::Int(val, _bits) => val.to_string(),
+        DynSolValue::Bool(b) => b.to_string(),
+        DynSolValue::Bytes(bytes) => format!("0x{}", hex::encode(bytes)),
+        DynSolValue::FixedBytes(bytes, _size) => format!("0x{}", hex::encode(bytes)),
+        DynSolValue::String(s) => s.clone(),
+        DynSolValue::Array(values) | DynSolValue::FixedArray(values) => {
+            if values.is_empty() {
+                "[]".to_string()
+            } else {
+                let formatted: Vec<String> = values.iter().map(format_dyn_sol_value).collect();
+                format!("[{}]", formatted.join(", "))
             }
         }
-    } else if ty.ends_with("[]") {
-        // Other dynamic arrays - just show offset for now
-        if *offset + 32 <= data.len() {
-            let array_offset_val =
-                U256::from_be_bytes(data[*offset..*offset + 32].try_into().unwrap_or([0; 32]));
-            *offset += 32;
-            return format!("(dynamic array at offset {array_offset_val})");
+        DynSolValue::Tuple(values) => {
+            let formatted: Vec<String> = values.iter().map(format_dyn_sol_value).collect();
+            format!("({})", formatted.join(", "))
         }
-    }
-
-    // Fallback for unknown types
-    if *offset + 32 <= data.len() {
-        let hex_val = hex::encode(&data[*offset..(*offset + 32).min(data.len())]);
-        *offset = (*offset + 32).min(data.len());
-        format!("{ty}: 0x{hex_val}")
-    } else {
-        format!("{ty}: (insufficient data)")
+        DynSolValue::Function(func) => format!("0x{}", hex::encode(func.0)),
     }
 }
 
@@ -161,31 +106,61 @@ impl AbiDecoder {
         let input_data = &calldata[4..];
 
         let mut expanded_fields = Vec::new();
-        let mut offset = 0;
 
-        // Build field for each input parameter
-        for (i, input) in function.inputs.iter().enumerate() {
-            let param_name = if !input.name.is_empty() {
-                input.name.clone()
-            } else {
-                format!("param{i}")
+        // Only decode if there are parameters
+        if !function.inputs.is_empty() {
+            // Parse all parameter types
+            let param_types: Vec<DynSolType> = function
+                .inputs
+                .iter()
+                .map(|input| {
+                    DynSolType::parse(&input.ty)
+                        .map_err(|e| format!("Failed to parse type '{}': {}", input.ty, e))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            // Function parameters are ABI-encoded as a tuple
+            let tuple_type = DynSolType::Tuple(param_types);
+
+            // Decode the tuple
+            let decoded = tuple_type.abi_decode(input_data).map_err(|e| {
+                format!(
+                    "Failed to decode parameters: {}. Data length: {}, Data: 0x{}",
+                    e,
+                    input_data.len(),
+                    hex::encode(input_data)
+                )
+            })?;
+
+            // Extract values from the tuple
+            let values = match decoded {
+                DynSolValue::Tuple(vals) => vals,
+                _ => return Err("Expected tuple from decode".into()),
             };
 
-            // Simple decoding based on type
-            let formatted = decode_solidity_value(&input.ty, input_data, &mut offset);
+            // Build fields from decoded values
+            for (i, (input, value)) in function.inputs.iter().zip(values.iter()).enumerate() {
+                let param_name = if !input.name.is_empty() {
+                    input.name.clone()
+                } else {
+                    format!("param{i}")
+                };
 
-            let field = AnnotatedPayloadField {
-                signable_payload_field: SignablePayloadField::TextV2 {
-                    common: SignablePayloadFieldCommon {
-                        fallback_text: formatted.clone(),
-                        label: param_name,
+                let formatted = format_dyn_sol_value(value);
+
+                let field = AnnotatedPayloadField {
+                    signable_payload_field: SignablePayloadField::TextV2 {
+                        common: SignablePayloadFieldCommon {
+                            fallback_text: formatted.clone(),
+                            label: param_name,
+                        },
+                        text_v2: SignablePayloadFieldTextV2 { text: formatted },
                     },
-                    text_v2: SignablePayloadFieldTextV2 { text: formatted },
-                },
-                static_annotation: None,
-                dynamic_annotation: None,
-            };
-            expanded_fields.push(field);
+                    static_annotation: None,
+                    dynamic_annotation: None,
+                };
+                expanded_fields.push(field);
+            }
         }
 
         // Build function signature
@@ -224,6 +199,7 @@ impl AbiDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::U256;
 
     const SIMPLE_ABI: &str = r#"[
         {
@@ -265,5 +241,48 @@ mod tests {
 
         let result = decoder.visualize(&[], 1, None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decode_transfer_with_alloy() {
+        use alloy_sol_types::{SolCall, sol};
+
+        let abi: JsonAbi = serde_json::from_str(SIMPLE_ABI).unwrap();
+        let decoder = AbiDecoder::new(Arc::new(abi));
+
+        sol! {
+            interface IERC20 {
+                function transfer(address to, uint256 amount) external returns (bool);
+            }
+        }
+
+        let to_addr: alloy_primitives::Address = "0x1234567890123456789012345678901234567890"
+            .parse()
+            .unwrap();
+        let call = IERC20::transferCall {
+            to: to_addr,
+            amount: U256::from(1_000_000u128),
+        };
+        let calldata = IERC20::transferCall::abi_encode(&call);
+
+        // Test decode_function
+        let (func_name, _hex) = decoder.decode_function(&calldata).expect("Decode failed");
+        assert_eq!(func_name, "transfer");
+
+        // Test visualize
+        let field = decoder
+            .visualize(&calldata, 1, None)
+            .expect("Visualize failed");
+
+        // Should have PreviewLayout with expanded fields
+        match field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+                let expanded = preview_layout
+                    .expanded
+                    .expect("Should have expanded fields");
+                assert_eq!(expanded.fields.len(), 2); // to + amount
+            }
+            _ => panic!("Expected PreviewLayout"),
+        }
     }
 }

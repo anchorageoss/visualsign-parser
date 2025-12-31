@@ -325,8 +325,9 @@ curl "https://api.etherscan.io/api?module=account&action=balance&address=0x00000
 
 ```bash
 # Check the raw response
-curl -s "https://api.etherscan.io/api" \
+curl -s "https://api.etherscan.io/v2/api" \
   -d "module=contract" \
+  -d "chainId=1" \
   -d "action=getabi" \
   -d "address=0xINVALID" \
   -d "apikey=$ETHERSCAN_API_KEY" | jq .
@@ -389,7 +390,7 @@ mkdir -p "$CONTRACTS_DIR"
 # Array of (address:name) pairs
 CONTRACTS=(
     "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48:USDC"
-    "0xc02aaa39b223fe8d0a0e8d0c9f8d0b21d0a0e8d0c:WETH"
+    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2:WETH"
     "0xdac17f958d2ee523a2206206994597c13d831ec7:USDT"
 )
 
@@ -398,7 +399,8 @@ for contract_info in "${CONTRACTS[@]}"; do
     IFS=':' read -r address name <<< "$contract_info"
     echo "  Fetching $name ($address)..."
 
-    response=$(curl -s "https://api.etherscan.io/api" \
+    response=$(curl -s "https://api.etherscan.io/v2/api" \
+      -d '
       -d "module=contract" \
       -d "action=getabi" \
       -d "address=$address" \
