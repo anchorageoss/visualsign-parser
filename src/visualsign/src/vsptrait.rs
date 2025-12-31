@@ -25,7 +25,6 @@ pub struct VisualSignOptions {
     pub abi_registry: Option<Arc<dyn Any + Send + Sync>>,
 }
 
-
 impl Debug for VisualSignOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VisualSignOptions")
