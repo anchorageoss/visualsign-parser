@@ -221,9 +221,7 @@ cast sig "transfer(address,uint256)"
 # Output: 0xa9059cbb
 
 # Generate full calldata using cast calldata
-cast calldata "transfer(address,uint256)" 0x1234567890123456789012345678901234567890 1000000
-  0x1234567890123456789012345678901234567890 \
-  1000000)
+CALLDATA=$(cast calldata "transfer(address,uint256)" 0x1234567890123456789012345678901234567890 1000000)
 
 echo "Generated calldata: $CALLDATA"
 # Output: 0xa9059cbb000000000000000000000000123456789012345678901234567890123456789000000000000000000000000000000000000000000000000000000000000f4240
@@ -400,7 +398,7 @@ for contract_info in "${CONTRACTS[@]}"; do
     echo "  Fetching $name ($address)..."
 
     response=$(curl -s "https://api.etherscan.io/v2/api" \
-      -d '
+      -d "chainId=1" \
       -d "module=contract" \
       -d "action=getabi" \
       -d "address=$address" \
