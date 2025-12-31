@@ -12,6 +12,7 @@ foundryup
 ```
 
 Verify installation:
+
 ```bash
 cast --version
 ```
@@ -25,19 +26,20 @@ Get a free Etherscan API key at: https://etherscan.io/apis
 ```bash
 ETHERSCAN_API_KEY="YOUR_API_KEY"
 
-# Get USDC ABI
-curl -s "https://api.etherscan.io/api" \
-  -d "module=contract" \
-  -d "action=getabi" \
-  -d "address=0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" \
-  -d "apikey=$ETHERSCAN_API_KEY" | jq '.result' > usdc.abi.json
+function get_abi_json(){
+  ADDRESS=$1
+  NAME=$2
+  curl -s "https://api.etherscan.io/v2/api" \
+    -d "module=contract" \
+    -d "chainId=1" \
+    -d "action=getabi" \
+    -d "address=$ADDRESS" \
+    -d "apikey=$ETHERSCAN_API_KEY" | jq -r '.result' > $NAME.abi.json
+}
 
-# Get WETH ABI
-curl -s "https://api.etherscan.io/api" \
-  -d "module=contract" \
-  -d "action=getabi" \
-  -d "address=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" \
-  -d "apikey=$ETHERSCAN_API_KEY" | jq '.result' > weth.abi.json
+get_abi_json 0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48 usdc #creates usdc.abi.json
+get_abi_json 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 weth #creates weth.abi.json
+get_abi_json 0xdac17f958d2ee523a2206206994597c13d831ec7 usdt #creates usdt.abi.json
 ```
 
 ### Method 2: Using `cast` to test calldata
@@ -50,42 +52,30 @@ cast calldata "transfer(address,uint256)" \
   0x1234567890123456789012345678901234567890 \
   1000000
 
-# Decode calldata with an ABI
-cast abi-decode "transfer(address,uint256)" \
+# Decode calldata with method from ABI
+cast calldata-decode "transfer(address,uint256)" \
   "0xa9059cbb000000000000000000000000123456789012345678901234567890123456789000000000000000000000000000000000000000000000000000000000000f4240"
 ```
-
-**Note**: Depending on your version of `cast`, you may need to use `cast calldata-decode` instead of `cast abi-decode`. Also, `cast abi-decode` expects just the parameter data without the function selector. Use `cast calldata-decode` for full calldata including the selector.
 
 ## Testing Locally
 
 ### Step 1: Pull Example ABIs
 
-```bash
-cd examples/using_abijson
-
-# Set your Etherscan API key
-export ETHERSCAN_API_KEY="YOUR_API_KEY"
-
-# Get USDC ABI
-curl -s "https://api.etherscan.io/api" \
-  -d "module=contract" \
-  -d "action=getabi" \
-  -d "address=0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" \
-  -d "apikey=$ETHERSCAN_API_KEY" | jq '.result' > contracts/USDC.abi.json
-
-# Get USDT ABI
-curl -s "https://api.etherscan.io/api" \
-  -d "module=contract" \
-  -d "action=getabi" \
-  -d "address=0xdac17f958d2ee523a2206206994597c13d831ec7" \
-  -d "apikey=$ETHERSCAN_API_KEY" | jq '.result' > contracts/USDT.abi.json
+Follow the steps [above to use CURL and Etherscan API](#method-1-using-curl--etherscan-api-recommended) to download the ABI JSON
 
 # Verify ABIs are valid
+
+```bash
+get_abi_json 0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48 contracts/USDC #creates usdc.abi.json
+get_abi_json 0xdac17f958d2ee523a2206206994597c13d831ec7 contracts/USDT #creates usdt.abi.json
 jq '.[] | select(.name == "transfer") | .inputs' contracts/USDC.abi.json
+jq '.[] | select(.name == "transfer") | .inputs' contracts/USDT.abi.json
+
 ```
 
-### Step 2: Create a Test Binary with Embedded ABIs
+### Step 2: Create a test visualizer with the above Binary
+
+This is shown as an isolated binary
 
 Create `examples/using_abijson/main.rs`:
 
@@ -94,7 +84,14 @@ use visualsign_ethereum::embedded_abis::register_embedded_abi;
 use visualsign_ethereum::abi_registry::AbiRegistry;
 use visualsign_ethereum::contracts::core::DynamicAbiVisualizer;
 use visualsign_ethereum::visualizer::CalldataVisualizer;
-use std::sync::Arc;
+use alloy_sol_types::{sol, SolCall};
+use alloy_primitives::U256;
+
+sol! {
+    interface IERC20 {
+        function transfer(address to, uint256 amount) external returns (bool);
+    }
+}
 
 // Embed real contract ABIs
 const USDC_ABI: &str = include_str!("contracts/USDC.abi.json");
@@ -125,17 +122,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(abi) = registry.get_abi_for_address(1, usdc_addr) {
         let visualizer = DynamicAbiVisualizer::new(abi);
 
-        // transfer(address to, uint256 amount)
-        // selector: 0xa9059cbb
+        // transfer(address to, uint256 amount) - using typesafe encoding
         let recipient: alloy_primitives::Address =
             "0x1234567890123456789012345678901234567890".parse()?;
         let amount = 1_000_000u128; // 1 USDC (6 decimals)
 
-        // Build calldata
-        let mut calldata = vec![0xa9, 0x05, 0x9c, 0xbb]; // transfer selector
-        calldata.extend_from_slice(&[0u8; 32]); // Pad to 32 bytes for address
-        calldata[4 + 12..4 + 32].copy_from_slice(recipient.as_slice()); // Copy address
-        calldata.extend_from_slice(&amount.to_be_bytes().to_vec()); // amount (right-padded)
+        // Build calldata using typesafe alloy encoder
+        let call = IERC20::transferCall {
+            to: recipient,
+            amount: U256::from(amount),
+        };
+        let calldata = IERC20::transferCall::abi_encode(&call);
 
         if let Some(field) = visualizer.visualize_calldata(&calldata, 1, None) {
             println!("✓ Successfully visualized USDC transfer");
@@ -157,6 +154,7 @@ cargo run --example using_abijson
 ```
 
 Output should show:
+
 ```
 Registry created with 2 ABIs:
   - USDC: 0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
@@ -166,6 +164,52 @@ Testing USDC transfer decoding...
 ✓ Successfully visualized USDC transfer
   Field: ...
 ```
+
+## Typesafe Calldata Encoding
+
+### Why Use sol! Macro Instead of Manual Encoding?
+
+The codebase uses alloy's `sol!` macro for type-safe calldata construction instead of manual byte manipulation.
+
+**DON'T** (manual encoding): We don't recommend doing this outside of very extreme reverse engineering use cases. It's very prone to fat-finger,off-by-one type errors
+
+```rust
+// Hardcoded selector - error-prone and not maintainable
+let mut calldata = vec![0xa9, 0x05, 0x9c, 0xbb]; // What function is this?
+calldata.extend_from_slice(&[0u8; 32]); // Manual padding
+calldata[4 + 12..4 + 32].copy_from_slice(recipient.as_slice()); // Easy to get wrong
+```
+
+**DO** (typesafe encoding):
+
+```rust
+use alloy_sol_types::{sol, SolCall};
+
+sol! {
+    interface IERC20 {
+        function transfer(address to, uint256 amount) external returns (bool);
+    }
+}
+
+let call = IERC20::transferCall {
+    to: recipient,
+    amount: U256::from(1_000_000),
+};
+let calldata = IERC20::transferCall::abi_encode(&call);
+```
+
+**Benefits:**
+
+- Type-safe: Compiler checks function signatures and parameter types
+- Automatic: Selectors generated from function signatures
+- Correct: ABI encoding rules handled automatically
+- Maintainable: Clear function signatures, easy to update
+- Consistent: Matches pattern used throughout visualsign-ethereum codebase
+
+**See also:**
+
+- `src/contracts/core/erc20.rs` - ERC20 encoding example
+- `src/protocols/uniswap/contracts/universal_router.rs` - Complex encoding patterns
 
 ## Testing with CLI
 
@@ -222,17 +266,20 @@ cargo test -p visualsign-ethereum --lib embedded_abis::tests
 ## Real Contract Examples
 
 ### USDC Token (0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48)
+
 ```bash
 # Minimal functions: transfer, transferFrom, approve, balanceOf, allowance
 cast interface 0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48 --json --etherscan-api-key $ETHERSCAN_API_KEY | jq '.[] | select(.name | IN("transfer", "transferFrom", "approve"))'
 ```
 
 ### WETH (0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2)
+
 ```bash
 cast interface 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2 --json --etherscan-api-key $ETHERSCAN_API_KEY | jq '.[] | select(.name | IN("deposit", "withdraw"))'
 ```
 
 ### Uniswap V3 SwapRouter (0xe592427a0aece92de3edee1f18e0157c05861564)
+
 ```bash
 cast interface 0xe592427a0aece92de3edee1f18e0157c05861564 --json --etherscan-api-key $ETHERSCAN_API_KEY | jq '.[] | select(.name | IN("exactInputSingle", "exactOutputSingle"))'
 ```
@@ -253,6 +300,7 @@ jq -r '.[].name' contracts/USDC.abi.json | sort | uniq
 ## Common Issues & Solutions
 
 ### `cast` command not found
+
 ```bash
 # Make sure Foundry is in your PATH
 export PATH="$HOME/.foundry/bin:$PATH"
@@ -263,6 +311,7 @@ foundryup
 ```
 
 ### Etherscan API returns empty response
+
 ```bash
 # Check your API key
 ETHERSCAN_API_KEY="YOUR_KEY"
@@ -273,6 +322,7 @@ curl "https://api.etherscan.io/api?module=account&action=balance&address=0x00000
 ```
 
 ### Invalid ABI JSON from curl
+
 ```bash
 # Check the raw response
 curl -s "https://api.etherscan.io/api" \
@@ -285,7 +335,9 @@ curl -s "https://api.etherscan.io/api" \
 ```
 
 ### Address format issues
+
 Always use lowercase or checksummed addresses:
+
 ```rust
 // Works - lowercase
 let addr: alloy_primitives::Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".parse()?;
@@ -295,6 +347,7 @@ let addr: alloy_primitives::Address = "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb4
 ```
 
 ### Function selector mismatch
+
 ```bash
 # Double-check function signature (must match ABI exactly)
 cast sig "transfer(address,uint256)"  # Correct
@@ -377,6 +430,7 @@ cargo test -p visualsign-ethereum --lib embedded_abis
 ```
 
 Run it:
+
 ```bash
 export ETHERSCAN_API_KEY="YOUR_API_KEY"
 chmod +x fetch_abis.sh
@@ -384,6 +438,7 @@ chmod +x fetch_abis.sh
 ```
 
 Quick test without fetching:
+
 ```bash
 # Just run existing tests
 cargo test -p visualsign-ethereum --lib embedded_abis
