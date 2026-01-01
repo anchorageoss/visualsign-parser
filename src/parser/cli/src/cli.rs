@@ -297,9 +297,15 @@ fn build_abi_registry_from_mappings(
 }
 
 /// Parse IDL mapping format: "Name:ProgramId:/path/to/file.json"
+///
+/// Splits from the right to handle file paths containing colons (e.g., Windows paths
+/// like "C:/path/to/file.json"). The last colon separates the file path, while the
+/// first colon separates the name from the program ID.
+///
 /// Returns: (`idl_name`, `program_id_str`, `file_path`)
 fn parse_idl_file_mapping(mapping_str: &str) -> Option<(String, String, String)> {
-    // Split from the right to get the file path (last : separator)
+    // Split from the right to get the file path (last : separator).
+    // This is necessary for Windows compatibility, as file paths may contain colons (e.g., "C:/path/to/file.json").
     let (remainder, file_path) = mapping_str.rsplit_once(':')?;
 
     // Split the remainder from the left to get name and program_id

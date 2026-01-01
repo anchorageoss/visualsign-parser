@@ -16,7 +16,6 @@ use std::collections::HashMap;
 ///
 /// Built-in IDLs are not stored here - they're checked via solana_parser's ProgramType.
 #[derive(Clone, Default, Debug)]
-#[allow(dead_code)] // Library code for future IDL integration
 pub struct IdlRegistry {
     /// Maps program_id (base58 string) -> CustomIdlConfig
     /// These are user-provided IDLs that override built-ins
@@ -27,7 +26,6 @@ pub struct IdlRegistry {
     idl_names: HashMap<String, String>,
 }
 
-#[allow(dead_code)] // Library code for future IDL integration
 impl IdlRegistry {
     /// Create empty registry (built-in IDLs handled by solana_parser directly)
     pub fn new() -> Self {
@@ -81,6 +79,9 @@ impl IdlRegistry {
     ///
     /// This returns the custom user-provided IDLs. Built-in IDLs are handled
     /// automatically by solana_parser when these are passed to parse_transaction_with_idls.
+    ///
+    /// Reserved for future integration with solana_parser's batch transaction parsing.
+    #[allow(dead_code)]
     pub fn get_all_configs(&self) -> &HashMap<String, CustomIdlConfig> {
         &self.configs
     }

@@ -136,6 +136,20 @@ fn extract_name_from_idl_json(idl_json: &str) -> Option<String> {
     value.get("name").and_then(|n| n.as_str()).map(String::from)
 }
 
+/// Create an IDL registry from VisualSignOptions metadata
+fn create_idl_registry_from_options(
+    options: &VisualSignOptions,
+) -> Result<IdlRegistry, VisualSignError> {
+    let idl_mappings = extract_idl_mappings(options);
+    if !idl_mappings.is_empty() {
+        IdlRegistry::from_idl_mappings(idl_mappings).map_err(|e| {
+            VisualSignError::ConversionError(format!("Failed to create IDL registry: {e}"))
+        })
+    } else {
+        Ok(IdlRegistry::new())
+    }
+}
+
 /// Converter that knows how to format Solana transactions for VisualSign
 pub struct SolanaVisualSignConverter;
 
@@ -207,15 +221,8 @@ fn convert_to_visual_sign_payload(
 ) -> Result<SignablePayload, VisualSignError> {
     let message = &transaction.message;
 
-    // Extract IDL mappings from options and create registry
-    let idl_mappings = extract_idl_mappings(options);
-    let idl_registry = if !idl_mappings.is_empty() {
-        IdlRegistry::from_idl_mappings(idl_mappings).map_err(|e| {
-            VisualSignError::ConversionError(format!("Failed to create IDL registry: {e}"))
-        })?
-    } else {
-        IdlRegistry::new()
-    };
+    // Create IDL registry from options metadata
+    let idl_registry = create_idl_registry_from_options(options)?;
 
     let mut fields = vec![SignablePayloadField::TextV2 {
         common: SignablePayloadFieldCommon {
@@ -297,15 +304,8 @@ fn convert_v0_to_visual_sign_payload(
     title: Option<String>,
     options: &VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
-    // Extract IDL mappings from options and create registry
-    let idl_mappings = extract_idl_mappings(options);
-    let idl_registry = if !idl_mappings.is_empty() {
-        IdlRegistry::from_idl_mappings(idl_mappings).map_err(|e| {
-            VisualSignError::ConversionError(format!("Failed to create IDL registry: {e}"))
-        })?
-    } else {
-        IdlRegistry::new()
-    };
+    // Create IDL registry from options metadata
+    let idl_registry = create_idl_registry_from_options(options)?;
 
     // Decode and sort accounts using the dedicated function
     let accounts = decode_v0_accounts(v0_message)?;

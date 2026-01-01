@@ -12,6 +12,8 @@ use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
 };
+use solana_parser::{SolanaParsedInstructionData, parse_instruction_with_idl};
+use std::collections::HashMap;
 
 // Create a static instance that we can reference
 static UNKNOWN_PROGRAM_CONFIG: UnknownProgramConfig = UnknownProgramConfig;
@@ -300,9 +302,6 @@ fn try_parse_with_idl(
     instruction: &solana_sdk::instruction::Instruction,
     idl_registry: &crate::idl::IdlRegistry,
 ) -> Result<solana_parser::SolanaParsedInstructionData, Box<dyn std::error::Error>> {
-    use solana_parser::{SolanaParsedInstructionData, parse_instruction_with_idl};
-    use std::collections::HashMap;
-
     let program_id_str = instruction.program_id.to_string();
     let instruction_data = &instruction.data;
 
