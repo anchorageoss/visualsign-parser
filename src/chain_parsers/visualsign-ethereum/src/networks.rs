@@ -186,16 +186,17 @@ pub fn parse_network(input: &str) -> Option<String> {
     }
 }
 
-/// Extracts chain_id from ChainMetadata with fallback to ETHEREUM_MAINNET
+/// Extracts chain_id from ChainMetadata
 ///
-/// Primary function for getting chain_id from metadata in both CLI and gRPC paths.
-/// Logs warnings to stderr if network_id is missing or invalid.
+/// Returns the chain_id from metadata, or None if metadata is not provided or invalid.
+/// The CLI can apply its own defaults (e.g., Ethereum Mainnet), while the gRPC path
+/// can fallback to the transaction's chain_id.
 ///
 /// # Arguments
 /// * `chain_metadata` - Optional ChainMetadata from VisualSignOptions
 ///
 /// # Returns
-/// Chain ID as u64. Defaults to ETHEREUM_MAINNET (chain_id = 1) on error with stderr warning.
+/// Some(chain_id) if valid metadata is provided, None otherwise
 ///
 /// # Examples
 /// ```ignore
@@ -210,58 +211,22 @@ pub fn parse_network(input: &str) -> Option<String> {
 /// };
 ///
 /// let chain_id = extract_chain_id_from_metadata(Some(&metadata));
-/// assert_eq!(chain_id, 137);
+/// assert_eq!(chain_id, Some(137));
 /// ```
 pub fn extract_chain_id_from_metadata(
     chain_metadata: Option<&generated::parser::ChainMetadata>,
-) -> u64 {
+) -> Option<u64> {
     use generated::parser::chain_metadata;
 
-    const DEFAULT_CHAIN_ID: u64 = id::ethereum::MAINNET;
-    const DEFAULT_NETWORK_NAME: &str = "ETHEREUM_MAINNET";
-
-    let Some(metadata) = chain_metadata else {
-        eprintln!(
-            "Warning: No chain metadata provided, defaulting to {DEFAULT_NETWORK_NAME} (chain_id: {DEFAULT_CHAIN_ID})"
-        );
-        return DEFAULT_CHAIN_ID;
-    };
-
-    let Some(ref inner_metadata) = metadata.metadata else {
-        eprintln!(
-            "Warning: Chain metadata is empty, defaulting to {DEFAULT_NETWORK_NAME} (chain_id: {DEFAULT_CHAIN_ID})"
-        );
-        return DEFAULT_CHAIN_ID;
-    };
+    let metadata = chain_metadata?;
+    let inner_metadata = metadata.metadata.as_ref()?;
 
     match inner_metadata {
         chain_metadata::Metadata::Ethereum(eth_metadata) => {
-            let network_id = match &eth_metadata.network_id {
-                Some(id) => id.as_str(),
-                None => {
-                    eprintln!(
-                        "Warning: Ethereum metadata missing network_id, defaulting to {DEFAULT_NETWORK_NAME} (chain_id: {DEFAULT_CHAIN_ID})"
-                    );
-                    return DEFAULT_CHAIN_ID;
-                }
-            };
-
-            match network_id_to_chain_id(network_id) {
-                Some(chain_id) => chain_id,
-                None => {
-                    eprintln!(
-                        "Warning: Unknown network_id '{network_id}', defaulting to {DEFAULT_NETWORK_NAME} (chain_id: {DEFAULT_CHAIN_ID})"
-                    );
-                    DEFAULT_CHAIN_ID
-                }
-            }
+            let network_id = eth_metadata.network_id.as_ref()?;
+            network_id_to_chain_id(network_id)
         }
-        chain_metadata::Metadata::Solana(_) => {
-            eprintln!(
-                "Warning: Solana metadata provided for Ethereum parser, defaulting to {DEFAULT_NETWORK_NAME} (chain_id: {DEFAULT_CHAIN_ID})"
-            );
-            DEFAULT_CHAIN_ID
-        }
+        chain_metadata::Metadata::Solana(_) => None,
     }
 }
 

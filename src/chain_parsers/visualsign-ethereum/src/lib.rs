@@ -221,12 +221,12 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
             TxType::Legacy | TxType::Eip1559 => true,
         };
         if is_supported {
-            return Ok(convert_to_visual_sign_payload(
+            return convert_to_visual_sign_payload(
                 transaction,
                 options,
                 &layered_registry,
                 &self.visualizer_registry,
-            ));
+            );
         }
         Err(VisualSignError::DecodeError(format!(
             "Unsupported transaction type: {}",
@@ -378,20 +378,29 @@ fn convert_to_visual_sign_payload(
     options: VisualSignOptions,
     layered_registry: &LayeredRegistry<registry::ContractRegistry>,
     visualizer_registry: &visualizer::EthereumVisualizerRegistry,
-) -> SignablePayload {
-    // Extract chain ID from metadata first (primary source)
-    let metadata_chain_id = networks::extract_chain_id_from_metadata(options.metadata.as_ref());
-
-    // Validate against transaction if present
-    if let Some(tx_chain_id) = transaction.chain_id() {
-        if tx_chain_id != metadata_chain_id {
-            eprintln!(
-                "Warning: Transaction chain_id ({tx_chain_id}) differs from metadata chain_id ({metadata_chain_id}). Using metadata."
-            );
+) -> Result<SignablePayload, VisualSignError> {
+    // Determine chain ID: prioritize metadata, fallback to transaction
+    let chain_id = if let Some(metadata_chain_id) =
+        networks::extract_chain_id_from_metadata(options.metadata.as_ref())
+    {
+        // Validate against transaction if present
+        if let Some(tx_chain_id) = transaction.chain_id() {
+            if tx_chain_id != metadata_chain_id {
+                eprintln!(
+                    "Warning: Transaction chain_id ({tx_chain_id}) differs from metadata chain_id ({metadata_chain_id}). Using metadata."
+                );
+            }
         }
-    }
-
-    let chain_id = metadata_chain_id;
+        metadata_chain_id
+    } else if let Some(tx_chain_id) = transaction.chain_id() {
+        // No metadata provided, use transaction's chain_id
+        tx_chain_id
+    } else {
+        // Neither metadata nor transaction provides chain_id
+        return Err(VisualSignError::DecodeError(
+            "Unable to determine chain_id: no metadata provided and transaction does not contain chain_id".to_string()
+        ));
+    };
 
     // Try to extract AbiRegistry from options
     let abi_registry = options
@@ -549,7 +558,13 @@ fn convert_to_visual_sign_payload(
     let title = options
         .transaction_name
         .unwrap_or_else(|| "Ethereum Transaction".to_string());
-    SignablePayload::new(0, title, None, fields, "EthereumTx".to_string())
+    Ok(SignablePayload::new(
+        0,
+        title,
+        None,
+        fields,
+        "EthereumTx".to_string(),
+    ))
 }
 
 // Public API functions for ease of use

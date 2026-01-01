@@ -303,13 +303,14 @@ fn parse_and_display(
         visualsign_ethereum::networks::extract_chain_id_from_metadata(Some(metadata))
     } else {
         eprintln!("Warning: No metadata provided for ABI registry, defaulting to chain_id 1");
-        1
+        Some(1)
     };
 
     // Build and report ABI registry from mappings
     if !abi_json_mappings.is_empty() {
         eprintln!("Registering custom ABIs:");
-        let (registry, valid_count) = build_abi_registry_from_mappings(abi_json_mappings, chain_id);
+        let (registry, valid_count) =
+            build_abi_registry_from_mappings(abi_json_mappings, chain_id.unwrap_or(1));
         eprintln!(
             "Successfully registered {}/{} ABI mappings\n",
             valid_count,
@@ -354,10 +355,25 @@ fn parse_and_display(
 /// - A chain ID number (e.g., 1, 137, 42161)
 /// - A canonical network name (e.g., `ETHEREUM_MAINNET`, `POLYGON_MAINNET`)
 ///
-/// Returns `None` if no network is specified.
+/// Defaults to `ETHEREUM_MAINNET` if no network is specified for Ethereum chains.
+/// Returns `None` if no network is specified for non-Ethereum chains.
 /// Prints an error and exits if the network identifier is invalid.
 fn create_chain_metadata(chain: &Chain, network: Option<String>) -> Option<ChainMetadata> {
-    let network = network?;
+    // Default to Ethereum Mainnet for Ethereum chains if no network specified
+    let network = match network {
+        Some(n) => n,
+        None => {
+            match chain {
+                Chain::Ethereum => {
+                    eprintln!(
+                        "Warning: No network specified, defaulting to ETHEREUM_MAINNET (chain_id: 1)"
+                    );
+                    "ETHEREUM_MAINNET".to_string()
+                }
+                _ => return None, // Other chains require explicit network
+            }
+        }
+    };
 
     // Parse and validate the network identifier
     let Some(network_id) = parse_network(&network) else {
