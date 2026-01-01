@@ -5,9 +5,12 @@ use generated::parser::{
     ChainMetadata, EthereumMetadata, SolanaMetadata, chain_metadata::Metadata,
 };
 use parser_app::registry::create_registry;
+use std::sync::Arc;
 use visualsign::registry::Chain;
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
+use visualsign_ethereum::abi_registry::AbiRegistry;
+use visualsign_ethereum::embedded_abis::load_and_map_abi;
 use visualsign_ethereum::networks::parse_network;
 
 #[derive(Parser, Debug)]
@@ -39,9 +42,18 @@ struct Args {
         long,
         short = 'n',
         value_name = "NETWORK",
-        help = "Network identifier - chain ID (e.g., 1, 137) or name (e.g., ETHEREUM_MAINNET, POLYGON_MAINNET)"
+        help = "Network identifier - supports:\n\
+                Chain ID: 1, 137, 42161, etc.\n\
+                Canonical name: ETHEREUM_MAINNET, POLYGON_MAINNET, ARBITRUM_MAINNET, etc."
     )]
     network: Option<String>,
+
+    #[arg(
+        long = "abi-json-mappings",
+        value_name = "ABI_NAME:FILE_PATH:0xADDRESS",
+        help = "Map custom ABI JSON file to contract address. Format: AbiName:/path/to/abi.json:0xAddress. Can be used multiple times"
+    )]
+    abi_json_mappings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -218,14 +230,94 @@ fn common_label(field: &SignablePayloadField) -> String {
     }
 }
 
+/// Parses full ABI mapping with file path: "<AbiName:/path/to/file.json:0xAddress>"
+fn parse_abi_file_mapping(mapping_str: &str) -> Option<(String, String, String)> {
+    let parts: Vec<&str> = mapping_str.rsplitn(2, ':').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let address_str = parts[0];
+    let rest = parts[1];
+
+    let name_file_parts: Vec<&str> = rest.splitn(2, ':').collect();
+    if name_file_parts.len() != 2 {
+        return None;
+    }
+
+    let abi_name = name_file_parts[0].to_string();
+    let file_path = name_file_parts[1].to_string();
+    let address_str = address_str.to_string();
+
+    Some((abi_name, file_path, address_str))
+}
+
+/// Builds an ABI registry from CLI mappings with file paths
+/// Returns `registry` and `valid_count` and logs any errors
+fn build_abi_registry_from_mappings(
+    abi_json_mappings: &[String],
+    chain_id: u64,
+) -> (AbiRegistry, usize) {
+    let mut registry = AbiRegistry::new();
+    let mut valid_count = 0;
+
+    for mapping in abi_json_mappings {
+        match parse_abi_file_mapping(mapping) {
+            Some((abi_name, file_path, address_str)) => {
+                match load_and_map_abi(&mut registry, &abi_name, &file_path, chain_id, &address_str)
+                {
+                    Ok(()) => {
+                        valid_count += 1;
+                        eprintln!(
+                            "  Loaded ABI '{abi_name}' from {file_path} and mapped to {address_str}"
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("  Warning: Failed to load/map ABI '{abi_name}': {e}");
+                    }
+                }
+            }
+            None => {
+                eprintln!(
+                    "  Warning: Invalid ABI mapping '{mapping}' (expected format: AbiName:/path/to/file.json:0xAddress)",
+                );
+            }
+        }
+    }
+
+    (registry, valid_count)
+}
+
 fn parse_and_display(
     chain: &str,
     raw_tx: &str,
-    options: VisualSignOptions,
+    mut options: VisualSignOptions,
     output_format: OutputFormat,
     condensed_only: bool,
+    abi_json_mappings: &[String],
 ) {
     let registry_chain = parse_chain(chain);
+
+    // Extract chain_id from metadata for ABI registry
+    let chain_id = if let Some(ref metadata) = options.metadata {
+        visualsign_ethereum::networks::extract_chain_id_from_metadata(Some(metadata))
+    } else {
+        eprintln!("Warning: No metadata provided for ABI registry, defaulting to chain_id 1");
+        Some(1)
+    };
+
+    // Build and report ABI registry from mappings
+    if !abi_json_mappings.is_empty() {
+        eprintln!("Registering custom ABIs:");
+        let (registry, valid_count) =
+            build_abi_registry_from_mappings(abi_json_mappings, chain_id.unwrap_or(1));
+        eprintln!(
+            "Successfully registered {}/{} ABI mappings\n",
+            valid_count,
+            abi_json_mappings.len()
+        );
+        options.abi_registry = Some(Arc::new(registry));
+    }
 
     let registry = create_registry();
     let signable_payload_str = registry.convert_transaction(&registry_chain, raw_tx, options);
@@ -263,15 +355,34 @@ fn parse_and_display(
 /// - A chain ID number (e.g., 1, 137, 42161)
 /// - A canonical network name (e.g., `ETHEREUM_MAINNET`, `POLYGON_MAINNET`)
 ///
-/// Returns `None` if no network is specified.
+/// Defaults to `ETHEREUM_MAINNET` if no network is specified for Ethereum chains.
+/// Returns `None` if no network is specified for non-Ethereum chains.
 /// Prints an error and exits if the network identifier is invalid.
 fn create_chain_metadata(chain: &Chain, network: Option<String>) -> Option<ChainMetadata> {
-    let network = network?;
+    // Default to Ethereum Mainnet for Ethereum chains if no network specified
+    let network = match network {
+        Some(n) => n,
+        None => {
+            match chain {
+                Chain::Ethereum => {
+                    eprintln!(
+                        "Warning: No network specified, defaulting to ETHEREUM_MAINNET (chain_id: 1)"
+                    );
+                    "ETHEREUM_MAINNET".to_string()
+                }
+                _ => return None, // Other chains require explicit network
+            }
+        }
+    };
 
     // Parse and validate the network identifier
     let Some(network_id) = parse_network(&network) else {
         eprintln!(
-            "Error: Invalid network '{network}'. Use a chain ID (e.g., 1, 137) or name (e.g., ETHEREUM_MAINNET, POLYGON_MAINNET)"
+            "Error: Invalid network '{network}'. Supported formats:\n\
+             - Chain ID (numeric): 1 (Ethereum), 137 (Polygon), 42161 (Arbitrum)\n\
+             - Canonical name: ETHEREUM_MAINNET, POLYGON_MAINNET, ARBITRUM_MAINNET\n\
+             \n\
+             Run with --help for full list of supported networks."
         );
         std::process::exit(1);
     };
@@ -305,15 +416,16 @@ impl Cli {
         let args = Args::parse();
 
         let chain = parse_chain(&args.chain);
-        let metadata = create_chain_metadata(&chain, args.network);
+        let chain_metadata = create_chain_metadata(&chain, args.network);
 
         let options = VisualSignOptions {
             decode_transfers: true,
             transaction_name: None,
-            metadata,
+            metadata: chain_metadata,
             developer_config: Some(DeveloperConfig {
                 allow_signed_transactions: true,
             }),
+            abi_registry: None,
         };
 
         parse_and_display(
@@ -322,6 +434,7 @@ impl Cli {
             options,
             args.output,
             args.condensed_only,
+            &args.abi_json_mappings,
         );
     }
 }

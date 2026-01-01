@@ -186,6 +186,50 @@ pub fn parse_network(input: &str) -> Option<String> {
     }
 }
 
+/// Extracts chain_id from ChainMetadata
+///
+/// Returns the chain_id from metadata, or None if metadata is not provided or invalid.
+/// The CLI can apply its own defaults (e.g., Ethereum Mainnet), while the gRPC path
+/// can fallback to the transaction's chain_id.
+///
+/// # Arguments
+/// * `chain_metadata` - Optional ChainMetadata from VisualSignOptions
+///
+/// # Returns
+/// Some(chain_id) if valid metadata is provided, None otherwise
+///
+/// # Examples
+/// ```ignore
+/// use visualsign_ethereum::networks::extract_chain_id_from_metadata;
+/// use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata};
+///
+/// let metadata = ChainMetadata {
+///     metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+///         network_id: Some("POLYGON_MAINNET".to_string()),
+///         abi: None,
+///     })),
+/// };
+///
+/// let chain_id = extract_chain_id_from_metadata(Some(&metadata));
+/// assert_eq!(chain_id, Some(137));
+/// ```
+pub fn extract_chain_id_from_metadata(
+    chain_metadata: Option<&generated::parser::ChainMetadata>,
+) -> Option<u64> {
+    use generated::parser::chain_metadata;
+
+    let metadata = chain_metadata?;
+    let inner_metadata = metadata.metadata.as_ref()?;
+
+    match inner_metadata {
+        chain_metadata::Metadata::Ethereum(eth_metadata) => {
+            let network_id = eth_metadata.network_id.as_ref()?;
+            network_id_to_chain_id(network_id)
+        }
+        chain_metadata::Metadata::Solana(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::fmt::{format_ether, format_gwei};
 use crate::registry::ContractType;
+use crate::visualizer::CalldataVisualizer;
 use alloy_consensus::{Transaction as _, TxEnvelope, TxType, TypedTransaction};
 use alloy_rlp::{Buf, Decodable};
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
@@ -16,9 +17,13 @@ use visualsign::{
     },
 };
 
+pub mod abi_decoder;
+pub mod abi_registry;
 pub mod context;
 pub mod contracts;
+pub mod embedded_abis;
 pub mod fmt;
+pub mod grpc_abi;
 pub mod networks;
 pub mod protocols;
 pub mod registry;
@@ -216,12 +221,12 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
             TxType::Legacy | TxType::Eip1559 => true,
         };
         if is_supported {
-            return Ok(convert_to_visual_sign_payload(
+            return convert_to_visual_sign_payload(
                 transaction,
                 options,
                 &layered_registry,
                 &self.visualizer_registry,
-            ));
+            );
         }
         Err(VisualSignError::DecodeError(format!(
             "Unsupported transaction type: {}",
@@ -373,18 +378,47 @@ fn convert_to_visual_sign_payload(
     options: VisualSignOptions,
     layered_registry: &LayeredRegistry<registry::ContractRegistry>,
     visualizer_registry: &visualizer::EthereumVisualizerRegistry,
-) -> SignablePayload {
-    // Extract chain ID to determine the network
-    let chain_id = transaction.chain_id();
+) -> Result<SignablePayload, VisualSignError> {
+    // Determine chain ID: prioritize metadata, fallback to transaction, default to mainnet for legacy txs
+    let chain_id = if let Some(metadata_chain_id) =
+        networks::extract_chain_id_from_metadata(options.metadata.as_ref())
+    {
+        // Validate against transaction if present
+        if let Some(tx_chain_id) = transaction.chain_id() {
+            if tx_chain_id != metadata_chain_id {
+                eprintln!(
+                    "Warning: Transaction chain_id ({tx_chain_id}) differs from metadata chain_id ({metadata_chain_id}). Using metadata."
+                );
+            }
+        }
+        metadata_chain_id
+    } else if let Some(tx_chain_id) = transaction.chain_id() {
+        // No metadata provided, use transaction's chain_id
+        tx_chain_id
+    } else if matches!(transaction, TypedTransaction::Legacy(_)) {
+        // Legacy transaction without chain_id (pre-EIP-155), default to Ethereum Mainnet
+        1
+    } else {
+        // Non-legacy transaction must have chain_id
+        return Err(VisualSignError::DecodeError(
+            "Unable to determine chain_id: no metadata provided and transaction does not contain chain_id".to_string()
+        ));
+    };
 
-    let chain_name = networks::get_network_name(chain_id);
+    // Try to extract AbiRegistry from options
+    let abi_registry = options
+        .abi_registry
+        .as_ref()
+        .and_then(|any_reg| any_reg.downcast_ref::<abi_registry::AbiRegistry>());
+
+    let network_name = networks::get_network_name(Some(chain_id));
 
     let mut fields = vec![SignablePayloadField::TextV2 {
         common: SignablePayloadFieldCommon {
-            fallback_text: chain_name.clone(),
+            fallback_text: network_name.clone(),
             label: "Network".to_string(),
         },
-        text_v2: SignablePayloadFieldTextV2 { text: chain_name },
+        text_v2: SignablePayloadFieldTextV2 { text: network_name },
     }];
     if let Some(to) = transaction.to() {
         fields.push(SignablePayloadField::AddressV2 {
@@ -457,7 +491,7 @@ fn convert_to_visual_sign_payload(
         let mut input_fields: Vec<SignablePayloadField> = Vec::new();
 
         // Try to visualize using the registered visualizers
-        let chain_id_val = chain_id.unwrap_or(1);
+        let chain_id_val = chain_id;
         if let Some(to_address) = transaction.to() {
             if let Some(contract_type) =
                 layered_registry.lookup(|r| r.get_contract_type(chain_id_val, to_address))
@@ -496,6 +530,20 @@ fn convert_to_visual_sign_payload(
             }
         }
 
+        // Try dynamic ABI visualization if available
+        if input_fields.is_empty() {
+            if let (Some(to_address), Some(abi_reg)) = (transaction.to(), abi_registry) {
+                let chain_id_val = chain_id;
+                if let Some(abi) = abi_reg.get_abi_for_address(chain_id_val, to_address) {
+                    if let Some(field) = (contracts::core::DynamicAbiVisualizer::new(abi))
+                        .visualize_calldata(input, chain_id_val, None)
+                    {
+                        input_fields.push(field);
+                    }
+                }
+            }
+        }
+
         // Fallback: Try ERC20 if decode_transfers is enabled
         if input_fields.is_empty() && options.decode_transfers {
             if let Some(field) = (contracts::core::ERC20Visualizer {}).visualize_tx_commands(input)
@@ -513,7 +561,13 @@ fn convert_to_visual_sign_payload(
     let title = options
         .transaction_name
         .unwrap_or_else(|| "Ethereum Transaction".to_string());
-    SignablePayload::new(0, title, None, fields, "EthereumTx".to_string())
+    Ok(SignablePayload::new(
+        0,
+        title,
+        None,
+        fields,
+        "EthereumTx".to_string(),
+    ))
 }
 
 // Public API functions for ease of use
@@ -701,6 +755,7 @@ mod tests {
             transaction_name: Some("Custom Transaction Title".to_string()),
             metadata: None,
             developer_config: None,
+            abi_registry: None,
         };
         let payload = transaction_to_visual_sign(tx, options).unwrap();
 
@@ -928,6 +983,7 @@ mod tests {
                     transaction_name: Some("Test Transaction".to_string()),
                     metadata: None,
                     developer_config: None,
+                    abi_registry: None,
                 }
             ),
             Ok(SignablePayload::new(
