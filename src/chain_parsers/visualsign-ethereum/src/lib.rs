@@ -379,7 +379,7 @@ fn convert_to_visual_sign_payload(
     layered_registry: &LayeredRegistry<registry::ContractRegistry>,
     visualizer_registry: &visualizer::EthereumVisualizerRegistry,
 ) -> Result<SignablePayload, VisualSignError> {
-    // Determine chain ID: prioritize metadata, fallback to transaction
+    // Determine chain ID: prioritize metadata, fallback to transaction, default to mainnet for legacy txs
     let chain_id = if let Some(metadata_chain_id) =
         networks::extract_chain_id_from_metadata(options.metadata.as_ref())
     {
@@ -395,8 +395,11 @@ fn convert_to_visual_sign_payload(
     } else if let Some(tx_chain_id) = transaction.chain_id() {
         // No metadata provided, use transaction's chain_id
         tx_chain_id
+    } else if matches!(transaction, TypedTransaction::Legacy(_)) {
+        // Legacy transaction without chain_id (pre-EIP-155), default to Ethereum Mainnet
+        1
     } else {
-        // Neither metadata nor transaction provides chain_id
+        // Non-legacy transaction must have chain_id
         return Err(VisualSignError::DecodeError(
             "Unable to determine chain_id: no metadata provided and transaction does not contain chain_id".to_string()
         ));
