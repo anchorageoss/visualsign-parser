@@ -299,7 +299,7 @@ fn build_abi_registry_from_mappings(
 /// Parse IDL mapping format: "Name:ProgramId:/path/to/file.json"
 ///
 /// Splits from the right to handle file paths containing colons (e.g., Windows paths
-/// like "C:/path/to/file.json"). The last colon separates the file path, while the
+/// like `C:/path/to/file.json`). The last colon separates the file path, while the
 /// first colon separates the name from the program ID.
 ///
 /// Returns: (`idl_name`, `program_id_str`, `file_path`)
@@ -466,10 +466,8 @@ fn create_chain_metadata(
         Some(network_id)
     } else if chain == &Chain::Ethereum {
         // Default to Ethereum Mainnet for Ethereum chains if no network specified
-        eprintln!(
-            "Warning: No network specified, defaulting to ETHEREUM_MAINNET (chain_id: 1)"
-        );
-        Some(parse_network("ETHEREUM_MAINNET").unwrap())
+        eprintln!("Warning: No network specified, defaulting to ETHEREUM_MAINNET (chain_id: 1)");
+        Some(parse_network("ETHEREUM_MAINNET").expect("ETHEREUM_MAINNET should always be valid"))
     } else {
         None
     };

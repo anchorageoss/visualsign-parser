@@ -107,11 +107,13 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> HashMap<String, (String,
                 .iter()
                 .map(|(program_id, idl)| {
                     // Use program_name from proto if available, otherwise extract from IDL JSON
-                    let name = idl.program_name.clone().or_else(|| {
-                        extract_name_from_idl_json(&idl.value)
-                    }).unwrap_or_else(|| {
-                        format!("Program {}", &program_id[..8.min(program_id.len())])
-                    });
+                    let name = idl
+                        .program_name
+                        .clone()
+                        .or_else(|| extract_name_from_idl_json(&idl.value))
+                        .unwrap_or_else(|| {
+                            format!("Program {}", &program_id[..8.min(program_id.len())])
+                        });
                     (program_id.clone(), (idl.value.clone(), name))
                 })
                 .collect()
