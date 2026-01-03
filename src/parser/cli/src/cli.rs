@@ -60,7 +60,7 @@ struct Args {
     #[arg(
         long = "idl-json-mappings",
         value_name = "NAME:PROGRAM_ID:PATH",
-        help = "Map custom IDL JSON file to Solana program. Format: IdlName:base58_program_id:/path/to/idl.json. Can be used multiple times"
+        help = "Map custom IDL JSON file to Solana program. Format: IdlName:/path/to/idl.json:base58_program_id. Can be used multiple times"
     )]
     idl_json_mappings: Vec<String>,
 }
