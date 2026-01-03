@@ -1,10 +1,12 @@
 use crate::chains;
+use crate::mapping_parser;
 use chains::parse_chain;
 use clap::Parser;
 use generated::parser::{
-    ChainMetadata, EthereumMetadata, SolanaMetadata, chain_metadata::Metadata,
+    ChainMetadata, EthereumMetadata, SolanaIdlType, SolanaMetadata, chain_metadata::Metadata,
 };
 use parser_app::registry::create_registry;
+use std::collections::HashMap;
 use std::sync::Arc;
 use visualsign::registry::Chain;
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
@@ -54,6 +56,13 @@ struct Args {
         help = "Map custom ABI JSON file to contract address. Format: AbiName:/path/to/abi.json:0xAddress. Can be used multiple times"
     )]
     abi_json_mappings: Vec<String>,
+
+    #[arg(
+        long = "idl-json-mappings",
+        value_name = "IDL_NAME:FILE_PATH:PROGRAM_ID",
+        help = "Map custom IDL JSON file to Solana program. Format: IdlName:/path/to/idl.json:base58_program_id. Can be used multiple times"
+    )]
+    idl_json_mappings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -230,26 +239,21 @@ fn common_label(field: &SignablePayloadField) -> String {
     }
 }
 
-/// Parses full ABI mapping with file path: "<AbiName:/path/to/file.json:0xAddress>"
+/// Parses full ABI mapping with file path: `<Name:/path/to/abi.json:ContractAddress>`
+///
+/// Returns: (`abi_name`, `file_path`, `contract_address`)
 fn parse_abi_file_mapping(mapping_str: &str) -> Option<(String, String, String)> {
-    let parts: Vec<&str> = mapping_str.rsplitn(2, ':').collect();
-    if parts.len() != 2 {
-        return None;
+    match mapping_parser::parse_mapping(mapping_str) {
+        Ok(components) => Some((components.name, components.path, components.identifier)),
+        Err(e) => {
+            eprintln!("Error parsing ABI mapping: {e}");
+            eprintln!("Expected format: Name:/path/to/abi.json:ContractAddress");
+            eprintln!(
+                "Example: UniswapV2:/home/user/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
+            );
+            None
+        }
     }
-
-    let address_str = parts[0];
-    let rest = parts[1];
-
-    let name_file_parts: Vec<&str> = rest.splitn(2, ':').collect();
-    if name_file_parts.len() != 2 {
-        return None;
-    }
-
-    let abi_name = name_file_parts[0].to_string();
-    let file_path = name_file_parts[1].to_string();
-    let address_str = address_str.to_string();
-
-    Some((abi_name, file_path, address_str))
 }
 
 /// Builds an ABI registry from CLI mappings with file paths
@@ -286,6 +290,76 @@ fn build_abi_registry_from_mappings(
     }
 
     (registry, valid_count)
+}
+
+/// Parse IDL mapping format: `<Name:/path/to/file.json:ProgramId>`
+///
+/// Splits from the right to handle file paths containing colons (e.g., Windows paths
+/// like `C:/path/to/file.json`). The last colon separates the program ID, the middle
+/// section is the file path, and the first part is the name.
+///
+/// Returns: (`idl_name`, `program_id_str`, `file_path`)
+fn parse_idl_file_mapping(mapping_str: &str) -> Option<(String, String, String)> {
+    match mapping_parser::parse_mapping(mapping_str) {
+        Ok(components) => Some((components.name, components.identifier, components.path)),
+        Err(e) => {
+            eprintln!("Error parsing IDL mapping: {e}");
+            eprintln!("Expected format: Name:/path/to/idl.json:ProgramId");
+            eprintln!(
+                "Example: JupiterSwap:/home/user/jupiter.json:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
+            );
+            None
+        }
+    }
+}
+
+/// Load IDL JSON files and create `HashMap` for `SolanaMetadata`
+fn build_idl_mappings_from_files(
+    idl_json_mappings: &[String],
+) -> (HashMap<String, generated::parser::Idl>, usize) {
+    let mut mappings = HashMap::new();
+    let mut valid_count = 0;
+
+    for mapping in idl_json_mappings {
+        match parse_idl_file_mapping(mapping) {
+            Some((idl_name, program_id, file_path)) => match load_idl_from_file(&file_path) {
+                Ok(idl_json) => {
+                    let idl = generated::parser::Idl {
+                        value: idl_json,
+                        idl_type: Some(SolanaIdlType::Anchor as i32),
+                        idl_version: None,
+                        signature: None,
+                        program_name: Some(idl_name.clone()),
+                    };
+                    mappings.insert(program_id.clone(), idl);
+                    valid_count += 1;
+                    eprintln!(
+                        "  Loaded IDL '{idl_name}' from {file_path} and mapped to {program_id}"
+                    );
+                }
+                Err(e) => {
+                    eprintln!("  Warning: Failed to load IDL '{idl_name}' from '{file_path}': {e}");
+                }
+            },
+            None => {
+                eprintln!(
+                    "  Warning: Invalid IDL mapping '{mapping}' (expected format: Name:ProgramId:/path/to/file.json)"
+                );
+            }
+        }
+    }
+
+    (mappings, valid_count)
+}
+
+/// Load IDL JSON file from disk and validate it
+fn load_idl_from_file(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let json_str = std::fs::read_to_string(file_path)?;
+
+    // Validate it's valid JSON
+    let _: serde_json::Value = serde_json::from_str(&json_str)?;
+
+    Ok(json_str)
 }
 
 fn parse_and_display(
@@ -356,47 +430,67 @@ fn parse_and_display(
 /// - A canonical network name (e.g., `ETHEREUM_MAINNET`, `POLYGON_MAINNET`)
 ///
 /// Defaults to `ETHEREUM_MAINNET` if no network is specified for Ethereum chains.
-/// Returns `None` if no network is specified for non-Ethereum chains.
+/// Returns `None` if no network is specified and no IDL mappings are provided for Solana.
 /// Prints an error and exits if the network identifier is invalid.
-fn create_chain_metadata(chain: &Chain, network: Option<String>) -> Option<ChainMetadata> {
-    // Default to Ethereum Mainnet for Ethereum chains if no network specified
-    let network = match network {
-        Some(n) => n,
-        None => {
-            match chain {
-                Chain::Ethereum => {
-                    eprintln!(
-                        "Warning: No network specified, defaulting to ETHEREUM_MAINNET (chain_id: 1)"
-                    );
-                    "ETHEREUM_MAINNET".to_string()
-                }
-                _ => return None, // Other chains require explicit network
-            }
+fn create_chain_metadata(
+    chain: &Chain,
+    network: Option<String>,
+    idl_json_mappings: &[String],
+) -> Option<ChainMetadata> {
+    // Parse network if provided, with Ethereum defaulting logic
+    let network_id = if let Some(network) = network {
+        let Some(network_id) = parse_network(&network) else {
+            eprintln!(
+                "Error: Invalid network '{network}'. Supported formats:\n\
+                 - Chain ID (numeric): 1 (Ethereum), 137 (Polygon), 42161 (Arbitrum)\n\
+                 - Canonical name: ETHEREUM_MAINNET, POLYGON_MAINNET, ARBITRUM_MAINNET\n\
+                 \n\
+                 Run with --help for full list of supported networks."
+            );
+            std::process::exit(1);
+        };
+        Some(network_id)
+    } else if chain == &Chain::Ethereum {
+        // Default to Ethereum Mainnet for Ethereum chains if no network specified
+        eprintln!("Warning: No network specified, defaulting to ETHEREUM_MAINNET (chain_id: 1)");
+        Some(parse_network("ETHEREUM_MAINNET").expect("ETHEREUM_MAINNET should always be valid"))
+    } else {
+        None
+    };
+
+    let metadata = if chain == &Chain::Solana {
+        // Build IDL mappings if provided
+        let idl_mappings = if idl_json_mappings.is_empty() {
+            HashMap::new()
+        } else {
+            eprintln!("Loading custom IDLs:");
+            let (mappings, valid_count) = build_idl_mappings_from_files(idl_json_mappings);
+            eprintln!(
+                "Successfully loaded {}/{} IDL mappings\n",
+                valid_count,
+                idl_json_mappings.len()
+            );
+            mappings
+        };
+
+        // Only create metadata if we have network or IDL mappings
+        if network_id.is_none() && idl_mappings.is_empty() {
+            return None;
         }
-    };
 
-    // Parse and validate the network identifier
-    let Some(network_id) = parse_network(&network) else {
-        eprintln!(
-            "Error: Invalid network '{network}'. Supported formats:\n\
-             - Chain ID (numeric): 1 (Ethereum), 137 (Polygon), 42161 (Arbitrum)\n\
-             - Canonical name: ETHEREUM_MAINNET, POLYGON_MAINNET, ARBITRUM_MAINNET\n\
-             \n\
-             Run with --help for full list of supported networks."
-        );
-        std::process::exit(1);
-    };
-
-    let metadata = match chain {
-        Chain::Solana => Metadata::Solana(SolanaMetadata {
-            network_id: Some(network_id),
+        Metadata::Solana(SolanaMetadata {
+            network_id,
             idl: None,
-        }),
+            idl_mappings,
+        })
+    } else {
         // For Ethereum and other chains, use EthereumMetadata structure
-        _ => Metadata::Ethereum(EthereumMetadata {
+        // Ethereum requires network_id
+        let network_id = network_id?;
+        Metadata::Ethereum(EthereumMetadata {
             network_id: Some(network_id),
             abi: None,
-        }),
+        })
     };
 
     Some(ChainMetadata {
@@ -416,7 +510,7 @@ impl Cli {
         let args = Args::parse();
 
         let chain = parse_chain(&args.chain);
-        let chain_metadata = create_chain_metadata(&chain, args.network);
+        let chain_metadata = create_chain_metadata(&chain, args.network, &args.idl_json_mappings);
 
         let options = VisualSignOptions {
             decode_transfers: true,

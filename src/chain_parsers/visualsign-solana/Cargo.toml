@@ -6,9 +6,13 @@ edition = "2024"
 [dependencies]
 
 tracing = { workspace = true }
-# After https://github.com/tkhq/solana-parser/pull/13 was merged we found that it was looking at files directly, which breaks tests but works in the enclave environment.
-solana_parser = { git = "https://github.com/tkhq/solana-parser.git", rev = "1703030a0876b170c299d143247d808e2485a7bf" }
+# Using custom fork for IDL-based instruction parsing features not yet in upstream
+# Features: parse_instruction_with_idl, CustomIdlConfig, decode_idl_data
+# Tracking: https://github.com/tkhq/solana-parser/pull/20
+solana_parser = { git = "https://github.com/prasincs/solana-parser.git", rev = "8248d99e42ce8a56ad440ed9b2201607feb1a150" }
 visualsign = { workspace = true }
+generated = { path = "../../generated" }
+serde_json = { workspace = true }
 hex = "0.4.3"
 base64 = "0.22.1"
 borsh = "1.5.5"

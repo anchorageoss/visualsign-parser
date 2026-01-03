@@ -265,12 +265,14 @@ fn test_solana_idl_with_ed25519_signature() {
         idl_type: Some(SolanaIdlType::Anchor as i32),
         idl_version: Some("0.30.0".to_string()),
         signature: Some(signature_metadata.clone()),
+        program_name: None,
     };
 
     // Create ParseRequest with SolanaMetadata containing signed IDL
     let solana_metadata = SolanaMetadata {
         network_id: None,
         idl: Some(idl),
+        idl_mappings: Default::default(),
     };
     let parse_request = ParseRequest {
         unsigned_payload: "0x".to_string(),
@@ -405,6 +407,7 @@ fn test_metadata_extensibility() {
         idl_type: Some(SolanaIdlType::Anchor as i32),
         idl_version: Some("0.1.0".to_string()),
         signature: Some(signature_metadata.clone()),
+        program_name: None,
     };
 
     // Verify original signature works

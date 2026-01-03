@@ -104,6 +104,9 @@ message SolanaMetadata {
   // Network identifier string (e.g., "SOLANA_MAINNET", "SOLANA_DEVNET")
   optional string network_id = 2;
   optional Idl idl = 1;
+  // Map of program_id (base58 string) to IDL definitions
+  // Allows wallet to provide multiple IDLs, one per program
+  map<string, Idl> idl_mappings = 3;
 }
 
 message Abi {
@@ -116,6 +119,7 @@ message Idl {
   optional SolanaIdlType idl_type = 2;      // Type of Solana IDL (e.g., Anchor)
   optional string idl_version = 3;          // IDL version (e.g., "0.30.0")
   optional SignatureMetadata signature = 4; // Optional IDL signature with metadata
+  optional string program_name = 5;         // Wallet-provided name for the program (e.g., "JupiterLend")
 }
 
 enum SolanaIdlType {

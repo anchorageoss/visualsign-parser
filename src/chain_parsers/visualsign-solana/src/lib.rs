@@ -1,4 +1,5 @@
 mod core;
+mod idl;
 mod integrations;
 mod presets;
 pub mod utils;
