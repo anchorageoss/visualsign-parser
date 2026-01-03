@@ -1,4 +1,5 @@
 use crate::chains;
+use crate::mapping_parser;
 use chains::parse_chain;
 use clap::Parser;
 use generated::parser::{
@@ -238,26 +239,21 @@ fn common_label(field: &SignablePayloadField) -> String {
     }
 }
 
-/// Parses full ABI mapping with file path: "<AbiName:/path/to/file.json:0xAddress>"
+/// Parses full ABI mapping with file path: `<Name:/path/to/abi.json:ContractAddress>`
+///
+/// Returns: (`abi_name`, `file_path`, `contract_address`)
 fn parse_abi_file_mapping(mapping_str: &str) -> Option<(String, String, String)> {
-    let parts: Vec<&str> = mapping_str.rsplitn(2, ':').collect();
-    if parts.len() != 2 {
-        return None;
+    match mapping_parser::parse_mapping(mapping_str) {
+        Ok(components) => Some((components.name, components.path, components.identifier)),
+        Err(e) => {
+            eprintln!("Error parsing ABI mapping: {e}");
+            eprintln!("Expected format: Name:/path/to/abi.json:ContractAddress");
+            eprintln!(
+                "Example: UniswapV2:/home/user/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
+            );
+            None
+        }
     }
-
-    let address_str = parts[0];
-    let rest = parts[1];
-
-    let name_file_parts: Vec<&str> = rest.splitn(2, ':').collect();
-    if name_file_parts.len() != 2 {
-        return None;
-    }
-
-    let abi_name = name_file_parts[0].to_string();
-    let file_path = name_file_parts[1].to_string();
-    let address_str = address_str.to_string();
-
-    Some((abi_name, file_path, address_str))
 }
 
 /// Builds an ABI registry from CLI mappings with file paths
@@ -296,35 +292,25 @@ fn build_abi_registry_from_mappings(
     (registry, valid_count)
 }
 
-/// Parse IDL mapping format: "Name:ProgramId:/path/to/file.json"
+/// Parse IDL mapping format: `<Name:/path/to/file.json:ProgramId>`
 ///
 /// Splits from the right to handle file paths containing colons (e.g., Windows paths
-/// like `C:/path/to/file.json`). The last colon separates the file path, while the
-/// first colon separates the name from the program ID.
+/// like `C:/path/to/file.json`). The last colon separates the program ID, the middle
+/// section is the file path, and the first part is the name.
 ///
 /// Returns: (`idl_name`, `program_id_str`, `file_path`)
 fn parse_idl_file_mapping(mapping_str: &str) -> Option<(String, String, String)> {
-    // Split from the right to get the file path (last : separator).
-    // This is necessary for Windows compatibility, as file paths may contain colons (e.g., "C:/path/to/file.json").
-    let (remainder, file_path) = mapping_str.rsplit_once(':')?;
-
-    // Split the remainder from the left to get name and program_id
-    let (idl_name, program_id) = remainder.split_once(':')?;
-
-    let idl_name = idl_name.trim();
-    let program_id = program_id.trim();
-    let file_path = file_path.trim();
-
-    // Basic validation
-    if idl_name.is_empty() || program_id.is_empty() || file_path.is_empty() {
-        return None;
+    match mapping_parser::parse_mapping(mapping_str) {
+        Ok(components) => Some((components.name, components.identifier, components.path)),
+        Err(e) => {
+            eprintln!("Error parsing IDL mapping: {e}");
+            eprintln!("Expected format: Name:/path/to/idl.json:ProgramId");
+            eprintln!(
+                "Example: JupiterSwap:/home/user/jupiter.json:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
+            );
+            None
+        }
     }
-
-    Some((
-        idl_name.to_string(),
-        program_id.to_string(),
-        file_path.to_string(),
-    ))
 }
 
 /// Load IDL JSON files and create `HashMap` for `SolanaMetadata`

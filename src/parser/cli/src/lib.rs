@@ -8,3 +8,5 @@
 pub mod chains;
 /// Command-line interface functionality and types.
 pub mod cli;
+/// Common mapping parser for ABI and IDL file mappings.
+pub mod mapping_parser;
