@@ -2,6 +2,8 @@
 
 Rust-based transaction parser that converts raw blockchain transactions into human-readable VisualSign payloads.
 
+[Documentation](https://visualsign.dev)
+
 ## What is VisualSign?
 
 VisualSign transforms opaque transaction data (hex strings, base64 blobs) into structured, human-readable JSONs that clearly decode transaction details. See the [full documentation](https://anchorageoss.github.io/visualsign-display).
