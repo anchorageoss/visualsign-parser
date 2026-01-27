@@ -1,0 +1,124 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "maple",
+  "name": "VisualSign",
+  "appearance": {
+    "default": "dark"
+  },
+  "colors": {
+    "primary": "#5580F6",
+    "light": "#7799F8",
+    "dark": "#3D68E0"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Overview",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "vision-roadmap",
+              "about"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Wallet Integration",
+        "groups": [
+          {
+            "group": "Wallet Integration",
+            "pages": [
+              "getting-started",
+              "security-model",
+              "verification",
+              "api-reference"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Adding Visualizations",
+        "groups": [
+          {
+            "group": "Guide",
+            "pages": [
+              "creating-visualizations",
+              "field-types",
+              "parser-cli"
+            ]
+          },
+          {
+            "group": "Supported Chains",
+            "pages": [
+              "chains/ethereum",
+              "chains/solana",
+              "chains/sui",
+              "chains/tron"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "contributing/contributing-visualization",
+              "contributing/testing-visualizations"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Chain Development",
+        "groups": [
+          {
+            "group": "Chain Development",
+            "pages": [
+              "chain-modules",
+              "adding-new-chain",
+              "contributing/project-structure",
+              "contributing/best-practices",
+              "contributing/integration-testing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Playground",
+        "groups": [
+          {
+            "group": "Playground",
+            "pages": [
+              "playground"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "primary": {
+      "type": "button",
+      "label": "GitHub",
+      "href": "https://github.com/anchorageoss/visualsign-parser"
+    }
+  },
+  "contextual": {
+    "options": [
+     "copy",
+     "view",
+     "chatgpt",
+     "claude",
+     "perplexity",
+     "mcp",
+     "cursor",
+     "vscode"
+   ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/anchorageoss"
+    }
+  }
+}

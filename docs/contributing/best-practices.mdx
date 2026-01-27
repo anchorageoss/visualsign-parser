@@ -1,0 +1,99 @@
+---
+title: Best Practices
+description: Dependency management, testing, and code organization guidelines
+---
+
+The project is in active development, and some specifics may change. This document outlines current guidelines for contributions.
+
+## What is VisualSign parser?
+
+VisualSign Parser is a platform for decoding various blockchains in Rust. It is deployed as a single binary and works with potentially conflicting dependencies from different blockchain ecosystems. The project is split into packages with the `visualsign` package serving as a common "core" that `chain_parsers` use.
+
+## Core principles
+
+### Minimize dependencies aggressively
+
+Every dependency introduces supply chain risk and increases build times. While this can be mitigated by splitting deployments into different binaries, the fundamental problem remains.
+
+**Strategies:**
+- Remove dependencies when possible
+- Replicate simpler functionalities rather than importing heavy libraries
+- For development and test builds, you can be more liberal with `[dev-dependencies]`
+
+**Checking Dependencies:**
+
+```bash
+# View dependency tree
+cargo tree
+
+# View dependency graph for a specific package
+cargo depgraph --root visualsign-ethereum
+```
+
+**Best practice:** If the complexity and transitive dependency count is too high, consider re-implementing in a simpler way and use the external dependency only in tests for validation.
+
+### Test thoroughly
+
+Ensure all changes and refactors are tested thoroughly. Use tools like `cargo-tarpaulin` for test coverage data:
+
+```bash
+cargo tarpaulin --workspace
+```
+
+### Respect blockchain conventions
+
+Our experience with dozens of blockchains has shown there's no one-size-fits-all approach to encoding. Instead of forcing a particular default everywhere:
+
+- Make pragmatic defaults that don't conflict
+- Let blockchains set conventions that make sense for them
+- Keep `visualsign` core lean and minimally opinionated
+
+This approach allows the library to work with diverse chains like:
+- Ethereum (RLP and hex)
+- Solana (Base58 or Base64)
+- Future chains with different encodings
+
+## Project structure
+
+### Monolithic binary with workspace
+
+We deploy a monolithic binary with many different `chain_parsers` that implement chain-specific dependencies. While Rust is more forgiving than languages like Go, overlapping dependencies can still cause conflicts.
+
+### Dependency guidelines
+
+1. **Don't add blockchain-specific dependencies to the `parser` crate.** These belong in the `chain_parsers` crates for:
+   - Locality of context
+   - Clear dependency management
+
+2. **Evaluate necessity.** Is the library truly essential, or can it be replicated and imported as a `dev-dependency`?
+
+3. **Integration tests are required.** Every chain should have at least one high-level integration test that validates baseline functionality (e.g., decoding a native token transfer).
+
+4. **Minimize features.** Keep dependencies to a minimum and only enable the features you need. Avoid feature bloat.
+
+### Code organization
+
+We've found that putting everything in `lib.rs` becomes unwieldy quickly. General guidelines:
+
+- **Layer dependencies and context** - solve for basic constructs first
+- **Create clearly named modules** - split into files or directories when files exceed ~2000 lines
+- **General to specific** - organize from most general to most specific implementations
+
+### Backwards compatibility
+
+Once the toolchain is fully integrated into production wallets, any output changes must be thoroughly examined. Display values, ordering, and formatting should remain stable between versions.
+
+## Writing good tests
+
+Test coverage within chains is a great model to aim for. Build incrementally:
+
+1. Start with basic transaction parsing tests
+2. Add tests for each transaction type
+3. Include edge cases and error conditions
+4. Validate against real-world transaction data
+
+## Related documentation
+
+- [Project Structure](./project-structure) - Architecture and dependency guidelines
+- [Integration Testing](./integration-testing) - Testing framework proposal
+- [Adding a New Chain](../adding-new-chain) - Step-by-step chain integration guide

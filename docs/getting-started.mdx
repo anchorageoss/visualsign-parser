@@ -1,0 +1,264 @@
+---
+title: Getting Started
+description: Integrate the VisualSign parser into your wallet or application
+---
+
+## Architecture overview
+
+```mermaid
+flowchart LR
+    WA["Wallet App"] --> PH["Parser Host (gRPC)"]
+    PH --> EN["Enclave (Parser)"]
+    WA --> VL["Verification Library"]
+    EN --> VL
+```
+
+## Integration steps
+
+### 1. Connect to parser service
+
+The parser exposes a gRPC service. You can connect using any gRPC client library.
+
+**Proto Definition:**
+```protobuf
+service ParserService {
+  rpc Parse(ParseRequest) returns (ParseResponse);
+}
+
+message ParseRequest {
+  string unsigned_payload = 1;  // Base64 or hex encoded transaction
+  Chain chain = 2;              // CHAIN_ETHEREUM, CHAIN_SOLANA, etc.
+  ChainMetadata chain_metadata = 3; // Optional chain-specific data
+}
+```
+
+### 2. Parse transactions
+
+Send raw transactions to the parser:
+
+**Go Example:**
+```go
+import (
+    pb "your-project/parser"
+    "google.golang.org/grpc"
+)
+
+// Connect to parser
+conn, err := grpc.Dial("localhost:44020", grpc.WithInsecure())
+client := pb.NewParserServiceClient(conn)
+
+// Parse transaction
+resp, err := client.Parse(context.Background(), &pb.ParseRequest{
+    UnsignedPayload: "0xf86c80850...", // Your raw transaction
+    Chain: pb.Chain_CHAIN_ETHEREUM,
+})
+
+// Extract VisualSign JSON
+visualSignJSON := resp.ParsedTransaction.Payload.SignablePayload
+```
+
+**JavaScript/TypeScript Example:**
+```typescript
+import { ParserServiceClient } from './generated/parser_grpc_pb';
+import { ParseRequest, Chain } from './generated/parser_pb';
+
+const client = new ParserServiceClient('localhost:44020');
+
+const request = new ParseRequest();
+request.setUnsignedPayload('0xf86c80850...');
+request.setChain(Chain.CHAIN_ETHEREUM);
+
+client.parse(request, (error, response) => {
+    if (!error) {
+        const visualSignJSON = response.getParsedTransaction()
+            .getPayload()
+            .getSignablePayload();
+        // Display to user
+    }
+});
+```
+
+### 3. Verify attestation
+
+**IMPORTANT**: Always verify the enclave attestation before trusting the parsed output.
+
+The parser response includes a signature that must be verified:
+
+```go
+// Verify the signature
+signature := resp.ParsedTransaction.Signature
+publicKey := signature.PublicKey
+message := signature.Message
+sig := signature.Signature
+
+// Verify using P256 ECDSA
+valid := verifyP256Signature(publicKey, message, sig)
+```
+
+### 4. Display to user
+
+Parse the VisualSign JSON and display it in your UI:
+
+```typescript
+const visualSign = JSON.parse(visualSignJSON);
+
+// Display transaction details
+console.log(`Transaction: ${visualSign.Title}`);
+visualSign.Fields.forEach(field => {
+    switch(field.Type) {
+        case 'text_v2':
+            console.log(`${field.Label}: ${field.TextV2.Text}`);
+            break;
+        case 'amount_v2':
+            console.log(`${field.Label}: ${field.AmountV2.Amount} ${field.AmountV2.Abbreviation}`);
+            break;
+        case 'address_v2':
+            console.log(`${field.Label}: ${field.AddressV2.Address}`);
+            break;
+    }
+});
+```
+
+## Chain-specific metadata
+
+### Ethereum - ABI support
+
+For smart contract interactions, provide the ABI:
+
+```go
+request := &pb.ParseRequest{
+    UnsignedPayload: txBytes,
+    Chain: pb.Chain_CHAIN_ETHEREUM,
+    ChainMetadata: &pb.ChainMetadata{
+        Metadata: &pb.ChainMetadata_Ethereum{
+            Ethereum: &pb.EthereumMetadata{
+                Abi: &pb.Abi{
+                    Value: contractABI, // JSON ABI string
+                },
+            },
+        },
+    },
+}
+```
+
+### Solana - IDL support
+
+For Anchor programs, provide the IDL:
+
+```go
+request := &pb.ParseRequest{
+    UnsignedPayload: txBytes,
+    Chain: pb.Chain_CHAIN_SOLANA,
+    ChainMetadata: &pb.ChainMetadata{
+        Metadata: &pb.ChainMetadata_Solana{
+            Solana: &pb.SolanaMetadata{
+                Idl: &pb.Idl{
+                    Value: anchorIDL, // JSON IDL string
+                    IdlType: pb.SolanaIdlType_SOLANA_IDL_TYPE_ANCHOR,
+                },
+            },
+        },
+    },
+}
+```
+
+## Error handling
+
+The parser may return errors for invalid transactions:
+
+```go
+resp, err := client.Parse(ctx, request)
+if err != nil {
+    // Handle gRPC error
+    status := status.Convert(err)
+    log.Printf("Parse failed: %v", status.Message())
+}
+```
+
+## Health checks
+
+Monitor parser health:
+
+```bash
+grpcurl -plaintext -d '{"service":""}' \
+    localhost:44020 grpc.health.v1.Health/Check
+```
+
+## Security considerations
+
+1. **Always verify attestations** - Don't trust parsed output without verification
+2. **Use TLS in production** - Enable TLS for gRPC connections
+3. **Validate signatures** - Check the P256 signature on all responses
+4. **Monitor PCR values** - Keep allowlists updated for enclave measurements
+
+## Example: Complete integration
+
+```go
+package main
+
+import (
+    "context"
+    "encoding/json"
+    "log"
+
+    pb "your-project/parser"
+    "google.golang.org/grpc"
+)
+
+func parseAndDisplayTransaction(rawTx string) error {
+    // Connect to parser
+    conn, err := grpc.Dial("localhost:44020", grpc.WithInsecure())
+    if err != nil {
+        return err
+    }
+    defer conn.Close()
+
+    client := pb.NewParserServiceClient(conn)
+
+    // Parse transaction
+    resp, err := client.Parse(context.Background(), &pb.ParseRequest{
+        UnsignedPayload: rawTx,
+        Chain: pb.Chain_CHAIN_ETHEREUM,
+    })
+    if err != nil {
+        return err
+    }
+
+    // Verify signature
+    sig := resp.ParsedTransaction.Signature
+    if !verifySignature(sig) {
+        return fmt.Errorf("invalid signature")
+    }
+
+    // Parse VisualSign JSON
+    var visualSign map[string]interface{}
+    err = json.Unmarshal([]byte(resp.ParsedTransaction.Payload.SignablePayload), &visualSign)
+    if err != nil {
+        return err
+    }
+
+    // Display to user
+    displayTransaction(visualSign)
+
+    return nil
+}
+```
+
+## Testing
+
+Use the provided test transactions:
+
+**Solana:**
+```bash
+cargo run --bin parser_cli -- --chain solana -t 'AgAAAAAAAA...'
+```
+
+**Ethereum:**
+```bash
+cargo run --bin parser_cli -- --chain ethereum -t '0xf86c808504a817c800...'
+```
+
+## Support
+
+- [GitHub Issues](https://github.com/anchorageoss/visualsign-parser/issues)
+- [Example Implementation](https://github.com/anchorageoss/visualsign-turnkeyclient)

@@ -1,0 +1,205 @@
+---
+title: Vision & Roadmap
+description: Incremental adoption strategy using existing tools and standards
+---
+
+:::note Work in Progress
+This document outlines our vision for how chain_parser crates can help Dapps incrementally build support for visualizing raw transactions, utilizing existing tools, processes, and libraries built by the community.
+:::
+
+## Core principles
+
+Based on our experience building rich first-party interactions, we believe:
+
+1. **Dapp Developers are the best entities** to know what and how they can visualize their interactions, followed by Wallet Developers
+2. **Integration into development workflow is crucial** for adoption of this platform
+
+## Current state of transaction visualization
+
+### Ethereum (before VisualSign)
+
+- **Clearsign with ERC-7730** - Standardized descriptions for smart contract interactions
+- **ABI decoding + enrichment layers** - Basic decoding with additional metadata
+- **Bespoke Dapp support** - Custom implementations per application
+- **Privacy concerns** - Not all Dapps publish ABIs to Etherscan or Sourcify
+
+### Solana (before VisualSign)
+
+- **Anchor IDL support** - Framework-specific interface descriptions
+- **Fragmented ecosystem** - Multiple competing standards
+- **Carbon support** - Limited coverage for some protocols
+- **Missing IDLs** - Not all Dapps publish their interface definitions
+
+## How VisualSign changes this
+
+### Ethereum approach
+
+#### 1. Native ABI support with type safety
+
+ VisualSign supports ABIs with strong type safety using `alloy-sol-types` as first-party support:
+
+```rust
+// Submit Solidity interface to get Rust types
+use alloy_sol_types::sol;
+
+sol! {
+    interface UniswapV3Router {
+        function exactInputSingle(ExactInputSingleParams params)
+            external payable returns (uint256 amountOut);
+    }
+}
+```
+
+This meets developers where they are - working with Solidity interfaces directly rather than ABI.json files.
+
+#### 2. Signed ABI.json from wallets
+
+To address privacy concerns:
+- Dapps can add ABIs directly to their applications
+- Pre-approve by signing the hash of abi.json
+- Third-party services can vet and sign ABIs
+- Maintains security while preserving privacy
+
+#### 3. ClearSign ERC-7730 integration
+
+Building on Ledger's ecosystem work:
+- Embed ERC-7730 JSON directly in visualsign-parser using `include_str!` macro
+- Use git submodules/subtrees for specific vetted commits
+- Pure Rust implementation of ERC-7730 parser and registry
+- Reuse abstractions from first-party approach
+
+### Solana approach
+
+Currently supporting high-priority programs with multiple strategies:
+
+#### 1. VisualSign native approach (ideal)
+
+Similar macro approach to Ethereum's `alloy-sol-types`, though no common standard exists yet.
+
+#### 2. Per-program discriminator mapping
+
+Currently implemented for Jupiter:
+```rust
+// Organize code in modules like jupiter, marinade, etc.
+mod jupiter {
+    pub const SWAP_DISCRIMINATOR: [u8; 8] = [0xc1, 0x20, 0x9b, 0x33, ...];
+
+    pub fn parse_swap(data: &[u8]) -> Result<SwapInstruction> {
+        // Parse without heavy dependencies
+    }
+}
+```
+
+This scales as a fallback for all contracts without introducing dependency overhead.
+
+#### 3. Solana-Parser's IDL parser
+
+Originally our first choice, still viable when rich discriminator mapping isn't available.
+
+#### 4. Signed IDLs and discriminator lists
+
+Adopting similar patterns to Ethereum for security and privacy.
+
+### Sui approach
+
+The Sui parser uses a sophisticated architecture with DApp-specific workspaces:
+
+#### Core architecture
+
+1. **Transaction Processing**:
+   - Accepts BCS-encoded `SenderSignedData` or `TransactionData`
+   - Builds `VisualizerContext` with commands, inputs, sender, and command_index
+   - Attempts to visualize each command in the transaction
+
+2. **Isolated Workspaces**:
+   - Each DApp gets an isolated workspace in the `integration` section
+   - `presets` section contains blueprints for developers
+
+3. **CommandVisualizer Trait**:
+```rust
+trait CommandVisualizer {
+    fn can_handle(&self, context: &VisualizerContext) -> bool;
+    fn visualize_tx_commands(&self, context: &VisualizerContext) -> Result<Visual>;
+}
+```
+
+#### Configuration macro
+
+The `chain_config` macro reduces boilerplate:
+
+```rust
+crate::chain_config! {
+    config CETUS_CONFIG as Config;
+
+    cetus_mainnet => {
+        package_id => 0xb2db7142fa83210a7d78d9c12ac49c043b3cbbd482224fea6e3da00aa5a5ae2d,
+        modules: {
+            pool_script_v2 => PoolScriptV2Functions: {
+                swap_a2b as SwapA2B => SwapA2BIndexes(
+                    amount_out as AmountOut: u64 => 5 => get_amount_out,
+                    max_amount_in as MaxAmountIn: u64 => 6 => get_max_amount_in,
+                    sqrt_price_limit as SqrtPriceLimit: u128 => 7 => get_sqrt_price_limit,
+                ),
+            },
+        }
+    },
+}
+```
+
+The number (e.g., `5`) represents the argument index in the `MoveCall`, letting developers focus on parsing commands rather than writing repetitive getters.
+
+## Graceful degradation and transparency
+
+Each approach handles failures gracefully and transparently:
+- Security-sensitive wallets can require full visualization or fail
+- Expose which sub-parsers/modules are used
+- Enable progressive enhancement based on available data
+
+## Next steps for launch
+
+### Cross-chain improvements
+- **Improve Rust-native abstractions** across Ethereum, Solana, and Sui
+- **Token naming and mapping** to wallet names
+- **Expand DApp coverage** across all chains
+
+### Documentation priorities
+
+1. **Getting started guide**
+   - Beginners who want to contribute
+   - Seasoned DApp developers deploying features per-chain
+   - [Adding a New Chain](./adding-new-chain) - Complete guide for blockchain integration
+
+2. **Foundation integration**
+   - Rust SDK chains (see [Adding a New Chain](./adding-new-chain) guide)
+   - Non-Rust SDK chains (build SDK or contribute StageX pallets)
+
+3. **TEE backend developer documentation**
+   - Security considerations
+   - Attestation integration
+
+4. **API documentation**
+   - Architecture overview
+   - Tutorials and examples (visualsign-unspecified as reference)
+
+### Testing and quality
+- Set up cargo tarpaulin or equivalent per chain
+- Target 30%+ test coverage for initial release
+- Integration test suites for each DApp parser
+
+### Community building
+- Launch website and developer documentation
+- Demo killer features beyond Anchorage Digital app integration
+- Establish communication channels (reactivate Telegram)
+- Privately solicit feedback from developers
+
+## Benefits of the incremental approach
+
+1. **Lower barrier to entry** - Developers can start with simple ABI support and gradually add richer visualizations
+2. **Ecosystem compatibility** - Works with existing tools and standards
+3. **Privacy preservation** - Multiple options for handling sensitive contract interfaces
+4. **Progressive enhancement** - Basic functionality always available, enhanced features when possible
+5. **Community driven** - Leverages work done by Ledger, Anchor, and other ecosystem contributors
+
+## Conclusion
+
+This incremental approach allows VisualSign to meet developers where they are, providing immediate value while building toward a richer, more comprehensive visualization ecosystem. By supporting multiple strategies and maintaining compatibility with existing standards, we enable gradual adoption without requiring wholesale rewrites of existing infrastructure.

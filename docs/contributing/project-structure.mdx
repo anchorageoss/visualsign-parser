@@ -1,0 +1,64 @@
+---
+title: Project Structure
+description: Workspace organization and dependency isolation patterns
+---
+
+VisualSign Parser holds itself to a higher bar for adopting dependencies. This means we sometimes cannot use nice-to-have features in the interest of keeping the dependency tree minimal and compatible.
+
+## Monolithic binary with workspace
+
+We deploy a monolithic binary with many different `chain_parsers` that implement specific dependencies. While Rust is more forgiving than other languages like Go, with enough chains and overlapping dependencies, we inevitably encounter cases where large libraries cannot be supported without significant changes.
+
+## Dependency import strategies
+
+- **Keep chain dependencies isolated** - Add blockchain-specific dependencies to `chain_parsers` crates, not the `parser` crate
+- **Evaluate necessity** - Ask whether a library is essential or can be replicated as a `dev-dependency`
+- **Required integration tests** - Every chain needs at least one test validating baseline functionality (e.g., decoding a native token transfer)
+- **Minimize features** - Only enable needed features; avoid bloat
+
+## Code structure guidelines
+
+Putting everything in a `lib.rs` works up to a point, then gets unwieldy. General approach:
+
+- **Layer dependencies and context** - Solve for basic constructs first; identify and abstract common transaction patterns
+- **Create clear modules** - Split into files or directories when files exceed ~2000 lines
+- **General to specific** - Organization should flow from most general to most specific implementations
+
+## Backwards compatibility
+
+Between versions, display values, order, and formatting should be retained. Currently this is in flux, but once we fully integrate the toolchain into production wallets, any output changes must be thoroughly examined.
+
+## Testing guidelines
+
+Good test coverage within chains is the model to aim for. Build incrementally:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_native_transfer() {
+        // Every chain should have this baseline test
+        let raw_tx = include_str!("fixtures/native_transfer.hex");
+        let result = parse_transaction(raw_tx);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_token_transfer() {
+        // Add tests incrementally for each transaction type
+    }
+
+    #[test]
+    fn test_complex_defi() {
+        // Build up to complex scenarios
+    }
+}
+```
+
+## Related documentation
+
+- [Best Practices](./best-practices) - Contribution guidelines
+- [Integration Testing](./integration-testing) - Testing framework proposal
+- [Adding a New Chain](../adding-new-chain) - Chain integration guide

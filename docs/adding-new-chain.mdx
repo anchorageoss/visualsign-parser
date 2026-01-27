@@ -1,0 +1,359 @@
+---
+title: Adding a New Chain
+description: Implement the Transaction and VisualSignConverter traits for a new blockchain
+---
+
+This guide uses the existing Ethereum implementation as a reference for adding a new blockchain to the VisualSign parser system.
+
+## Prerequisites
+
+- Rust development environment
+- Access to the `visualsign-parser` workspace
+- Access to the `visualsign-display` workspace (for UI testing in step 6)
+- Understanding of the target blockchain's transaction format
+
+## Step 1: Copy visualsign-unspecified as starting point
+
+1. Navigate to the chain parsers directory:
+   ```bash
+   cd src/chain_parsers/
+   ```
+
+2. Copy the unspecified template:
+   ```bash
+   cp -r visualsign-unspecified visualsign-<your-chain>
+   ```
+   Replace `<your-chain>` with your blockchain name (e.g., `visualsign-cosmos`, `visualsign-aptos`)
+
+3. Update the new chain's `Cargo.toml`:
+   ```toml
+   [package]
+   name = "visualsign-<your-chain>"
+   version = "0.1.0"
+   edition = "2021"
+
+   [dependencies]
+   visualsign = { path = "../../visualsign" }
+   # Add your chain-specific dependencies here
+   ```
+
+4. Add your new chain to the workspace `Cargo.toml`:
+   ```toml
+   [workspace]
+   members = [
+     "codegen",
+     "generated",
+     # ...existing members...
+     "chain_parsers/visualsign-<your-chain>",
+   ]
+   ```
+
+## Step 2: Implement required traits
+
+In your new chain's `src/lib.rs`, implement the required traits:
+
+### Transaction trait
+
+The `Transaction` trait defines how to parse raw transaction data:
+
+```rust
+use visualsign::vsptrait::{Transaction, TransactionParseError};
+
+#[derive(Debug, Clone)]
+pub struct YourChainTransactionWrapper {
+    raw_data: String,
+    // Add parsed fields specific to your chain
+}
+
+impl Transaction for YourChainTransactionWrapper {
+    fn from_string(data: &str) -> Result<Self, TransactionParseError> {
+        // Parse your chain's transaction format
+        // This could be hex-encoded bytes, JSON, base64, etc.
+        Ok(Self {
+            raw_data: data.to_string(),
+        })
+    }
+
+    fn transaction_type(&self) -> String {
+        "YourChainName".to_string()
+    }
+}
+```
+
+### VisualSignConverter trait
+
+The `VisualSignConverter` trait handles the conversion to human-readable format:
+
+```rust
+use visualsign::{
+    SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
+    SignablePayloadFieldTextV2, SignablePayloadFieldAmountV2,
+    vsptrait::{VisualSignConverter, VisualSignError, VisualSignOptions}
+};
+
+pub struct YourChainVisualSignConverter;
+
+impl VisualSignConverter<YourChainTransactionWrapper> for YourChainVisualSignConverter {
+    fn to_visual_sign_payload(
+        &self,
+        transaction: YourChainTransactionWrapper,
+        options: VisualSignOptions,
+    ) -> Result<SignablePayload, VisualSignError> {
+        // Decode the transaction
+        let decoded_info = self.decode_transaction(&transaction)?;
+
+        // Build fields for the visual representation
+        let fields = vec![
+            SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: decoded_info.to.clone(),
+                    label: "To".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 {
+                    text: decoded_info.to,
+                },
+            },
+            SignablePayloadField::AmountV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!("{} {}", decoded_info.amount, decoded_info.symbol),
+                    label: "Amount".to_string(),
+                },
+                amount_v2: SignablePayloadFieldAmountV2 {
+                    amount: decoded_info.amount,
+                    abbreviation: Some(decoded_info.symbol),
+                },
+            },
+        ];
+
+        Ok(SignablePayload::new(
+            0, // version
+            format!("{} Transaction", transaction.transaction_type()),
+            None, // subtitle
+            fields,
+            "YourChainTx".to_string(), // payload_type
+        ))
+    }
+}
+
+impl YourChainVisualSignConverter {
+    fn decode_transaction(&self, tx: &YourChainTransactionWrapper) -> Result<DecodedTransaction, VisualSignError> {
+        // Implement your chain-specific decoding logic here
+        // Use existing Rust libraries when available (recommended approach)
+        todo!("Implement transaction decoding")
+    }
+}
+
+struct DecodedTransaction {
+    to: String,
+    amount: String,
+    symbol: String,
+    // Add fields specific to your chain
+}
+```
+
+## Step 3: Write tests
+
+Create comprehensive tests in your chain parser:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use visualsign::vsptrait::{Transaction, VisualSignConverter, VisualSignOptions};
+
+    #[test]
+    fn test_transaction_parsing() {
+        let raw_tx = "your_test_transaction_data";
+        let tx = YourChainTransactionWrapper::from_string(raw_tx).unwrap();
+        assert_eq!(tx.transaction_type(), "YourChainName");
+    }
+
+    #[test]
+    fn test_visual_sign_conversion() {
+        let raw_tx = "your_test_transaction_data";
+        let tx = YourChainTransactionWrapper::from_string(raw_tx).unwrap();
+        let converter = YourChainVisualSignConverter;
+        let options = VisualSignOptions {
+            decode_transfers: true,
+            ..Default::default()
+        };
+
+        let result = converter.to_visual_sign_payload(tx, options).unwrap();
+        assert!(result.title.contains("YourChainName"));
+    }
+}
+```
+
+## Step 4: Add to registry
+
+1. Add your chain to the proto definition in `proto/parser/parser.proto`:
+   ```protobuf
+   enum Chain {
+     CHAIN_UNSPECIFIED = 0;
+     CHAIN_BITCOIN = 1;
+     CHAIN_ETHEREUM = 2;
+     CHAIN_SOLANA = 3;
+     CHAIN_SUI = 4;
+     CHAIN_TRON = 5;
+     // Add your chain here (use next available number)
+   }
+   ```
+
+2. Regenerate proto code:
+   ```bash
+   make proto -C generated
+   ```
+
+3. Update `src/parser/app/src/chain_conversion.rs`:
+   ```rust
+   use generated::parser::Chain as ProtoChain;
+   use visualsign::registry::Chain as VisualSignRegistryChain;
+
+   pub fn proto_to_registry(proto_chain: ProtoChain) -> VisualSignRegistryChain {
+       match proto_chain {
+           ProtoChain::Unspecified => VisualSignRegistryChain::Unspecified,
+           ProtoChain::Solana => VisualSignRegistryChain::Solana,
+           ProtoChain::Ethereum => VisualSignRegistryChain::Ethereum,
+           ProtoChain::YourChain => VisualSignRegistryChain::YourChain,  // Add this
+       }
+   }
+   ```
+
+4. Add your chain to the registry enum in `src/visualsign/src/registry.rs`:
+   ```rust
+   #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+   pub enum Chain {
+       Unspecified,
+       Solana,
+       Ethereum,
+       YourChain,  // Add your chain here
+   }
+   ```
+
+5. Add your chain dependency to `src/parser/app/Cargo.toml`:
+   ```toml
+   [dependencies]
+   # ...existing dependencies...
+   visualsign-<your-chain> = { path = "../../chain_parsers/visualsign-<your-chain>"}
+   ```
+
+6. Register your converter in `src/parser/app/src/routes/parse.rs`:
+   ```rust
+   fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
+       let mut registry = visualsign::registry::TransactionConverterRegistry::new();
+
+       // ...existing registrations...
+
+       registry.register::<visualsign_your_chain::YourChainTransactionWrapper, _>(
+           visualsign::registry::Chain::YourChain,
+           visualsign_your_chain::YourChainVisualSignConverter,
+       );
+
+       registry
+   }
+   ```
+
+## Step 5: Test with gRPC or parser CLI
+
+You can test in two ways - either run the gRPC service for the app which requires building the whole stack, or call the parser_cli directly.
+
+### Option A: gRPC parser
+
+1. Build and run the parser service:
+   ```bash
+   cd src && make parser
+   ```
+
+2. Test your implementation with grpcurl:
+   ```bash
+   grpcurl -plaintext -d '{
+     "chain": "CHAIN_<NAME>",
+     "unsigned_payload": "your_test_transaction_hex"
+   }' localhost:50051 parser.ParserService/Parse
+   ```
+
+### Option B: Parser CLI
+
+```bash
+cd src && cargo run -p parser_cli -- --chain chain_name -o json -t "transaction hex"
+```
+
+## Step 6: Test UI rendering
+
+1. Navigate to the `visualsign-display` repository
+2. Update the display service to handle your new chain type
+3. Test the end-to-end flow by sending transactions through the display interface
+4. Verify that your parsed transaction displays correctly in the UI with proper formatting and all relevant transaction details
+
+## Using existing Rust libraries
+
+When a well-established Rust library exists for your blockchain, use it directly in your implementation:
+
+```toml
+[dependencies]
+visualsign = { path = "../../visualsign" }
+alloy = "0.1"     # Example for Ethereum-compatible chains
+solana-sdk = "1.18"  # Example for Solana
+```
+
+### Advanced: FFI integration
+
+If no suitable Rust library exists and you need to use an implementation in another language (like Go), you can use FFI. The `visualsign-goethereum` implementation serves as an example:
+
+1. Create a `build.rs` file that compiles your foreign library:
+   ```rust
+   use std::env;
+   use std::path::PathBuf;
+   use std::process::Command;
+
+   fn main() {
+       let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
+       // Build the Go library
+       let status = Command::new("go")
+           .args(&["build", "-buildmode=c-archive", "-o"])
+           .arg(&out_dir.join("libgo_lib.a"))
+           .arg("./go")
+           .status()
+           .expect("Failed to build Go library");
+
+       // Link the library
+       println!("cargo:rustc-link-search=native={}", out_dir.display());
+       println!("cargo:rustc-link-lib=static=go_lib");
+   }
+   ```
+
+2. Create bindings for the foreign functions:
+   ```rust
+   extern "C" {
+       pub fn DecodeEthereumTransactionToJSON(rawTxHex: *mut ::std::os::raw::c_char) -> *mut ::std::os::raw::c_char;
+       pub fn FreeString(s: *mut ::std::os::raw::c_char);
+   }
+   ```
+
+FFI adds complexity and should only be used when no suitable Rust library exists.
+
+## Testing your implementation
+
+1. Run unit tests:
+   ```bash
+   cd src/chain_parsers/visualsign-<your-chain>
+   cargo test
+   ```
+
+2. Run integration tests:
+   ```bash
+   cd src && cargo test
+   ```
+
+3. Test with real transaction data using the gRPC interface
+4. Verify output formatting in the display UI
+
+Your new chain should now be fully integrated into the VisualSign parser system.
+
+## Related documentation
+
+- [Chain Module Architecture](./chain-modules) - Understanding the overall architecture
+- [Field Types](./field-types) - VisualSign JSON field reference
+- [Parser CLI](./parser-cli) - Command-line tool for development and testing
+- [Contribution Best Practices](./contributing/best-practices) - Guidelines for contributors

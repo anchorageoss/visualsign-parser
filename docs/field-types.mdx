@@ -1,0 +1,461 @@
+---
+title: Field Types Reference
+description: Building blocks for displaying blockchain data in visualizations
+---
+
+Field types are the building blocks of VisualSign visualizations. Each type displays specific kinds of blockchain data in a clear, consistent way.
+
+## Core field types
+
+### text_v2
+
+Displays plain text information. Use for labels, status messages, and non-monetary values.
+
+```json
+{
+  "Type": "text_v2",
+  "Label": "Network",
+  "TextV2": {
+    "Text": "Ethereum Mainnet"
+  }
+}
+```
+
+**When to use:**
+- Network names
+- Protocol identifiers
+- Status messages
+- Transaction types
+- Warning messages
+
+### amount_v2
+
+Displays monetary values with proper formatting. Automatically handles decimal places and currency symbols.
+
+```json
+{
+  "Type": "amount_v2",
+  "Label": "You're sending",
+  "AmountV2": {
+    "Amount": "1234.56",
+    "Abbreviation": "USDC"
+  }
+}
+```
+
+**Properties:**
+- `Amount`: Numeric string (must be a valid signed decimal number)
+- `Abbreviation`: Token symbol or currency code
+
+**Visual treatment:**
+- Large, prominent display for amounts
+- Currency symbol or code shown clearly
+- Automatic formatting for readability
+
+### address_v2
+
+Displays blockchain addresses with optional identity resolution and verification badges.
+
+```json
+{
+  "Type": "address_v2",
+  "Label": "Recipient",
+  "AddressV2": {
+    "Address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7",
+    "Name": "Uniswap V3 Router",
+    "BadgeText": "✓ Verified Contract"
+  }
+}
+```
+
+**Properties:**
+- `Address`: The blockchain address
+- `Name` (optional): ENS name, contract name, or identity
+- `BadgeText` (optional): Verification status or warning
+
+**Visual features:**
+- Truncated address display (0x742d...bEb7)
+- Copy-to-clipboard functionality
+- Visual badges for verification status
+- Color coding for risk levels
+
+## Layout field types
+
+### list_layout
+
+Groups related fields together in a vertical list. Perfect for showing multiple related parameters.
+
+```json
+{
+  "Type": "list_layout",
+  "Label": "Token Swap",
+  "ListLayout": {
+    "Fields": [
+      {
+        "Type": "amount_v2",
+        "Label": "From",
+        "AmountV2": {
+          "Amount": "1.5",
+          "Abbreviation": "ETH"
+        }
+      },
+      {
+        "Type": "amount_v2",
+        "Label": "To",
+        "AmountV2": {
+          "Amount": "2,850.00",
+          "Abbreviation": "USDC"
+        }
+      }
+    ]
+  }
+}
+```
+
+**When to use:**
+- Grouping related parameters
+- Showing inputs/outputs
+- Listing multiple recipients
+- Displaying step sequences
+
+### preview_layout
+
+Provides expandable/collapsible content with progressive disclosure. Shows essential info collapsed, full details when expanded.
+
+```json
+{
+  "Type": "preview_layout",
+  "Label": "Advanced Settings",
+  "PreviewLayout": {
+    "Title": {
+      "Text": "Gas Settings"
+    },
+    "Subtitle": {
+      "Text": "~$12.50"
+    },
+    "Condensed": {
+      "Fields": [
+        {
+          "Type": "text_v2",
+          "Label": "Fee",
+          "TextV2": {
+            "Text": "0.002 ETH"
+          }
+        }
+      ]
+    },
+    "Expanded": {
+      "Fields": [
+        {
+          "Type": "text_v2",
+          "Label": "Gas Price",
+          "TextV2": {
+            "Text": "30 gwei"
+          }
+        },
+        {
+          "Type": "text_v2",
+          "Label": "Gas Limit",
+          "TextV2": {
+            "Text": "65,000"
+          }
+        },
+        {
+          "Type": "text_v2",
+          "Label": "Max Fee",
+          "TextV2": {
+            "Text": "0.00195 ETH"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+**Properties:**
+- `Title`: Main heading for the preview
+- `Subtitle` (optional): Secondary information
+- `Condensed`: Fields shown when collapsed
+- `Expanded`: Full field list when expanded
+
+**Visual behavior:**
+- Chevron indicator for expand/collapse
+- Smooth animation between states
+- Preserves user's expand/collapse choice
+
+## Field type selection guide
+
+| Data Type | Recommended Field | Example Use Case |
+|-----------|------------------|------------------|
+| Token amounts | `amount_v2` | "Sending 100 USDC" |
+| Fees | `amount_v2` | "Network fee: 0.002 ETH" |
+| Wallet addresses | `address_v2` | "To: alice.eth" |
+| Contract addresses | `address_v2` | "Interacting with: Compound V3" |
+| Status/State | `text_v2` | "Status: Pending" |
+| Network info | `text_v2` | "Network: Ethereum Mainnet" |
+| Multiple values | `list_layout` | List of recipients |
+| Complex data | `preview_layout` | Detailed gas breakdown |
+| Warnings | `text_v2` | "⚠️ High slippage" |
+
+## Combining field types
+
+### Example: DeFi position
+
+```json
+{
+  "Version": "0",
+  "Title": "Supply to Aave",
+  "Fields": [
+    {
+      "Type": "text_v2",
+      "Label": "Protocol",
+      "TextV2": {
+        "Text": "Aave V3"
+      }
+    },
+    {
+      "Type": "amount_v2",
+      "Label": "Supplying",
+      "AmountV2": {
+        "Amount": "10,000",
+        "Abbreviation": "USDC"
+      }
+    },
+    {
+      "Type": "preview_layout",
+      "Label": "Position Details",
+      "PreviewLayout": {
+        "Title": {
+          "Text": "After Transaction"
+        },
+        "Condensed": {
+          "Fields": [
+            {
+              "Type": "text_v2",
+              "Label": "APY",
+              "TextV2": {
+                "Text": "4.2%"
+              }
+            }
+          ]
+        },
+        "Expanded": {
+          "Fields": [
+            {
+              "Type": "text_v2",
+              "Label": "Current APY",
+              "TextV2": {
+                "Text": "4.2%"
+              }
+            },
+            {
+              "Type": "amount_v2",
+              "Label": "Total Supplied",
+              "AmountV2": {
+                "Amount": "25,000",
+                "Abbreviation": "USDC"
+              }
+            },
+            {
+              "Type": "text_v2",
+              "Label": "Health Factor",
+              "TextV2": {
+                "Text": "2.5"
+              }
+            },
+            {
+              "Type": "address_v2",
+              "Label": "Pool Contract",
+              "AddressV2": {
+                "Address": "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2",
+                "Name": "Aave V3 Pool",
+                "BadgeText": "✓ Verified"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+## Best practices
+
+### 1. Label clarity
+- Use action-oriented labels ("You're sending" vs "Amount")
+- Keep labels concise but descriptive
+- Use consistent terminology across transactions
+
+### 2. Progressive complexity
+- Show critical information with basic field types
+- Use `preview_layout` for advanced details
+- Group related items with `list_layout`
+
+### 3. Risk communication
+```json
+{
+  "Type": "text_v2",
+  "Label": "⚠️ WARNING",
+  "TextV2": {
+    "Text": "First time interacting with this contract"
+  }
+}
+```
+
+### 4. Visual hierarchy
+- Primary action: Large `amount_v2` fields
+- Recipients: Clear `address_v2` with names
+- Context: `text_v2` for supporting information
+- Details: `preview_layout` for optional viewing
+
+## Platform considerations
+
+### Mobile optimization
+- Field types automatically adapt to screen size
+- `preview_layout` defaults to collapsed on mobile
+- Touch-friendly expand/collapse controls
+- Horizontal scrolling for addresses
+
+### Accessibility
+- All field types support screen readers
+- Keyboard navigation between fields
+- High contrast mode support
+- ARIA labels for interactive elements
+
+### Internationalization
+
+Parser output is ASCII-only (see [Character set](#character-set-all-fields) validation). Wallet applications handle localization:
+
+- Locale-aware number formatting (decimal separators, grouping)
+- Currency symbol positioning based on locale
+- Date/time formatting for timestamps
+- UI translation of standard labels
+
+## Validation
+
+Each field type has validation rules:
+
+### Character set (all fields)
+
+All text content is restricted to **printable ASCII characters only** (codes 0x20-0x7E). The following are rejected:
+
+- Unicode characters (Chinese, Japanese, Arabic, Cyrillic, etc.)
+- Emoji
+- Non-ASCII currency symbols (€, £, ¥)
+- Control characters and zero-width characters
+- Unicode escape sequences (`\u`)
+
+This restriction prevents security attacks including:
+- **Homoglyph attacks**: Cyrillic "а" (U+0430) looks identical to Latin "a" (U+0061)
+- **Right-to-left override**: Characters that reverse text direction
+- **Invisible characters**: Zero-width spaces that hide content
+
+Token names and other content must use ASCII equivalents (e.g., "EUR" instead of "€").
+
+### amount_v2
+- `Amount` must be a valid signed decimal number (validated by regex)
+- `Abbreviation` must be non-empty
+- Supports decimal places
+- Large numbers should use decimal notation, not scientific notation
+
+### address_v2
+- Must be valid for target chain
+- Ethereum: 40 hex characters with 0x prefix
+- Solana: Valid Base58 public key
+- Sui: 32-byte hex address with 0x prefix
+- Tron: Base58 address starting with T
+
+### text_v2
+- Maximum 500 characters
+- ASCII printable characters only (see character set above)
+- HTML is escaped for security
+
+### Layout types
+- Maximum 20 nested fields
+- Recursive nesting not allowed
+- At least one field required
+
+## Chain-specific patterns
+
+### Ethereum ERC-20 approval
+
+```json
+{
+  "Version": "0",
+  "Title": "Approve USDC Spending",
+  "Fields": [
+    {
+      "Type": "address_v2",
+      "Label": "Token Contract",
+      "AddressV2": {
+        "Address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "Name": "USDC",
+        "BadgeText": "✓ Verified"
+      }
+    },
+    {
+      "Type": "address_v2",
+      "Label": "Spender",
+      "AddressV2": {
+        "Address": "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+        "Name": "Uniswap V3 Router",
+        "BadgeText": "✓ Verified"
+      }
+    },
+    {
+      "Type": "amount_v2",
+      "Label": "Allowance",
+      "AmountV2": {
+        "Amount": "Unlimited",
+        "Abbreviation": "USDC"
+      }
+    }
+  ]
+}
+```
+
+### Solana SPL token transfer
+
+```json
+{
+  "Version": "0",
+  "Title": "Transfer SPL Tokens",
+  "Fields": [
+    {
+      "Type": "list_layout",
+      "Label": "Instructions",
+      "ListLayout": {
+        "Fields": [
+          {
+            "Type": "text_v2",
+            "Label": "1",
+            "TextV2": {
+              "Text": "Create Associated Token Account"
+            }
+          },
+          {
+            "Type": "amount_v2",
+            "Label": "2",
+            "AmountV2": {
+              "Amount": "100",
+              "Abbreviation": "USDC"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+## Future field types
+
+Planned additions to the field type system:
+
+- **image_v2**: NFT previews and token logos
+- **chart_v2**: Price charts and historical data
+- **qr_v2**: QR codes for addresses
+- **signature_v2**: Signature visualization
+- **timeline_v2**: Transaction history display

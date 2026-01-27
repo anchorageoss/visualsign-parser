@@ -1,0 +1,100 @@
+---
+title: Contributing a Visualization
+description: Add transaction support for your DApp or protocol
+---
+
+You do not need Rust experience to contribute a visualization. This guide covers the workflow for adding support for your DApp's transactions.
+
+## Before you start
+
+Make sure you understand:
+- [Field types](/field-types) available for building visualizations
+- [Creating visualizations](/creating-visualizations) design patterns
+
+## Contribution workflow
+
+### 1. Fork the repository
+
+Fork [visualsign-parser](https://github.com/anchorageoss/visualsign-parser) on GitHub and clone your fork locally.
+
+### 2. Create your visualization
+
+Add a JSON preset file for your protocol in the appropriate chain directory:
+
+```
+src/chain_parsers/visualsign-<chain>/src/presets/<your-protocol>/
+```
+
+Each preset file defines how to decode and display a specific transaction type. See existing presets (like Uniswap, Jupiter, or Cetus) for examples.
+
+### 3. Test with parser CLI
+
+Use the [parser CLI](/parser-cli) to verify your visualization works correctly.
+
+```bash
+# Build the CLI
+cd visualsign-parser/src
+cargo build --release
+
+# Test with a real transaction
+./target/release/parser_cli --chain <chain> -t <transaction_hex> --output human
+```
+
+Run both expanded and condensed views:
+
+```bash
+# Full view
+./target/release/parser_cli --chain ethereum -t <tx_hex> --output human
+
+# Hardware wallet view
+./target/release/parser_cli --chain ethereum -t <tx_hex> --output human --condensed-only
+```
+
+### 4. Submit a pull request
+
+Open a pull request with:
+- Your preset file(s)
+- At least one test case with a real mainnet transaction
+- A brief description of your protocol
+
+## What reviewers look for
+
+### Accuracy
+
+- Field values match the raw transaction data
+- Addresses, amounts, and parameters are correctly decoded
+- Protocol name and function names are accurate
+
+### Clarity
+
+- A non-technical user can understand what the transaction does
+- Labels are action-oriented ("You're sending" not just "Amount")
+- Important information is visible in the condensed view
+
+### Completeness
+
+- All relevant parameters are displayed
+- Risk indicators are included where appropriate (large amounts, new addresses)
+- Both expanded and condensed views work well
+
+### Consistency
+
+- Follows existing visualization patterns for similar operations
+- Uses appropriate [field types](/field-types) for each data type
+- Matches the style of other visualizations on the same chain
+
+## Testing checklist
+
+Before submitting, verify:
+
+- [ ] Parser CLI produces correct output for your transaction type
+- [ ] Condensed view shows the most critical information
+- [ ] Amounts display with correct decimals and token symbols
+- [ ] Addresses are properly formatted for the chain
+- [ ] Test with multiple real transactions, not just one
+
+## Related documentation
+
+- [Creating Visualizations](/creating-visualizations) - Design patterns and examples
+- [Field Types Reference](/field-types) - Available field types
+- [Parser CLI](/parser-cli) - Testing tool documentation

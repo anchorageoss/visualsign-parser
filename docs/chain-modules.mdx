@@ -1,0 +1,109 @@
+---
+title: Chain Module Architecture
+description: Core traits and design patterns for blockchain parsers
+---
+
+Each blockchain requires a specialized module to parse its unique transaction format into VisualSign JSON.
+
+:::tip Adding Support for a New Blockchain?
+See our comprehensive [Adding a New Chain](./adding-new-chain) guide for step-by-step instructions on integrating your blockchain into VisualSign.
+:::
+
+## Core architecture
+
+All chain modules implement two core traits that define the parsing and conversion interface:
+
+```rust
+/// Trait for blockchain transactions that can be parsed from raw data
+pub trait Transaction: Debug + Clone {
+    /// Parse a transaction from a string representation (hex, base64, etc.)
+    fn from_string(data: &str) -> Result<Self, TransactionParseError>
+    where
+        Self: Sized;
+
+    /// Get the transaction type name (e.g., "Solana", "Ethereum", "Sui", "Tron")
+    fn transaction_type(&self) -> String;
+}
+
+/// Trait for converting parsed transactions to VisualSign format
+pub trait VisualSignConverter<T: Transaction> {
+    fn to_visual_sign_payload(
+        &self,
+        transaction: T,
+        options: VisualSignOptions,
+    ) -> Result<SignablePayload, VisualSignError>;
+}
+```
+
+Each chain module implements these traits:
+1. **Transaction** - Handles parsing raw transaction bytes into chain-specific structures
+2. **VisualSignConverter** - Transforms parsed transactions into the VisualSign JSON format
+
+## Key design principles
+
+1. **Progressive Disclosure** - Show the most important information first, with details available on demand through expandable sections
+2. **Risk Highlighting** - Prominently display warnings, first-time addresses, and large amounts
+3. **Chain-Specific Context** - Visualize chain-unique concepts appropriately (Ethereum gas fees, Solana instructions, Sui objects, Tron energy)
+
+## Implementation pattern
+
+Each chain module follows this general pattern:
+
+1. **Decode** - Parse raw transaction bytes into chain-specific structures
+2. **Extract** - Pull out key information (sender, recipient, amounts, etc.)
+3. **Enrich** - Add context (resolve names, check contracts, calculate fees)
+4. **Transform** - Convert to VisualSign field types
+5. **Organize** - Structure fields for optimal user understanding
+
+## Supported chains
+
+- **[Ethereum](./chains/ethereum)** - Account-based model with smart contracts
+- **[Solana](./chains/solana)** - High-performance chain with parallel processing
+- **[Sui](./chains/sui)** - Object-oriented blockchain with Move
+- **[Tron](./chains/tron)** - EVM-compatible with energy system
+
+## Field type mapping
+
+Each chain's native data types map to VisualSign field types:
+
+| Chain Data | VisualSign Field | Example |
+|------------|------------------|---------|
+| Token amounts | `amount_v2` | ETH, SOL, USDC |
+| Addresses | `address_v2` | Recipients, contracts |
+| Methods/Instructions | `text_v2` or `preview_layout` | Function calls |
+| Multiple operations | `list_layout` | Batch transactions |
+| Gas/Fees | `preview_layout` | Expandable fee details |
+
+## Source code
+
+The full implementation of all chain modules can be found in the [visualsign-parser repository](https://github.com/anchorageoss/visualsign-parser):
+
+- [Parser Core](https://github.com/anchorageoss/visualsign-parser/tree/main/src/parser)
+- [Chain Modules](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers)
+- [VisualSign Core](https://github.com/anchorageoss/visualsign-parser/tree/main/src/visualsign)
+- [Proto Definitions](https://github.com/anchorageoss/visualsign-parser/tree/main/proto)
+
+## Adding new chains
+
+To add support for a new blockchain:
+
+1. **Study the transaction format** - Understand how transactions are encoded
+2. **Identify key information** - What users need to see for this chain
+3. **Implement the Transaction and VisualSignConverter traits** - Follow the pattern of existing modules
+4. **Map to field types** - Use appropriate VisualSign fields for visualization
+5. **Add tests** - Ensure parsing works with real transaction data
+
+See the [contribution guide](https://github.com/anchorageoss/visualsign-parser/blob/main/CONTRIBUTING.md) for detailed instructions.
+
+## Best practices
+
+- **Performance**: Cache frequently accessed data, avoid blocking operations, use efficient decoding libraries
+- **Accuracy**: Validate all decoded data, handle malformed transactions gracefully, provide clear error messages
+- **Maintainability**: Follow existing patterns, document chain-specific quirks, keep modules isolated and testable
+
+## Next steps
+
+- Review individual [chain documentation](./chains/ethereum) for specific details
+- Explore the [Field Types](./field-types) reference
+- Check [visualization patterns](./creating-visualizations) for UI guidance
+- View the [source code](https://github.com/anchorageoss/visualsign-parser) for implementation details
