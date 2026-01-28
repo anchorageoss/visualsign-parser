@@ -82,18 +82,27 @@ client.parse(request, (error, response) => {
 
 **IMPORTANT**: Always verify the enclave attestation before trusting the parsed output.
 
-The parser response includes a signature that must be verified:
+The parser response includes an attestation document and a signature. You must first verify the attestation to extract a trusted public key, then use that key to verify the signature:
 
 ```go
-// Verify the signature
+// 1. Verify the AWS Nitro attestation document and extract the enclave's public key
+//    See the Verification guide for full implementation details
+attestationDoc := resp.Attestation
+enclavePubKey, err := verifyAttestationAndExtractKey(attestationDoc)
+if err != nil {
+    return fmt.Errorf("attestation verification failed: %w", err)
+}
+
+// 2. Verify the parser's signature using the attested public key
 signature := resp.ParsedTransaction.Signature
-publicKey := signature.PublicKey
 message := signature.Message
 sig := signature.Signature
 
-// Verify using P256 ECDSA
-valid := verifyP256Signature(publicKey, message, sig)
+// Verify using P256 ECDSA with the key derived from the attestation document
+valid := verifyP256Signature(enclavePubKey, message, sig)
 ```
+
+See [Verification](./verification) for the complete attestation verification implementation.
 
 ### 4. Display to user
 

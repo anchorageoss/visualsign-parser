@@ -4,14 +4,14 @@ description: Incremental adoption strategy using existing tools and standards
 ---
 
 :::note Work in Progress
-This document outlines our vision for how chain_parser crates can help Dapps incrementally build support for visualizing raw transactions, utilizing existing tools, processes, and libraries built by the community.
+This document outlines our vision for how chain_parser crates can help DApps incrementally build support for visualizing raw transactions, utilizing existing tools, processes, and libraries built by the community.
 :::
 
 ## Core principles
 
 Based on our experience building rich first-party interactions, we believe:
 
-1. **Dapp Developers are the best entities** to know what and how they can visualize their interactions, followed by Wallet Developers
+1. **DApp Developers are the best entities** to know what and how they can visualize their interactions, followed by Wallet Developers
 2. **Integration into development workflow is crucial** for adoption of this platform
 
 ## Current state of transaction visualization
@@ -20,15 +20,15 @@ Based on our experience building rich first-party interactions, we believe:
 
 - **Clearsign with ERC-7730** - Standardized descriptions for smart contract interactions
 - **ABI decoding + enrichment layers** - Basic decoding with additional metadata
-- **Bespoke Dapp support** - Custom implementations per application
-- **Privacy concerns** - Not all Dapps publish ABIs to Etherscan or Sourcify
+- **Bespoke DApp support** - Custom implementations per application
+- **Privacy concerns** - Not all DApps publish ABIs to Etherscan or Sourcify
 
 ### Solana (before VisualSign)
 
 - **Anchor IDL support** - Framework-specific interface descriptions
 - **Fragmented ecosystem** - Multiple competing standards
 - **Carbon support** - Limited coverage for some protocols
-- **Missing IDLs** - Not all Dapps publish their interface definitions
+- **Missing IDLs** - Not all DApps publish their interface definitions
 
 ## How VisualSign changes this
 
@@ -55,7 +55,7 @@ This meets developers where they are - working with Solidity interfaces directly
 #### 2. Signed ABI.json from wallets
 
 To address privacy concerns:
-- Dapps can add ABIs directly to their applications
+- DApps can add ABIs directly to their applications
 - Pre-approve by signing the hash of abi.json
 - Third-party services can vet and sign ABIs
 - Maintains security while preserving privacy
