@@ -180,12 +180,26 @@ No changes to request/response handling are required.
 
 ## Health checks
 
+The server implements the standard [gRPC health checking protocol](https://github.com/grpc/grpc/blob/master/doc/health-checking.md):
+
 ```bash
-# gRPC health check (using grpcurl)
-grpcurl -plaintext localhost:44020 list
+grpcurl -plaintext -d '{"service":"parser.ParserService"}' \
+    localhost:44020 grpc.health.v1.Health/Check
 ```
 
-This lists available services including `parser.ParserService`.
+Response:
+
+```json
+{
+  "status": "SERVING"
+}
+```
+
+You can also list all available services:
+
+```bash
+grpcurl -plaintext localhost:44020 list
+```
 
 ## Next steps
 

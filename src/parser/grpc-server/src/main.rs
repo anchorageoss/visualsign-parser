@@ -1,5 +1,10 @@
 //! gRPC server - single binary gRPC server for non-TEE deployments
 
+use generated::grpc::health::v1::{
+    health_check_response::ServingStatus,
+    health_server::{Health, HealthServer},
+    HealthCheckRequest, HealthCheckResponse,
+};
 use generated::parser::{
     parser_service_server::{ParserService, ParserServiceServer},
     ParseRequest, ParseResponse,
@@ -14,6 +19,9 @@ use std::net::SocketAddr;
 struct GrpcService {
     ephemeral_key: P256Pair,
 }
+
+/// Health check service - always returns SERVING
+struct HealthService;
 
 impl GrpcService {
     fn new(ephemeral_file: &str) -> Self {
@@ -38,6 +46,27 @@ impl ParserService for GrpcService {
     }
 }
 
+#[tonic::async_trait]
+impl Health for HealthService {
+    async fn check(
+        &self,
+        _request: Request<HealthCheckRequest>,
+    ) -> Result<Response<HealthCheckResponse>, Status> {
+        Ok(Response::new(HealthCheckResponse {
+            status: ServingStatus::Serving as i32,
+        }))
+    }
+
+    type WatchStream = tokio_stream::wrappers::ReceiverStream<Result<HealthCheckResponse, Status>>;
+
+    async fn watch(
+        &self,
+        _request: Request<HealthCheckRequest>,
+    ) -> Result<Response<Self::WatchStream>, Status> {
+        Err(Status::unimplemented("watch is not supported"))
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = "0.0.0.0:44020".parse()?;
@@ -57,6 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tonic::transport::Server::builder()
         .add_service(reflection_service)
+        .add_service(HealthServer::new(HealthService))
         .add_service(ParserServiceServer::new(svc))
         .serve(addr)
         .await?;

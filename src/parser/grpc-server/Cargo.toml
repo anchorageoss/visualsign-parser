@@ -15,3 +15,4 @@ tokio = { version = "1.0", features = [
   "rt-multi-thread",
   "signal",
 ], default-features = false }
+tokio-stream = "0.1"
