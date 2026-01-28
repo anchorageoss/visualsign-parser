@@ -1,16 +1,16 @@
 ---
-title: Security Model
-description: Threat model, trust architecture, and security guarantees
+title: TEE Security Model
+description: Threat model, trust architecture, and security guarantees for AWS Nitro deployments
 ---
 
-VisualSign solves a fundamental problem in blockchain security: users cannot verify what they are signing. This page explains the threat model, trust architecture, and security guarantees that VisualSign provides.
+VisualSign solves a fundamental problem in blockchain security: users cannot verify what they are signing. This page explains the threat model, trust architecture, and security guarantees that VisualSign provides when deployed in AWS Nitro Enclaves.
 
 ## The problem
 
 When you sign a blockchain transaction, you typically see one of two things:
 
-1. **Raw hex data** - Incomprehensible strings like `0xf86c808504a817c800...`
-2. **Application-provided descriptions** - Text that could be manipulated by a compromised app
+1. **Raw hex data** — Incomprehensible strings like `0xf86c808504a817c800...`
+2. **Application-provided descriptions** — Text that could be manipulated by a compromised app
 
 Both approaches are vulnerable:
 
@@ -65,21 +65,21 @@ flowchart TB
 | The network | Attestation verification catches any tampering |
 | The host EC2 instance | The enclave isolates parsing from the host system |
 
-## AWS Nitro enclaves
+## AWS Nitro Enclaves
 
-VisualSign runs inside [AWS Nitro Enclaves](https://aws.amazon.com/ec2/nitro/nitro-enclaves/), which provide hardware-level isolation. A Nitro Enclave is a separate virtual machine that runs alongside a host EC2 instance. The enclave has its own kernel and memory, which the host instance cannot access — even though the host is responsible for starting and stopping the enclave.
+VisualSign runs inside [AWS Nitro Enclaves](https://aws.amazon.com/ec2/nitro/nitro-enclaves/), which provide hardware-level isolation. A Nitro Enclave is a separate virtual machine that runs alongside a host EC2 instance. The enclave has its own kernel and memory, which the host instance cannot access—even though the host is responsible for starting and stopping the enclave.
 
 ### Key properties
 
-1. **Isolated execution** - The enclave runs in a separate virtual machine with its own kernel. The parent instance cannot access enclave memory.
+1. **Isolated execution** — The enclave runs in a separate virtual machine with its own kernel. The parent instance cannot access enclave memory.
 
-2. **No persistent storage** - Enclaves have no disk access. All state exists only in memory and is lost on restart.
+2. **No persistent storage** — Enclaves have no disk access. All state exists only in memory and is lost on restart.
 
-3. **No external network** - Enclaves cannot make network calls directly. All communication goes through a controlled vsock channel.
+3. **No external network** — Enclaves cannot make network calls directly. All communication goes through a controlled vsock channel.
 
-4. **Cryptographic attestation** - AWS signs a document containing measurements of exactly what code is running.
+4. **Cryptographic attestation** — AWS signs a document containing measurements of exactly what code is running.
 
-### Platform configuration registers (PCRs)
+### Platform Configuration Registers (PCRs)
 
 PCRs are cryptographic measurements taken at boot time:
 
@@ -137,9 +137,9 @@ AWS Nitro signs an attestation document containing:
 
 The wallet verifies before displaying:
 
-1. **Certificate chain** - Validates the attestation document was signed by AWS
-2. **PCR values** - Confirms the expected parser code is running
-3. **Signature** - Verifies the parsed output was signed by the attested enclave
+1. **Certificate chain** — Validates the attestation document was signed by AWS
+2. **PCR values** — Confirms the expected parser code is running
+3. **Signature** — Verifies the parsed output was signed by the attested enclave
 
 Only after all checks pass does the wallet display the visualization.
 
@@ -194,9 +194,9 @@ VisualSign's security model assumes:
 
 ### For wallet developers
 
-1. **Always verify attestation** - Never display parsed output without full verification
-2. **Maintain PCR allowlists** - Keep track of valid parser versions
-3. **Handle verification failures** - If verification fails, do not display the parsed output
+1. **Always verify attestation** — Never display parsed output without full verification
+2. **Maintain PCR allowlists** — Keep track of valid parser versions
+3. **Handle verification failures** — If verification fails, do not display the parsed output
 
 ### For security auditors
 
@@ -216,9 +216,13 @@ When the parser is updated, PCR values change. Wallets should:
 3. Update allowlists before new versions are deployed
 4. Support multiple PCR sets during migration periods
 
+## Next steps
+
+- [Attestation Verification](./attestation) — Implementation guide
+- [Getting Started](./getting-started) — Deploy your own enclave
+- [Parser Source Code](https://github.com/anchorageoss/visualsign-parser)
+
 ## Resources
 
 - [AWS Nitro Enclaves Documentation](https://docs.aws.amazon.com/enclaves/)
-- [Attestation Verification Guide](./verification)
 - [VisualSign Verifier Library](https://github.com/anchorageoss/awsnitroverifier)
-- [Parser Source Code](https://github.com/anchorageoss/visualsign-parser)

@@ -1,5 +1,5 @@
 ---
-title: Verification
+title: Attestation Verification
 description: Implement attestation verification for parser responses
 ---
 
@@ -9,7 +9,7 @@ For background on why verification matters and how the security model works, see
 
 ## Prerequisites
 
-- Understanding of [VisualSign's security model](./security-model)
+- Understanding of the [TEE security model](./security-model)
 - Access to the [VisualSign Verifier Library](https://github.com/anchorageoss/awsnitroverifier) (recommended) or ability to implement verification from scratch
 - A PCR allowlist for the parser version you're integrating with
 
@@ -321,9 +321,13 @@ Verify an attestation document directly:
 nitro-cli verify-attestation --document attestation.cbor
 ```
 
+## Next steps
+
+- [Security Model](./security-model) — Understanding the trust architecture
+- [Getting Started](./getting-started) — Deploy your own enclave
+
 ## Resources
 
-- [Security Model](./security-model) - Understanding the trust architecture
 - [AWS Nitro Enclaves Documentation](https://docs.aws.amazon.com/enclaves/)
 - [CBOR RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html)
 - [VisualSign Verifier Library](https://github.com/anchorageoss/awsnitroverifier)

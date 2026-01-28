@@ -1,0 +1,195 @@
+---
+title: Error Handling
+description: Handle parsing errors gracefully in your wallet integration
+---
+
+Not all transactions can be fully parsed. This page covers error handling strategies for wallet integrations.
+
+## Error categories
+
+| Category | Cause | Recommended action |
+|----------|-------|-------------------|
+| Invalid transaction | Malformed bytes, wrong encoding | Show error, don't allow signing |
+| Wrong chain | Transaction doesn't match specified chain | Ask user to verify chain selection |
+| Unknown contract | No ABI, not a known protocol | Show available info + warning |
+| Parse failure | Bug or unsupported feature | Fall back to raw display |
+| Service unavailable | Network or service down | Retry or fall back |
+
+## gRPC error codes
+
+The parser returns standard gRPC status codes:
+
+```go
+resp, err := client.Parse(ctx, request)
+if err != nil {
+    status := status.Convert(err)
+    switch status.Code() {
+    case codes.InvalidArgument:
+        // Transaction couldn't be decoded
+        // Show: "Invalid transaction format"
+    case codes.FailedPrecondition:
+        // Missing required metadata or wrong chain
+        // Show: "Transaction doesn't match selected chain"
+    case codes.Internal:
+        // Parser error (bug or unsupported feature)
+        // Show raw transaction with warning
+    case codes.Unavailable:
+        // Service down
+        // Retry with backoff
+    }
+}
+```
+
+### Error code reference
+
+| Code | Name | Description |
+|------|------|-------------|
+| `3` | INVALID_ARGUMENT | Invalid transaction bytes or encoding |
+| `5` | NOT_FOUND | Chain not supported |
+| `9` | FAILED_PRECONDITION | Chain mismatch or missing required data |
+| `13` | INTERNAL | Parser error |
+| `14` | UNAVAILABLE | Service temporarily unavailable |
+
+## Graceful degradation
+
+When parsing fails or returns incomplete data, you can still allow signing with appropriate warnings:
+
+```typescript
+async function parseTransaction(rawTx: string, chain: Chain): Promise<ParseResult> {
+    try {
+        const result = await parser.parse(rawTx, chain);
+        return {
+            success: true,
+            visualSign: result,
+            warnings: []
+        };
+    } catch (error) {
+        // Log for debugging
+        console.error('Parse failed:', error);
+
+        // Determine severity
+        if (isInvalidTransaction(error)) {
+            // Don't allow signing malformed transactions
+            return {
+                success: false,
+                error: 'This transaction appears to be malformed and cannot be signed.',
+                allowSigning: false
+            };
+        }
+
+        // For other errors, allow signing with warning
+        return {
+            success: false,
+            fallback: {
+                title: 'Unknown Transaction',
+                warning: 'Transaction details could not be fully parsed.',
+                rawData: rawTx,
+            },
+            allowSigning: true  // User can proceed at their own risk
+        };
+    }
+}
+```
+
+## User communication
+
+Match error severity to UI treatment:
+
+| Scenario | UI Treatment |
+|----------|--------------|
+| Parsed successfully | Show VisualSign fields normally |
+| Unknown contract | Show parsed fields + "Interacting with unverified contract" banner |
+| Partial parse | Show what's known + "Some details unavailable" notice |
+| Parse failed entirely | Show raw hex + "Unable to decode transaction" warning |
+| Invalid transaction | Error state, disable signing |
+| Service unavailable | "Checking transaction..." with retry option |
+
+### Example warning banners
+
+**Unknown contract:**
+```
+⚠️ Unverified Contract
+This transaction interacts with a contract we don't recognize.
+Review the raw data carefully before signing.
+```
+
+**Service unavailable:**
+```
+⚠️ Unable to Verify
+We couldn't connect to the transaction parser.
+[Retry] [Sign Anyway]
+```
+
+## Retry logic
+
+For transient failures, implement retry with exponential backoff:
+
+```go
+func parseWithRetry(ctx context.Context, req *ParseRequest) (*ParseResponse, error) {
+    var lastErr error
+    for attempt := 0; attempt < 3; attempt++ {
+        resp, err := client.Parse(ctx, req)
+        if err == nil {
+            return resp, nil
+        }
+
+        // Only retry on transient errors
+        if status.Code(err) != codes.Unavailable {
+            return nil, err
+        }
+
+        lastErr = err
+        time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
+    }
+    return nil, lastErr
+}
+```
+
+## Health checks
+
+Monitor parser availability before users need it:
+
+```bash
+# gRPC health check
+grpcurl -plaintext localhost:44020 grpc.health.v1.Health/Check
+```
+
+```go
+// Programmatic health check
+func checkParserHealth(ctx context.Context) bool {
+    resp, err := healthClient.Check(ctx, &healthpb.HealthCheckRequest{
+        Service: "parser.ParserService",
+    })
+    return err == nil && resp.Status == healthpb.HealthCheckResponse_SERVING
+}
+```
+
+## Logging and monitoring
+
+Track parsing outcomes for debugging and improvement:
+
+```go
+// Log parse attempts
+log.Info("parse_attempt",
+    "chain", req.Chain,
+    "tx_size", len(req.UnsignedPayload),
+    "has_metadata", req.ChainMetadata != nil,
+)
+
+// Log outcomes
+if err != nil {
+    log.Error("parse_failed",
+        "error", err,
+        "code", status.Code(err),
+    )
+    metrics.Counter("parser.failures").Inc()
+} else {
+    metrics.Counter("parser.successes").Inc()
+}
+```
+
+## Next steps
+
+- [How Parsing Works](./how-parsing-works) — Understand what can cause parse failures
+- [Chain Metadata](./chain-metadata) — Reduce "unknown contract" errors
+- [gRPC API Reference](/api-reference) — Full error code documentation

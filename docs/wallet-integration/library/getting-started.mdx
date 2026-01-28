@@ -1,0 +1,118 @@
+---
+title: Library Integration
+description: Embed the VisualSign parser directly in your application
+---
+
+{/*
+PLACEHOLDER - This page is not yet in navigation.
+TODO: Document the Rust API and build options.
+*/}
+
+Embed VisualSign parsing directly in your application without network calls. The parser is available as a Rust crate that can be compiled to native code or WebAssembly.
+
+## When to use library integration
+
+Library integration is ideal when:
+
+- You're building a browser extension or web application (WASM)
+- Parsing should happen on the user's device
+- Network latency is unacceptable
+- You're embedding in a Rust application
+
+## Trade-offs
+
+| Advantage | Consideration |
+|-----------|---------------|
+| No network latency | No attestation (trust your process) |
+| Works offline | Larger binary size |
+| Simpler deployment | Updates require app releases |
+
+## Integration options
+
+### Rust native
+
+Add the crate to your `Cargo.toml`:
+
+```toml
+[dependencies]
+visualsign-parser = { git = "https://github.com/anchorageoss/visualsign-parser" }
+```
+
+Basic usage:
+
+```rust
+use visualsign_parser::{parse_transaction, Chain};
+
+fn main() {
+    let raw_tx = "0xf86c808504a817c800...";
+    let result = parse_transaction(raw_tx, Chain::Ethereum, None);
+
+    match result {
+        Ok(visual_sign) => {
+            println!("Title: {}", visual_sign.title);
+            // Display fields to user
+        }
+        Err(e) => eprintln!("Parse error: {}", e),
+    }
+}
+```
+
+<Note>
+API details are preliminary. See the crate documentation for current usage.
+</Note>
+
+### WebAssembly
+
+Build for WASM target:
+
+```bash
+cargo build --target wasm32-unknown-unknown --release
+```
+
+Use from JavaScript:
+
+```javascript
+import init, { parse_transaction } from 'visualsign-parser';
+
+await init();
+
+const result = parse_transaction(
+    '0xf86c808504a817c800...',
+    'ethereum',
+    null
+);
+
+console.log(result.title);
+```
+
+See [WASM Integration](./wasm) for detailed browser integration.
+
+### FFI (C, Go, Python, etc.)
+
+The library can be compiled as a C-compatible shared library for use from other languages.
+
+```c
+// Example C usage
+#include "visualsign.h"
+
+int main() {
+    const char* result = visualsign_parse(
+        "0xf86c808504a817c800...",
+        CHAIN_ETHEREUM,
+        NULL
+    );
+    printf("%s\n", result);
+    visualsign_free(result);
+    return 0;
+}
+```
+
+<Note>
+FFI bindings are not yet published. Contact us if you need FFI support.
+</Note>
+
+## Next steps
+
+- [Rust API Reference](../../api-reference) — Detailed API documentation
+- [WASM Integration](./wasm) — Browser-specific guidance
+- [Chain Metadata](../core-concepts/chain-metadata) — Providing ABIs and IDLs
