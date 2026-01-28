@@ -4,8 +4,8 @@ description: Run the gRPC parser service without TEE infrastructure
 ---
 
 {/*
-PLACEHOLDER - This page is not yet in navigation.
-TODO: Add Docker/K8s deployment examples.
+TODO: Publish a public Docker image and add Docker deployment instructions.
+The K8s example below uses a placeholder image that doesn't exist yet.
 */}
 
 Run VisualSign as a standalone gRPC service without AWS Nitro Enclave infrastructure. This provides the same parsing functionality and API without attestation.
@@ -30,16 +30,6 @@ The sidecar model assumes:
 - Network communication is secured (TLS, VPC, etc.)
 - You don't need to prove parsing integrity to external parties
 
-## Running with Docker
-
-```bash
-# Pull the parser image
-docker pull ghcr.io/anchorageoss/visualsign-parser:latest
-
-# Run the parser
-docker run -p 44020:44020 ghcr.io/anchorageoss/visualsign-parser:latest
-```
-
 ## Running locally (development)
 
 ```bash
@@ -47,8 +37,8 @@ docker run -p 44020:44020 ghcr.io/anchorageoss/visualsign-parser:latest
 git clone https://github.com/anchorageoss/visualsign-parser
 cd visualsign-parser/src
 
-# Run the parser
-make parser_host
+# Run the parser (starts all required components)
+make parser
 ```
 
 The parser will be available at `localhost:44020`.
@@ -72,7 +62,7 @@ spec:
     spec:
       containers:
       - name: parser
-        image: ghcr.io/anchorageoss/visualsign-parser:latest
+        image: ${YOUR_IMAGE}
         ports:
         - containerPort: 44020
         resources:
@@ -132,11 +122,10 @@ No changes to request/response handling are required.
 
 ```bash
 # gRPC health check
-grpcurl -plaintext localhost:44020 grpc.health.v1.Health/Check
-
-# Or with curl if HTTP health endpoint is enabled
-curl http://localhost:44021/health
+grpcurl -plaintext localhost:44020 health.HealthCheckService/AppHealth
 ```
+
+This returns `{"code": 200}` when healthy.
 
 ## Next steps
 

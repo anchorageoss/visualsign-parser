@@ -47,9 +47,14 @@
             "group": "Deployment Models",
             "pages": [
               "wallet-integration/hosted/getting-started",
-              "wallet-integration/self-hosted-tee/getting-started",
-              "wallet-integration/self-hosted-tee/security-model",
-              "wallet-integration/self-hosted-tee/attestation",
+              {
+                "group": "Self-Hosted TEE",
+                "pages": [
+                  "wallet-integration/self-hosted-tee/getting-started",
+                  "wallet-integration/self-hosted-tee/security-model",
+                  "wallet-integration/self-hosted-tee/attestation"
+                ]
+              },
               "wallet-integration/library/getting-started",
               "wallet-integration/sidecar/getting-started"
             ]
@@ -140,20 +145,6 @@
      "vscode"
    ]
   },
-  "redirects": [
-    {
-      "source": "/getting-started",
-      "destination": "/wallet-integration/overview"
-    },
-    {
-      "source": "/security-model",
-      "destination": "/wallet-integration/self-hosted-tee/security-model"
-    },
-    {
-      "source": "/verification",
-      "destination": "/wallet-integration/self-hosted-tee/attestation"
-    }
-  ],
   "footer": {
     "socials": {
       "github": "https://github.com/anchorageoss"

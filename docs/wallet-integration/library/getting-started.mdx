@@ -3,21 +3,16 @@ title: Library Integration
 description: Embed the VisualSign parser directly in your application
 ---
 
-{/*
-PLACEHOLDER - This page is not yet in navigation.
-TODO: Document the Rust API and build options.
-*/}
-
-Embed VisualSign parsing directly in your application without network calls. The parser is available as a Rust crate that can be compiled to native code or WebAssembly.
+Embed VisualSign parsing directly in your application without network calls. The parser is available as Rust crates that can be compiled into your application.
 
 ## When to use library integration
 
 Library integration is ideal when:
 
-- You're building a browser extension or web application (WASM)
-- Parsing should happen on the user's device
+- You're building a Rust application (CLI tool, backend service)
+- Parsing should happen without external service dependencies
 - Network latency is unacceptable
-- You're embedding in a Rust application
+- You want the smallest deployment footprint
 
 ## Trade-offs
 
@@ -27,92 +22,211 @@ Library integration is ideal when:
 | Works offline | Larger binary size |
 | Simpler deployment | Updates require app releases |
 
-## Integration options
+## Rust integration
 
-### Rust native
+### Dependencies
 
-Add the crate to your `Cargo.toml`:
+Add the required crates to your `Cargo.toml`. The `parser_app` crate provides the full parser registry with all chain support:
 
 ```toml
 [dependencies]
-visualsign-parser = { git = "https://github.com/anchorageoss/visualsign-parser" }
+parser_app = { git = "https://github.com/anchorageoss/visualsign-parser", package = "parser_app" }
+visualsign = { git = "https://github.com/anchorageoss/visualsign-parser", package = "visualsign" }
+generated = { git = "https://github.com/anchorageoss/visualsign-parser", package = "generated" }
 ```
 
-Basic usage:
+### Basic usage
 
 ```rust
-use visualsign_parser::{parse_transaction, Chain};
+use parser_app::registry::create_registry;
+use visualsign::registry::Chain;
+use visualsign::vsptrait::{VisualSignOptions, DeveloperConfig};
+use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 
 fn main() {
-    let raw_tx = "0xf86c808504a817c800...";
-    let result = parse_transaction(raw_tx, Chain::Ethereum, None);
+    // Create the parser registry (includes all supported chains)
+    let registry = create_registry();
 
-    match result {
-        Ok(visual_sign) => {
-            println!("Title: {}", visual_sign.title);
-            // Display fields to user
+    // Raw transaction hex (with or without 0x prefix)
+    // This is a complete EIP-1559 transaction
+    let raw_tx = "0x02f901..."; // Your full transaction hex
+
+    // Configure parsing options
+    let options = VisualSignOptions {
+        decode_transfers: true,
+        transaction_name: None,
+        metadata: Some(ChainMetadata {
+            metadata: Some(Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("1".to_string()), // Ethereum Mainnet
+                abi: None,
+            })),
+        }),
+        developer_config: Some(DeveloperConfig {
+            allow_signed_transactions: true,
+        }),
+        abi_registry: None,
+    };
+
+    // Parse the transaction
+    match registry.convert_transaction(&Chain::Ethereum, raw_tx, options) {
+        Ok(payload) => {
+            println!("Title: {}", payload.title);
+            println!("Fields: {:?}", payload.fields);
         }
-        Err(e) => eprintln!("Parse error: {}", e),
+        Err(e) => eprintln!("Parse error: {:?}", e),
     }
 }
 ```
 
-<Note>
-API details are preliminary. See the crate documentation for current usage.
-</Note>
+### Working with the SignablePayload
 
-### WebAssembly
+The parser returns a `SignablePayload` containing structured fields:
 
-Build for WASM target:
+```rust
+use visualsign::{SignablePayload, SignablePayloadField};
 
-```bash
-cargo build --target wasm32-unknown-unknown --release
-```
+fn display_payload(payload: &SignablePayload) {
+    println!("Transaction: {}", payload.title);
 
-Use from JavaScript:
+    if let Some(subtitle) = &payload.subtitle {
+        println!("  {}", subtitle);
+    }
 
-```javascript
-import init, { parse_transaction } from 'visualsign-parser';
-
-await init();
-
-const result = parse_transaction(
-    '0xf86c808504a817c800...',
-    'ethereum',
-    null
-);
-
-console.log(result.title);
-```
-
-See [WASM Integration](./wasm) for detailed browser integration.
-
-### FFI (C, Go, Python, etc.)
-
-The library can be compiled as a C-compatible shared library for use from other languages.
-
-```c
-// Example C usage
-#include "visualsign.h"
-
-int main() {
-    const char* result = visualsign_parse(
-        "0xf86c808504a817c800...",
-        CHAIN_ETHEREUM,
-        NULL
-    );
-    printf("%s\n", result);
-    visualsign_free(result);
-    return 0;
+    for field in &payload.fields {
+        match field {
+            SignablePayloadField::TextV2 { common, text_v2 } => {
+                println!("  {}: {}", common.label, text_v2.text);
+            }
+            SignablePayloadField::AmountV2 { common, amount_v2 } => {
+                println!("  {}: {} {}",
+                    common.label,
+                    amount_v2.amount,
+                    amount_v2.abbreviation.as_deref().unwrap_or("")
+                );
+            }
+            SignablePayloadField::AddressV2 { common, address_v2 } => {
+                println!("  {}: {}", common.label, address_v2.address);
+            }
+            _ => {
+                // Handle other field types as needed
+            }
+        }
+    }
 }
 ```
 
-<Note>
-FFI bindings are not yet published. Contact us if you need FFI support.
-</Note>
+### Supported chains
+
+The registry includes parsers for:
+
+- **Ethereum** — Mainnet and L2s (Arbitrum, Optimism, Base, Polygon)
+- **Solana** — With IDL support for program parsing
+- **Sui** — Move-based transactions
+- **Tron** — TRC-20 and smart contracts
+
+Use the `Chain` enum to specify which parser to use:
+
+```rust
+use visualsign::registry::Chain;
+
+let chain = Chain::Ethereum;  // or Chain::Solana, Chain::Sui, Chain::Tron
+```
+
+### Adding custom ABIs (Ethereum)
+
+For Ethereum transactions, you can provide custom ABIs to improve parsing of unrecognized contracts:
+
+```rust
+use std::sync::Arc;
+use visualsign_ethereum::abi_registry::AbiRegistry;
+use visualsign_ethereum::embedded_abis::load_and_map_abi;
+
+// Create an ABI registry
+let mut abi_registry = AbiRegistry::new();
+
+// Load an ABI from a JSON file and map it to a contract address
+load_and_map_abi(
+    &mut abi_registry,
+    "MyContract",              // Name for the ABI
+    "/path/to/abi.json",       // Path to ABI JSON file
+    1,                         // Chain ID
+    "0x1234...abcd",           // Contract address
+).expect("Failed to load ABI");
+
+// Use the registry in options
+let options = VisualSignOptions {
+    // ... other options
+    abi_registry: Some(Arc::new(abi_registry)),
+    ..Default::default()
+};
+```
+
+### Adding custom IDLs (Solana)
+
+For Solana transactions, provide Anchor IDLs to parse program instructions:
+
+```rust
+use std::collections::HashMap;
+use generated::parser::{ChainMetadata, SolanaMetadata, Idl, SolanaIdlType, chain_metadata::Metadata};
+
+// Load IDL JSON from file
+let idl_json = std::fs::read_to_string("/path/to/idl.json")?;
+
+// Create IDL mapping
+let mut idl_mappings = HashMap::new();
+idl_mappings.insert(
+    "YourProgramId1111111111111111111111111111111".to_string(),
+    Idl {
+        value: idl_json,
+        idl_type: Some(SolanaIdlType::Anchor as i32),
+        idl_version: None,
+        signature: None,
+        program_name: Some("MyProgram".to_string()),
+    },
+);
+
+let options = VisualSignOptions {
+    metadata: Some(ChainMetadata {
+        metadata: Some(Metadata::Solana(SolanaMetadata {
+            network_id: None,
+            idl: None,
+            idl_mappings,
+        })),
+    }),
+    ..Default::default()
+};
+```
+
+## Testing your integration
+
+Use the CLI to verify expected output before integrating:
+
+```bash
+# From the src/ directory
+cargo run --bin parser_cli --release -- \
+  --chain ethereum \
+  --network ETHEREUM_MAINNET \
+  --output json \
+  -t "0x02f901..."
+```
+
+Compare the CLI's JSON output with your integration to ensure consistent parsing.
+
+## Complete example
+
+A working example that demonstrates library integration is available in the repository:
+
+- [src/examples/library_integration_test.rs](https://github.com/anchorageoss/visualsign-parser/blob/main/src/examples/library_integration_test.rs)
+
+Run it with:
+
+```bash
+# From the src/ directory
+cargo run -p library_integration_test
+```
 
 ## Next steps
 
-- [Rust API Reference](../../api-reference) — Detailed API documentation
-- [WASM Integration](./wasm) — Browser-specific guidance
-- [Chain Metadata](../core-concepts/chain-metadata) — Providing ABIs and IDLs
+- [Chain Metadata](../core-concepts/chain-metadata) — Providing ABIs and IDLs for better parsing
+- [Error Handling](../core-concepts/error-handling) — Handling parse failures gracefully
+- [Field Types](/field-types) — Understanding the SignablePayload schema
