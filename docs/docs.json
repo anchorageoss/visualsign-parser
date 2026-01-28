@@ -63,8 +63,9 @@
           {
             "group": "Contributing",
             "pages": [
-              "contributing/contributing-visualization",
-              "contributing/testing-visualizations"
+              "contributing",
+              "contributor-guides/contributing-visualization",
+              "contributor-guides/testing-visualizations"
             ]
           }
         ]
@@ -77,9 +78,10 @@
             "pages": [
               "chain-modules",
               "adding-new-chain",
-              "contributing/project-structure",
-              "contributing/best-practices",
-              "contributing/integration-testing"
+              "contributing",
+              "contributor-guides/project-structure",
+              "contributor-guides/best-practices",
+              "contributor-guides/integration-testing"
             ]
           }
         ]

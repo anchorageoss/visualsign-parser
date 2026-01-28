@@ -255,17 +255,69 @@ func parseAndDisplayTransaction(rawTx string) error {
 
 ## Testing
 
-Use the provided test transactions:
+Use the CLI to test transaction parsing locally. The `-o human` flag provides a readable output format.
 
-**Solana:**
+**Ethereum (native transfer):**
 ```bash
-cargo run --bin parser_cli -- --chain solana -t 'AgAAAAAAAA...'
+cargo run --bin parser_cli -- --chain ethereum -o human -t '0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83'
 ```
 
-**Ethereum:**
-```bash
-cargo run --bin parser_cli -- --chain ethereum -t '0xf86c808504a817c800...'
+Expected output:
 ```
+┌─ Transaction: Ethereum Transaction
+│  Version: 0
+│  Type: EthereumTx
+│
+└─ Fields:
+   ├─ Network: Ethereum Mainnet
+   ├─ To: 0x3535353535353535353535353535353535353535
+   ├─ Value: 1 ETH
+   ├─ Gas Limit: 21000
+   ├─ Gas Price: 20 gwei
+   └─ Nonce: 0
+```
+
+**Solana (Jupiter swap):**
+```bash
+cargo run --bin parser_cli -- --chain solana -o human -t 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAkSTXq/T5ciKTTbZJhKN+HNd2Q3/i8mDBxbxpek3krZ664CMz4dTWd4gwDq6aKU/sqHgTzleVA7bTCOy59kSOO+0EPkGS7bWuT/2yiCuaADtj/v6d+KwyTj46OQM2MjIq6hTqzVdwLTW8t+UsWMrwHEvc/r814OmVR9yLVQZujbWvpTh0XSNlF7uoIvuHyKD/16mBElrNa/eT8vB1KVUaN8IoaTvZbN4b7iiv8Q8cl5bDecNqCXzTS1Xmsmh5b2UVZniTbtX0AYG5QKiSDC10m0caM6frmEVukpjEWOk7F/0OzFKL0A0HdMWTIMuQj4xBuP3csLyGzVO/MXtPu6woNViO2O9ocxd1YSDcIwhrzHY3a9ewvycRH5q662TcQqdxD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEedVb8jHAbu50xW7OaBUH/bGy3qP0jlECsc2iVrwTjwabiFf+q4GE+2h/Y0YYwDXaxDncGus7VZig8AAAAAABBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkOA2hfjpCQU+RYEhxm9adq7cdwaqEcgviqlSqPK3h5qVJNNVq4xx0JIWWE9kFLvpQK5lvS5UCde3W3QfWYLIxYjJclj04kifG7PRApFI4NgwtaE5na/xCEBI572Nvp+Fm0P/on9df2SnTAmx8pWHneSwmrNt/J3VFLMhqns4zl6Mb6evO+2606PWXzaqvJdDGxu+TC0vbg5HymAgNFL11hXuFhKBWRymmouYdcNxL6PjM1Bkcio0R+AtqA/P3C3jAFDwYABgALCQwBAQkCAAYMAgAAAEBCDwAAAAAADAEGAREKFQwABgUKEQoQCg0MAAQGAwUHCAECDiTlF8uXeuOtKgEAAAARAWQAAUBCDwAAAAAAtEADAAAAAAAyAAAMAwYAAAEJ'
+```
+
+Expected output (condensed):
+```
+┌─ Transaction: Solana Transaction
+│  Version: 0
+│  Type: SolanaTx
+│
+└─ Fields:
+   ├─ Network: Solana
+   ├─ Instruction 4
+   │     Title: Jupiter Swap: From 1000000 Toke...Q5DA To 213172 USDC (slippage: 50bps)
+   ...
+```
+
+**Sui (native transfer):**
+```bash
+cargo run --bin parser_cli -- --chain sui -o human -t 'AAACACCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJCrze8SNFZ4kAAIAMqaOwAAAAACAgABAQEAAQECAAABAADW6S4ALibDr7IIgAHBtYILZPK8NRv9paI0Ksv59cHKwgHLSF74CguvkHmmIcQsiwy2XOmYbhyB/RbuiAOPAEpa7Rua1BcAAAAAIGOAX4LpV/FYmnpiNGs3y1rsDwwf9O10x5SdK7vXP+9Q1ukuAC4mw6+yCIABwbWCC2TyvDUb/aWiNCrL+fXBysLoAwAAAAAAAEBLTAAAAAAAAA=='
+```
+
+Expected output:
+```
+┌─ Transaction: Programmable Transaction
+│  Version: 0
+│  Type: Sui
+│
+└─ Fields:
+   ├─ Network: Sui Network
+   ├─ Transfer Command
+   │     Title: Transfer: 1000000000 MIST (1 SUI)
+   ...
+```
+
+**Additional options:**
+- `-o json` — Output as JSON for programmatic use
+- `-o text` — Output as Rust debug format
+- `--condensed-only` — Show only fields displayed on hardware wallets
+- `-n NETWORK` — Specify network (e.g., `POLYGON_MAINNET`, `ARBITRUM_MAINNET`)
 
 ## Support
 

@@ -1,0 +1,90 @@
+---
+title: Contributing Overview
+description: PR workflow, code standards, and build instructions for all contributors
+---
+
+Thank you for your interest in contributing to VisualSign Parser. This guide covers the universal contribution workflow applicable to all contributors.
+
+## Governance
+
+For details about authority, Core Team structure, and decision-making, see [Governance](/about#governance).
+
+## Contribution workflow
+
+### For community contributors
+
+1. **Fork** the [visualsign-parser](https://github.com/anchorageoss/visualsign-parser) repository
+2. **Create a feature branch** from `main`
+3. **Make your changes** following the code style and practices in this project
+4. **Sign the Contributor License Agreement (CLA)** if this is your first contribution. The CLA check will prompt you with instructions if needed.
+5. **Submit a pull request** with a clear description of your changes
+6. **Wait for Core Team review**. A Core Team member will review and approve your PR before it can be merged.
+
+### For Core Team members
+
+Core Team members can review, approve, and merge PRs from community contributors and other Core Team members. Follow the same PR workflow but with merge authority.
+
+## PR guidelines
+
+- **Clear description**: Explain what problem your PR solves and how it solves it
+- **Test coverage**: Include tests for new functionality
+- **Code style**: Follow existing code conventions in the repository
+- **One concern per PR**: Keep PRs focused on a single feature or bug fix
+
+## Code standards
+
+Before submitting, ensure your code passes all checks:
+
+```bash
+# Format code
+make -C src fmt
+
+# Run linter and fix issues
+make -C src lint
+
+# Run tests
+make -C src test
+```
+
+Additional guidelines:
+- Format your code using [rustfmt](https://github.com/rust-lang/rustfmt)
+- Address all linter warnings
+- Ensure all tests pass
+- No breaking changes without discussion
+
+## Building OCI containers
+
+This repository uses [StageX](https://stagex.tools) to build OCI containers.
+
+### Requirements
+
+- Docker Desktop 26 or later with containerd enabled (Settings then "Use containerd for pulling and storing images")
+- Linux: Add to `/etc/docker/daemon.json`:
+  ```json
+  {"features": {"containerd-snapshotter": true}}
+  ```
+
+### Build commands
+
+```bash
+# Parser app container
+make out/parser_app/index.json
+
+# Parser host container
+make out/parser_host/index.json
+
+# Non-OCI versions
+make non-oci-docker-images
+```
+
+## Questions or issues
+
+If you have questions about the contribution process, reach out to the Core Team through the [repository issue tracker](https://github.com/anchorageoss/visualsign-parser/issues).
+
+## Type-specific guides
+
+Depending on what you're contributing, see:
+
+- **Adding a visualization for your DApp or protocol**: [Contributing a Visualization](./contributor-guides/contributing-visualization)
+- **Adding support for a new blockchain**: [Adding a New Chain](./adding-new-chain)
+- **Improving the core parser**: [Best Practices](./contributor-guides/best-practices) and [Project Structure](./contributor-guides/project-structure)

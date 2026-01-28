@@ -1,54 +1,15 @@
 # Contributing
 
-Thank you for your interest in contributing to this project! This document outlines the contribution workflow and guidelines.
+For complete contribution guidelines, including PR workflow, code standards, and build instructions, see our documentation:
 
-## Governance
+**[Contributing Overview](https://visualsign.dev/contributing)**
 
-For details about authority, core team structure, and decision-making, please refer to [GOVERNANCE.md](GOVERNANCE.md).
+## Quick links
 
-## How to Contribute
+- [Contributing a Visualization](https://visualsign.dev/contributor-guides/contributing-visualization) — For DApp and protocol developers
+- [Adding a New Chain](https://visualsign.dev/adding-new-chain) — For blockchain developers
+- [Best Practices](https://visualsign.dev/contributor-guides/best-practices) — Code standards and testing guidelines
 
-### For Community/Public Contributors
-1. **Fork** the repository
-2. **Create a feature branch** from `main`
-3. **Make your changes** following the code style and practices used in the project
-4. **Sign the Contributor License Agreement (CLA) if this is your first contribution. The CLA check will prompt you with instructions if needed.**
-5. **Submit a Pull Request** with a clear description of your changes
-6. **Wait for Core Team review** - A Core Team member will review and approve your PR before it can be merged
+## Questions?
 
-### For Core Team Members
-1. Core Team members can review, approve, and merge PRs from community contributors and other Core Team members
-2. Follow the same PR workflow but with merge authority
-
-## PR Guidelines
-- **Clear description:** Explain what problem your PR solves and how it solves it
-- **Test coverage:** Include tests for new functionality
-- **Code style:** Follow existing code conventions in the repository
-- **One concern per PR:** Keep PRs focused on a single feature or bug fix
-
-## Code Standards
-- Format your code using [rustfmt](https://github.com/rust-lang/rustfmt) by running `make -C src fmt` before submitting
-- Address all linter warnings by running `make -C src lint` and fixing issues
-- Run `make -C src test` to ensure all tests pass before submitting
-- No breaking changes without discussion
-
-## Building OCI Containers
-
-This repository uses [StageX](https://stagex.tools) to build OCI containers.
-
-**Requirements:**
-- Docker Desktop >= 26 with containerd enabled (Settings → "Use containerd for pulling and storing images")
-- Linux: Add to `/etc/docker/daemon.json`:
-  ```json
-  {"features": {"containerd-snapshotter": true}}
-  ```
-
-**Build:**
-```sh
-make out/parser_app/index.json   # Parser app container
-make out/parser_host/index.json  # Parser host container
-make non-oci-docker-images       # Non-OCI versions
-```
-
-## Questions or Issues?
-If you have questions about the contribution process, please reach out to the Core Team through the repository's issue tracker.
+Reach out through the [issue tracker](https://github.com/anchorageoss/visualsign-parser/issues).
