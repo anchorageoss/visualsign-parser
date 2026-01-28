@@ -1,13 +1,13 @@
 //! gRPC server - single binary gRPC server for non-TEE deployments
 
 use generated::grpc::health::v1::{
+    HealthCheckRequest, HealthCheckResponse,
     health_check_response::ServingStatus,
     health_server::{Health, HealthServer},
-    HealthCheckRequest, HealthCheckResponse,
 };
 use generated::parser::{
-    parser_service_server::{ParserService, ParserServiceServer},
     ParseRequest, ParseResponse,
+    parser_service_server::{ParserService, ParserServiceServer},
 };
 use generated::tonic::{self, Request, Response, Status};
 use parser_app::routes::parse::parse;

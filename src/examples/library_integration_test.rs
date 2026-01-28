@@ -1,11 +1,11 @@
 // Test file to verify library documentation examples compile
 // Run with: cargo run -p library_integration_test
 
+use generated::parser::{chain_metadata::Metadata, ChainMetadata, EthereumMetadata};
 use parser_app::registry::create_registry;
 use visualsign::registry::Chain;
-use visualsign::vsptrait::{VisualSignOptions, DeveloperConfig};
+use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
-use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 
 /// Display a SignablePayload in human-readable format
 fn display_payload(payload: &SignablePayload) {
@@ -21,7 +21,8 @@ fn display_payload(payload: &SignablePayload) {
                 println!("  {}: {}", common.label, text_v2.text);
             }
             SignablePayloadField::AmountV2 { common, amount_v2 } => {
-                println!("  {}: {} {}",
+                println!(
+                    "  {}: {} {}",
                     common.label,
                     amount_v2.amount,
                     amount_v2.abbreviation.as_deref().unwrap_or("")
