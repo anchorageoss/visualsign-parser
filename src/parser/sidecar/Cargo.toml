@@ -1,0 +1,17 @@
+[package]
+name = "parser_sidecar"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+parser_app = { path = "../app" }
+generated = { path = "../../generated", features = ["tonic_types"] }
+qos_core = { workspace = true }
+qos_p256 = { workspace = true }
+
+tokio = { version = "1.0", features = [
+  "macros",
+  "rt-multi-thread",
+  "signal",
+], default-features = false }

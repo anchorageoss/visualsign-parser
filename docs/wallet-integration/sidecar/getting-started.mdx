@@ -3,11 +3,6 @@ title: Sidecar Deployment
 description: Run the gRPC parser service without TEE infrastructure
 ---
 
-{/*
-TODO: Publish a public Docker image and add Docker deployment instructions.
-The K8s example below uses a placeholder image that doesn't exist yet.
-*/}
-
 Run VisualSign as a standalone gRPC service without AWS Nitro Enclave infrastructure. This provides the same parsing functionality and API without attestation.
 
 ## When to use sidecar deployment
@@ -30,18 +25,69 @@ The sidecar model assumes:
 - Network communication is secured (TLS, VPC, etc.)
 - You don't need to prove parsing integrity to external parties
 
-## Running locally (development)
+## Running locally
+
+The sidecar binary is a single-process gRPC server that calls the parser directly, without the socket-based architecture used in TEE deployments.
 
 ```bash
 # Clone the repository
 git clone https://github.com/anchorageoss/visualsign-parser
 cd visualsign-parser/src
 
-# Run the parser (starts all required components)
-make parser
+# Build and run the sidecar
+cargo run --bin parser_sidecar
 ```
 
 The parser will be available at `localhost:44020`.
+
+### Configuration
+
+Set the `EPHEMERAL_FILE` environment variable to specify a custom signing key:
+
+```bash
+EPHEMERAL_FILE=/path/to/key.secret cargo run --bin parser_sidecar
+```
+
+For development, the binary defaults to `integration/fixtures/ephemeral.secret`.
+
+## Building a Docker image
+
+The sidecar binary can be containerized as a single static binary:
+
+```dockerfile
+FROM rust:1.88 AS builder
+
+WORKDIR /build
+COPY . .
+
+# Build the sidecar binary
+RUN cd src && cargo build --release --bin parser_sidecar
+
+# Runtime image
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/src/target/release/parser_sidecar /usr/local/bin/
+COPY --from=builder /build/src/integration/fixtures/ephemeral.secret /etc/visualsign/
+
+ENV EPHEMERAL_FILE=/etc/visualsign/ephemeral.secret
+
+EXPOSE 44020
+
+CMD ["parser_sidecar"]
+```
+
+Build and run:
+
+```bash
+docker build -t visualsign-sidecar .
+docker run -p 44020:44020 visualsign-sidecar
+```
+
+<Note>
+For production, generate your own ephemeral key file rather than using the test fixture.
+</Note>
 
 ## Kubernetes deployment
 
@@ -62,9 +108,12 @@ spec:
     spec:
       containers:
       - name: parser
-        image: ${YOUR_IMAGE}
+        image: your-registry/visualsign-sidecar:latest
         ports:
         - containerPort: 44020
+        env:
+        - name: EPHEMERAL_FILE
+          value: /etc/visualsign/ephemeral.secret
         resources:
           requests:
             memory: "256Mi"
@@ -108,6 +157,17 @@ resp, err := client.Parse(context.Background(), &pb.ParseRequest{
 visualSignJSON := resp.ParsedTransaction.Payload.SignablePayload
 ```
 
+## Alternative: Multi-process mode
+
+For development, you can also run the full multi-process setup that mirrors the TEE architecture:
+
+```bash
+cd visualsign-parser/src
+make parser
+```
+
+This starts three processes (`parser_host`, `simulator_enclave`, `parser_app`) communicating over Unix sockets. The sidecar binary is simpler for most use cases.
+
 ## Migrating to TEE
 
 The sidecar deployment uses the same gRPC API as TEE deployments. To migrate:
@@ -121,11 +181,11 @@ No changes to request/response handling are required.
 ## Health checks
 
 ```bash
-# gRPC health check
-grpcurl -plaintext localhost:44020 health.HealthCheckService/AppHealth
+# gRPC health check (using grpcurl)
+grpcurl -plaintext localhost:44020 list
 ```
 
-This returns `{"code": 200}` when healthy.
+This lists available services including `parser.ParserService`.
 
 ## Next steps
 
