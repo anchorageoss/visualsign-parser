@@ -1,13 +1,13 @@
 ---
-title: Sidecar Deployment
+title: gRPC Server
 description: Run the gRPC parser service without TEE infrastructure
 ---
 
 Run VisualSign as a standalone gRPC service without AWS Nitro Enclave infrastructure. This provides the same parsing functionality and API without attestation.
 
-## When to use sidecar deployment
+## When to use the gRPC server
 
-Sidecar deployment is appropriate for:
+The standalone gRPC server is appropriate for:
 
 - Development and testing environments
 - Internal services on trusted networks
@@ -20,22 +20,22 @@ Sidecar deployment is appropriate for:
 Without TEE, there's no cryptographic proof of parsing integrity. Only use this deployment model when you trust the network and host.
 </Warning>
 
-The sidecar model assumes:
+The standalone server model assumes:
 - The host running the parser is trusted
 - Network communication is secured (TLS, VPC, etc.)
 - You don't need to prove parsing integrity to external parties
 
 ## Running locally
 
-The sidecar binary is a single-process gRPC server that calls the parser directly, without the socket-based architecture used in TEE deployments.
+The server binary is a single-process gRPC server that calls the parser directly, without the socket-based architecture used in TEE deployments.
 
 ```bash
 # Clone the repository
 git clone https://github.com/anchorageoss/visualsign-parser
 cd visualsign-parser/src
 
-# Build and run the sidecar
-cargo run --bin parser_sidecar
+# Build and run the server
+make grpc-server
 ```
 
 The parser will be available at `localhost:44020`.
@@ -45,14 +45,14 @@ The parser will be available at `localhost:44020`.
 Set the `EPHEMERAL_FILE` environment variable to specify a custom signing key:
 
 ```bash
-EPHEMERAL_FILE=/path/to/key.secret cargo run --bin parser_sidecar
+EPHEMERAL_FILE=/path/to/key.secret cargo run --bin parser_grpc_server
 ```
 
 For development, the binary defaults to `integration/fixtures/ephemeral.secret`.
 
 ## Building a Docker image
 
-The sidecar binary can be containerized as a single static binary:
+The server binary can be containerized as a single static binary:
 
 ```dockerfile
 FROM rust:1.88 AS builder
@@ -60,29 +60,29 @@ FROM rust:1.88 AS builder
 WORKDIR /build
 COPY . .
 
-# Build the sidecar binary
-RUN cd src && cargo build --release --bin parser_sidecar
+# Build the server binary
+RUN cd src && cargo build --release --bin parser_grpc_server
 
 # Runtime image
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/src/target/release/parser_sidecar /usr/local/bin/
+COPY --from=builder /build/src/target/release/parser_grpc_server /usr/local/bin/
 COPY --from=builder /build/src/integration/fixtures/ephemeral.secret /etc/visualsign/
 
 ENV EPHEMERAL_FILE=/etc/visualsign/ephemeral.secret
 
 EXPOSE 44020
 
-CMD ["parser_sidecar"]
+CMD ["parser_grpc_server"]
 ```
 
 Build and run:
 
 ```bash
-docker build -t visualsign-sidecar .
-docker run -p 44020:44020 visualsign-sidecar
+docker build -t visualsign-grpc-server .
+docker run -p 44020:44020 visualsign-grpc-server
 ```
 
 <Note>
@@ -108,7 +108,7 @@ spec:
     spec:
       containers:
       - name: parser
-        image: your-registry/visualsign-sidecar:latest
+        image: your-registry/visualsign-grpc-server:latest
         ports:
         - containerPort: 44020
         env:
@@ -152,7 +152,7 @@ resp, err := client.Parse(context.Background(), &pb.ParseRequest{
     Chain: pb.Chain_CHAIN_ETHEREUM,
 })
 
-// Note: Skip attestation verification in sidecar mode
+// Note: Skip attestation verification when running without TEE
 // The response still includes a signature, but it's not attestation-backed
 visualSignJSON := resp.ParsedTransaction.Payload.SignablePayload
 ```
@@ -166,11 +166,11 @@ cd visualsign-parser/src
 make parser
 ```
 
-This starts three processes (`parser_host`, `simulator_enclave`, `parser_app`) communicating over Unix sockets. The sidecar binary is simpler for most use cases.
+This starts three processes (`parser_host`, `simulator_enclave`, `parser_app`) communicating over Unix sockets. The single-process server binary is simpler for most use cases.
 
 ## Migrating to TEE
 
-The sidecar deployment uses the same gRPC API as TEE deployments. To migrate:
+The gRPC server uses the same API as TEE deployments. To migrate:
 
 1. Deploy TEE infrastructure (self-hosted or use Turnkey)
 2. Update your client to point to the TEE endpoint

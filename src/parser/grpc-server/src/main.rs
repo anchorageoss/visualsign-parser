@@ -1,4 +1,4 @@
-//! Sidecar parser - single binary gRPC server for non-TEE deployments
+//! gRPC server - single binary gRPC server for non-TEE deployments
 
 use generated::parser::{
     parser_service_server::{ParserService, ParserServiceServer},
@@ -10,12 +10,12 @@ use qos_core::handles::EphemeralKeyHandle;
 use qos_p256::P256Pair;
 use std::net::SocketAddr;
 
-/// Sidecar gRPC service that calls the parser directly
-struct SidecarService {
+/// Standalone gRPC service that calls the parser directly
+struct GrpcService {
     ephemeral_key: P256Pair,
 }
 
-impl SidecarService {
+impl GrpcService {
     fn new(ephemeral_file: &str) -> Self {
         let handle = EphemeralKeyHandle::new(ephemeral_file.to_string());
         let ephemeral_key = handle
@@ -26,12 +26,12 @@ impl SidecarService {
 }
 
 #[tonic::async_trait]
-impl ParserService for SidecarService {
+impl ParserService for GrpcService {
     async fn parse(
         &self,
         request: Request<ParseRequest>,
     ) -> Result<Response<ParseResponse>, Status> {
-        // Direct function call - no sockets!
+        // Direct function call - no sockets needed
         parse(request.into_inner(), &self.ephemeral_key)
             .map(Response::new)
             .map_err(|e| Status::new(tonic::Code::from_i32(e.code as i32), e.message))
@@ -46,14 +46,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ephemeral_file = std::env::var("EPHEMERAL_FILE")
         .unwrap_or_else(|_| "integration/fixtures/ephemeral.secret".to_string());
 
-    let svc = SidecarService::new(&ephemeral_file);
+    let svc = GrpcService::new(&ephemeral_file);
 
     let reflection_service = generated::tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(generated::FILE_DESCRIPTOR_SET)
         .build()
         .expect("failed to start reflection service");
 
-    println!("Sidecar parser listening on {addr}");
+    println!("gRPC server listening on {addr}");
 
     tonic::transport::Server::builder()
         .add_service(reflection_service)

@@ -18,12 +18,12 @@ flowchart TD
     Q2 -->|No| HOSTED[Turnkey Hosted]
 
     Q3 -->|In my application| LIBRARY[Library Integration]
-    Q3 -->|Separate service| SIDECAR[Sidecar Deployment]
+    Q3 -->|Separate service| GRPC[gRPC Server]
 ```
 
 ## Comparison
 
-| | Turnkey Hosted | Self-Hosted TEE | Library | Sidecar |
+| | Turnkey Hosted | Self-Hosted TEE | Library | gRPC Server |
 |---|---|---|---|---|
 | **Security model** | Attestation-verified TEE | Attestation-verified TEE | Trust your process | Trust your network |
 | **Parsing integrity proof** | Yes | Yes | No | No |
@@ -84,7 +84,7 @@ Embed the VisualSign parser directly in your application. Available as Rust crat
 
 ---
 
-### Sidecar Deployment
+### gRPC Server
 
 Run the gRPC parser service without TEE infrastructure. The same gRPC API as the TEE deployments, but without enclave isolation or attestation.
 
@@ -98,7 +98,7 @@ Run the gRPC parser service without TEE infrastructure. The same gRPC API as the
 - Relies on network security
 - Same API as TEE deployments (easy migration path)
 
-[Get started with Sidecar Deployment →](./sidecar/getting-started)
+[Get started with gRPC Server →](./grpc-server/getting-started)
 
 ---
 
@@ -118,7 +118,7 @@ Attestation provides cryptographic proof that:
 
 ### When attestation isn't required
 
-**Library or Sidecar deployments are appropriate when:**
+**Library or gRPC Server deployments are appropriate when:**
 - Parsing happens on the user's own device (browser extension, mobile app)
 - The service runs on internal infrastructure you fully control
 - You're building development or testing environments
@@ -131,7 +131,7 @@ Choose your deployment model and follow the getting started guide:
 - [Turnkey Hosted](./hosted/getting-started) — Fastest path to production
 - [Self-Hosted TEE](./self-hosted-tee/getting-started) — Full control with TEE security
 - [Library Integration](./library/getting-started) — Embed parsing directly
-- [Sidecar Deployment](./sidecar/getting-started) — Simple gRPC service
+- [gRPC Server](./grpc-server/getting-started) — Simple gRPC service
 
 Regardless of deployment model, you'll want to understand:
 - [How parsing works](./core-concepts/how-parsing-works) — Transaction input and VisualSign output

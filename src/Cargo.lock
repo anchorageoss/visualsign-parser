@@ -6194,6 +6194,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "parser_grpc_server"
+version = "0.1.0"
+dependencies = [
+ "generated",
+ "parser_app",
+ "qos_core",
+ "qos_p256",
+ "tokio",
+]
+
+[[package]]
 name = "parser_host"
 version = "0.1.0"
 dependencies = [
@@ -6203,17 +6214,6 @@ dependencies = [
  "host_primitives",
  "metrics",
  "qos_core",
- "tokio",
-]
-
-[[package]]
-name = "parser_sidecar"
-version = "0.1.0"
-dependencies = [
- "generated",
- "parser_app",
- "qos_core",
- "qos_p256",
  "tokio",
 ]
 

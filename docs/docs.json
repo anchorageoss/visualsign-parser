@@ -56,7 +56,7 @@
                 ]
               },
               "wallet-integration/library/getting-started",
-              "wallet-integration/sidecar/getting-started"
+              "wallet-integration/grpc-server/getting-started"
             ]
           },
           {
