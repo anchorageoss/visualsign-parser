@@ -15,6 +15,12 @@ use qos_p256::P256Pair;
 use visualsign::registry::Chain as VisualSignRegistryChain;
 use visualsign::vsptrait::VisualSignOptions;
 
+/// Parses an unsigned transaction payload and returns a signed parsed response.
+///
+/// # Panics
+///
+/// Panics if the `ParsedTransactionPayload` cannot be serialized to Borsh format.
+/// This should never happen as the payload type implements `borsh::BorshSerialize`.
 pub fn parse(
     parse_request: ParseRequest,
     ephemeral_key: &P256Pair,
