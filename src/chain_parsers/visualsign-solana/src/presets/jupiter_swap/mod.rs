@@ -46,7 +46,10 @@ pub enum JupiterSwapInstruction {
         slippage_bps: u16,
         platform_fee_bps: u8,
     },
-    Unknown,
+    Unknown {
+        /// Optional instruction name from IDL if available
+        instruction_name: Option<String>,
+    },
 }
 
 impl JupiterSwapInstruction {
@@ -271,7 +274,9 @@ fn parse_jupiter_instruction_with_idl(
                 platform_fee_bps,
             })
         }
-        _ => Ok(JupiterSwapInstruction::Unknown),
+        _ => Ok(JupiterSwapInstruction::Unknown {
+            instruction_name: Some(parsed.instruction_name.clone()),
+        }),
     }
 }
 
@@ -300,7 +305,9 @@ fn parse_jupiter_swap_instruction(
         d if d == JUPITER_SHARED_ACCOUNTS_ROUTE_DISCRIMINATOR => {
             parse_shared_accounts_route_instruction(data, accounts)
         }
-        _ => Ok(JupiterSwapInstruction::Unknown),
+        _ => Ok(JupiterSwapInstruction::Unknown {
+            instruction_name: None,
+        }),
     }
 }
 
@@ -407,7 +414,13 @@ fn format_jupiter_swap_instruction(instruction: &JupiterSwapInstruction) -> Stri
             result.push(')');
             result
         }
-        JupiterSwapInstruction::Unknown => "Jupiter: Unknown Instruction".to_string(),
+        JupiterSwapInstruction::Unknown { instruction_name } => {
+            if let Some(name) = instruction_name {
+                format!("Jupiter: {name}")
+            } else {
+                "Jupiter: Unknown Instruction".to_string()
+            }
+        }
     }
 }
 
@@ -499,9 +512,14 @@ fn create_jupiter_swap_expanded_fields(
                 );
             }
         }
-        JupiterSwapInstruction::Unknown => {
+        JupiterSwapInstruction::Unknown { instruction_name } => {
+            let status_text = if let Some(name) = instruction_name {
+                format!("Jupiter instruction: {name} (not explicitly handled)")
+            } else {
+                "Unknown Jupiter instruction type".to_string()
+            };
             fields.push(
-                create_text_field("Status", "Unknown Jupiter instruction type")
+                create_text_field("Status", &status_text)
                     .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
             );
         }
@@ -705,8 +723,8 @@ mod tests {
                     expected_program_id_field.get("Type")
                 );
 
-                println!("✅ Jupiter instruction parsed and serialized successfully");
-                println!(
+                tracing::trace!("✅ Jupiter instruction parsed and serialized successfully");
+                tracing::trace!(
                     "✅ Created {} fields with correct JSON structure",
                     fields_array.len()
                 );
@@ -798,14 +816,16 @@ mod tests {
 
         // Test Route discriminator
         match parse_jupiter_swap_instruction(&route_data, &accounts) {
-            Ok(JupiterSwapInstruction::Route { .. }) => println!("✅ Route discriminator matches"),
+            Ok(JupiterSwapInstruction::Route { .. }) => {
+                tracing::trace!("✅ Route discriminator matches")
+            }
             _ => panic!("Route discriminator should match"),
         }
 
         // Test ExactOutRoute discriminator
         match parse_jupiter_swap_instruction(&exact_out_data, &accounts) {
             Ok(JupiterSwapInstruction::ExactOutRoute { .. }) => {
-                println!("✅ ExactOutRoute discriminator matches")
+                tracing::trace!("✅ ExactOutRoute discriminator matches")
             }
             _ => panic!("ExactOutRoute discriminator should match"),
         }
@@ -813,15 +833,15 @@ mod tests {
         // Test SharedAccountsRoute discriminator
         match parse_jupiter_swap_instruction(&shared_accounts_data, &accounts) {
             Ok(JupiterSwapInstruction::SharedAccountsRoute { .. }) => {
-                println!("✅ SharedAccountsRoute discriminator matches")
+                tracing::trace!("✅ SharedAccountsRoute discriminator matches")
             }
             _ => panic!("SharedAccountsRoute discriminator should match"),
         }
 
         // Test unknown discriminator
         match parse_jupiter_swap_instruction(&unknown_data, &accounts) {
-            Ok(JupiterSwapInstruction::Unknown) => {
-                println!("✅ Unknown discriminator handled correctly")
+            Ok(JupiterSwapInstruction::Unknown { .. }) => {
+                tracing::trace!("✅ Unknown discriminator handled correctly")
             }
             _ => panic!("Unknown discriminator should return Unknown variant"),
         }
@@ -853,8 +873,8 @@ mod tests {
             } => {
                 assert_eq!(slippage_bps, 50, "Slippage should be 50 bps");
                 assert_eq!(platform_fee_bps, 100, "Platform fee should be 100 bps");
-                println!("✅ Correctly parsed slippage: {slippage_bps} bps");
-                println!("✅ Correctly parsed platform fee: {platform_fee_bps} bps");
+                tracing::trace!("✅ Correctly parsed slippage: {slippage_bps} bps");
+                tracing::trace!("✅ Correctly parsed platform fee: {platform_fee_bps} bps");
             }
             _ => panic!("Expected Route instruction"),
         }
@@ -869,7 +889,7 @@ mod tests {
             formatted.contains("platform fee: 100bps"),
             "Formatted string should contain platform fee when non-zero"
         );
-        println!("✅ Formatted output: {formatted}");
+        tracing::trace!("✅ Formatted output: {formatted}");
 
         // Test expanded fields include platform fee
         let fields = create_jupiter_swap_expanded_fields(
@@ -891,6 +911,160 @@ mod tests {
             platform_fee_field.is_some(),
             "Should have Platform Fee field when platform_fee_bps > 0"
         );
-        println!("✅ Platform Fee field present in expanded fields");
+        tracing::trace!("✅ Platform Fee field present in expanded fields");
+    }
+
+    #[test]
+    fn test_jupiter_uncovered_instruction_fallthrough() {
+        // Test with a real Jupiter instruction that exists in the IDL but isn't covered
+        // by the case statement. This tests the fallthrough behavior.
+        //
+        // Using an unknown discriminator to simulate instructions like setTokenLedger,
+        // mercurialSwap, serumSwap, etc. that exist in the Jupiter IDL but aren't
+        // explicitly handled in the match statement.
+        //
+        // When the instruction falls through:
+        // 1. It should return Unknown variant (graceful handling)
+        // 2. The expanded fields should include the raw instruction data
+        // 3. A status field should indicate it's an unknown Jupiter instruction
+        let instruction_data = [
+            0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x5f, 0x6a, 0x7b, // Unknown discriminator
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // Random instruction data
+            0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+        ];
+
+        let accounts = vec!["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4".to_string()];
+
+        // Parse the instruction - should handle unknown discriminator gracefully
+        let result = parse_jupiter_swap_instruction(&instruction_data, &accounts).unwrap();
+
+        // Verify it falls through to Unknown variant
+        match &result {
+            JupiterSwapInstruction::Unknown { instruction_name } => {
+                tracing::trace!("✅ Unknown instruction discriminator handled correctly");
+                assert_eq!(
+                    instruction_name, &None,
+                    "instruction_name should be None for unknown discriminator"
+                );
+            }
+            _ => panic!("Expected Unknown variant for uncovered instruction, got {result:?}"),
+        }
+
+        // Test the formatting for unknown instruction
+        let formatted = format_jupiter_swap_instruction(&result);
+        assert_eq!(
+            formatted, "Jupiter: Unknown Instruction",
+            "Should format as unknown instruction"
+        );
+        tracing::trace!("✅ Formatted as: {formatted}");
+
+        // Test expanded fields - should include status and raw data
+        let fields = create_jupiter_swap_expanded_fields(
+            &result,
+            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+            &instruction_data,
+        )
+        .unwrap();
+
+        // Should have at least Program ID, Status, and Raw Data fields
+        assert!(
+            fields.len() >= 3,
+            "Should have at least 3 fields for unknown instruction"
+        );
+
+        // Check for Program ID field
+        let has_program_id = fields.iter().any(|f| {
+            if let SignablePayloadField::TextV2 { common, .. } = &f.signable_payload_field {
+                common.label == "Program ID"
+            } else {
+                false
+            }
+        });
+        assert!(has_program_id, "Should have Program ID field");
+
+        // Check for Status field indicating unknown instruction
+        let has_status = fields.iter().any(|f| {
+            if let SignablePayloadField::TextV2 { common, text_v2 } = &f.signable_payload_field {
+                common.label == "Status" && text_v2.text == "Unknown Jupiter instruction type"
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_status,
+            "Should have Status field with 'Unknown Jupiter instruction type'"
+        );
+
+        // Check for Raw Data field with hex encoding (returns TextV2 with "Raw Data" label)
+        let has_raw_data = fields.iter().any(|f| {
+            if let SignablePayloadField::TextV2 { common, .. } = &f.signable_payload_field {
+                common.label == "Raw Data"
+            } else {
+                false
+            }
+        });
+        assert!(has_raw_data, "Should have Raw Data field");
+
+        tracing::trace!("✅ Unknown instruction expanded fields structure verified");
+        tracing::trace!("   - Program ID: present");
+        tracing::trace!("   - Status: 'Unknown Jupiter instruction type'");
+        tracing::trace!("   - Raw Data: present (hex encoded)");
+        tracing::trace!("   - Raw data hex: {}", hex::encode(instruction_data));
+    }
+
+    #[test]
+    fn test_jupiter_instruction_name_from_idl() {
+        // Test that when we have an instruction name from IDL but don't explicitly handle it,
+        // we display the instruction name instead of just "Unknown"
+
+        // Create a mock Unknown instruction with a name (as would come from IDL parsing)
+        let instruction = JupiterSwapInstruction::Unknown {
+            instruction_name: Some("setTokenLedger".to_string()),
+        };
+
+        // Test formatting includes the instruction name
+        let formatted = format_jupiter_swap_instruction(&instruction);
+        assert_eq!(
+            formatted, "Jupiter: setTokenLedger",
+            "Should show instruction name from IDL"
+        );
+        tracing::trace!("✅ Formatted with IDL name: {formatted}");
+
+        // Test expanded fields show the instruction name
+        let fields = create_jupiter_swap_expanded_fields(
+            &instruction,
+            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+            &[0x01, 0x02, 0x03], // minimal data
+        )
+        .unwrap();
+
+        // Check that status field includes the instruction name
+        let status_field = fields.iter().find(|f| {
+            if let SignablePayloadField::TextV2 { common, text_v2 } = &f.signable_payload_field {
+                common.label == "Status"
+                    && text_v2.text.contains("setTokenLedger")
+                    && text_v2.text.contains("not explicitly handled")
+            } else {
+                false
+            }
+        });
+        assert!(
+            status_field.is_some(),
+            "Status field should show instruction name from IDL"
+        );
+        tracing::trace!(
+            "✅ Status field shows: 'Jupiter instruction: setTokenLedger (not explicitly handled)'"
+        );
+
+        // Test with None instruction name
+        let instruction_no_name = JupiterSwapInstruction::Unknown {
+            instruction_name: None,
+        };
+        let formatted_no_name = format_jupiter_swap_instruction(&instruction_no_name);
+        assert_eq!(
+            formatted_no_name, "Jupiter: Unknown Instruction",
+            "Should fallback to generic unknown when no name available"
+        );
+        tracing::trace!("✅ Fallback for no name: {formatted_no_name}");
     }
 }
