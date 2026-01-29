@@ -35,19 +35,6 @@ For basic value transfers, focus on the key elements:
 }
 ```
 
-**Visual Result:**
-```
-┌──────────────────────────────┐
-│ Ethereum Transfer            │
-├──────────────────────────────┤
-│ You're sending               │
-│ 0.005 ETH                    │
-│                              │
-│ To                           │
-│ 0x742d...bEb7               │
-└──────────────────────────────┘
-```
-
 ### Pattern 2: Transaction with instructions
 
 For transactions with multiple instructions (based on actual Solana fixture):
@@ -216,7 +203,8 @@ Structure information by importance:
 Title: "Swap ETH for USDC"
 
 // Secondary: Key parameters
-Amount: "1.5 ETH → 2,850 USDC"
+From: "1.5 ETH"
+To: "2,850 USDC"
 
 // Tertiary: Additional context
 Slippage: "0.5%"
@@ -246,7 +234,7 @@ Use visual indicators for important information:
   "FallbackText": "0x...",
   "AddressV2": {
     "Address": "0x...",
-    "BadgeText": "⚠️ New Address"  // Warning indicator
+    "BadgeText": "New Address"  // Warning indicator
   }
 }
 ```
@@ -389,7 +377,7 @@ Show Move module interactions (based on presets):
 ```json
 {
   "Type": "text_v2",
-  "Label": "⚠️ WARNING",
+  "Label": "WARNING",
   "TextV2": {
     "Text": "This transaction moves more than $10,000"
   }
@@ -404,7 +392,7 @@ Show Move module interactions (based on presets):
   "Label": "Contract",
   "AddressV2": {
     "Address": "0x...",
-    "BadgeText": "⚠️ Unverified",
+    "BadgeText": "Unverified",
     "Name": "Unknown Contract"
   }
 }
@@ -415,7 +403,7 @@ Show Move module interactions (based on presets):
 ```json
 {
   "Type": "text_v2",
-  "Label": "⛔ IRREVERSIBLE",
+  "Label": "IRREVERSIBLE",
   "TextV2": {
     "Text": "This action cannot be undone"
   }
