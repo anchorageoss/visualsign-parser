@@ -1,0 +1,5 @@
+# Generated protobuf files (nested inside src/generated/ crate)
+src/generated/src/generated/** linguist-generated=true
+
+# Cargo lock files
+**/Cargo.lock linguist-generated=true
