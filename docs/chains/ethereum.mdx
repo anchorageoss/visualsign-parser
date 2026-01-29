@@ -1,0 +1,116 @@
+---
+title: Ethereum
+description: Native transfers, ERC tokens, smart contracts, and DeFi protocols
+---
+
+The Ethereum module handles transactions for Ethereum and all EVM-compatible chains.
+
+## Architecture overview
+
+### Transaction model
+- **Encoding**: RLP (Recursive Length Prefix)
+- **Account Model**: Account-based with nonce tracking
+- **Gas System**: Dynamic pricing with base fee + priority fee (EIP-1559)
+
+### Key components
+
+The Ethereum parser handles:
+- Native ETH transfers
+- ERC-20/721/1155 token standards
+- Smart contract method calls via ABI decoding
+- DeFi protocol interactions
+- ENS name resolution
+
+## Transaction types
+
+### 1. Simple transfer
+Basic ETH transfer between addresses with gas calculation.
+
+### 2. Token operations
+- **ERC-20**: Transfer, Approve, TransferFrom
+- **ERC-721**: NFT transfers and approvals
+- **ERC-1155**: Multi-token standard
+
+### 3. Smart contract calls
+Decode function calls using contract ABI to show:
+- Method name and parameters
+- Token amounts in human-readable format
+- Contract verification status
+
+### 4. DeFi protocols
+Special handling for common protocols:
+- Uniswap (swaps, liquidity)
+- Compound (lending/borrowing)
+- Aave (deposits, withdrawals)
+- OpenSea (NFT trades)
+
+## Visualization strategy
+
+### Primary information
+```json
+{
+  "Title": "Swap ETH for USDC",
+  "Fields": [
+    {
+      "Type": "amount_v2",
+      "Label": "You Pay",
+      "AmountV2": { "Amount": "1.5", "Abbreviation": "ETH" }
+    },
+    {
+      "Type": "amount_v2",
+      "Label": "You Receive",
+      "AmountV2": { "Amount": "2,850", "Abbreviation": "USDC" }
+    }
+  ]
+}
+```
+
+### Gas information
+Always shown as expandable preview:
+- Condensed: Total fee in ETH and USD
+- Expanded: Gas price, limit, max fee breakdown
+
+### Risk indicators
+- First-time recipient addresses
+- Unverified contracts
+- Unlimited token approvals
+- High-value transfers
+
+## Name resolution
+
+The module integrates with:
+- **ENS**: Ethereum Name Service
+- **Contract Registry**: Known verified contracts
+- **Token Lists**: Popular token databases
+
+## Implementation details
+
+Full source code available at:
+- [Ethereum Parser Implementation](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-ethereum)
+
+## Chain support
+
+Compatible with all EVM chains:
+- Ethereum Mainnet
+- Polygon
+- Arbitrum
+- Optimism
+- BSC
+- Avalanche C-Chain
+
+Configuration adjustments may be needed for:
+- Native token symbols
+- Block explorers
+- Gas token decimals
+
+## Example outputs
+
+- **ETH Transfer** - Shows sender, recipient, amount, and gas fee in a clear layout
+- **Token Swap** - Displays input/output tokens, exchange rate, slippage, and protocol used
+- **NFT Transfer** - Shows collection name, token ID, visual preview (if available), and recipient
+
+## Resources
+
+- [Ethereum JSON-RPC Spec](https://ethereum.org/en/developers/docs/apis/json-rpc/)
+- [EIP-1559 Gas Pricing](https://eips.ethereum.org/EIPS/eip-1559)
+- [ERC Token Standards](https://ethereum.org/en/developers/docs/standards/tokens/)

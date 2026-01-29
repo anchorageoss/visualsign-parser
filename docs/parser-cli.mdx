@@ -1,0 +1,253 @@
+---
+title: Parser CLI
+description: Parse raw transactions and preview visualizations from the command line
+---
+
+The `parser_cli` tool parses raw transaction data and shows the resulting visualization, making it essential for developing and testing VisualSign parsers.
+
+## Installation
+
+```bash
+# Clone the visualsign-parser repository (https://github.com/anchorageoss/visualsign-parser) with your preferred method
+cd visualsign-parser/src
+
+# Build the parser CLI
+cargo build --release
+
+# The binary will be available at target/release/parser_cli
+```
+
+## Basic usage
+
+```bash
+parser_cli --chain <chain> -t <transaction_hex> --output <format>
+```
+
+### Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `--chain` | Blockchain type (`ethereum`, `solana`, `sui`, `tron`) |
+| `-t`, `--transaction` | Raw transaction data (hex encoded) |
+| `--output` | Output format: `text` (default), `json`, or `human` |
+| `--condensed-only` | Show only condensed view (what users see on hardware wallets) |
+| `-n`, `--network` | Network identifier—chain ID (e.g., `1`, `137`) or canonical name (e.g., `ETHEREUM_MAINNET`, `POLYGON_MAINNET`) |
+| `--abi-json-mappings` | Map custom ABI JSON to contract. Format: `Name:/path/to/abi.json:0xAddress`. Can be used multiple times |
+| `--idl-json-mappings` | Map custom IDL JSON to Solana program. Format: `Name:/path/to/idl.json:ProgramId`. Can be used multiple times |
+
+## Real-world examples
+
+### Ethereum: Complex Uniswap transaction
+
+The following command parses a real Uniswap Universal Router transaction that includes multiple DeFi operations:
+
+```bash
+parser_cli --chain ethereum -t 0x02f904cf0181b78477359400847c17b3e383045307943fc91a3afd70395cd496c647d5a6cc9d4b2b7fad80b904a424856bc30000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000040a08060c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000032000000000000000000000000000000000000000000000000000000000000003a0000000000000000000000000000000000000000000000000000000000000016000000000000000000000000072b658bd674f9c2b4954682f517c17d14476e417000000000000000000000000ffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000006940571900000000000000000000000000000000000000000000000000000000000000000000000000000000000000003fc91a3afd70395cd496c647d5a6cc9d4b2b7fad000000000000000000000000000000000000000000000000000000006918d12100000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000000412eb0933411b0970637515316fb50511bea7908d3f85808074ceed3bf881562bc06da5178104470e54fb5be96075169b30799c30f30975317ae14113ffdb84bc81c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000285aaa58c1a1a183d0000000000000000000000000000000000000000000000000009cf200e607a0800000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000072b658bd674f9c2b4954682f517c17d14476e417000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000000000000000000000000000000000000000000060000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000000000fee13a103a10d593b9ae06b3e05f2e7e1c000000000000000000000000000000000000000000000000000000000000001900000000000000000000000000000000000000000000000000000000000000400000000000000000000000008419e7eda8577dfc49591a49cad965a0fc6716cf0000000000000000000000000000000000000000000000000009c8d8ef9ef49bc0 --output human
+```
+
+#### Output breakdown
+
+```
+┌─ Transaction: Ethereum Transaction
+│  Version: 0
+│  Type: EthereumTx
+│
+└─ Fields:
+   ├─ Network: Ethereum Mainnet
+   ├─ To: 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD
+   ├─ Value: 0 ETH
+   ├─ Gas Limit: 283399
+   ├─ Gas Price: 2.081928163 gwei
+   ├─ Max Priority Fee Per Gas: 2 gwei
+   ├─ Nonce: 183
+   └─ Universal Router
+         Title: Uniswap Universal Router Execute
+         Detail: 4 commands
+         📖 Expanded View:
+         ├─ Permit2 Permit
+         │     Title: Permit2 Permit
+         │     Detail: Permit 0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD to spend Unlimited Amount of 0x72b658bd674f9c2b4954682f517c17d14476e417
+         │     📖 Expanded View:
+         │     ├─ Token: 0x72b658bd674f9c2b4954682f517c17d14476e417
+         │     ├─ Amount: 1461501637330902918203684832716283019655932542975
+         │     ├─ Spender: 0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad
+         │     ├─ Expires: 2025-12-15 18:44 UTC
+         │     └─ Sig Deadline: 2025-11-15 19:14 UTC
+         ├─ V2 Swap Exact In
+         │     Title: V2 Swap Exact In
+         │     Detail: Swap 46525180921656252477 0x72b658bd674f9c2b4954682f517c17d14476e417 for >=0.002761011377502728 WETH via V2 (1 hops)
+         │     📖 Expanded View:
+         │     ├─ Input Token: 0x72b658bd674f9c2b4954682f517c17d14476e417
+         │     ├─ Input Amount: 46525180921656252477
+         │     ├─ Output Token: WETH
+         │     ├─ Minimum Output: >=0.002761011377502728
+         │     └─ Hops: 1
+         ├─ Pay Portion
+         │     Title: Pay Portion
+         │     Detail: Pay 0.2500% of WETH to 0x000000fee13a103A10D593b9AE06b3e05F2E7E1c
+         │     📖 Expanded View:
+         │     ├─ Token: WETH
+         │     ├─ Percentage: 0.2500%
+         │     └─ Recipient: 0x000000fee13a103a10d593b9ae06b3e05f2e7e1c
+         └─ Unwrap WETH
+               Title: Unwrap WETH
+               Detail: Unwrap >=0.002754108849058971 WETH to ETH for 0x8419e7Eda8577Dfc49591a49CAd965a0Fc6716cF
+               📖 Expanded View:
+               ├─ Minimum Amount: >=0.002754108849058971 WETH
+               └─ Recipient: 0x8419e7eda8577dfc49591a49cad965a0fc6716cf
+```
+
+This visualization shows how VisualSign transforms a complex 2470-character hex string into a clear, hierarchical representation that anyone can understand.
+
+### Hardware wallet view
+
+Use `--condensed-only` to see what users see on hardware wallets with limited screen space:
+
+```bash
+parser_cli --chain ethereum -t <transaction_hex> --output human --condensed-only
+```
+
+This shows only the most essential information that fits on small screens.
+
+## Available test fixtures
+
+The parser includes real-world transaction examples from production networks:
+
+### Ethereum fixtures
+Located in `src/chain_parsers/visualsign-ethereum/tests/fixtures/`:
+
+- **legacy.input**: Simple ETH transfer
+- **1559.input**: EIP-1559 transaction example
+- **uniswap-v2swap.input**: Uniswap V2 swap transaction
+- **uniswap-v3swap.input**: Uniswap V3 swap transaction
+
+### Solana fixtures
+Located in `src/chain_parsers/visualsign-solana/tests/fixtures/`:
+
+- **jupiter_swap/**: Real mainnet Jupiter aggregator swap
+  - WSOL → USELESS token swap
+  - 25 accounts including Whirlpool DEX integration
+  - Transaction signature: `441ttot8CzpgsiRHvAHnNTCBwbSnPuhuy43pCjzZU9BKwBuJeW8f4TMU7FYLeqBst6WJeMEHprdQxr4thxqZSxRs`
+
+- **token_2022/**: Token-2022 program transactions
+  - SPL Token-2022 (Token Extensions) operations
+
+### Sui fixtures
+Located in `src/chain_parsers/visualsign-sui/src/presets/`:
+
+- **cetus/**: Concentrated liquidity DEX operations
+  - Swaps (A→B, B→A, with/without partner fees)
+  - Liquidity provision at specific price ranges
+
+- **coin_transfer/**: Native SUI transfer operations
+
+- **momentum/**: Liquidity protocol operations
+  - Position management (open, close, add, remove)
+  - Fee and reward collection
+
+- **sui_native_staking/**: Native staking operations
+  - Stake and unstake SUI with validators
+
+- **suilend/**: Lending protocol operations
+  - Borrow, deposit, repay operations
+  - Collateral token management
+  - Staking and unstaking
+
+## Development workflow
+
+### 1. Testing new parsers
+
+When developing a new parser or modifying existing ones:
+
+```bash
+# Test with a raw transaction
+parser_cli --chain ethereum -t <your_tx_hex> --output json > result.json
+
+# Compare with expected output
+diff result.json expected.json
+```
+
+### 2. Debugging complex transactions
+
+For complex DeFi transactions with nested operations:
+
+```bash
+# Get full JSON output for analysis
+parser_cli --chain ethereum -t <tx_hex> --output json | jq '.'
+
+# Focus on specific fields
+parser_cli --chain ethereum -t <tx_hex> --output json | jq '.Fields[-1]'
+```
+
+### 3. Validating hardware wallet display
+
+Ensure your parser output works well on constrained devices:
+
+```bash
+# Check condensed view fits requirements
+parser_cli --chain ethereum -t <tx_hex> --output human --condensed-only
+
+# Verify character limits and formatting
+parser_cli --chain ethereum -t <tx_hex> --output json | jq '.PreviewLayout.Condensed'
+```
+
+## Output formats
+
+### Human format
+Best for development and debugging. Shows hierarchical structure with indentation and Unicode box drawing characters.
+
+### JSON format
+Machine-readable format following the VisualSign JSON schema. Use with `jq` for analysis:
+
+```bash
+# Extract all field titles
+parser_cli --chain ethereum -t <tx> --output json | jq -r '.. | .Title? // empty'
+
+# Find all addresses
+parser_cli --chain ethereum -t <tx> --output json | jq -r '.. | .Address? // empty'
+```
+
+## Developer options
+
+### Signed transaction support
+
+The CLI enables `allow_signed_transactions` by default, which allows parsing already-signed transactions by extracting the unsigned portion. This is useful for development and debugging — you can paste transactions directly from block explorers.
+
+**Important**: The production gRPC API does **not** enable this option. Production wallets should only parse unsigned transactions to ensure users are signing exactly what they see.
+
+```bash
+# This works in the CLI (signed transaction from Etherscan)
+parser_cli --chain ethereum -t 0x02f8b00181...signature_bytes...
+
+# The parser extracts the unsigned portion for visualization
+```
+
+When `allow_signed_transactions` is enabled:
+- Signed transactions are accepted and the unsigned portion is extracted
+- The visualization shows what the user originally approved
+- Useful for debugging and verifying production transactions
+
+## Best practices
+
+1. **Always test with real transactions**: Use mainnet transactions from block explorers
+2. **Verify both views**: Check both expanded and condensed layouts
+3. **Test edge cases**: Large numbers, special characters, long addresses
+4. **Validate against hardware**: Ensure condensed view fits actual device constraints
+5. **Document complex logic**: Add comments for protocol-specific parsing
+
+## Common issues and solutions
+
+### Issue: Transaction parsing fails
+**Solution**: Verify the hex encoding and chain type match
+
+### Issue: Output too verbose for hardware wallet
+**Solution**: Adjust the condensed view to show only critical fields
+
+### Issue: Missing protocol details
+**Solution**: Add protocol-specific presets to decode contract calls
+
+## Next steps
+
+- [Field Types Reference](./field-types) - Understanding VisualSign JSON fields
+- [Chain Modules](./chain-modules) - Building parsers for specific chains
+- [Verification](./verification) - Testing and validating parser output

@@ -1,0 +1,81 @@
+---
+title: About VisualSign
+description: The origin, people, and mission behind the VisualSign project
+---
+
+## Origin
+
+VisualSign began as an internal project at Anchorage Digital called the "Visual Signing Protocol."
+
+In the early days of Anchorage's custody system, clients used iOS apps backed by the Secure Enclave to sign payloads signaling their intent to perform blockchain transactions. The Secure Enclave provided hardware-rooted key protection — private keys never left the secure hardware, and biometric authentication ensured only authorized users could sign. The system's HSMs validated these signatures by reproducing the same canonical payload and verifying the signature matched. This worked as long as the app displayed the same data it put into the signed payload — but in practice, maintaining that consistency proved difficult.
+
+App developers naturally focused on how things looked rather than tracing complex dependency graphs to ensure the security of signed data. Enums were a common source of errors: they had a human-visible portion for display and a separate text representation for signing. It was possible to keep these synchronized, but it was error-prone, and mistakes happened.
+
+In 2022, [Viktor Stanchev](https://www.linkedin.com/in/viktorstanchev/), a Founding Engineer at Anchorage Digital, demonstrated a solution at an internal hackathon. The architecture defines exactly what the UI must show the user and cryptographically binds it to what gets signed. Over the following year, the Visual Signing Protocol shipped to production. It improved security, reduced coordination overhead between teams, and enabled rapid expansion of signing capabilities across multiple blockchains and protocols.
+
+From 2022 to 2025, Anchorage moved the UI construction logic into the HSM itself. This solved the consistency problem — the HSM now generated the exact visualization that users would see and sign — and established a grammar of UI elements (text fields, amounts, addresses, expandable sections) that could represent any transaction. However, this architecture introduced a new bottleneck: highly specialized HSM engineers now needed to become experts in blockchain transaction decoding. Blockchain protocols evolve rapidly, with new token standards, DeFi primitives, and transaction formats emerging constantly. Keeping HSM firmware current with these changes was slow and resource-intensive.
+
+Today, the Visual Signing Protocol handles all non-standard blockchain interactions at Anchorage Digital and will eventually replace all other methods for collecting cryptographic endorsements from users. The open-source VisualSign parser runs in TEEs, allowing transaction decoding logic to be updated independently of HSM firmware while maintaining cryptographic verification of the visualization.
+
+## Why open source
+
+In early 2025, a series of high-profile crypto heists made it clear that the "what are you really signing" problem extended far beyond any single company. The Bybit hack moved over $1.5 billion in assets to an attacker-controlled wallet, exploiting a flawed implementation of the very standards designed to prevent blind signing.
+
+Existing standards like ERC-7730 were too hard to adopt, insufficiently flexible for all transaction types, and didn't work across all blockchains. Viktor Stanchev and [Prasanna Gautam](https://www.linkedin.com/in/prasannagautam/), a Protocols Researcher at Anchorage Digital, partnered with TurnKey to take the Visual Signing Protocol open source.
+
+The open-source project was named **VisualSign** and launched in November 2025. Now any smart contract developer can contribute secure transaction visualizations for their DApp, and any wallet can adopt the visualization code. Anchorage deploys the visualizer in Trusted Execution Environments (TEEs) running on TurnKey's infrastructure, where HSMs can cryptographically verify the visualizations.
+
+## Talks and presentations
+
+The VisualSign team has presented the project at major industry conferences:
+
+| Date | Event | Title | Presenter |
+|------|-------|-------|-----------|
+| April 2025 | [ETHTaipei 2025](https://www.youtube.com/watch?v=Mjd3kFm2v2M) | What You See Is What You Sign | Viktor Stanchev, Prasanna Gautam |
+| November 2025 | [EthGlobal Buenos Aires](https://www.youtube.com/watch?v=HG7_GuATJAo) | Anchorage Digital Workshop | Prasanna Gautam |
+| November 2025 | [DeFi Security Summit](https://www.youtube.com/watch?v=sW7kPajWymc) | A New Way to Visualize Crypto Transactions | Prasanna Gautam |
+| December 2025 | [Solana Breakpoint 2025](https://www.youtube.com/watch?v=ECmDMrgFr18) | Keynote: Anchorage Digital | Prasanna Gautam |
+
+## Media and coverage
+
+- **November 2025** — [VisualSign Protocol: A Multi-Chain Approach to Elevate DeFi Security](https://medium.com/@prasincs/visualsign-protocol-a-multi-chain-approach-to-elevate-defi-security-08224d4e799f) — Technical blog post introducing the project
+- **November 2025** — [TurnKey announcement](https://x.com/turnkeyhq/status/1991634225162834349) — Anchorage Digital announced as the first live customer on TurnKey Verifiable Cloud
+
+## Funding and support
+
+VisualSign is funded and staffed by **Anchorage Digital**, the only federally chartered crypto bank in the United States. The project has received a grant from the **Solana Foundation** to improve Solana support.
+
+**TurnKey** provides the infrastructure for running VisualSign in TEEs, making Anchorage the first live customer on TurnKey Verifiable Cloud.
+
+## Governance
+
+### Authority
+
+**Anchorage Digital** retains all rights, title, and interest in the repository. Final decision-making authority rests with Anchorage Digital's internal engineering leadership.
+
+### The Core Team
+
+The Core Team is the only group authorized to merge code, approve pull requests, and manage releases. This team is composed of:
+
+- **Anchorage Digital employees** — Internal engineering staff
+- **Authorized partners** — Designated representatives from partner organizations (e.g., TurnKey)
+- **Contractors** — Engineering contractors vetted and authorized by Anchorage Digital
+
+### Contribution workflow
+
+- **Core Team members** may review and approve PRs. At least one Anchorage employee must review and approve.
+- **Community contributors** may submit PRs, but they must be approved by a Core Team member. For protocol owners in chains or DApps in maintenance mode, one Anchorage employee and one protocol owner must approve.
+
+Being a partner or contractor does not grant administrative rights over repository settings—only code maintenance rights.
+
+## Get involved
+
+VisualSign is open source and welcomes contributions:
+
+- [GitHub: visualsign-parser](https://github.com/anchorageoss/visualsign-parser) — Core transaction parser
+- [Contributing guide](/contributing/contributing-visualization) — How to add visualization support for your DApp
+- [Wallet integration guide](https://github.com/anchorageoss/visualsign-turnkeyclient/blob/main/WALLET_INTEGRATION_GUIDE.md) — For wallet developers
+
+## License
+
+VisualSign Parser is released under the [Apache 2.0 license](https://github.com/anchorageoss/visualsign-parser/blob/main/LICENSE).

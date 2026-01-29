@@ -1,0 +1,336 @@
+---
+title: API Reference
+description: gRPC service definition, messages, and client examples
+---
+
+## Service definition
+
+```protobuf
+service ParserService {
+  rpc Parse(ParseRequest) returns (ParseResponse);
+}
+```
+
+## Messages
+
+### ParseRequest
+
+The main request for parsing transactions.
+
+```protobuf
+message ParseRequest {
+  string unsigned_payload = 1;    // Raw transaction (base64 or hex)
+  Chain chain = 2;                // Blockchain network
+  ChainMetadata chain_metadata = 3; // Optional chain-specific data
+}
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `unsigned_payload` | string | Raw unsigned transaction bytes, base64 or hex encoded |
+| `chain` | Chain enum | The blockchain network (CHAIN_ETHEREUM, CHAIN_SOLANA, etc.) |
+| `chain_metadata` | ChainMetadata | Optional metadata like ABI or IDL |
+
+### Chain enum
+
+Supported blockchain networks:
+
+```protobuf
+enum Chain {
+  CHAIN_UNSPECIFIED = 0;
+  CHAIN_BITCOIN = 1;
+  CHAIN_ETHEREUM = 2;
+  CHAIN_SOLANA = 3;
+  CHAIN_SUI = 4;
+  CHAIN_TRON = 5;
+  CHAIN_CUSTOM = 999;  // For extensibility
+}
+```
+
+### ChainMetadata
+
+Chain-specific metadata for enhanced parsing:
+
+```protobuf
+message ChainMetadata {
+  oneof metadata {
+    EthereumMetadata ethereum = 1;
+    SolanaMetadata solana = 2;
+  }
+}
+
+message EthereumMetadata {
+  optional string network_id = 2;  // Network identifier (e.g., "ETHEREUM_MAINNET", "POLYGON_MAINNET")
+  optional Abi abi = 1;            // Contract ABI for decoding
+}
+
+message SolanaMetadata {
+  optional string network_id = 2;       // Network identifier (e.g., "SOLANA_MAINNET", "SOLANA_DEVNET")
+  optional Idl idl = 1;                 // Anchor IDL for decoding (single program)
+  map<string, Idl> idl_mappings = 3;    // Map of program_id to IDL (multiple programs)
+}
+```
+
+### ParseResponse
+
+The parsed transaction response:
+
+```protobuf
+message ParseResponse {
+  ParsedTransaction parsed_transaction = 1;
+}
+
+message ParsedTransaction {
+  ParsedTransactionPayload payload = 1;
+  Signature signature = 2;
+}
+
+message ParsedTransactionPayload {
+  string signable_payload = 4;  // VisualSign JSON string
+}
+```
+
+### Signature
+
+Cryptographic signature for attestation:
+
+```protobuf
+message Signature {
+  SignatureScheme scheme = 1;  // Signature algorithm
+  string public_key = 2;       // Public key (hex)
+  string message = 3;          // Message that was signed
+  string signature = 4;        // Signature bytes (hex)
+}
+
+enum SignatureScheme {
+  SIGNATURE_SCHEME_UNSPECIFIED = 0;
+  SIGNATURE_SCHEME_TURNKEY_P256_EPHEMERAL_KEY = 1;
+}
+```
+
+## Response structure
+
+The `signable_payload` field contains a JSON string with the following structure:
+
+```typescript
+interface TransactionData {
+  Version: string;           // Format version
+  Title: string;             // Transaction title
+  Subtitle?: string;         // Optional subtitle
+  Fields: Field[];           // Array of field objects
+  ReplayProtection?: string; // Optional replay protection
+  VaultSubID?: string;       // Optional vault sub-ID
+  EndorsedParamsDigest?: string; // Optional params digest
+}
+```
+
+See [Field Types](/field-types) for details on the available field types.
+
+## Usage examples
+
+### Basic transaction parsing
+
+```bash
+# Ethereum transaction
+grpcurl -plaintext -d '{
+  "unsigned_payload": "0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83",
+  "chain": "CHAIN_ETHEREUM"
+}' localhost:44020 parser.ParserService/Parse
+```
+
+### With contract ABI
+
+```bash
+# Ethereum with ABI for smart contract decoding
+grpcurl -plaintext -d '{
+  "unsigned_payload": "0x...",
+  "chain": "CHAIN_ETHEREUM",
+  "chain_metadata": {
+    "ethereum": {
+      "abi": {
+        "value": "[{\"inputs\":[],\"name\":\"transfer\",\"type\":\"function\"}]"
+      }
+    }
+  }
+}' localhost:44020 parser.ParserService/Parse
+```
+
+### Solana with Anchor IDL
+
+```bash
+# Solana with IDL for program decoding
+grpcurl -plaintext -d '{
+  "unsigned_payload": "AgAAAAAAAA...",
+  "chain": "CHAIN_SOLANA",
+  "chain_metadata": {
+    "solana": {
+      "idl": {
+        "value": "{\"version\":\"0.30.0\",\"name\":\"my_program\",...}",
+        "idl_type": "SOLANA_IDL_TYPE_ANCHOR",
+        "idl_version": "0.30.0"
+      }
+    }
+  }
+}' localhost:44020 parser.ParserService/Parse
+```
+
+## Response format
+
+### Successful response
+
+```json
+{
+  "parsedTransaction": {
+    "payload": {
+      "signablePayload": "{\"Version\":\"0\",\"Title\":\"Ethereum Transfer\",\"Fields\":[{\"Type\":\"text_v2\",\"Label\":\"To\",\"TextV2\":{\"Text\":\"0x3535...\"}}]}"
+    },
+    "signature": {
+      "scheme": "SIGNATURE_SCHEME_TURNKEY_P256_EPHEMERAL_KEY",
+      "publicKey": "04abc123...",
+      "message": "sha256_hash_of_payload",
+      "signature": "304502..."
+    }
+  }
+}
+```
+
+### Error response
+
+Errors follow the standard gRPC status codes:
+
+```json
+{
+  "code": 3,
+  "message": "Invalid transaction format",
+  "details": []
+}
+```
+
+Common error codes:
+
+| Code | Name | Description |
+|------|------|-------------|
+| `3` | INVALID_ARGUMENT | Invalid transaction or chain |
+| `5` | NOT_FOUND | Chain not supported |
+| `13` | INTERNAL | Parser error |
+| `14` | UNAVAILABLE | Service unavailable |
+
+## Health check API
+
+The service also implements the standard gRPC health check:
+
+```protobuf
+service Health {
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+}
+```
+
+Check service health:
+
+```bash
+grpcurl -plaintext -d '{"service":"parser.ParserService"}' \
+    localhost:44020 grpc.health.v1.Health/Check
+```
+
+Response:
+```json
+{
+  "status": "SERVING"
+}
+```
+
+## Client libraries
+
+### Go
+
+```go
+import pb "github.com/anchorageoss/visualsign-parser/proto"
+
+conn, _ := grpc.Dial("localhost:44020", grpc.WithInsecure())
+client := pb.NewParserServiceClient(conn)
+```
+
+### Python
+
+```python
+import grpc
+import json
+import parser_pb2
+import parser_pb2_grpc
+
+# Connect to parser service
+channel = grpc.insecure_channel('localhost:44020')
+stub = parser_pb2_grpc.ParserServiceStub(channel)
+
+# Parse transaction
+request = parser_pb2.ParseRequest(
+    unsigned_payload=raw_tx_bytes,
+    chain=parser_pb2.CHAIN_ETHEREUM
+)
+response = stub.Parse(request)
+
+# Get structured data
+transaction_data = json.loads(response.parsed_transaction.payload.signable_payload)
+```
+
+### JavaScript/TypeScript
+
+```typescript
+const grpc = require('@grpc/grpc-js');
+const protoLoader = require('@grpc/proto-loader');
+
+const packageDefinition = protoLoader.loadSync('parser.proto');
+const parser = grpc.loadPackageDefinition(packageDefinition).parser;
+
+const client = new parser.ParserService(
+    'localhost:44020',
+    grpc.credentials.createInsecure()
+);
+
+// Parse transaction
+client.Parse({
+    unsigned_payload: rawTxHex,
+    chain: 'CHAIN_ETHEREUM'
+}, (err, response) => {
+    if (err) {
+        console.error('Parse error:', err);
+        return;
+    }
+    const transactionData = JSON.parse(response.parsedTransaction.payload.signablePayload);
+    console.log('Parsed:', transactionData);
+});
+```
+
+## Rate limits
+
+The parser service enforces the following limits:
+
+- **Request size**: Max 1MB per transaction
+- **Timeout**: 30 seconds per request
+- **Concurrent requests**: 100 per client
+
+## Security
+
+### TLS configuration
+
+In production, always use TLS:
+
+```go
+creds := credentials.NewTLS(&tls.Config{
+    ServerName: "parser.example.com",
+})
+conn, _ := grpc.Dial("parser.example.com:44020", grpc.WithTransportCredentials(creds))
+```
+
+### Authentication
+
+The service supports mTLS for authentication:
+
+```go
+cert, _ := tls.LoadX509KeyPair("client.crt", "client.key")
+creds := credentials.NewTLS(&tls.Config{
+    Certificates: []tls.Certificate{cert},
+})
+```

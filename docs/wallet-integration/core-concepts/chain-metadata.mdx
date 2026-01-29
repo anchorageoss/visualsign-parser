@@ -1,0 +1,190 @@
+---
+title: Chain Metadata
+description: Provide ABIs and IDLs for enhanced transaction parsing
+---
+
+Chain metadata helps the parser understand smart contract interactions. Without metadata, contract calls may appear as raw hex data. With metadata, they're parsed into meaningful field names and values.
+
+## When to provide metadata
+
+| Scenario | Metadata needed? |
+|----------|------------------|
+| Native transfers (ETH, SOL, SUI) | No |
+| Known protocols (Uniswap, Jupiter, Aave) | No (built-in support) |
+| Standard token transfers (ERC-20, SPL) | No (built-in support) |
+| Custom smart contracts | Yes |
+| Anchor programs without public IDL | Yes |
+
+## Ethereum: Contract ABI
+
+For Ethereum and EVM chains, provide the contract ABI to decode function calls:
+
+### gRPC example
+
+```go
+request := &pb.ParseRequest{
+    UnsignedPayload: txBytes,
+    Chain: pb.Chain_CHAIN_ETHEREUM,
+    ChainMetadata: &pb.ChainMetadata{
+        Metadata: &pb.ChainMetadata_Ethereum{
+            Ethereum: &pb.EthereumMetadata{
+                Abi: &pb.Abi{
+                    Value: contractABI, // JSON ABI string
+                },
+            },
+        },
+    },
+}
+```
+
+### ABI format
+
+The ABI is standard Solidity ABI JSON:
+
+```json
+[
+  {
+    "name": "transfer",
+    "type": "function",
+    "inputs": [
+      { "name": "recipient", "type": "address" },
+      { "name": "amount", "type": "uint256" }
+    ]
+  },
+  {
+    "name": "approve",
+    "type": "function",
+    "inputs": [
+      { "name": "spender", "type": "address" },
+      { "name": "amount", "type": "uint256" }
+    ]
+  }
+]
+```
+
+### Specifying network
+
+For EVM chains other than mainnet, specify the network:
+
+```go
+ChainMetadata: &pb.ChainMetadata{
+    Metadata: &pb.ChainMetadata_Ethereum{
+        Ethereum: &pb.EthereumMetadata{
+            NetworkId: "POLYGON_MAINNET",  // or ARBITRUM_MAINNET, etc.
+            Abi: &pb.Abi{
+                Value: contractABI,
+            },
+        },
+    },
+}
+```
+
+## Solana: Program IDL
+
+For Solana programs, provide the Anchor IDL to decode instructions:
+
+### gRPC example
+
+```go
+request := &pb.ParseRequest{
+    UnsignedPayload: txBytes,
+    Chain: pb.Chain_CHAIN_SOLANA,
+    ChainMetadata: &pb.ChainMetadata{
+        Metadata: &pb.ChainMetadata_Solana{
+            Solana: &pb.SolanaMetadata{
+                Idl: &pb.Idl{
+                    Value: anchorIDL, // JSON IDL string
+                    IdlType: pb.SolanaIdlType_SOLANA_IDL_TYPE_ANCHOR,
+                },
+            },
+        },
+    },
+}
+```
+
+### Multiple programs
+
+If your transaction interacts with multiple programs, use the IDL mappings:
+
+```go
+ChainMetadata: &pb.ChainMetadata{
+    Metadata: &pb.ChainMetadata_Solana{
+        Solana: &pb.SolanaMetadata{
+            IdlMappings: map[string]*pb.Idl{
+                "Program1111111111111111111111111111111111111": {
+                    Value: program1IDL,
+                    IdlType: pb.SolanaIdlType_SOLANA_IDL_TYPE_ANCHOR,
+                },
+                "Program2222222222222222222222222222222222222": {
+                    Value: program2IDL,
+                    IdlType: pb.SolanaIdlType_SOLANA_IDL_TYPE_ANCHOR,
+                },
+            },
+        },
+    },
+}
+```
+
+### Supported IDL types
+
+| Type | Description |
+|------|-------------|
+| `SOLANA_IDL_TYPE_ANCHOR` | Anchor framework IDL |
+| `SOLANA_IDL_TYPE_SHANK` | Shank IDL format |
+
+## Library integration
+
+When using the library directly (not gRPC), pass metadata as a function parameter:
+
+```rust
+use visualsign_parser::{parse_transaction, Chain, ChainMetadata, EthereumMetadata};
+
+let metadata = ChainMetadata::Ethereum(EthereumMetadata {
+    abi: Some(contract_abi.to_string()),
+    network_id: None,
+});
+
+let result = parse_transaction(raw_tx, Chain::Ethereum, Some(metadata));
+```
+
+## Obtaining metadata
+
+### Ethereum ABIs
+
+| Source | How to get |
+|--------|------------|
+| Etherscan | View verified contract → Contract tab → ABI |
+| Compilation | `solc --abi Contract.sol` |
+| Hardhat | `artifacts/contracts/Contract.sol/Contract.json` |
+| Foundry | `out/Contract.sol/Contract.json` |
+
+### Solana IDLs
+
+| Source | How to get |
+|--------|------------|
+| Anchor build | `target/idl/program_name.json` |
+| On-chain | Some programs publish IDL on-chain |
+| Program repo | Check the program's source repository |
+
+## Without metadata
+
+If you don't provide metadata for a contract interaction, the parser will:
+
+1. Decode what it can (addresses, amounts in native token)
+2. Show the function selector (first 4 bytes) as hex
+3. Display raw calldata for unknown parameters
+
+This is safe but less informative. Users see something like:
+
+```
+Contract Interaction
+Method: 0xa9059cbb (unknown)
+To: 0x1234...
+Data: 0x...
+```
+
+## Next steps
+
+- [How Parsing Works](./how-parsing-works) — Understand the parsing pipeline
+- [Error Handling](./error-handling) — Handle cases where parsing fails
+- [gRPC API Reference](/api-reference) — Full request/response formats

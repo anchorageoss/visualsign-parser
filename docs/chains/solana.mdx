@@ -1,0 +1,79 @@
+---
+title: Solana
+description: Multi-instruction transactions, system programs, and SPL tokens
+---
+
+The Solana module handles transactions with multiple instructions, program invocations, and SPL token operations.
+
+## Architecture overview
+
+### Transaction model
+- **Encoding**: Borsh/Bincode serialization
+- **Instruction-based**: Multiple instructions per transaction
+- **Account Model**: Accounts owned by programs
+- **Fee Model**: Fixed base fee with optional priority fees
+
+### Key components
+
+The Solana parser handles:
+- System program transfers
+- SPL Token operations
+- Associated Token Account (ATA) creation
+- Multiple instructions per transaction
+- Program invocations
+
+## Transaction structure
+
+Solana transactions consist of:
+1. **Signatures**: One or more transaction signatures
+2. **Message**: Contains the actual transaction data
+   - Account keys (all accounts involved)
+   - Instructions (operations to execute)
+   - Recent blockhash (for replay protection)
+
+## Instruction types
+
+### System program
+- SOL transfers between accounts
+- Account creation and initialization
+- Space allocation for data storage
+
+### SPL token program
+- Token transfers
+- Token approvals
+- Mint and burn operations
+
+### Associated token account
+- Automatic creation of token accounts
+- Deterministic addressing for user tokens
+
+## Visualization strategy
+
+- **Primary Information** - Display the most significant instruction as the title, with supporting instructions shown as steps
+- **Multiple Instructions** - Group related instructions together, showing them as a sequence of operations
+- **Account Context** - Show account ownership and program associations when relevant
+
+## Implementation details
+
+Source code available at:
+- [Solana Parser](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-solana)
+
+## Supported programs
+
+The parser recognizes common Solana programs:
+- System Program
+- SPL Token Program
+- SPL Associated Token Account Program
+- Custom programs via IDL (Interface Definition Language)
+
+## Example transaction types
+
+- **SOL Transfer** - Simple transfer of native SOL between accounts
+- **SPL Token Transfer** - Transfer of SPL tokens, often including ATA creation if needed
+- **Complex DeFi Transaction** - Multiple instructions working together (e.g., create account, transfer tokens, interact with DEX)
+
+## Resources
+
+- [Solana Documentation](https://docs.solana.com/)
+- [SPL Token Program](https://spl.solana.com/token)
+- [Anchor Framework](https://www.anchor-lang.com/)

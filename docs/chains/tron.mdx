@@ -1,0 +1,44 @@
+---
+title: Tron
+description: TRX transfers, TRC-20 tokens, and energy/bandwidth system
+---
+
+The Tron module handles TRX transfers, TRC-20 tokens, and smart contract interactions on the Tron Virtual Machine.
+
+## Architecture overview
+
+### Transaction model
+- **Encoding**: Protocol Buffers
+- **Account Model**: Account-based similar to Ethereum
+- **Energy System**: Bandwidth and Energy for transactions
+- **Fee Model**: TRX for bandwidth, Energy for smart contracts
+
+### Key components
+
+The Tron parser handles:
+- TRX transfers
+- TRC-20 token operations
+- Smart contract interactions
+- Account resource management
+
+## Transaction types
+
+- **TRX Transfer** - Native TRX token transfers between accounts
+- **TRC-20 Tokens** - Token standard similar to ERC-20 (Transfer, Approve, TransferFrom)
+- **Smart Contracts** - Tron Virtual Machine (TVM) compatible with Ethereum Virtual Machine
+
+## Visualization strategy
+
+- **Resource Display** - Show bandwidth and energy consumption clearly, as these are key concepts for Tron users
+- **Contract Interactions** - Display contract method calls and parameters in human-readable format
+
+## Implementation details
+
+Source code available at:
+- [Tron Parser](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-tron)
+
+## Resources
+
+- [Tron Documentation](https://developers.tron.network/)
+- [TRC-20 Standard](https://developers.tron.network/docs/trc20)
+- [Tron Protocol](https://github.com/tronprotocol/protocol-document)

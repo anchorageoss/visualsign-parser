@@ -4747,6 +4747,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 
 [[package]]
+name = "library_integration_test"
+version = "0.1.0"
+dependencies = [
+ "generated",
+ "parser_app",
+ "visualsign",
+]
+
+[[package]]
 name = "libredox"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6182,6 +6191,18 @@ dependencies = [
  "visualsign-ethereum",
  "visualsign-solana",
  "visualsign-unspecified",
+]
+
+[[package]]
+name = "parser_grpc_server"
+version = "0.1.0"
+dependencies = [
+ "generated",
+ "parser_app",
+ "qos_core",
+ "qos_p256",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

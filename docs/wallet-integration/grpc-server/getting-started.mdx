@@ -1,0 +1,208 @@
+---
+title: gRPC Server
+description: Run the gRPC parser service without TEE infrastructure
+---
+
+Run VisualSign as a standalone gRPC service without AWS Nitro Enclave infrastructure. This provides the same parsing functionality and API without attestation.
+
+## When to use the gRPC server
+
+The standalone gRPC server is appropriate for:
+
+- Development and testing environments
+- Internal services on trusted networks
+- Environments where TEE isn't available or required
+- Prototyping before moving to TEE
+
+## Security considerations
+
+<Warning>
+Without TEE, there's no cryptographic proof of parsing integrity. Only use this deployment model when you trust the network and host.
+</Warning>
+
+The standalone server model assumes:
+- The host running the parser is trusted
+- Network communication is secured (TLS, VPC, etc.)
+- You don't need to prove parsing integrity to external parties
+
+## Running locally
+
+The server binary is a single-process gRPC server that calls the parser directly, without the socket-based architecture used in TEE deployments.
+
+```bash
+# Clone the repository
+git clone https://github.com/anchorageoss/visualsign-parser
+cd visualsign-parser/src
+
+# Build and run the server
+make grpc-server
+```
+
+The parser will be available at `localhost:44020`.
+
+### Configuration
+
+Set the `EPHEMERAL_FILE` environment variable to specify a custom signing key:
+
+```bash
+EPHEMERAL_FILE=/path/to/key.secret cargo run --bin parser_grpc_server
+```
+
+For development, the binary defaults to `integration/fixtures/ephemeral.secret`.
+
+## Building a Docker image
+
+The server binary can be containerized as a single static binary:
+
+```dockerfile
+FROM rust:1.88 AS builder
+
+WORKDIR /build
+COPY . .
+
+# Build the server binary
+RUN cd src && cargo build --release --bin parser_grpc_server
+
+# Runtime image
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/src/target/release/parser_grpc_server /usr/local/bin/
+COPY --from=builder /build/src/integration/fixtures/ephemeral.secret /etc/visualsign/
+
+ENV EPHEMERAL_FILE=/etc/visualsign/ephemeral.secret
+
+EXPOSE 44020
+
+CMD ["parser_grpc_server"]
+```
+
+Build and run:
+
+```bash
+docker build -t visualsign-grpc-server .
+docker run -p 44020:44020 visualsign-grpc-server
+```
+
+<Note>
+For production, generate your own ephemeral key file rather than using the test fixture.
+</Note>
+
+## Kubernetes deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: visualsign-parser
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: visualsign-parser
+  template:
+    metadata:
+      labels:
+        app: visualsign-parser
+    spec:
+      containers:
+      - name: parser
+        image: your-registry/visualsign-grpc-server:latest
+        ports:
+        - containerPort: 44020
+        env:
+        - name: EPHEMERAL_FILE
+          value: /etc/visualsign/ephemeral.secret
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: visualsign-parser
+spec:
+  selector:
+    app: visualsign-parser
+  ports:
+  - port: 44020
+    targetPort: 44020
+```
+
+## Using the gRPC API
+
+The API is identical to TEE deployments, minus attestation:
+
+```go
+import (
+    pb "your-project/parser"
+    "google.golang.org/grpc"
+)
+
+conn, err := grpc.Dial("localhost:44020", grpc.WithInsecure())
+client := pb.NewParserServiceClient(conn)
+
+resp, err := client.Parse(context.Background(), &pb.ParseRequest{
+    UnsignedPayload: "0xf86c80850...",
+    Chain: pb.Chain_CHAIN_ETHEREUM,
+})
+
+// Note: Skip attestation verification when running without TEE
+// The response still includes a signature, but it's not attestation-backed
+visualSignJSON := resp.ParsedTransaction.Payload.SignablePayload
+```
+
+## Alternative: Multi-process mode
+
+For development, you can also run the full multi-process setup that mirrors the TEE architecture:
+
+```bash
+cd visualsign-parser/src
+make parser
+```
+
+This starts three processes (`parser_host`, `simulator_enclave`, `parser_app`) communicating over Unix sockets. The single-process server binary is simpler for most use cases.
+
+## Migrating to TEE
+
+The gRPC server uses the same API as TEE deployments. To migrate:
+
+1. Deploy TEE infrastructure (self-hosted or use Turnkey)
+2. Update your client to point to the TEE endpoint
+3. Add attestation verification to your client
+
+No changes to request/response handling are required.
+
+## Health checks
+
+The server implements the standard [gRPC health checking protocol](https://github.com/grpc/grpc/blob/master/doc/health-checking.md):
+
+```bash
+grpcurl -plaintext -d '{"service":"parser.ParserService"}' \
+    localhost:44020 grpc.health.v1.Health/Check
+```
+
+Response:
+
+```json
+{
+  "status": "SERVING"
+}
+```
+
+You can also list all available services:
+
+```bash
+grpcurl -plaintext localhost:44020 list
+```
+
+## Next steps
+
+- [gRPC API Reference](../../api-reference) — Full API documentation
+- [Self-Hosted TEE](../self-hosted-tee/getting-started) — Upgrade to TEE when ready
+- [Chain Metadata](../core-concepts/chain-metadata) — Providing ABIs and IDLs

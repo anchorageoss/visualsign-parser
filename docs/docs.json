@@ -1,0 +1,153 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "maple",
+  "name": "VisualSign",
+  "appearance": {
+    "default": "dark"
+  },
+  "colors": {
+    "primary": "#5580F6",
+    "light": "#7799F8",
+    "dark": "#3D68E0"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Overview",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "vision-roadmap",
+              "about"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Wallet Integration",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "wallet-integration/overview"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "wallet-integration/core-concepts/how-parsing-works",
+              "wallet-integration/core-concepts/chain-metadata",
+              "wallet-integration/core-concepts/error-handling"
+            ]
+          },
+          {
+            "group": "Deployment Models",
+            "pages": [
+              "wallet-integration/hosted/getting-started",
+              {
+                "group": "Self-Hosted TEE",
+                "pages": [
+                  "wallet-integration/self-hosted-tee/getting-started",
+                  "wallet-integration/self-hosted-tee/security-model",
+                  "wallet-integration/self-hosted-tee/attestation"
+                ]
+              },
+              "wallet-integration/library/getting-started",
+              "wallet-integration/grpc-server/getting-started"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "api-reference"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Adding Visualizations",
+        "groups": [
+          {
+            "group": "Guide",
+            "pages": [
+              "creating-visualizations",
+              "field-types",
+              "parser-cli"
+            ]
+          },
+          {
+            "group": "Supported Chains",
+            "pages": [
+              "chains/ethereum",
+              "chains/solana",
+              "chains/sui",
+              "chains/tron"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "contributing",
+              "contributor-guides/contributing-visualization",
+              "contributor-guides/testing-visualizations"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Chain Development",
+        "groups": [
+          {
+            "group": "Chain Development",
+            "pages": [
+              "chain-modules",
+              "adding-new-chain",
+              "contributing",
+              "contributor-guides/project-structure",
+              "contributor-guides/best-practices",
+              "contributor-guides/integration-testing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Playground",
+        "groups": [
+          {
+            "group": "Playground",
+            "pages": [
+              "playground"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "primary": {
+      "type": "button",
+      "label": "GitHub",
+      "href": "https://github.com/anchorageoss/visualsign-parser"
+    }
+  },
+  "contextual": {
+    "options": [
+     "copy",
+     "view",
+     "chatgpt",
+     "claude",
+     "perplexity",
+     "mcp",
+     "cursor",
+     "vscode"
+   ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/anchorageoss"
+    }
+  }
+}

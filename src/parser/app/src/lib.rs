@@ -14,6 +14,8 @@ pub mod chain_conversion;
 
 pub mod registry;
 
-mod routes {
-    pub(crate) mod parse;
+/// Routes for the parser service
+pub mod routes {
+    /// Parse route
+    pub mod parse;
 }

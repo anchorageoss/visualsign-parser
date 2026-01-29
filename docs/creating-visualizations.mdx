@@ -1,0 +1,444 @@
+---
+title: Creating Visualizations
+description: Design patterns and examples for transaction display
+---
+
+## Visualization patterns
+
+### Pattern 1: Simple transfer
+
+For basic value transfers, focus on the key elements:
+
+```json
+{
+  "Version": "0",
+  "Title": "Ethereum Transfer",
+  "Fields": [
+    {
+      "Type": "amount_v2",
+      "Label": "You're sending",
+      "FallbackText": "0.005 ETH",
+      "AmountV2": {
+        "Amount": "0.005",
+        "Abbreviation": "ETH"
+      }
+    },
+    {
+      "Type": "address_v2",
+      "Label": "To",
+      "FallbackText": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7",
+      "AddressV2": {
+        "Address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7"
+      }
+    }
+  ]
+}
+```
+
+**Visual Result:**
+```
+┌──────────────────────────────┐
+│ Ethereum Transfer            │
+├──────────────────────────────┤
+│ You're sending               │
+│ 0.005 ETH                    │
+│                              │
+│ To                           │
+│ 0x742d...bEb7               │
+└──────────────────────────────┘
+```
+
+### Pattern 2: Transaction with instructions
+
+For transactions with multiple instructions (based on actual Solana fixture):
+
+```json
+{
+  "Version": "0",
+  "Title": "Solana Transaction",
+  "Fields": [
+    {
+      "Type": "text_v2",
+      "FallbackText": "Solana",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Solana"
+      }
+    },
+    {
+      "Type": "preview_layout",
+      "FallbackText": "Program ID: JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+      "Label": "Instruction",
+      "PreviewLayout": {
+        "Title": {
+          "Text": "Jupiter Swap"
+        },
+        "Subtitle": {
+          "Text": "DeFi Protocol"
+        },
+        "Condensed": {
+          "Fields": [
+            {
+              "Type": "text_v2",
+              "FallbackText": "Jupiter Swap",
+              "Label": "Instruction",
+              "TextV2": {
+                "Text": "Jupiter Swap"
+              }
+            }
+          ]
+        },
+        "Expanded": {
+          "Fields": [
+            {
+              "Type": "text_v2",
+              "FallbackText": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+              "Label": "Program ID",
+              "TextV2": {
+                "Text": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+### Pattern 3: Smart contract interaction
+
+For complex operations, use progressive disclosure with real field structure:
+
+```json
+{
+  "Version": "0",
+  "Title": "Ethereum Transaction",
+  "Fields": [
+    {
+      "Type": "text_v2",
+      "Label": "Network",
+      "FallbackText": "Ethereum Mainnet",
+      "TextV2": {
+        "Text": "Ethereum Mainnet"
+      }
+    },
+    {
+      "Type": "address_v2",
+      "Label": "To",
+      "FallbackText": "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD",
+      "AddressV2": {
+        "Address": "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
+      }
+    },
+    {
+      "Type": "amount_v2",
+      "Label": "Value",
+      "FallbackText": "0 ETH",
+      "AmountV2": {
+        "Amount": "0",
+        "Abbreviation": "ETH"
+      }
+    },
+    {
+      "Type": "preview_layout",
+      "Label": "Universal Router",
+      "FallbackText": "Uniswap Universal Router Execute",
+      "PreviewLayout": {
+        "Title": {
+          "Text": "Uniswap Universal Router Execute"
+        },
+        "Subtitle": {
+          "Text": "4 commands"
+        },
+        "Condensed": {
+          "Fields": [
+            {
+              "Type": "text_v2",
+              "Label": "Commands",
+              "FallbackText": "4 operations",
+              "TextV2": {
+                "Text": "Permit2, Swap, Pay, Unwrap"
+              }
+            }
+          ]
+        },
+        "Expanded": {
+          "Fields": [
+            {
+              "Type": "text_v2",
+              "Label": "Command 1",
+              "FallbackText": "Permit2 Permit",
+              "TextV2": {
+                "Text": "Permit2 Permit"
+              }
+            },
+            {
+              "Type": "text_v2",
+              "Label": "Command 2",
+              "FallbackText": "V2 Swap Exact In",
+              "TextV2": {
+                "Text": "V2 Swap Exact In"
+              }
+            },
+            {
+              "Type": "text_v2",
+              "Label": "Command 3",
+              "FallbackText": "Pay Portion",
+              "TextV2": {
+                "Text": "Pay Portion"
+              }
+            },
+            {
+              "Type": "text_v2",
+              "Label": "Command 4",
+              "FallbackText": "Unwrap WETH",
+              "TextV2": {
+                "Text": "Unwrap WETH"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+## Design guidelines
+
+### 1. Information hierarchy
+
+Structure information by importance:
+
+```typescript
+// Primary: What is happening?
+Title: "Swap ETH for USDC"
+
+// Secondary: Key parameters
+Amount: "1.5 ETH → 2,850 USDC"
+
+// Tertiary: Additional context
+Slippage: "0.5%"
+Route: "Uniswap V3"
+```
+
+### 2. Use semantic field types
+
+Choose the right field type for the data:
+
+| Data Type | Field Type | Example |
+|-----------|------------|---------|
+| Monetary values | `amount_v2` | Token amounts, fees |
+| Addresses | `address_v2` | Recipients, contracts |
+| Status/Labels | `text_v2` | Network, protocol names |
+| Groups | `list_layout` | Related parameters |
+| Complex data | `preview_layout` | Expandable details |
+
+### 3. Color and visual cues
+
+Use visual indicators for important information:
+
+```json
+{
+  "Type": "address_v2",
+  "Label": "Recipient",
+  "FallbackText": "0x...",
+  "AddressV2": {
+    "Address": "0x...",
+    "BadgeText": "⚠️ New Address"  // Warning indicator
+  }
+}
+```
+
+```json
+{
+  "Type": "amount_v2",
+  "Label": "Amount",
+  "FallbackText": "10 ETH",
+  "AmountV2": {
+    "Amount": "10",  // Large amount - render prominently
+    "Abbreviation": "ETH"
+  }
+}
+```
+
+## Chain-specific visualizations
+
+### Ethereum: Gas optimization
+
+Show gas costs clearly:
+
+```json
+{
+  "Type": "preview_layout",
+  "Label": "Network Fee",
+  "PreviewLayout": {
+    "Title": {
+      "Text": "~$12.50"
+    },
+    "Condensed": {
+      "Fields": [
+        {
+          "Type": "text_v2",
+          "Label": "Gas",
+          "TextV2": {
+            "Text": "0.002 ETH"
+          }
+        }
+      ]
+    },
+    "Expanded": {
+      "Fields": [
+        {
+          "Type": "text_v2",
+          "Label": "Gas Price",
+          "TextV2": {
+            "Text": "30 gwei"
+          }
+        },
+        {
+          "Type": "text_v2",
+          "Label": "Gas Limit",
+          "TextV2": {
+            "Text": "65,000"
+          }
+        },
+        {
+          "Type": "text_v2",
+          "Label": "Max Fee",
+          "TextV2": {
+            "Text": "0.00195 ETH"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+### Solana: Multiple instructions
+
+Group related instructions (based on actual test data):
+
+```json
+{
+  "Type": "list_layout",
+  "Label": "Instructions",
+  "FallbackText": "Transaction Instructions",
+  "ListLayout": {
+    "Fields": [
+      {
+        "Type": "text_v2",
+        "Label": "Instruction 1",
+        "FallbackText": "AdvanceNonceAccount",
+        "TextV2": {
+          "Text": "AdvanceNonceAccount"
+        }
+      },
+      {
+        "Type": "text_v2",
+        "Label": "Instruction 2",
+        "FallbackText": "Jupiter Swap",
+        "TextV2": {
+          "Text": "Jupiter Swap"
+        }
+      }
+    ]
+  }
+}
+```
+
+### Sui: Move calls
+
+Show Move module interactions (based on presets):
+
+```json
+{
+  "Type": "list_layout",
+  "Label": "Commands",
+  "FallbackText": "Transaction Commands",
+  "ListLayout": {
+    "Fields": [
+      {
+        "Type": "text_v2",
+        "Label": "Module",
+        "FallbackText": "pool_script_v2",
+        "TextV2": {
+          "Text": "pool_script_v2::swap_a2b"
+        }
+      },
+      {
+        "Type": "amount_v2",
+        "Label": "Amount",
+        "FallbackText": "1000000 MIST",
+        "AmountV2": {
+          "Amount": "1000000",
+          "Abbreviation": "MIST"
+        }
+      }
+    ]
+  }
+}
+```
+
+## Risk indicators
+
+### High-value warnings
+
+```json
+{
+  "Type": "text_v2",
+  "Label": "⚠️ WARNING",
+  "TextV2": {
+    "Text": "This transaction moves more than $10,000"
+  }
+}
+```
+
+### Unknown contracts
+
+```json
+{
+  "Type": "address_v2",
+  "Label": "Contract",
+  "AddressV2": {
+    "Address": "0x...",
+    "BadgeText": "⚠️ Unverified",
+    "Name": "Unknown Contract"
+  }
+}
+```
+
+### Irreversible actions
+
+```json
+{
+  "Type": "text_v2",
+  "Label": "⛔ IRREVERSIBLE",
+  "TextV2": {
+    "Text": "This action cannot be undone"
+  }
+}
+```
+
+## Testing visualizations
+
+Before deploying a visualization, verify:
+
+1. **Clarity**: Can a non-technical user understand what will happen?
+2. **Completeness**: Are all important parameters shown?
+3. **Accuracy**: Do amounts and addresses match the raw transaction?
+4. **Risk Communication**: Are warnings prominently displayed?
+5. **Mobile Compatibility**: Does it work on small screens?
+
+Test with different user personas (novice, regular user, expert) and edge cases like zero amounts, failed transactions, contract creation, multi-signature operations, and batch transactions.
+
+## Best practices
+
+1. **Keep titles action-oriented**: "Send ETH" not "Ethereum Transaction"
+2. **Use familiar terms**: "Send" not "Transfer", "Swap" not "Exchange"
+3. **Show both technical and friendly names**: "Uniswap V3 (0x68b3...)"
+4. **Group related information**: Use `list_layout` for coherent sections
+5. **Provide context**: Include network, protocol, estimated time
+6. **Be consistent**: Use the same patterns across similar operations

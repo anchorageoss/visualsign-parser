@@ -1,0 +1,114 @@
+---
+title: Quickstart
+description: Test your DApp's transactions with the VisualSign parser CLI
+---
+
+## Prerequisites
+
+- Rust development environment
+- A raw transaction hex from your DApp
+
+## Install the parser CLI
+
+```bash
+# Clone the repository
+git clone https://github.com/anchorageoss/visualsign-parser.git
+cd visualsign-parser/src
+
+# Build the CLI
+cargo build --release
+
+# The binary is at target/release/parser_cli
+```
+
+## Parse your first transaction
+
+Run the parser with a transaction from your DApp:
+
+```bash
+./target/release/parser_cli --chain ethereum -t <your_transaction_hex> --output human
+```
+
+Replace `ethereum` with your chain (`solana`, `sui`, or `tron`) and `<your_transaction_hex>` with your actual transaction data.
+
+### Example: Ethereum Transfer
+
+```bash
+./target/release/parser_cli --chain ethereum -t 0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a0 --output human
+```
+
+Output:
+```
+┌─ Transaction: Ethereum Transaction
+│  Version: 0
+│
+└─ Fields:
+   ├─ Network: Ethereum Mainnet
+   ├─ To: 0x3535353535353535353535353535353535353535
+   ├─ Value: 1 ETH
+   └─ Gas Limit: 21000
+```
+
+### Example: Solana Transaction
+
+```bash
+./target/release/parser_cli --chain solana -t AgAAAAAAAA... --output human
+```
+
+## Test hardware wallet view
+
+Users on hardware wallets see a condensed view. Test what they'll see:
+
+```bash
+./target/release/parser_cli --chain ethereum -t <tx_hex> --output human --condensed-only
+```
+
+This shows only the essential information that fits on small screens.
+
+## Get JSON output
+
+For programmatic analysis or integration testing:
+
+```bash
+./target/release/parser_cli --chain ethereum -t <tx_hex> --output json
+```
+
+Use `jq` to extract specific fields:
+
+```bash
+# Get all field labels
+./target/release/parser_cli --chain ethereum -t <tx_hex> --output json | jq -r '.Fields[].Label'
+
+# Get the transaction title
+./target/release/parser_cli --chain ethereum -t <tx_hex> --output json | jq -r '.Title'
+```
+
+## What to check
+
+When reviewing your transaction's visualization:
+
+1. **Accuracy** - Do amounts, addresses, and parameters match your transaction?
+2. **Clarity** - Can a non-technical user understand what will happen?
+3. **Completeness** - Are all important details visible?
+4. **Condensed view** - Does the hardware wallet view show critical information?
+
+## Common issues
+
+### Transaction fails to parse
+
+Verify the chain flag matches your transaction and that the hex is properly formatted.
+
+### Missing protocol details
+
+The parser may not recognize your specific contract. You can [contribute a visualization](/contributing/contributing-visualization) for your protocol.
+
+### Amounts display incorrectly
+
+Check that your transaction encodes token decimals correctly. The parser uses on-chain standards for decimal handling.
+
+## Next steps
+
+- [Parser CLI Reference](/parser-cli) - Full CLI documentation with advanced examples
+- [Creating Visualizations](/creating-visualizations) - Design patterns for transaction display
+- [Contributing a Visualization](/contributing/contributing-visualization) - Add support for your protocol
+- [Vision & Roadmap](/vision-roadmap) - Long-term strategy for DApp integration

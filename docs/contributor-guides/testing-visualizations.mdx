@@ -1,0 +1,143 @@
+---
+title: Testing Visualizations
+description: Verify parser output with the CLI before submitting
+---
+
+For full parser CLI documentation, see [Parser CLI](../parser-cli). This guide covers the practical steps to test your visualization locally.
+
+## Prerequisites
+
+Before testing, ensure you have:
+- The `parser_cli` binary built (see [installation instructions](../parser-cli#installation))
+- A raw transaction hex from your DApp or protocol
+- The expected output you want to verify
+
+## Quick testing workflow
+
+### 1. Parse your transaction
+
+Run the parser CLI with your transaction:
+
+```bash
+parser_cli --chain <chain> -t <your_transaction_hex> --output human
+```
+
+For example, with an Ethereum transaction:
+
+```bash
+parser_cli --chain ethereum -t 0x02f9... --output human
+```
+
+### 2. Verify the output
+
+Check that the visualization:
+- Shows the correct action (swap, transfer, approval, etc.)
+- Displays accurate amounts and addresses
+- Uses appropriate labels that users will understand
+
+### 3. Test the condensed view
+
+Hardware wallets have limited screen space. Verify your visualization works in condensed mode:
+
+```bash
+parser_cli --chain <chain> -t <your_transaction_hex> --output human --condensed-only
+```
+
+The condensed view should show only the most critical information.
+
+### 4. Check JSON output
+
+For programmatic validation, use JSON output:
+
+```bash
+parser_cli --chain <chain> -t <your_transaction_hex> --output json
+```
+
+You can extract specific fields with `jq`:
+
+```bash
+parser_cli --chain ethereum -t <tx_hex> --output json | jq '.Fields'
+```
+
+## Common issues
+
+### Transaction fails to parse
+
+**Cause**: Incorrect chain type or malformed hex encoding.
+
+**Solution**: Verify the chain flag matches your transaction and that the hex is properly formatted (with or without `0x` prefix, depending on chain conventions).
+
+### Missing protocol details
+
+**Cause**: The parser does not recognize your contract or protocol.
+
+**Solution**: You may need to add a protocol-specific preset. See [Creating Visualizations](../creating-visualizations) for patterns.
+
+### Output too verbose for hardware wallets
+
+**Cause**: The condensed view includes too many fields.
+
+**Solution**: Review your visualization's `Condensed` section in the `PreviewLayout` and reduce it to only the essential fields.
+
+### Amounts display incorrectly
+
+**Cause**: Decimal handling or token metadata issues.
+
+**Solution**: Verify that token decimals are correctly applied. Use the `amount_v2` field type with proper `Amount` and `Abbreviation` values.
+
+## Adding test fixtures
+
+When your visualization is working, add a test fixture to ensure it does not regress.
+
+### 1. Save your transaction
+
+Create a fixture file in the appropriate chain directory:
+
+```
+src/chain_parsers/visualsign-<chain>/tests/fixtures/
+```
+
+Name the file descriptively, for example `my_protocol_swap.input`.
+
+### 2. Add expected output
+
+Create a corresponding expected output file with the same name but `.expected` extension. This captures the correct JSON output for comparison.
+
+### 3. Write a test
+
+Add a test that compares the parser output against your expected fixture:
+
+```rust
+#[test]
+fn test_my_protocol_swap() {
+    let input = include_str!("fixtures/my_protocol_swap.input");
+    let expected = include_str!("fixtures/my_protocol_swap.expected");
+
+    let result = parse_transaction(input);
+    assert_eq!(result, expected);
+}
+```
+
+### 4. Run tests
+
+Verify your fixture passes:
+
+```bash
+cargo test -p visualsign-<chain> test_my_protocol
+```
+
+## Validation checklist
+
+Before submitting your visualization:
+
+- [ ] Parses correctly with `--output human`
+- [ ] Condensed view shows critical information only
+- [ ] Amounts and addresses are accurate
+- [ ] Labels are clear to non-technical users
+- [ ] Test fixture added and passing
+
+## Related documentation
+
+- [Parser CLI Development](../parser-cli) - Full CLI reference and examples
+- [Creating Visualizations](../creating-visualizations) - Design patterns for visualizations
+- [Field Types Reference](../field-types) - Available field types and their usage

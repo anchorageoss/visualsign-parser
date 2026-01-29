@@ -1,0 +1,333 @@
+---
+title: Attestation Verification
+description: Implement attestation verification for parser responses
+---
+
+Before trusting any parsed transaction data, your wallet must verify the attestation to confirm it came from a genuine enclave running the expected code.
+
+For background on why verification matters and how the security model works, see [Security Model](./security-model).
+
+## Prerequisites
+
+- Understanding of the [TEE security model](./security-model)
+- Access to the [VisualSign Verifier Library](https://github.com/anchorageoss/awsnitroverifier) (recommended) or ability to implement verification from scratch
+- A PCR allowlist for the parser version you're integrating with
+
+## Verification levels
+
+Choose the level of verification appropriate for your security requirements:
+
+| Level | Verifies | Use Case |
+|-------|----------|----------|
+| Level 1 | Signature only | Development and testing |
+| Level 2 | Signature + PCRs | Production deployments |
+| Level 3 | Signature + PCRs + Manifest | High-security environments |
+
+## Level 1: Signature verification
+
+Verify the parser's P256 signature on the response.
+
+```go
+// Extract from parser response
+signature := response.ParsedTransaction.Signature
+publicKey := signature.PublicKey
+message := signature.Message
+sig := signature.Signature
+
+// Verify P256 ECDSA signature
+valid := verifyP256Signature(publicKey, message, sig)
+if !valid {
+    return errors.New("invalid signature")
+}
+```
+
+## Level 2: Boot attestation
+
+Verify the enclave boot measurements (PCRs) to confirm the expected code is running.
+
+```go
+// Parse attestation document
+doc, err := parseAttestationDocument(attestationBytes)
+if err != nil {
+    return err
+}
+
+// Check PCR values against allowlist
+expectedPCRs := map[int]string{
+    0: "abc123...", // Enclave image
+    1: "def456...", // Enclave boot
+    2: "ghi789...", // Application hash
+}
+
+for idx, expected := range expectedPCRs {
+    if doc.PCRs[idx] != expected {
+        return fmt.Errorf("PCR%d mismatch", idx)
+    }
+}
+```
+
+## Level 3: Manifest verification
+
+Verify the exact application binary for complete supply chain verification.
+
+```go
+// Get manifest from attestation
+manifest := doc.UserData.Manifest
+
+// Verify manifest signature
+manifestSig := manifest.Signature
+valid := verifyManifestSignature(manifestSig)
+
+// Check application hash
+appHash := sha256.Sum256(applicationBinary)
+if manifest.AppHash != appHash {
+    return errors.New("application hash mismatch")
+}
+```
+
+## Step-by-step implementation
+
+### Step 1: Extract attestation
+
+The parser includes attestation in its responses:
+
+```go
+type ParseResponse struct {
+    ParsedTransaction Transaction
+    Attestation      []byte // CBOR-encoded attestation document
+}
+```
+
+### Step 2: Decode CBOR
+
+AWS attestation documents use CBOR encoding:
+
+```go
+import "github.com/fxamacker/cbor/v2"
+
+var doc AttestationDocument
+err := cbor.Unmarshal(attestationBytes, &doc)
+```
+
+### Step 3: Verify certificate chain
+
+The attestation includes an X.509 certificate chain signed by AWS:
+
+```go
+// Extract certificates
+certs := doc.Certificate
+chain := x509.NewCertPool()
+
+// Build chain
+for _, certDER := range certs {
+    cert, _ := x509.ParseCertificate(certDER)
+    chain.AddCert(cert)
+}
+
+// Verify against AWS root CA
+opts := x509.VerifyOptions{
+    Roots: awsNitroRootCA,
+    Intermediates: chain,
+}
+
+_, err := leafCert.Verify(opts)
+```
+
+### Step 4: Verify PCR values
+
+Check Platform Configuration Registers against your allowlist:
+
+```go
+type PCRs struct {
+    PCR0 []byte // Enclave image file
+    PCR1 []byte // Linux kernel and boot ramfs
+    PCR2 []byte // Application binary
+    PCR3 []byte // Parent instance ID
+    PCR4 []byte // Parent instance IP
+    PCR8 []byte // Enclave certificate
+}
+```
+
+Maintain an allowlist of valid PCR values:
+
+```yaml
+# pcr-allowlist.yaml
+production:
+  pcr0: "7fb5c55bc2ecbb68ed99a13d7122abfc0666b926a79d5379bc58b9445c84217f"
+  pcr1: "235c9e6050abf6b993c915505f3220e2a82b51a4b8b244d5e19e6c7b2d7e8b25"
+  pcr2: "0f0e3e8118b61c8c5b21f92e1e2e52e89d09a92c627d7f6cf42c135f5d5c7c82"
+```
+
+### Step 5: Extract public key
+
+Only extract the public key after successful attestation verification:
+
+```go
+// IMPORTANT: Only after successful attestation verification!
+if !verifyAttestation(doc) {
+    return errors.New("attestation verification failed")
+}
+
+// Now safe to use the public key
+publicKey := doc.PublicKey
+```
+
+## Complete example
+
+```go
+package verify
+
+import (
+    "crypto/ecdsa"
+    "crypto/sha256"
+    "crypto/x509"
+    "encoding/hex"
+    "fmt"
+
+    "github.com/fxamacker/cbor/v2"
+)
+
+func VerifyParserResponse(resp *ParseResponse) error {
+    // Step 1: Decode attestation
+    var doc AttestationDocument
+    if err := cbor.Unmarshal(resp.Attestation, &doc); err != nil {
+        return fmt.Errorf("decode attestation: %w", err)
+    }
+
+    // Step 2: Verify certificate chain
+    if err := verifyCertificateChain(doc.Certificate); err != nil {
+        return fmt.Errorf("verify cert chain: %w", err)
+    }
+
+    // Step 3: Check PCR values
+    if err := verifyPCRs(doc.PCRs); err != nil {
+        return fmt.Errorf("verify PCRs: %w", err)
+    }
+
+    // Step 4: Verify signature using attested public key
+    pubKey, err := parsePublicKey(doc.PublicKey)
+    if err != nil {
+        return fmt.Errorf("parse public key: %w", err)
+    }
+
+    // Step 5: Verify the transaction signature
+    hash := sha256.Sum256([]byte(resp.ParsedTransaction.Payload))
+    valid := ecdsa.VerifyASN1(pubKey, hash[:], resp.ParsedTransaction.Signature)
+    if !valid {
+        return fmt.Errorf("invalid transaction signature")
+    }
+
+    return nil
+}
+
+func verifyPCRs(pcrs map[int][]byte) error {
+    // Load allowlist
+    allowlist := loadPCRAllowlist()
+
+    // Check each PCR
+    for idx, expected := range allowlist {
+        actual := hex.EncodeToString(pcrs[idx])
+        if actual != expected {
+            return fmt.Errorf("PCR%d mismatch: got %s, want %s",
+                idx, actual, expected)
+        }
+    }
+
+    return nil
+}
+```
+
+## PCR management
+
+### Updating your allowlist
+
+When the parser is updated, PCR values change. Follow this process:
+
+1. Subscribe to parser release announcements
+2. Verify new PCR values against published hashes
+3. Add new PCRs to your allowlist
+4. Deploy to production
+5. Remove old PCRs after migration completes
+
+### Supporting multiple versions
+
+During migrations, support multiple PCR sets:
+
+```yaml
+# pcr-allowlist.yaml
+production:
+  # Current version
+  - pcr0: "7fb5c55bc..."
+    pcr1: "235c9e605..."
+    pcr2: "0f0e3e811..."
+  # Previous version (remove after migration)
+  - pcr0: "a1b2c3d4e..."
+    pcr1: "f5g6h7i8j..."
+    pcr2: "k9l0m1n2o..."
+```
+
+## Monitoring
+
+Track verification metrics in production:
+
+```go
+metrics.Counter("attestation.verification.success")
+metrics.Counter("attestation.verification.failure")
+metrics.Histogram("attestation.verification.duration")
+```
+
+Log verification attempts for auditing:
+
+```go
+log.Info("attestation_verified",
+    "pcr0", hex.EncodeToString(doc.PCRs[0]),
+    "pcr2", hex.EncodeToString(doc.PCRs[2]),
+    "timestamp", doc.Timestamp,
+    "nonce", doc.Nonce,
+)
+```
+
+## Troubleshooting
+
+### PCR mismatch
+
+- Parser was updated and your allowlist needs updating
+- You're connecting to a different environment (staging vs production)
+- Check the [parser releases](https://github.com/anchorageoss/visualsign-parser/releases) for current PCR values
+
+### Certificate chain invalid
+
+- Check for clock skew on your system
+- Verify certificates haven't expired
+- Ensure network connectivity for CRL checks
+
+### Signature verification failed
+
+- Confirm the message being verified matches what was signed
+- Check you're using the correct public key from the attestation
+- Verify the signature format (ASN.1 DER encoding)
+
+### Debug commands
+
+Check current PCR values on the enclave:
+
+```bash
+nitro-cli describe-enclave --enclave-id $EID
+```
+
+Verify an attestation document directly:
+
+```bash
+nitro-cli verify-attestation --document attestation.cbor
+```
+
+## Next steps
+
+- [Security Model](./security-model) — Understanding the trust architecture
+- [Getting Started](./getting-started) — Deploy your own enclave
+
+## Resources
+
+- [AWS Nitro Enclaves Documentation](https://docs.aws.amazon.com/enclaves/)
+- [CBOR RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html)
+- [VisualSign Verifier Library](https://github.com/anchorageoss/awsnitroverifier)

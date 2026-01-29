@@ -1,0 +1,14 @@
+[package]
+name = "library_integration_test"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "library_integration_test"
+path = "library_integration_test.rs"
+
+[dependencies]
+parser_app = { path = "../parser/app" }
+visualsign = { path = "../visualsign" }
+generated = { path = "../generated" }

@@ -1,0 +1,61 @@
+---
+title: Sui
+description: Object model, Move calls, and programmable transactions
+---
+
+The Sui module handles the Move programming language and Sui's object-centric data model.
+
+## Architecture overview
+
+### Transaction model
+- **Encoding**: BCS (Binary Canonical Serialization)
+- **Object-based**: Resources are objects with unique IDs
+- **Move Language**: Type-safe smart contract language
+- **Gas Model**: Storage and computation fees
+
+### Key components
+
+The Sui parser handles:
+- Object transfers
+- Move function calls
+- Coin operations (split, merge)
+- Programmable transactions
+- Package publishing
+
+## Transaction types
+
+### Programmable transactions
+Sui's programmable transactions allow multiple operations in a single transaction:
+- Multiple Move calls
+- Object transfers
+- Coin operations
+- All executed atomically
+
+### Object model
+- **Owned Objects**: Belong to a specific address
+- **Shared Objects**: Accessible by multiple transactions
+- **Immutable Objects**: Read-only after creation
+
+## Visualization strategy
+
+- **Command Sequence** - Show programmable transaction commands as a sequence of operations
+- **Object Information** - Display object IDs and ownership when relevant to the transaction
+- **Gas Objects** - Show gas payment details including storage rebates
+
+## Implementation details
+
+Source code available at:
+- [Sui Parser](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-sui)
+
+## Common operations
+
+- **SUI Transfer** - Transfer of native SUI tokens between addresses
+- **Object Transfer** - Moving owned objects from one address to another
+- **Move Function Call** - Invoking functions in deployed Move modules
+- **Coin Split/Merge** - Operations to divide or combine coin objects
+
+## Resources
+
+- [Sui Documentation](https://docs.sui.io/)
+- [Move Language](https://move-book.com/)
+- [Sui JSON-RPC](https://docs.sui.io/references/sui-api)

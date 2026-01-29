@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "codegen",
+  "examples",
   "generated",
   "health_check",
   "host_primitives",
@@ -9,6 +10,7 @@ members = [
   "parser/app",
   "parser/cli",
   "parser/host",
+  "parser/grpc-server",
   "visualsign",
   "chain_parsers/visualsign-ethereum",
   "chain_parsers/visualsign-solana",
