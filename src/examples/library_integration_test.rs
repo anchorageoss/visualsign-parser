@@ -12,7 +12,7 @@ fn display_payload(payload: &SignablePayload) {
     println!("Transaction: {}", payload.title);
 
     if let Some(subtitle) = &payload.subtitle {
-        println!("  {}", subtitle);
+        println!("  {subtitle}");
     }
 
     for field in &payload.fields {
@@ -68,7 +68,7 @@ fn main() {
             display_payload(&payload);
         }
         Err(e) => {
-            eprintln!("Parse error: {:?}", e);
+            eprintln!("Parse error: {e:?}");
             std::process::exit(1);
         }
     }
