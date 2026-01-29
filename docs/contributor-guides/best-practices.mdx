@@ -34,11 +34,24 @@ cargo depgraph --root visualsign-ethereum
 
 ### Test thoroughly
 
-Ensure all changes and refactors are tested thoroughly. Use tools like `cargo-tarpaulin` for test coverage data:
+Ensure all changes and refactors are tested thoroughly. Use `cargo-llvm-cov` for test coverage:
 
 ```bash
-cargo tarpaulin --workspace
+# Install cargo-llvm-cov (one-time setup)
+cargo install cargo-llvm-cov
+
+# Generate HTML report and open in browser
+cargo llvm-cov --workspace --open
+
+# Generate report for a specific package
+cargo llvm-cov --package visualsign-solana --lib --open
+
+# For CI: generate lcov format or fail under threshold
+cargo llvm-cov --workspace --lcov --output-path lcov.info
+cargo llvm-cov --workspace --fail-under-lines 70
 ```
+
+Reports are generated in `target/llvm-cov/html/`. Use coverage to identify untested code paths and prioritize adding test fixtures for uncovered instruction types.
 
 ### Respect blockchain conventions
 

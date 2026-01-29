@@ -3,26 +3,18 @@ title: Solana
 description: Multi-instruction transactions, system programs, and SPL tokens
 ---
 
-The Solana module handles transactions with multiple instructions, program invocations, and SPL token operations.
+The Solana module handles transactions with multiple instructions, program invocations, and SPL token operations. Source code is available in the [visualsign-solana](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-solana) crate.
 
-## Architecture overview
+## Architecture
 
 ### Transaction model
+
 - **Encoding**: Borsh/Bincode serialization
 - **Instruction-based**: Multiple instructions per transaction
-- **Account Model**: Accounts owned by programs
-- **Fee Model**: Fixed base fee with optional priority fees
+- **Account model**: Accounts owned by programs
+- **Fee model**: Fixed base fee with optional priority fees
 
-### Key components
-
-The Solana parser handles:
-- System program transfers
-- SPL Token operations
-- Associated Token Account (ATA) creation
-- Multiple instructions per transaction
-- Program invocations
-
-## Transaction structure
+### Transaction structure
 
 Solana transactions consist of:
 1. **Signatures**: One or more transaction signatures
@@ -31,32 +23,21 @@ Solana transactions consist of:
    - Instructions (operations to execute)
    - Recent blockhash (for replay protection)
 
-## Instruction types
+### Instruction types
 
-### System program
+**System program**
 - SOL transfers between accounts
 - Account creation and initialization
 - Space allocation for data storage
 
-### SPL token program
+**SPL token program**
 - Token transfers
 - Token approvals
 - Mint and burn operations
 
-### Associated token account
+**Associated token account**
 - Automatic creation of token accounts
 - Deterministic addressing for user tokens
-
-## Visualization strategy
-
-- **Primary Information** - Display the most significant instruction as the title, with supporting instructions shown as steps
-- **Multiple Instructions** - Group related instructions together, showing them as a sequence of operations
-- **Account Context** - Show account ownership and program associations when relevant
-
-## Implementation details
-
-Source code available at:
-- [Solana Parser](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-solana)
 
 ## Supported programs
 
@@ -66,11 +47,96 @@ The parser recognizes common Solana programs:
 - SPL Associated Token Account Program
 - Custom programs via IDL (Interface Definition Language)
 
-## Example transaction types
+Example transaction types include:
+- **SOL Transfer** — Simple transfer of native SOL between accounts
+- **SPL Token Transfer** — Transfer of SPL tokens, often including ATA creation if needed
+- **Complex DeFi Transaction** — Multiple instructions working together (e.g., create account, transfer tokens, interact with DEX)
 
-- **SOL Transfer** - Simple transfer of native SOL between accounts
-- **SPL Token Transfer** - Transfer of SPL tokens, often including ATA creation if needed
-- **Complex DeFi Transaction** - Multiple instructions working together (e.g., create account, transfer tokens, interact with DEX)
+## Visualization strategy
+
+- **Primary information** — Display the most significant instruction as the title, with supporting instructions shown as steps
+- **Multiple instructions** — Group related instructions together, showing them as a sequence of operations
+- **Account context** — Show account ownership and program associations when relevant
+
+## Testing
+
+The Solana parser uses fixture-based unit tests that capture real on-chain instruction data. Each fixture tests one instruction in isolation.
+
+### Generating fixtures
+
+Use the provided script to generate fixtures from real transactions:
+
+```bash
+cd src/chain_parsers/visualsign-solana
+
+# Generate fixture for instruction 2 from mainnet
+./scripts/generate-fixture.sh <signature> 2 > tests/fixtures/my_program/example.json
+
+# Generate fixture for instruction 2 from devnet
+./scripts/generate-fixture.sh <signature> 2 devnet > tests/fixtures/my_program/example.json
+```
+
+<Note>
+Solana transactions often include `ComputeBudget` instructions at indices 0 and 1 for setting compute unit limits and prices. The program instruction you want is typically at index 2 or later. Check the transaction on [Solscan](https://solscan.io) or [Solana Explorer](https://explorer.solana.com) to find the correct instruction index.
+</Note>
+
+The script fetches the transaction from Solana RPC and outputs a fixture JSON with base58-encoded instruction data, account metadata, and expected field values. After generating, update the `description` and `full_transaction_note` fields to be human-readable.
+
+### Fixture structure
+
+```json
+{
+  "description": "Brief description of what this instruction does",
+  "source": "https://solscan.io/tx/<signature>?cluster=mainnet-beta",
+  "signature": "<transaction_signature>",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "Context about the full transaction",
+  "instruction_index": 2,
+  "instruction_data": "<base58_encoded_data>",
+  "program_id": "<program_id>",
+  "accounts": [
+    {
+      "pubkey": "<account_pubkey>",
+      "signer": false,
+      "writable": true,
+      "description": "Token account"
+    }
+  ],
+  "expected_fields": {
+    "amount": "1000000",
+    "mint": "So11111111111111111111111111111111111111112"
+  }
+}
+```
+
+### Testing rules
+
+<Warning>
+**Fixtures are the source of truth.** Never modify fixture data to make tests pass. If a test fails, fix the parser code, not the fixture.
+</Warning>
+
+- **No network dependencies** — Fixtures are committed to git and tests run offline
+- **Field names match explorers** — Use the same field names shown in Solscan or Solana Explorer
+- **Verify before committing** — Check the source URL to confirm expected values are correct
+
+### Running tests
+
+```bash
+# Run all tests for a program preset
+cargo test -p visualsign-solana presets::jupiter_swap::tests
+
+# Run with output visible
+cargo test -p visualsign-solana presets::jupiter_swap::tests -- --nocapture
+```
+
+Use coverage reports to find untested instruction types:
+
+```bash
+cargo llvm-cov --package visualsign-solana --lib --html
+open target/llvm-cov/html/index.html
+```
+
+Uncovered match arms in `src/presets/<program>/mod.rs` are candidates for new fixtures.
 
 ## Resources
 
