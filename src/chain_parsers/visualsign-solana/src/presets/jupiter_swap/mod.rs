@@ -17,11 +17,12 @@ use visualsign::{
 };
 
 // Jupiter instruction discriminators (8-byte values)
+// Updated to match Jupiter v6 IDL (fixes bugs in exact_out_route and shared_accounts_route)
 const JUPITER_ROUTE_DISCRIMINATOR: [u8; 8] = [0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a];
 const JUPITER_EXACT_OUT_ROUTE_DISCRIMINATOR: [u8; 8] =
-    [0x4b, 0xd7, 0xdf, 0xa8, 0x0c, 0xd0, 0xb6, 0x2a];
+    [0xd0, 0x33, 0xef, 0x97, 0x7b, 0x2b, 0xed, 0x5c];
 const JUPITER_SHARED_ACCOUNTS_ROUTE_DISCRIMINATOR: [u8; 8] =
-    [0x3a, 0xf2, 0xaa, 0xae, 0x2f, 0xb6, 0xd4, 0x2a];
+    [0xc1, 0x20, 0x9b, 0x33, 0x41, 0xd6, 0x9c, 0x81];
 
 #[derive(Debug, Clone)]
 pub enum JupiterSwapInstruction {
@@ -606,12 +607,31 @@ mod tests {
 
     #[test]
     fn test_jupiter_discriminator_constants() {
-        // Verify discriminator constants are correct 8-byte arrays
-        assert_eq!(JUPITER_ROUTE_DISCRIMINATOR.len(), 8);
-        assert_eq!(JUPITER_EXACT_OUT_ROUTE_DISCRIMINATOR.len(), 8);
-        assert_eq!(JUPITER_SHARED_ACCOUNTS_ROUTE_DISCRIMINATOR.len(), 8);
+        // Verify discriminator constants match Jupiter v6 IDL
+        // Source: https://github.com/tkhq/solana-parser/blob/9a038e8fd7176d397d98c003dec431a7be112cbc/src/solana/idls/jupiter_agg_v6.json
 
-        // Verify they are different
+        // route instruction
+        assert_eq!(
+            JUPITER_ROUTE_DISCRIMINATOR,
+            [0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a],
+            "route discriminator must match Jupiter v6 IDL"
+        );
+
+        // exact_out_route instruction
+        assert_eq!(
+            JUPITER_EXACT_OUT_ROUTE_DISCRIMINATOR,
+            [0xd0, 0x33, 0xef, 0x97, 0x7b, 0x2b, 0xed, 0x5c],
+            "exact_out_route discriminator must match Jupiter v6 IDL"
+        );
+
+        // shared_accounts_route instruction
+        assert_eq!(
+            JUPITER_SHARED_ACCOUNTS_ROUTE_DISCRIMINATOR,
+            [0xc1, 0x20, 0x9b, 0x33, 0x41, 0xd6, 0x9c, 0x81],
+            "shared_accounts_route discriminator must match Jupiter v6 IDL"
+        );
+
+        // Verify they are different from each other
         assert_ne!(
             JUPITER_ROUTE_DISCRIMINATOR,
             JUPITER_EXACT_OUT_ROUTE_DISCRIMINATOR
@@ -628,10 +648,10 @@ mod tests {
 
     #[test]
     fn test_jupiter_discriminator_matching() {
-        // Test that our discriminators match correctly
+        // Test that our discriminators match correctly (updated to use correct IDL discriminators)
         // Each instruction needs at least 27 bytes: 8 for discriminator + 16 for amounts + 2 for slippage + 1 for platform_fee
         let route_data = [
-            0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a, // discriminator
+            0xe5, 0x17, 0xcb, 0x97, 0x7a, 0xe3, 0xad, 0x2a, // discriminator (route)
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // padding/intermediate data
             0x00, 0xe1, 0xf5, 0x05, 0x00, 0x00, 0x00, 0x00, // in_amount (100000000)
             0x00, 0xc2, 0xeb, 0x0b, 0x00, 0x00, 0x00, 0x00, // out_amount (200000000)
@@ -639,7 +659,7 @@ mod tests {
             0x00, // platform_fee_bps (0 bps)
         ];
         let exact_out_data = [
-            0x4b, 0xd7, 0xdf, 0xa8, 0x0c, 0xd0, 0xb6, 0x2a, // discriminator
+            0xd0, 0x33, 0xef, 0x97, 0x7b, 0x2b, 0xed, 0x5c, // discriminator (exact_out_route)
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // padding/intermediate data
             0x00, 0xe1, 0xf5, 0x05, 0x00, 0x00, 0x00, 0x00, // in_amount (100000000)
             0x00, 0xc2, 0xeb, 0x0b, 0x00, 0x00, 0x00, 0x00, // out_amount (200000000)
@@ -647,7 +667,8 @@ mod tests {
             0x00, // platform_fee_bps (0 bps)
         ];
         let shared_accounts_data = [
-            0x3a, 0xf2, 0xaa, 0xae, 0x2f, 0xb6, 0xd4, 0x2a, // discriminator
+            0xc1, 0x20, 0x9b, 0x33, 0x41, 0xd6, 0x9c,
+            0x81, // discriminator (shared_accounts_route)
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // padding/intermediate data
             0x00, 0xe1, 0xf5, 0x05, 0x00, 0x00, 0x00, 0x00, // in_amount (100000000)
             0x00, 0xc2, 0xeb, 0x0b, 0x00, 0x00, 0x00, 0x00, // out_amount (200000000)
