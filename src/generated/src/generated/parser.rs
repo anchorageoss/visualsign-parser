@@ -79,6 +79,7 @@ pub struct ParseRequest {
     derive(::serde::Serialize, ::serde::Deserialize),
     serde(rename_all = "camelCase")
 )]
+#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ChainMetadata {
@@ -92,7 +93,9 @@ pub mod chain_metadata {
         derive(::serde::Serialize, ::serde::Deserialize),
         serde(rename_all = "camelCase")
     )]
+    #[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
     #[cfg_attr(feature = "serde_derive", serde(untagged))]
+    #[borsh(use_discriminant = true)]
     #[allow(clippy::derive_partial_eq_without_eq)]
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Metadata {
@@ -110,6 +113,7 @@ pub mod chain_metadata {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ParseResponse {
+    /// Parsed transaction details
     #[prost(message, optional, tag = "1")]
     pub parsed_transaction: ::core::option::Option<ParsedTransaction>,
 }
@@ -132,6 +136,7 @@ pub struct Metadata {
     derive(::serde::Serialize, ::serde::Deserialize),
     serde(rename_all = "camelCase")
 )]
+#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SignatureMetadata {
@@ -151,6 +156,19 @@ pub struct SignatureMetadata {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ParsedTransactionPayload {
+    /// JSON string representation of the parsed payload
+    #[prost(string, tag = "1")]
+    pub parsed_payload: ::prost::alloc::string::String,
+    /// SHA-256 digest of the unsigned payload passed to the parser
+    #[prost(string, tag = "2")]
+    pub input_payload_digest: ::prost::alloc::string::String,
+    /// SHA-256 digest of the metadata passed to the parser
+    /// The metadata is serialized with Borsh before hashing.
+    /// If there is no metadata, this field is the empty SHA-256 digest
+    /// (e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855)
+    #[prost(string, tag = "3")]
+    pub metadata_digest: ::prost::alloc::string::String,
+    /// Legacy field. Will be removed, please do not use!
     #[prost(string, tag = "4")]
     pub signable_payload: ::prost::alloc::string::String,
 }
@@ -189,6 +207,7 @@ pub struct Signature {
     derive(::serde::Serialize, ::serde::Deserialize),
     serde(rename_all = "camelCase")
 )]
+#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EthereumMetadata {
@@ -203,6 +222,7 @@ pub struct EthereumMetadata {
     derive(::serde::Serialize, ::serde::Deserialize),
     serde(rename_all = "camelCase")
 )]
+#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SolanaMetadata {
@@ -221,6 +241,7 @@ pub struct SolanaMetadata {
     derive(::serde::Serialize, ::serde::Deserialize),
     serde(rename_all = "camelCase")
 )]
+#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Abi {
@@ -236,6 +257,7 @@ pub struct Abi {
     derive(::serde::Serialize, ::serde::Deserialize),
     serde(rename_all = "camelCase")
 )]
+#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Idl {

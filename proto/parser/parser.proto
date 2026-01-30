@@ -59,6 +59,7 @@ message ChainMetadata {
 }
 
 message ParseResponse {
+  // Parsed transaction details
   ParsedTransaction parsed_transaction = 1;
 }
 
@@ -73,6 +74,16 @@ message SignatureMetadata {
 }
 
 message ParsedTransactionPayload {
+  // JSON string representation of the parsed payload
+  string parsed_payload = 1;
+  // SHA-256 digest of the unsigned payload passed to the parser
+  string input_payload_digest = 2;
+  // SHA-256 digest of the metadata passed to the parser
+  // The metadata is serialized with Borsh before hashing.
+  // If there is no metadata, this field is the empty SHA-256 digest
+  // (e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855)
+  string metadata_digest = 3;
+  // Legacy field. Will be removed, please do not use!
   string signable_payload = 4;
 }
 
