@@ -5,8 +5,10 @@ mod config;
 use crate::core::{
     InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
 };
+use crate::idl::IdlRegistry;
 use crate::utils::{SwapTokenInfo, get_token_info};
 use config::JupiterSwapConfig;
+use solana_parser::{Idl, ProgramType, parse_instruction_with_idl};
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{
     create_amount_field, create_number_field, create_raw_data_field, create_text_field,
@@ -172,6 +174,107 @@ impl InstructionVisualizer for JupiterSwapVisualizer {
     }
 }
 
+/// Get Jupiter v6 IDL from built-in IDLs in solana-parser
+fn get_jupiter_idl() -> Option<Idl> {
+    let program_id = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+
+    // Check if it's a built-in IDL (it is)
+    if ProgramType::from_program_id(program_id).is_some() {
+        let registry = IdlRegistry::new();
+        registry.get_idl(program_id)
+    } else {
+        None
+    }
+}
+
+/// Helper to extract u64 argument from parsed IDL args
+fn extract_u64_arg(
+    args: &serde_json::Map<String, serde_json::Value>,
+    name: &str,
+) -> Result<u64, Box<dyn std::error::Error>> {
+    args.get(name)
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| format!("Missing or invalid argument: {name}").into())
+}
+
+/// Parse Jupiter instruction using IDL-based approach
+fn parse_jupiter_instruction_with_idl(
+    data: &[u8],
+    accounts: &[String],
+) -> Result<JupiterSwapInstruction, Box<dyn std::error::Error>> {
+    let program_id = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+    let idl = get_jupiter_idl().ok_or("Jupiter IDL not available")?;
+
+    // Parse using solana_parser
+    let parsed = parse_instruction_with_idl(data, program_id, &idl)?;
+
+    // Extract instruction type and arguments
+    match parsed.instruction_name.as_str() {
+        "route" => {
+            let in_amount = extract_u64_arg(&parsed.program_call_args, "in_amount")?;
+            let quoted_out_amount =
+                extract_u64_arg(&parsed.program_call_args, "quoted_out_amount")?;
+            let slippage_bps = extract_u64_arg(&parsed.program_call_args, "slippage_bps")? as u16;
+            let platform_fee_bps =
+                extract_u64_arg(&parsed.program_call_args, "platform_fee_bps")? as u8;
+
+            // Get token info (preserve current logic)
+            let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
+            let out_token = accounts
+                .get(5)
+                .map(|addr| get_token_info(addr, quoted_out_amount));
+
+            Ok(JupiterSwapInstruction::Route {
+                in_token,
+                out_token,
+                slippage_bps,
+                platform_fee_bps,
+            })
+        }
+        "exact_out_route" => {
+            // Note: exact_out_route uses out_amount and quoted_in_amount (reversed)
+            let out_amount = extract_u64_arg(&parsed.program_call_args, "out_amount")?;
+            let quoted_in_amount = extract_u64_arg(&parsed.program_call_args, "quoted_in_amount")?;
+            let slippage_bps = extract_u64_arg(&parsed.program_call_args, "slippage_bps")? as u16;
+            let platform_fee_bps =
+                extract_u64_arg(&parsed.program_call_args, "platform_fee_bps")? as u8;
+
+            let in_token = accounts
+                .first()
+                .map(|addr| get_token_info(addr, quoted_in_amount));
+            let out_token = accounts.get(5).map(|addr| get_token_info(addr, out_amount));
+
+            Ok(JupiterSwapInstruction::ExactOutRoute {
+                in_token,
+                out_token,
+                slippage_bps,
+                platform_fee_bps,
+            })
+        }
+        "shared_accounts_route" => {
+            let in_amount = extract_u64_arg(&parsed.program_call_args, "in_amount")?;
+            let quoted_out_amount =
+                extract_u64_arg(&parsed.program_call_args, "quoted_out_amount")?;
+            let slippage_bps = extract_u64_arg(&parsed.program_call_args, "slippage_bps")? as u16;
+            let platform_fee_bps =
+                extract_u64_arg(&parsed.program_call_args, "platform_fee_bps")? as u8;
+
+            let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
+            let out_token = accounts
+                .get(5)
+                .map(|addr| get_token_info(addr, quoted_out_amount));
+
+            Ok(JupiterSwapInstruction::SharedAccountsRoute {
+                in_token,
+                out_token,
+                slippage_bps,
+                platform_fee_bps,
+            })
+        }
+        _ => Ok(JupiterSwapInstruction::Unknown),
+    }
+}
+
 fn parse_jupiter_swap_instruction(
     data: &[u8],
     accounts: &[String],
@@ -180,6 +283,13 @@ fn parse_jupiter_swap_instruction(
         return Err("Invalid instruction data length");
     }
 
+    // Try IDL-based parsing first (more robust, uses correct discriminators from IDL)
+    if let Ok(instruction) = parse_jupiter_instruction_with_idl(data, accounts) {
+        return Ok(instruction);
+    }
+
+    // Fallback to discriminator-based parsing for robustness
+    // This ensures we don't break if IDL parsing fails for any reason
     let discriminator = &data[0..8];
 
     match discriminator {
