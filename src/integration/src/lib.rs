@@ -96,7 +96,6 @@ fn port_is_available(port: u16) -> bool {
 }
 
 const HOST_IP: &str = "127.0.0.1";
-const SIMULATOR_ENCLAVE_PATH: &str = "../target/debug/simulator_enclave";
 
 /// Arguments passed to the `test` function in [`Builder::execute`].
 #[derive(Default)]
@@ -157,39 +156,20 @@ impl Builder {
         let enclave_sock_path = format!("./{test_id}.parser.enclave.sock");
         file_handles.push(enclave_sock_path.clone());
 
-        // Start parser enclave (simulator)
-        let enclave_process: ChildWrapper = Command::new(SIMULATOR_ENCLAVE_PATH)
-            .arg(&enclave_sock_path)
-            .arg(&app_sock_path)
-            .spawn()
-            .unwrap()
-            .into();
-        process_handles.push(enclave_process);
+        let host_port = find_free_port().unwrap();
 
         // Start parser secure app
         let parser_process: ChildWrapper = Command::new("../target/debug/parser_app")
-            .arg("--usock")
-            .arg(&app_sock_path)
+            .arg("--host-ip")
+            .arg(HOST_IP)
+            .arg("--host-port")
+            .arg(host_port.to_string())
             .arg("--ephemeral-file")
             .arg("./fixtures/ephemeral.secret")
             .spawn()
             .unwrap()
             .into();
         process_handles.push(parser_process);
-
-        // Start parser host
-        let host_port = find_free_port().unwrap();
-        let host_process: ChildWrapper = Command::new("../target/debug/parser_host")
-            .arg("--host-ip")
-            .arg(HOST_IP)
-            .arg("--host-port")
-            .arg(host_port.to_string())
-            .arg("--usock")
-            .arg(&enclave_sock_path)
-            .spawn()
-            .unwrap()
-            .into();
-        process_handles.push(host_process);
         wait_until_port_is_bound(host_port);
 
         let host_addr = format!("http://{HOST_IP}:{host_port}");

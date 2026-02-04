@@ -6,6 +6,8 @@
 
 pub mod cli;
 
+pub mod host;
+
 pub mod service;
 
 pub mod errors;
