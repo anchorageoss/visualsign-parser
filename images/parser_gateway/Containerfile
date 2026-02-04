@@ -1,0 +1,32 @@
+FROM stagex/pallet-go:sx2025.10.0@sha256:5477bcf690aa52d1afdd2ed4ed0e6cc661cabf028a93ac639106b2ad06d7fa9a AS pallet-go
+FROM stagex/user-protobuf:sx2025.10.0@sha256:00df9c95a4a3978fb3157c833dfd939f4bc81ed061fb4726ffbcffc4fe424136 AS protobuf
+
+FROM scratch AS build
+COPY --from=pallet-go . /
+COPY --from=protobuf . /
+
+ENV GOPATH=/cache/go
+ENV CGO_ENABLED=0
+ENV GOPROXY=https://proxy.golang.org,direct
+ENV GOFLAGS=-trimpath
+
+WORKDIR /src
+
+COPY proto proto
+COPY gateway gateway
+
+WORKDIR /src/gateway
+
+RUN --network=none <<-EOF
+    set -eu
+    mkdir -p /rootfs/usr/local/bin
+    go build -mod=vendor -o /rootfs/usr/local/bin/gateway .
+EOF
+
+FROM stagex/core-busybox:1.36.1@sha256:cac5d773db1c69b832d022c469ccf5f52daf223b91166e6866d42d6983a3b374 AS package
+
+COPY --from=build /rootfs/. .
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/gateway"]

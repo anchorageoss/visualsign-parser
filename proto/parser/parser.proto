@@ -4,10 +4,18 @@ package parser;
 
 import "health/rpc.proto";
 import "vendor/google/rpc/status.proto";
+import "google/api/annotations.proto";
+
+option go_package = "github.com/anchorageoss/visualsign-parser/gateway/gen/parser";
 
 
 service ParserService {
-  rpc Parse(ParseRequest) returns (ParseResponse);
+  rpc Parse(ParseRequest) returns (ParseResponse) {
+    option (google.api.http) = {
+      post: "/visualsign/api/v1/parse"
+      body: "*"
+    };
+  }
 }
 
 // Chain represents supported blockchain networks

@@ -5,6 +5,8 @@ syntax = "proto3";
 
 package health;
 
+option go_package = "github.com/anchorageoss/visualsign-parser/gateway/gen/health";
+
 service HealthCheckService {
   rpc HostHealth(HostHealthRequest) returns (HostHealthResponse);
   rpc EnclaveHealth(EnclaveHealthRequest) returns (EnclaveHealthResponse);
