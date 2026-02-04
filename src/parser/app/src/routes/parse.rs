@@ -22,10 +22,10 @@ use visualsign::vsptrait::VisualSignOptions;
 /// Panics if the `ParsedTransactionPayload` cannot be serialized to Borsh format.
 /// This should never happen as the payload type implements `borsh::BorshSerialize`.
 pub fn parse(
-    parse_request: ParseRequest,
+    parse_request: &ParseRequest,
     ephemeral_key: &P256Pair,
 ) -> Result<ParseResponse, GrpcError> {
-    let request_payload = parse_request.unsigned_payload;
+    let request_payload = parse_request.unsigned_payload.as_str();
     if request_payload.is_empty() {
         return Err(GrpcError::new(
             Code::InvalidArgument,
@@ -46,7 +46,7 @@ pub fn parse(
     let registry_chain: VisualSignRegistryChain = chain_conversion::proto_to_registry(proto_chain);
 
     let signable_payload_str = registry
-        .convert_transaction(&registry_chain, request_payload.as_str(), options)
+        .convert_transaction(&registry_chain, request_payload, options)
         .map_err(|e| GrpcError::new(Code::InvalidArgument, &format!("{e}")))?;
 
     // Convert SignablePayload to String (assuming you want JSON)
@@ -56,7 +56,7 @@ pub fn parse(
 
     // Metadata can be empty; if so, we use an empty vec for hashing to avoid having to deal with
     // optional types in ParsedTransactionPayload.
-    let metadata_bytes = if let Some(metadata) = parse_request.chain_metadata {
+    let metadata_bytes = if let Some(metadata) = parse_request.chain_metadata.as_ref() {
         borsh::to_vec(&metadata).expect("chain_metadata implements borsh::Serialize")
     } else {
         vec![]

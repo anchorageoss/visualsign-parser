@@ -9,7 +9,6 @@ members = [
   "metrics",
   "parser/app",
   "parser/cli",
-  "parser/host",
   "parser/grpc-server",
   "visualsign",
   "chain_parsers/visualsign-ethereum",
@@ -38,14 +37,14 @@ repository = "https://github.com/anchorageoss/visualsign-parser"
 
 [workspace.dependencies]
 # See https://doc.rust-lang.org/nightly/cargo/reference/workspaces.html#the-dependencies-table
-qos_client = { git = "https://github.com/tkhq/qos.git", rev = "90dec56fc06926b7fb7439175c58789492ec82c6", default-features = false }
-qos_core = { git = "https://github.com/tkhq/qos.git", rev = "90dec56fc06926b7fb7439175c58789492ec82c6", default-features = false }
-qos_crypto = { git = "https://github.com/tkhq/qos.git", rev = "90dec56fc06926b7fb7439175c58789492ec82c6", default-features = false }
-qos_hex = { git = "https://github.com/tkhq/qos.git", rev = "90dec56fc06926b7fb7439175c58789492ec82c6", default-features = false }
-qos_net = { git = "https://github.com/tkhq/qos.git", rev = "90dec56fc06926b7fb7439175c58789492ec82c6", default-features = false }
-qos_nsm = { git = "https://github.com/tkhq/qos.git", rev = "90dec56fc06926b7fb7439175c58789492ec82c6", default-features = false }
-qos_p256 = { git = "https://github.com/tkhq/qos.git", rev = "90dec56fc06926b7fb7439175c58789492ec82c6", default-features = false }
-qos_test_primitives = { git = "https://github.com/tkhq/qos.git", rev = "90dec56fc06926b7fb7439175c58789492ec82c6", default-features = false }
+qos_client = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
+qos_core = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
+qos_crypto = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
+qos_hex = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
+qos_net = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
+qos_nsm = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
+qos_p256 = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
+qos_test_primitives = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
 
 # Common dependencies
 base64 = "0.22.1"

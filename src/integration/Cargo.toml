@@ -12,7 +12,6 @@ qos_hex = { workspace = true }
 qos_nsm = { workspace = true, features = ["mock"] }
 qos_test_primitives = { workspace = true }
 
-parser_host = { path = "../parser/host", default-features = false }
 parser_app = { path = "../parser/app", default-features = false }
 
 generated = { path = "../generated", default-features = false }

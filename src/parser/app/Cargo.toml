@@ -13,6 +13,9 @@ qos_crypto = { workspace = true }
 qos_hex = { workspace = true }
 qos_p256 = { workspace = true }
 generated = { path = "../../generated" }
+health_check = { path = "../../health_check" }
+host_primitives = { path = "../../host_primitives" }
+metrics = { path = "../../metrics" }
 visualsign = {workspace = true}
 visualsign-ethereum = { path = "../../chain_parsers/visualsign-ethereum"}
 visualsign-solana = { path = "../../chain_parsers/visualsign-solana"}

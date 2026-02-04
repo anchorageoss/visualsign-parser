@@ -5,43 +5,33 @@ use generated::{
     google::rpc::{Code, Status},
     health::AppHealthResponse,
     parser::{QosParserRequest, QosParserResponse, qos_parser_request, qos_parser_response},
-    prost::Message,
 };
-use qos_core::{handles::EphemeralKeyHandle, server::RequestProcessor};
+use qos_core::handles::EphemeralKeyHandle;
 use tokio::sync::RwLock;
 
 /// Struct holding a request processor for QOS
+#[derive(Debug)]
 pub struct Processor {
     handle: EphemeralKeyHandle,
 }
 
+/// `Processor` shared between tasks
+pub type SharedProcessor = Arc<RwLock<Processor>>;
+
 impl Processor {
     /// Creates a new request processor. The only argument needed is an ephemeral key handle.
     #[must_use]
-    pub fn new(handle: EphemeralKeyHandle) -> Arc<RwLock<Self>> {
+    pub fn new(handle: EphemeralKeyHandle) -> SharedProcessor {
         Arc::new(RwLock::new(Self { handle }))
     }
 }
 
-impl RequestProcessor for Processor {
-    async fn process(&self, request: &[u8]) -> Vec<u8> {
+impl Processor {
+    /// Process a `QosParserRequest` and respond with `QosParserResponse`
+    #[must_use]
+    pub fn process(&self, request: &QosParserRequest) -> QosParserResponse {
         // We're doing a potentially CPU intensive blocking task, we shouldn't just lock the runtime
         tokio::task::block_in_place(move || {
-            let request = match QosParserRequest::decode(request)
-                // TODO: clean up this error handling, we can implement From/Into and probably clean this up meaningfully
-                .map_err(|e| {
-                    qos_parser_response::Output::Status(Status {
-                        code: Code::Internal as i32,
-                        message: e.to_string(),
-                        details: vec![],
-                    })
-                })
-                .map_err(|o| QosParserResponse { output: Some(o) })
-            {
-                Ok(request) => request,
-                Err(err_resp) => return err_resp.encode_to_vec(),
-            };
-
             let ephemeral_key = match self
                 .handle
                 .get_ephemeral_key()
@@ -56,11 +46,12 @@ impl RequestProcessor for Processor {
                     output: Some(output),
                 }) {
                 Ok(input) => input,
-                Err(err_resp) => return err_resp.encode_to_vec(),
+                Err(err_resp) => return err_resp,
             };
 
             let input = match request
                 .input
+                .as_ref()
                 .ok_or({
                     qos_parser_response::Output::Status(Status {
                         code: Code::InvalidArgument as i32,
@@ -71,7 +62,7 @@ impl RequestProcessor for Processor {
                 .map_err(|o| QosParserResponse { output: Some(o) })
             {
                 Ok(input) => input,
-                Err(err_resp) => return err_resp.encode_to_vec(),
+                Err(err_resp) => return err_resp,
             };
 
             let output = match input {
@@ -96,7 +87,6 @@ impl RequestProcessor for Processor {
             QosParserResponse {
                 output: Some(output),
             }
-            .encode_to_vec()
         })
     }
 }
