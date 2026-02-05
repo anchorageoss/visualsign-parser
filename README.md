@@ -33,11 +33,11 @@ See the [Quickstart](https://visualsign.dev/quickstart) for more examples and th
 Full documentation at **https://visualsign.dev**:
 
 - [Quickstart](https://visualsign.dev/quickstart) — Test your DApp's transactions
-- [Wallet Integration](https://visualsign.dev/getting-started) — Integrate the parser into your wallet
+- [Wallet Integration](https://visualsign.dev/wallet-integration/overview) — Integrate the parser into your wallet
 - [API Reference](https://visualsign.dev/api-reference) — gRPC service definition
 - [Field Types](https://visualsign.dev/field-types) — VisualSign JSON schema
-- [Contributing a Visualization](https://visualsign.dev/contributing/contributing-visualization) — Add support for your protocol
+- [Contributing a Visualization](https://visualsign.dev/contributor-guides/contributing-visualization) — Add support for your protocol
 
 ## Contributing
 
-See the [Contributing guide](https://visualsign.dev/contributing/contributing-visualization) and [About](https://visualsign.dev/about) page for governance details.
+See the [Contributing guide](https://visualsign.dev/contributing) and [About](https://visualsign.dev/about) page for governance details.
