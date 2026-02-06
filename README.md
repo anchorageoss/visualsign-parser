@@ -6,6 +6,10 @@ Rust-based transaction parser that converts raw blockchain transactions into hum
 
 VisualSign transforms opaque transaction data (hex strings, base64 blobs) into structured, human-readable JSON that clearly shows what a transaction will do. See the [full documentation](https://visualsign.dev).
 
+
+
+
+
 ## Supported Chains
 
 - Ethereum (+ L2s: Arbitrum, Optimism, Base, Polygon)
