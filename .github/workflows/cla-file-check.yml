@@ -47,7 +47,7 @@ jobs:
         id: check_comment
         run: |
           # Check if github-actions bot has already commented about CLA on this PR
-          if gh pr view ${{ github.event.pull_request.number }} --json comments --jq '.comments[] | select(.author.login == "github-actions[bot]") | .body' | grep -q "Contributor License Agreement"; then
+          if gh pr view ${{ github.event.pull_request.number }} --json comments --jq '.comments[] | select(.author.login == "github-actions") | .body' | grep -q "Contributor License Agreement"; then
             echo "CLA comment already exists, skipping"
             echo "comment_exists=true" >> $GITHUB_OUTPUT
           else
