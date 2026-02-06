@@ -14,19 +14,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Debug event
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           echo "Event type: ${{ github.event_name }}"
-          echo "Comment body: '${{ github.event.comment.body }}'"
+          echo "Comment body: '$COMMENT_BODY'"
           echo "Commenter: ${{ github.event.comment.user.login }}"
           echo "Issue number: ${{ github.event.issue.number }}"
           echo "Is PR: ${{ github.event.issue.pull_request != null }}"
 
       - name: Check for command early
         id: command_check
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          COMMENT_BODY="${{ github.event.comment.body }}"
-          # Trim whitespace and normalize the command
-          COMMENT_BODY=$(echo "$COMMENT_BODY" | xargs)
+          # Trim leading/trailing whitespace without xargs (which chokes on quotes)
+          COMMENT_BODY="$(echo "$COMMENT_BODY" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           echo "Trimmed comment: '$COMMENT_BODY'"
 
           if [[ "$COMMENT_BODY" == "/approve-cla" ]]; then
