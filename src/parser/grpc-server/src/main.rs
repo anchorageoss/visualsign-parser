@@ -40,7 +40,7 @@ impl ParserService for GrpcService {
         request: Request<ParseRequest>,
     ) -> Result<Response<ParseResponse>, Status> {
         // Direct function call - no sockets needed
-        parse(request.into_inner(), &self.ephemeral_key)
+        parse(&request.into_inner(), &self.ephemeral_key)
             .map(Response::new)
             .map_err(|e| Status::new(tonic::Code::from_i32(e.code as i32), e.message))
     }

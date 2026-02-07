@@ -6,7 +6,6 @@
 #![warn(missing_docs, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc, clippy::module_name_repetitions)]
 
-use borsh::BorshDeserialize;
 use generated::grpc::health::v1::{
     HealthCheckRequest as K8HealthCheckRequest, HealthCheckResponse as K8HealthCheckResponse,
     health_check_response::ServingStatus as K8ServingStatus,
@@ -16,14 +15,9 @@ use generated::health::health_check_service_server::{
     HealthCheckService, HealthCheckServiceServer,
 };
 use generated::health::{
-    AppHealthRequest, AppHealthResponse, EnclaveHealthRequest, EnclaveHealthResponse,
-    HostHealthRequest, HostHealthResponse,
+    AppHealthRequest, AppHealthResponse, HostHealthRequest, HostHealthResponse,
 };
 use generated::tonic;
-use qos_core::{
-    client::SocketClient,
-    protocol::{ProtocolPhase, msg::ProtocolMsg},
-};
 use std::{pin::Pin, time::Duration};
 use tokio::sync::mpsc;
 use tokio_stream::Stream;
@@ -38,7 +32,6 @@ pub const READINESS: &str = "readiness";
 /// Turnkeys health check service for performing primitive health checks via an
 /// app host.
 pub struct TkHealthCheck<T> {
-    client: SocketClient,
     app_check: T,
 }
 
@@ -49,11 +42,8 @@ where
     /// Create a new instance of [`Self`], with the given enclave
     /// (`enclave_addr`).
     #[must_use]
-    pub fn build_service(
-        client: SocketClient,
-        app_check: T,
-    ) -> HealthCheckServiceServer<TkHealthCheck<T>> {
-        let inner = Self { client, app_check };
+    pub fn build_service(app_check: T) -> HealthCheckServiceServer<TkHealthCheck<T>> {
+        let inner = Self { app_check };
         HealthCheckServiceServer::new(inner)
     }
 }
@@ -78,43 +68,6 @@ where
     ) -> Result<tonic::Response<HostHealthResponse>, tonic::Status> {
         let response = HostHealthResponse { code: 200 };
         Ok(tonic::Response::new(response))
-    }
-
-    async fn enclave_health(
-        &self,
-        _request: tonic::Request<EnclaveHealthRequest>,
-    ) -> Result<tonic::Response<EnclaveHealthResponse>, tonic::Status> {
-        let encoded_request = borsh::to_vec(&ProtocolMsg::StatusRequest)
-            .expect("ProtocolMsg can always serialize. qed.");
-
-        let encoded_response = self
-            .client
-            .call(&encoded_request)
-            .await
-            .map_err(|e| tonic::Status::internal(format!("{e:?}")))?;
-
-        let decoded_response = ProtocolMsg::try_from_slice(&encoded_response)
-            .map_err(|e| tonic::Status::internal(format!("{e:?}")))?;
-
-        match decoded_response {
-            ProtocolMsg::StatusResponse(phase) => match phase {
-                ProtocolPhase::UnrecoverableError
-                | ProtocolPhase::WaitingForBootInstruction
-                | ProtocolPhase::WaitingForQuorumShards
-                | ProtocolPhase::WaitingForForwardedKey
-                | ProtocolPhase::GenesisBooted => Err(tonic::Status::unavailable(format!(
-                    "Enclave status {phase:?}"
-                ))),
-                ProtocolPhase::QuorumKeyProvisioned => {
-                    Ok(tonic::Response::new(EnclaveHealthResponse {
-                        phase: format!("{phase:?}"),
-                    }))
-                }
-            },
-            other => Err(tonic::Status::internal(format!(
-                "Unexpected enclave response: {other:?}",
-            ))),
-        }
     }
 
     async fn app_health(
