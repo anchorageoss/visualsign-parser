@@ -14,11 +14,6 @@ description: Test your DApp's transactions with the VisualSign parser CLI
 # Clone the repository
 git clone https://github.com/anchorageoss/visualsign-parser.git
 cd visualsign-parser/src
-
-# Build the CLI
-cargo build --release
-
-# The binary is at target/release/parser_cli
 ```
 
 ## Parse your first transaction
@@ -26,7 +21,7 @@ cargo build --release
 Run the parser with a transaction from your DApp:
 
 ```bash
-./target/release/parser_cli --chain ethereum -t <your_transaction_hex> --output human
+cargo run --bin parser_cli -- --chain ethereum -t <your_transaction_hex> --output human
 ```
 
 Replace `ethereum` with your chain (`solana`, `sui`, or `tron`) and `<your_transaction_hex>` with your actual transaction data.
@@ -34,7 +29,7 @@ Replace `ethereum` with your chain (`solana`, `sui`, or `tron`) and `<your_trans
 ### Example: Ethereum Transfer
 
 ```bash
-./target/release/parser_cli --chain ethereum -t 0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a0 --output human
+cargo run --bin parser_cli -- --chain ethereum -t 0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a0 --output human
 ```
 
 Output:
@@ -52,7 +47,7 @@ Output:
 ### Example: Solana Transaction
 
 ```bash
-./target/release/parser_cli --chain solana -t AgAAAAAAAA... --output human
+cargo run --bin parser_cli -- --chain solana -t AgAAAAAAAA... --output human
 ```
 
 ## Test hardware wallet view
@@ -60,7 +55,7 @@ Output:
 Users on hardware wallets see a condensed view. Test what they'll see:
 
 ```bash
-./target/release/parser_cli --chain ethereum -t <tx_hex> --output human --condensed-only
+cargo run --bin parser_cli -- --chain ethereum -t <tx_hex> --output human --condensed-only
 ```
 
 This shows only the essential information that fits on small screens.
@@ -70,17 +65,17 @@ This shows only the essential information that fits on small screens.
 For programmatic analysis or integration testing:
 
 ```bash
-./target/release/parser_cli --chain ethereum -t <tx_hex> --output json
+cargo run --bin parser_cli -- --chain ethereum -t <tx_hex> --output json
 ```
 
 Use `jq` to extract specific fields:
 
 ```bash
 # Get all field labels
-./target/release/parser_cli --chain ethereum -t <tx_hex> --output json | jq -r '.Fields[].Label'
+cargo run --bin parser_cli -- --chain ethereum -t <tx_hex> --output json | jq -r '.Fields[].Label'
 
 # Get the transaction title
-./target/release/parser_cli --chain ethereum -t <tx_hex> --output json | jq -r '.Title'
+cargo run --bin parser_cli -- --chain ethereum -t <tx_hex> --output json | jq -r '.Title'
 ```
 
 ## What to check
