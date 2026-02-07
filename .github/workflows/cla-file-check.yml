@@ -42,8 +42,25 @@ jobs:
             echo "is_signed=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Comment on PR if user is not signed
+      - name: Check if CLA comment already exists
         if: steps.check_user.outputs.is_signed == 'false'
+        id: check_comment
+        run: |
+          # Check if github-actions bot has already commented about CLA on this PR
+          COMMENTS=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq '.comments[] | select(.author.login == "github-actions") | .body')
+
+          if echo "$COMMENTS" | grep -Fq "${{ env.CLA_URL }}"; then
+            echo "CLA comment already exists, skipping"
+            echo "comment_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "No CLA comment found, will post one"
+            echo "comment_exists=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Comment on PR if user is not signed
+        if: steps.check_user.outputs.is_signed == 'false' && steps.check_comment.outputs.comment_exists == 'false'
         run: |
           gh pr comment ${{ github.event.pull_request.number }} --body "Hi @${{ github.event.pull_request.user.login }}, thank you for your contribution!
 
