@@ -1,7 +1,3 @@
-out/parser_host/index.json: \
-	$(shell git ls-files images/parser_host src)
-	$(call build,parser_host)
-
 out/parser_app/index.json: \
 	$(shell git ls-files images/parser_app src)
 	$(call build,parser_app)
@@ -9,7 +5,6 @@ out/parser_app/index.json: \
 .PHONY: non-oci-docker-images
 non-oci-docker-images:
 	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_app -f images/parser_app/Containerfile .
-	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_host -f images/parser_host/Containerfile .
 
 define build_context
 $$( \

@@ -4515,7 +4515,6 @@ dependencies = [
  "host_primitives",
  "k256 0.12.0",
  "parser_app",
- "parser_host",
  "prost 0.11.9",
  "qos_core",
  "qos_crypto",
@@ -6153,6 +6152,9 @@ dependencies = [
  "borsh 1.6.0",
  "bs58 0.5.1",
  "generated",
+ "health_check",
+ "host_primitives",
+ "metrics",
  "qos_core",
  "qos_crypto",
  "qos_hex",
@@ -6203,19 +6205,6 @@ dependencies = [
  "qos_p256",
  "tokio",
  "tokio-stream",
-]
-
-[[package]]
-name = "parser_host"
-version = "0.1.0"
-dependencies = [
- "futures",
- "generated",
- "health_check",
- "host_primitives",
- "metrics",
- "qos_core",
- "tokio",
 ]
 
 [[package]]
@@ -6917,7 +6906,7 @@ dependencies = [
 [[package]]
 name = "qos_core"
 version = "0.1.0"
-source = "git+https://github.com/tkhq/qos.git?rev=90dec56fc06926b7fb7439175c58789492ec82c6#90dec56fc06926b7fb7439175c58789492ec82c6"
+source = "git+https://github.com/tkhq/qos.git?rev=365ba7ed529bc5af617bcfb27502c3efce8b37ae#365ba7ed529bc5af617bcfb27502c3efce8b37ae"
 dependencies = [
  "aws-nitro-enclaves-nsm-api",
  "borsh 1.6.0",
@@ -6930,6 +6919,7 @@ dependencies = [
  "qos_p256",
  "serde",
  "serde_bytes",
+ "serde_json",
  "tokio",
  "tokio-vsock",
 ]
@@ -6937,7 +6927,7 @@ dependencies = [
 [[package]]
 name = "qos_crypto"
 version = "0.1.0"
-source = "git+https://github.com/tkhq/qos.git?rev=90dec56fc06926b7fb7439175c58789492ec82c6#90dec56fc06926b7fb7439175c58789492ec82c6"
+source = "git+https://github.com/tkhq/qos.git?rev=365ba7ed529bc5af617bcfb27502c3efce8b37ae#365ba7ed529bc5af617bcfb27502c3efce8b37ae"
 dependencies = [
  "rand 0.9.2",
  "sha2 0.10.9",
@@ -6948,7 +6938,7 @@ dependencies = [
 [[package]]
 name = "qos_hex"
 version = "0.1.0"
-source = "git+https://github.com/tkhq/qos.git?rev=90dec56fc06926b7fb7439175c58789492ec82c6#90dec56fc06926b7fb7439175c58789492ec82c6"
+source = "git+https://github.com/tkhq/qos.git?rev=365ba7ed529bc5af617bcfb27502c3efce8b37ae#365ba7ed529bc5af617bcfb27502c3efce8b37ae"
 dependencies = [
  "serde",
 ]
@@ -6956,7 +6946,7 @@ dependencies = [
 [[package]]
 name = "qos_nsm"
 version = "0.1.0"
-source = "git+https://github.com/tkhq/qos.git?rev=90dec56fc06926b7fb7439175c58789492ec82c6#90dec56fc06926b7fb7439175c58789492ec82c6"
+source = "git+https://github.com/tkhq/qos.git?rev=365ba7ed529bc5af617bcfb27502c3efce8b37ae#365ba7ed529bc5af617bcfb27502c3efce8b37ae"
 dependencies = [
  "aws-nitro-enclaves-cose",
  "aws-nitro-enclaves-nsm-api",
@@ -6972,7 +6962,7 @@ dependencies = [
 [[package]]
 name = "qos_p256"
 version = "0.1.0"
-source = "git+https://github.com/tkhq/qos.git?rev=90dec56fc06926b7fb7439175c58789492ec82c6#90dec56fc06926b7fb7439175c58789492ec82c6"
+source = "git+https://github.com/tkhq/qos.git?rev=365ba7ed529bc5af617bcfb27502c3efce8b37ae#365ba7ed529bc5af617bcfb27502c3efce8b37ae"
 dependencies = [
  "aes-gcm",
  "borsh 1.6.0",
@@ -6987,7 +6977,7 @@ dependencies = [
 [[package]]
 name = "qos_test_primitives"
 version = "0.1.0"
-source = "git+https://github.com/tkhq/qos.git?rev=90dec56fc06926b7fb7439175c58789492ec82c6#90dec56fc06926b7fb7439175c58789492ec82c6"
+source = "git+https://github.com/tkhq/qos.git?rev=365ba7ed529bc5af617bcfb27502c3efce8b37ae#365ba7ed529bc5af617bcfb27502c3efce8b37ae"
 dependencies = [
  "nix 0.29.0",
  "rand 0.9.2",
