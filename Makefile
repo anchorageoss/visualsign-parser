@@ -6,10 +6,32 @@ out/parser_app/index.json: \
 	$(shell git ls-files images/parser_app src)
 	$(call build,parser_app)
 
+out/parser_unified/index.json: \
+	$(shell git ls-files images/parser_unified src scripts)
+	$(call build,parser_unified)
+
+.PHONY: vendor-gateway
+vendor-gateway:
+	cd gateway && GONOPROXY='*' GOPRIVATE='' go generate ./... && go mod tidy && go mod vendor
+
 .PHONY: non-oci-docker-images
-non-oci-docker-images:
+non-oci-docker-images: non-oci-parser-app non-oci-parser-host non-oci-parser-gateway non-oci-parser-unified
+
+.PHONY: non-oci-parser-app
+non-oci-parser-app:
 	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_app -f images/parser_app/Containerfile .
+
+.PHONY: non-oci-parser-host
+non-oci-parser-host:
 	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_host -f images/parser_host/Containerfile .
+
+.PHONY: non-oci-parser-gateway
+non-oci-parser-gateway:
+	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_gateway -f images/parser_gateway/Containerfile .
+
+.PHONY: non-oci-parser-unified
+non-oci-parser-unified: non-oci-parser-app non-oci-parser-host non-oci-parser-gateway
+	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_unified -f images/parser_unified/Containerfile .
 
 define build_context
 $$( \
