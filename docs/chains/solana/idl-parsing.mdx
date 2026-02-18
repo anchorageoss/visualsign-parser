@@ -1,0 +1,182 @@
+---
+title: Instruction decoding
+description: Decode Solana program instructions using Anchor IDLs or manual byte parsing
+---
+
+There are two approaches for decoding Solana instruction data, depending on whether the target program has an Anchor IDL:
+
+1. **IDL-based parsing** — automatic deserialization using an Anchor IDL JSON. This is the preferred path when an IDL is available.
+2. **Manual byte decoding** — reading fields at known byte offsets. Use this for programs with custom binary serialization and no Anchor IDL.
+
+## IDL-based parsing
+
+### How it works
+
+The [`solana-parser`](https://github.com/prasincs/solana-parser) crate reads an Anchor IDL JSON, matches the 8-byte discriminator at the start of the instruction data, and deserializes the Borsh-encoded arguments into a JSON map. No manual byte offsets needed.
+
+The result is a `SolanaParsedInstructionData` struct containing:
+- `instruction_name` — the matched instruction name from the IDL
+- `program_call_args` — a map of argument names to deserialized values
+
+### Built-in IDLs
+
+`solana-parser` ships with embedded program IDLs that are compiled into the binary and used automatically. See the [`ProgramType` enum](https://github.com/prasincs/solana-parser/blob/8248d99e42ce8a56ad440ed9b2201607feb1a150/src/solana/structs.rs#L7-L20) for the current list.
+
+You only need to supply an IDL if your program isn't already covered.
+
+### IDL structure
+
+A minimal Anchor IDL JSON looks like this:
+
+```json
+{
+  "address": "YourProgramAddress111111111111111111111111111",
+  "metadata": { "name": "my_swap", "version": "0.1.0" },
+  "instructions": [
+    {
+      "name": "swap",
+      "discriminator": [248, 198, 158, 145, 225, 117, 135, 200],
+      "accounts": [
+        { "name": "user", "signer": true },
+        { "name": "source_token_account", "writable": true },
+        { "name": "destination_token_account", "writable": true },
+        { "name": "pool", "writable": true }
+      ],
+      "args": [
+        { "name": "amount_in", "type": "u64" },
+        { "name": "min_amount_out", "type": "u64" },
+        { "name": "slippage_bps", "type": "u16" }
+      ]
+    }
+  ],
+  "types": []
+}
+```
+
+Key fields:
+- **`discriminator`** — the first 8 bytes of the instruction data, used to identify which instruction is being called
+- **`accounts`** — ordered list of accounts matching the transaction's account indices
+- **`args`** — Borsh-deserialized from the bytes after the discriminator
+
+### Loading a built-in IDL
+
+```rust
+use solana_parser::{ProgramType, decode_idl_data, Idl};
+
+fn get_idl(program_id: &str) -> Option<Idl> {
+    ProgramType::from_program_id(program_id)
+        .and_then(|pt| decode_idl_data(pt.idl_json()).ok())
+}
+```
+
+`ProgramType::from_program_id()` returns `Some` if the program has a built-in IDL, then `decode_idl_data()` deserializes the JSON into an `Idl` struct.
+
+### Embedding your own IDL
+
+Use `include_str!` to compile the IDL JSON into the binary:
+
+```rust
+use solana_parser::{decode_idl_data, Idl};
+
+const MY_PROGRAM_IDL: &str = include_str!("idls/my_program.json");
+
+fn get_my_idl() -> Option<Idl> {
+    decode_idl_data(MY_PROGRAM_IDL).ok()
+}
+```
+
+For runtime-supplied IDLs (e.g., loaded from configuration), use `CustomIdlConfig::from_json()`:
+
+```rust
+use solana_parser::CustomIdlConfig;
+
+let config = CustomIdlConfig::from_json(idl_json_string, true);
+```
+
+The `IdlRegistry` in `visualsign-solana` manages both built-in and custom IDLs, checking custom configs first and falling back to built-in `ProgramType` lookups.
+
+### Parsing an instruction
+
+```rust
+use solana_parser::{parse_instruction_with_idl, decode_idl_data, ProgramType};
+
+let program_id = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+let idl = ProgramType::from_program_id(program_id)
+    .and_then(|pt| decode_idl_data(pt.idl_json()).ok())
+    .expect("IDL not found");
+
+let parsed = parse_instruction_with_idl(data, program_id, &idl)
+    .expect("Failed to parse instruction");
+
+match parsed.instruction_name.as_str() {
+    "shared_accounts_route" => {
+        let slippage_bps = parsed.program_call_args
+            .get("slippage_bps")
+            .and_then(|v| v.as_u64());
+        // ... build visualization fields
+    }
+    _ => {
+        // Unknown instruction — still has instruction_name from the IDL
+    }
+}
+```
+
+`parse_instruction_with_idl` returns a `SolanaParsedInstructionData` with the instruction name and all arguments deserialized from the Borsh-encoded data.
+
+**Reference implementation:** [Jupiter swap preset](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-solana/src/presets/jupiter_swap/mod.rs)
+
+## Manual byte decoding
+
+### When to use
+
+Use manual byte decoding for programs that don't have an Anchor IDL — programs with custom binary serialization where you need full control over how bytes are read.
+
+### Pattern
+
+Read a discriminator (the size varies per program — Anchor uses 8 bytes, but others may use 1, 2, or 4 bytes), match it to an instruction type, then parse fields at known byte offsets:
+
+```rust
+#[repr(u16)]
+enum MyInstructionKind {
+    Create = 0,
+    Transfer = 1,
+}
+
+fn parse_instruction(data: &[u8]) -> Result<MyInstruction, MyError> {
+    if data.len() < 2 {
+        return Err(MyError::DataTooShort("missing discriminator"));
+    }
+
+    let discriminator = u16::from_le_bytes([data[0], data[1]]);
+    match discriminator {
+        0 => parse_create(data),
+        1 => parse_transfer(data),
+        _ => Ok(MyInstruction::Unknown {
+            discriminator,
+            raw_data: data.to_vec(),
+        }),
+    }
+}
+
+fn parse_transfer(data: &[u8]) -> Result<MyInstruction, MyError> {
+    if data.len() < 42 {
+        return Err(MyError::DataTooShort("transfer data"));
+    }
+
+    let amount = u64::from_le_bytes(data[2..10].try_into().unwrap());
+    let destination = &data[10..42]; // 32-byte pubkey
+    // ...
+}
+```
+
+Key considerations:
+- Always validate data length before reading at an offset
+- Use little-endian byte order (`from_le_bytes`) — this is standard for Solana
+- Define a structured error type with context about which field failed to parse
+- Include an `Unknown` variant to handle unrecognized discriminators gracefully
+
+**Reference implementation:** [Swig wallet preset](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-solana/src/presets/swig_wallet/mod.rs)
+
+## Extending solana-parser
+
+For a more generic, reusable solution, you can contribute a built-in IDL to the [`solana-parser`](https://github.com/prasincs/solana-parser) crate. This makes the IDL available to all consumers of the crate without any extra configuration. This is also the planned approach for supporting Codama-generated IDLs.
