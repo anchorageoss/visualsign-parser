@@ -17,6 +17,9 @@ use visualsign::{
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
 };
 
+/// Jupiter v6 program ID
+pub(crate) const JUPITER_PROGRAM_ID: &str = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+
 #[derive(Debug, Clone)]
 pub enum JupiterSwapInstruction {
     Route {
@@ -125,9 +128,8 @@ impl InstructionVisualizer for JupiterSwapVisualizer {
 
 /// Get Jupiter v6 IDL from built-in IDLs in solana-parser
 fn get_jupiter_idl() -> Option<Idl> {
-    let program_id = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
-
-    ProgramType::from_program_id(program_id).and_then(|pt| decode_idl_data(pt.idl_json()).ok())
+    ProgramType::from_program_id(JUPITER_PROGRAM_ID)
+        .and_then(|pt| decode_idl_data(pt.idl_json()).ok())
 }
 
 /// Helper to extract u64 argument from parsed IDL args
@@ -145,11 +147,10 @@ fn parse_jupiter_instruction_with_idl(
     data: &[u8],
     accounts: &[String],
 ) -> Result<JupiterSwapInstruction, Box<dyn std::error::Error>> {
-    let program_id = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
     let idl = get_jupiter_idl().ok_or("Jupiter IDL not available")?;
 
     // Parse using solana_parser
-    let parsed = parse_instruction_with_idl(data, program_id, &idl)?;
+    let parsed = parse_instruction_with_idl(data, JUPITER_PROGRAM_ID, &idl)?;
 
     // Extract instruction type and arguments
     match parsed.instruction_name.as_str() {
@@ -157,9 +158,12 @@ fn parse_jupiter_instruction_with_idl(
             let in_amount = extract_u64_arg(&parsed.program_call_args, "in_amount")?;
             let quoted_out_amount =
                 extract_u64_arg(&parsed.program_call_args, "quoted_out_amount")?;
-            let slippage_bps = extract_u64_arg(&parsed.program_call_args, "slippage_bps")? as u16;
-            let platform_fee_bps =
-                extract_u64_arg(&parsed.program_call_args, "platform_fee_bps")? as u8;
+            let slippage_bps =
+                u16::try_from(extract_u64_arg(&parsed.program_call_args, "slippage_bps")?)?;
+            let platform_fee_bps = u8::try_from(extract_u64_arg(
+                &parsed.program_call_args,
+                "platform_fee_bps",
+            )?)?;
 
             // Get token info (preserve current logic)
             let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
@@ -178,9 +182,12 @@ fn parse_jupiter_instruction_with_idl(
             // Note: exact_out_route uses out_amount and quoted_in_amount (reversed)
             let out_amount = extract_u64_arg(&parsed.program_call_args, "out_amount")?;
             let quoted_in_amount = extract_u64_arg(&parsed.program_call_args, "quoted_in_amount")?;
-            let slippage_bps = extract_u64_arg(&parsed.program_call_args, "slippage_bps")? as u16;
-            let platform_fee_bps =
-                extract_u64_arg(&parsed.program_call_args, "platform_fee_bps")? as u8;
+            let slippage_bps =
+                u16::try_from(extract_u64_arg(&parsed.program_call_args, "slippage_bps")?)?;
+            let platform_fee_bps = u8::try_from(extract_u64_arg(
+                &parsed.program_call_args,
+                "platform_fee_bps",
+            )?)?;
 
             let in_token = accounts
                 .first()
@@ -198,9 +205,12 @@ fn parse_jupiter_instruction_with_idl(
             let in_amount = extract_u64_arg(&parsed.program_call_args, "in_amount")?;
             let quoted_out_amount =
                 extract_u64_arg(&parsed.program_call_args, "quoted_out_amount")?;
-            let slippage_bps = extract_u64_arg(&parsed.program_call_args, "slippage_bps")? as u16;
-            let platform_fee_bps =
-                extract_u64_arg(&parsed.program_call_args, "platform_fee_bps")? as u8;
+            let slippage_bps =
+                u16::try_from(extract_u64_arg(&parsed.program_call_args, "slippage_bps")?)?;
+            let platform_fee_bps = u8::try_from(extract_u64_arg(
+                &parsed.program_call_args,
+                "platform_fee_bps",
+            )?)?;
 
             let in_token = accounts.first().map(|addr| get_token_info(addr, in_amount));
             let out_token = accounts
@@ -228,8 +238,15 @@ fn parse_jupiter_swap_instruction(
         return Err("Invalid instruction data length");
     }
 
-    parse_jupiter_instruction_with_idl(data, accounts)
-        .map_err(|_| "Failed to parse Jupiter instruction with IDL")
+    match parse_jupiter_instruction_with_idl(data, accounts) {
+        Ok(instruction) => Ok(instruction),
+        Err(e) => {
+            tracing::warn!("Failed to parse Jupiter instruction with IDL: {e}");
+            Ok(JupiterSwapInstruction::Unknown {
+                instruction_name: None,
+            })
+        }
+    }
 }
 
 fn format_jupiter_swap_instruction(instruction: &JupiterSwapInstruction) -> String {
@@ -571,7 +588,7 @@ mod tests {
 
     #[test]
     fn test_jupiter_uncovered_instruction_fallthrough() {
-        // Unknown discriminator should now return Err (not Ok(Unknown))
+        // Unknown discriminator should gracefully degrade to Unknown variant
         let garbage_data = [
             0x0a, 0x1b, 0x2c, 0x3d, 0x4e, 0x5f, 0x6a, 0x7b, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
             0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
@@ -579,8 +596,16 @@ mod tests {
 
         let accounts = vec!["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4".to_string()];
 
-        let result = parse_jupiter_swap_instruction(&garbage_data, &accounts);
-        assert!(result.is_err(), "Unknown discriminator should return Err");
+        let result = parse_jupiter_swap_instruction(&garbage_data, &accounts).unwrap();
+        assert!(
+            matches!(
+                result,
+                JupiterSwapInstruction::Unknown {
+                    instruction_name: None
+                }
+            ),
+            "Unknown discriminator should gracefully degrade to Unknown variant"
+        );
 
         // Test expanded fields for Unknown variant by constructing directly
         let instruction = JupiterSwapInstruction::Unknown {

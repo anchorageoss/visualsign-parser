@@ -1,3 +1,4 @@
+use super::JUPITER_PROGRAM_ID;
 use crate::core::{SolanaIntegrationConfig, SolanaIntegrationConfigData};
 use std::collections::HashMap;
 
@@ -14,10 +15,7 @@ impl SolanaIntegrationConfig for JupiterSwapConfig {
             let mut programs = HashMap::new();
             let mut jupiter_instructions = HashMap::new();
             jupiter_instructions.insert("*", vec!["*"]);
-            programs.insert(
-                "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
-                jupiter_instructions,
-            );
+            programs.insert(JUPITER_PROGRAM_ID, jupiter_instructions);
             SolanaIntegrationConfigData { programs }
         })
     }
