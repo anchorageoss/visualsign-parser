@@ -426,6 +426,12 @@ mod tests {
             .expect("valid hex")
     }
 
+    /// Route fixture body bytes (after discriminator) — reusable across instruction types
+    fn fixture_route_plan_body() -> Vec<u8> {
+        let full = fixture_instruction_data();
+        full[8..].to_vec()
+    }
+
     /// Accounts from sample_route.json fixture (need at least indices 0 and 5)
     fn fixture_accounts() -> Vec<String> {
         vec![
@@ -701,5 +707,141 @@ mod tests {
             formatted_no_name, "Jupiter: Unknown Instruction",
             "Should fallback to generic unknown when no name available"
         );
+    }
+
+    #[test]
+    fn test_jupiter_exact_out_route_parsing() {
+        // ExactOutRoute: same body layout as Route, different discriminator
+        // Amount fields are reversed: out_amount / quoted_in_amount instead of in_amount / quoted_out_amount
+        let discriminator = hex::decode("d033ef977b2bed5c").expect("valid hex");
+        let body = fixture_route_plan_body();
+        let data: Vec<u8> = [discriminator, body].concat();
+        let accounts = fixture_accounts();
+
+        let parsed = parse_jupiter_swap_instruction(&data, &accounts).unwrap();
+
+        match &parsed {
+            JupiterSwapInstruction::ExactOutRoute {
+                in_token,
+                out_token,
+                slippage_bps,
+                platform_fee_bps,
+            } => {
+                assert_eq!(*slippage_bps, 50, "Slippage should be 50 bps");
+                assert_eq!(*platform_fee_bps, 0, "Platform fee should be 0");
+                // ExactOutRoute reverses amounts: in_token gets quoted_in_amount, out_token gets out_amount
+                assert_eq!(
+                    in_token.as_ref().unwrap().amount,
+                    1550653,
+                    "in_token should use quoted_in_amount"
+                );
+                assert_eq!(
+                    out_token.as_ref().unwrap().amount,
+                    2000000,
+                    "out_token should use out_amount"
+                );
+            }
+            _ => panic!("Expected ExactOutRoute instruction, got {parsed:?}"),
+        }
+
+        let formatted = format_jupiter_swap_instruction(&parsed);
+        assert!(
+            formatted.contains("Jupiter Exact Out Route"),
+            "Should contain 'Jupiter Exact Out Route', got: {formatted}"
+        );
+        assert!(formatted.contains("50bps"), "Should contain slippage");
+
+        let fields = create_jupiter_swap_expanded_fields(
+            &parsed,
+            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+            &data,
+        )
+        .unwrap();
+
+        let has_program_id = fields.iter().any(|f| {
+            if let SignablePayloadField::TextV2 { common, .. } = &f.signable_payload_field {
+                common.label == "Program ID"
+            } else {
+                false
+            }
+        });
+        assert!(has_program_id, "Should have Program ID field");
+
+        let has_slippage = fields.iter().any(|f| {
+            if let SignablePayloadField::Number { common, .. } = &f.signable_payload_field {
+                common.label == "Slippage"
+            } else {
+                false
+            }
+        });
+        assert!(has_slippage, "Should have Slippage field");
+    }
+
+    #[test]
+    fn test_jupiter_shared_accounts_route_parsing() {
+        // SharedAccountsRoute: extra leading `id: u8` byte after discriminator, then same body as Route
+        let discriminator = hex::decode("c1209b3341d69c81").expect("valid hex");
+        let id_byte = vec![0x00u8]; // id = 0
+        let body = fixture_route_plan_body();
+        let data: Vec<u8> = [discriminator, id_byte, body].concat();
+        let accounts = fixture_accounts();
+
+        let parsed = parse_jupiter_swap_instruction(&data, &accounts).unwrap();
+
+        match &parsed {
+            JupiterSwapInstruction::SharedAccountsRoute {
+                in_token,
+                out_token,
+                slippage_bps,
+                platform_fee_bps,
+            } => {
+                assert_eq!(*slippage_bps, 50, "Slippage should be 50 bps");
+                assert_eq!(*platform_fee_bps, 0, "Platform fee should be 0");
+                // Same field order as Route: in_amount then quoted_out_amount
+                assert_eq!(
+                    in_token.as_ref().unwrap().amount,
+                    2000000,
+                    "in_token should use in_amount"
+                );
+                assert_eq!(
+                    out_token.as_ref().unwrap().amount,
+                    1550653,
+                    "out_token should use quoted_out_amount"
+                );
+            }
+            _ => panic!("Expected SharedAccountsRoute instruction, got {parsed:?}"),
+        }
+
+        let formatted = format_jupiter_swap_instruction(&parsed);
+        assert!(
+            formatted.contains("Jupiter Shared Accounts Route"),
+            "Should contain 'Jupiter Shared Accounts Route', got: {formatted}"
+        );
+        assert!(formatted.contains("50bps"), "Should contain slippage");
+
+        let fields = create_jupiter_swap_expanded_fields(
+            &parsed,
+            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+            &data,
+        )
+        .unwrap();
+
+        let has_program_id = fields.iter().any(|f| {
+            if let SignablePayloadField::TextV2 { common, .. } = &f.signable_payload_field {
+                common.label == "Program ID"
+            } else {
+                false
+            }
+        });
+        assert!(has_program_id, "Should have Program ID field");
+
+        let has_slippage = fields.iter().any(|f| {
+            if let SignablePayloadField::Number { common, .. } = &f.signable_payload_field {
+                common.label == "Slippage"
+            } else {
+                false
+            }
+        });
+        assert!(has_slippage, "Should have Slippage field");
     }
 }
