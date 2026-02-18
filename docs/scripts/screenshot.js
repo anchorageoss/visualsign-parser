@@ -12,7 +12,22 @@ const puppeteer = require('/tmp/node_modules/puppeteer');
 const path = require('path');
 const fs = require('fs');
 
-const CHROME_PATH = '/home/user/.cache/puppeteer/chrome/linux-144.0.7559.96/chrome-linux64/chrome';
+// Find the latest installed Chrome in Puppeteer's cache
+function findChromePath() {
+  const cacheDir = path.join(require('os').homedir(), '.cache', 'puppeteer', 'chrome');
+  if (!fs.existsSync(cacheDir)) return null;
+  const versions = fs.readdirSync(cacheDir)
+    .filter(d => d.startsWith('linux-'))
+    .sort()
+    .reverse();
+  for (const version of versions) {
+    const chrome = path.join(cacheDir, version, 'chrome-linux64', 'chrome');
+    if (fs.existsSync(chrome)) return chrome;
+  }
+  return null;
+}
+
+const CHROME_PATH = process.env.CHROME_PATH || findChromePath();
 const BASE_URL = 'http://localhost:3000';
 const SCREENSHOTS_DIR = path.join(__dirname, '..', 'screenshots');
 
@@ -50,6 +65,11 @@ async function screenshot(pagePath, outputFile, scrollOffset = 0) {
 }
 
 const [,, pagePath, outputFileArg, scrollOffset] = process.argv;
+
+if (!CHROME_PATH) {
+  console.error('Chrome not found. Install it with: npx puppeteer browsers install chrome');
+  process.exit(1);
+}
 
 if (!pagePath) {
   console.error('Usage: node scripts/screenshot.js <page-path> [output-file] [scroll-offset]');
