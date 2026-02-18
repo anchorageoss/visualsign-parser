@@ -83,7 +83,13 @@
             "group": "Supported Chains",
             "pages": [
               "chains/ethereum",
-              "chains/solana",
+              {
+                "group": "Solana",
+                "pages": [
+                  "chains/solana",
+                  "chains/solana/idl-parsing"
+                ]
+              },
               "chains/sui",
               "chains/tron"
             ]
