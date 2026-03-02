@@ -1,12 +1,18 @@
 //! CLI for the parser app
-use qos_core::{
-    EPHEMERAL_KEY_FILE, SEC_APP_SOCK,
-    cli::{EPHEMERAL_FILE_OPT, USOCK},
-    handles::EphemeralKeyHandle,
-    io::{SocketAddress, StreamPool},
-    parser::{GetParserForOptions, OptionsParser, Parser, Token},
-    server::SocketServer,
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    str::FromStr,
 };
+
+use qos_core::{
+    EPHEMERAL_KEY_FILE,
+    cli::EPHEMERAL_FILE_OPT,
+    handles::EphemeralKeyHandle,
+    parser::{GetParserForOptions, OptionsParser, Parser, Token},
+};
+
+const HOST_IP: &str = "host-ip";
+const HOST_PORT: &str = "host-port";
 
 /// CLI options for starting up the app server.
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -22,15 +28,28 @@ impl ParserOpts {
         Self { parsed }
     }
 
-    /// Create a new `StreamPool` using the list of `SocketAddress` for the app
-    fn enclave_pool(&self) -> Result<StreamPool, qos_core::io::IOError> {
-        if let Some(u) = self.parsed.single(USOCK) {
-            let address = SocketAddress::new_unix(u);
+    /// Address the host server should listen on.
+    fn host_addr(&self) -> SocketAddr {
+        let ip = Ipv4Addr::from_str(&self.ip()).expect("could not parse ip to IP v4");
+        let port = self
+            .port()
+            .parse::<u16>()
+            .expect("could not parse port to u16");
+        SocketAddr::new(IpAddr::V4(ip), port)
+    }
 
-            StreamPool::new(address, 1)
-        } else {
-            panic!("Invalid socket opts")
-        }
+    fn ip(&self) -> String {
+        self.parsed
+            .single(HOST_IP)
+            .expect("host ip required")
+            .clone()
+    }
+
+    fn port(&self) -> String {
+        self.parsed
+            .single(HOST_PORT)
+            .expect("host port required")
+            .clone()
     }
 
     fn ephemeral_file(&self) -> String {
@@ -46,11 +65,16 @@ impl GetParserForOptions for ParserParser {
     fn parser() -> Parser {
         Parser::new()
             .token(
-                Token::new(USOCK, "unix socket (`.sock`) to listen on.")
+                Token::new(HOST_IP, "IP address this server should listen on")
                     .takes_value(true)
-                    .forbids(vec!["port", "cid"])
-                    .default_value(SEC_APP_SOCK),
+                    .required(true),
             )
+            .token(
+                Token::new(HOST_PORT, "port this server should listen on")
+                    .takes_value(true)
+                    .required(true),
+            )
+
             .token(
                 Token::new(
                     EPHEMERAL_FILE_OPT,
@@ -84,11 +108,12 @@ impl Cli {
                 crate::service::Processor::new(EphemeralKeyHandle::new(opts.ephemeral_file()));
 
             println!("---- Starting Parser server -----");
-            let _server = SocketServer::listen_all(
-                opts.enclave_pool().expect("unable to create enclave pool"),
-                &processor,
-            )
-            .expect("unable to start Parser server");
+            let mut tasks = Vec::new();
+            tasks.push(tokio::spawn(async move {
+                crate::host::Host::listen(opts.host_addr(), processor)
+                    .await
+                    .expect("`AsyncHost::listen` error");
+            }));
 
             match tokio::signal::ctrl_c().await {
                 Ok(()) => eprintln!("handling ctrl+c the tokio way"),

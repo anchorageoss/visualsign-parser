@@ -11,15 +11,14 @@
 
 use generated::health::{AppHealthRequest, AppHealthResponse};
 use generated::parser::{
-    ParseRequest, ParseResponse, QosParserRequest, QosParserResponse, parser_service_server,
-    qos_parser_request, qos_parser_response,
+    ParseRequest, ParseResponse, QosParserRequest, parser_service_server, qos_parser_request,
+    qos_parser_response,
 };
 use generated::tonic;
 use generated::tonic::{Request, Response, Status};
 use health_check::AppHealthCheckable;
-use host_primitives::{GRPC_MAX_RECV_MSG_SIZE, enclave_client_timeout};
+use host_primitives::GRPC_MAX_RECV_MSG_SIZE;
 use metrics::request;
-use qos_core::{client::SocketClient, io::SocketAddress};
 use std::time::Instant;
 
 use tokio::sync::oneshot::{self, Sender};
@@ -28,33 +27,31 @@ use tokio::{
     spawn,
 };
 
+use crate::service::SharedProcessor;
+
 /// Host `gRPC` server.
 #[derive(Debug)]
 pub struct Host {
-    client: SocketClient,
+    processor: SharedProcessor,
 }
 
 impl Host {
     /// Start the host server.
     pub async fn listen(
         listen_addr: std::net::SocketAddr,
-        enclave_addr: SocketAddress,
+        processor: SharedProcessor,
     ) -> Result<(), tonic::transport::Error> {
         let reflection_service = generated::tonic_reflection::server::Builder::configure()
             .register_encoded_file_descriptor_set(generated::FILE_DESCRIPTOR_SET)
             .build()
             .expect("failed to start reflection service");
 
-        let client = SocketClient::single(enclave_addr.clone(), enclave_client_timeout())
-            .expect("unable to create socket client");
-        let app_checker = ParserHealth {
-            client: client.clone(),
+        let host = Host {
+            processor: processor.clone(),
         };
-        let health_check_service =
-            health_check::TkHealthCheck::build_service(client.clone(), app_checker.clone());
+        let app_checker = ParserHealth { processor };
+        let health_check_service = health_check::TkHealthCheck::build_service(app_checker.clone());
         let k8_health_service = health_check::K8Health::build_service(app_checker);
-
-        let host = Host { client };
 
         println!("HostServer listening on {listen_addr}");
 
@@ -104,14 +101,9 @@ impl parser_service_server::ParserService for Host {
 
         let now_step = Instant::now();
 
-        let raw_output =
-            host_primitives::send_proxy_request::<QosParserRequest, QosParserResponse>(
-                request,
-                &self.client,
-            )
-            .await;
+        let raw_output = self.processor.read().await.process(&request);
+
         let output = raw_output
-            .map_err(|e| Status::internal(format!("Parse: unexpected socket failure: {e:?}")))?
             .output
             .ok_or_else(|| Status::internal("QosParserResponse::output was None"))?;
 
@@ -156,7 +148,7 @@ impl parser_service_server::ParserService for Host {
 
 #[derive(Clone)]
 struct ParserHealth {
-    client: SocketClient,
+    processor: SharedProcessor,
 }
 
 impl AppHealthCheckable for ParserHealth {
@@ -169,15 +161,9 @@ impl AppHealthCheckable for ParserHealth {
             )),
         };
 
-        let raw_output =
-            host_primitives::send_proxy_request::<QosParserRequest, QosParserResponse>(
-                request,
-                &self.client,
-            )
-            .await;
+        let raw_output = self.processor.read().await.process(&request);
 
         let output = raw_output
-            .map_err(|e| Status::internal(format!("App Health: unexpected socket failure: {e:?}")))?
             .output
             .ok_or_else(|| Status::internal("QosParserResponse::output was None"))?;
 
