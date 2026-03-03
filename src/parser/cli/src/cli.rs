@@ -1,11 +1,14 @@
 use crate::chains::parse_chain;
-use crate::{ethereum, solana};
 use clap::Parser;
 use generated::parser::ChainMetadata;
-use parser_app::registry::create_registry;
-use visualsign::registry::Chain;
+use visualsign::registry::{Chain, TransactionConverterRegistry};
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
+
+#[cfg(feature = "ethereum")]
+use crate::ethereum;
+#[cfg(feature = "solana")]
+use crate::solana;
 
 #[derive(Parser, Debug)]
 #[command(name = "visualsign-parser")]
@@ -42,6 +45,7 @@ struct Args {
     )]
     network: Option<String>,
 
+    #[cfg(feature = "ethereum")]
     #[arg(
         long = "abi-json-mappings",
         value_name = "ABI_NAME:FILE_PATH:0xADDRESS",
@@ -49,6 +53,7 @@ struct Args {
     )]
     abi_json_mappings: Vec<String>,
 
+    #[cfg(feature = "solana")]
     #[arg(
         long = "idl-json-mappings",
         value_name = "IDL_NAME:FILE_PATH:PROGRAM_ID",
@@ -234,16 +239,12 @@ fn common_label(field: &SignablePayloadField) -> String {
 fn parse_and_display(
     chain: &str,
     raw_tx: &str,
-    mut options: VisualSignOptions,
+    options: VisualSignOptions,
     output_format: OutputFormat,
     condensed_only: bool,
-    abi_json_mappings: &[String],
 ) {
     let registry_chain = parse_chain(chain);
-
-    ethereum::apply_abi_registry(&mut options, abi_json_mappings);
-
-    let registry = create_registry();
+    let registry = Cli::build_registry();
     let signable_payload_str = registry.convert_transaction(&registry_chain, raw_tx, options);
     match signable_payload_str {
         Ok(payload) => match output_format {
@@ -275,12 +276,14 @@ fn parse_and_display(
 
 fn create_chain_metadata(
     chain: &Chain,
-    network: Option<String>,
+    _network: Option<String>,
     idl_json_mappings: &[String],
 ) -> Option<ChainMetadata> {
     match chain {
+        #[cfg(feature = "solana")]
         Chain::Solana => solana::create_chain_metadata(idl_json_mappings),
-        Chain::Ethereum => ethereum::create_chain_metadata(network),
+        #[cfg(feature = "ethereum")]
+        Chain::Ethereum => ethereum::create_chain_metadata(_network),
         _ => None,
     }
 }
@@ -288,18 +291,48 @@ fn create_chain_metadata(
 /// app cli
 pub struct Cli;
 impl Cli {
+    fn build_registry() -> TransactionConverterRegistry {
+        let mut registry = TransactionConverterRegistry::new();
+
+        #[cfg(feature = "ethereum")]
+        registry.register::<visualsign_ethereum::EthereumTransactionWrapper, _>(
+            Chain::Ethereum,
+            visualsign_ethereum::EthereumVisualSignConverter::new(),
+        );
+
+        #[cfg(feature = "solana")]
+        registry.register::<visualsign_solana::SolanaTransactionWrapper, _>(
+            Chain::Solana,
+            visualsign_solana::SolanaVisualSignConverter,
+        );
+
+        registry.register::<visualsign_unspecified::UnspecifiedTransactionWrapper, _>(
+            Chain::Unspecified,
+            visualsign_unspecified::UnspecifiedVisualSignConverter,
+        );
+
+        registry
+    }
+
     /// start the parser cli
     ///
     /// # Panics
     ///
     /// Executes the CLI application, parsing command line arguments and processing the transaction
+    #[allow(unused_mut)] // mut only needed when ethereum feature is enabled
     pub fn execute() {
         let args = Args::parse();
 
         let chain = parse_chain(&args.chain);
-        let chain_metadata = create_chain_metadata(&chain, args.network, &args.idl_json_mappings);
 
-        let options = VisualSignOptions {
+        #[cfg(feature = "solana")]
+        let idl_json_mappings = args.idl_json_mappings;
+        #[cfg(not(feature = "solana"))]
+        let idl_json_mappings: Vec<String> = vec![];
+
+        let chain_metadata = create_chain_metadata(&chain, args.network, &idl_json_mappings);
+
+        let mut options = VisualSignOptions {
             decode_transfers: true,
             transaction_name: None,
             metadata: chain_metadata,
@@ -309,13 +342,15 @@ impl Cli {
             abi_registry: None,
         };
 
+        #[cfg(feature = "ethereum")]
+        ethereum::apply_abi_registry(&mut options, &args.abi_json_mappings);
+
         parse_and_display(
             &args.chain,
             &args.transaction,
             options,
             args.output,
             args.condensed_only,
-            &args.abi_json_mappings,
         );
     }
 }
