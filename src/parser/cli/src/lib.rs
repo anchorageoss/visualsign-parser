@@ -8,5 +8,9 @@
 pub mod chains;
 /// Command-line interface functionality and types.
 pub mod cli;
+/// Ethereum-specific CLI handling: ABI registry, network metadata.
+pub mod ethereum;
 /// Common mapping parser for ABI and IDL file mappings.
 pub mod mapping_parser;
+/// Solana-specific CLI handling: IDL mappings, Solana metadata.
+pub mod solana;
