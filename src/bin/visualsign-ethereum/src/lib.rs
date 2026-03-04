@@ -1,8 +1,8 @@
-//! Shared utilities for `VisualSign` CLI binaries.
+//! `VisualSign` Ethereum CLI binary.
 #![forbid(unsafe_code)]
 #![deny(clippy::all, clippy::unwrap_used)]
 #![warn(missing_docs, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc, clippy::module_name_repetitions)]
 
-/// Chain-agnostic output formatting.
-pub mod display;
+/// CLI entry point.
+pub mod cli;
