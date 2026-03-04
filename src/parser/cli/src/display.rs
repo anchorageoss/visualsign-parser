@@ -180,18 +180,18 @@ fn common_label(field: &SignablePayloadField) -> String {
 /// Print a [`SignablePayload`] using the chosen [`OutputFormat`].
 pub fn print_payload(payload: &SignablePayload, format: OutputFormat, condensed_only: bool) {
     match format {
-        OutputFormat::Json => {
-            match serde_json::to_string_pretty(payload) {
-                Ok(s) => println!("{s}"),
-                Err(_) => eprintln!("Error: Failed to serialize output as JSON"),
-            }
-        }
+        OutputFormat::Json => match serde_json::to_string_pretty(payload) {
+            Ok(s) => println!("{s}"),
+            Err(_) => eprintln!("Error: Failed to serialize output as JSON"),
+        },
         OutputFormat::Text => println!("{payload:#?}"),
         OutputFormat::Human => {
             let formatter = HumanReadableFormatter::new(payload, condensed_only);
             println!("{formatter}");
             if !condensed_only {
-                eprintln!("\nRun with `--condensed-only` to see what users see on hardware wallets");
+                eprintln!(
+                    "\nRun with `--condensed-only` to see what users see on hardware wallets"
+                );
             }
         }
     }
