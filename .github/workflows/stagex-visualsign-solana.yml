@@ -1,4 +1,4 @@
-name: stagex
+name: stagex (visualsign-solana)
 
 on:
   push:
@@ -8,19 +8,34 @@ on:
       - "main"
     paths:
       - ".github/**"
-      - "src/**"
       - "Makefile"
+      - "images/visualsign-solana/**"
+      - "src/Cargo.toml"
+      - "src/Cargo.lock"
+      - "src/bin/visualsign-solana/**"
+      - "src/chain_parsers/visualsign-solana/**"
+      - "src/chain_parsers/visualsign-unspecified/**"
+      - "src/visualsign/**"
+      - "src/generated/**"
+      - "src/parser/cli/**"
   pull_request:
     paths:
       - ".github/**"
-      - "src/**"
-      - "images/**"
       - "Makefile"
+      - "images/visualsign-solana/**"
+      - "src/Cargo.toml"
+      - "src/Cargo.lock"
+      - "src/bin/visualsign-solana/**"
+      - "src/chain_parsers/visualsign-solana/**"
+      - "src/chain_parsers/visualsign-unspecified/**"
+      - "src/visualsign/**"
+      - "src/generated/**"
+      - "src/parser/cli/**"
   workflow_dispatch: # Allows manual invocation
 
 jobs:
-  parser:
-    name: Build parser images
+  build:
+    name: Build parser images (visualsign-solana)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -32,10 +47,6 @@ jobs:
         ${{ github.ref == format('refs/heads/{0}', 'main') && 'latest' || '' }}
         ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || '' }}
         ${{ github.event_name == 'push' && github.ref_name || '' }}
-    strategy:
-      matrix:
-        target:
-          - name: parser_app
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -47,18 +58,18 @@ jobs:
           dockerHub: ${{ secrets.DOCKERHUB_API_KEY }}
           ghcr: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build ${{ matrix.target.name }}
+      - name: Build visualsign-solana
         shell: bash
         run: |
-          make -j$(nproc) out/${{ matrix.target.name }}/index.json
+          make -j$(nproc) out/visualsign-solana/index.json
 
       - name: Load artifact to Docker
         run: |
-          env -C out/${{ matrix.target.name }} tar -cf - . | docker load
+          env -C out/visualsign-solana tar -cf - . | docker load
 
       - name: Upload to GHCR
         run: |
           for tag in ${tags}; do
-              docker tag "anchorageoss-visualsign-parser/${{ matrix.target.name }}:latest" "ghcr.io/anchorageoss/${{ matrix.target.name }}:${tag}"
+              docker tag "anchorageoss-visualsign-parser/visualsign-solana:latest" "ghcr.io/anchorageoss/visualsign-solana:${tag}"
           done
-          docker image push --all-tags "ghcr.io/anchorageoss/${{ matrix.target.name }}"
+          docker image push --all-tags "ghcr.io/anchorageoss/visualsign-solana"

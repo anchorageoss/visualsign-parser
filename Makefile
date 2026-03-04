@@ -2,6 +2,10 @@ out/parser_app/index.json: \
 	$(shell git ls-files images/parser_app src)
 	$(call build,parser_app)
 
+out/visualsign-solana/index.json: \
+	$(shell git ls-files images/visualsign-solana src/Cargo.toml src/Cargo.lock src/bin/visualsign-solana src/chain_parsers/visualsign-solana src/chain_parsers/visualsign-unspecified src/visualsign src/generated src/parser/cli)
+	$(call build,visualsign-solana)
+
 .PHONY: non-oci-docker-images
 non-oci-docker-images:
 	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_app -f images/parser_app/Containerfile .
