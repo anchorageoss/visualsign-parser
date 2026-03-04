@@ -1,7 +1,11 @@
 use clap::Parser;
-use generated::parser::{ChainMetadata, Idl, SolanaIdlType, SolanaMetadata, chain_metadata::Metadata};
+use generated::parser::{
+    ChainMetadata, Idl, SolanaIdlType, SolanaMetadata, chain_metadata::Metadata,
+};
 use parser_cli::display::{OutputFormat, print_payload};
 use std::collections::HashMap;
+use visualsign::registry::{Chain, TransactionConverterRegistry};
+use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MappingComponents {
@@ -28,27 +32,33 @@ fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, String> {
 }
 
 fn load_json_file(path: &str) -> Result<String, String> {
-    let json_content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read file at {path}: {e}"))?;
+    let json_content =
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read file at {path}: {e}"))?;
     serde_json::from_str::<serde_json::Value>(&json_content)
         .map_err(|e| format!("Invalid JSON in file {path}: {e}"))?;
     Ok(json_content)
 }
-use visualsign::registry::{Chain, TransactionConverterRegistry};
-use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 
 #[derive(Parser, Debug)]
 #[command(name = "visualsign-solana")]
 #[command(version = "1.0")]
 #[command(about = "Converts raw Solana transactions to visual signing properties")]
 struct Args {
-    #[arg(short, long, value_name = "RAW_TX", help = "Raw transaction hex string")]
+    #[arg(
+        short,
+        long,
+        value_name = "RAW_TX",
+        help = "Raw transaction hex string"
+    )]
     transaction: String,
 
     #[arg(short, long, default_value = "text", help = "Output format")]
     output: OutputFormat,
 
-    #[arg(long, help = "Show only condensed view (what hardware wallets display)")]
+    #[arg(
+        long,
+        help = "Show only condensed view (what hardware wallets display)"
+    )]
     condensed_only: bool,
 
     #[arg(
@@ -191,7 +201,10 @@ mod tests {
                 .expect("Solana program ID mapping should parse successfully");
         assert_eq!(result.name, "Jupiter");
         assert_eq!(result.path, "/path/to/idl.json");
-        assert_eq!(result.identifier, "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
+        assert_eq!(
+            result.identifier,
+            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
+        );
     }
 
     #[test]

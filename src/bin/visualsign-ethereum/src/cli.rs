@@ -38,13 +38,21 @@ use visualsign_ethereum::networks::parse_network;
 #[command(version = "1.0")]
 #[command(about = "Converts raw Ethereum transactions to visual signing properties")]
 struct Args {
-    #[arg(short, long, value_name = "RAW_TX", help = "Raw transaction hex string")]
+    #[arg(
+        short,
+        long,
+        value_name = "RAW_TX",
+        help = "Raw transaction hex string"
+    )]
     transaction: String,
 
     #[arg(short, long, default_value = "text", help = "Output format")]
     output: OutputFormat,
 
-    #[arg(long, help = "Show only condensed view (what hardware wallets display)")]
+    #[arg(
+        long,
+        help = "Show only condensed view (what hardware wallets display)"
+    )]
     condensed_only: bool,
 
     #[arg(
@@ -131,7 +139,10 @@ fn build_abi_registry(abi_json_mappings: &[String], chain_id: u64) -> (AbiRegist
                 );
             }
             Err(e) => {
-                eprintln!("  Warning: Failed to load/map ABI '{}': {e}", components.name);
+                eprintln!(
+                    "  Warning: Failed to load/map ABI '{}': {e}",
+                    components.name
+                );
             }
         }
     }
@@ -210,7 +221,10 @@ mod tests {
                 .expect("Ethereum address mapping should parse successfully");
         assert_eq!(result.name, "USDC");
         assert_eq!(result.path, "/path/to/abi.json");
-        assert_eq!(result.identifier, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+        assert_eq!(
+            result.identifier,
+            "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+        );
     }
 
     #[test]
