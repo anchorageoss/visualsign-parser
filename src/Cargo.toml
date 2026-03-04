@@ -7,6 +7,8 @@ members = [
   "host_primitives",
   "integration",
   "metrics",
+  "bin/visualsign-ethereum",
+  "bin/visualsign-solana",
   "parser/app",
   "parser/cli",
   "parser/grpc-server",

@@ -6175,24 +6175,8 @@ dependencies = [
 name = "parser_cli"
 version = "0.1.0"
 dependencies = [
- "bincode",
- "borsh 1.6.0",
- "bs58 0.5.1",
- "clap",
- "generated",
- "parser_app",
- "serde",
  "serde_json",
- "sha2 0.10.9",
- "similar",
- "tracing",
- "tracing-bunyan-formatter",
- "tracing-log 0.2.0",
- "tracing-subscriber",
  "visualsign",
- "visualsign-ethereum",
- "visualsign-solana",
- "visualsign-unspecified",
 ]
 
 [[package]]
@@ -13011,6 +12995,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "visualsign-ethereum-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "generated",
+ "parser_cli",
+ "serde_json",
+ "tracing",
+ "tracing-bunyan-formatter",
+ "tracing-log 0.2.0",
+ "tracing-subscriber",
+ "visualsign",
+ "visualsign-ethereum",
+ "visualsign-unspecified",
+]
+
+[[package]]
 name = "visualsign-solana"
 version = "0.1.0"
 dependencies = [
@@ -13035,6 +13036,24 @@ dependencies = [
  "spl-token-2022-interface",
  "tracing",
  "visualsign",
+]
+
+[[package]]
+name = "visualsign-solana-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "generated",
+ "parser_cli",
+ "serde_json",
+ "similar",
+ "tracing",
+ "tracing-bunyan-formatter",
+ "tracing-log 0.2.0",
+ "tracing-subscriber",
+ "visualsign",
+ "visualsign-solana",
+ "visualsign-unspecified",
 ]
 
 [[package]]

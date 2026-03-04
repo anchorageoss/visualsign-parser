@@ -1,0 +1,27 @@
+[package]
+name = "visualsign-solana-cli"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "visualsign-solana"
+path = "src/main.rs"
+
+[dependencies]
+parser_cli = { path = "../../parser/cli" }
+
+generated = { path = "../../generated" }
+visualsign = { workspace = true }
+visualsign-solana = { path = "../../chain_parsers/visualsign-solana" }
+visualsign-unspecified = { path = "../../chain_parsers/visualsign-unspecified" }
+
+serde_json = "1"
+clap = { version = "4.0", features = ["derive"] }
+tracing = { workspace = true }
+tracing-log = "0.2.0"
+tracing-bunyan-formatter = "0.3.10"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
+[dev-dependencies]
+similar = "2.7.0"
