@@ -13021,6 +13021,7 @@ dependencies = [
  "generated",
  "hex",
  "jupiter-swap-api-client",
+ "proptest",
  "serde",
  "serde_json",
  "solana-program",
