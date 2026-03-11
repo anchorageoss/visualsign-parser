@@ -59,14 +59,14 @@ fn arb_identifier() -> impl Strategy<Value = String> {
     "[a-z][a-z0-9]{1,15}"
 }
 
-/// Random IDL instruction: a name + 0–6 args of randomly-chosen types.
+/// Random IDL instruction: a name + 0–20 args of randomly-chosen types.
 fn arb_idl_instruction() -> impl Strategy<Value = serde_json::Value> {
     (
         arb_identifier(),
         prop::collection::vec(
             (arb_identifier(), arb_idl_type())
                 .prop_map(|(name, ty)| serde_json::json!({"name": name, "type": ty})),
-            0..=6,
+            0..=20,
         ),
     )
         .prop_map(|(name, args)| {
@@ -78,9 +78,9 @@ fn arb_idl_instruction() -> impl Strategy<Value = serde_json::Value> {
         })
 }
 
-/// Full IDL JSON string with 1–4 randomly-structured instructions.
+/// Full IDL JSON string with 1–16 randomly-structured instructions.
 fn arb_idl_json() -> impl Strategy<Value = String> {
-    prop::collection::vec(arb_idl_instruction(), 1..=4).prop_map(|instructions| {
+    prop::collection::vec(arb_idl_instruction(), 1..=16).prop_map(|instructions| {
         serde_json::json!({
             "instructions": instructions,
             "types": [],
@@ -114,16 +114,18 @@ proptest! {
         let _ = decode_idl_data(&s);
     }
 
-    /// Take a valid 8-byte discriminator from a parsed IDL and append random
-    /// bytes for the argument payload.  The parser must return `Ok` or a clean
-    /// `Err` — never a panic.
+    /// Take a valid 8-byte discriminator from a randomly-selected instruction
+    /// (not always the first) and append random arg bytes up to MAX_CURSOR_LENGTH
+    /// (1232).  The parser must return `Ok` or a clean `Err` — never a panic.
     #[test]
     fn fuzz_valid_discriminator_random_args(
         idl_json in arb_idl_json(),
-        arg_bytes in prop::collection::vec(any::<u8>(), 0..200usize),
+        inst_idx in any::<usize>(),
+        arg_bytes in prop::collection::vec(any::<u8>(), 0..1300usize),
     ) {
         if let Ok(idl) = decode_idl_data(&idl_json) {
-            if let Some(inst) = idl.instructions.first() {
+            if !idl.instructions.is_empty() {
+                let inst = &idl.instructions[inst_idx % idl.instructions.len()];
                 if let Some(disc) = &inst.discriminator {
                     let mut data = disc.clone();
                     data.extend_from_slice(&arg_bytes);
