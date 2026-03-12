@@ -1,12 +1,60 @@
 use std::sync::Arc;
 
+use clap::Args as ClapArgs;
 use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
+use visualsign::registry::{Chain, TransactionConverterRegistry};
 use visualsign::vsptrait::VisualSignOptions;
 use visualsign_ethereum::abi_registry::AbiRegistry;
 use visualsign_ethereum::embedded_abis::load_and_map_abi;
 use visualsign_ethereum::networks::{extract_chain_id_from_metadata, parse_network};
 
 use crate::mapping_parser;
+
+/// CLI arguments specific to Ethereum.
+#[derive(ClapArgs, Debug, Default, Clone)]
+pub struct EthereumArgs {
+    /// Map custom ABI JSON file to contract address.
+    /// Format: `AbiName:/path/to/abi.json:0xAddress`. Can be used multiple times.
+    #[arg(
+        long = "abi-json-mappings",
+        value_name = "ABI_NAME:FILE_PATH:0xADDRESS"
+    )]
+    pub abi_json_mappings: Vec<String>,
+}
+
+/// [`crate::ChainPlugin`] implementation for Ethereum.
+pub struct EthereumPlugin {
+    args: EthereumArgs,
+}
+
+impl EthereumPlugin {
+    /// Creates a new `EthereumPlugin` with the given CLI args.
+    #[must_use]
+    pub fn new(args: EthereumArgs) -> Self {
+        Self { args }
+    }
+}
+
+impl crate::ChainPlugin for EthereumPlugin {
+    fn chain(&self) -> Chain {
+        Chain::Ethereum
+    }
+
+    fn register(&self, registry: &mut TransactionConverterRegistry) {
+        registry.register::<visualsign_ethereum::EthereumTransactionWrapper, _>(
+            Chain::Ethereum,
+            visualsign_ethereum::EthereumVisualSignConverter::new(),
+        );
+    }
+
+    fn create_metadata(&self, network: Option<String>) -> Option<ChainMetadata> {
+        create_chain_metadata(network)
+    }
+
+    fn apply_options(&self, options: VisualSignOptions) -> VisualSignOptions {
+        apply_abi_registry(options, &self.args.abi_json_mappings)
+    }
+}
 
 fn parse_abi_file_mapping(mapping_str: &str) -> Option<(String, String, String)> {
     match mapping_parser::parse_mapping(mapping_str) {
@@ -56,10 +104,12 @@ fn build_abi_registry_from_mappings(
     (registry, valid_count)
 }
 
-/// Applies a built ABI registry to the options if any mappings are provided.
-pub fn apply_abi_registry(options: &mut VisualSignOptions, abi_json_mappings: &[String]) {
+fn apply_abi_registry(
+    mut options: VisualSignOptions,
+    abi_json_mappings: &[String],
+) -> VisualSignOptions {
     if abi_json_mappings.is_empty() {
-        return;
+        return options;
     }
 
     let chain_id = if let Some(ref metadata) = options.metadata {
@@ -78,6 +128,7 @@ pub fn apply_abi_registry(options: &mut VisualSignOptions, abi_json_mappings: &[
         abi_json_mappings.len()
     );
     options.abi_registry = Some(Arc::new(registry));
+    options
 }
 
 /// Creates Ethereum chain metadata from the network argument.

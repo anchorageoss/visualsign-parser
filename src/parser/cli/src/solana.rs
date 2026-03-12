@@ -1,10 +1,54 @@
 use std::collections::HashMap;
 
+use clap::Args as ClapArgs;
 use generated::parser::{
     ChainMetadata, Idl, SolanaIdlType, SolanaMetadata, chain_metadata::Metadata,
 };
+use visualsign::registry::{Chain, TransactionConverterRegistry};
 
 use crate::mapping_parser;
+
+/// CLI arguments specific to Solana.
+#[derive(ClapArgs, Debug, Default, Clone)]
+pub struct SolanaArgs {
+    /// Map custom IDL JSON file to a Solana program.
+    /// Format: `IdlName:/path/to/idl.json:base58_program_id`. Can be used multiple times.
+    #[arg(
+        long = "idl-json-mappings",
+        value_name = "IDL_NAME:FILE_PATH:PROGRAM_ID"
+    )]
+    pub idl_json_mappings: Vec<String>,
+}
+
+/// [`crate::ChainPlugin`] implementation for Solana.
+pub struct SolanaPlugin {
+    args: SolanaArgs,
+}
+
+impl SolanaPlugin {
+    /// Creates a new `SolanaPlugin` with the given CLI args.
+    #[must_use]
+    pub fn new(args: SolanaArgs) -> Self {
+        Self { args }
+    }
+}
+
+impl crate::ChainPlugin for SolanaPlugin {
+    fn chain(&self) -> Chain {
+        Chain::Solana
+    }
+
+    fn register(&self, registry: &mut TransactionConverterRegistry) {
+        registry.register::<visualsign_solana::SolanaTransactionWrapper, _>(
+            Chain::Solana,
+            visualsign_solana::SolanaVisualSignConverter,
+        );
+    }
+
+    fn create_metadata(&self, _network: Option<String>) -> Option<ChainMetadata> {
+        create_chain_metadata(&self.args.idl_json_mappings)
+    }
+}
 
 fn parse_idl_file_mapping(mapping_str: &str) -> Option<(String, String, String)> {
     match mapping_parser::parse_mapping(mapping_str) {
