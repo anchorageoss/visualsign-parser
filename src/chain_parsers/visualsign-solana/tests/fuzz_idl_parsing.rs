@@ -20,7 +20,9 @@ mod common;
 use common::{ArbDefinedStructIdl, ArbIdl, ArbVecArgIdl};
 
 use proptest::prelude::*;
-use solana_parser::solana::structs::{IdlInstruction, IdlType, IdlTypeDefinition, IdlTypeDefinitionType};
+use solana_parser::solana::structs::{
+    IdlInstruction, IdlType, IdlTypeDefinition, IdlTypeDefinitionType,
+};
 use solana_parser::{decode_idl_data, parse_instruction_with_idl};
 use std::sync::Arc;
 
@@ -41,67 +43,60 @@ const TEST_PROGRAM_ID: &str = "11111111111111111111111111111111";
 /// Returns a `BoxedStrategy` so the function can recurse for container types.
 fn arb_bytes_for_type(ty: IdlType, types: Arc<Vec<IdlTypeDefinition>>) -> BoxedStrategy<Vec<u8>> {
     match ty {
-        IdlType::Bool =>
-            any::<bool>().prop_map(|b| vec![b as u8]).boxed(),
-        IdlType::U8 =>
-            any::<u8>().prop_map(|v| vec![v]).boxed(),
-        IdlType::U16 =>
-            any::<u16>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
-        IdlType::U32 =>
-            any::<u32>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
-        IdlType::U64 =>
-            any::<u64>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
-        IdlType::U128 =>
-            any::<u128>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
-        IdlType::I8 =>
-            any::<i8>().prop_map(|v| vec![v as u8]).boxed(),
-        IdlType::I16 =>
-            any::<i16>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
-        IdlType::I32 =>
-            any::<i32>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
-        IdlType::I64 =>
-            any::<i64>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
-        IdlType::I128 =>
-            any::<i128>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::Bool => any::<bool>().prop_map(|b| vec![b as u8]).boxed(),
+        IdlType::U8 => any::<u8>().prop_map(|v| vec![v]).boxed(),
+        IdlType::U16 => any::<u16>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::U32 => any::<u32>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::U64 => any::<u64>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::U128 => any::<u128>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::I8 => any::<i8>().prop_map(|v| vec![v as u8]).boxed(),
+        IdlType::I16 => any::<i16>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::I32 => any::<i32>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::I64 => any::<i64>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::I128 => any::<i128>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
         // Use raw bit patterns to avoid NaN/inf — parser calls read_f32/f64 which accept any bits.
-        IdlType::F32 =>
-            any::<u32>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
-        IdlType::F64 =>
-            any::<u64>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::F32 => any::<u32>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::F64 => any::<u64>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
         // PublicKey: exactly 32 bytes, no length prefix.
-        IdlType::PublicKey =>
-            prop::collection::vec(any::<u8>(), 32).boxed(),
+        IdlType::PublicKey => prop::collection::vec(any::<u8>(), 32).boxed(),
         // String: borsh u32-length-prefixed valid UTF-8.
-        IdlType::String =>
-            "[a-z0-9]{0,16}".prop_map(|s| {
+        IdlType::String => "[a-z0-9]{0,16}"
+            .prop_map(|s| {
                 let b = s.as_bytes();
                 let mut out = (b.len() as u32).to_le_bytes().to_vec();
                 out.extend_from_slice(b);
                 out
-            }).boxed(),
+            })
+            .boxed(),
         // Bytes: borsh u32-length-prefixed raw bytes.
-        IdlType::Bytes =>
-            prop::collection::vec(any::<u8>(), 0..=16).prop_map(|bytes| {
+        IdlType::Bytes => prop::collection::vec(any::<u8>(), 0..=16)
+            .prop_map(|bytes| {
                 let mut out = (bytes.len() as u32).to_le_bytes().to_vec();
                 out.extend(bytes);
                 out
-            }).boxed(),
+            })
+            .boxed(),
         // Option: 1-byte tag (0=None, 1=Some) + inner bytes when Some.
         IdlType::Option(inner) => {
             let some_strat = arb_bytes_for_type(*inner, types);
             prop_oneof![
                 1 => Just(vec![0u8]),
                 1 => some_strat.prop_map(|b| { let mut out = vec![1u8]; out.extend(b); out }),
-            ].boxed()
+            ]
+            .boxed()
         }
         // Vec: u32 length prefix + N encoded elements (N ≤ 2 to bound total size).
         IdlType::Vec(inner) => {
             let inner_strat = arb_bytes_for_type(*inner, types);
-            prop::collection::vec(inner_strat, 0..=2).prop_map(|items| {
-                let mut out = (items.len() as u32).to_le_bytes().to_vec();
-                for item in items { out.extend(item); }
-                out
-            }).boxed()
+            prop::collection::vec(inner_strat, 0..=2)
+                .prop_map(|items| {
+                    let mut out = (items.len() as u32).to_le_bytes().to_vec();
+                    for item in items {
+                        out.extend(item);
+                    }
+                    out
+                })
+                .boxed()
         }
         // Array: exactly N encoded elements, no length prefix.
         IdlType::Array(inner, n) => {
@@ -114,21 +109,28 @@ fn arb_bytes_for_type(ty: IdlType, types: Arc<Vec<IdlTypeDefinition>>) -> BoxedS
         // Enum variants are not yet handled — fall back to empty bytes.
         IdlType::Defined(defined) => {
             let name = defined.to_string();
-            match types.iter().find(|t| t.name == name).map(|t| t.r#type.clone()) {
-                Some(IdlTypeDefinitionType::Struct { fields }) => {
-                    fields.into_iter()
-                        .map(|f| arb_bytes_for_type(f.r#type, types.clone()))
-                        .fold(Just(Vec::new()).boxed(), |acc, strat| {
-                            (acc, strat)
-                                .prop_map(|(mut a, b)| { a.extend(b); a })
-                                .boxed()
-                        })
-                }
-                Some(IdlTypeDefinitionType::Alias { value }) =>
-                    arb_bytes_for_type(value, types),
+            match types
+                .iter()
+                .find(|t| t.name == name)
+                .map(|t| t.r#type.clone())
+            {
+                Some(IdlTypeDefinitionType::Struct { fields }) => fields
+                    .into_iter()
+                    .map(|f| arb_bytes_for_type(f.r#type, types.clone()))
+                    .fold(Just(Vec::new()).boxed(), |acc, strat| {
+                        (acc, strat)
+                            .prop_map(|(mut a, b)| {
+                                a.extend(b);
+                                a
+                            })
+                            .boxed()
+                    }),
+                Some(IdlTypeDefinitionType::Alias { value }) => arb_bytes_for_type(value, types),
                 _ =>
-                    // Enum or unknown — produce empty bytes; test will tolerate Err here.
-                    Just(vec![]).boxed(),
+                // Enum or unknown — produce empty bytes; test will tolerate Err here.
+                {
+                    Just(vec![]).boxed()
+                }
             }
         }
     }
@@ -143,10 +145,16 @@ fn arb_valid_instruction_bytes(
         Some(d) => d.clone(),
         None => return Just(vec![]).boxed(),
     };
-    inst.args.iter()
+    inst.args
+        .iter()
         .map(|field| arb_bytes_for_type(field.r#type.clone(), types.clone()))
         .fold(Just(disc).boxed(), |acc, strat| {
-            (acc, strat).prop_map(|(mut a, b)| { a.extend(b); a }).boxed()
+            (acc, strat)
+                .prop_map(|(mut a, b)| {
+                    a.extend(b);
+                    a
+                })
+                .boxed()
         })
 }
 
@@ -169,10 +177,8 @@ fn arb_idl_and_valid_bytes() -> impl Strategy<Value = (String, usize, Vec<u8>)> 
                 let idl_json_owned = idl_json.clone();
                 (0..n)
                     .prop_flat_map(move |inst_idx| {
-                        let byte_strat = arb_valid_instruction_bytes(
-                            &instructions[inst_idx],
-                            types.clone(),
-                        );
+                        let byte_strat =
+                            arb_valid_instruction_bytes(&instructions[inst_idx], types.clone());
                         let j = idl_json_owned.clone();
                         byte_strat.prop_map(move |bytes| (j.clone(), inst_idx, bytes))
                     })
@@ -406,16 +412,19 @@ fn roundtrip_mixed_primitive_args() {
 
     let mut data = disc.clone();
     data.extend_from_slice(&1000u64.to_le_bytes()); // amountIn
-    data.extend_from_slice(&900u64.to_le_bytes());  // minOut
-    data.extend_from_slice(&50u16.to_le_bytes());   // slippage
-    data.push(1u8);                                  // isExact = true
+    data.extend_from_slice(&900u64.to_le_bytes()); // minOut
+    data.extend_from_slice(&50u16.to_le_bytes()); // slippage
+    data.push(1u8); // isExact = true
 
     let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl).unwrap();
     assert_eq!(result.instruction_name, "swap");
-    assert_eq!(result.program_call_args["amountIn"], serde_json::json!(1000));
-    assert_eq!(result.program_call_args["minOut"],   serde_json::json!(900));
+    assert_eq!(
+        result.program_call_args["amountIn"],
+        serde_json::json!(1000)
+    );
+    assert_eq!(result.program_call_args["minOut"], serde_json::json!(900));
     assert_eq!(result.program_call_args["slippage"], serde_json::json!(50));
-    assert_eq!(result.program_call_args["isExact"],  serde_json::json!(true));
+    assert_eq!(result.program_call_args["isExact"], serde_json::json!(true));
 }
 
 #[test]
@@ -432,7 +441,7 @@ fn roundtrip_option_some() {
     let disc = idl.instructions[0].discriminator.as_ref().unwrap();
 
     let mut data = disc.clone();
-    data.push(1u8);                               // Some
+    data.push(1u8); // Some
     data.extend_from_slice(&300u16.to_le_bytes());
 
     let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl).unwrap();
@@ -549,7 +558,7 @@ fn roundtrip_multiple_instructions_distinct_dispatch() {
     let r = parse_instruction_with_idl(&data2, TEST_PROGRAM_ID, &idl).unwrap();
     assert_eq!(r.instruction_name, "withdraw");
     assert_eq!(r.program_call_args["amount"], serde_json::json!(50));
-    assert_eq!(r.program_call_args["all"],    serde_json::json!(false));
+    assert_eq!(r.program_call_args["all"], serde_json::json!(false));
 }
 
 // ── Defined type (struct) roundtrip tests ────────────────────────────────────
@@ -578,17 +587,17 @@ fn roundtrip_defined_struct_arg() {
 
     let mut data = disc.clone();
     data.extend_from_slice(&5000u64.to_le_bytes()); // price
-    data.extend_from_slice(&10u32.to_le_bytes());   // quantity
-    data.push(1u8);                                  // side = buy
+    data.extend_from_slice(&10u32.to_le_bytes()); // quantity
+    data.push(1u8); // side = buy
 
     // Must parse and return Ok with the struct contents.
     let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl).unwrap();
     assert_eq!(result.instruction_name, "createOrder");
     // Struct fields are nested under the "params" key.
     let params = &result.program_call_args["params"];
-    assert_eq!(params["price"],    serde_json::json!(5000));
+    assert_eq!(params["price"], serde_json::json!(5000));
     assert_eq!(params["quantity"], serde_json::json!(10));
-    assert_eq!(params["side"],     serde_json::json!(true));
+    assert_eq!(params["side"], serde_json::json!(true));
 }
 
 // ── SizeGuard boundary tests ──────────────────────────────────────────────────
@@ -616,7 +625,10 @@ fn size_guard_huge_vec_length_prefix_is_rejected_cleanly() {
 
     let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
     // Must be Err, not a panic or OOM.
-    assert!(result.is_err(), "expected Err for over-budget Vec length, got Ok");
+    assert!(
+        result.is_err(),
+        "expected Err for over-budget Vec length, got Ok"
+    );
 }
 
 /// Same as above but with a Vec<u64> (8 bytes/element) — smaller element count
@@ -639,5 +651,8 @@ fn size_guard_vec_u64_over_budget() {
     data.extend_from_slice(&100_000u32.to_le_bytes());
 
     let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
-    assert!(result.is_err(), "expected Err for over-budget Vec<u64> length");
+    assert!(
+        result.is_err(),
+        "expected Err for over-budget Vec<u64> length"
+    );
 }
