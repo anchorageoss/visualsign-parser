@@ -315,11 +315,15 @@ fn arb_idl_type() -> impl Strategy<Value = serde_json::Value> {
         let p_vec = prim.clone();
         let p_opt = prim.clone();
         let p_arr = prim.clone();
+        let p_vec_opt = prim.clone(); // Vec<Option<T>>
+        let p_opt_vec = prim.clone(); // Option<Vec<T>>
         prop_oneof![
             4 => Just(prim),
             1 => Just(serde_json::json!({"vec": p_vec})),
             1 => Just(serde_json::json!({"option": p_opt})),
             1 => (1usize..=4).prop_map(move |n| serde_json::json!({"array": [p_arr.clone(), n]})),
+            1 => Just(serde_json::json!({"vec": {"option": p_vec_opt}})),
+            1 => Just(serde_json::json!({"option": {"vec": p_opt_vec}})),
         ]
     })
 }
@@ -352,27 +356,63 @@ proptest! {
     // Default 256 cases; override with PROPTEST_CASES=N.
     #![proptest_config(ProptestConfig::default())]
 
-    /// Random IDL registered for a program + random instruction bytes: the full
-    /// pipeline must never panic and must return Ok.
+    /// Random IDL registered for a program + instruction data that is either
+    /// (a) a valid discriminator prefix + random arg bytes, or (b) fully random
+    /// bytes — 50/50 split.  The full pipeline must never panic.
+    ///
+    /// The valid-discriminator half ensures argument-decoding code is exercised,
+    /// not just the discriminator-matching paths.
     #[test]
     fn fuzz_pipeline_never_panics(
         idl_json in arb_idl_json(),
+        use_valid_disc in any::<bool>(),
+        inst_idx in any::<usize>(),
         data in prop::collection::vec(any::<u8>(), 0..1300usize),
     ) {
         let program_id = Pubkey::new_unique();
-        let tx = build_transaction(program_id, vec![], data);
+        let bytes = if use_valid_disc {
+            if let Ok(idl) = decode_idl_data(&idl_json) {
+                if !idl.instructions.is_empty() {
+                    let inst = &idl.instructions[inst_idx % idl.instructions.len()];
+                    if let Some(disc) = &inst.discriminator {
+                        let mut d = disc.clone();
+                        d.extend_from_slice(&data);
+                        d
+                    } else { data }
+                } else { data }
+            } else { data }
+        } else {
+            data
+        };
+        let tx = build_transaction(program_id, vec![], bytes);
         let _ = transaction_to_visual_sign(tx, options_with_idl(&program_id, &idl_json, "F"));
     }
 
     /// The number of instruction fields in the output always equals the number
-    /// of instructions in the transaction.
+    /// of instructions in the transaction — regardless of valid/invalid discriminator.
     #[test]
     fn fuzz_pipeline_field_count_invariant(
         idl_json in arb_idl_json(),
+        use_valid_disc in any::<bool>(),
+        inst_idx in any::<usize>(),
         data in prop::collection::vec(any::<u8>(), 0..1300usize),
     ) {
         let program_id = Pubkey::new_unique();
-        let tx = build_transaction(program_id, vec![], data);
+        let bytes = if use_valid_disc {
+            if let Ok(idl) = decode_idl_data(&idl_json) {
+                if !idl.instructions.is_empty() {
+                    let inst = &idl.instructions[inst_idx % idl.instructions.len()];
+                    if let Some(disc) = &inst.discriminator {
+                        let mut d = disc.clone();
+                        d.extend_from_slice(&data);
+                        d
+                    } else { data }
+                } else { data }
+            } else { data }
+        } else {
+            data
+        };
+        let tx = build_transaction(program_id, vec![], bytes);
         let inst_count = tx.message.instructions.len();
         let options = options_with_idl(&program_id, &idl_json, "F");
         if let Ok(payload) = transaction_to_visual_sign(tx, options) {
