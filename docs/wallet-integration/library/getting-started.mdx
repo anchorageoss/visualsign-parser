@@ -64,7 +64,7 @@ fn main() {
         developer_config: Some(DeveloperConfig {
             allow_signed_transactions: true,
         }),
-        abi_registry: None,
+
     };
 
     // Parse the transaction
@@ -137,9 +137,9 @@ let chain = Chain::Ethereum;  // or Chain::Solana, Chain::Sui, Chain::Tron
 For Ethereum transactions, you can provide custom ABIs to improve parsing of unrecognized contracts:
 
 ```rust
-use std::sync::Arc;
 use visualsign_ethereum::abi_registry::AbiRegistry;
 use visualsign_ethereum::embedded_abis::load_and_map_abi;
+use visualsign_ethereum::EthereumVisualSignConverter;
 
 // Create an ABI registry
 let mut abi_registry = AbiRegistry::new();
@@ -153,12 +153,14 @@ load_and_map_abi(
     "0x1234...abcd",           // Contract address
 ).expect("Failed to load ABI");
 
-// Use the registry in options
-let options = VisualSignOptions {
-    // ... other options
-    abi_registry: Some(Arc::new(abi_registry)),
-    ..Default::default()
-};
+// Use the Ethereum converter directly with the ABI registry
+let converter = EthereumVisualSignConverter::new();
+let options = VisualSignOptions::default();
+let payload = converter.convert_from_string_with_abi(
+    raw_tx,
+    options,
+    Some(&abi_registry),
+).expect("Failed to parse transaction");
 ```
 
 ### Adding custom IDLs (Solana)

@@ -7,7 +7,6 @@ use generated::parser::{
 };
 use parser_app::registry::create_registry;
 use std::collections::HashMap;
-use std::sync::Arc;
 use visualsign::registry::Chain;
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
@@ -365,7 +364,7 @@ fn load_idl_from_file(file_path: &str) -> Result<String, Box<dyn std::error::Err
 fn parse_and_display(
     chain: &str,
     raw_tx: &str,
-    mut options: VisualSignOptions,
+    options: VisualSignOptions,
     output_format: OutputFormat,
     condensed_only: bool,
     abi_json_mappings: &[String],
@@ -380,8 +379,8 @@ fn parse_and_display(
         Some(1)
     };
 
-    // Build and report ABI registry from mappings
-    if !abi_json_mappings.is_empty() {
+    // Build ABI registry from CLI mappings (Ethereum-only)
+    let cli_abi_registry = if !abi_json_mappings.is_empty() {
         eprintln!("Registering custom ABIs:");
         let (registry, valid_count) =
             build_abi_registry_from_mappings(abi_json_mappings, chain_id.unwrap_or(1));
@@ -390,11 +389,20 @@ fn parse_and_display(
             valid_count,
             abi_json_mappings.len()
         );
-        options.abi_registry = Some(Arc::new(registry));
-    }
+        Some(registry)
+    } else {
+        None
+    };
 
-    let registry = create_registry();
-    let signable_payload_str = registry.convert_transaction(&registry_chain, raw_tx, options);
+    // If CLI ABIs are provided and chain is Ethereum, use the direct converter path
+    let signable_payload_str =
+        if cli_abi_registry.is_some() && matches!(registry_chain, Chain::Ethereum) {
+            let converter = visualsign_ethereum::EthereumVisualSignConverter::new();
+            converter.convert_from_string_with_abi(raw_tx, options, cli_abi_registry.as_ref())
+        } else {
+            let registry = create_registry();
+            registry.convert_transaction(&registry_chain, raw_tx, options)
+        };
     match signable_payload_str {
         Ok(payload) => match output_format {
             OutputFormat::Json => {
@@ -519,7 +527,6 @@ impl Cli {
             developer_config: Some(DeveloperConfig {
                 allow_signed_transactions: true,
             }),
-            abi_registry: None,
         };
 
         parse_and_display(

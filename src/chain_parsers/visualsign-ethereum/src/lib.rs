@@ -189,6 +189,60 @@ impl EthereumVisualSignConverter {
     }
 }
 
+impl EthereumVisualSignConverter {
+    /// Parse and convert a transaction string with an explicit ABI registry override.
+    ///
+    /// The `override_abi_registry` takes precedence over any ABI extracted from metadata.
+    /// This is used by the CLI where ABIs are loaded from files with address mappings.
+    pub fn convert_from_string_with_abi(
+        &self,
+        transaction_data: &str,
+        options: VisualSignOptions,
+        override_abi_registry: Option<&abi_registry::AbiRegistry>,
+    ) -> Result<SignablePayload, VisualSignError> {
+        let wrapper = EthereumTransactionWrapper::from_string_with_options(
+            transaction_data,
+            options.developer_config.as_ref(),
+        )
+        .map_err(VisualSignError::ParseError)?;
+
+        let transaction = wrapper.inner().clone();
+        let layered_registry = self.create_layered_registry(&options);
+
+        let is_supported = match transaction.tx_type() {
+            TxType::Eip2930 | TxType::Eip4844 | TxType::Eip7702 => false,
+            TxType::Legacy | TxType::Eip1559 => true,
+        };
+        if !is_supported {
+            return Err(VisualSignError::DecodeError(format!(
+                "Unsupported transaction type: {}",
+                transaction.tx_type()
+            )));
+        }
+
+        // CLI ABI takes precedence over metadata-extracted ABI
+        let metadata_abi =
+            match grpc_abi::try_extract_abi_from_chain_metadata(options.metadata.as_ref()) {
+                Some(Ok(registry)) => Some(registry),
+                Some(Err(e)) => {
+                    log::warn!("Failed to extract wallet-provided ABI: {e}");
+                    None
+                }
+                None => None,
+            };
+
+        let abi_ref = override_abi_registry.or(metadata_abi.as_ref());
+
+        convert_to_visual_sign_payload(
+            transaction,
+            options,
+            &layered_registry,
+            &self.visualizer_registry,
+            abi_ref,
+        )
+    }
+}
+
 impl Default for EthereumVisualSignConverter {
     fn default() -> Self {
         Self::new()
@@ -216,6 +270,17 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
             }
         }
 
+        // Extract ABI from wallet-provided metadata (graceful degradation)
+        let abi_registry =
+            match grpc_abi::try_extract_abi_from_chain_metadata(options.metadata.as_ref()) {
+                Some(Ok(registry)) => Some(registry),
+                Some(Err(e)) => {
+                    log::warn!("Failed to extract wallet-provided ABI: {e}");
+                    None
+                }
+                None => None,
+            };
+
         let is_supported = match transaction.tx_type() {
             TxType::Eip2930 | TxType::Eip4844 | TxType::Eip7702 => false,
             TxType::Legacy | TxType::Eip1559 => true,
@@ -226,6 +291,7 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
                 options,
                 &layered_registry,
                 &self.visualizer_registry,
+                abi_registry.as_ref(),
             );
         }
         Err(VisualSignError::DecodeError(format!(
@@ -378,6 +444,7 @@ fn convert_to_visual_sign_payload(
     options: VisualSignOptions,
     layered_registry: &LayeredRegistry<registry::ContractRegistry>,
     visualizer_registry: &visualizer::EthereumVisualizerRegistry,
+    abi_registry: Option<&abi_registry::AbiRegistry>,
 ) -> Result<SignablePayload, VisualSignError> {
     // Determine chain ID: prioritize metadata, fallback to transaction, default to mainnet for legacy txs
     let chain_id = if let Some(metadata_chain_id) =
@@ -404,12 +471,6 @@ fn convert_to_visual_sign_payload(
             "Unable to determine chain_id: no metadata provided and transaction does not contain chain_id".to_string()
         ));
     };
-
-    // Try to extract AbiRegistry from options
-    let abi_registry = options
-        .abi_registry
-        .as_ref()
-        .and_then(|any_reg| any_reg.downcast_ref::<abi_registry::AbiRegistry>());
 
     let network_name = networks::get_network_name(Some(chain_id));
 
@@ -755,7 +816,6 @@ mod tests {
             transaction_name: Some("Custom Transaction Title".to_string()),
             metadata: None,
             developer_config: None,
-            abi_registry: None,
         };
         let payload = transaction_to_visual_sign(tx, options).unwrap();
 
@@ -983,7 +1043,6 @@ mod tests {
                     transaction_name: Some("Test Transaction".to_string()),
                     metadata: None,
                     developer_config: None,
-                    abi_registry: None,
                 }
             ),
             Ok(SignablePayload::new(
