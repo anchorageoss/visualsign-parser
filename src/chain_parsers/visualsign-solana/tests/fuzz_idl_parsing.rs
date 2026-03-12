@@ -5,6 +5,9 @@
 //!
 //! - IDL shape: varying instruction counts, argument counts, and argument types
 //! - Instruction data bytes: fully random, correct-discriminator prefix, empty, overlong
+//! - Defined types (structs) referenced from instruction args
+//! - Nested container types: `Vec<Option<T>>`, `Option<Vec<T>>`
+//! - SizeGuard boundary: large Vec/String length prefixes with little backing data
 //!
 //! Run: `cargo test --test fuzz_idl_parsing`
 //! More iterations: `PROPTEST_CASES=5000 cargo test --test fuzz_idl_parsing`
@@ -38,18 +41,25 @@ fn arb_primitive_type() -> impl Strategy<Value = serde_json::Value> {
     ]
 }
 
-/// IDL type: a primitive or a container (Vec, Option, Array) wrapping a primitive.
+/// IDL type: a primitive or a container (Vec, Option, Array, or nested combo)
+/// wrapping a primitive.
+///
+/// Weights: 4 primitive : 1 Vec : 1 Option : 1 Array : 1 Vec<Option<T>> : 1 Option<Vec<T>>
 fn arb_idl_type() -> impl Strategy<Value = serde_json::Value> {
     arb_primitive_type().prop_flat_map(|prim| {
         let p_vec = prim.clone();
         let p_opt = prim.clone();
         let p_arr = prim.clone();
+        let p_vec_opt = prim.clone(); // Vec<Option<T>>
+        let p_opt_vec = prim.clone(); // Option<Vec<T>>
         prop_oneof![
-            // Weighted 4:1:1:1 — most fields are primitives, containers less frequent.
+            // Most fields are primitives; containers and nested types less frequent.
             4 => Just(prim),
             1 => Just(serde_json::json!({"vec": p_vec})),
             1 => Just(serde_json::json!({"option": p_opt})),
             1 => (1usize..=4).prop_map(move |n| serde_json::json!({"array": [p_arr.clone(), n]})),
+            1 => Just(serde_json::json!({"vec": {"option": p_vec_opt}})),
+            1 => Just(serde_json::json!({"option": {"vec": p_opt_vec}})),
         ]
     })
 }
@@ -78,12 +88,63 @@ fn arb_idl_instruction() -> impl Strategy<Value = serde_json::Value> {
         })
 }
 
-/// Full IDL JSON string with 1–16 randomly-structured instructions.
+/// Full IDL JSON string with 1–16 randomly-structured instructions (primitive + container types).
 fn arb_idl_json() -> impl Strategy<Value = String> {
     prop::collection::vec(arb_idl_instruction(), 1..=16).prop_map(|instructions| {
         serde_json::json!({
             "instructions": instructions,
             "types": [],
+        })
+        .to_string()
+    })
+}
+
+/// IDL JSON string where one instruction references a randomly-generated defined struct.
+///
+/// This exercises the `Defined` type resolution path through `types`.
+fn arb_defined_struct_idl_json() -> impl Strategy<Value = String> {
+    (
+        arb_identifier(), // struct name
+        prop::collection::vec(
+            (arb_identifier(), arb_primitive_type())
+                .prop_map(|(n, t)| serde_json::json!({"name": n, "type": t})),
+            1..=8, // struct fields (primitives only — avoids Defined-in-Defined depth limit)
+        ),
+        arb_identifier(), // instruction name
+        // extra instructions that use primitive args, not the defined type
+        prop::collection::vec(arb_idl_instruction(), 0..=4),
+    )
+        .prop_map(|(struct_name, fields, inst_name, mut extra_insts)| {
+            let main_inst = serde_json::json!({
+                "name": inst_name,
+                "accounts": [],
+                "args": [{"name": "data", "type": {"defined": struct_name}}]
+            });
+            extra_insts.push(main_inst);
+            serde_json::json!({
+                "instructions": extra_insts,
+                "types": [{
+                    "name": struct_name,
+                    "type": {"kind": "struct", "fields": fields}
+                }]
+            })
+            .to_string()
+        })
+}
+
+/// IDL JSON string where every instruction has at least one `Vec` arg.
+///
+/// Used to stress-test the SizeGuard, which guards against large length-prefix
+/// attacks (e.g. claiming a Vec of 10,000,000 u8 when the cursor has 4 bytes).
+fn arb_vec_arg_idl_json() -> impl Strategy<Value = String> {
+    (arb_identifier(), arb_idl_type()).prop_map(|(inst_name, elem_type)| {
+        serde_json::json!({
+            "instructions": [{
+                "name": inst_name,
+                "accounts": [],
+                "args": [{"name": "data", "type": {"vec": elem_type}}]
+            }],
+            "types": []
         })
         .to_string()
     })
@@ -95,16 +156,39 @@ proptest! {
     // Default is 256 cases. Override with PROPTEST_CASES=5000 for deeper fuzzing.
     #![proptest_config(ProptestConfig::default())]
 
-    /// Core crash-safety test: a random IDL paired with random instruction bytes
-    /// must never cause a panic — only `Ok` or a clean `Err`.
+    /// Core crash-safety test: a random IDL paired with instruction data that is
+    /// either (a) fully random bytes or (b) a valid discriminator prefix followed
+    /// by random arg bytes — 50/50 split.
+    ///
+    /// Using a valid discriminator for half of all inputs ensures the argument-
+    /// decoding code paths are covered, not just the discriminator-matching paths.
+    ///
+    /// On the valid-discriminator branch: if parsing returns `Ok`, the instruction
+    /// name must be non-empty — confirming that the parse code path was taken, not
+    /// just that an `Err` was returned silently.
     #[test]
     fn fuzz_idl_parsing_never_panics(
         idl_json in arb_idl_json(),
+        use_valid_disc in any::<bool>(),
+        inst_idx in any::<usize>(),
         data in prop::collection::vec(any::<u8>(), 0..200usize),
     ) {
-        // If the IDL itself fails to decode, that's fine; we only care about panics.
         if let Ok(idl) = decode_idl_data(&idl_json) {
-            let _ = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
+            if use_valid_disc && !idl.instructions.is_empty() {
+                let inst = &idl.instructions[inst_idx % idl.instructions.len()];
+                if let Some(disc) = &inst.discriminator {
+                    let mut d = disc.clone();
+                    d.extend_from_slice(&data);
+                    if let Ok(result) = parse_instruction_with_idl(&d, TEST_PROGRAM_ID, &idl) {
+                        prop_assert!(!result.instruction_name.is_empty(),
+                            "Ok result must have a non-empty instruction name");
+                    }
+                    // Err is also acceptable — random arg bytes may be too short or malformed
+                }
+            } else {
+                // Random bytes: only crash-safety matters, not the Ok/Err outcome
+                let _ = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
+            }
         }
     }
 
@@ -117,6 +201,9 @@ proptest! {
     /// Take a valid 8-byte discriminator from a randomly-selected instruction
     /// (not always the first) and append random arg bytes up to MAX_CURSOR_LENGTH
     /// (1232).  The parser must return `Ok` or a clean `Err` — never a panic.
+    ///
+    /// On `Ok`: the instruction name must match the selected instruction, confirming
+    /// that discriminator dispatch routed to the correct handler.
     #[test]
     fn fuzz_valid_discriminator_random_args(
         idl_json in arb_idl_json(),
@@ -126,9 +213,72 @@ proptest! {
         if let Ok(idl) = decode_idl_data(&idl_json) {
             if !idl.instructions.is_empty() {
                 let inst = &idl.instructions[inst_idx % idl.instructions.len()];
+                let expected_name = inst.name.clone();
                 if let Some(disc) = &inst.discriminator {
                     let mut data = disc.clone();
                     data.extend_from_slice(&arg_bytes);
+                    if let Ok(result) = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl) {
+                        prop_assert_eq!(&result.instruction_name, &expected_name,
+                            "discriminator must dispatch to the correct instruction");
+                    }
+                    // Err is acceptable — random arg bytes may be too short or malformed
+                }
+            }
+        }
+    }
+
+    /// IDLs with defined struct types must not panic regardless of instruction bytes.
+    /// Uses the same 50/50 valid-discriminator mix as the core test.
+    ///
+    /// On the valid-discriminator branch: if parsing returns `Ok`, the instruction
+    /// name must match the selected instruction, confirming that defined-type
+    /// resolution was attempted (not short-circuited before dispatch).
+    #[test]
+    fn fuzz_defined_struct_types_never_panics(
+        idl_json in arb_defined_struct_idl_json(),
+        use_valid_disc in any::<bool>(),
+        inst_idx in any::<usize>(),
+        data in prop::collection::vec(any::<u8>(), 0..200usize),
+    ) {
+        if let Ok(idl) = decode_idl_data(&idl_json) {
+            if use_valid_disc && !idl.instructions.is_empty() {
+                let inst = &idl.instructions[inst_idx % idl.instructions.len()];
+                let expected_name = inst.name.clone();
+                if let Some(disc) = &inst.discriminator {
+                    let mut d = disc.clone();
+                    d.extend_from_slice(&data);
+                    if let Ok(result) = parse_instruction_with_idl(&d, TEST_PROGRAM_ID, &idl) {
+                        prop_assert_eq!(&result.instruction_name, &expected_name,
+                            "defined-type instruction must dispatch to the correct handler");
+                    }
+                    // Err is acceptable — random arg bytes may not satisfy struct field layout
+                }
+            } else {
+                let _ = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
+            }
+        }
+    }
+
+    /// SizeGuard stress: a Vec arg instruction with a valid discriminator followed
+    /// by an arbitrary u32 length prefix and a short trailing payload.
+    ///
+    /// The SizeGuard must prevent the parser from allocating memory proportional
+    /// to the claimed length when the cursor contains far fewer bytes
+    /// (budget = MAX_CURSOR_LENGTH × MAX_ALLOC_PER_CURSOR_LENGTH = 1232 × 24 = 29 568 bytes).
+    #[test]
+    fn fuzz_size_guard_vec_length_prefix(
+        idl_json in arb_vec_arg_idl_json(),
+        length_prefix in any::<u32>(),
+        trailing in prop::collection::vec(any::<u8>(), 0..=8usize),
+    ) {
+        if let Ok(idl) = decode_idl_data(&idl_json) {
+            if !idl.instructions.is_empty() {
+                // There is exactly one instruction in arb_vec_arg_idl_json
+                let inst = &idl.instructions[0];
+                if let Some(disc) = &inst.discriminator {
+                    let mut data = disc.clone();
+                    data.extend_from_slice(&length_prefix.to_le_bytes());
+                    data.extend_from_slice(&trailing);
                     let _ = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
                 }
             }
@@ -340,4 +490,94 @@ fn roundtrip_multiple_instructions_distinct_dispatch() {
     assert_eq!(r.instruction_name, "withdraw");
     assert_eq!(r.program_call_args["amount"], serde_json::json!(50));
     assert_eq!(r.program_call_args["all"],    serde_json::json!(false));
+}
+
+// ── Defined type (struct) roundtrip tests ────────────────────────────────────
+
+/// An instruction whose single arg is a defined struct with primitive fields
+/// is decoded correctly end-to-end.
+#[test]
+fn roundtrip_defined_struct_arg() {
+    let idl_json = serde_json::json!({
+        "instructions": [{"name": "createOrder", "accounts": [], "args": [
+            {"name": "params", "type": {"defined": "OrderParams"}}
+        ]}],
+        "types": [{
+            "name": "OrderParams",
+            "type": {"kind": "struct", "fields": [
+                {"name": "price",    "type": "u64"},
+                {"name": "quantity", "type": "u32"},
+                {"name": "side",     "type": "bool"},
+            ]}
+        }]
+    })
+    .to_string();
+
+    let idl = decode_idl_data(&idl_json).unwrap();
+    let disc = idl.instructions[0].discriminator.as_ref().unwrap();
+
+    let mut data = disc.clone();
+    data.extend_from_slice(&5000u64.to_le_bytes()); // price
+    data.extend_from_slice(&10u32.to_le_bytes());   // quantity
+    data.push(1u8);                                  // side = buy
+
+    // Must parse and return Ok with the struct contents.
+    let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl).unwrap();
+    assert_eq!(result.instruction_name, "createOrder");
+    // Struct fields are nested under the "params" key.
+    let params = &result.program_call_args["params"];
+    assert_eq!(params["price"],    serde_json::json!(5000));
+    assert_eq!(params["quantity"], serde_json::json!(10));
+    assert_eq!(params["side"],     serde_json::json!(true));
+}
+
+// ── SizeGuard boundary tests ──────────────────────────────────────────────────
+
+/// A Vec<u8> arg with a length prefix that vastly exceeds the backing data
+/// must be rejected cleanly (Err), not panic or over-allocate.
+///
+/// SizeGuard budget = MAX_CURSOR_LENGTH (1232) × MAX_ALLOC_PER_CURSOR_LENGTH (24) = 29 568 bytes.
+#[test]
+fn size_guard_huge_vec_length_prefix_is_rejected_cleanly() {
+    let idl_json = serde_json::json!({
+        "instructions": [{"name": "writeData", "accounts": [], "args": [
+            {"name": "payload", "type": {"vec": "u8"}}
+        ]}],
+        "types": []
+    })
+    .to_string();
+
+    let idl = decode_idl_data(&idl_json).unwrap();
+    let disc = idl.instructions[0].discriminator.as_ref().unwrap();
+
+    // Claim 10 000 000 elements but provide zero backing bytes.
+    let mut data = disc.clone();
+    data.extend_from_slice(&10_000_000u32.to_le_bytes());
+
+    let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
+    // Must be Err, not a panic or OOM.
+    assert!(result.is_err(), "expected Err for over-budget Vec length, got Ok");
+}
+
+/// Same as above but with a Vec<u64> (8 bytes/element) — smaller element count
+/// is still enough to exceed the budget relative to cursor length.
+#[test]
+fn size_guard_vec_u64_over_budget() {
+    let idl_json = serde_json::json!({
+        "instructions": [{"name": "setRates", "accounts": [], "args": [
+            {"name": "rates", "type": {"vec": "u64"}}
+        ]}],
+        "types": []
+    })
+    .to_string();
+
+    let idl = decode_idl_data(&idl_json).unwrap();
+    let disc = idl.instructions[0].discriminator.as_ref().unwrap();
+
+    // 100 000 × 8 bytes = 800 000 bytes, far exceeds the 29 568-byte budget.
+    let mut data = disc.clone();
+    data.extend_from_slice(&100_000u32.to_le_bytes());
+
+    let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
+    assert!(result.is_err(), "expected Err for over-budget Vec<u64> length");
 }
