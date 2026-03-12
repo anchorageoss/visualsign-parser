@@ -14,6 +14,13 @@
 //! Contrast with fuzz_idl_parsing.rs, which calls parse_instruction_with_idl
 //! directly and never exercises IdlRegistry, the visualizer dispatch, or the
 //! SignablePayloadField wrapping.
+//!
+//! IDL shapes are generated via `#[derive(Arbitrary)]` types in `common/mod.rs`
+//! (`ArbIdl`), replacing the manual proptest strategy functions that were
+//! previously duplicated from fuzz_idl_parsing.rs.
+
+mod common;
+use common::ArbIdl;
 
 use std::collections::HashMap;
 
@@ -287,69 +294,6 @@ fn pipeline_multi_instruction_mixed_programs() {
     assert_eq!(title_b, program_b.to_string());
 }
 
-// ── Proptest strategies (duplicated from fuzz_idl_parsing.rs) ─────────────────
-
-fn arb_primitive_type() -> impl Strategy<Value = serde_json::Value> {
-    prop_oneof![
-        Just(serde_json::json!("bool")),
-        Just(serde_json::json!("u8")),
-        Just(serde_json::json!("u16")),
-        Just(serde_json::json!("u32")),
-        Just(serde_json::json!("u64")),
-        Just(serde_json::json!("u128")),
-        Just(serde_json::json!("i8")),
-        Just(serde_json::json!("i16")),
-        Just(serde_json::json!("i32")),
-        Just(serde_json::json!("i64")),
-        Just(serde_json::json!("i128")),
-        Just(serde_json::json!("f32")),
-        Just(serde_json::json!("f64")),
-        Just(serde_json::json!("publicKey")),
-        Just(serde_json::json!("string")),
-        Just(serde_json::json!("bytes")),
-    ]
-}
-
-fn arb_idl_type() -> impl Strategy<Value = serde_json::Value> {
-    arb_primitive_type().prop_flat_map(|prim| {
-        let p_vec = prim.clone();
-        let p_opt = prim.clone();
-        let p_arr = prim.clone();
-        let p_vec_opt = prim.clone(); // Vec<Option<T>>
-        let p_opt_vec = prim.clone(); // Option<Vec<T>>
-        prop_oneof![
-            4 => Just(prim),
-            1 => Just(serde_json::json!({"vec": p_vec})),
-            1 => Just(serde_json::json!({"option": p_opt})),
-            1 => (1usize..=4).prop_map(move |n| serde_json::json!({"array": [p_arr.clone(), n]})),
-            1 => Just(serde_json::json!({"vec": {"option": p_vec_opt}})),
-            1 => Just(serde_json::json!({"option": {"vec": p_opt_vec}})),
-        ]
-    })
-}
-
-fn arb_identifier() -> impl Strategy<Value = String> {
-    "[a-z][a-z0-9]{1,15}"
-}
-
-fn arb_idl_instruction() -> impl Strategy<Value = serde_json::Value> {
-    (
-        arb_identifier(),
-        prop::collection::vec(
-            (arb_identifier(), arb_idl_type())
-                .prop_map(|(name, ty)| serde_json::json!({"name": name, "type": ty})),
-            0..=20,
-        ),
-    )
-        .prop_map(|(name, args)| serde_json::json!({"name": name, "accounts": [], "args": args}))
-}
-
-fn arb_idl_json() -> impl Strategy<Value = String> {
-    prop::collection::vec(arb_idl_instruction(), 1..=16).prop_map(|instructions| {
-        serde_json::json!({"instructions": instructions, "types": []}).to_string()
-    })
-}
-
 // ── Property-based pipeline tests ────────────────────────────────────────────
 
 proptest! {
@@ -364,11 +308,12 @@ proptest! {
     /// not just the discriminator-matching paths.
     #[test]
     fn fuzz_pipeline_never_panics(
-        idl_json in arb_idl_json(),
+        arb_idl in any::<ArbIdl>(),
         use_valid_disc in any::<bool>(),
         inst_idx in any::<usize>(),
         data in prop::collection::vec(any::<u8>(), 0..1300usize),
     ) {
+        let idl_json = arb_idl.to_json_string();
         let program_id = Pubkey::new_unique();
         let bytes = if use_valid_disc {
             if let Ok(idl) = decode_idl_data(&idl_json) {
@@ -392,11 +337,12 @@ proptest! {
     /// of instructions in the transaction — regardless of valid/invalid discriminator.
     #[test]
     fn fuzz_pipeline_field_count_invariant(
-        idl_json in arb_idl_json(),
+        arb_idl in any::<ArbIdl>(),
         use_valid_disc in any::<bool>(),
         inst_idx in any::<usize>(),
         data in prop::collection::vec(any::<u8>(), 0..1300usize),
     ) {
+        let idl_json = arb_idl.to_json_string();
         let program_id = Pubkey::new_unique();
         let bytes = if use_valid_disc {
             if let Ok(idl) = decode_idl_data(&idl_json) {
@@ -424,10 +370,11 @@ proptest! {
     /// the IDL code path is always taken — title contains "(IDL)".
     #[test]
     fn fuzz_pipeline_idl_path_taken_on_valid_discriminator(
-        idl_json in arb_idl_json(),
+        arb_idl in any::<ArbIdl>(),
         inst_idx in any::<usize>(),
         arg_bytes in prop::collection::vec(any::<u8>(), 0..200usize),
     ) {
+        let idl_json = arb_idl.to_json_string();
         let Ok(idl) = decode_idl_data(&idl_json) else { return Ok(()); };
         let inst = &idl.instructions[inst_idx % idl.instructions.len()];
         let Some(disc) = &inst.discriminator else { return Ok(()); };

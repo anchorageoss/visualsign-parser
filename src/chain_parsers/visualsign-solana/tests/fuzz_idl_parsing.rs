@@ -9,8 +9,15 @@
 //! - Nested container types: `Vec<Option<T>>`, `Option<Vec<T>>`
 //! - SizeGuard boundary: large Vec/String length prefixes with little backing data
 //!
+//! IDL shapes are generated via `#[derive(Arbitrary)]` types in `common/mod.rs`
+//! (`ArbIdl`, `ArbDefinedStructIdl`, `ArbVecArgIdl`), which replace the
+//! manual proptest strategy functions from the original implementation.
+//!
 //! Run: `cargo test --test fuzz_idl_parsing`
 //! More iterations: `PROPTEST_CASES=5000 cargo test --test fuzz_idl_parsing`
+
+mod common;
+use common::{ArbDefinedStructIdl, ArbIdl, ArbVecArgIdl};
 
 use proptest::prelude::*;
 use solana_parser::solana::structs::{IdlInstruction, IdlType, IdlTypeDefinition, IdlTypeDefinitionType};
@@ -18,139 +25,6 @@ use solana_parser::{decode_idl_data, parse_instruction_with_idl};
 use std::sync::Arc;
 
 const TEST_PROGRAM_ID: &str = "11111111111111111111111111111111";
-
-// ── Strategies ───────────────────────────────────────────────────────────────
-
-/// All primitive IDL types in their JSON wire format (as expected by `decode_idl_data`).
-fn arb_primitive_type() -> impl Strategy<Value = serde_json::Value> {
-    prop_oneof![
-        Just(serde_json::json!("bool")),
-        Just(serde_json::json!("u8")),
-        Just(serde_json::json!("u16")),
-        Just(serde_json::json!("u32")),
-        Just(serde_json::json!("u64")),
-        Just(serde_json::json!("u128")),
-        Just(serde_json::json!("i8")),
-        Just(serde_json::json!("i16")),
-        Just(serde_json::json!("i32")),
-        Just(serde_json::json!("i64")),
-        Just(serde_json::json!("i128")),
-        Just(serde_json::json!("f32")),
-        Just(serde_json::json!("f64")),
-        Just(serde_json::json!("publicKey")),
-        Just(serde_json::json!("string")),
-        Just(serde_json::json!("bytes")),
-    ]
-}
-
-/// IDL type: a primitive or a container (Vec, Option, Array, or nested combo)
-/// wrapping a primitive.
-///
-/// Weights: 4 primitive : 1 Vec : 1 Option : 1 Array : 1 Vec<Option<T>> : 1 Option<Vec<T>>
-fn arb_idl_type() -> impl Strategy<Value = serde_json::Value> {
-    arb_primitive_type().prop_flat_map(|prim| {
-        let p_vec = prim.clone();
-        let p_opt = prim.clone();
-        let p_arr = prim.clone();
-        let p_vec_opt = prim.clone(); // Vec<Option<T>>
-        let p_opt_vec = prim.clone(); // Option<Vec<T>>
-        prop_oneof![
-            // Most fields are primitives; containers and nested types less frequent.
-            4 => Just(prim),
-            1 => Just(serde_json::json!({"vec": p_vec})),
-            1 => Just(serde_json::json!({"option": p_opt})),
-            1 => (1usize..=4).prop_map(move |n| serde_json::json!({"array": [p_arr.clone(), n]})),
-            1 => Just(serde_json::json!({"vec": {"option": p_vec_opt}})),
-            1 => Just(serde_json::json!({"option": {"vec": p_opt_vec}})),
-        ]
-    })
-}
-
-/// Valid identifier: starts with [a-z], followed by 1–15 lowercase alphanumeric chars.
-fn arb_identifier() -> impl Strategy<Value = String> {
-    "[a-z][a-z0-9]{1,15}"
-}
-
-/// Random IDL instruction: a name + 0–20 args of randomly-chosen types.
-fn arb_idl_instruction() -> impl Strategy<Value = serde_json::Value> {
-    (
-        arb_identifier(),
-        prop::collection::vec(
-            (arb_identifier(), arb_idl_type())
-                .prop_map(|(name, ty)| serde_json::json!({"name": name, "type": ty})),
-            0..=20,
-        ),
-    )
-        .prop_map(|(name, args)| {
-            serde_json::json!({
-                "name": name,
-                "accounts": [],
-                "args": args,
-            })
-        })
-}
-
-/// Full IDL JSON string with 1–16 randomly-structured instructions (primitive + container types).
-fn arb_idl_json() -> impl Strategy<Value = String> {
-    prop::collection::vec(arb_idl_instruction(), 1..=16).prop_map(|instructions| {
-        serde_json::json!({
-            "instructions": instructions,
-            "types": [],
-        })
-        .to_string()
-    })
-}
-
-/// IDL JSON string where one instruction references a randomly-generated defined struct.
-///
-/// This exercises the `Defined` type resolution path through `types`.
-fn arb_defined_struct_idl_json() -> impl Strategy<Value = String> {
-    (
-        arb_identifier(), // struct name
-        prop::collection::vec(
-            (arb_identifier(), arb_primitive_type())
-                .prop_map(|(n, t)| serde_json::json!({"name": n, "type": t})),
-            1..=8, // struct fields (primitives only — avoids Defined-in-Defined depth limit)
-        ),
-        arb_identifier(), // instruction name
-        // extra instructions that use primitive args, not the defined type
-        prop::collection::vec(arb_idl_instruction(), 0..=4),
-    )
-        .prop_map(|(struct_name, fields, inst_name, mut extra_insts)| {
-            let main_inst = serde_json::json!({
-                "name": inst_name,
-                "accounts": [],
-                "args": [{"name": "data", "type": {"defined": struct_name}}]
-            });
-            extra_insts.push(main_inst);
-            serde_json::json!({
-                "instructions": extra_insts,
-                "types": [{
-                    "name": struct_name,
-                    "type": {"kind": "struct", "fields": fields}
-                }]
-            })
-            .to_string()
-        })
-}
-
-/// IDL JSON string where every instruction has at least one `Vec` arg.
-///
-/// Used to stress-test the SizeGuard, which guards against large length-prefix
-/// attacks (e.g. claiming a Vec of 10,000,000 u8 when the cursor has 4 bytes).
-fn arb_vec_arg_idl_json() -> impl Strategy<Value = String> {
-    (arb_identifier(), arb_idl_type()).prop_map(|(inst_name, elem_type)| {
-        serde_json::json!({
-            "instructions": [{
-                "name": inst_name,
-                "accounts": [],
-                "args": [{"name": "data", "type": {"vec": elem_type}}]
-            }],
-            "types": []
-        })
-        .to_string()
-    })
-}
 
 // ── Valid-input byte-generation strategies ────────────────────────────────────
 //
@@ -281,10 +155,11 @@ fn arb_valid_instruction_bytes(
 /// The bytes are always correctly encoded for the selected instruction's arg
 /// layout — so `parse_instruction_with_idl` is expected to return `Ok`.
 fn arb_idl_and_valid_bytes() -> impl Strategy<Value = (String, usize, Vec<u8>)> {
-    arb_idl_json().prop_flat_map(|idl_json| {
+    any::<ArbIdl>().prop_flat_map(|arb_idl| {
+        let idl_json = arb_idl.to_json_string();
         match decode_idl_data(&idl_json) {
             Err(_) => {
-                // arb_idl_json generates well-formed IDLs; this branch is rare.
+                // ArbIdl generates well-formed IDLs; this branch is rare.
                 Just((idl_json, 0usize, vec![])).boxed()
             }
             Ok(idl) => {
@@ -325,11 +200,12 @@ proptest! {
     /// just that an `Err` was returned silently.
     #[test]
     fn fuzz_idl_parsing_never_panics(
-        idl_json in arb_idl_json(),
+        arb_idl in any::<ArbIdl>(),
         use_valid_disc in any::<bool>(),
         inst_idx in any::<usize>(),
         data in prop::collection::vec(any::<u8>(), 0..200usize),
     ) {
+        let idl_json = arb_idl.to_json_string();
         if let Ok(idl) = decode_idl_data(&idl_json) {
             if use_valid_disc && !idl.instructions.is_empty() {
                 let inst = &idl.instructions[inst_idx % idl.instructions.len()];
@@ -363,10 +239,11 @@ proptest! {
     /// that discriminator dispatch routed to the correct handler.
     #[test]
     fn fuzz_valid_discriminator_random_args(
-        idl_json in arb_idl_json(),
+        arb_idl in any::<ArbIdl>(),
         inst_idx in any::<usize>(),
         arg_bytes in prop::collection::vec(any::<u8>(), 0..1300usize),
     ) {
+        let idl_json = arb_idl.to_json_string();
         if let Ok(idl) = decode_idl_data(&idl_json) {
             if !idl.instructions.is_empty() {
                 let inst = &idl.instructions[inst_idx % idl.instructions.len()];
@@ -392,11 +269,12 @@ proptest! {
     /// resolution was attempted (not short-circuited before dispatch).
     #[test]
     fn fuzz_defined_struct_types_never_panics(
-        idl_json in arb_defined_struct_idl_json(),
+        arb_defined in any::<ArbDefinedStructIdl>(),
         use_valid_disc in any::<bool>(),
         inst_idx in any::<usize>(),
         data in prop::collection::vec(any::<u8>(), 0..200usize),
     ) {
+        let idl_json = arb_defined.to_json_string();
         if let Ok(idl) = decode_idl_data(&idl_json) {
             if use_valid_disc && !idl.instructions.is_empty() {
                 let inst = &idl.instructions[inst_idx % idl.instructions.len()];
@@ -448,13 +326,14 @@ proptest! {
     /// (budget = MAX_CURSOR_LENGTH × MAX_ALLOC_PER_CURSOR_LENGTH = 1232 × 24 = 29 568 bytes).
     #[test]
     fn fuzz_size_guard_vec_length_prefix(
-        idl_json in arb_vec_arg_idl_json(),
+        arb_vec in any::<ArbVecArgIdl>(),
         length_prefix in any::<u32>(),
         trailing in prop::collection::vec(any::<u8>(), 0..=8usize),
     ) {
+        let idl_json = arb_vec.to_json_string();
         if let Ok(idl) = decode_idl_data(&idl_json) {
             if !idl.instructions.is_empty() {
-                // There is exactly one instruction in arb_vec_arg_idl_json
+                // There is exactly one instruction in ArbVecArgIdl
                 let inst = &idl.instructions[0];
                 if let Some(disc) = &inst.discriminator {
                     let mut data = disc.clone();
