@@ -13,7 +13,9 @@
 //! More iterations: `PROPTEST_CASES=5000 cargo test --test fuzz_idl_parsing`
 
 use proptest::prelude::*;
+use solana_parser::solana::structs::{IdlInstruction, IdlType, IdlTypeDefinition, IdlTypeDefinitionType};
 use solana_parser::{decode_idl_data, parse_instruction_with_idl};
+use std::sync::Arc;
 
 const TEST_PROGRAM_ID: &str = "11111111111111111111111111111111";
 
@@ -150,6 +152,161 @@ fn arb_vec_arg_idl_json() -> impl Strategy<Value = String> {
     })
 }
 
+// ── Valid-input byte-generation strategies ────────────────────────────────────
+//
+// These strategies produce borsh-correct bytes for a given IdlType so that the
+// parser can be asserted to return Ok — not merely "didn't panic".
+//
+// Size constraints keep every generated payload ≤ MAX_CURSOR_LENGTH (1232 bytes):
+//   Vec: 0..=2 elements, String/Bytes: 0..=16 bytes of content.
+// With 20 args per instruction (the max from arb_idl_instruction), worst-case:
+//   Vec<Option<String<16>>> × 2 elements × 20 args + 8-byte disc = ~620 bytes.
+
+/// Generate borsh-correct bytes for `ty`, resolving Defined types against `types`.
+///
+/// Returns a `BoxedStrategy` so the function can recurse for container types.
+fn arb_bytes_for_type(ty: IdlType, types: Arc<Vec<IdlTypeDefinition>>) -> BoxedStrategy<Vec<u8>> {
+    match ty {
+        IdlType::Bool =>
+            any::<bool>().prop_map(|b| vec![b as u8]).boxed(),
+        IdlType::U8 =>
+            any::<u8>().prop_map(|v| vec![v]).boxed(),
+        IdlType::U16 =>
+            any::<u16>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::U32 =>
+            any::<u32>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::U64 =>
+            any::<u64>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::U128 =>
+            any::<u128>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::I8 =>
+            any::<i8>().prop_map(|v| vec![v as u8]).boxed(),
+        IdlType::I16 =>
+            any::<i16>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::I32 =>
+            any::<i32>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::I64 =>
+            any::<i64>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::I128 =>
+            any::<i128>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        // Use raw bit patterns to avoid NaN/inf — parser calls read_f32/f64 which accept any bits.
+        IdlType::F32 =>
+            any::<u32>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        IdlType::F64 =>
+            any::<u64>().prop_map(|v| v.to_le_bytes().to_vec()).boxed(),
+        // PublicKey: exactly 32 bytes, no length prefix.
+        IdlType::PublicKey =>
+            prop::collection::vec(any::<u8>(), 32).boxed(),
+        // String: borsh u32-length-prefixed valid UTF-8.
+        IdlType::String =>
+            "[a-z0-9]{0,16}".prop_map(|s| {
+                let b = s.as_bytes();
+                let mut out = (b.len() as u32).to_le_bytes().to_vec();
+                out.extend_from_slice(b);
+                out
+            }).boxed(),
+        // Bytes: borsh u32-length-prefixed raw bytes.
+        IdlType::Bytes =>
+            prop::collection::vec(any::<u8>(), 0..=16).prop_map(|bytes| {
+                let mut out = (bytes.len() as u32).to_le_bytes().to_vec();
+                out.extend(bytes);
+                out
+            }).boxed(),
+        // Option: 1-byte tag (0=None, 1=Some) + inner bytes when Some.
+        IdlType::Option(inner) => {
+            let some_strat = arb_bytes_for_type(*inner, types);
+            prop_oneof![
+                1 => Just(vec![0u8]),
+                1 => some_strat.prop_map(|b| { let mut out = vec![1u8]; out.extend(b); out }),
+            ].boxed()
+        }
+        // Vec: u32 length prefix + N encoded elements (N ≤ 2 to bound total size).
+        IdlType::Vec(inner) => {
+            let inner_strat = arb_bytes_for_type(*inner, types);
+            prop::collection::vec(inner_strat, 0..=2).prop_map(|items| {
+                let mut out = (items.len() as u32).to_le_bytes().to_vec();
+                for item in items { out.extend(item); }
+                out
+            }).boxed()
+        }
+        // Array: exactly N encoded elements, no length prefix.
+        IdlType::Array(inner, n) => {
+            let inner_strat = arb_bytes_for_type(*inner, types);
+            prop::collection::vec(inner_strat, n..=n)
+                .prop_map(|items| items.into_iter().flatten().collect())
+                .boxed()
+        }
+        // Defined: look up the struct/alias in `types` and encode its fields in order.
+        // Enum variants are not yet handled — fall back to empty bytes.
+        IdlType::Defined(defined) => {
+            let name = defined.to_string();
+            match types.iter().find(|t| t.name == name).map(|t| t.r#type.clone()) {
+                Some(IdlTypeDefinitionType::Struct { fields }) => {
+                    fields.into_iter()
+                        .map(|f| arb_bytes_for_type(f.r#type, types.clone()))
+                        .fold(Just(Vec::new()).boxed(), |acc, strat| {
+                            (acc, strat)
+                                .prop_map(|(mut a, b)| { a.extend(b); a })
+                                .boxed()
+                        })
+                }
+                Some(IdlTypeDefinitionType::Alias { value }) =>
+                    arb_bytes_for_type(value, types),
+                _ =>
+                    // Enum or unknown — produce empty bytes; test will tolerate Err here.
+                    Just(vec![]).boxed(),
+            }
+        }
+    }
+}
+
+/// Generate the discriminator + borsh-correct arg bytes for one instruction.
+fn arb_valid_instruction_bytes(
+    inst: &IdlInstruction,
+    types: Arc<Vec<IdlTypeDefinition>>,
+) -> BoxedStrategy<Vec<u8>> {
+    let disc = match &inst.discriminator {
+        Some(d) => d.clone(),
+        None => return Just(vec![]).boxed(),
+    };
+    inst.args.iter()
+        .map(|field| arb_bytes_for_type(field.r#type.clone(), types.clone()))
+        .fold(Just(disc).boxed(), |acc, strat| {
+            (acc, strat).prop_map(|(mut a, b)| { a.extend(b); a }).boxed()
+        })
+}
+
+/// Strategy that produces `(idl_json, instruction_index, valid_borsh_bytes)`.
+///
+/// The bytes are always correctly encoded for the selected instruction's arg
+/// layout — so `parse_instruction_with_idl` is expected to return `Ok`.
+fn arb_idl_and_valid_bytes() -> impl Strategy<Value = (String, usize, Vec<u8>)> {
+    arb_idl_json().prop_flat_map(|idl_json| {
+        match decode_idl_data(&idl_json) {
+            Err(_) => {
+                // arb_idl_json generates well-formed IDLs; this branch is rare.
+                Just((idl_json, 0usize, vec![])).boxed()
+            }
+            Ok(idl) => {
+                let n = idl.instructions.len();
+                let types = Arc::new(idl.types.clone());
+                let instructions = idl.instructions.clone();
+                let idl_json_owned = idl_json.clone();
+                (0..n)
+                    .prop_flat_map(move |inst_idx| {
+                        let byte_strat = arb_valid_instruction_bytes(
+                            &instructions[inst_idx],
+                            types.clone(),
+                        );
+                        let j = idl_json_owned.clone();
+                        byte_strat.prop_map(move |bytes| (j.clone(), inst_idx, bytes))
+                    })
+                    .boxed()
+            }
+        }
+    })
+}
+
 // ── Crash-safety property tests ──────────────────────────────────────────────
 
 proptest! {
@@ -257,6 +414,30 @@ proptest! {
                 let _ = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
             }
         }
+    }
+
+    /// Valid input must always parse successfully.
+    ///
+    /// Unlike the other crash-safety tests, this one asserts `result.is_ok()` —
+    /// not merely "didn't panic". The bytes are generated by `arb_idl_and_valid_bytes`,
+    /// which produces a correctly borsh-encoded payload for every instruction layout.
+    ///
+    /// A failure here indicates a genuine parser bug: the parser rejected data
+    /// that it should have accepted according to its own IDL contract.
+    ///
+    /// On `Ok`: instruction name must match the selected instruction, confirming
+    /// discriminator dispatch and arg decoding both succeeded.
+    #[test]
+    fn fuzz_valid_data_always_parses_ok(
+        (idl_json, inst_idx, bytes) in arb_idl_and_valid_bytes(),
+    ) {
+        let Ok(idl) = decode_idl_data(&idl_json) else { return Ok(()); };
+        if idl.instructions.is_empty() || bytes.is_empty() { return Ok(()); }
+        let expected_name = idl.instructions[inst_idx].name.clone();
+        let result = parse_instruction_with_idl(&bytes, TEST_PROGRAM_ID, &idl);
+        prop_assert!(result.is_ok(),
+            "parser rejected correctly-encoded input for instruction '{expected_name}': {:?}", result);
+        prop_assert_eq!(&result.unwrap().instruction_name, &expected_name);
     }
 
     /// SizeGuard stress: a Vec arg instruction with a valid discriminator followed
