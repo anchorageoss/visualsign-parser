@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "solana_test_utils",
   "codegen",
   "examples",
   "generated",

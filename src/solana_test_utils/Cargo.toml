@@ -1,0 +1,20 @@
+[package]
+name = "solana_test_utils"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow       = "1.0"
+proptest     = "1"
+solana-client = "2.1.15"
+solana-sdk   = "2.1.15"
+tokio        = { workspace = true, features = ["full"] }
+tracing      = { workspace = true }
+# Same git dep + rev as visualsign-solana — required for IdlType, arb_bytes_for_type
+solana_parser = { git = "https://github.com/prasincs/solana-parser.git", rev = "8248d99e42ce8a56ad440ed9b2201607feb1a150" }
+
+[dev-dependencies]
+visualsign-solana = { path = "../chain_parsers/visualsign-solana" }
+visualsign        = { workspace = true }
+generated         = { path = "../generated" }
