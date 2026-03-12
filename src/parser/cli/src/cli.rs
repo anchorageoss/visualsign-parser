@@ -380,7 +380,9 @@ fn parse_and_display(
     };
 
     // Build ABI registry from CLI mappings (Ethereum-only)
-    let cli_abi_registry = if !abi_json_mappings.is_empty() {
+    let cli_abi_registry = if abi_json_mappings.is_empty() {
+        None
+    } else {
         eprintln!("Registering custom ABIs:");
         let (registry, valid_count) =
             build_abi_registry_from_mappings(abi_json_mappings, chain_id.unwrap_or(1));
@@ -390,8 +392,6 @@ fn parse_and_display(
             abi_json_mappings.len()
         );
         Some(registry)
-    } else {
-        None
     };
 
     // If CLI ABIs are provided and chain is Ethereum, use the direct converter path
