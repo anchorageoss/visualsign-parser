@@ -1,22 +1,16 @@
 use crate::chains::parse_chain;
 use clap::Parser;
-use generated::parser::ChainMetadata;
 use visualsign::registry::{Chain, TransactionConverterRegistry};
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
-
-#[cfg(feature = "ethereum")]
-use crate::ethereum;
-#[cfg(feature = "solana")]
-use crate::solana;
 
 #[derive(Parser, Debug)]
 #[command(name = "visualsign-parser")]
 #[command(version = "1.0")]
 #[command(about = "Converts raw transactions to visual signing properties")]
-struct Args {
+pub(crate) struct Args {
     #[arg(short, long, help = "Chain type")]
-    chain: String,
+    pub(crate) chain: String,
 
     #[arg(
         short,
@@ -43,23 +37,15 @@ struct Args {
                 Chain ID: 1, 137, 42161, etc.\n\
                 Canonical name: ETHEREUM_MAINNET, POLYGON_MAINNET, ARBITRUM_MAINNET, etc."
     )]
-    network: Option<String>,
+    pub(crate) network: Option<String>,
 
     #[cfg(feature = "ethereum")]
-    #[arg(
-        long = "abi-json-mappings",
-        value_name = "ABI_NAME:FILE_PATH:0xADDRESS",
-        help = "Map custom ABI JSON file to contract address. Format: AbiName:/path/to/abi.json:0xAddress. Can be used multiple times"
-    )]
-    abi_json_mappings: Vec<String>,
+    #[command(flatten)]
+    pub(crate) ethereum: crate::ethereum::EthereumArgs,
 
     #[cfg(feature = "solana")]
-    #[arg(
-        long = "idl-json-mappings",
-        value_name = "IDL_NAME:FILE_PATH:PROGRAM_ID",
-        help = "Map custom IDL JSON file to Solana program. Format: IdlName:/path/to/idl.json:base58_program_id. Can be used multiple times"
-    )]
-    idl_json_mappings: Vec<String>,
+    #[command(flatten)]
+    pub(crate) solana: crate::solana::SolanaArgs,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -239,12 +225,12 @@ fn common_label(field: &SignablePayloadField) -> String {
 fn parse_and_display(
     chain: &str,
     raw_tx: &str,
+    registry: &TransactionConverterRegistry,
     options: VisualSignOptions,
     output_format: OutputFormat,
     condensed_only: bool,
 ) {
     let registry_chain = parse_chain(chain);
-    let registry = Cli::build_registry();
     let signable_payload_str = registry.convert_transaction(&registry_chain, raw_tx, options);
     match signable_payload_str {
         Ok(payload) => match output_format {
@@ -274,65 +260,35 @@ fn parse_and_display(
     }
 }
 
-fn create_chain_metadata(
-    chain: &Chain,
-    _network: Option<String>,
-    idl_json_mappings: &[String],
-) -> Option<ChainMetadata> {
-    match chain {
-        #[cfg(feature = "solana")]
-        Chain::Solana => solana::create_chain_metadata(idl_json_mappings),
-        #[cfg(feature = "ethereum")]
-        Chain::Ethereum => ethereum::create_chain_metadata(_network),
-        _ => None,
-    }
-}
-
 /// app cli
 pub struct Cli;
 impl Cli {
-    fn build_registry() -> TransactionConverterRegistry {
-        let mut registry = TransactionConverterRegistry::new();
-
-        #[cfg(feature = "ethereum")]
-        registry.register::<visualsign_ethereum::EthereumTransactionWrapper, _>(
-            Chain::Ethereum,
-            visualsign_ethereum::EthereumVisualSignConverter::new(),
-        );
-
-        #[cfg(feature = "solana")]
-        registry.register::<visualsign_solana::SolanaTransactionWrapper, _>(
-            Chain::Solana,
-            visualsign_solana::SolanaVisualSignConverter,
-        );
-
-        registry.register::<visualsign_unspecified::UnspecifiedTransactionWrapper, _>(
-            Chain::Unspecified,
-            visualsign_unspecified::UnspecifiedVisualSignConverter,
-        );
-
-        registry
-    }
-
     /// start the parser cli
     ///
     /// # Panics
     ///
     /// Executes the CLI application, parsing command line arguments and processing the transaction
-    #[allow(unused_mut)] // mut only needed when ethereum feature is enabled
     pub fn execute() {
         let args = Args::parse();
-
         let chain = parse_chain(&args.chain);
+        let plugins = crate::build_plugins(&args);
 
-        #[cfg(feature = "solana")]
-        let idl_json_mappings = args.idl_json_mappings;
-        #[cfg(not(feature = "solana"))]
-        let idl_json_mappings: Vec<String> = vec![];
+        let mut registry = TransactionConverterRegistry::new();
+        for plugin in &plugins {
+            plugin.register(&mut registry);
+        }
+        registry.register::<visualsign_unspecified::UnspecifiedTransactionWrapper, _>(
+            Chain::Unspecified,
+            visualsign_unspecified::UnspecifiedVisualSignConverter,
+        );
 
-        let chain_metadata = create_chain_metadata(&chain, args.network, &idl_json_mappings);
+        let plugin = plugins.iter().find(|p| p.chain() == chain);
 
-        let mut options = VisualSignOptions {
+        let chain_metadata = plugin
+            .as_ref()
+            .and_then(|p| p.create_metadata(args.network));
+
+        let options = VisualSignOptions {
             decode_transfers: true,
             transaction_name: None,
             metadata: chain_metadata,
@@ -342,12 +298,16 @@ impl Cli {
             abi_registry: None,
         };
 
-        #[cfg(feature = "ethereum")]
-        ethereum::apply_abi_registry(&mut options, &args.abi_json_mappings);
+        let options = if let Some(p) = plugin {
+            p.apply_options(options)
+        } else {
+            options
+        };
 
         parse_and_display(
             &args.chain,
             &args.transaction,
+            &registry,
             options,
             args.output,
             args.condensed_only,
