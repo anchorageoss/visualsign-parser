@@ -91,7 +91,6 @@ mod tests {
                     decode_transfers: true,
                     transaction_name: Some("Unicode Escape Test".to_string()),
                     developer_config: None,
-
                 },
             )
             .expect("Should convert to payload successfully");

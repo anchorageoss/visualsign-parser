@@ -187,9 +187,7 @@ impl EthereumVisualSignConverter {
         // No wallet metadata, use global registry only
         LayeredRegistry::new(Arc::clone(&self.registry))
     }
-}
 
-impl EthereumVisualSignConverter {
     /// Parse and convert a transaction string with an explicit ABI registry override.
     ///
     /// The `override_abi_registry` takes precedence over any ABI extracted from metadata.
@@ -206,31 +204,33 @@ impl EthereumVisualSignConverter {
         )
         .map_err(VisualSignError::ParseError)?;
 
-        let transaction = wrapper.inner().clone();
+        self.convert_transaction_inner(wrapper.inner().clone(), options, override_abi_registry)
+    }
+
+    /// Shared conversion logic for both trait impl and direct-call paths.
+    fn convert_transaction_inner(
+        &self,
+        transaction: TypedTransaction,
+        options: VisualSignOptions,
+        override_abi_registry: Option<&abi_registry::AbiRegistry>,
+    ) -> Result<SignablePayload, VisualSignError> {
         let layered_registry = self.create_layered_registry(&options);
 
-        let is_supported = match transaction.tx_type() {
-            TxType::Eip2930 | TxType::Eip4844 | TxType::Eip7702 => false,
-            TxType::Legacy | TxType::Eip1559 => true,
-        };
-        if !is_supported {
-            return Err(VisualSignError::DecodeError(format!(
-                "Unsupported transaction type: {}",
-                transaction.tx_type()
-            )));
+        match transaction.tx_type() {
+            TxType::Legacy | TxType::Eip1559 => {}
+            unsupported => {
+                return Err(VisualSignError::DecodeError(format!(
+                    "Unsupported transaction type: {unsupported}"
+                )));
+            }
         }
 
-        // CLI ABI takes precedence over metadata-extracted ABI
-        let metadata_abi =
-            match grpc_abi::try_extract_abi_from_chain_metadata(options.metadata.as_ref()) {
-                Some(Ok(registry)) => Some(registry),
-                Some(Err(e)) => {
-                    log::warn!("Failed to extract wallet-provided ABI: {e}");
-                    None
-                }
-                None => None,
-            };
-
+        // Override ABI (from CLI) takes precedence; only extract from metadata if needed.
+        let metadata_abi = if override_abi_registry.is_some() {
+            None
+        } else {
+            extract_metadata_abi(&options)
+        };
         let abi_ref = override_abi_registry.or(metadata_abi.as_ref());
 
         convert_to_visual_sign_payload(
@@ -255,49 +255,7 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
         transaction_wrapper: EthereumTransactionWrapper,
         options: VisualSignOptions,
     ) -> Result<SignablePayload, VisualSignError> {
-        let transaction = transaction_wrapper.inner().clone();
-
-        // Create layered registry: global (Arc-shared) + optional request-scoped wallet data.
-        // Lookups check request layer first, then fall back to global.
-        let layered_registry = self.create_layered_registry(&options);
-
-        // Debug trace: Log registry usage for contract/token lookups (future enhancement)
-        if let Some(to) = transaction.to() {
-            if let Some(chain_id) = transaction.chain_id() {
-                let _contract_type = layered_registry.lookup(|r| r.get_contract_type(chain_id, to));
-                let _token_symbol = layered_registry.lookup(|r| r.get_token_symbol(chain_id, to));
-                // TODO: Use contract_type and token_symbol to enhance visualization
-            }
-        }
-
-        // Extract ABI from wallet-provided metadata (graceful degradation)
-        let abi_registry =
-            match grpc_abi::try_extract_abi_from_chain_metadata(options.metadata.as_ref()) {
-                Some(Ok(registry)) => Some(registry),
-                Some(Err(e)) => {
-                    log::warn!("Failed to extract wallet-provided ABI: {e}");
-                    None
-                }
-                None => None,
-            };
-
-        let is_supported = match transaction.tx_type() {
-            TxType::Eip2930 | TxType::Eip4844 | TxType::Eip7702 => false,
-            TxType::Legacy | TxType::Eip1559 => true,
-        };
-        if is_supported {
-            return convert_to_visual_sign_payload(
-                transaction,
-                options,
-                &layered_registry,
-                &self.visualizer_registry,
-                abi_registry.as_ref(),
-            );
-        }
-        Err(VisualSignError::DecodeError(format!(
-            "Unsupported transaction type: {}",
-            transaction.tx_type()
-        )))
+        self.convert_transaction_inner(transaction_wrapper.inner().clone(), options, None)
     }
 }
 
@@ -437,6 +395,18 @@ fn decode_transaction(
         })?,
     };
     decode_transaction_bytes(&bytes, allow_signed)
+}
+
+/// Extract ABI from wallet-provided metadata with graceful degradation.
+fn extract_metadata_abi(options: &VisualSignOptions) -> Option<abi_registry::AbiRegistry> {
+    match grpc_abi::try_extract_abi_from_chain_metadata(options.metadata.as_ref()) {
+        Some(Ok(registry)) => Some(registry),
+        Some(Err(e)) => {
+            log::warn!("Failed to extract wallet-provided ABI: {e}");
+            None
+        }
+        None => None,
+    }
 }
 
 fn convert_to_visual_sign_payload(
