@@ -13,7 +13,9 @@
 //! More iterations: `PROPTEST_CASES=5000 cargo test --test fuzz_idl_parsing`
 
 use proptest::prelude::*;
-use solana_parser::solana::structs::{IdlInstruction, IdlType, IdlTypeDefinition, IdlTypeDefinitionType};
+use solana_parser::solana::structs::{
+    EnumFields, IdlInstruction, IdlType, IdlTypeDefinition, IdlTypeDefinitionType,
+};
 use solana_parser::{decode_idl_data, parse_instruction_with_idl};
 use std::sync::Arc;
 
@@ -236,8 +238,7 @@ fn arb_bytes_for_type(ty: IdlType, types: Arc<Vec<IdlTypeDefinition>>) -> BoxedS
                 .prop_map(|items| items.into_iter().flatten().collect())
                 .boxed()
         }
-        // Defined: look up the struct/alias in `types` and encode its fields in order.
-        // Enum variants are not yet handled — fall back to empty bytes.
+        // Defined: look up the struct/enum/alias in `types` and encode accordingly.
         IdlType::Defined(defined) => {
             let name = defined.to_string();
             match types.iter().find(|t| t.name == name).map(|t| t.r#type.clone()) {
@@ -250,10 +251,51 @@ fn arb_bytes_for_type(ty: IdlType, types: Arc<Vec<IdlTypeDefinition>>) -> BoxedS
                                 .boxed()
                         })
                 }
+                Some(IdlTypeDefinitionType::Enum { variants }) => {
+                    // borsh: 1-byte variant index + optional fields for that variant.
+                    let n = variants.len();
+                    if n == 0 {
+                        return Just(vec![]).boxed();
+                    }
+                    let variants_owned = variants.clone();
+                    let types_inner = types.clone();
+                    (0..n)
+                        .prop_flat_map(move |idx| {
+                            let variant = variants_owned[idx].clone();
+                            let types_v = types_inner.clone();
+                            let idx_byte = idx as u8; // borsh enum index is u8
+                            let fields_strat: BoxedStrategy<Vec<u8>> =
+                                match variant.fields {
+                                    None => Just(vec![]).boxed(),
+                                    Some(EnumFields::Named(fields)) => fields
+                                        .into_iter()
+                                        .map(|f| arb_bytes_for_type(f.r#type, types_v.clone()))
+                                        .fold(Just(vec![]).boxed(), |acc, s| {
+                                            (acc, s)
+                                                .prop_map(|(mut a, b)| { a.extend(b); a })
+                                                .boxed()
+                                        }),
+                                    Some(EnumFields::Tuple(tys)) => tys
+                                        .into_iter()
+                                        .map(|t| arb_bytes_for_type(t, types_v.clone()))
+                                        .fold(Just(vec![]).boxed(), |acc, s| {
+                                            (acc, s)
+                                                .prop_map(|(mut a, b)| { a.extend(b); a })
+                                                .boxed()
+                                        }),
+                                };
+                            fields_strat.prop_map(move |f| {
+                                let mut out = vec![idx_byte];
+                                out.extend(f);
+                                out
+                            })
+                        })
+                        .boxed()
+                }
                 Some(IdlTypeDefinitionType::Alias { value }) =>
                     arb_bytes_for_type(value, types),
-                _ =>
-                    // Enum or unknown — produce empty bytes; test will tolerate Err here.
+                None =>
+                    // Unknown defined type — fall back to empty bytes.
                     Just(vec![]).boxed(),
             }
         }
@@ -761,4 +803,101 @@ fn size_guard_vec_u64_over_budget() {
 
     let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
     assert!(result.is_err(), "expected Err for over-budget Vec<u64> length");
+}
+
+// ── Real-IDL property tests (driven by IDL_FILE env var) ─────────────────────
+//
+// These tests are skipped when IDL_FILE is unset, so CI passes without it.
+//
+// Usage:
+//   IDL_FILE=/path/to/jupiter.json cargo test --test fuzz_idl_parsing real_idl
+//   IDL_FILE=/path/to/drift.json PROPTEST_CASES=1000 cargo test --test fuzz_idl_parsing real_idl
+//
+// See scripts/fuzz_all_idls.sh to run against all embedded IDLs in one pass.
+
+fn load_idl_from_env() -> Option<(String, solana_parser::solana::structs::Idl)> {
+    let path = std::env::var("IDL_FILE").ok()?;
+    let json = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("IDL_FILE={path}: {e}"));
+    match decode_idl_data(&json) {
+        Ok(idl) => Some((json, idl)),
+        Err(e) => {
+            // IDL failed validation (e.g. duplicate type names, cyclic references).
+            // Skip these tests — they are not valid inputs for real_idl_* tests.
+            eprintln!("IDL_FILE={path}: skipping — decode failed: {e}");
+            None
+        }
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::default())]
+
+    /// Crash-safety test against a real IDL loaded from IDL_FILE.
+    ///
+    /// Uses the same 50/50 valid/random discriminator mix as
+    /// `fuzz_idl_parsing_never_panics`. On `Ok` with a valid discriminator,
+    /// asserts the instruction name matches the selected instruction.
+    #[test]
+    fn real_idl_never_panics(
+        use_valid_disc in any::<bool>(),
+        inst_idx in any::<usize>(),
+        data in prop::collection::vec(any::<u8>(), 0..1300usize),
+    ) {
+        let Some((_, idl)) = load_idl_from_env() else { return Ok(()); };
+        if use_valid_disc && !idl.instructions.is_empty() {
+            let inst = &idl.instructions[inst_idx % idl.instructions.len()];
+            let expected_name = inst.name.clone();
+            if let Some(disc) = &inst.discriminator {
+                let mut d = disc.clone();
+                d.extend_from_slice(&data);
+                if let Ok(result) = parse_instruction_with_idl(&d, TEST_PROGRAM_ID, &idl) {
+                    prop_assert_eq!(&result.instruction_name, &expected_name,
+                        "discriminator must dispatch to the correct instruction");
+                }
+            }
+        } else {
+            let _ = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
+        }
+    }
+}
+
+/// Valid-data parse test against a real IDL loaded from IDL_FILE.
+///
+/// Uses TestRunner::run directly so the strategy can be built from the
+/// runtime-loaded IDL (not possible with the proptest! macro, which requires
+/// strategies to be fully determined at compile time).
+///
+/// For every instruction in the IDL, generates correctly borsh-encoded bytes
+/// (discriminator + all args) and asserts the parser returns Ok with the
+/// expected instruction name.
+#[test]
+fn real_idl_valid_data_always_parses_ok() {
+    let Some((_, idl)) = load_idl_from_env() else { return; };
+    let n = idl.instructions.len();
+    if n == 0 { return; }
+
+    let types = Arc::new(idl.types.clone());
+    let instructions = idl.instructions.clone();
+
+    let strategy = (0..n).prop_flat_map(move |inst_idx| {
+        arb_valid_instruction_bytes(&instructions[inst_idx], types.clone())
+            .prop_map(move |bytes| (inst_idx, bytes))
+    });
+
+    let config = ProptestConfig::default();
+    let mut runner = proptest::test_runner::TestRunner::new(config);
+    let idl_ref = idl.clone();
+    runner
+        .run(&strategy, move |(inst_idx, bytes)| {
+            let expected = &idl_ref.instructions[inst_idx].name;
+            let result = parse_instruction_with_idl(&bytes, TEST_PROGRAM_ID, &idl_ref);
+            prop_assert!(
+                result.is_ok(),
+                "instruction '{expected}' rejected correctly-encoded input: {:?}", result
+            );
+            prop_assert_eq!(&result.unwrap().instruction_name, expected);
+            Ok(())
+        })
+        .expect("real_idl_valid_data_always_parses_ok failed");
 }
