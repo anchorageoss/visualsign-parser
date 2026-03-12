@@ -14,6 +14,13 @@
 //! Contrast with fuzz_idl_parsing.rs, which calls parse_instruction_with_idl
 //! directly and never exercises IdlRegistry, the visualizer dispatch, or the
 //! SignablePayloadField wrapping.
+//!
+//! IDL shapes are generated via `#[derive(Arbitrary)]` types in `common/mod.rs`
+//! (`ArbIdl`), replacing the manual proptest strategy functions that were
+//! previously duplicated from fuzz_idl_parsing.rs.
+
+mod common;
+use common::ArbIdl;
 
 use std::collections::HashMap;
 
@@ -24,15 +31,19 @@ use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::message::Message;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::transaction::Transaction as SolanaTransaction;
+use visualsign::vsptrait::VisualSignOptions;
 use visualsign::{
     AnnotatedPayloadField, SignablePayload, SignablePayloadField, SignablePayloadFieldPreviewLayout,
 };
-use visualsign::vsptrait::VisualSignOptions;
 use visualsign_solana::transaction_to_visual_sign;
 
 // ── Transaction builders ──────────────────────────────────────────────────────
 
-fn build_transaction(program_id: Pubkey, extra_accounts: Vec<Pubkey>, data: Vec<u8>) -> SolanaTransaction {
+fn build_transaction(
+    program_id: Pubkey,
+    extra_accounts: Vec<Pubkey>,
+    data: Vec<u8>,
+) -> SolanaTransaction {
     let fee_payer = Pubkey::new_unique();
     let account_metas: Vec<AccountMeta> = extra_accounts
         .iter()
@@ -95,14 +106,22 @@ fn options_no_idl() -> VisualSignOptions {
 /// Returns the PreviewLayout for every instruction field in the payload.
 /// Instruction fields have label "Instruction N"; the Accounts summary uses "Accounts".
 fn instruction_fields(payload: &SignablePayload) -> Vec<&SignablePayloadFieldPreviewLayout> {
-    payload.fields.iter().filter_map(|f| {
-        if let SignablePayloadField::PreviewLayout { common, preview_layout } = f {
-            if common.label.starts_with("Instruction") {
-                return Some(preview_layout);
+    payload
+        .fields
+        .iter()
+        .filter_map(|f| {
+            if let SignablePayloadField::PreviewLayout {
+                common,
+                preview_layout,
+            } = f
+            {
+                if common.label.starts_with("Instruction") {
+                    return Some(preview_layout);
+                }
             }
-        }
-        None
-    }).collect()
+            None
+        })
+        .collect()
 }
 
 /// Searches a flat slice of AnnotatedPayloadFields for a TextV2 field with the given label.
@@ -130,7 +149,8 @@ fn pipeline_idl_path_correct_data() {
             {"name": "amount", "type": "u64"}
         ]}],
         "types": []
-    }).to_string();
+    })
+    .to_string();
 
     let idl = decode_idl_data(&idl_json).unwrap();
     let disc = idl.instructions[0].discriminator.as_ref().unwrap();
@@ -141,7 +161,8 @@ fn pipeline_idl_path_correct_data() {
     let payload = transaction_to_visual_sign(
         build_transaction(program_id, vec![], data),
         options_with_idl(&program_id, &idl_json, "My Program"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let inst_fields = instruction_fields(&payload);
     assert_eq!(inst_fields.len(), 1);
@@ -151,7 +172,10 @@ fn pipeline_idl_path_correct_data() {
     assert!(title.contains("(IDL)"), "expected IDL title, got: {title}");
 
     let condensed = layout.condensed.as_ref().unwrap();
-    assert_eq!(find_text(&condensed.fields, "Instruction"), Some("deposit".into()));
+    assert_eq!(
+        find_text(&condensed.fields, "Instruction"),
+        Some("deposit".into())
+    );
     assert_eq!(find_text(&condensed.fields, "amount"), Some("42".into()));
 }
 
@@ -164,7 +188,8 @@ fn pipeline_idl_discriminator_miss() {
     let idl_json = serde_json::json!({
         "instructions": [{"name": "deposit", "accounts": [], "args": []}],
         "types": []
-    }).to_string();
+    })
+    .to_string();
 
     // Discriminator that will never match "deposit"
     let data = vec![0xde, 0xad, 0xbe, 0xef, 0x00, 0x01, 0x02, 0x03];
@@ -172,7 +197,8 @@ fn pipeline_idl_discriminator_miss() {
     let payload = transaction_to_visual_sign(
         build_transaction(program_id, vec![], data),
         options_with_idl(&program_id, &idl_json, "My Program"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let inst_fields = instruction_fields(&payload);
     let layout = inst_fields[0];
@@ -198,7 +224,8 @@ fn pipeline_no_idl_registered() {
     let payload = transaction_to_visual_sign(
         build_transaction(program_id, vec![], vec![1, 2, 3]),
         options_no_idl(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let inst_fields = instruction_fields(&payload);
     let layout = inst_fields[0];
@@ -220,7 +247,8 @@ fn pipeline_named_accounts() {
             "args": []
         }],
         "types": []
-    }).to_string();
+    })
+    .to_string();
 
     let idl = decode_idl_data(&idl_json).unwrap();
     let disc = idl.instructions[0].discriminator.as_ref().unwrap();
@@ -228,7 +256,8 @@ fn pipeline_named_accounts() {
     let payload = transaction_to_visual_sign(
         build_transaction(program_id, vec![depositor], disc.clone()),
         options_with_idl(&program_id, &idl_json, "Test Program"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let inst_fields = instruction_fields(&payload);
     let expanded = inst_fields[0].expanded.as_ref().unwrap();
@@ -264,7 +293,8 @@ fn pipeline_multi_instruction_mixed_programs() {
     let idl_json = serde_json::json!({
         "instructions": [{"name": "swap", "accounts": [], "args": []}],
         "types": []
-    }).to_string();
+    })
+    .to_string();
 
     let idl = decode_idl_data(&idl_json).unwrap();
     let disc_a = idl.instructions[0].discriminator.as_ref().unwrap().clone();
@@ -274,80 +304,24 @@ fn pipeline_multi_instruction_mixed_programs() {
         (program_b, vec![0xde, 0xad]),
     ]);
 
-    let payload = transaction_to_visual_sign(tx, options_with_idl(&program_a, &idl_json, "A")).unwrap();
+    let payload =
+        transaction_to_visual_sign(tx, options_with_idl(&program_a, &idl_json, "A")).unwrap();
 
     let inst_fields = instruction_fields(&payload);
     assert_eq!(inst_fields.len(), 2);
 
     let title_a = inst_fields[0].title.as_ref().unwrap().text.as_str();
-    assert!(title_a.contains("(IDL)"), "program_a has IDL, got: {title_a}");
+    assert!(
+        title_a.contains("(IDL)"),
+        "program_a has IDL, got: {title_a}"
+    );
 
     let title_b = inst_fields[1].title.as_ref().unwrap().text.as_str();
-    assert!(!title_b.contains("(IDL)"), "program_b has no IDL, got: {title_b}");
+    assert!(
+        !title_b.contains("(IDL)"),
+        "program_b has no IDL, got: {title_b}"
+    );
     assert_eq!(title_b, program_b.to_string());
-}
-
-// ── Proptest strategies (duplicated from fuzz_idl_parsing.rs) ─────────────────
-
-fn arb_primitive_type() -> impl Strategy<Value = serde_json::Value> {
-    prop_oneof![
-        Just(serde_json::json!("bool")),
-        Just(serde_json::json!("u8")),
-        Just(serde_json::json!("u16")),
-        Just(serde_json::json!("u32")),
-        Just(serde_json::json!("u64")),
-        Just(serde_json::json!("u128")),
-        Just(serde_json::json!("i8")),
-        Just(serde_json::json!("i16")),
-        Just(serde_json::json!("i32")),
-        Just(serde_json::json!("i64")),
-        Just(serde_json::json!("i128")),
-        Just(serde_json::json!("f32")),
-        Just(serde_json::json!("f64")),
-        Just(serde_json::json!("publicKey")),
-        Just(serde_json::json!("string")),
-        Just(serde_json::json!("bytes")),
-    ]
-}
-
-fn arb_idl_type() -> impl Strategy<Value = serde_json::Value> {
-    arb_primitive_type().prop_flat_map(|prim| {
-        let p_vec = prim.clone();
-        let p_opt = prim.clone();
-        let p_arr = prim.clone();
-        let p_vec_opt = prim.clone(); // Vec<Option<T>>
-        let p_opt_vec = prim.clone(); // Option<Vec<T>>
-        prop_oneof![
-            4 => Just(prim),
-            1 => Just(serde_json::json!({"vec": p_vec})),
-            1 => Just(serde_json::json!({"option": p_opt})),
-            1 => (1usize..=4).prop_map(move |n| serde_json::json!({"array": [p_arr.clone(), n]})),
-            1 => Just(serde_json::json!({"vec": {"option": p_vec_opt}})),
-            1 => Just(serde_json::json!({"option": {"vec": p_opt_vec}})),
-        ]
-    })
-}
-
-fn arb_identifier() -> impl Strategy<Value = String> {
-    "[a-z][a-z0-9]{1,15}"
-}
-
-fn arb_idl_instruction() -> impl Strategy<Value = serde_json::Value> {
-    (
-        arb_identifier(),
-        prop::collection::vec(
-            (arb_identifier(), arb_idl_type())
-                .prop_map(|(name, ty)| serde_json::json!({"name": name, "type": ty})),
-            0..=20,
-        ),
-    )
-        .prop_map(|(name, args)| serde_json::json!({"name": name, "accounts": [], "args": args}))
-}
-
-fn arb_idl_json() -> impl Strategy<Value = String> {
-    prop::collection::vec(arb_idl_instruction(), 1..=16).prop_map(|instructions| {
-        serde_json::json!({"instructions": instructions, "types": []}).to_string()
-    })
 }
 
 // ── Property-based pipeline tests ────────────────────────────────────────────
@@ -364,11 +338,12 @@ proptest! {
     /// not just the discriminator-matching paths.
     #[test]
     fn fuzz_pipeline_never_panics(
-        idl_json in arb_idl_json(),
+        arb_idl in any::<ArbIdl>(),
         use_valid_disc in any::<bool>(),
         inst_idx in any::<usize>(),
         data in prop::collection::vec(any::<u8>(), 0..1300usize),
     ) {
+        let idl_json = arb_idl.to_json_string();
         let program_id = Pubkey::new_unique();
         let bytes = if use_valid_disc {
             if let Ok(idl) = decode_idl_data(&idl_json) {
@@ -392,11 +367,12 @@ proptest! {
     /// of instructions in the transaction — regardless of valid/invalid discriminator.
     #[test]
     fn fuzz_pipeline_field_count_invariant(
-        idl_json in arb_idl_json(),
+        arb_idl in any::<ArbIdl>(),
         use_valid_disc in any::<bool>(),
         inst_idx in any::<usize>(),
         data in prop::collection::vec(any::<u8>(), 0..1300usize),
     ) {
+        let idl_json = arb_idl.to_json_string();
         let program_id = Pubkey::new_unique();
         let bytes = if use_valid_disc {
             if let Ok(idl) = decode_idl_data(&idl_json) {
@@ -424,10 +400,11 @@ proptest! {
     /// the IDL code path is always taken — title contains "(IDL)".
     #[test]
     fn fuzz_pipeline_idl_path_taken_on_valid_discriminator(
-        idl_json in arb_idl_json(),
+        arb_idl in any::<ArbIdl>(),
         inst_idx in any::<usize>(),
         arg_bytes in prop::collection::vec(any::<u8>(), 0..200usize),
     ) {
+        let idl_json = arb_idl.to_json_string();
         let Ok(idl) = decode_idl_data(&idl_json) else { return Ok(()); };
         let inst = &idl.instructions[inst_idx % idl.instructions.len()];
         let Some(disc) = &inst.discriminator else { return Ok(()); };
