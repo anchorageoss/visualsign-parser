@@ -394,7 +394,9 @@ fn parse_and_display(
         Some(registry)
     };
 
-    // If CLI ABIs are provided and chain is Ethereum, use the direct converter path
+    // Use the standard registry for all chains. When CLI ABIs are provided for
+    // Ethereum, use the direct converter path (which is equivalent to the registered
+    // converter since both use `EthereumVisualSignConverter::new()`).
     let signable_payload_str =
         if cli_abi_registry.is_some() && matches!(registry_chain, Chain::Ethereum) {
             let converter = visualsign_ethereum::EthereumVisualSignConverter::new();

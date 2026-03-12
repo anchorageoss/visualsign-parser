@@ -402,6 +402,76 @@ mod tests {
     }
 
     #[test]
+    fn test_try_extract_valid_abi_with_signature() {
+        use generated::parser::Metadata;
+
+        let (signature_hex, public_key_hex) = create_test_signature(VALID_ABI);
+
+        let proto_sig = generated::parser::SignatureMetadata {
+            value: signature_hex.clone(),
+            metadata: vec![
+                Metadata {
+                    key: "algorithm".to_string(),
+                    value: "secp256k1".to_string(),
+                },
+                Metadata {
+                    key: "public_key".to_string(),
+                    value: public_key_hex.clone(),
+                },
+                Metadata {
+                    key: "issuer".to_string(),
+                    value: "test-issuer".to_string(),
+                },
+                Metadata {
+                    key: "timestamp".to_string(),
+                    value: "2024-01-01T00:00:00Z".to_string(),
+                },
+            ],
+        };
+
+        // Verify convert_proto_signature maps fields correctly
+        let local_sig = convert_proto_signature(&proto_sig);
+        assert_eq!(local_sig.value, signature_hex);
+        assert_eq!(local_sig.algorithm, Some("secp256k1".to_string()));
+        assert_eq!(local_sig.public_key, Some(public_key_hex));
+        assert_eq!(local_sig.issuer, Some("test-issuer".to_string()));
+        assert_eq!(
+            local_sig.timestamp,
+            Some("2024-01-01T00:00:00Z".to_string())
+        );
+
+        // Verify end-to-end: ABI with valid signature extracts successfully
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("1".to_string()),
+                abi: Some(Abi {
+                    value: VALID_ABI.to_string(),
+                    signature: Some(proto_sig),
+                }),
+            })),
+        };
+        let result = try_extract_abi_from_chain_metadata(Some(&metadata));
+        assert!(result.is_some());
+        let registry = result.unwrap().unwrap();
+        assert!(registry.list_abis().contains(&"wallet_provided"));
+    }
+
+    #[test]
+    fn test_convert_proto_signature_missing_keys() {
+        let proto_sig = generated::parser::SignatureMetadata {
+            value: "sig_value".to_string(),
+            metadata: vec![],
+        };
+
+        let local_sig = convert_proto_signature(&proto_sig);
+        assert_eq!(local_sig.value, "sig_value");
+        assert!(local_sig.algorithm.is_none());
+        assert!(local_sig.public_key.is_none());
+        assert!(local_sig.issuer.is_none());
+        assert!(local_sig.timestamp.is_none());
+    }
+
+    #[test]
     fn test_try_extract_invalid_abi_json() {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
