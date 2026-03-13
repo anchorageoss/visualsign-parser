@@ -8,8 +8,9 @@ edition = "2024"
 tracing = { workspace = true }
 # Using custom fork for IDL-based instruction parsing features not yet in upstream
 # Features: parse_instruction_with_idl, CustomIdlConfig, decode_idl_data
-# Tracking: https://github.com/tkhq/solana-parser/pull/20
-solana_parser = { git = "https://github.com/prasincs/solana-parser.git", rev = "8248d99e42ce8a56ad440ed9b2201607feb1a150" }
+# Upstream PR: https://github.com/tkhq/solana-parser/pull/20
+# Fork branch: https://github.com/shahan-khatchadourian-anchorage/solana-parser/tree/prasincs/custom-idl-support
+solana_parser = { git = "https://github.com/shahan-khatchadourian-anchorage/solana-parser.git", branch = "solana-parser-add-arbitrary" }
 visualsign = { workspace = true }
 generated = { path = "../../generated" }
 serde_json = { workspace = true }
