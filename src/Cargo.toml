@@ -60,10 +60,3 @@ tracing = "0.1.41"
 # Pin visualsign dependencies
 visualsign = { path = "./visualsign" }
 
-# ---------------------------------------------------------------------------
-# Local development overrides
-# Uncomment the [patch] block below to use a local checkout of solana-parser
-# instead of the pinned git revision. Remove (or re-comment) before committing.
-# ---------------------------------------------------------------------------
-# [patch."https://github.com/shahan-khatchadourian-anchorage/solana-parser.git"]
-# solana_parser = { path = "../../solana-parser" }
