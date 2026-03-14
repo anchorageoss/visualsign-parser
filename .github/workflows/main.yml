@@ -140,8 +140,39 @@ jobs:
       - name: Run codegen
         run: make -C src generated
       - name: Fuzz fuzz_transaction_string (30s)
-        run: cargo +nightly fuzz run fuzz_transaction_string -- -max_total_time=30
+        id: fuzz_transaction_string
+        continue-on-error: true
+        run: |
+          cargo +nightly fuzz run fuzz_transaction_string -- -max_total_time=30 2>&1 | tee /tmp/fuzz_transaction_string.txt
+          exit ${PIPESTATUS[0]}
         working-directory: src/chain_parsers/visualsign-solana/fuzz
+      - name: Post fuzz_transaction_string crash comment
+        if: steps.fuzz_transaction_string.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body=$(awk '/^─+$/{found=1} found{print}' /tmp/fuzz_transaction_string.txt)
+          gh pr comment ${{ github.event.pull_request.number }} --body "### Fuzz crash: \`fuzz_transaction_string\`
+          \`\`\`
+          ${body}
+          \`\`\`"
       - name: Fuzz fuzz_versioned_transaction (30s)
-        run: cargo +nightly fuzz run fuzz_versioned_transaction -- -max_total_time=30
+        id: fuzz_versioned_transaction
+        continue-on-error: true
+        run: |
+          cargo +nightly fuzz run fuzz_versioned_transaction -- -max_total_time=30 2>&1 | tee /tmp/fuzz_versioned_transaction.txt
+          exit ${PIPESTATUS[0]}
         working-directory: src/chain_parsers/visualsign-solana/fuzz
+      - name: Post fuzz_versioned_transaction crash comment
+        if: steps.fuzz_versioned_transaction.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body=$(awk '/^─+$/{found=1} found{print}' /tmp/fuzz_versioned_transaction.txt)
+          gh pr comment ${{ github.event.pull_request.number }} --body "### Fuzz crash: \`fuzz_versioned_transaction\`
+          \`\`\`
+          ${body}
+          \`\`\`"
+      - name: Fail if any fuzz target crashed
+        if: steps.fuzz_transaction_string.outcome == 'failure' || steps.fuzz_versioned_transaction.outcome == 'failure'
+        run: exit 1
