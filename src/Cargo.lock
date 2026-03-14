@@ -10549,6 +10549,7 @@ dependencies = [
 [[package]]
 name = "solana_parser"
 version = "0.1.0"
+source = "git+https://github.com/anchorageoss/solana-parser.git?branch=solana-parser-add-arbitrary#3a523cc6fdc4d72e69cc2b08387f44cbf16ea22c"
 dependencies = [
  "bincode",
  "bs58 0.5.1",
