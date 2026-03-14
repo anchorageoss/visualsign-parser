@@ -1,0 +1,85 @@
+name: Fuzz Testing
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+jobs:
+  fuzz:
+    if: contains(github.event.pull_request.labels.*.name, 'fuzz')
+    runs-on: ubuntu-latest-4-cores
+    permissions:
+      pull-requests: write
+    steps:
+      - name: git checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Rust (nightly)
+        uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
+        with:
+          toolchain: nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+      - name: Cache Rust dependencies
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            src/target/
+          key: ${{ runner.os }}-cargo-fuzz-${{ hashFiles('src/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-fuzz-
+            ${{ runner.os }}-cargo-
+      - name: install protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          version: "21.4"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: free disk space
+        run: |
+          sudo swapoff -a
+          sudo rm -f /swapfile
+          sudo apt clean
+          df -h
+      - name: Run codegen
+        run: make -C src generated
+      - name: Fuzz fuzz_transaction_string (30s)
+        id: fuzz_transaction_string
+        continue-on-error: true
+        run: |
+          cargo +nightly fuzz run fuzz_transaction_string -- -max_total_time=30 2>&1 | tee /tmp/fuzz_transaction_string.txt
+          exit ${PIPESTATUS[0]}
+        working-directory: src/chain_parsers/visualsign-solana/fuzz
+      - name: Post fuzz_transaction_string crash comment
+        if: steps.fuzz_transaction_string.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body=$(awk '/^─+$/{found=1} found{print}' /tmp/fuzz_transaction_string.txt)
+          gh pr comment ${{ github.event.pull_request.number }} --body "### Fuzz crash: \`fuzz_transaction_string\`
+          \`\`\`
+          ${body}
+          \`\`\`"
+      - name: Fuzz fuzz_versioned_transaction (30s)
+        id: fuzz_versioned_transaction
+        continue-on-error: true
+        run: |
+          cargo +nightly fuzz run fuzz_versioned_transaction -- -max_total_time=30 2>&1 | tee /tmp/fuzz_versioned_transaction.txt
+          exit ${PIPESTATUS[0]}
+        working-directory: src/chain_parsers/visualsign-solana/fuzz
+      - name: Post fuzz_versioned_transaction crash comment
+        if: steps.fuzz_versioned_transaction.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body=$(awk '/^─+$/{found=1} found{print}' /tmp/fuzz_versioned_transaction.txt)
+          gh pr comment ${{ github.event.pull_request.number }} --body "### Fuzz crash: \`fuzz_versioned_transaction\`
+          \`\`\`
+          ${body}
+          \`\`\`"
+      - name: Fail if any fuzz target crashed
+        if: steps.fuzz_transaction_string.outcome == 'failure' || steps.fuzz_versioned_transaction.outcome == 'failure'
+        run: exit 1
