@@ -43,21 +43,21 @@ fn arb_defined_struct_idl_json() -> impl Strategy<Value = String> {
         arb::arb_idl_instruction(),
         prop::collection::vec(arb::arb_idl_instruction(), 0..=4),
     )
-    .prop_map(|(struct_name, fields, mut main_inst, mut extra_insts)| {
-        main_inst.args = vec![IdlField {
-            name: "data".to_string(),
-            r#type: IdlType::Defined(Defined::String(struct_name.clone())),
-        }];
-        extra_insts.push(main_inst);
-        let idl = Idl {
-            instructions: extra_insts,
-            types: vec![IdlTypeDefinition {
-                name: struct_name,
-                r#type: IdlTypeDefinitionType::Struct { fields },
-            }],
-        };
-        serde_json::to_string(&idl).unwrap()
-    })
+        .prop_map(|(struct_name, fields, mut main_inst, mut extra_insts)| {
+            main_inst.args = vec![IdlField {
+                name: "data".to_string(),
+                r#type: IdlType::Defined(Defined::String(struct_name.clone())),
+            }];
+            extra_insts.push(main_inst);
+            let idl = Idl {
+                instructions: extra_insts,
+                types: vec![IdlTypeDefinition {
+                    name: struct_name,
+                    r#type: IdlTypeDefinitionType::Struct { fields },
+                }],
+            };
+            serde_json::to_string(&idl).unwrap()
+        })
 }
 
 /// IDL JSON where the single instruction has a `Vec` arg.
@@ -72,7 +72,10 @@ fn arb_vec_arg_idl_json() -> impl Strategy<Value = String> {
                 name: "data".to_string(),
                 r#type: IdlType::Vec(Box::new(elem_type)),
             }];
-            let idl = Idl { instructions: vec![inst], types: vec![] };
+            let idl = Idl {
+                instructions: vec![inst],
+                types: vec![],
+            };
             serde_json::to_string(&idl).unwrap()
         })
     })
@@ -88,15 +91,12 @@ fn arb_idl_and_valid_bytes() -> impl Strategy<Value = (Idl, usize, Vec<u8>)> {
         let types = Arc::new(idl.types.clone());
         let instructions = idl.instructions.clone();
         let idl_owned = idl.clone();
-        (0..n)
-            .prop_flat_map(move |inst_idx| {
-                let byte_strat = arb::arb_valid_instruction_bytes(
-                    &instructions[inst_idx],
-                    types.clone(),
-                );
-                let idl_c = idl_owned.clone();
-                byte_strat.prop_map(move |bytes| (idl_c.clone(), inst_idx, bytes))
-            })
+        (0..n).prop_flat_map(move |inst_idx| {
+            let byte_strat =
+                arb::arb_valid_instruction_bytes(&instructions[inst_idx], types.clone());
+            let idl_c = idl_owned.clone();
+            byte_strat.prop_map(move |bytes| (idl_c.clone(), inst_idx, bytes))
+        })
     })
 }
 
@@ -319,16 +319,19 @@ fn roundtrip_mixed_primitive_args() {
 
     let mut data = disc.clone();
     data.extend_from_slice(&1000u64.to_le_bytes()); // amountIn
-    data.extend_from_slice(&900u64.to_le_bytes());  // minOut
-    data.extend_from_slice(&50u16.to_le_bytes());   // slippage
-    data.push(1u8);                                  // isExact = true
+    data.extend_from_slice(&900u64.to_le_bytes()); // minOut
+    data.extend_from_slice(&50u16.to_le_bytes()); // slippage
+    data.push(1u8); // isExact = true
 
     let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl).unwrap();
     assert_eq!(result.instruction_name, "swap");
-    assert_eq!(result.program_call_args["amountIn"], serde_json::json!(1000));
-    assert_eq!(result.program_call_args["minOut"],   serde_json::json!(900));
+    assert_eq!(
+        result.program_call_args["amountIn"],
+        serde_json::json!(1000)
+    );
+    assert_eq!(result.program_call_args["minOut"], serde_json::json!(900));
     assert_eq!(result.program_call_args["slippage"], serde_json::json!(50));
-    assert_eq!(result.program_call_args["isExact"],  serde_json::json!(true));
+    assert_eq!(result.program_call_args["isExact"], serde_json::json!(true));
 }
 
 #[test]
@@ -345,7 +348,7 @@ fn roundtrip_option_some() {
     let disc = idl.instructions[0].discriminator.as_ref().unwrap();
 
     let mut data = disc.clone();
-    data.push(1u8);                               // Some
+    data.push(1u8); // Some
     data.extend_from_slice(&300u16.to_le_bytes());
 
     let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl).unwrap();
@@ -462,7 +465,7 @@ fn roundtrip_multiple_instructions_distinct_dispatch() {
     let r = parse_instruction_with_idl(&data2, TEST_PROGRAM_ID, &idl).unwrap();
     assert_eq!(r.instruction_name, "withdraw");
     assert_eq!(r.program_call_args["amount"], serde_json::json!(50));
-    assert_eq!(r.program_call_args["all"],    serde_json::json!(false));
+    assert_eq!(r.program_call_args["all"], serde_json::json!(false));
 }
 
 // ── Defined type (struct) roundtrip tests ────────────────────────────────────
@@ -491,17 +494,17 @@ fn roundtrip_defined_struct_arg() {
 
     let mut data = disc.clone();
     data.extend_from_slice(&5000u64.to_le_bytes()); // price
-    data.extend_from_slice(&10u32.to_le_bytes());   // quantity
-    data.push(1u8);                                  // side = buy
+    data.extend_from_slice(&10u32.to_le_bytes()); // quantity
+    data.push(1u8); // side = buy
 
     // Must parse and return Ok with the struct contents.
     let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl).unwrap();
     assert_eq!(result.instruction_name, "createOrder");
     // Struct fields are nested under the "params" key.
     let params = &result.program_call_args["params"];
-    assert_eq!(params["price"],    serde_json::json!(5000));
+    assert_eq!(params["price"], serde_json::json!(5000));
     assert_eq!(params["quantity"], serde_json::json!(10));
-    assert_eq!(params["side"],     serde_json::json!(true));
+    assert_eq!(params["side"], serde_json::json!(true));
 }
 
 // ── SizeGuard boundary tests ──────────────────────────────────────────────────
@@ -529,7 +532,10 @@ fn size_guard_huge_vec_length_prefix_is_rejected_cleanly() {
 
     let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
     // Must be Err, not a panic or OOM.
-    assert!(result.is_err(), "expected Err for over-budget Vec length, got Ok");
+    assert!(
+        result.is_err(),
+        "expected Err for over-budget Vec length, got Ok"
+    );
 }
 
 /// Same as above but with a Vec<u64> (8 bytes/element) — smaller element count
@@ -552,7 +558,10 @@ fn size_guard_vec_u64_over_budget() {
     data.extend_from_slice(&100_000u32.to_le_bytes());
 
     let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
-    assert!(result.is_err(), "expected Err for over-budget Vec<u64> length");
+    assert!(
+        result.is_err(),
+        "expected Err for over-budget Vec<u64> length"
+    );
 }
 
 // ── Real-IDL property tests (driven by IDL_FILE env var) ─────────────────────
@@ -567,8 +576,7 @@ fn size_guard_vec_u64_over_budget() {
 
 fn load_idl_from_env() -> Option<(String, solana_parser::solana::structs::Idl)> {
     let path = std::env::var("IDL_FILE").ok()?;
-    let json = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("IDL_FILE={path}: {e}"));
+    let json = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("IDL_FILE={path}: {e}"));
     match decode_idl_data(&json) {
         Ok(idl) => Some((json, idl)),
         Err(e) => {
@@ -623,9 +631,13 @@ proptest! {
 /// expected instruction name.
 #[test]
 fn real_idl_valid_data_always_parses_ok() {
-    let Some((_, idl)) = load_idl_from_env() else { return; };
+    let Some((_, idl)) = load_idl_from_env() else {
+        return;
+    };
     let n = idl.instructions.len();
-    if n == 0 { return; }
+    if n == 0 {
+        return;
+    }
 
     let types = Arc::new(idl.types.clone());
     let instructions = idl.instructions.clone();
@@ -644,7 +656,8 @@ fn real_idl_valid_data_always_parses_ok() {
             let result = parse_instruction_with_idl(&bytes, TEST_PROGRAM_ID, &idl_ref);
             prop_assert!(
                 result.is_ok(),
-                "instruction '{expected}' rejected correctly-encoded input: {:?}", result
+                "instruction '{expected}' rejected correctly-encoded input: {:?}",
+                result
             );
             prop_assert_eq!(&result.unwrap().instruction_name, expected);
             Ok(())

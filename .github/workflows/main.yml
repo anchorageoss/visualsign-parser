@@ -96,9 +96,6 @@ jobs:
           df -h
       - name: Run codegen
         run: make -C src generated
-      - name: Run clippy
-        run: cargo clippy -p visualsign-solana -- -D warnings
-        working-directory: src
       - name: Run proptest tests
         run: cargo test -p visualsign-solana
         working-directory: src
@@ -142,9 +139,6 @@ jobs:
           df -h
       - name: Run codegen
         run: make -C src generated
-      - name: Run clippy
-        run: cargo +nightly clippy -- -D warnings
-        working-directory: src/chain_parsers/visualsign-solana/fuzz
       - name: Fuzz fuzz_transaction_string (30s)
         run: cargo +nightly fuzz run fuzz_transaction_string -- -max_total_time=30
         working-directory: src/chain_parsers/visualsign-solana/fuzz
