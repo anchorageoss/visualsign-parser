@@ -53,16 +53,23 @@ jobs:
           cargo +nightly fuzz run fuzz_transaction_string -- -max_total_time=30 2>&1 | tee /tmp/fuzz_transaction_string.txt
           exit ${PIPESTATUS[0]}
         working-directory: src/chain_parsers/visualsign-solana/fuzz
-      - name: Post fuzz_transaction_string crash comment
+      - name: Extract fuzz_transaction_string crash output
+        id: extract_fuzz_transaction_string
         if: steps.fuzz_transaction_string.outcome == 'failure'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           body=$(awk '/^─+$/{found=1} found{print}' /tmp/fuzz_transaction_string.txt)
-          gh pr comment ${{ github.event.pull_request.number }} --body "### Fuzz crash: \`fuzz_transaction_string\`
-          \`\`\`
-          ${body}
-          \`\`\`"
+          delim=$(openssl rand -hex 8)
+          echo "body<<${delim}" >> "$GITHUB_OUTPUT"
+          echo "${body}" >> "$GITHUB_OUTPUT"
+          echo "${delim}" >> "$GITHUB_OUTPUT"
+      - name: Post fuzz_transaction_string crash comment
+        if: steps.fuzz_transaction_string.outcome == 'failure'
+        uses: ./.github/actions/post-failure-comment
+        with:
+          pr-number: ${{ github.event.pull_request.number }}
+          title: "Fuzz crash: `fuzz_transaction_string`"
+          body: ${{ steps.extract_fuzz_transaction_string.outputs.body }}
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Fuzz fuzz_versioned_transaction (30s)
         id: fuzz_versioned_transaction
         continue-on-error: true
@@ -70,16 +77,23 @@ jobs:
           cargo +nightly fuzz run fuzz_versioned_transaction -- -max_total_time=30 2>&1 | tee /tmp/fuzz_versioned_transaction.txt
           exit ${PIPESTATUS[0]}
         working-directory: src/chain_parsers/visualsign-solana/fuzz
-      - name: Post fuzz_versioned_transaction crash comment
+      - name: Extract fuzz_versioned_transaction crash output
+        id: extract_fuzz_versioned_transaction
         if: steps.fuzz_versioned_transaction.outcome == 'failure'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           body=$(awk '/^─+$/{found=1} found{print}' /tmp/fuzz_versioned_transaction.txt)
-          gh pr comment ${{ github.event.pull_request.number }} --body "### Fuzz crash: \`fuzz_versioned_transaction\`
-          \`\`\`
-          ${body}
-          \`\`\`"
+          delim=$(openssl rand -hex 8)
+          echo "body<<${delim}" >> "$GITHUB_OUTPUT"
+          echo "${body}" >> "$GITHUB_OUTPUT"
+          echo "${delim}" >> "$GITHUB_OUTPUT"
+      - name: Post fuzz_versioned_transaction crash comment
+        if: steps.fuzz_versioned_transaction.outcome == 'failure'
+        uses: ./.github/actions/post-failure-comment
+        with:
+          pr-number: ${{ github.event.pull_request.number }}
+          title: "Fuzz crash: `fuzz_versioned_transaction`"
+          body: ${{ steps.extract_fuzz_versioned_transaction.outputs.body }}
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Fail if any fuzz target crashed
         if: steps.fuzz_transaction_string.outcome == 'failure' || steps.fuzz_versioned_transaction.outcome == 'failure'
         run: exit 1
