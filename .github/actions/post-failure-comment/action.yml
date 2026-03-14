@@ -1,0 +1,33 @@
+name: Post Failure Comment
+description: 'Post a PR comment with failure details and tag @copilot to fix the issue'
+
+inputs:
+  pr-number:
+    description: Pull request number
+    required: true
+  title:
+    description: Short title describing what failed
+    required: true
+  body:
+    description: Failure output to include in the comment
+    required: true
+  gh-token:
+    description: GitHub token with pull-requests write permission
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Post comment
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.gh-token }}
+        COMMENT_BODY: ${{ inputs.body }}
+      run: |
+        gh pr comment ${{ inputs.pr-number }} --body "### ${{ inputs.title }}
+
+        \`\`\`
+        ${COMMENT_BODY}
+        \`\`\`
+
+        @copilot please investigate the failure above and fix the issue in this PR."
