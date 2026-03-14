@@ -1,0 +1,33 @@
+[package]
+name = "visualsign-solana-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+bincode = "1.3.3"
+solana-sdk = "2.1.15"
+visualsign = { path = "../../../visualsign" }
+
+[dependencies.visualsign-solana]
+path = ".."
+
+[[bin]]
+name = "fuzz_transaction_string"
+path = "fuzz_targets/fuzz_transaction_string.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_versioned_transaction"
+path = "fuzz_targets/fuzz_versioned_transaction.rs"
+test = false
+doc = false
+bench = false
