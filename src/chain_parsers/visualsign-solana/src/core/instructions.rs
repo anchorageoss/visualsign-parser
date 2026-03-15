@@ -25,33 +25,53 @@ pub fn decode_instructions(
     let message = &transaction.message;
     let account_keys = &message.account_keys;
 
-    // Convert compiled instructions to full instructions
+    // Convert compiled instructions to full instructions, skipping those with out-of-bounds
+    // account indices (which can occur with malformed/fuzz inputs).
     let instructions: Vec<Instruction> = message
         .instructions
         .iter()
-        .map(|ci| Instruction {
-            program_id: account_keys[ci.program_id_index as usize],
-            accounts: ci
+        .filter_map(|ci| {
+            let program_id_idx = ci.program_id_index as usize;
+            if program_id_idx >= account_keys.len() {
+                return None;
+            }
+            let program_id = account_keys[program_id_idx];
+
+            let accounts: Vec<solana_sdk::instruction::AccountMeta> = ci
                 .accounts
                 .iter()
-                .map(|&i| {
-                    solana_sdk::instruction::AccountMeta::new_readonly(
-                        account_keys[i as usize],
-                        false,
-                    )
+                .filter_map(|&i| {
+                    if (i as usize) < account_keys.len() {
+                        Some(solana_sdk::instruction::AccountMeta::new_readonly(
+                            account_keys[i as usize],
+                            false,
+                        ))
+                    } else {
+                        None
+                    }
                 })
-                .collect(),
-            data: ci.data.clone(),
+                .collect();
+
+            Some(Instruction {
+                program_id,
+                accounts,
+                data: ci.data.clone(),
+            })
         })
         .collect();
+
+    // Use the zero pubkey as a placeholder sender when there are no account keys.
+    let sender_key = account_keys
+        .first()
+        .map(|k| k.to_string())
+        .unwrap_or_else(|| solana_sdk::pubkey::Pubkey::default().to_string());
 
     let results: Result<Vec<AnnotatedPayloadField>, VisualSignError> = instructions
         .iter()
         .enumerate()
         .map(|(instruction_index, instruction)| {
-            // Create sender account from first account key (typically the fee payer)
             let sender = SolanaAccount {
-                account_key: account_keys[0].to_string(),
+                account_key: sender_key.clone(),
                 signer: false,
                 writable: false,
             };
@@ -59,30 +79,20 @@ pub fn decode_instructions(
             let context =
                 VisualizerContext::new(&sender, instruction_index, &instructions, idl_registry);
 
-            // Try to visualize with available visualizers (including unknown_program fallback)
+            // Try to visualize with available visualizers (including unknown_program fallback).
+            // Return an error instead of panicking if all visualizers decline the instruction.
             visualize_with_any(&visualizers_refs, &context)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "No visualizer available for instruction {} at index {}",
+                .ok_or_else(|| {
+                    VisualSignError::ParseError(TransactionParseError::DecodeError(format!(
+                        "Failed to visualize instruction {} at index {}",
                         instruction.program_id, instruction_index
-                    )
-                })
+                    )))
+                })?
                 .map(|viz_result| viz_result.field)
         })
         .collect();
 
-    let fields = results?;
-
-    // Self-check: ensure we have the same number of instruction fields as input instructions
-    if fields.len() != instructions.len() {
-        return Err(VisualSignError::InvariantViolation(format!(
-            "Instruction count mismatch: expected {} instructions, got {} fields. This should never happen with unknown_program fallback.",
-            instructions.len(),
-            fields.len()
-        )));
-    }
-
-    Ok(fields)
+    Ok(results?)
 }
 
 pub fn decode_transfers(
