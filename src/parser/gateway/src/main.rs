@@ -121,15 +121,13 @@ async fn parse_handler(
     };
 
     let signature = parsed_tx.signature.map(|sig| {
-        let scheme_str = match sig.scheme {
-            x if x == SignatureScheme::Unspecified as i32 => {
-                SignatureScheme::Unspecified.as_str_name()
-            }
+        let scheme = match sig.scheme {
             x if x == SignatureScheme::TurnkeyP256EphemeralKey as i32 => {
-                SignatureScheme::TurnkeyP256EphemeralKey.as_str_name()
+                SignatureScheme::TurnkeyP256EphemeralKey
             }
-            _ => SignatureScheme::Unspecified.as_str_name(),
+            _ => SignatureScheme::Unspecified,
         };
+        let scheme_str = scheme.as_str_name();
         TurnkeySignature {
             message: sig.message,
             public_key: sig.public_key,
