@@ -1,0 +1,2 @@
+# surfpool runtime state written next to the process cwd
+.surfpool/
