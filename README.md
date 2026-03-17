@@ -60,7 +60,7 @@ curl -X POST http://localhost:8080/visualsign/api/v1/parse \
 **Docker usage:**
 
 ```sh
-# Build the gateway image
+# Build the gateway image (run from the repo root, not src/)
 make non-oci-docker-images
 
 # Run the gateway container (assumes gRPC server is accessible at host.docker.internal:44020)

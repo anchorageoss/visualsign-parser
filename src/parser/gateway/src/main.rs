@@ -12,8 +12,6 @@ use std::net::SocketAddr;
 #[derive(Deserialize)]
 struct TurnkeyRequestWrapper {
     request: TurnkeyRequest,
-    #[allow(dead_code)]
-    organization_id: String,
 }
 
 #[derive(Deserialize)]
@@ -173,7 +171,7 @@ fn error_response(msg: String) -> TurnkeyResponseWrapper {
 // --- Server startup ---
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port: u16 = match std::env::var("GATEWAY_PORT") {
         Ok(val) => val.parse().unwrap_or_else(|_| {
             eprintln!("WARNING: invalid GATEWAY_PORT value '{val}', falling back to 8080");
@@ -187,7 +185,7 @@ async fn main() {
 
     let client = ParserServiceClient::connect(grpc_addr.clone())
         .await
-        .unwrap_or_else(|e| panic!("failed to connect to gRPC server at {grpc_addr}: {e}"))
+        .map_err(|e| format!("failed to connect to gRPC server at {grpc_addr}: {e}"))?
         .max_decoding_message_size(GRPC_MAX_RECV_MSG_SIZE)
         .max_encoding_message_size(GRPC_MAX_RECV_MSG_SIZE);
 
@@ -200,6 +198,7 @@ async fn main() {
     println!("Gateway listening on {addr}");
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
-        .await
-        .unwrap();
+        .await?;
+
+    Ok(())
 }
