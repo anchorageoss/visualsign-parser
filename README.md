@@ -54,7 +54,7 @@ cd src && make parser_gateway
 ```sh
 curl -X POST http://localhost:8080/visualsign/api/v1/parse \
   -H "Content-Type: application/json" \
-  -d '{"request": {"unsigned_payload": "<hex>", "chain": "ETHEREUM"}, "organization_id": "org-123"}'
+  -d '{"request": {"unsigned_payload": "<hex>", "chain": "CHAIN_ETHEREUM"}, "organization_id": "org-123"}'
 ```
 
 **Docker usage:**
