@@ -204,8 +204,11 @@ impl EthereumVisualSignConverter {
         )
         .map_err(VisualSignError::ParseError)?;
 
-        let payload =
-            self.convert_transaction_inner(wrapper.inner().clone(), options, override_abi_registry)?;
+        let payload = self.convert_transaction_inner(
+            wrapper.inner().clone(),
+            options,
+            override_abi_registry,
+        )?;
         payload.validate_charset()?;
         Ok(payload)
     }
