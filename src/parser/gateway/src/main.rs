@@ -188,7 +188,8 @@ async fn main() {
     let client = ParserServiceClient::connect(grpc_addr.clone())
         .await
         .unwrap_or_else(|e| panic!("failed to connect to gRPC server at {grpc_addr}: {e}"))
-        .max_decoding_message_size(GRPC_MAX_RECV_MSG_SIZE);
+        .max_decoding_message_size(GRPC_MAX_RECV_MSG_SIZE)
+        .max_encoding_message_size(GRPC_MAX_RECV_MSG_SIZE);
 
     let app = Router::new()
         .route("/visualsign/api/v1/parse", post(parse_handler))
