@@ -129,7 +129,8 @@ impl InstructionVisualizer for JupiterSwapVisualizer {
 }
 
 /// Embedded Jupiter v6 IDL — kept in-tree so we can update it independently of solana-parser.
-const JUPITER_AGG_V6_IDL_JSON: &str = include_str!("../../idl/idls/jupiter_agg_v6.json");
+const JUPITER_AGG_V6_IDL_JSON: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/idl/idls/jupiter_agg_v6.json"));
 
 /// Get Jupiter v6 IDL from the embedded IDL JSON.
 fn get_jupiter_idl() -> Option<Idl> {
