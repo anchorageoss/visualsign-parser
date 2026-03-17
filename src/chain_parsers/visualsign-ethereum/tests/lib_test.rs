@@ -189,6 +189,12 @@ fn test_convert_from_string_with_abi_registry() {
     )
     .unwrap();
 
+    // Map the ABI to the fixture transaction's `to` address so the registry lookup
+    // actually exercises the dynamic ABI visualisation path.
+    let to_address: alloy_primitives::Address =
+        "0x66a9893cc07d91d95644aedd05d03f95e1dba8af".parse().unwrap();
+    abi_registry.map_address(1, to_address, "test_abi");
+
     let options = VisualSignOptions {
         decode_transfers: true,
         transaction_name: None,

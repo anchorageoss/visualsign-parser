@@ -204,7 +204,10 @@ impl EthereumVisualSignConverter {
         )
         .map_err(VisualSignError::ParseError)?;
 
-        self.convert_transaction_inner(wrapper.inner().clone(), options, override_abi_registry)
+        let payload =
+            self.convert_transaction_inner(wrapper.inner().clone(), options, override_abi_registry)?;
+        payload.validate_charset()?;
+        Ok(payload)
     }
 
     /// Shared conversion logic for both trait impl and direct-call paths.

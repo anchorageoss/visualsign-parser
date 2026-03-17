@@ -371,18 +371,24 @@ fn parse_and_display(
 ) {
     let registry_chain = parse_chain(chain);
 
-    // Extract chain_id from metadata for ABI registry
-    let chain_id = if let Some(ref metadata) = options.metadata {
-        visualsign_ethereum::networks::extract_chain_id_from_metadata(Some(metadata))
-    } else {
-        eprintln!("Warning: No metadata provided for ABI registry, defaulting to chain_id 1");
-        Some(1)
-    };
-
     // Build ABI registry from CLI mappings (Ethereum-only)
-    let cli_abi_registry = if abi_json_mappings.is_empty() {
+    let cli_abi_registry = if abi_json_mappings.is_empty()
+        || !matches!(registry_chain, Chain::Ethereum)
+    {
+        if !abi_json_mappings.is_empty() && !matches!(registry_chain, Chain::Ethereum) {
+            eprintln!(
+                "Warning: --abi-json-mappings is only supported for Ethereum; ignoring for chain '{chain}'"
+            );
+        }
         None
     } else {
+        let chain_id = if let Some(ref metadata) = options.metadata {
+            visualsign_ethereum::networks::extract_chain_id_from_metadata(Some(metadata))
+        } else {
+            eprintln!("Warning: No metadata provided for ABI registry, defaulting to chain_id 1");
+            Some(1)
+        };
+
         eprintln!("Registering custom ABIs:");
         let (registry, valid_count) =
             build_abi_registry_from_mappings(abi_json_mappings, chain_id.unwrap_or(1));
