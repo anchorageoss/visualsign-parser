@@ -1,6 +1,6 @@
 use crate::chains::parse_chain;
 use clap::Parser;
-use visualsign::registry::{Chain, TransactionConverterRegistry};
+use visualsign::registry::TransactionConverterRegistry;
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
 
@@ -277,10 +277,6 @@ impl Cli {
         for plugin in &plugins {
             plugin.register(&mut registry);
         }
-        registry.register::<visualsign_unspecified::UnspecifiedTransactionWrapper, _>(
-            Chain::Unspecified,
-            visualsign_unspecified::UnspecifiedVisualSignConverter,
-        );
 
         let plugin = plugins.iter().find(|p| p.chain() == chain);
 

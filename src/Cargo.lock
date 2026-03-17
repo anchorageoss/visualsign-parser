@@ -6191,7 +6191,6 @@ dependencies = [
  "visualsign",
  "visualsign-ethereum",
  "visualsign-solana",
- "visualsign-unspecified",
 ]
 
 [[package]]
