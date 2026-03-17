@@ -204,13 +204,7 @@ impl EthereumVisualSignConverter {
         )
         .map_err(VisualSignError::ParseError)?;
 
-        let payload = self.convert_transaction_inner(
-            wrapper.inner().clone(),
-            options,
-            override_abi_registry,
-        )?;
-        payload.validate_charset()?;
-        Ok(payload)
+        self.convert_transaction_inner(wrapper.inner().clone(), options, override_abi_registry)
     }
 
     /// Shared conversion logic for both trait impl and direct-call paths.
@@ -239,13 +233,15 @@ impl EthereumVisualSignConverter {
         };
         let abi_ref = override_abi_registry.or(metadata_abi.as_ref());
 
-        convert_to_visual_sign_payload(
+        let payload = convert_to_visual_sign_payload(
             transaction,
             options,
             &layered_registry,
             &self.visualizer_registry,
             abi_ref,
-        )
+        )?;
+        payload.validate_charset()?;
+        Ok(payload)
     }
 }
 
@@ -406,12 +402,12 @@ fn decode_transaction(
 /// Extract ABI from wallet-provided metadata with graceful degradation.
 fn extract_metadata_abi(options: &VisualSignOptions) -> Option<abi_registry::AbiRegistry> {
     match grpc_abi::try_extract_abi_from_chain_metadata(options.metadata.as_ref()) {
-        Some(Ok(registry)) => Some(registry),
-        Some(Err(e)) => {
+        Ok(Some(registry)) => Some(registry),
+        Ok(None) => None,
+        Err(e) => {
             log::warn!("Failed to extract wallet-provided ABI: {e}");
             None
         }
-        None => None,
     }
 }
 

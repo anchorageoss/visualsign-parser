@@ -68,17 +68,23 @@ pub fn extract_abi_from_metadata(
 /// Extract and validate ABI from `ChainMetadata`, if present.
 ///
 /// Navigates `ChainMetadata -> Ethereum -> Abi` and calls [`extract_abi_from_metadata`].
-/// Returns `None` if the metadata doesn't contain an Ethereum ABI.
+/// Returns `Ok(None)` if the metadata doesn't contain an Ethereum ABI.
 pub fn try_extract_abi_from_chain_metadata(
     chain_metadata: Option<&ChainMetadata>,
-) -> Option<Result<AbiRegistry, GrpcAbiError>> {
-    let ethereum = match chain_metadata?.metadata.as_ref()? {
-        chain_metadata::Metadata::Ethereum(eth) => eth,
-        _ => return None,
+) -> Result<Option<AbiRegistry>, GrpcAbiError> {
+    let Some(chain_metadata) = chain_metadata else {
+        return Ok(None);
     };
-    let abi = ethereum.abi.as_ref()?;
+    let Some(chain_metadata::Metadata::Ethereum(ethereum)) = chain_metadata.metadata.as_ref()
+    else {
+        return Ok(None);
+    };
+    let Some(abi) = ethereum.abi.as_ref() else {
+        return Ok(None);
+    };
     let signature = abi.signature.as_ref().map(convert_proto_signature);
-    Some(extract_abi_from_metadata(&abi.value, signature.as_ref()))
+    let registry = extract_abi_from_metadata(&abi.value, signature.as_ref())?;
+    Ok(Some(registry))
 }
 
 /// Convert protobuf `SignatureMetadata` (key-value pairs) to local `SignatureMetadata`.
@@ -358,7 +364,7 @@ mod tests {
 
     #[test]
     fn test_try_extract_no_metadata() {
-        assert!(try_extract_abi_from_chain_metadata(None).is_none());
+        assert!(try_extract_abi_from_chain_metadata(None).unwrap().is_none());
     }
 
     #[test]
@@ -370,7 +376,11 @@ mod tests {
                 idl_mappings: Default::default(),
             })),
         };
-        assert!(try_extract_abi_from_chain_metadata(Some(&metadata)).is_none());
+        assert!(
+            try_extract_abi_from_chain_metadata(Some(&metadata))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -381,7 +391,11 @@ mod tests {
                 abi: None,
             })),
         };
-        assert!(try_extract_abi_from_chain_metadata(Some(&metadata)).is_none());
+        assert!(
+            try_extract_abi_from_chain_metadata(Some(&metadata))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -395,9 +409,9 @@ mod tests {
                 }),
             })),
         };
-        let result = try_extract_abi_from_chain_metadata(Some(&metadata));
-        assert!(result.is_some());
-        let registry = result.unwrap().unwrap();
+        let registry = try_extract_abi_from_chain_metadata(Some(&metadata))
+            .unwrap()
+            .expect("should contain ABI");
         assert!(registry.list_abis().contains(&"wallet_provided"));
     }
 
@@ -450,9 +464,9 @@ mod tests {
                 }),
             })),
         };
-        let result = try_extract_abi_from_chain_metadata(Some(&metadata));
-        assert!(result.is_some());
-        let registry = result.unwrap().unwrap();
+        let registry = try_extract_abi_from_chain_metadata(Some(&metadata))
+            .unwrap()
+            .expect("should contain ABI");
         assert!(registry.list_abis().contains(&"wallet_provided"));
     }
 
@@ -483,7 +497,6 @@ mod tests {
             })),
         };
         let result = try_extract_abi_from_chain_metadata(Some(&metadata));
-        assert!(result.is_some());
-        assert!(result.unwrap().is_err());
+        assert!(result.is_err());
     }
 }
