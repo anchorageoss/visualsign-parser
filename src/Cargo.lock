@@ -1374,6 +1374,8 @@ dependencies = [
  "pin-project-lite",
  "rustversion",
  "serde",
+ "serde_json",
+ "serde_path_to_error",
  "sync_wrapper 0.1.2",
  "tokio",
  "tower 0.4.13",
@@ -6193,6 +6195,18 @@ dependencies = [
  "visualsign-ethereum",
  "visualsign-solana",
  "visualsign-unspecified",
+]
+
+[[package]]
+name = "parser_gateway"
+version = "0.1.0"
+dependencies = [
+ "axum 0.6.20",
+ "generated",
+ "host_primitives",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

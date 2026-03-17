@@ -28,6 +28,45 @@ cargo run --bin parser_cli -- --chain ethereum --network ETHEREUM_MAINNET --outp
 
 See the [Quickstart](https://visualsign.dev/quickstart) for more examples and the [Parser CLI](https://visualsign.dev/parser-cli) reference for all options.
 
+## Running the Gateway
+
+The `parser_gateway` is an HTTP REST proxy (Turnkey-compatible) that forwards requests to the gRPC parser. It exposes the same `/visualsign/api/v1/parse` endpoint used in production, making it useful for local development and integration testing.
+
+**Start the gRPC server and gateway:**
+
+```sh
+# Terminal 1: start the gRPC parser server
+cd src && make grpc-server
+
+# Terminal 2: start the HTTP gateway
+cd src && make parser_gateway
+```
+
+**Environment variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GATEWAY_PORT` | `8080` | HTTP port the gateway listens on |
+| `GRPC_ADDR` | `http://127.0.0.1:44020` | Address of the gRPC parser server |
+
+**Example request:**
+
+```sh
+curl -X POST http://localhost:8080/visualsign/api/v1/parse \
+  -H "Content-Type: application/json" \
+  -d '{"request": {"unsigned_payload": "<hex>", "chain": "ETHEREUM"}, "organization_id": "org-123"}'
+```
+
+**Docker usage:**
+
+```sh
+# Build the gateway image
+make non-oci-docker-images
+
+# Run the gateway container (assumes gRPC server is accessible at host.docker.internal:44020)
+docker run -p 8080:8080 -e GRPC_ADDR=http://host.docker.internal:44020 anchorageoss-visualsign-parser/parser_gateway
+```
+
 ## Documentation
 
 Full documentation at **https://visualsign.dev**:
