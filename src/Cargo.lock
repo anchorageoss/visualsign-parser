@@ -6180,7 +6180,6 @@ dependencies = [
  "bs58 0.5.1",
  "clap",
  "generated",
- "parser_app",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6192,7 +6191,6 @@ dependencies = [
  "visualsign",
  "visualsign-ethereum",
  "visualsign-solana",
- "visualsign-unspecified",
 ]
 
 [[package]]
