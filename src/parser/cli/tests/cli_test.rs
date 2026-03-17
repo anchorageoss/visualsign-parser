@@ -33,7 +33,7 @@ fn test_cli_with_fixtures() {
 
         // Skip fixtures for chains not compiled in.
         // Fixture names are prefixed with their chain (e.g. "solana-json", "ethereum-text").
-        let mut disabled_chain_prefixes: Vec<&str> = vec![];
+        let disabled_chain_prefixes: Vec<&str> = vec![];
         #[cfg(not(feature = "ethereum"))]
         disabled_chain_prefixes.push("ethereum");
         #[cfg(not(feature = "solana"))]
