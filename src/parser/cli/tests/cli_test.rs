@@ -38,7 +38,10 @@ fn test_cli_with_fixtures() {
         disabled_chain_prefixes.push("ethereum");
         #[cfg(not(feature = "solana"))]
         disabled_chain_prefixes.push("solana");
-        if disabled_chain_prefixes.iter().any(|p| test_name.starts_with(p)) {
+        if disabled_chain_prefixes
+            .iter()
+            .any(|p| test_name.starts_with(p))
+        {
             println!("Skipping fixture '{test_name}' (chain feature not enabled)");
             continue;
         }
