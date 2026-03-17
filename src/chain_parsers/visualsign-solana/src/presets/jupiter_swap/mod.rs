@@ -7,7 +7,9 @@ use crate::core::{
 };
 use crate::utils::{SwapTokenInfo, get_token_info};
 use config::JupiterSwapConfig;
-use solana_parser::{Idl, ProgramType, decode_idl_data, parse_instruction_with_idl};
+use solana_parser::{
+    Idl, decode_idl_data, find_instruction_by_discriminator, parse_instruction_with_idl,
+};
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{
     create_amount_field, create_number_field, create_raw_data_field, create_text_field,
@@ -126,10 +128,12 @@ impl InstructionVisualizer for JupiterSwapVisualizer {
     }
 }
 
-/// Get Jupiter v6 IDL from built-in IDLs in solana-parser
+/// Embedded Jupiter v6 IDL — kept in-tree so we can update it independently of solana-parser.
+const JUPITER_AGG_V6_IDL_JSON: &str = include_str!("../../idl/idls/jupiter_agg_v6.json");
+
+/// Get Jupiter v6 IDL from the embedded IDL JSON.
 fn get_jupiter_idl() -> Option<Idl> {
-    ProgramType::from_program_id(JUPITER_PROGRAM_ID)
-        .and_then(|pt| decode_idl_data(pt.idl_json()).ok())
+    decode_idl_data(JUPITER_AGG_V6_IDL_JSON).ok()
 }
 
 /// Helper to extract u64 argument from parsed IDL args
@@ -230,6 +234,74 @@ fn parse_jupiter_instruction_with_idl(
     }
 }
 
+/// Minimum trailing field size: amount_1 (8) + amount_2 (8) + slippage_bps (2) + platform_fee_bps (1)
+const TRAILING_FIELDS_SIZE: usize = 19;
+
+/// Fallback parser that extracts fixed-size trailing fields from route-like instructions
+/// when full IDL parsing fails (e.g. due to unknown Swap enum variants in the route_plan).
+///
+/// The variable-length `route_plan` sits between the discriminator and the trailing fields,
+/// so we parse from the end of the data buffer.
+fn parse_jupiter_trailing_fields(
+    data: &[u8],
+    accounts: &[String],
+) -> Result<JupiterSwapInstruction, Box<dyn std::error::Error>> {
+    let idl = get_jupiter_idl().ok_or("Jupiter IDL not available")?;
+    let matched = find_instruction_by_discriminator(data, idl.instructions)?;
+    let name = matched.name;
+
+    if data.len() < 8 + TRAILING_FIELDS_SIZE {
+        return Err(format!(
+            "data too short for trailing fields: {} bytes (need at least {})",
+            data.len(),
+            8 + TRAILING_FIELDS_SIZE
+        )
+        .into());
+    }
+
+    let tail = &data[data.len() - TRAILING_FIELDS_SIZE..];
+    let amount_1 = u64::from_le_bytes(tail[0..8].try_into()?);
+    let amount_2 = u64::from_le_bytes(tail[8..16].try_into()?);
+    let slippage_bps = u16::from_le_bytes(tail[16..18].try_into()?);
+    let platform_fee_bps = tail[18];
+
+    match name.as_str() {
+        "route" => {
+            let in_token = accounts.first().map(|addr| get_token_info(addr, amount_1));
+            let out_token = accounts.get(5).map(|addr| get_token_info(addr, amount_2));
+            Ok(JupiterSwapInstruction::Route {
+                in_token,
+                out_token,
+                slippage_bps,
+                platform_fee_bps,
+            })
+        }
+        "exact_out_route" => {
+            let in_token = accounts.first().map(|addr| get_token_info(addr, amount_2));
+            let out_token = accounts.get(5).map(|addr| get_token_info(addr, amount_1));
+            Ok(JupiterSwapInstruction::ExactOutRoute {
+                in_token,
+                out_token,
+                slippage_bps,
+                platform_fee_bps,
+            })
+        }
+        "shared_accounts_route" => {
+            let in_token = accounts.first().map(|addr| get_token_info(addr, amount_1));
+            let out_token = accounts.get(5).map(|addr| get_token_info(addr, amount_2));
+            Ok(JupiterSwapInstruction::SharedAccountsRoute {
+                in_token,
+                out_token,
+                slippage_bps,
+                platform_fee_bps,
+            })
+        }
+        _ => Ok(JupiterSwapInstruction::Unknown {
+            instruction_name: Some(name),
+        }),
+    }
+}
+
 fn parse_jupiter_swap_instruction(
     data: &[u8],
     accounts: &[String],
@@ -241,10 +313,16 @@ fn parse_jupiter_swap_instruction(
     match parse_jupiter_instruction_with_idl(data, accounts) {
         Ok(instruction) => Ok(instruction),
         Err(e) => {
-            tracing::warn!("Failed to parse Jupiter instruction with IDL: {e}");
-            Ok(JupiterSwapInstruction::Unknown {
-                instruction_name: None,
-            })
+            tracing::warn!("IDL parse failed: {e}, trying trailing-bytes fallback");
+            match parse_jupiter_trailing_fields(data, accounts) {
+                Ok(instruction) => Ok(instruction),
+                Err(e2) => {
+                    tracing::warn!("Trailing-bytes fallback also failed: {e2}");
+                    Ok(JupiterSwapInstruction::Unknown {
+                        instruction_name: None,
+                    })
+                }
+            }
         }
     }
 }
@@ -843,5 +921,75 @@ mod tests {
             }
         });
         assert!(has_slippage, "Should have Slippage field");
+    }
+
+    #[test]
+    fn test_jupiter_trailing_bytes_fallback_on_unknown_swap_variant() {
+        // Build a route instruction whose route_plan contains an invalid Swap variant index (0xFF).
+        // Full IDL parsing will fail on the unknown variant, but the trailing-bytes fallback
+        // should still extract amounts, slippage, and platform_fee_bps from the end of the data.
+
+        // Route discriminator
+        let discriminator = hex::decode("e517cb977ae3ad2a").expect("valid hex");
+
+        // route_plan: Vec<RoutePlanStep> encoded as [len(u32)=1][swap_variant(u8)=0xFF][dummy_data]
+        // We just need enough bytes so that the trailing 19 bytes are our known fields.
+        let route_plan_len: u32 = 1;
+        let mut route_plan = route_plan_len.to_le_bytes().to_vec();
+        // Invalid swap variant index
+        route_plan.push(0xFF);
+        // Some padding bytes to simulate the rest of the route plan step
+        route_plan.extend_from_slice(&[0x00; 10]);
+
+        // Trailing fields: in_amount (u64) + quoted_out_amount (u64) + slippage_bps (u16) + platform_fee_bps (u8)
+        let in_amount: u64 = 5_000_000;
+        let quoted_out_amount: u64 = 4_800_000;
+        let slippage_bps: u16 = 100;
+        let platform_fee_bps: u8 = 5;
+
+        let mut trailing = Vec::new();
+        trailing.extend_from_slice(&in_amount.to_le_bytes());
+        trailing.extend_from_slice(&quoted_out_amount.to_le_bytes());
+        trailing.extend_from_slice(&slippage_bps.to_le_bytes());
+        trailing.push(platform_fee_bps);
+
+        let data: Vec<u8> = [discriminator, route_plan, trailing].concat();
+        let accounts = fixture_accounts();
+
+        let parsed = parse_jupiter_swap_instruction(&data, &accounts).unwrap();
+
+        match &parsed {
+            JupiterSwapInstruction::Route {
+                in_token,
+                out_token,
+                slippage_bps: s,
+                platform_fee_bps: p,
+            } => {
+                assert_eq!(*s, 100, "Slippage should be 100 bps");
+                assert_eq!(*p, 5, "Platform fee should be 5 bps");
+                assert_eq!(
+                    in_token.as_ref().unwrap().amount,
+                    5_000_000,
+                    "in_amount should be parsed from trailing bytes"
+                );
+                assert_eq!(
+                    out_token.as_ref().unwrap().amount,
+                    4_800_000,
+                    "quoted_out_amount should be parsed from trailing bytes"
+                );
+            }
+            _ => panic!("Expected Route from trailing-bytes fallback, got {parsed:?}"),
+        }
+
+        let formatted = format_jupiter_swap_instruction(&parsed);
+        assert!(
+            formatted.contains("Jupiter Swap"),
+            "Should identify as Jupiter Swap"
+        );
+        assert!(formatted.contains("100bps"), "Should contain slippage");
+        assert!(
+            formatted.contains("platform fee: 5bps"),
+            "Should contain platform fee"
+        );
     }
 }
