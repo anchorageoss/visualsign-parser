@@ -97,7 +97,7 @@ fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (HashMap<Strin
             },
             None => {
                 eprintln!(
-                    "  Warning: Invalid IDL mapping '{mapping}' (expected format: Name:ProgramId:/path/to/file.json)"
+                    "  Warning: Invalid IDL mapping '{mapping}' (expected format: Name:/path/to/file.json:ProgramId)"
                 );
             }
         }
