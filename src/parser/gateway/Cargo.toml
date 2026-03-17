@@ -10,4 +10,3 @@ host_primitives = { path = "../../host_primitives" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 axum = { version = "0.6.20", features = ["http1", "tokio", "json"], default-features = false }
 serde = { workspace = true }
-serde_json = { workspace = true }
