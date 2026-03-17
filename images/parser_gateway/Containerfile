@@ -11,7 +11,7 @@ ENV RELEASE_DIR=/src/target/x86_64-unknown-linux-musl/release
 ADD src /src
 WORKDIR /src/
 
-# pre-fetch all workspace deps; we need to them to build with `--network=none` later
+# pre-fetch all workspace deps; we need them to build with `--network=none` later
 RUN cargo fetch
 
 WORKDIR /src/parser/gateway

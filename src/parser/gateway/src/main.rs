@@ -1,4 +1,4 @@
-use axum::{Json, Router, extract::State, routing::post};
+use axum::{Json, Router, extract::DefaultBodyLimit, extract::State, routing::post};
 use generated::parser::{
     Chain, ParseRequest, SignatureScheme, parser_service_client::ParserServiceClient,
 };
@@ -63,7 +63,7 @@ struct TurnkeySignature {
 type GrpcClient = ParserServiceClient<tonic::transport::Channel>;
 
 async fn parse_handler(
-    State(client): State<GrpcClient>,
+    State(mut client): State<GrpcClient>,
     Json(wrapper): Json<TurnkeyRequestWrapper>,
 ) -> (axum::http::StatusCode, Json<TurnkeyResponseWrapper>) {
     let chain = match Chain::from_str_name(&wrapper.request.chain) {
@@ -79,8 +79,6 @@ async fn parse_handler(
         }
     };
 
-    let mut client = client.clone();
-
     let request = tonic::Request::new(ParseRequest {
         unsigned_payload: wrapper.request.unsigned_payload,
         chain,
@@ -90,8 +88,13 @@ async fn parse_handler(
     let response = match client.parse(request).await {
         Ok(r) => r.into_inner(),
         Err(e) => {
+            let http_status = match e.code() {
+                tonic::Code::InvalidArgument => axum::http::StatusCode::BAD_REQUEST,
+                tonic::Code::NotFound => axum::http::StatusCode::NOT_FOUND,
+                _ => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            };
             return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                http_status,
                 Json(error_response(format!("gRPC error: {e}"))),
             );
         }
@@ -189,6 +192,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/visualsign/api/v1/parse", post(parse_handler))
+        .layer(DefaultBodyLimit::max(GRPC_MAX_RECV_MSG_SIZE))
         .with_state(client);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
