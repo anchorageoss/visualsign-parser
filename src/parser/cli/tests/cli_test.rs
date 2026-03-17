@@ -22,6 +22,15 @@ fn test_cli_with_fixtures() {
                 .ends_with(".input")
         });
 
+    // Fixture names are prefixed with their chain (e.g. "solana-json", "ethereum-text").
+    // Build the skip list once from compile-time feature flags.
+    let disabled_chain_prefixes: &[&str] = &[
+        #[cfg(not(feature = "ethereum"))]
+        "ethereum",
+        #[cfg(not(feature = "solana"))]
+        "solana",
+    ];
+
     for input_file in test_cases {
         let input_path = input_file.path();
         let test_name = input_path
@@ -31,13 +40,6 @@ fn test_cli_with_fixtures() {
             .unwrap()
             .replace(".input", "");
 
-        // Skip fixtures for chains not compiled in.
-        // Fixture names are prefixed with their chain (e.g. "solana-json", "ethereum-text").
-        let disabled_chain_prefixes: Vec<&str> = vec![];
-        #[cfg(not(feature = "ethereum"))]
-        disabled_chain_prefixes.push("ethereum");
-        #[cfg(not(feature = "solana"))]
-        disabled_chain_prefixes.push("solana");
         if disabled_chain_prefixes
             .iter()
             .any(|p| test_name.starts_with(p))

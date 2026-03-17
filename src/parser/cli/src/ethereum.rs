@@ -56,20 +56,6 @@ impl crate::ChainPlugin for EthereumPlugin {
     }
 }
 
-fn parse_abi_file_mapping(mapping_str: &str) -> Option<(String, String, String)> {
-    match mapping_parser::parse_mapping(mapping_str) {
-        Ok(components) => Some((components.name, components.path, components.identifier)),
-        Err(e) => {
-            eprintln!("Error parsing ABI mapping: {e}");
-            eprintln!("Expected format: Name:/path/to/abi.json:ContractAddress");
-            eprintln!(
-                "Example: UniswapV2:/home/user/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
-            );
-            None
-        }
-    }
-}
-
 fn build_abi_registry_from_mappings(
     abi_json_mappings: &[String],
     chain_id: u64,
@@ -78,24 +64,35 @@ fn build_abi_registry_from_mappings(
     let mut valid_count = 0;
 
     for mapping in abi_json_mappings {
-        match parse_abi_file_mapping(mapping) {
-            Some((abi_name, file_path, address_str)) => {
-                match load_and_map_abi(&mut registry, &abi_name, &file_path, chain_id, &address_str)
-                {
+        match mapping_parser::parse_mapping(mapping) {
+            Ok(components) => {
+                match load_and_map_abi(
+                    &mut registry,
+                    &components.name,
+                    &components.path,
+                    chain_id,
+                    &components.identifier,
+                ) {
                     Ok(()) => {
                         valid_count += 1;
                         eprintln!(
-                            "  Loaded ABI '{abi_name}' from {file_path} and mapped to {address_str}"
+                            "  Loaded ABI '{}' from {} and mapped to {}",
+                            components.name, components.path, components.identifier
                         );
                     }
                     Err(e) => {
-                        eprintln!("  Warning: Failed to load/map ABI '{abi_name}': {e}");
+                        eprintln!(
+                            "  Warning: Failed to load/map ABI '{}': {e}",
+                            components.name
+                        );
                     }
                 }
             }
-            None => {
+            Err(e) => {
+                eprintln!("Error parsing ABI mapping: {e}");
+                eprintln!("Expected format: Name:/path/to/abi.json:ContractAddress");
                 eprintln!(
-                    "  Warning: Invalid ABI mapping '{mapping}' (expected format: AbiName:/path/to/file.json:0xAddress)"
+                    "Example: UniswapV2:/home/user/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
                 );
             }
         }

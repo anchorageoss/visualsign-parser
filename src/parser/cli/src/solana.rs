@@ -50,54 +50,40 @@ impl crate::ChainPlugin for SolanaPlugin {
     }
 }
 
-fn parse_idl_file_mapping(mapping_str: &str) -> Option<(String, String, String)> {
-    match mapping_parser::parse_mapping(mapping_str) {
-        Ok(components) => Some((components.name, components.identifier, components.path)),
-        Err(e) => {
-            eprintln!("Error parsing IDL mapping: {e}");
-            eprintln!("Expected format: Name:/path/to/idl.json:ProgramId");
-            eprintln!(
-                "Example: JupiterSwap:/home/user/jupiter.json:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
-            );
-            None
-        }
-    }
-}
-
-fn load_idl_from_file(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let json_str = std::fs::read_to_string(file_path)?;
-    let _: serde_json::Value = serde_json::from_str(&json_str)?;
-    Ok(json_str)
-}
-
 fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (HashMap<String, Idl>, usize) {
     let mut mappings = HashMap::new();
     let mut valid_count = 0;
 
     for mapping in idl_json_mappings {
-        match parse_idl_file_mapping(mapping) {
-            Some((idl_name, program_id, file_path)) => match load_idl_from_file(&file_path) {
+        match mapping_parser::parse_mapping(mapping) {
+            Ok(components) => match mapping_parser::load_json_file(&components.path) {
                 Ok(idl_json) => {
                     let idl = Idl {
                         value: idl_json,
                         idl_type: Some(SolanaIdlType::Anchor as i32),
                         idl_version: None,
                         signature: None,
-                        program_name: Some(idl_name.clone()),
+                        program_name: Some(components.name.clone()),
                     };
-                    mappings.insert(program_id.clone(), idl);
+                    mappings.insert(components.identifier.clone(), idl);
                     valid_count += 1;
                     eprintln!(
-                        "  Loaded IDL '{idl_name}' from {file_path} and mapped to {program_id}"
+                        "  Loaded IDL '{}' from {} and mapped to {}",
+                        components.name, components.path, components.identifier
                     );
                 }
                 Err(e) => {
-                    eprintln!("  Warning: Failed to load IDL '{idl_name}' from '{file_path}': {e}");
+                    eprintln!(
+                        "  Warning: Failed to load IDL '{}' from '{}': {e}",
+                        components.name, components.path
+                    );
                 }
             },
-            None => {
+            Err(e) => {
+                eprintln!("Error parsing IDL mapping: {e}");
+                eprintln!("Expected format: Name:/path/to/idl.json:ProgramId");
                 eprintln!(
-                    "  Warning: Invalid IDL mapping '{mapping}' (expected format: Name:/path/to/file.json:ProgramId)"
+                    "Example: JupiterSwap:/home/user/jupiter.json:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
                 );
             }
         }
