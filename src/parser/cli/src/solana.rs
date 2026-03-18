@@ -51,45 +51,18 @@ impl crate::ChainPlugin for SolanaPlugin {
 }
 
 fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (HashMap<String, Idl>, usize) {
-    let mut mappings = HashMap::new();
-    let mut valid_count = 0;
-
-    for mapping in idl_json_mappings {
-        match mapping_parser::parse_mapping(mapping) {
-            Ok(components) => match mapping_parser::load_json_file(&components.path) {
-                Ok(idl_json) => {
-                    let idl = Idl {
-                        value: idl_json,
-                        idl_type: Some(SolanaIdlType::Anchor as i32),
-                        idl_version: None,
-                        signature: None,
-                        program_name: Some(components.name.clone()),
-                    };
-                    mappings.insert(components.identifier.clone(), idl);
-                    valid_count += 1;
-                    eprintln!(
-                        "  Loaded IDL '{}' from {} and mapped to {}",
-                        components.name, components.path, components.identifier
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "  Warning: Failed to load IDL '{}' from '{}': {e}",
-                        components.name, components.path
-                    );
-                }
-            },
-            Err(e) => {
-                eprintln!("Error parsing IDL mapping: {e}");
-                eprintln!("Expected format: Name:/path/to/idl.json:ProgramId");
-                eprintln!(
-                    "Example: JupiterSwap:/home/user/jupiter.json:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
-                );
-            }
-        }
-    }
-
-    (mappings, valid_count)
+    mapping_parser::load_mappings(
+        idl_json_mappings,
+        "IDL",
+        "JupiterSwap:/home/user/jupiter.json:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+        |components, json| Idl {
+            value: json,
+            idl_type: Some(SolanaIdlType::Anchor as i32),
+            idl_version: None,
+            signature: None,
+            program_name: Some(components.name.clone()),
+        },
+    )
 }
 
 /// Creates Solana chain metadata from IDL mappings.
