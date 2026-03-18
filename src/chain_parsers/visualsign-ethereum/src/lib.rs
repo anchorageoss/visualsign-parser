@@ -226,10 +226,12 @@ impl EthereumVisualSignConverter {
         }
 
         // Override ABI (from CLI) takes precedence; only extract from metadata if needed.
+        let metadata_chain_id =
+            networks::extract_chain_id_from_metadata(options.metadata.as_ref()).unwrap_or(1);
         let metadata_abi = if override_abi_registry.is_some() {
             None
         } else {
-            extract_metadata_abi(&options)
+            extract_metadata_abi(&options, metadata_chain_id)
         };
         let abi_ref = override_abi_registry.or(metadata_abi.as_ref());
 
@@ -400,8 +402,11 @@ fn decode_transaction(
 }
 
 /// Extract ABI from wallet-provided metadata with graceful degradation.
-fn extract_metadata_abi(options: &VisualSignOptions) -> Option<abi_registry::AbiRegistry> {
-    match grpc_abi::try_extract_abi_from_chain_metadata(options.metadata.as_ref()) {
+fn extract_metadata_abi(
+    options: &VisualSignOptions,
+    chain_id: u64,
+) -> Option<abi_registry::AbiRegistry> {
+    match grpc_abi::try_extract_abi_from_chain_metadata(options.metadata.as_ref(), chain_id) {
         Ok(Some(registry)) => Some(registry),
         Ok(None) => None,
         Err(e) => {

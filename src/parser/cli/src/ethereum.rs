@@ -1,7 +1,11 @@
+use std::collections::HashMap;
+
 use clap::Args as ClapArgs;
-use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
+use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 use visualsign::registry::{Chain, TransactionConverterRegistry};
 use visualsign_ethereum::networks::parse_network;
+
+use crate::mapping_parser;
 
 /// CLI arguments specific to Ethereum.
 #[derive(ClapArgs, Debug, Default, Clone)]
@@ -17,7 +21,6 @@ pub struct EthereumArgs {
 
 /// [`crate::ChainPlugin`] implementation for Ethereum.
 pub struct EthereumPlugin {
-    #[allow(dead_code)]
     args: EthereumArgs,
 }
 
@@ -42,8 +45,48 @@ impl crate::ChainPlugin for EthereumPlugin {
     }
 
     fn create_metadata(&self, network: Option<String>) -> Option<ChainMetadata> {
-        create_chain_metadata(network)
+        create_chain_metadata(network, &self.args.abi_json_mappings)
     }
+}
+
+/// Load ABI JSON files and create `HashMap` for `EthereumMetadata.abi_mappings`
+fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<String, Abi>, usize) {
+    let mut mappings = HashMap::new();
+    let mut valid_count = 0;
+
+    for mapping in abi_json_mappings {
+        match mapping_parser::parse_mapping(mapping) {
+            Ok(components) => match mapping_parser::load_json_file(&components.path) {
+                Ok(json) => {
+                    let abi = Abi {
+                        value: json,
+                        signature: None,
+                    };
+                    mappings.insert(components.identifier.clone(), abi);
+                    valid_count += 1;
+                    eprintln!(
+                        "  Loaded ABI '{}' from {} and mapped to {}",
+                        components.name, components.path, components.identifier
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "  Warning: Failed to load ABI '{}' from '{}': {e}",
+                        components.name, components.path
+                    );
+                }
+            },
+            Err(e) => {
+                eprintln!("Error parsing ABI mapping: {e}");
+                eprintln!("Expected format: Name:/path/to/abi.json:ContractAddress");
+                eprintln!(
+                    "Example: UniswapV2:/home/user/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
+                );
+            }
+        }
+    }
+
+    (mappings, valid_count)
 }
 
 /// Creates Ethereum chain metadata from the network argument.
@@ -54,7 +97,10 @@ impl crate::ChainPlugin for EthereumPlugin {
 ///
 /// Panics if `ETHEREUM_MAINNET` cannot be parsed (should never happen).
 #[must_use]
-pub fn create_chain_metadata(network: Option<String>) -> Option<ChainMetadata> {
+pub fn create_chain_metadata(
+    network: Option<String>,
+    abi_json_mappings: &[String],
+) -> Option<ChainMetadata> {
     let network_id = if let Some(network) = network {
         let Some(network_id) = parse_network(&network) else {
             eprintln!(
@@ -72,10 +118,23 @@ pub fn create_chain_metadata(network: Option<String>) -> Option<ChainMetadata> {
         parse_network("ETHEREUM_MAINNET").expect("ETHEREUM_MAINNET should always be valid")
     };
 
+    let abi_mappings = if abi_json_mappings.is_empty() {
+        HashMap::new()
+    } else {
+        eprintln!("Loading custom ABIs:");
+        let (mappings, valid_count) = build_abi_mappings_from_files(abi_json_mappings);
+        eprintln!(
+            "Successfully loaded {}/{} ABI mappings\n",
+            valid_count,
+            abi_json_mappings.len()
+        );
+        mappings
+    };
+
     Some(ChainMetadata {
         metadata: Some(Metadata::Ethereum(EthereumMetadata {
             network_id: Some(network_id),
-            abi: None,
+            abi_mappings,
         })),
     })
 }

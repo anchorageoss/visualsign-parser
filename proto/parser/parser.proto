@@ -106,9 +106,12 @@ message Signature {
 }
 
 message EthereumMetadata {
+  reserved 1;  // was: optional Abi abi
   // Network identifier string (e.g., "ETHEREUM_MAINNET", "POLYGON_MAINNET", "ARBITRUM_MAINNET")
   optional string network_id = 2;
-  optional Abi abi = 1;
+  // Map of contract address (e.g. "0x1234...") to ABI definitions
+  // Allows wallet to provide multiple ABIs, one per contract
+  map<string, Abi> abi_mappings = 3;
 }
 
 message SolanaMetadata {
