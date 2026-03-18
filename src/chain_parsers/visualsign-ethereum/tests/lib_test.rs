@@ -1,6 +1,9 @@
 use std::fs;
 use std::path::PathBuf;
 use visualsign::vsptrait::VisualSignOptions;
+use visualsign_ethereum::EthereumVisualSignConverter;
+use visualsign_ethereum::abi_registry::AbiRegistry;
+use visualsign_ethereum::embedded_abis::register_embedded_abi;
 use visualsign_ethereum::transaction_string_to_visual_sign;
 
 // Helper function to get fixture path
@@ -35,7 +38,6 @@ fn test_with_fixtures() {
             transaction_name: None,
             metadata: None,
             developer_config: None,
-            abi_registry: None,
         };
 
         let result = transaction_string_to_visual_sign(transaction_hex, options);
@@ -81,7 +83,6 @@ fn test_ethereum_charset_validation() {
             transaction_name: None,
             metadata: None,
             developer_config: None,
-            abi_registry: None,
         };
 
         let result = transaction_string_to_visual_sign(transaction_hex, options);
@@ -133,4 +134,84 @@ fn test_ethereum_charset_validation() {
             }
         }
     }
+}
+
+#[test]
+fn test_convert_from_string_with_abi_none() {
+    // Verify the direct path with None ABI produces the same result as the trait path
+    let fixtures_dir = fixture_path("");
+    let input_path = fixtures_dir.join("1559.input");
+    let transaction_hex = fs::read_to_string(&input_path).unwrap();
+    let transaction_hex = transaction_hex.trim();
+
+    let options = VisualSignOptions {
+        decode_transfers: true,
+        transaction_name: None,
+        metadata: None,
+        developer_config: None,
+    };
+
+    let trait_result = transaction_string_to_visual_sign(transaction_hex, options.clone()).unwrap();
+    let converter = EthereumVisualSignConverter::new();
+    let direct_result = converter
+        .convert_from_string_with_abi(transaction_hex, options, None)
+        .unwrap();
+
+    assert_eq!(
+        trait_result.to_json().unwrap(),
+        direct_result.to_json().unwrap(),
+        "Direct path with None ABI should match trait path"
+    );
+}
+
+#[test]
+fn test_convert_from_string_with_abi_registry() {
+    // Verify the direct path works end-to-end with a real ABI registry
+    let fixtures_dir = fixture_path("");
+    let input_path = fixtures_dir.join("1559.input");
+    let transaction_hex = fs::read_to_string(&input_path).unwrap();
+    let transaction_hex = transaction_hex.trim();
+
+    let mut abi_registry = AbiRegistry::new();
+    register_embedded_abi(
+        &mut abi_registry,
+        "test_abi",
+        r#"[{
+            "type": "function",
+            "name": "transfer",
+            "inputs": [
+                {"name": "to", "type": "address"},
+                {"name": "amount", "type": "uint256"}
+            ],
+            "outputs": [{"name": "", "type": "bool"}],
+            "stateMutability": "nonpayable"
+        }]"#,
+    )
+    .unwrap();
+
+    // Map the ABI to the fixture transaction's `to` address so the registry lookup
+    // actually exercises the dynamic ABI visualisation path.
+    let to_address: alloy_primitives::Address = "0x66a9893cc07d91d95644aedd05d03f95e1dba8af"
+        .parse()
+        .unwrap();
+    abi_registry.map_address(1, to_address, "test_abi");
+
+    let options = VisualSignOptions {
+        decode_transfers: true,
+        transaction_name: None,
+        metadata: None,
+        developer_config: None,
+    };
+
+    let converter = EthereumVisualSignConverter::new();
+    let result = converter
+        .convert_from_string_with_abi(transaction_hex, options, Some(&abi_registry))
+        .unwrap();
+
+    // Should succeed and produce a valid payload
+    assert!(!result.fields.is_empty(), "Payload should have fields");
+    assert!(
+        result.to_json().unwrap().contains("Ethereum"),
+        "Payload should contain Ethereum network info"
+    );
 }

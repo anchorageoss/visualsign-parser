@@ -1,14 +1,7 @@
-use std::sync::Arc;
-
 use clap::Args as ClapArgs;
 use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 use visualsign::registry::{Chain, TransactionConverterRegistry};
-use visualsign::vsptrait::VisualSignOptions;
-use visualsign_ethereum::abi_registry::AbiRegistry;
-use visualsign_ethereum::embedded_abis::load_and_map_abi;
-use visualsign_ethereum::networks::{extract_chain_id_from_metadata, parse_network};
-
-use crate::mapping_parser;
+use visualsign_ethereum::networks::parse_network;
 
 /// CLI arguments specific to Ethereum.
 #[derive(ClapArgs, Debug, Default, Clone)]
@@ -24,6 +17,7 @@ pub struct EthereumArgs {
 
 /// [`crate::ChainPlugin`] implementation for Ethereum.
 pub struct EthereumPlugin {
+    #[allow(dead_code)]
     args: EthereumArgs,
 }
 
@@ -50,82 +44,6 @@ impl crate::ChainPlugin for EthereumPlugin {
     fn create_metadata(&self, network: Option<String>) -> Option<ChainMetadata> {
         create_chain_metadata(network)
     }
-
-    fn apply_options(&self, options: VisualSignOptions) -> VisualSignOptions {
-        apply_abi_registry(options, &self.args.abi_json_mappings)
-    }
-}
-
-fn build_abi_registry_from_mappings(
-    abi_json_mappings: &[String],
-    chain_id: u64,
-) -> (AbiRegistry, usize) {
-    let mut registry = AbiRegistry::new();
-    let mut valid_count = 0;
-
-    for mapping in abi_json_mappings {
-        match mapping_parser::parse_mapping(mapping) {
-            Ok(components) => {
-                match load_and_map_abi(
-                    &mut registry,
-                    &components.name,
-                    &components.path,
-                    chain_id,
-                    &components.identifier,
-                ) {
-                    Ok(()) => {
-                        valid_count += 1;
-                        eprintln!(
-                            "  Loaded ABI '{}' from {} and mapped to {}",
-                            components.name, components.path, components.identifier
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "  Warning: Failed to load/map ABI '{}': {e}",
-                            components.name
-                        );
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("Error parsing ABI mapping: {e}");
-                eprintln!("Expected format: Name:/path/to/abi.json:ContractAddress");
-                eprintln!(
-                    "Example: UniswapV2:/home/user/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
-                );
-            }
-        }
-    }
-
-    (registry, valid_count)
-}
-
-fn apply_abi_registry(
-    mut options: VisualSignOptions,
-    abi_json_mappings: &[String],
-) -> VisualSignOptions {
-    if abi_json_mappings.is_empty() {
-        return options;
-    }
-
-    let chain_id = if let Some(ref metadata) = options.metadata {
-        extract_chain_id_from_metadata(Some(metadata))
-    } else {
-        eprintln!("Warning: No metadata provided for ABI registry, defaulting to chain_id 1");
-        Some(1)
-    };
-
-    eprintln!("Registering custom ABIs:");
-    let (registry, valid_count) =
-        build_abi_registry_from_mappings(abi_json_mappings, chain_id.unwrap_or(1));
-    eprintln!(
-        "Successfully registered {}/{} ABI mappings\n",
-        valid_count,
-        abi_json_mappings.len()
-    );
-    options.abi_registry = Some(Arc::new(registry));
-    options
 }
 
 /// Creates Ethereum chain metadata from the network argument.
