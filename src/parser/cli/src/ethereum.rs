@@ -51,42 +51,15 @@ impl crate::ChainPlugin for EthereumPlugin {
 
 /// Load ABI JSON files and create `HashMap` for `EthereumMetadata.abi_mappings`
 fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<String, Abi>, usize) {
-    let mut mappings = HashMap::new();
-    let mut valid_count = 0;
-
-    for mapping in abi_json_mappings {
-        match mapping_parser::parse_mapping(mapping) {
-            Ok(components) => match mapping_parser::load_json_file(&components.path) {
-                Ok(abi_json) => {
-                    let abi = Abi {
-                        value: abi_json,
-                        signature: None,
-                    };
-                    mappings.insert(components.identifier.clone(), abi);
-                    valid_count += 1;
-                    eprintln!(
-                        "  Loaded ABI '{}' from {} and mapped to {}",
-                        components.name, components.path, components.identifier
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "  Warning: Failed to load ABI '{}' from '{}': {e}",
-                        components.name, components.path
-                    );
-                }
-            },
-            Err(e) => {
-                eprintln!("Error parsing ABI mapping: {e}");
-                eprintln!("Expected format: Name:/path/to/abi.json:ContractAddress");
-                eprintln!(
-                    "Example: UniswapV2:/home/user/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
-                );
-            }
-        }
-    }
-
-    (mappings, valid_count)
+    mapping_parser::load_mappings(
+        abi_json_mappings,
+        "ABI",
+        "UniswapV2:/home/user/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
+        |_components, json| Abi {
+            value: json,
+            signature: None,
+        },
+    )
 }
 
 /// Creates Ethereum chain metadata from the network argument.

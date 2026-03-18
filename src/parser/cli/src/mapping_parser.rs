@@ -38,6 +38,52 @@ pub fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, String> {
     })
 }
 
+/// Load JSON files from CLI mapping strings and build a `HashMap`.
+///
+/// Each mapping string is parsed, the JSON file is loaded, and `build_value` converts
+/// the loaded JSON + components into the target value type. The identifier from the
+/// mapping becomes the HashMap key.
+///
+/// Returns the populated map and the count of successfully loaded entries.
+pub fn load_mappings<V>(
+    mappings: &[String],
+    kind: &str,
+    example: &str,
+    build_value: impl Fn(&MappingComponents, String) -> V,
+) -> (std::collections::HashMap<String, V>, usize) {
+    let mut map = std::collections::HashMap::new();
+    let mut valid_count = 0;
+
+    for mapping in mappings {
+        match parse_mapping(mapping) {
+            Ok(components) => match load_json_file(&components.path) {
+                Ok(json) => {
+                    let value = build_value(&components, json);
+                    map.insert(components.identifier.clone(), value);
+                    valid_count += 1;
+                    eprintln!(
+                        "  Loaded {kind} '{}' from {} and mapped to {}",
+                        components.name, components.path, components.identifier
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "  Warning: Failed to load {kind} '{}' from '{}': {e}",
+                        components.name, components.path
+                    );
+                }
+            },
+            Err(e) => {
+                eprintln!("Error parsing {kind} mapping: {e}");
+                eprintln!("Expected format: Name:/path/to/file.json:Identifier");
+                eprintln!("Example: {example}");
+            }
+        }
+    }
+
+    (map, valid_count)
+}
+
 /// Load and validate JSON file from path
 pub fn load_json_file(path: &str) -> Result<String, String> {
     let json_content =
