@@ -52,7 +52,7 @@ fn main() {
         metadata: Some(ChainMetadata {
             metadata: Some(Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("1".to_string()), // Ethereum Mainnet
-                abi: None,
+                abi_mappings: Default::default(),
             })),
         }),
         developer_config: Some(DeveloperConfig {

@@ -22,6 +22,10 @@ pub enum GrpcAbiError {
     #[error("ABI signature validation failed: {0}")]
     SignatureValidation(String),
 
+    /// Invalid contract address format
+    #[error("Invalid contract address: {0}")]
+    InvalidAddress(String),
+
     /// Missing required metadata
     #[error("Missing ABI metadata")]
     MissingMetadata,
@@ -49,7 +53,8 @@ pub enum GrpcAbiError {
 ///     }
 /// }
 /// ```
-pub fn extract_abi_from_metadata(
+#[allow(dead_code)]
+pub(crate) fn extract_abi_from_metadata(
     abi_value: &str,
     signature: Option<&SignatureMetadata>,
 ) -> Result<AbiRegistry, GrpcAbiError> {
@@ -65,12 +70,16 @@ pub fn extract_abi_from_metadata(
     Ok(registry)
 }
 
-/// Extract and validate ABI from `ChainMetadata`, if present.
+/// Extract and validate ABIs from `ChainMetadata`, if present.
 ///
-/// Navigates `ChainMetadata -> Ethereum -> Abi` and calls [`extract_abi_from_metadata`].
-/// Returns `Ok(None)` if the metadata doesn't contain an Ethereum ABI.
+/// Navigates `ChainMetadata -> Ethereum -> abi_mappings` and registers each ABI
+/// with its contract address. Returns `Ok(None)` if the metadata doesn't contain
+/// any Ethereum ABI mappings.
+///
+/// The `chain_id` is needed to register address-to-ABI mappings in the registry.
 pub fn try_extract_abi_from_chain_metadata(
     chain_metadata: Option<&ChainMetadata>,
+    chain_id: u64,
 ) -> Result<Option<AbiRegistry>, GrpcAbiError> {
     let Some(chain_metadata) = chain_metadata else {
         return Ok(None);
@@ -79,11 +88,26 @@ pub fn try_extract_abi_from_chain_metadata(
     else {
         return Ok(None);
     };
-    let Some(abi) = ethereum.abi.as_ref() else {
+    if ethereum.abi_mappings.is_empty() {
         return Ok(None);
-    };
-    let signature = abi.signature.as_ref().map(convert_proto_signature);
-    let registry = extract_abi_from_metadata(&abi.value, signature.as_ref())?;
+    }
+
+    let mut registry = AbiRegistry::new();
+    for (address, abi) in &ethereum.abi_mappings {
+        // Validate address first (cheap) before expensive signature/ABI operations
+        let parsed_address = address
+            .parse::<alloy_primitives::Address>()
+            .map_err(|e| GrpcAbiError::InvalidAddress(format!("'{address}': {e}")))?;
+
+        // Validate signature if present
+        if let Some(proto_sig) = abi.signature.as_ref() {
+            let signature = convert_proto_signature(proto_sig);
+            validate_abi_signature(&abi.value, &signature)?;
+        }
+
+        register_embedded_abi(&mut registry, address, &abi.value)?;
+        registry.map_address(chain_id, parsed_address, address);
+    }
     Ok(Some(registry))
 }
 
@@ -362,9 +386,22 @@ mod tests {
 
     // --- try_extract_abi_from_chain_metadata tests ---
 
+    const TEST_ADDRESS: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
+
+    fn make_abi_mappings(entries: Vec<(&str, Abi)>) -> std::collections::HashMap<String, Abi> {
+        entries
+            .into_iter()
+            .map(|(addr, abi)| (addr.to_string(), abi))
+            .collect()
+    }
+
     #[test]
     fn test_try_extract_no_metadata() {
-        assert!(try_extract_abi_from_chain_metadata(None).unwrap().is_none());
+        assert!(
+            try_extract_abi_from_chain_metadata(None, 1)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -377,7 +414,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_abi_from_chain_metadata(Some(&metadata))
+            try_extract_abi_from_chain_metadata(Some(&metadata), 1)
                 .unwrap()
                 .is_none()
         );
@@ -388,11 +425,11 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("1".to_string()),
-                abi: None,
+                abi_mappings: Default::default(),
             })),
         };
         assert!(
-            try_extract_abi_from_chain_metadata(Some(&metadata))
+            try_extract_abi_from_chain_metadata(Some(&metadata), 1)
                 .unwrap()
                 .is_none()
         );
@@ -403,16 +440,19 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("1".to_string()),
-                abi: Some(Abi {
-                    value: VALID_ABI.to_string(),
-                    signature: None,
-                }),
+                abi_mappings: make_abi_mappings(vec![(
+                    TEST_ADDRESS,
+                    Abi {
+                        value: VALID_ABI.to_string(),
+                        signature: None,
+                    },
+                )]),
             })),
         };
-        let registry = try_extract_abi_from_chain_metadata(Some(&metadata))
+        let registry = try_extract_abi_from_chain_metadata(Some(&metadata), 1)
             .unwrap()
             .expect("should contain ABI");
-        assert!(registry.list_abis().contains(&"wallet_provided"));
+        assert!(registry.list_abis().contains(&TEST_ADDRESS));
     }
 
     #[test]
@@ -458,16 +498,19 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("1".to_string()),
-                abi: Some(Abi {
-                    value: VALID_ABI.to_string(),
-                    signature: Some(proto_sig),
-                }),
+                abi_mappings: make_abi_mappings(vec![(
+                    TEST_ADDRESS,
+                    Abi {
+                        value: VALID_ABI.to_string(),
+                        signature: Some(proto_sig),
+                    },
+                )]),
             })),
         };
-        let registry = try_extract_abi_from_chain_metadata(Some(&metadata))
+        let registry = try_extract_abi_from_chain_metadata(Some(&metadata), 1)
             .unwrap()
             .expect("should contain ABI");
-        assert!(registry.list_abis().contains(&"wallet_provided"));
+        assert!(registry.list_abis().contains(&TEST_ADDRESS));
     }
 
     #[test]
@@ -486,17 +529,41 @@ mod tests {
     }
 
     #[test]
+    fn test_try_extract_invalid_address() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("1".to_string()),
+                abi_mappings: make_abi_mappings(vec![(
+                    "not_an_address",
+                    Abi {
+                        value: VALID_ABI.to_string(),
+                        signature: None,
+                    },
+                )]),
+            })),
+        };
+        let result = try_extract_abi_from_chain_metadata(Some(&metadata), 1);
+        assert!(
+            matches!(result, Err(GrpcAbiError::InvalidAddress(_))),
+            "Expected InvalidAddress error"
+        );
+    }
+
+    #[test]
     fn test_try_extract_invalid_abi_json() {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("1".to_string()),
-                abi: Some(Abi {
-                    value: "not valid json".to_string(),
-                    signature: None,
-                }),
+                abi_mappings: make_abi_mappings(vec![(
+                    TEST_ADDRESS,
+                    Abi {
+                        value: "not valid json".to_string(),
+                        signature: None,
+                    },
+                )]),
             })),
         };
-        let result = try_extract_abi_from_chain_metadata(Some(&metadata));
+        let result = try_extract_abi_from_chain_metadata(Some(&metadata), 1);
         assert!(result.is_err());
     }
 }

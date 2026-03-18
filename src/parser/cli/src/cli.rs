@@ -3,15 +3,13 @@ use crate::mapping_parser;
 use chains::parse_chain;
 use clap::Parser;
 use generated::parser::{
-    ChainMetadata, EthereumMetadata, SolanaIdlType, SolanaMetadata, chain_metadata::Metadata,
+    Abi, ChainMetadata, EthereumMetadata, SolanaIdlType, SolanaMetadata, chain_metadata::Metadata,
 };
 use parser_app::registry::create_registry;
 use std::collections::HashMap;
 use visualsign::registry::Chain;
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
-use visualsign_ethereum::abi_registry::AbiRegistry;
-use visualsign_ethereum::embedded_abis::load_and_map_abi;
 use visualsign_ethereum::networks::parse_network;
 
 #[derive(Parser, Debug)]
@@ -255,31 +253,29 @@ fn parse_abi_file_mapping(mapping_str: &str) -> Option<(String, String, String)>
     }
 }
 
-/// Builds an ABI registry from CLI mappings with file paths
-/// Returns `registry` and `valid_count` and logs any errors
-fn build_abi_registry_from_mappings(
-    abi_json_mappings: &[String],
-    chain_id: u64,
-) -> (AbiRegistry, usize) {
-    let mut registry = AbiRegistry::new();
+/// Load ABI JSON files and create `HashMap` for `EthereumMetadata.abi_mappings`
+fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<String, Abi>, usize) {
+    let mut mappings = HashMap::new();
     let mut valid_count = 0;
 
     for mapping in abi_json_mappings {
         match parse_abi_file_mapping(mapping) {
-            Some((abi_name, file_path, address_str)) => {
-                match load_and_map_abi(&mut registry, &abi_name, &file_path, chain_id, &address_str)
-                {
-                    Ok(()) => {
-                        valid_count += 1;
-                        eprintln!(
-                            "  Loaded ABI '{abi_name}' from {file_path} and mapped to {address_str}"
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("  Warning: Failed to load/map ABI '{abi_name}': {e}");
-                    }
+            Some((abi_name, file_path, address_str)) => match load_json_from_file(&file_path) {
+                Ok(abi_json) => {
+                    let abi = Abi {
+                        value: abi_json,
+                        signature: None,
+                    };
+                    mappings.insert(address_str.clone(), abi);
+                    valid_count += 1;
+                    eprintln!(
+                        "  Loaded ABI '{abi_name}' from {file_path} and mapped to {address_str}"
+                    );
                 }
-            }
+                Err(e) => {
+                    eprintln!("  Warning: Failed to load ABI '{abi_name}' from '{file_path}': {e}");
+                }
+            },
             None => {
                 eprintln!(
                     "  Warning: Invalid ABI mapping '{mapping}' (expected format: AbiName:/path/to/file.json:0xAddress)",
@@ -288,7 +284,17 @@ fn build_abi_registry_from_mappings(
         }
     }
 
-    (registry, valid_count)
+    (mappings, valid_count)
+}
+
+/// Load a JSON file from disk and validate it parses as valid JSON
+fn load_json_from_file(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let json_str = std::fs::read_to_string(file_path)?;
+
+    // Validate it's valid JSON
+    let _: serde_json::Value = serde_json::from_str(&json_str)?;
+
+    Ok(json_str)
 }
 
 /// Parse IDL mapping format: `<Name:/path/to/file.json:ProgramId>`
@@ -321,7 +327,7 @@ fn build_idl_mappings_from_files(
 
     for mapping in idl_json_mappings {
         match parse_idl_file_mapping(mapping) {
-            Some((idl_name, program_id, file_path)) => match load_idl_from_file(&file_path) {
+            Some((idl_name, program_id, file_path)) => match load_json_from_file(&file_path) {
                 Ok(idl_json) => {
                     let idl = generated::parser::Idl {
                         value: idl_json,
@@ -351,66 +357,16 @@ fn build_idl_mappings_from_files(
     (mappings, valid_count)
 }
 
-/// Load IDL JSON file from disk and validate it
-fn load_idl_from_file(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let json_str = std::fs::read_to_string(file_path)?;
-
-    // Validate it's valid JSON
-    let _: serde_json::Value = serde_json::from_str(&json_str)?;
-
-    Ok(json_str)
-}
-
 fn parse_and_display(
     chain: &str,
     raw_tx: &str,
     options: VisualSignOptions,
     output_format: OutputFormat,
     condensed_only: bool,
-    abi_json_mappings: &[String],
 ) {
     let registry_chain = parse_chain(chain);
-
-    // Build ABI registry from CLI mappings (Ethereum-only)
-    let cli_abi_registry = if abi_json_mappings.is_empty()
-        || !matches!(registry_chain, Chain::Ethereum)
-    {
-        if !abi_json_mappings.is_empty() && !matches!(registry_chain, Chain::Ethereum) {
-            eprintln!(
-                "Warning: --abi-json-mappings is only supported for Ethereum; ignoring for chain '{chain}'"
-            );
-        }
-        None
-    } else {
-        let chain_id = if let Some(ref metadata) = options.metadata {
-            visualsign_ethereum::networks::extract_chain_id_from_metadata(Some(metadata))
-        } else {
-            eprintln!("Warning: No metadata provided for ABI registry, defaulting to chain_id 1");
-            Some(1)
-        };
-
-        eprintln!("Registering custom ABIs:");
-        let (registry, valid_count) =
-            build_abi_registry_from_mappings(abi_json_mappings, chain_id.unwrap_or(1));
-        eprintln!(
-            "Successfully registered {}/{} ABI mappings\n",
-            valid_count,
-            abi_json_mappings.len()
-        );
-        Some(registry)
-    };
-
-    // Use the standard registry for all chains. When CLI ABIs are provided for
-    // Ethereum, use the direct converter path (which is equivalent to the registered
-    // converter since both use `EthereumVisualSignConverter::new()`).
-    let signable_payload_str =
-        if cli_abi_registry.is_some() && matches!(registry_chain, Chain::Ethereum) {
-            let converter = visualsign_ethereum::EthereumVisualSignConverter::new();
-            converter.convert_from_string_with_abi(raw_tx, options, cli_abi_registry.as_ref())
-        } else {
-            let registry = create_registry();
-            registry.convert_transaction(&registry_chain, raw_tx, options)
-        };
+    let registry = create_registry();
+    let signable_payload_str = registry.convert_transaction(&registry_chain, raw_tx, options);
     match signable_payload_str {
         Ok(payload) => match output_format {
             OutputFormat::Json => {
@@ -451,6 +407,7 @@ fn parse_and_display(
 fn create_chain_metadata(
     chain: &Chain,
     network: Option<String>,
+    abi_json_mappings: &[String],
     idl_json_mappings: &[String],
 ) -> Option<ChainMetadata> {
     // Parse network if provided, with Ethereum defaulting logic
@@ -503,9 +460,27 @@ fn create_chain_metadata(
         // For Ethereum and other chains, use EthereumMetadata structure
         // Ethereum requires network_id
         let network_id = network_id?;
+
+        // Build ABI mappings if provided
+        let abi_mappings = if abi_json_mappings.is_empty() || chain != &Chain::Ethereum {
+            if !abi_json_mappings.is_empty() && chain != &Chain::Ethereum {
+                eprintln!("Warning: --abi-json-mappings is only supported for Ethereum; ignoring");
+            }
+            HashMap::new()
+        } else {
+            eprintln!("Loading custom ABIs:");
+            let (mappings, valid_count) = build_abi_mappings_from_files(abi_json_mappings);
+            eprintln!(
+                "Successfully loaded {}/{} ABI mappings\n",
+                valid_count,
+                abi_json_mappings.len()
+            );
+            mappings
+        };
+
         Metadata::Ethereum(EthereumMetadata {
             network_id: Some(network_id),
-            abi: None,
+            abi_mappings,
         })
     };
 
@@ -526,7 +501,12 @@ impl Cli {
         let args = Args::parse();
 
         let chain = parse_chain(&args.chain);
-        let chain_metadata = create_chain_metadata(&chain, args.network, &args.idl_json_mappings);
+        let chain_metadata = create_chain_metadata(
+            &chain,
+            args.network,
+            &args.abi_json_mappings,
+            &args.idl_json_mappings,
+        );
 
         let options = VisualSignOptions {
             decode_transfers: true,
@@ -543,7 +523,6 @@ impl Cli {
             options,
             args.output,
             args.condensed_only,
-            &args.abi_json_mappings,
         );
     }
 }
