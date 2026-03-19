@@ -23,6 +23,7 @@ use generated::grpc::health::v1::{
 use generated::health::health_check_service_client::HealthCheckServiceClient;
 use generated::parser::parser_service_client::ParserServiceClient;
 
+use health_check::{DEFAULT_SERVICE, LIVENESS_SERVICE, READINESS_SERVICE};
 use host_primitives::GRPC_MAX_RECV_MSG_SIZE;
 use qos_core::protocol::services::boot::{Manifest, ManifestEnvelope, MemberPubKey, PatchSet};
 use qos_p256::P256Pair;
@@ -238,46 +239,12 @@ pub fn make_patch_set(member_count: usize, threshold: u32) -> (PatchSet, Vec<P25
     (PatchSet { threshold, members }, pairs)
 }
 
-/// Test the k8s health endpoints.
-pub async fn k8_health(test_args: TestArgs) {
-    use health_check::{LIVENESS, READINESS};
+/// Test the k8s health check endpoints.
+pub async fn k8_health_check(test_args: TestArgs) {
     let mut client = test_args.k8_health_client.unwrap();
 
     let request = tonic::Request::new(HealthCheckRequest {
-        service: LIVENESS.to_string(),
-    });
-    let response = client.check(request).await;
-    assert_eq!(
-        response.unwrap().into_inner(),
-        HealthCheckResponse {
-            status: ServingStatus::Serving as i32
-        }
-    );
-
-    let request = tonic::Request::new(HealthCheckRequest {
-        service: READINESS.to_string(),
-    });
-    let response = client.check(request).await;
-    assert_eq!(
-        response.unwrap().into_inner(),
-        HealthCheckResponse {
-            status: ServingStatus::Serving as i32
-        }
-    );
-
-    let request = tonic::Request::new(HealthCheckRequest {
-        service: "signer".to_string(),
-    });
-    let response = client.check(request).await;
-    assert_eq!(
-        response.unwrap().into_inner(),
-        HealthCheckResponse {
-            status: ServingStatus::ServiceUnknown as i32
-        }
-    );
-
-    let request = tonic::Request::new(HealthCheckRequest {
-        service: LIVENESS.to_string(),
+        service: LIVENESS_SERVICE.to_string(),
     });
     let response = client
         .watch(request)
@@ -296,7 +263,26 @@ pub async fn k8_health(test_args: TestArgs) {
     );
 
     let request = tonic::Request::new(HealthCheckRequest {
-        service: READINESS.to_string(),
+        service: READINESS_SERVICE.to_string(),
+    });
+    let response = client
+        .watch(request)
+        .await
+        .unwrap()
+        .into_inner()
+        .message()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        response,
+        HealthCheckResponse {
+            status: ServingStatus::Serving as i32
+        }
+    );
+
+    let request = tonic::Request::new(HealthCheckRequest {
+        service: DEFAULT_SERVICE.to_string(),
     });
     let response = client
         .watch(request)
@@ -328,6 +314,55 @@ pub async fn k8_health(test_args: TestArgs) {
         .unwrap();
     assert_eq!(
         response,
+        HealthCheckResponse {
+            status: ServingStatus::ServiceUnknown as i32
+        }
+    );
+}
+
+/// Test the k8s health "watch" endpoints.
+pub async fn k8_health_watch(test_args: TestArgs) {
+    let mut client = test_args.k8_health_client.unwrap();
+
+    let request = tonic::Request::new(HealthCheckRequest {
+        service: LIVENESS_SERVICE.to_string(),
+    });
+    let response = client.check(request).await;
+    assert_eq!(
+        response.unwrap().into_inner(),
+        HealthCheckResponse {
+            status: ServingStatus::Serving as i32
+        }
+    );
+
+    let request = tonic::Request::new(HealthCheckRequest {
+        service: READINESS_SERVICE.to_string(),
+    });
+    let response = client.check(request).await;
+    assert_eq!(
+        response.unwrap().into_inner(),
+        HealthCheckResponse {
+            status: ServingStatus::Serving as i32
+        }
+    );
+
+    let request = tonic::Request::new(HealthCheckRequest {
+        service: DEFAULT_SERVICE.to_string(),
+    });
+    let response = client.check(request).await;
+    assert_eq!(
+        response.unwrap().into_inner(),
+        HealthCheckResponse {
+            status: ServingStatus::Serving as i32
+        }
+    );
+
+    let request = tonic::Request::new(HealthCheckRequest {
+        service: "other".to_string(),
+    });
+    let response = client.check(request).await;
+    assert_eq!(
+        response.unwrap().into_inner(),
         HealthCheckResponse {
             status: ServingStatus::ServiceUnknown as i32
         }

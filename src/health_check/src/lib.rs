@@ -120,8 +120,7 @@ where
     ) -> K8HealthCheckResponse {
         let status = match request.get_ref().service.as_str() {
             LIVENESS_SERVICE => K8ServingStatus::Serving,
-            READINESS_SERVICE => self.app_status().await,
-            DEFAULT_SERVICE => self.app_status().await,
+            READINESS_SERVICE | DEFAULT_SERVICE => self.app_status().await,
             _ => K8ServingStatus::ServiceUnknown,
         };
 
