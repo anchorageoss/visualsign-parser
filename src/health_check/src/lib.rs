@@ -24,11 +24,11 @@ use tokio_stream::Stream;
 
 const WATCH_STREAM_TIMEOUT_SEC: u64 = 3;
 const STREAM_MSG_BUFFER_MAX: usize = 16;
-/// Turnkey-specific k8s terminology to check if a service is up, but not necessarily ready to serve traffic.
+/// Turnkey-specific service to check if a service is up, but not necessarily ready to serve traffic.
 pub const LIVENESS_SERVICE: &str = "liveness";
-/// Turnkey-specific k8s terminology to check if a service is ready to serve traffic.
+/// Turnkey-specific service to check if a service is ready to serve traffic.
 pub const READINESS_SERVICE: &str = "readiness";
-/// When k8s makes a healthcheck, by default the service is empty ("")
+/// Default service when k8s makes a healthcheck without specifying a particular service.
 pub const DEFAULT_SERVICE: &str = "";
 
 /// Turnkeys health check service for performing primitive health checks via an
