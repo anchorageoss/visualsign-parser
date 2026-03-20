@@ -112,21 +112,25 @@ fn convert_proto_signature(proto: &generated::parser::SignatureMetadata) -> Sign
     }
 }
 
+/// The only supported signature algorithm.
+const SUPPORTED_ALGORITHM: &str = "secp256k1";
+
 /// ABI signature metadata for validation
 ///
 /// Mirrors the protobuf `SignatureMetadata` structure in a local type
 #[derive(Debug, Clone)]
-pub struct SignatureMetadata {
+struct SignatureMetadata {
     /// Signature value (hex-encoded, DER format for secp256k1)
-    pub value: String,
+    value: String,
     /// Algorithm used (e.g., "secp256k1")
-    pub algorithm: Option<String>,
+    algorithm: Option<String>,
     /// Public key for signature verification (hex-encoded)
-    pub public_key: Option<String>,
+    public_key: Option<String>,
     /// Issuer of the signature
-    pub issuer: Option<String>,
-    /// Timestamp of signature
-    pub timestamp: Option<String>,
+    issuer: Option<String>,
+    /// Timestamp of signature (mirrors proto field; not used in validation)
+    #[allow(dead_code)]
+    timestamp: Option<String>,
 }
 
 /// Validate ABI using secp256k1 signature
@@ -148,9 +152,9 @@ fn validate_abi_signature(
         .as_deref()
         .ok_or_else(|| AbiMetadataError::SignatureValidation("Missing algorithm".to_string()))?;
 
-    if algorithm != "secp256k1" {
+    if algorithm != SUPPORTED_ALGORITHM {
         return Err(AbiMetadataError::SignatureValidation(format!(
-            "Unsupported algorithm: {algorithm}. Only secp256k1 is supported."
+            "Unsupported algorithm: {algorithm}. Only {SUPPORTED_ALGORITHM} is supported."
         )));
     }
 

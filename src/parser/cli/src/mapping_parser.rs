@@ -90,18 +90,20 @@ const MAX_JSON_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
 /// Load and validate JSON file from path
 pub fn load_json_file(path: &str) -> Result<String, String> {
-    let metadata =
-        std::fs::metadata(path).map_err(|e| format!("Failed to read file at {path}: {e}"))?;
-    if metadata.len() > MAX_JSON_FILE_SIZE {
+    let file =
+        std::fs::File::open(path).map_err(|e| format!("Failed to read file at {path}: {e}"))?;
+    let file_len = file
+        .metadata()
+        .map_err(|e| format!("Failed to read file at {path}: {e}"))?
+        .len();
+    if file_len > MAX_JSON_FILE_SIZE {
         return Err(format!(
-            "File {path} exceeds maximum size ({} bytes > {} bytes)",
-            metadata.len(),
-            MAX_JSON_FILE_SIZE
+            "File {path} exceeds maximum size ({file_len} bytes > {MAX_JSON_FILE_SIZE} bytes)"
         ));
     }
 
     let json_content =
-        std::fs::read_to_string(path).map_err(|e| format!("Failed to read file at {path}: {e}"))?;
+        std::io::read_to_string(file).map_err(|e| format!("Failed to read file at {path}: {e}"))?;
 
     // Validate JSON format
     serde_json::from_str::<serde_json::Value>(&json_content)
@@ -168,21 +170,8 @@ mod tests {
         assert!(parse_mapping("MyToken:/path/to/file.json:").is_err());
     }
 
-    /// Helper: write `content` to a temporary file and return its path.
     fn write_temp_json(name: &str, content: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join("vsp_tests");
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        let path = dir.join(format!(
-            "{}_{}_{}",
-            name,
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
-        std::fs::write(&path, content).expect("write temp file");
-        path
+        crate::test_utils::write_temp_json("vsp_tests", name, content)
     }
 
     #[test]
