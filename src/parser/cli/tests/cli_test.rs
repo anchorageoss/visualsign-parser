@@ -3,6 +3,37 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+/// Helper to run the parser_cli binary with given args and return stdout.
+fn run_cli(args: &[&str]) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_parser_cli"))
+        .args(args)
+        .output()
+        .expect("Failed to execute parser_cli");
+    assert!(
+        output.status.success(),
+        "CLI exited with error. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("Invalid UTF-8 output")
+}
+
+/// Helper to write a temp JSON file and return its path.
+fn write_temp_json(name: &str, content: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join("vsp_cli_tests");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let path = dir.join(format!(
+        "{}_{}_{}",
+        name,
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos()
+    ));
+    fs::write(&path, content).expect("write temp file");
+    path
+}
+
 #[test]
 fn test_cli_with_fixtures() {
     let fixtures_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
