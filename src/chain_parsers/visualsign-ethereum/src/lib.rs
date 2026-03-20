@@ -421,6 +421,7 @@ fn convert_to_visual_sign_payload(
     };
 
     let network_name = networks::get_network_name(Some(chain_id));
+    let native_symbol = networks::get_native_asset_symbol(chain_id);
 
     let mut fields = vec![SignablePayloadField::TextV2 {
         common: SignablePayloadFieldCommon {
@@ -438,7 +439,7 @@ fn convert_to_visual_sign_payload(
             address_v2: SignablePayloadFieldAddressV2 {
                 address: to.to_string(),
                 name: "To".to_string(),
-                asset_label: "ETH".to_string(),
+                asset_label: native_symbol.clone(),
                 memo: None,
                 badge_text: None,
             },
@@ -447,12 +448,12 @@ fn convert_to_visual_sign_payload(
     fields.extend([
         SignablePayloadField::AmountV2 {
             common: SignablePayloadFieldCommon {
-                fallback_text: format!("{} ETH", format_ether(transaction.value())),
+                fallback_text: format!("{} {}", format_ether(transaction.value()), native_symbol),
                 label: "Value".to_string(),
             },
             amount_v2: SignablePayloadFieldAmountV2 {
                 amount: format_ether(transaction.value()),
-                abbreviation: Some("ETH".to_string()),
+                abbreviation: Some(native_symbol),
             },
         },
         SignablePayloadField::TextV2 {
