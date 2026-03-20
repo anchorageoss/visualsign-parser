@@ -51,45 +51,19 @@ impl crate::ChainPlugin for SolanaPlugin {
 }
 
 fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (HashMap<String, Idl>, usize) {
-    let mut mappings = HashMap::new();
-    let mut valid_count = 0;
-
-    for mapping in idl_json_mappings {
-        match mapping_parser::parse_mapping(mapping) {
-            Ok(components) => match mapping_parser::load_json_file(&components.path) {
-                Ok(idl_json) => {
-                    let idl = Idl {
-                        value: idl_json,
-                        idl_type: Some(SolanaIdlType::Anchor as i32),
-                        idl_version: None,
-                        signature: None,
-                        program_name: Some(components.name.clone()),
-                    };
-                    mappings.insert(components.identifier.clone(), idl);
-                    valid_count += 1;
-                    eprintln!(
-                        "  Loaded IDL '{}' from {} and mapped to {}",
-                        components.name, components.path, components.identifier
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "  Warning: Failed to load IDL '{}' from '{}': {e}",
-                        components.name, components.path
-                    );
-                }
-            },
-            Err(e) => {
-                eprintln!("Error parsing IDL mapping: {e}");
-                eprintln!("Expected format: Name:/path/to/idl.json:ProgramId");
-                eprintln!(
-                    "Example: JupiterSwap:/home/user/jupiter.json:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
-                );
-            }
-        }
-    }
-
-    (mappings, valid_count)
+    mapping_parser::load_mappings(
+        idl_json_mappings,
+        "IDL",
+        "JupiterSwap:/home/user/jupiter.json:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+        "ProgramId",
+        |components, json| Idl {
+            value: json,
+            idl_type: Some(SolanaIdlType::Anchor as i32),
+            idl_version: None,
+            signature: None,
+            program_name: Some(components.name.clone()),
+        },
+    )
 }
 
 /// Creates Solana chain metadata from IDL mappings.
@@ -115,4 +89,117 @@ pub fn create_chain_metadata(idl_json_mappings: &[String]) -> Option<ChainMetada
             idl_mappings,
         })),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_temp_json(name: &str, content: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join("vsp_sol_tests");
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join(name);
+        std::fs::write(&path, content).expect("write temp file");
+        path
+    }
+
+    #[test]
+    fn test_create_chain_metadata_empty_returns_none() {
+        assert!(create_chain_metadata(&[]).is_none());
+    }
+
+    #[test]
+    fn test_create_chain_metadata_with_idl_mapping() {
+        let path = write_temp_json("jupiter.json", r#"{"version":"0.1.0","name":"jupiter"}"#);
+        let mappings = vec![format!(
+            "Jupiter:{}:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+            path.display()
+        )];
+
+        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let Metadata::Solana(sol) = meta.metadata.unwrap() else {
+            panic!("expected Solana metadata");
+        };
+        assert_eq!(sol.idl_mappings.len(), 1);
+
+        let idl = sol
+            .idl_mappings
+            .get("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4")
+            .expect("mapping present");
+        assert!(idl.value.contains("jupiter"));
+        assert_eq!(idl.idl_type, Some(SolanaIdlType::Anchor as i32));
+        assert_eq!(idl.program_name.as_deref(), Some("Jupiter"));
+        assert!(idl.signature.is_none());
+        assert!(idl.idl_version.is_none());
+    }
+
+    #[test]
+    fn test_create_chain_metadata_invalid_file_skipped() {
+        let mappings = vec!["Bad:/nonexistent/idl.json:ProgramId123".to_string()];
+        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let Metadata::Solana(sol) = meta.metadata.unwrap() else {
+            panic!("expected Solana metadata");
+        };
+        assert!(sol.idl_mappings.is_empty());
+    }
+
+    #[test]
+    fn test_create_chain_metadata_multiple_idl_mappings() {
+        let path1 = write_temp_json("idl_a.json", r#"{"name":"a"}"#);
+        let path2 = write_temp_json("idl_b.json", r#"{"name":"b"}"#);
+        let mappings = vec![
+            format!(
+                "A:{}:Prog1111111111111111111111111111111111111111",
+                path1.display()
+            ),
+            format!(
+                "B:{}:Prog2222222222222222222222222222222222222222",
+                path2.display()
+            ),
+        ];
+
+        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let Metadata::Solana(sol) = meta.metadata.unwrap() else {
+            panic!("expected Solana metadata");
+        };
+        assert_eq!(sol.idl_mappings.len(), 2);
+        assert!(
+            sol.idl_mappings
+                .contains_key("Prog1111111111111111111111111111111111111111")
+        );
+        assert!(
+            sol.idl_mappings
+                .contains_key("Prog2222222222222222222222222222222222222222")
+        );
+    }
+
+    #[test]
+    fn test_create_chain_metadata_sets_no_network_or_legacy_idl() {
+        let path = write_temp_json("meta_check.json", r#"{"ok": true}"#);
+        let mappings = vec![format!("Test:{}:ProgXYZ", path.display())];
+
+        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let Metadata::Solana(sol) = meta.metadata.unwrap() else {
+            panic!("expected Solana metadata");
+        };
+        assert!(sol.network_id.is_none());
+        assert!(sol.idl.is_none());
+    }
+
+    #[test]
+    fn test_create_chain_metadata_mixed_valid_and_invalid() {
+        let path = write_temp_json("sol_good.json", r#"{"works": true}"#);
+        let mappings = vec![
+            "bad-format".to_string(),
+            format!("Good:{}:GoodProg", path.display()),
+            "Also:/missing/file.json:BadProg".to_string(),
+        ];
+
+        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let Metadata::Solana(sol) = meta.metadata.unwrap() else {
+            panic!("expected Solana metadata");
+        };
+        assert_eq!(sol.idl_mappings.len(), 1);
+        assert!(sol.idl_mappings.contains_key("GoodProg"));
+    }
 }

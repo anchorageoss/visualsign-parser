@@ -291,7 +291,12 @@ impl Cli {
             developer_config: Some(DeveloperConfig {
                 allow_signed_transactions: true,
             }),
-            abi_registry: None,
+        };
+
+        let options = if let Some(p) = plugin {
+            p.apply_options(options)
+        } else {
+            options
         };
 
         let options = if let Some(p) = plugin {
