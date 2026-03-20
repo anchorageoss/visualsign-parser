@@ -126,7 +126,8 @@ struct SignatureMetadata {
     algorithm: Option<String>,
     /// Public key for signature verification (hex-encoded)
     public_key: Option<String>,
-    /// Issuer of the signature
+    /// Issuer of the signature (mirrors proto field; not used in validation)
+    #[allow(dead_code)]
     issuer: Option<String>,
     /// Timestamp of signature (mirrors proto field; not used in validation)
     #[allow(dead_code)]
