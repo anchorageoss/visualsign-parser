@@ -57,7 +57,7 @@ fn main() {
         transaction_name: None,
         metadata: Some(ChainMetadata {
             metadata: Some(Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("1".to_string()), // Ethereum Mainnet
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
                 abi_mappings: Default::default(),
             })),
         }),
@@ -156,7 +156,7 @@ abi_mappings.insert(
 let options = VisualSignOptions {
     metadata: Some(ChainMetadata {
         metadata: Some(Metadata::Ethereum(EthereumMetadata {
-            network_id: Some("1".to_string()),
+            network_id: Some("ETHEREUM_MAINNET".to_string()),
             abi_mappings,
         })),
     }),

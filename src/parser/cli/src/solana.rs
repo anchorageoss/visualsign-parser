@@ -99,7 +99,15 @@ mod tests {
     fn write_temp_json(name: &str, content: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join("vsp_sol_tests");
         std::fs::create_dir_all(&dir).expect("create temp dir");
-        let path = dir.join(name);
+        let path = dir.join(format!(
+            "{}_{}_{}",
+            name,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
         std::fs::write(&path, content).expect("write temp file");
         path
     }

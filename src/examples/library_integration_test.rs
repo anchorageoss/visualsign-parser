@@ -1,7 +1,7 @@
 // Test file to verify library documentation examples compile
 // Run with: cargo run -p library_integration_test
 
-use generated::parser::{chain_metadata::Metadata, ChainMetadata, EthereumMetadata};
+use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 use parser_app::registry::create_registry;
 use visualsign::registry::Chain;
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
@@ -51,7 +51,7 @@ fn main() {
         transaction_name: None,
         metadata: Some(ChainMetadata {
             metadata: Some(Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("1".to_string()), // Ethereum Mainnet
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
                 abi_mappings: Default::default(),
             })),
         }),

@@ -21,7 +21,15 @@ fn run_cli(args: &[&str]) -> String {
 fn write_temp_json(name: &str, content: &str) -> PathBuf {
     let dir = std::env::temp_dir().join("vsp_cli_tests");
     fs::create_dir_all(&dir).expect("create temp dir");
-    let path = dir.join(name);
+    let path = dir.join(format!(
+        "{}_{}_{}",
+        name,
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos()
+    ));
     fs::write(&path, content).expect("write temp file");
     path
 }
