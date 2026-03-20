@@ -20,6 +20,8 @@ pub mod mapping_parser;
 /// Solana-specific CLI handling: IDL mappings, Solana metadata.
 #[cfg(feature = "solana")]
 pub mod solana;
+#[cfg(test)]
+pub(crate) mod test_utils;
 
 /// Trait for integrating a chain into the CLI.
 ///
