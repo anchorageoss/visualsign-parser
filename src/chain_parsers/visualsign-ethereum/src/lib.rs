@@ -213,16 +213,13 @@ impl EthereumVisualSignConverter {
             .unwrap_or(1);
         let metadata_abi = extract_metadata_abi(&options, chain_id);
 
-        let payload = convert_to_visual_sign_payload(
+        convert_to_visual_sign_payload(
             transaction,
             options,
             &layered_registry,
             &self.visualizer_registry,
             metadata_abi.as_ref(),
-        )?;
-        // Validates that all field text is within the allowed character set (ASCII-safe).
-        payload.validate_charset()?;
-        Ok(payload)
+        )
     }
 }
 
