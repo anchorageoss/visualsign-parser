@@ -410,7 +410,7 @@ async fn parser_ethereum_native_transfer_e2e() {
             "AddressV2": {
               "Address": "0x3535353535353535353535353535353535353535",
               "Name": "To",
-              "AssetLabel": "Test Asset"
+              "AssetLabel": "ETH"
             },
             "Type": "address_v2"
           },
