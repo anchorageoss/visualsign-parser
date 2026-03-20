@@ -158,18 +158,25 @@ fn test_cli_ethereum_abi_json_mappings() {
     );
 
     let output = run_cli(&[
-        "--chain", "ethereum",
-        "--network", "ETHEREUM_MAINNET",
-        "-o", "json",
-        "--abi-json-mappings", &mapping,
-        "-t", ERC20_TRANSFER_TX,
+        "--chain",
+        "ethereum",
+        "--network",
+        "ETHEREUM_MAINNET",
+        "-o",
+        "json",
+        "--abi-json-mappings",
+        &mapping,
+        "-t",
+        ERC20_TRANSFER_TX,
     ]);
 
     // Dynamic ABI decoder produces "transfer" as the function name in the title
-    let json: serde_json::Value = serde_json::from_str(&output)
-        .expect("CLI output should be valid JSON");
+    let json: serde_json::Value =
+        serde_json::from_str(&output).expect("CLI output should be valid JSON");
 
-    let fields = json["Fields"].as_array().expect("Fields should be an array");
+    let fields = json["Fields"]
+        .as_array()
+        .expect("Fields should be an array");
 
     // Find the preview_layout field produced by the dynamic ABI decoder
     let abi_field = fields.iter().find(|f| {
@@ -197,21 +204,27 @@ fn test_cli_ethereum_abi_json_mappings() {
 #[cfg(feature = "ethereum")]
 fn test_cli_ethereum_without_abi_uses_builtin_visualizer() {
     let output = run_cli(&[
-        "--chain", "ethereum",
-        "--network", "ETHEREUM_MAINNET",
-        "-o", "json",
-        "-t", ERC20_TRANSFER_TX,
+        "--chain",
+        "ethereum",
+        "--network",
+        "ETHEREUM_MAINNET",
+        "-o",
+        "json",
+        "-t",
+        ERC20_TRANSFER_TX,
     ]);
 
-    let json: serde_json::Value = serde_json::from_str(&output)
-        .expect("CLI output should be valid JSON");
+    let json: serde_json::Value =
+        serde_json::from_str(&output).expect("CLI output should be valid JSON");
 
-    let fields = json["Fields"].as_array().expect("Fields should be an array");
+    let fields = json["Fields"]
+        .as_array()
+        .expect("Fields should be an array");
 
     // Without a custom ABI, the built-in ERC-20 visualizer should handle it
-    let erc20_field = fields.iter().find(|f| {
-        f["Label"].as_str().is_some_and(|l| l == "ERC20 Transfer")
-    });
+    let erc20_field = fields
+        .iter()
+        .find(|f| f["Label"].as_str().is_some_and(|l| l == "ERC20 Transfer"));
     assert!(
         erc20_field.is_some(),
         "Expected built-in 'ERC20 Transfer' field without custom ABI, got: {output}"
@@ -226,15 +239,20 @@ fn test_cli_ethereum_abi_invalid_file_still_parses() {
     let mapping = "Bad:/nonexistent/abi.json:0x1111111111111111111111111111111111111111";
 
     let output = run_cli(&[
-        "--chain", "ethereum",
-        "--network", "ETHEREUM_MAINNET",
-        "-o", "json",
-        "--abi-json-mappings", mapping,
-        "-t", ERC20_TRANSFER_TX,
+        "--chain",
+        "ethereum",
+        "--network",
+        "ETHEREUM_MAINNET",
+        "-o",
+        "json",
+        "--abi-json-mappings",
+        mapping,
+        "-t",
+        ERC20_TRANSFER_TX,
     ]);
 
-    let json: serde_json::Value = serde_json::from_str(&output)
-        .expect("CLI output should be valid JSON");
+    let json: serde_json::Value =
+        serde_json::from_str(&output).expect("CLI output should be valid JSON");
     assert_eq!(json["Title"], "Ethereum Transaction");
 }
 
@@ -259,8 +277,8 @@ fn test_cli_solana_idl_json_mappings() {
     let fixtures_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures");
-    let input = fs::read_to_string(fixtures_dir.join("solana-json.input"))
-        .expect("read solana-json.input");
+    let input =
+        fs::read_to_string(fixtures_dir.join("solana-json.input")).expect("read solana-json.input");
 
     let mut args: Vec<&str> = Vec::new();
     let lines: Vec<&str> = input.lines().filter(|l| !l.trim().is_empty()).collect();
@@ -273,8 +291,8 @@ fn test_cli_solana_idl_json_mappings() {
     let output = run_cli(&args);
 
     // The transaction should still parse successfully
-    let json: serde_json::Value = serde_json::from_str(&output)
-        .expect("CLI output should be valid JSON");
+    let json: serde_json::Value =
+        serde_json::from_str(&output).expect("CLI output should be valid JSON");
     assert_eq!(json["Title"], "Solana Transaction");
     assert!(json["Fields"].as_array().is_some_and(|f| !f.is_empty()));
 }
@@ -287,8 +305,8 @@ fn test_cli_solana_idl_invalid_file_still_parses() {
     let fixtures_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures");
-    let input = fs::read_to_string(fixtures_dir.join("solana-json.input"))
-        .expect("read solana-json.input");
+    let input =
+        fs::read_to_string(fixtures_dir.join("solana-json.input")).expect("read solana-json.input");
 
     let mut args: Vec<&str> = Vec::new();
     let lines: Vec<&str> = input.lines().filter(|l| !l.trim().is_empty()).collect();
@@ -300,7 +318,7 @@ fn test_cli_solana_idl_invalid_file_still_parses() {
 
     let output = run_cli(&args);
 
-    let json: serde_json::Value = serde_json::from_str(&output)
-        .expect("CLI output should be valid JSON");
+    let json: serde_json::Value =
+        serde_json::from_str(&output).expect("CLI output should be valid JSON");
     assert_eq!(json["Title"], "Solana Transaction");
 }
