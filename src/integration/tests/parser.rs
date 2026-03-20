@@ -172,9 +172,18 @@ async fn parser_health_check() {
 }
 
 #[tokio::test]
-async fn parser_k8_health() {
+async fn parser_k8_health_check() {
     async fn test(test_args: TestArgs) {
-        integration::k8_health(test_args).await;
+        integration::k8_health_check(test_args).await;
+    }
+
+    integration::Builder::new().execute(test).await
+}
+
+#[tokio::test]
+async fn parser_k8_health_watch() {
+    async fn test(test_args: TestArgs) {
+        integration::k8_health_watch(test_args).await;
     }
 
     integration::Builder::new().execute(test).await

@@ -24,10 +24,12 @@ use tokio_stream::Stream;
 
 const WATCH_STREAM_TIMEOUT_SEC: u64 = 3;
 const STREAM_MSG_BUFFER_MAX: usize = 16;
-/// k8s terminology to check if a service is up, but not necessarily ready to serve traffic.
-pub const LIVENESS: &str = "liveness";
-/// k8s terminology to check if a service is ready to serve traffic.
-pub const READINESS: &str = "readiness";
+/// Turnkey-specific service to check if a service is up, but not necessarily ready to serve traffic.
+pub const LIVENESS_SERVICE: &str = "liveness";
+/// Turnkey-specific service to check if a service is ready to serve traffic.
+pub const READINESS_SERVICE: &str = "readiness";
+/// Default service when k8s makes a healthcheck without specifying a particular service.
+pub const DEFAULT_SERVICE: &str = "";
 
 /// Turnkeys health check service for performing primitive health checks via an
 /// app host.
@@ -117,8 +119,8 @@ where
         request: &tonic::Request<K8HealthCheckRequest>,
     ) -> K8HealthCheckResponse {
         let status = match request.get_ref().service.as_str() {
-            LIVENESS => K8ServingStatus::Serving,
-            READINESS => self.app_status().await,
+            LIVENESS_SERVICE => K8ServingStatus::Serving,
+            READINESS_SERVICE | DEFAULT_SERVICE => self.app_status().await,
             _ => K8ServingStatus::ServiceUnknown,
         };
 
