@@ -45,28 +45,7 @@ pub fn try_extract_from_chain_metadata(
         return None;
     };
     if ethereum.abi_mappings.is_empty() {
-        // Fallback to legacy `abi` field for backwards compatibility.
-        // Note: the legacy field has no contract address, so the ABI is registered
-        // as "wallet_provided" without an address mapping. The decoder's
-        // `get_abi_for_address` won't find it — callers that need address-based
-        // lookup should migrate to `abi_mappings`. This fallback exists so the ABI
-        // is at least available via `list_abis()` for tooling that iterates all ABIs.
-        let legacy_abi = ethereum.abi.as_ref()?;
-        let mut registry = AbiRegistry::new();
-        if let Some(proto_sig) = legacy_abi.signature.as_ref() {
-            let signature = convert_proto_signature(proto_sig);
-            if let Err(e) = validate_abi_signature(&legacy_abi.value, &signature) {
-                log::warn!("Legacy ABI signature validation failed: {e}");
-                return None;
-            }
-        }
-        match register_embedded_abi(&mut registry, "wallet_provided", &legacy_abi.value) {
-            Ok(()) => return Some(registry),
-            Err(e) => {
-                log::warn!("Failed to register legacy ABI: {e}");
-                return None;
-            }
-        }
+        return None;
     }
 
     let mut registry = AbiRegistry::new();
@@ -407,7 +386,6 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: Default::default(),
             })),
         };
@@ -419,7 +397,6 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: make_abi_mappings(vec![(
                     TEST_ADDRESS,
                     Abi {
@@ -477,7 +454,6 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: make_abi_mappings(vec![(
                     TEST_ADDRESS,
                     Abi {
@@ -512,7 +488,6 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: make_abi_mappings(vec![(
                     "not_an_address",
                     Abi {
@@ -531,7 +506,6 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: make_abi_mappings(vec![(
                     TEST_ADDRESS,
                     Abi {
@@ -551,7 +525,6 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: make_abi_mappings(vec![
                     (
                         "not_an_address",

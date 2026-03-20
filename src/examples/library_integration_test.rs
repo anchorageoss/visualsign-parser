@@ -52,14 +52,12 @@ fn main() {
         metadata: Some(ChainMetadata {
             metadata: Some(Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: Default::default(),
             })),
         }),
         developer_config: Some(DeveloperConfig {
             allow_signed_transactions: true,
         }),
-        abi_registry: None,
     };
 
     // Parse the transaction

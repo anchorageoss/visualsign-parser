@@ -24,7 +24,6 @@ pub mod context;
 pub mod contracts;
 pub mod embedded_abis;
 pub mod fmt;
-pub mod grpc_abi;
 pub mod networks;
 pub mod protocols;
 pub mod registry;
@@ -212,25 +211,13 @@ impl EthereumVisualSignConverter {
         let chain_id = resolve_chain_id(&transaction, &options)?;
         let metadata_abi = extract_metadata_abi(&options, chain_id);
 
-        // Prefer metadata ABI, fallback to legacy abi_registry from options
-        let legacy_abi = if metadata_abi.is_none() {
-            options
-                .abi_registry
-                .as_ref()
-                .and_then(|any_reg| any_reg.downcast_ref::<abi_registry::AbiRegistry>())
-                .cloned()
-        } else {
-            None
-        };
-        let abi_ref = metadata_abi.as_ref().or(legacy_abi.as_ref());
-
         convert_to_visual_sign_payload(
             transaction,
             options,
             chain_id,
             &layered_registry,
             &self.visualizer_registry,
-            abi_ref,
+            metadata_abi.as_ref(),
         )
     }
 }
@@ -781,7 +768,6 @@ mod tests {
             transaction_name: Some("Custom Transaction Title".to_string()),
             metadata: None,
             developer_config: None,
-            abi_registry: None,
         };
         let payload = transaction_to_visual_sign(tx, options).unwrap();
 
@@ -1009,7 +995,6 @@ mod tests {
                     transaction_name: Some("Test Transaction".to_string()),
                     metadata: None,
                     developer_config: None,
-                    abi_registry: None,
                 }
             ),
             Ok(SignablePayload::new(
