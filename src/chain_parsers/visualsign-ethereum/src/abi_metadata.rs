@@ -122,11 +122,13 @@ pub struct SignatureMetadata {
     /// Algorithm used (e.g., "secp256k1")
     pub algorithm: Option<String>,
     /// Public key for signature verification (hex-encoded)
-    pub public_key: Option<String>,
-    /// Issuer of the signature
-    pub issuer: Option<String>,
-    /// Timestamp of signature
-    pub timestamp: Option<String>,
+    public_key: Option<String>,
+    /// Issuer of the signature (mirrors proto field; not used in validation)
+    #[allow(dead_code)]
+    issuer: Option<String>,
+    /// Timestamp of signature (mirrors proto field; not used in validation)
+    #[allow(dead_code)]
+    timestamp: Option<String>,
 }
 
 /// Validate ABI using secp256k1 signature
