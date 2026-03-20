@@ -115,6 +115,7 @@ pub fn create_chain_metadata(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

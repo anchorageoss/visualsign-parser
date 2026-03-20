@@ -299,12 +299,6 @@ impl Cli {
             options
         };
 
-        let options = if let Some(p) = plugin {
-            p.apply_options(options)
-        } else {
-            options
-        };
-
         parse_and_display(
             &args.chain,
             &args.transaction,
