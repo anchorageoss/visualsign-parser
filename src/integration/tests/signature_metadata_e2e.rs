@@ -187,10 +187,15 @@ fn test_ethereum_abi_with_secp256k1_signature() {
         signature: Some(signature_metadata.clone()),
     };
 
-    // Create ParseRequest with EthereumMetadata containing signed ABI
+    // Create ParseRequest with EthereumMetadata containing signed ABI in abi_mappings
+    let mut abi_mappings = std::collections::HashMap::new();
+    abi_mappings.insert(
+        "0x1234567890abcdef1234567890abcdef12345678".to_string(),
+        abi,
+    );
     let ethereum_metadata = EthereumMetadata {
         network_id: None,
-        abi: Some(abi),
+        abi_mappings,
     };
     let parse_request = ParseRequest {
         unsigned_payload: "0x".to_string(),
@@ -215,8 +220,15 @@ fn test_ethereum_abi_with_secp256k1_signature() {
         chain_metadata::Metadata::Ethereum(eth_meta) => eth_meta,
         _ => panic!("Expected EthereumMetadata, found other"),
     };
-    let abi_data = eth_meta.abi.expect("ABI data should exist");
-    let sig_meta = abi_data.signature.expect("Signature metadata should exist");
+    let abi_data = eth_meta
+        .abi_mappings
+        .values()
+        .next()
+        .expect("ABI data should exist");
+    let sig_meta = abi_data
+        .signature
+        .clone()
+        .expect("Signature metadata should exist");
 
     let verification_result =
         verify_signature_metadata(&abi_data.value, &sig_meta, &public_key_hex);
@@ -347,9 +359,14 @@ fn test_signature_tampering_detection() {
         signature: Some(signature_metadata.clone()),
     };
 
+    let mut abi_mappings = std::collections::HashMap::new();
+    abi_mappings.insert(
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_string(),
+        abi,
+    );
     let ethereum_metadata = EthereumMetadata {
         network_id: None,
-        abi: Some(abi),
+        abi_mappings,
     };
     let parse_request = ParseRequest {
         unsigned_payload: "0x".to_string(),
@@ -369,8 +386,15 @@ fn test_signature_tampering_detection() {
         chain_metadata::Metadata::Ethereum(eth_meta) => eth_meta,
         _ => panic!("Expected EthereumMetadata, found other"),
     };
-    let abi_data = eth_meta.abi.expect("ABI data should exist");
-    let sig_meta = abi_data.signature.expect("Signature metadata should exist");
+    let abi_data = eth_meta
+        .abi_mappings
+        .values()
+        .next()
+        .expect("ABI data should exist");
+    let sig_meta = abi_data
+        .signature
+        .clone()
+        .expect("Signature metadata should exist");
 
     // This should fail because we're verifying tampered content
     let verification_result = verify_signature_metadata(tampered_abi, &sig_meta, &public_key_hex);
