@@ -216,6 +216,10 @@ pub struct EthereumMetadata {
     pub network_id: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(message, optional, tag = "1")]
     pub abi: ::core::option::Option<Abi>,
+    /// Map of contract address (e.g. "0x1234...") to ABI definitions
+    /// Allows wallet to provide multiple ABIs, one per contract
+    #[prost(map = "string, message", tag = "3")]
+    pub abi_mappings: ::std::collections::HashMap<::prost::alloc::string::String, Abi>,
 }
 #[cfg_attr(
     feature = "serde_derive",

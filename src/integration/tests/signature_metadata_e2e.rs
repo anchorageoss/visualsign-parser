@@ -191,6 +191,7 @@ fn test_ethereum_abi_with_secp256k1_signature() {
     let ethereum_metadata = EthereumMetadata {
         network_id: None,
         abi: Some(abi),
+        abi_mappings: Default::default(),
     };
     let parse_request = ParseRequest {
         unsigned_payload: "0x".to_string(),
@@ -350,6 +351,7 @@ fn test_signature_tampering_detection() {
     let ethereum_metadata = EthereumMetadata {
         network_id: None,
         abi: Some(abi),
+        abi_mappings: Default::default(),
     };
     let parse_request = ParseRequest {
         unsigned_payload: "0x".to_string(),
