@@ -72,6 +72,10 @@ fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<Strin
 /// Creates Ethereum chain metadata from the network argument.
 /// Defaults to `ETHEREUM_MAINNET` if no network is specified.
 /// Returns an error if the network identifier is invalid.
+///
+/// # Panics
+///
+/// Panics if `ETHEREUM_MAINNET` cannot be parsed (should never happen).
 pub fn create_chain_metadata(
     network: Option<String>,
     abi_json_mappings: &[String],
