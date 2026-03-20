@@ -7,11 +7,11 @@
 
 /// Macro to define network constants and generate lookup functions from a single source.
 ///
-/// Each entry: (chain_module, network_const, chain_id, display_name, fee_paying_asset_symbol)
+/// Each entry: (chain_module, network_const, chain_id, display_name, native_asset_symbol)
 /// Generates:
 /// - `id::{chain_module}::{network_const}` constants
 /// - `get_network_name()` - chain_id -> display name
-/// - `get_fee_paying_asset_symbol()` - chain_id -> fee-paying asset ticker (e.g., "ETH", "POL")
+/// - `get_native_asset_symbol()` - chain_id -> native asset ticker (e.g., "ETH", "POL")
 /// - `chain_id_to_network_id()` - chain_id -> canonical ID (e.g., "ETHEREUM_MAINNET")
 /// - `network_id_to_chain_id()` - canonical ID -> chain_id
 macro_rules! define_networks {
@@ -47,16 +47,16 @@ macro_rules! define_networks {
             }
         }
 
-        /// Returns the fee-paying asset symbol for a given chain ID, if known.
+        /// Returns the native asset symbol for a given chain ID.
         ///
         /// For known networks, returns the configured symbol (e.g., "ETH", "POL", "BNB").
-        /// For unknown chains, returns `None`.
-        pub fn get_fee_paying_asset_symbol(chain_id: u64) -> Option<&'static str> {
+        /// For unknown chains, defaults to "ETH" since most EVM chains use ETH as native asset.
+        pub fn get_native_asset_symbol(chain_id: u64) -> String {
             match chain_id {
                 $($(
-                    id::$chain::$network => Some($symbol),
+                    id::$chain::$network => $symbol.to_string(),
                 )*)*
-                _ => None,
+                _ => "ETH".to_string(),
             }
         }
 
@@ -115,7 +115,7 @@ define_networks! {
         MAINNET = 250 => "Fantom Opera", "FTM",
     },
     gnosis {
-        MAINNET = 100 => "Gnosis Chain", "XDAI",
+        MAINNET = 100 => "Gnosis Chain", "xDAI",
     },
     celo {
         MAINNET = 42220 => "Celo Mainnet", "CELO",
@@ -249,7 +249,7 @@ pub fn extract_chain_id_from_metadata(
 mod tests {
     use super::*;
 
-    // All 28 networks for parametrized testing: (chain_id, network_id, display_name, fee_paying_asset_symbol)
+    // All 28 networks for parametrized testing: (chain_id, network_id, display_name, native_symbol)
     const ALL_NETWORKS: &[(u64, &str, &str, &str)] = &[
         (
             id::ethereum::MAINNET,
@@ -311,7 +311,7 @@ mod tests {
             id::gnosis::MAINNET,
             "GNOSIS_MAINNET",
             "Gnosis Chain",
-            "XDAI",
+            "xDAI",
         ),
         (id::celo::MAINNET, "CELO_MAINNET", "Celo Mainnet", "CELO"),
         (
@@ -369,16 +369,16 @@ mod tests {
     }
 
     #[test]
-    fn test_all_networks_get_fee_paying_asset_symbol() {
+    fn test_all_networks_get_native_asset_symbol() {
         for &(chain_id, _, _, symbol) in ALL_NETWORKS {
-            assert_eq!(get_fee_paying_asset_symbol(chain_id), Some(symbol));
+            assert_eq!(get_native_asset_symbol(chain_id), symbol);
         }
     }
 
     #[test]
-    fn test_get_fee_paying_asset_symbol_unknown_returns_none() {
-        assert_eq!(get_fee_paying_asset_symbol(999999999), None);
-        assert_eq!(get_fee_paying_asset_symbol(0), None);
+    fn test_get_native_asset_symbol_unknown_defaults_to_eth() {
+        assert_eq!(get_native_asset_symbol(999999999), "ETH");
+        assert_eq!(get_native_asset_symbol(0), "ETH");
     }
 
     #[test]
