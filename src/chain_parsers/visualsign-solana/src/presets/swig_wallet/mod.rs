@@ -2234,7 +2234,6 @@ mod tests {
             .to_visual_sign_payload(
                 tx_wrapper,
                 VisualSignOptions {
-                    abi_registry: None,
                     decode_transfers: true,
                     transaction_name: Some(description.to_string()),
                     metadata: None,
