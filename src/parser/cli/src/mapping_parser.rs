@@ -111,6 +111,7 @@ pub fn load_json_file(path: &str) -> Result<String, String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

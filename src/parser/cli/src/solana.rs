@@ -92,6 +92,7 @@ pub fn create_chain_metadata(idl_json_mappings: &[String]) -> Option<ChainMetada
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
