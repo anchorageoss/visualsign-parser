@@ -1009,7 +1009,7 @@ mod tests {
                         address_v2: SignablePayloadFieldAddressV2 {
                             address: "0x0000000000000000000000000000000000000000".to_string(),
                             name: "To".to_string(),
-                            asset_label: "Test Asset".to_string(),
+                            asset_label: "ETH".to_string(),
                             memo: None,
                             badge_text: None,
                         },
