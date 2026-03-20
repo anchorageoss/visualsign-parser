@@ -122,7 +122,6 @@ pub(crate) fn create_chain_metadata(
     Ok(Some(ChainMetadata {
         metadata: Some(Metadata::Ethereum(EthereumMetadata {
             network_id: Some(network_id),
-            abi: None,
             abi_mappings,
         })),
     }))
