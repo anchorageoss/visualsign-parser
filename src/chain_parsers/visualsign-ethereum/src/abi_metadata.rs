@@ -53,6 +53,24 @@ pub fn try_extract_from_chain_metadata(
         return Ok(None);
     };
     if ethereum.abi_mappings.is_empty() {
+        // Fallback to legacy `abi` field for backwards compatibility
+        if let Some(legacy_abi) = ethereum.abi.as_ref() {
+            let mut registry = AbiRegistry::new();
+            if let Some(proto_sig) = legacy_abi.signature.as_ref() {
+                let signature = convert_proto_signature(proto_sig);
+                if let Err(e) = validate_abi_signature(&legacy_abi.value, &signature) {
+                    log::warn!("Legacy ABI signature validation failed: {e}");
+                    return Ok(None);
+                }
+            }
+            match register_embedded_abi(&mut registry, "wallet_provided", &legacy_abi.value) {
+                Ok(()) => return Ok(Some(registry)),
+                Err(e) => {
+                    log::warn!("Failed to register legacy ABI: {e}");
+                    return Ok(None);
+                }
+            }
+        }
         return Ok(None);
     }
 
@@ -365,7 +383,7 @@ mod tests {
 
     const TEST_ADDRESS: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 
-    fn make_abi_mappings(entries: Vec<(&str, Abi)>) -> std::collections::HashMap<String, Abi> {
+    fn make_abi_mappings(entries: Vec<(&str, Abi)>) -> std::collections::BTreeMap<String, Abi> {
         entries
             .into_iter()
             .map(|(addr, abi)| (addr.to_string(), abi))
@@ -397,7 +415,7 @@ mod tests {
     fn test_try_extract_ethereum_without_abi() {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("1".to_string()),
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
                 abi: None,
                 abi_mappings: Default::default(),
             })),
@@ -413,7 +431,7 @@ mod tests {
     fn test_try_extract_valid_abi() {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("1".to_string()),
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
                 abi: None,
                 abi_mappings: make_abi_mappings(vec![(
                     TEST_ADDRESS,
@@ -472,7 +490,7 @@ mod tests {
         // Verify end-to-end: ABI with valid signature extracts successfully
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("1".to_string()),
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
                 abi: None,
                 abi_mappings: make_abi_mappings(vec![(
                     TEST_ADDRESS,
@@ -508,7 +526,7 @@ mod tests {
     fn test_try_extract_invalid_address_skipped() {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("1".to_string()),
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
                 abi: None,
                 abi_mappings: make_abi_mappings(vec![(
                     "not_an_address",
@@ -528,7 +546,7 @@ mod tests {
     fn test_try_extract_invalid_abi_json_skipped() {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("1".to_string()),
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
                 abi: None,
                 abi_mappings: make_abi_mappings(vec![(
                     TEST_ADDRESS,
@@ -549,7 +567,7 @@ mod tests {
         let valid_address = TEST_ADDRESS;
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("1".to_string()),
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
                 abi: None,
                 abi_mappings: make_abi_mappings(vec![
                     (
