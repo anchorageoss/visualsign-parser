@@ -6,9 +6,9 @@
 use crate::abi_registry::AbiRegistry;
 use crate::embedded_abis::{AbiEmbeddingError, register_embedded_abi};
 use k256::EncodedPoint;
-use k256::ecdsa::signature::Verifier;
 use k256::ecdsa::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
+use k256::ecdsa::signature::hazmat::PrehashVerifier;
 
 /// Error type for gRPC ABI operations
 #[derive(Debug, thiserror::Error)]
@@ -134,8 +134,8 @@ fn validate_abi_signature(
     let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)
         .map_err(|e| GrpcAbiError::SignatureValidation(format!("Invalid verifying key: {e}")))?;
 
-    // 6. Verify signature
-    verifying_key.verify(&hash, &sig).map_err(|e| {
+    // 6. Verify pre-hashed signature (hash was computed in step 3)
+    verifying_key.verify_prehash(&hash, &sig).map_err(|e| {
         GrpcAbiError::SignatureValidation(format!("Signature verification failed: {e}"))
     })?;
 
@@ -146,7 +146,7 @@ fn validate_abi_signature(
 mod tests {
     use super::*;
     use k256::ecdsa::SigningKey;
-    use k256::ecdsa::signature::Signer;
+    use k256::ecdsa::signature::hazmat::PrehashSigner;
 
     const VALID_ABI: &str = r#"[
         {
@@ -173,8 +173,9 @@ mod tests {
         hasher.update(content.as_bytes());
         let hash: [u8; 32] = hasher.finalize().into();
 
-        // Sign the hash
-        let signature: Signature = signing_key.sign(&hash);
+        // Sign the pre-hashed content
+        let signature: Signature =
+            signing_key.sign_prehash(&hash).expect("signing failed");
         let signature_der = signature.to_der();
         let signature_hex = hex::encode(signature_der.as_bytes());
 

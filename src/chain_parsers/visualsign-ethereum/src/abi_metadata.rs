@@ -7,9 +7,9 @@ use crate::abi_registry::AbiRegistry;
 use crate::embedded_abis::{AbiEmbeddingError, register_embedded_abi};
 use generated::parser::{ChainMetadata, chain_metadata};
 use k256::EncodedPoint;
-use k256::ecdsa::signature::Verifier;
 use k256::ecdsa::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
+use k256::ecdsa::signature::hazmat::PrehashVerifier;
 
 /// Error type for ABI metadata operations
 #[derive(Debug, thiserror::Error)]
@@ -53,7 +53,12 @@ pub fn try_extract_from_chain_metadata(
         return Ok(None);
     };
     if ethereum.abi_mappings.is_empty() {
-        // Fallback to legacy `abi` field for backwards compatibility
+        // Fallback to legacy `abi` field for backwards compatibility.
+        // Note: the legacy field has no contract address, so the ABI is registered
+        // as "wallet_provided" without an address mapping. The decoder's
+        // `get_abi_for_address` won't find it — callers that need address-based
+        // lookup should migrate to `abi_mappings`. This fallback exists so the ABI
+        // is at least available via `list_abis()` for tooling that iterates all ABIs.
         if let Some(legacy_abi) = ethereum.abi.as_ref() {
             let mut registry = AbiRegistry::new();
             if let Some(proto_sig) = legacy_abi.signature.as_ref() {
@@ -210,8 +215,8 @@ fn validate_abi_signature(
         AbiMetadataError::SignatureValidation(format!("Invalid verifying key: {e}"))
     })?;
 
-    // 6. Verify signature
-    verifying_key.verify(&hash, &sig).map_err(|e| {
+    // 6. Verify pre-hashed signature (hash was computed in step 3)
+    verifying_key.verify_prehash(&hash, &sig).map_err(|e| {
         AbiMetadataError::SignatureValidation(format!("Signature verification failed: {e}"))
     })?;
 
@@ -223,7 +228,7 @@ mod tests {
     use super::*;
     use generated::parser::{Abi, EthereumMetadata, SolanaMetadata};
     use k256::ecdsa::SigningKey;
-    use k256::ecdsa::signature::Signer;
+    use k256::ecdsa::signature::hazmat::PrehashSigner;
 
     const VALID_ABI: &str = r#"[
         {
@@ -250,8 +255,9 @@ mod tests {
         hasher.update(content.as_bytes());
         let hash: [u8; 32] = hasher.finalize().into();
 
-        // Sign the hash
-        let signature: Signature = signing_key.sign(&hash);
+        // Sign the pre-hashed content
+        let signature: Signature =
+            signing_key.sign_prehash(&hash).expect("signing failed");
         let signature_der = signature.to_der();
         let signature_hex = hex::encode(signature_der.as_bytes());
 
