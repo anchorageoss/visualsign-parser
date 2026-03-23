@@ -106,7 +106,8 @@ message Signature {
 }
 
 message EthereumMetadata {
-  reserved 1;  // was: optional Abi abi
+  reserved 1;       // was: optional Abi abi
+  reserved "abi";   // prevent reuse of removed field name
   // Network identifier string (e.g., "ETHEREUM_MAINNET", "POLYGON_MAINNET", "ARBITRUM_MAINNET")
   optional string network_id = 2;
   // Map of contract address to ABI definitions.
