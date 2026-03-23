@@ -90,7 +90,7 @@ macro_rules! define_networks {
 }
 
 // Define all supported networks
-// Format: chain { NETWORK = chain_id => "Display Name", "FeePayingAssetSymbol" }
+// Format: chain { NETWORK = chain_id => "Display Name", "NativeAssetSymbol" }
 define_networks! {
     // L1 Chains
     ethereum {
