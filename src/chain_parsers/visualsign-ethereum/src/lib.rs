@@ -214,12 +214,24 @@ impl EthereumVisualSignConverter {
             .unwrap_or(1);
         let metadata_abi = extract_metadata_abi(&options, chain_id);
 
+        // Prefer metadata ABI, fallback to legacy abi_registry from options
+        let legacy_abi = if metadata_abi.is_none() {
+            options
+                .abi_registry
+                .as_ref()
+                .and_then(|any_reg| any_reg.downcast_ref::<abi_registry::AbiRegistry>())
+                .cloned()
+        } else {
+            None
+        };
+        let abi_ref = metadata_abi.as_ref().or(legacy_abi.as_ref());
+
         convert_to_visual_sign_payload(
             transaction,
             options,
             &layered_registry,
             &self.visualizer_registry,
-            metadata_abi.as_ref(),
+            abi_ref,
         )
     }
 }

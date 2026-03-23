@@ -138,7 +138,7 @@ let chain = Chain::Ethereum;  // or Chain::Solana, Chain::Sui, Chain::Tron
 For Ethereum transactions, you can provide custom ABIs to improve parsing of unrecognized contracts:
 
 ```rust
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 
 // Load ABI JSON from file
@@ -146,7 +146,7 @@ let abi_json = std::fs::read_to_string("/path/to/abi.json")
     .expect("failed to read ABI file");
 
 // Create ABI mapping keyed by contract address
-let mut abi_mappings = HashMap::new();
+let mut abi_mappings = BTreeMap::new();
 abi_mappings.insert(
     "0x1234...abcd".to_string(),
     Abi {
@@ -177,7 +177,7 @@ let payload = registry.convert_transaction(&Chain::Ethereum, raw_tx, options)
 For Solana transactions, provide Anchor IDLs to parse program instructions:
 
 ```rust
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use generated::parser::{ChainMetadata, SolanaMetadata, Idl, SolanaIdlType, chain_metadata::Metadata};
 
 // Load IDL JSON from file
@@ -185,7 +185,7 @@ let idl_json = std::fs::read_to_string("/path/to/idl.json")
     .expect("failed to read IDL file");
 
 // Create IDL mapping
-let mut idl_mappings = HashMap::new();
+let mut idl_mappings = BTreeMap::new();
 idl_mappings.insert(
     "YourProgramId1111111111111111111111111111111".to_string(),
     Idl {
