@@ -89,3 +89,56 @@ pub fn parse(
         }),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata};
+
+    /// Verify that metadata_digest is deterministic regardless of abi_mappings insertion order.
+    /// This guards against accidental reintroduction of HashMap-backed map fields.
+    #[test]
+    fn metadata_digest_is_deterministic_across_insertion_orders() {
+        let abi_a = Abi {
+            value: r#"[{"name":"transfer"}]"#.to_string(),
+            signature: None,
+        };
+        let abi_b = Abi {
+            value: r#"[{"name":"approve"}]"#.to_string(),
+            signature: None,
+        };
+
+        // Insert in order A, B
+        let mut mappings_ab = std::collections::BTreeMap::new();
+        mappings_ab.insert("0xaaaa".to_string(), abi_a.clone());
+        mappings_ab.insert("0xbbbb".to_string(), abi_b.clone());
+
+        // Insert in order B, A
+        let mut mappings_ba = std::collections::BTreeMap::new();
+        mappings_ba.insert("0xbbbb".to_string(), abi_b);
+        mappings_ba.insert("0xaaaa".to_string(), abi_a);
+
+        let metadata_ab = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi: None,
+                abi_mappings: mappings_ab,
+            })),
+        };
+        let metadata_ba = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi: None,
+                abi_mappings: mappings_ba,
+            })),
+        };
+
+        let bytes_ab = borsh::to_vec(&metadata_ab).unwrap();
+        let bytes_ba = borsh::to_vec(&metadata_ba).unwrap();
+        assert_eq!(
+            sha_256(&bytes_ab),
+            sha_256(&bytes_ba),
+            "metadata_digest must be identical regardless of map insertion order"
+        );
+    }
+}
