@@ -45,8 +45,8 @@ impl crate::ChainPlugin for SolanaPlugin {
         );
     }
 
-    fn create_metadata(&self, _network: Option<String>) -> Option<ChainMetadata> {
-        create_chain_metadata(&self.args.idl_json_mappings)
+    fn create_metadata(&self, _network: Option<String>) -> Result<Option<ChainMetadata>, String> {
+        Ok(create_chain_metadata(&self.args.idl_json_mappings))
     }
 }
 

@@ -18,6 +18,8 @@ fn run_cli(args: &[&str]) -> String {
 }
 
 /// Helper to write a temp JSON file and return its path.
+/// Duplicated from `test_utils::write_temp_json` because that module is
+/// `pub(crate)` and not accessible from integration tests.
 fn write_temp_json(name: &str, content: &str) -> PathBuf {
     let dir = std::env::temp_dir().join("vsp_cli_tests");
     fs::create_dir_all(&dir).expect("create temp dir");

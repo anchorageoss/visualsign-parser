@@ -44,14 +44,8 @@ impl crate::ChainPlugin for EthereumPlugin {
         );
     }
 
-    fn create_metadata(&self, network: Option<String>) -> Option<ChainMetadata> {
-        match create_chain_metadata(network, &self.args.abi_json_mappings) {
-            Ok(metadata) => metadata,
-            Err(e) => {
-                eprintln!("Error: {e}");
-                std::process::exit(1);
-            }
-        }
+    fn create_metadata(&self, network: Option<String>) -> Result<Option<ChainMetadata>, String> {
+        create_chain_metadata(network, &self.args.abi_json_mappings)
     }
 }
 
