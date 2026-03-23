@@ -280,9 +280,14 @@ impl Cli {
 
         let plugin = plugins.iter().find(|p| p.chain() == chain);
 
-        let chain_metadata = plugin
-            .as_ref()
-            .and_then(|p| p.create_metadata(args.network));
+        let chain_metadata = match plugin.as_ref().map(|p| p.create_metadata(args.network)) {
+            Some(Ok(meta)) => meta,
+            Some(Err(e)) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+            None => None,
+        };
 
         let options = VisualSignOptions {
             decode_transfers: true,
@@ -292,12 +297,6 @@ impl Cli {
                 allow_signed_transactions: true,
             }),
             abi_registry: None,
-        };
-
-        let options = if let Some(p) = plugin {
-            p.apply_options(options)
-        } else {
-            options
         };
 
         parse_and_display(
