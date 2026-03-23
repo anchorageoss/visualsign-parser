@@ -50,13 +50,13 @@ macro_rules! define_networks {
         /// Returns the native asset symbol for a given chain ID.
         ///
         /// For known networks, returns the configured symbol (e.g., "ETH", "POL", "BNB").
-        /// For unknown chains, defaults to "ETH" since most EVM chains use ETH as native asset.
+        /// For unknown chains, returns a neutral label to avoid mislabeling.
         pub fn get_native_asset_symbol(chain_id: u64) -> String {
             match chain_id {
                 $($(
                     id::$chain::$network => $symbol.to_string(),
                 )*)*
-                _ => "ETH".to_string(),
+                _ => "Native Asset".to_string(),
             }
         }
 
@@ -375,9 +375,9 @@ mod tests {
     }
 
     #[test]
-    fn test_get_native_asset_symbol_unknown_defaults_to_eth() {
-        assert_eq!(get_native_asset_symbol(999999999), "ETH");
-        assert_eq!(get_native_asset_symbol(0), "ETH");
+    fn test_get_native_asset_symbol_unknown_returns_neutral_label() {
+        assert_eq!(get_native_asset_symbol(999999999), "Native Asset");
+        assert_eq!(get_native_asset_symbol(0), "Native Asset");
     }
 
     #[test]
