@@ -20,6 +20,7 @@ pub mod mapping_parser;
 /// Solana-specific CLI handling: IDL mappings, Solana metadata.
 #[cfg(feature = "solana")]
 pub mod solana;
+/// Shared test helpers (temp file creation, etc.).
 #[cfg(test)]
 pub(crate) mod test_utils;
 
