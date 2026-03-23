@@ -1,4 +1,7 @@
-use ed25519_dalek::{SigningKey as Ed25519SigningKey, VerifyingKey as Ed25519VerifyingKey};
+use ed25519_dalek::{
+    Signer as _, SigningKey as Ed25519SigningKey, Verifier as _,
+    VerifyingKey as Ed25519VerifyingKey,
+};
 /// End-to-end test for SignatureMetadata with cryptographic signature verification
 ///
 /// This test validates that:
@@ -12,8 +15,7 @@ use generated::parser::{
 use k256::EncodedPoint;
 use k256::ecdsa::SigningKey;
 use k256::ecdsa::VerifyingKey;
-use k256::ecdsa::signature::Signer;
-use k256::ecdsa::signature::Verifier;
+use k256::ecdsa::signature::hazmat::PrehashSigner;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
@@ -32,7 +34,7 @@ fn sign_with_secp256k1(content: &str) -> (String, String) {
     let verifying_key = VerifyingKey::from(&signing_key);
     let message_hash = hash_content_sha256(content);
 
-    let signature: k256::ecdsa::Signature = signing_key.sign(&message_hash);
+    let signature: k256::ecdsa::Signature = signing_key.sign_prehash(&message_hash).expect("signing failed");
     // Use DER encoding for consistency with Turnkey API
     let signature_der = signature.to_der();
     let signature_hex = hex::encode(signature_der.as_ref()).to_string();
@@ -79,8 +81,9 @@ fn verify_secp256k1(
         .map_err(|e| format!("Failed to parse DER signature: {e}"))?;
 
     let message_hash = hash_content_sha256(content);
+    use k256::ecdsa::signature::hazmat::PrehashVerifier;
     verifying_key
-        .verify(&message_hash, &signature)
+        .verify_prehash(&message_hash, &signature)
         .map_err(|e| format!("Signature verification failed: {e}"))?;
 
     Ok(())
