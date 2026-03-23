@@ -9,6 +9,7 @@ members = [
   "metrics",
   "parser/app",
   "parser/cli",
+  "parser/gateway",
   "parser/grpc-server",
   "visualsign",
   "chain_parsers/visualsign-ethereum",

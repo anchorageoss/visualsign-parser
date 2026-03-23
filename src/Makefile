@@ -57,3 +57,7 @@ parser_host:
 .PHONY: grpc-server
 grpc-server:
 	cargo run --bin parser_grpc_server
+
+.PHONY: parser_gateway
+parser_gateway:
+	cargo run --bin parser_gateway
