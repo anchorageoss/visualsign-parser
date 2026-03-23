@@ -382,8 +382,9 @@ async fn parser_solana_native_transfer_e2e() {
 #[tokio::test]
 async fn parser_ethereum_native_transfer_e2e() {
     async fn test(test_args: TestArgs) {
-        // Base64 encoded Ethereum legacy transaction
-        // This is a sample Ethereum transaction that transfers 1 ETH
+        // Signed EIP-155 legacy transaction (v=0x25, chain_id=1 via EIP-155).
+        // Sent through the unsigned-only API path, so the parser decodes v=37 as
+        // a raw chain_id, yielding "Unknown Network (Chain ID: 37)" and "Native Asset".
         let ethereum_tx_hex = "0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83";
 
         let parse_request = ParseRequest {
