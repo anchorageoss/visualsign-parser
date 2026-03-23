@@ -38,11 +38,11 @@ pub fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, String> {
     })
 }
 
-/// Load JSON files from CLI mapping strings and build a `HashMap`.
+/// Load JSON files from CLI mapping strings and build a `BTreeMap`.
 ///
 /// Each mapping string is parsed, the JSON file is loaded, and `build_value` converts
 /// the loaded JSON + components into the target value type. The identifier from the
-/// mapping becomes the `HashMap` key.
+/// mapping becomes the map key.
 ///
 /// Returns the populated map and the count of successfully loaded entries.
 pub fn load_mappings<V>(
@@ -51,8 +51,8 @@ pub fn load_mappings<V>(
     example: &str,
     identifier_label: &str,
     build_value: impl Fn(&MappingComponents, String) -> V,
-) -> (std::collections::HashMap<String, V>, usize) {
-    let mut map = std::collections::HashMap::new();
+) -> (std::collections::BTreeMap<String, V>, usize) {
+    let mut map = std::collections::BTreeMap::new();
     let mut valid_count = 0;
 
     for mapping in mappings {
@@ -90,20 +90,24 @@ const MAX_JSON_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
 /// Load and validate JSON file from path
 pub fn load_json_file(path: &str) -> Result<String, String> {
+    use std::io::Read;
+
     let file =
         std::fs::File::open(path).map_err(|e| format!("Failed to read file at {path}: {e}"))?;
-    let file_len = file
-        .metadata()
-        .map_err(|e| format!("Failed to read file at {path}: {e}"))?
-        .len();
-    if file_len > MAX_JSON_FILE_SIZE {
+
+    // Use a bounded reader to prevent reading more than MAX_JSON_FILE_SIZE,
+    // even if the file grows between the open and the read.
+    let mut bounded = file.take(MAX_JSON_FILE_SIZE + 1);
+    let mut json_content = String::new();
+    bounded
+        .read_to_string(&mut json_content)
+        .map_err(|e| format!("Failed to read file at {path}: {e}"))?;
+
+    if json_content.len() as u64 > MAX_JSON_FILE_SIZE {
         return Err(format!(
-            "File {path} exceeds maximum size ({file_len} bytes > {MAX_JSON_FILE_SIZE} bytes)"
+            "File {path} exceeds maximum size (> {MAX_JSON_FILE_SIZE} bytes)"
         ));
     }
-
-    let json_content =
-        std::io::read_to_string(file).map_err(|e| format!("Failed to read file at {path}: {e}"))?;
 
     // Validate JSON format
     serde_json::from_str::<serde_json::Value>(&json_content)
