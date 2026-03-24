@@ -97,6 +97,21 @@ mod tests {
         Abi, ChainMetadata, EthereumMetadata, Idl, SolanaMetadata, chain_metadata,
     };
 
+    /// Compile-time assertion that abi_mappings is a BTreeMap, not a HashMap.
+    /// If prost_build config regresses, this will fail to compile.
+    const _: () = {
+        fn assert_btreemap(m: &EthereumMetadata) {
+            let _: &std::collections::BTreeMap<String, Abi> = &m.abi_mappings;
+        }
+    };
+
+    /// Compile-time assertion that idl_mappings is a BTreeMap, not a HashMap.
+    const _: () = {
+        fn assert_btreemap(m: &SolanaMetadata) {
+            let _: &std::collections::BTreeMap<String, Idl> = &m.idl_mappings;
+        }
+    };
+
     /// Verify that metadata_digest is deterministic regardless of abi_mappings insertion order.
     /// This guards against accidental reintroduction of HashMap-backed map fields.
     #[test]
