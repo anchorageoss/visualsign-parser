@@ -25,7 +25,6 @@ spl-token-2022 = "10.0.0"
 spl-token-2022-interface = "2.1.0"
 
 [dev-dependencies]
-solana_parser = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "a0c554d" }
 solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "a0c554d", features = ["proptest"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
