@@ -1,6 +1,6 @@
 use crate::chains::parse_chain;
 use clap::Parser;
-use visualsign::registry::TransactionConverterRegistry;
+use visualsign::registry::{Chain, TransactionConverterRegistry};
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
 
@@ -279,6 +279,15 @@ impl Cli {
         }
 
         let plugin = plugins.iter().find(|p| p.chain() == chain);
+
+        if plugin.is_none() && chain != Chain::Unspecified {
+            eprintln!(
+                "Error: chain '{0}' is recognized but no plugin is available for it. \
+                 This may mean the corresponding feature flag is disabled.",
+                args.chain
+            );
+            std::process::exit(1);
+        }
 
         let network = args.network.clone();
         let chain_metadata = match plugin.as_ref().map(|p| p.create_metadata(network)) {
