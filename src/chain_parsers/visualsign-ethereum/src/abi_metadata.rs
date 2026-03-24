@@ -4,23 +4,18 @@
 //! validates secp256k1 signatures attached to individual ABI entries.
 
 use crate::abi_registry::AbiRegistry;
-use crate::embedded_abis::{AbiEmbeddingError, register_embedded_abi};
+use crate::embedded_abis::register_embedded_abi;
 use generated::parser::{ChainMetadata, chain_metadata};
 use k256::EncodedPoint;
+use k256::ecdsa::signature::hazmat::PrehashVerifier;
 use k256::ecdsa::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
-use k256::ecdsa::signature::hazmat::PrehashVerifier;
 
-/// Error type for ABI metadata operations
+/// Error type for ABI signature validation.
 #[derive(Debug, thiserror::Error)]
-pub enum AbiMetadataError {
-    /// Failed to parse ABI JSON
-    #[error("Failed to parse ABI: {0}")]
-    InvalidAbi(#[from] AbiEmbeddingError),
-
-    /// Signature validation failed
+enum AbiSignatureError {
     #[error("ABI signature validation failed: {0}")]
-    SignatureValidation(String),
+    Validation(String),
 }
 
 /// Extract and validate ABIs from `ChainMetadata`, if present.
@@ -44,13 +39,10 @@ pub enum AbiMetadataError {
 pub fn try_extract_from_chain_metadata(
     chain_metadata: Option<&ChainMetadata>,
     chain_id: u64,
-) -> Result<Option<AbiRegistry>, AbiMetadataError> {
-    let Some(chain_metadata) = chain_metadata else {
-        return Ok(None);
-    };
-    let Some(chain_metadata::Metadata::Ethereum(ethereum)) = chain_metadata.metadata.as_ref()
-    else {
-        return Ok(None);
+) -> Option<AbiRegistry> {
+    let chain_metadata = chain_metadata?;
+    let chain_metadata::Metadata::Ethereum(ethereum) = chain_metadata.metadata.as_ref()? else {
+        return None;
     };
     if ethereum.abi_mappings.is_empty() {
         // Fallback to legacy `abi` field for backwards compatibility.
@@ -59,24 +51,22 @@ pub fn try_extract_from_chain_metadata(
         // `get_abi_for_address` won't find it — callers that need address-based
         // lookup should migrate to `abi_mappings`. This fallback exists so the ABI
         // is at least available via `list_abis()` for tooling that iterates all ABIs.
-        if let Some(legacy_abi) = ethereum.abi.as_ref() {
-            let mut registry = AbiRegistry::new();
-            if let Some(proto_sig) = legacy_abi.signature.as_ref() {
-                let signature = convert_proto_signature(proto_sig);
-                if let Err(e) = validate_abi_signature(&legacy_abi.value, &signature) {
-                    log::warn!("Legacy ABI signature validation failed: {e}");
-                    return Ok(None);
-                }
-            }
-            match register_embedded_abi(&mut registry, "wallet_provided", &legacy_abi.value) {
-                Ok(()) => return Ok(Some(registry)),
-                Err(e) => {
-                    log::warn!("Failed to register legacy ABI: {e}");
-                    return Ok(None);
-                }
+        let legacy_abi = ethereum.abi.as_ref()?;
+        let mut registry = AbiRegistry::new();
+        if let Some(proto_sig) = legacy_abi.signature.as_ref() {
+            let signature = convert_proto_signature(proto_sig);
+            if let Err(e) = validate_abi_signature(&legacy_abi.value, &signature) {
+                log::warn!("Legacy ABI signature validation failed: {e}");
+                return None;
             }
         }
-        return Ok(None);
+        match register_embedded_abi(&mut registry, "wallet_provided", &legacy_abi.value) {
+            Ok(()) => return Some(registry),
+            Err(e) => {
+                log::warn!("Failed to register legacy ABI: {e}");
+                return None;
+            }
+        }
     }
 
     let mut registry = AbiRegistry::new();
@@ -111,9 +101,9 @@ pub fn try_extract_from_chain_metadata(
         }
     }
     if registry.list_abis().is_empty() {
-        return Ok(None);
+        return None;
     }
-    Ok(Some(registry))
+    Some(registry)
 }
 
 /// Convert protobuf `SignatureMetadata` (key-value pairs) to local `SignatureMetadata`.
@@ -165,19 +155,19 @@ struct SignatureMetadata {
 ///
 /// # Returns
 /// * `Ok(())` if signature is valid
-/// * `Err(AbiMetadataError)` if signature validation fails
+/// * `Err(AbiSignatureError)` if signature validation fails
 fn validate_abi_signature(
     abi_json: &str,
     signature: &SignatureMetadata,
-) -> Result<(), AbiMetadataError> {
+) -> Result<(), AbiSignatureError> {
     // 1. Get algorithm - must be secp256k1
     let algorithm = signature
         .algorithm
         .as_deref()
-        .ok_or_else(|| AbiMetadataError::SignatureValidation("Missing algorithm".to_string()))?;
+        .ok_or_else(|| AbiSignatureError::Validation("Missing algorithm".to_string()))?;
 
     if algorithm != SUPPORTED_ALGORITHM {
-        return Err(AbiMetadataError::SignatureValidation(format!(
+        return Err(AbiSignatureError::Validation(format!(
             "Unsupported algorithm: {algorithm}. Only {SUPPORTED_ALGORITHM} is supported."
         )));
     }
@@ -186,7 +176,7 @@ fn validate_abi_signature(
     let public_key_hex = signature
         .public_key
         .as_deref()
-        .ok_or_else(|| AbiMetadataError::SignatureValidation("Missing public_key".to_string()))?;
+        .ok_or_else(|| AbiSignatureError::Validation("Missing public_key".to_string()))?;
 
     // 3. Hash ABI JSON with SHA256
     let mut hasher = Sha256::new();
@@ -194,30 +184,30 @@ fn validate_abi_signature(
     let hash: [u8; 32] = hasher.finalize().into();
 
     // 4. Decode signature (DER format) from hex
-    let sig_bytes = hex::decode(&signature.value).map_err(|e| {
-        AbiMetadataError::SignatureValidation(format!("Invalid signature hex: {e}"))
-    })?;
+    let sig_hex = signature
+        .value
+        .strip_prefix("0x")
+        .unwrap_or(&signature.value);
+    let sig_bytes = hex::decode(sig_hex)
+        .map_err(|e| AbiSignatureError::Validation(format!("Invalid signature hex: {e}")))?;
 
-    let sig = Signature::from_der(&sig_bytes).map_err(|e| {
-        AbiMetadataError::SignatureValidation(format!("Invalid DER signature: {e}"))
-    })?;
+    let sig = Signature::from_der(&sig_bytes)
+        .map_err(|e| AbiSignatureError::Validation(format!("Invalid DER signature: {e}")))?;
 
     // 5. Decode public key from hex
-    let pubkey_bytes = hex::decode(public_key_hex).map_err(|e| {
-        AbiMetadataError::SignatureValidation(format!("Invalid public key hex: {e}"))
-    })?;
+    let pubkey_hex = public_key_hex.strip_prefix("0x").unwrap_or(public_key_hex);
+    let pubkey_bytes = hex::decode(pubkey_hex)
+        .map_err(|e| AbiSignatureError::Validation(format!("Invalid public key hex: {e}")))?;
 
-    let encoded_point = EncodedPoint::from_bytes(&pubkey_bytes).map_err(|e| {
-        AbiMetadataError::SignatureValidation(format!("Invalid public key point: {e}"))
-    })?;
+    let encoded_point = EncodedPoint::from_bytes(&pubkey_bytes)
+        .map_err(|e| AbiSignatureError::Validation(format!("Invalid public key point: {e}")))?;
 
-    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point).map_err(|e| {
-        AbiMetadataError::SignatureValidation(format!("Invalid verifying key: {e}"))
-    })?;
+    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)
+        .map_err(|e| AbiSignatureError::Validation(format!("Invalid verifying key: {e}")))?;
 
     // 6. Verify pre-hashed signature (hash was computed in step 3)
     verifying_key.verify_prehash(&hash, &sig).map_err(|e| {
-        AbiMetadataError::SignatureValidation(format!("Signature verification failed: {e}"))
+        AbiSignatureError::Validation(format!("Signature verification failed: {e}"))
     })?;
 
     Ok(())
@@ -256,8 +246,7 @@ mod tests {
         let hash: [u8; 32] = hasher.finalize().into();
 
         // Sign the pre-hashed content
-        let signature: Signature =
-            signing_key.sign_prehash(&hash).expect("signing failed");
+        let signature: Signature = signing_key.sign_prehash(&hash).expect("signing failed");
         let signature_der = signature.to_der();
         let signature_hex = hex::encode(signature_der.as_bytes());
 
@@ -398,7 +387,7 @@ mod tests {
 
     #[test]
     fn test_try_extract_no_metadata() {
-        assert!(try_extract_from_chain_metadata(None, 1).unwrap().is_none());
+        assert!(try_extract_from_chain_metadata(None, 1).is_none());
     }
 
     #[test]
@@ -410,11 +399,7 @@ mod tests {
                 idl_mappings: Default::default(),
             })),
         };
-        assert!(
-            try_extract_from_chain_metadata(Some(&metadata), 1)
-                .unwrap()
-                .is_none()
-        );
+        assert!(try_extract_from_chain_metadata(Some(&metadata), 1).is_none());
     }
 
     #[test]
@@ -426,11 +411,7 @@ mod tests {
                 abi_mappings: Default::default(),
             })),
         };
-        assert!(
-            try_extract_from_chain_metadata(Some(&metadata), 1)
-                .unwrap()
-                .is_none()
-        );
+        assert!(try_extract_from_chain_metadata(Some(&metadata), 1).is_none());
     }
 
     #[test]
@@ -448,9 +429,8 @@ mod tests {
                 )]),
             })),
         };
-        let registry = try_extract_from_chain_metadata(Some(&metadata), 1)
-            .unwrap()
-            .expect("should contain ABI");
+        let registry =
+            try_extract_from_chain_metadata(Some(&metadata), 1).expect("should contain ABI");
         assert!(registry.list_abis().contains(&TEST_ADDRESS));
     }
 
@@ -507,9 +487,8 @@ mod tests {
                 )]),
             })),
         };
-        let registry = try_extract_from_chain_metadata(Some(&metadata), 1)
-            .unwrap()
-            .expect("should contain ABI");
+        let registry =
+            try_extract_from_chain_metadata(Some(&metadata), 1).expect("should contain ABI");
         assert!(registry.list_abis().contains(&TEST_ADDRESS));
     }
 
@@ -544,8 +523,7 @@ mod tests {
             })),
         };
         // Invalid entries are skipped; with no valid entries left, result is None
-        let result = try_extract_from_chain_metadata(Some(&metadata), 1);
-        assert!(result.unwrap().is_none());
+        assert!(try_extract_from_chain_metadata(Some(&metadata), 1).is_none());
     }
 
     #[test]
@@ -564,8 +542,7 @@ mod tests {
             })),
         };
         // Invalid ABI JSON is skipped; with no valid entries left, result is None
-        let result = try_extract_from_chain_metadata(Some(&metadata), 1);
-        assert!(result.unwrap().is_none());
+        assert!(try_extract_from_chain_metadata(Some(&metadata), 1).is_none());
     }
 
     #[test]
@@ -595,7 +572,6 @@ mod tests {
         };
         // The valid entry should be registered; the invalid one skipped
         let registry = try_extract_from_chain_metadata(Some(&metadata), 1)
-            .unwrap()
             .expect("should contain the valid ABI");
         assert!(registry.list_abis().contains(&valid_address));
     }
