@@ -74,6 +74,10 @@ Raw tx bytes → ChainPlugin (CLI) or gRPC request
 - Integration tests in `integration/tests/` use gRPC client against built binaries
 - `test_utils` module in `visualsign` provides shared test helpers
 
+### Local Dev Container
+
+A unified Docker container (see `images/parser_app/Containerfile`) bundles parser_app + simulator_enclave + parser_host + Go gateway into a single image for non-TEE local development. Same API as production TDX deployment, only difference is no attestation. REST at `:8080`, gRPC at `:44020`. Build with `make non-oci-docker-images` from repo root.
+
 ### Design Decisions
 
 - **Deterministic serialization everywhere** — BTreeMap for proto maps, `DeterministicOrdering` trait, alphabetical field ordering for stable metadata hashing (borsh encoding)
