@@ -281,10 +281,16 @@ impl Cli {
         let plugin = plugins.iter().find(|p| p.chain() == chain);
 
         if plugin.is_none() && chain != Chain::Unspecified {
+            let supported: Vec<String> = plugins.iter().map(|p| p.chain().as_str().to_string()).collect();
             eprintln!(
-                "Error: chain '{0}' is recognized but no plugin is available for it. \
-                 This may mean the corresponding feature flag is disabled.",
-                args.chain
+                "Error: chain '{}' is not supported by this CLI build.\n\
+                 Supported chains: {}",
+                args.chain,
+                if supported.is_empty() {
+                    "none".to_string()
+                } else {
+                    supported.join(", ")
+                }
             );
             std::process::exit(1);
         }
