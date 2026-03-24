@@ -12,8 +12,7 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::transaction::Transaction as SolanaTransaction;
 use visualsign::vsptrait::VisualSignOptions;
 use visualsign::{
-    AnnotatedPayloadField, SignablePayload, SignablePayloadField,
-    SignablePayloadFieldPreviewLayout,
+    AnnotatedPayloadField, SignablePayload, SignablePayloadField, SignablePayloadFieldPreviewLayout,
 };
 
 /// Decode an IDL JSON string, extract the discriminator for the instruction at
