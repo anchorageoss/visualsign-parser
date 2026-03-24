@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 generated = { path = "../../generated", features = ["tonic_types"] }
 host_primitives = { path = "../../host_primitives" }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+serde_json = { workspace = true }
 axum = { version = "0.6.20", features = ["http1", "tokio", "json"], default-features = false }
 serde = { workspace = true }

@@ -6203,6 +6203,7 @@ dependencies = [
  "generated",
  "host_primitives",
  "serde",
+ "serde_json",
  "tokio",
 ]
 

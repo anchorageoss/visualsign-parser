@@ -1,4 +1,9 @@
-use axum::{Json, Router, extract::DefaultBodyLimit, extract::State, routing::post};
+use axum::{
+    Json, Router,
+    extract::DefaultBodyLimit,
+    extract::State,
+    routing::{get, post},
+};
 use generated::parser::{
     Chain, ParseRequest, SignatureScheme, parser_service_client::ParserServiceClient,
 };
@@ -60,8 +65,42 @@ struct TurnkeySignature {
 
 type GrpcClient = ParserServiceClient<tonic::transport::Channel>;
 
+#[derive(Clone)]
+struct AppState {
+    grpc_client: GrpcClient,
+    grpc_addr: String,
+}
+
+async fn health_handler(
+    State(state): State<AppState>,
+) -> (axum::http::StatusCode, Json<serde_json::Value>) {
+    let addr = state
+        .grpc_addr
+        .strip_prefix("http://")
+        .or_else(|| state.grpc_addr.strip_prefix("https://"))
+        .unwrap_or(&state.grpc_addr);
+
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        tokio::net::TcpStream::connect(addr),
+    )
+    .await
+    {
+        Ok(Ok(_)) => (
+            axum::http::StatusCode::OK,
+            Json(serde_json::json!({"status": "ok"})),
+        ),
+        _ => (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"status": "unhealthy", "reason": "grpc backend unreachable"})),
+        ),
+    }
+}
+
 async fn parse_handler(
-    State(mut client): State<GrpcClient>,
+    State(AppState {
+        mut grpc_client, ..
+    }): State<AppState>,
     Json(wrapper): Json<TurnkeyRequestWrapper>,
 ) -> (axum::http::StatusCode, Json<TurnkeyResponseWrapper>) {
     let chain = match Chain::from_str_name(&wrapper.request.chain) {
@@ -83,7 +122,7 @@ async fn parse_handler(
         chain_metadata: None,
     });
 
-    let response = match client.parse(request).await {
+    let response = match grpc_client.parse(request).await {
         Ok(r) => r.into_inner(),
         Err(e) => {
             let http_status = match e.code() {
@@ -187,10 +226,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_decoding_message_size(GRPC_MAX_RECV_MSG_SIZE)
         .max_encoding_message_size(GRPC_MAX_RECV_MSG_SIZE);
 
+    let state = AppState {
+        grpc_client: client,
+        grpc_addr,
+    };
+
     let app = Router::new()
+        .route("/health", get(health_handler))
         .route("/visualsign/api/v1/parse", post(parse_handler))
         .layer(DefaultBodyLimit::max(GRPC_MAX_RECV_MSG_SIZE))
-        .with_state(client);
+        .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("Gateway listening on {addr}");
