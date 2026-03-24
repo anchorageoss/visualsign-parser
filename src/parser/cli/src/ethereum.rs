@@ -57,14 +57,17 @@ fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (BTreeMap<Stri
         "UniswapV2:/home/user/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
         "ContractAddress",
         |addr| {
-            let addr = addr
+            let hex = addr
                 .strip_prefix("0x")
                 .or(addr.strip_prefix("0X"))
-                .unwrap_or(addr);
-            if addr.len() != 40 {
-                return Err(format!("expected 40 hex chars, got {}", addr.len()));
+                .ok_or("must start with 0x")?;
+            if hex.len() != 40 {
+                return Err(format!(
+                    "expected 0x + 40 hex chars, got {} hex chars",
+                    hex.len()
+                ));
             }
-            if !addr.chars().all(|c| c.is_ascii_hexdigit()) {
+            if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
                 return Err("contains non-hex characters".to_string());
             }
             Ok(())
