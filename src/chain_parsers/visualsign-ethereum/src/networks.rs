@@ -249,7 +249,7 @@ pub fn extract_chain_id_from_metadata(
 mod tests {
     use super::*;
 
-    // All 28 networks for parametrized testing: (chain_id, network_id, display_name, native_symbol)
+    // All 28 networks for parametrized testing: (chain_id, network_id, display_name, fee_paying_asset_symbol)
     const ALL_NETWORKS: &[(u64, &str, &str, &str)] = &[
         (
             id::ethereum::MAINNET,
