@@ -400,8 +400,8 @@ fn resolve_chain_id(
     {
         if let Some(tx_chain_id) = transaction.chain_id() {
             if tx_chain_id != metadata_chain_id {
-                eprintln!(
-                    "Warning: Transaction chain_id ({tx_chain_id}) differs from metadata chain_id ({metadata_chain_id}). Using metadata."
+                log::warn!(
+                    "Transaction chain_id ({tx_chain_id}) differs from metadata chain_id ({metadata_chain_id}). Using metadata."
                 );
             }
         }

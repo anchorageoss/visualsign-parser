@@ -21,7 +21,7 @@ enum AbiSignatureError {
 /// Extract and validate ABIs from `ChainMetadata`, if present.
 ///
 /// Navigates `ChainMetadata -> Ethereum -> abi_mappings` and registers each ABI
-/// with its contract address. Returns `Ok(None)` if the metadata doesn't contain
+/// with its contract address. Returns `None` if the metadata doesn't contain
 /// any Ethereum ABI mappings.
 ///
 /// The `chain_id` is needed to register address-to-ABI mappings in the registry.
