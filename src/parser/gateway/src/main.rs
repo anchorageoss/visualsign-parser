@@ -11,6 +11,7 @@ use generated::tonic;
 use host_primitives::GRPC_MAX_RECV_MSG_SIZE;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 // --- Turnkey JSON types (matching Go client's format) ---
 
@@ -68,21 +69,23 @@ type GrpcClient = ParserServiceClient<tonic::transport::Channel>;
 #[derive(Clone)]
 struct AppState {
     grpc_client: GrpcClient,
-    grpc_addr: String,
+    grpc_addr: Arc<str>,
 }
 
 async fn health_handler(
     State(state): State<AppState>,
 ) -> (axum::http::StatusCode, Json<serde_json::Value>) {
-    let addr = state
-        .grpc_addr
-        .strip_prefix("http://")
-        .or_else(|| state.grpc_addr.strip_prefix("https://"))
-        .unwrap_or(&state.grpc_addr);
+    let tcp_addr = match state.grpc_addr.parse::<axum::http::Uri>() {
+        Ok(uri) => uri
+            .authority()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| state.grpc_addr.to_string()),
+        Err(_) => state.grpc_addr.to_string(),
+    };
 
     match tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        tokio::net::TcpStream::connect(addr),
+        tokio::net::TcpStream::connect(tcp_addr),
     )
     .await
     {
@@ -228,7 +231,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState {
         grpc_client: client,
-        grpc_addr,
+        grpc_addr: Arc::from(grpc_addr.as_str()),
     };
 
     let app = Router::new()
