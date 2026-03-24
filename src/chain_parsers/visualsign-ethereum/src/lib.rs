@@ -440,14 +440,13 @@ fn convert_to_visual_sign_payload(
     fields.extend([
         SignablePayloadField::AmountV2 {
             common: SignablePayloadFieldCommon {
-                fallback_text: fee_symbol.as_deref().map_or_else(
-                    || format_ether(transaction.value()),
-                    |s| format!("{} {}", format_ether(transaction.value()), s),
-                ),
+                fallback_text: fee_symbol
+                    .as_deref()
+                    .map_or_else(|| value.clone(), |s| format!("{value} {s}")),
                 label: "Value".to_string(),
             },
             amount_v2: SignablePayloadFieldAmountV2 {
-                amount: format_ether(transaction.value()),
+                amount: value,
                 abbreviation: fee_symbol,
             },
         },
