@@ -12,6 +12,8 @@
 //! Run: `cargo test --test fuzz_idl_parsing`
 //! More iterations: `PROPTEST_CASES=5000 cargo test --test fuzz_idl_parsing`
 
+mod common;
+
 use proptest::prelude::*;
 use solana_parser_fuzz_core::proptest as arb;
 use solana_parser::solana::structs::{

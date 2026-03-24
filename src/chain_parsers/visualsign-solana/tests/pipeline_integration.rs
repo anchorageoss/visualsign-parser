@@ -15,6 +15,8 @@
 //! directly and never exercises IdlRegistry, the visualizer dispatch, or the
 //! SignablePayloadField wrapping.
 
+mod common;
+
 use std::collections::HashMap;
 
 use generated::parser::{ChainMetadata, Idl as ProtoIdl, SolanaMetadata, chain_metadata};
@@ -309,20 +311,7 @@ proptest! {
         data in prop::collection::vec(any::<u8>(), 0..1300usize),
     ) {
         let program_id = Pubkey::new_unique();
-        let bytes = if use_valid_disc {
-            if let Ok(idl) = decode_idl_data(&idl_json) {
-                if !idl.instructions.is_empty() {
-                    let inst = &idl.instructions[inst_idx % idl.instructions.len()];
-                    if let Some(disc) = &inst.discriminator {
-                        let mut d = disc.clone();
-                        d.extend_from_slice(&data);
-                        d
-                    } else { data }
-                } else { data }
-            } else { data }
-        } else {
-            data
-        };
+        let bytes = common::build_maybe_disc_bytes(&idl_json, use_valid_disc, inst_idx, data);
         let tx = build_transaction(program_id, vec![], bytes);
         let _ = transaction_to_visual_sign(tx, options_with_idl(&program_id, &idl_json, "F"));
     }
@@ -337,20 +326,7 @@ proptest! {
         data in prop::collection::vec(any::<u8>(), 0..1300usize),
     ) {
         let program_id = Pubkey::new_unique();
-        let bytes = if use_valid_disc {
-            if let Ok(idl) = decode_idl_data(&idl_json) {
-                if !idl.instructions.is_empty() {
-                    let inst = &idl.instructions[inst_idx % idl.instructions.len()];
-                    if let Some(disc) = &inst.discriminator {
-                        let mut d = disc.clone();
-                        d.extend_from_slice(&data);
-                        d
-                    } else { data }
-                } else { data }
-            } else { data }
-        } else {
-            data
-        };
+        let bytes = common::build_maybe_disc_bytes(&idl_json, use_valid_disc, inst_idx, data);
         let tx = build_transaction(program_id, vec![], bytes);
         let inst_count = tx.message.instructions.len();
         let options = options_with_idl(&program_id, &idl_json, "F");
