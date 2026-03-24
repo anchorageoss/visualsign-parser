@@ -13,7 +13,7 @@
 //! More iterations: `PROPTEST_CASES=5000 cargo test --test fuzz_idl_parsing`
 
 use proptest::prelude::*;
-use solana_parser::arb;
+use solana_parser_fuzz_core::proptest as arb;
 use solana_parser::solana::structs::{
     Defined, Idl, IdlField, IdlType, IdlTypeDefinition, IdlTypeDefinitionType,
 };
@@ -25,9 +25,9 @@ const TEST_PROGRAM_ID: &str = "11111111111111111111111111111111";
 // ── Local strategies ─────────────────────────────────────────────────────────
 //
 // Core strategies (`arb_identifier`, `arb_primitive_idl_type`, `arb_idl_type`,
-// `arb_idl_field`, `arb_idl_instruction`, `arb_idl`, `arb_idl_json`,
-// `arb_bytes_for_type`, `arb_valid_instruction_bytes`) live in
-// `solana_parser::arb` and are shared with `pipeline_integration.rs`.
+// `arb_idl_instruction`, `arb_idl`, `arb_idl_json`, `arb_bytes_for_type`,
+// `arb_valid_instruction_bytes`) live in `solana_parser_fuzz_core::proptest`
+// (aliased as `arb`) and are shared with `pipeline_integration.rs`.
 
 /// IDL JSON with a defined struct type correlated between `types` and instruction args.
 ///

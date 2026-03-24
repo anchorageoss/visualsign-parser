@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use generated::parser::{ChainMetadata, Idl as ProtoIdl, SolanaMetadata, chain_metadata};
 use proptest::prelude::*;
-use solana_parser::arb;
+use solana_parser_fuzz_core::proptest as arb;
 use solana_parser::decode_idl_data;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::message::Message;
