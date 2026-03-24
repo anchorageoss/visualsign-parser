@@ -50,6 +50,7 @@ pub fn load_mappings<V>(
     kind: &str,
     example: &str,
     identifier_label: &str,
+    validate_identifier: impl Fn(&str) -> Result<(), String>,
     build_value: impl Fn(&MappingComponents, String) -> V,
 ) -> (std::collections::BTreeMap<String, V>, usize) {
     let mut map = std::collections::BTreeMap::new();
@@ -57,23 +58,32 @@ pub fn load_mappings<V>(
 
     for mapping in mappings {
         match parse_mapping(mapping) {
-            Ok(components) => match load_json_file(&components.path) {
-                Ok(json) => {
-                    let value = build_value(&components, json);
-                    map.insert(components.identifier.clone(), value);
-                    valid_count += 1;
+            Ok(components) => {
+                if let Err(e) = validate_identifier(&components.identifier) {
                     eprintln!(
-                        "  Loaded {kind} '{}' from {} and mapped to {}",
-                        components.name, components.path, components.identifier
+                        "  Warning: Skipping {kind} '{}': invalid {identifier_label} '{}': {e}",
+                        components.name, components.identifier
                     );
+                    continue;
                 }
-                Err(e) => {
-                    eprintln!(
-                        "  Warning: Failed to load {kind} '{}' from '{}': {e}",
-                        components.name, components.path
-                    );
+                match load_json_file(&components.path) {
+                    Ok(json) => {
+                        let value = build_value(&components, json);
+                        map.insert(components.identifier.clone(), value);
+                        valid_count += 1;
+                        eprintln!(
+                            "  Loaded {kind} '{}' from {} and mapped to {}",
+                            components.name, components.path, components.identifier
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "  Warning: Failed to load {kind} '{}' from '{}': {e}",
+                            components.name, components.path
+                        );
+                    }
                 }
-            },
+            }
             Err(e) => {
                 eprintln!("Error parsing {kind} mapping: {e}");
                 eprintln!("Expected format: Name:/path/to/file.json:{identifier_label}");
@@ -211,9 +221,14 @@ mod tests {
             format!("Token2:{}:0xAddr2", path2.display()),
         ];
 
-        let (map, count) = load_mappings(&mappings, "ABI", "example", "Address", |_comp, json| {
-            json.to_uppercase()
-        });
+        let (map, count) = load_mappings(
+            &mappings,
+            "ABI",
+            "example",
+            "Address",
+            |_| Ok(()),
+            |_comp, json| json.to_uppercase(),
+        );
 
         assert_eq!(count, 2);
         assert_eq!(map.len(), 2);
@@ -224,8 +239,14 @@ mod tests {
     #[test]
     fn test_load_mappings_empty_input() {
         let mappings: Vec<String> = vec![];
-        let (map, count) =
-            load_mappings::<String>(&mappings, "ABI", "example", "Address", |_, json| json);
+        let (map, count) = load_mappings::<String>(
+            &mappings,
+            "ABI",
+            "example",
+            "Address",
+            |_| Ok(()),
+            |_, json| json,
+        );
         assert_eq!(count, 0);
         assert!(map.is_empty());
     }
@@ -233,8 +254,14 @@ mod tests {
     #[test]
     fn test_load_mappings_invalid_parse_skipped() {
         let mappings = vec!["bad-format-no-colons".to_string()];
-        let (map, count) =
-            load_mappings::<String>(&mappings, "ABI", "example", "Address", |_, json| json);
+        let (map, count) = load_mappings::<String>(
+            &mappings,
+            "ABI",
+            "example",
+            "Address",
+            |_| Ok(()),
+            |_, json| json,
+        );
         assert_eq!(count, 0);
         assert!(map.is_empty());
     }
@@ -242,8 +269,14 @@ mod tests {
     #[test]
     fn test_load_mappings_missing_file_skipped() {
         let mappings = vec!["Name:/nonexistent/file.json:0xAddr".to_string()];
-        let (map, count) =
-            load_mappings::<String>(&mappings, "ABI", "example", "Address", |_, json| json);
+        let (map, count) = load_mappings::<String>(
+            &mappings,
+            "ABI",
+            "example",
+            "Address",
+            |_| Ok(()),
+            |_, json| json,
+        );
         assert_eq!(count, 0);
         assert!(map.is_empty());
     }
@@ -257,8 +290,14 @@ mod tests {
             "Also:/nonexistent/missing.json:0xBad".to_string(),
         ];
 
-        let (map, count) =
-            load_mappings::<String>(&mappings, "ABI", "example", "Address", |_, json| json);
+        let (map, count) = load_mappings::<String>(
+            &mappings,
+            "ABI",
+            "example",
+            "Address",
+            |_| Ok(()),
+            |_, json| json,
+        );
         assert_eq!(count, 1);
         assert_eq!(map.len(), 1);
         assert!(map.contains_key("0xGood"));
@@ -269,9 +308,14 @@ mod tests {
         let path = write_temp_json("comp_test.json", r#"{"data": "value"}"#);
         let mappings = vec![format!("MyName:{}:MyId", path.display())];
 
-        let (map, count) = load_mappings(&mappings, "TEST", "ex", "Id", |components, json| {
-            format!("{}|{}|{}", components.name, components.identifier, json)
-        });
+        let (map, count) = load_mappings(
+            &mappings,
+            "TEST",
+            "ex",
+            "Id",
+            |_| Ok(()),
+            |components, json| format!("{}|{}|{}", components.name, components.identifier, json),
+        );
 
         assert_eq!(count, 1);
         let value = map.get("MyId").unwrap();
@@ -288,10 +332,33 @@ mod tests {
             format!("Second:{}:0xSame", path2.display()),
         ];
 
-        let (map, count) = load_mappings::<String>(&mappings, "ABI", "ex", "Addr", |_, json| json);
+        let (map, count) =
+            load_mappings::<String>(&mappings, "ABI", "ex", "Addr", |_| Ok(()), |_, json| json);
         assert_eq!(count, 2);
         assert_eq!(map.len(), 1);
         // Last write wins
         assert!(map.get("0xSame").unwrap().contains(r#""v": 2"#));
+    }
+
+    #[test]
+    fn test_load_json_file_too_large() {
+        use std::io::Write;
+
+        let dir = std::env::temp_dir().join("vsp_tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("large_{}_{}.json", std::process::id(), "too_big"));
+        let mut file = std::fs::File::create(&path).unwrap();
+        // Write just over MAX_JSON_FILE_SIZE bytes
+        let chunk = vec![b'x'; 1024 * 1024]; // 1 MB
+        for _ in 0..11 {
+            file.write_all(&chunk).unwrap();
+        }
+        drop(file);
+
+        let result = load_json_file(path.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("exceeds maximum size"));
+
+        std::fs::remove_file(&path).ok();
     }
 }
