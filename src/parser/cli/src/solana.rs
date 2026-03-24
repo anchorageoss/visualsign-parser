@@ -183,7 +183,10 @@ mod tests {
     #[test]
     fn test_create_chain_metadata_sets_no_network_or_legacy_idl() {
         let path = write_temp_json("meta_check.json", r#"{"ok": true}"#);
-        let mappings = vec![format!("Test:{}:ProgXYZ", path.display())];
+        let mappings = vec![format!(
+            "Test:{}:11111111111111111111111111111111",
+            path.display()
+        )];
 
         let meta = create_chain_metadata(&mappings).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {

@@ -69,12 +69,19 @@ pub fn load_mappings<V>(
                 match load_json_file(&components.path) {
                     Ok(json) => {
                         let value = build_value(&components, json);
-                        map.insert(components.identifier.clone(), value);
-                        valid_count += 1;
-                        eprintln!(
-                            "  Loaded {kind} '{}' from {} and mapped to {}",
-                            components.name, components.path, components.identifier
-                        );
+                        let previous = map.insert(components.identifier.clone(), value);
+                        if previous.is_some() {
+                            eprintln!(
+                                "  Warning: Duplicate {identifier_label} '{}' for {kind} '{}'; overwriting previous entry",
+                                components.identifier, components.name
+                            );
+                        } else {
+                            valid_count += 1;
+                            eprintln!(
+                                "  Loaded {kind} '{}' from {} and mapped to {}",
+                                components.name, components.path, components.identifier
+                            );
+                        }
                     }
                     Err(e) => {
                         eprintln!(
@@ -334,7 +341,7 @@ mod tests {
 
         let (map, count) =
             load_mappings::<String>(&mappings, "ABI", "ex", "Addr", |_| Ok(()), |_, json| json);
-        assert_eq!(count, 2);
+        assert_eq!(count, 1); // Duplicate not counted
         assert_eq!(map.len(), 1);
         // Last write wins
         assert!(map.get("0xSame").unwrap().contains(r#""v": 2"#));

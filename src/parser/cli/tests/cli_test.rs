@@ -3,8 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Helper to run the parser_cli binary with given args and return stdout.
-fn run_cli(args: &[&str]) -> String {
+/// Helper to run the parser_cli binary with given args and return (stdout, stderr).
+fn run_cli_full(args: &[&str]) -> (String, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_parser_cli"))
         .args(args)
         .output()
@@ -14,7 +14,15 @@ fn run_cli(args: &[&str]) -> String {
         "CLI exited with error. stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    String::from_utf8(output.stdout).expect("Invalid UTF-8 output")
+    (
+        String::from_utf8(output.stdout).expect("Invalid UTF-8 output"),
+        String::from_utf8(output.stderr).expect("Invalid UTF-8 stderr"),
+    )
+}
+
+/// Helper to run the parser_cli binary with given args and return stdout.
+fn run_cli(args: &[&str]) -> String {
+    run_cli_full(args).0
 }
 
 /// Helper to write a temp JSON file and return its path.
@@ -268,7 +276,7 @@ fn test_cli_solana_idl_json_mappings() {
     }"#;
     let idl_path = write_temp_json("test_idl.json", idl_json);
     let mapping = format!(
-        "TestProgram:{}:TestProg1111111111111111111111111111111111111",
+        "TestProgram:{}:TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
         idl_path.display()
     );
 
@@ -287,11 +295,17 @@ fn test_cli_solana_idl_json_mappings() {
     args.push("--idl-json-mappings");
     args.push(&mapping);
 
-    let output = run_cli(&args);
+    let (stdout, stderr) = run_cli_full(&args);
+
+    // Verify the mapping was actually loaded
+    assert!(
+        stderr.contains("Loaded IDL"),
+        "Expected 'Loaded IDL' in stderr, got: {stderr}"
+    );
 
     // The transaction should still parse successfully
     let json: serde_json::Value =
-        serde_json::from_str(&output).expect("CLI output should be valid JSON");
+        serde_json::from_str(&stdout).expect("CLI output should be valid JSON");
     assert_eq!(json["Title"], "Solana Transaction");
     assert!(json["Fields"].as_array().is_some_and(|f| !f.is_empty()));
 }
@@ -299,7 +313,7 @@ fn test_cli_solana_idl_json_mappings() {
 #[test]
 #[cfg(feature = "solana")]
 fn test_cli_solana_idl_invalid_file_still_parses() {
-    let mapping = "Bad:/nonexistent/idl.json:BadProg11111111111111111111111111111111111";
+    let mapping = "Bad:/nonexistent/idl.json:11111111111111111111111111111111";
 
     let fixtures_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
