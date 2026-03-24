@@ -12,12 +12,11 @@
 //! Run: `cargo test --test fuzz_idl_parsing`
 //! More iterations: `PROPTEST_CASES=5000 cargo test --test fuzz_idl_parsing`
 
-mod common;
-
 use proptest::prelude::*;
 use solana_parser_fuzz_core::proptest as arb;
 use solana_parser::solana::structs::{
-    Defined, Idl, IdlField, IdlType, IdlTypeDefinition, IdlTypeDefinitionType,
+    Defined, EnumFields, Idl, IdlEnumVariant, IdlField, IdlType, IdlTypeDefinition,
+    IdlTypeDefinitionType,
 };
 use solana_parser::{decode_idl_data, parse_instruction_with_idl};
 use std::sync::Arc;
@@ -60,6 +59,55 @@ fn arb_defined_struct_idl_json() -> impl Strategy<Value = String> {
         };
         serde_json::to_string(&idl).unwrap()
     })
+}
+
+/// IDL JSON with a defined enum type correlated between `types` and instruction args.
+///
+/// Generates enums with a mix of unit, tuple, and named (struct-like) variants,
+/// exercising the `Defined` → `Enum` type resolution path.
+fn arb_defined_enum_idl_json() -> impl Strategy<Value = String> {
+    (
+        arb::arb_identifier(),
+        prop::collection::vec(
+            (
+                arb::arb_identifier(),
+                prop::option::of(prop::bool::ANY.prop_flat_map(|use_named| {
+                    if use_named {
+                        prop::collection::vec(
+                            (arb::arb_identifier(), arb::arb_primitive_idl_type())
+                                .prop_map(|(n, t)| IdlField { name: n, r#type: t }),
+                            1..=4,
+                        )
+                        .prop_map(|fields| EnumFields::Named(fields))
+                        .boxed()
+                    } else {
+                        prop::collection::vec(arb::arb_primitive_idl_type(), 1..=4)
+                            .prop_map(|types| EnumFields::Tuple(types))
+                            .boxed()
+                    }
+                })),
+            )
+                .prop_map(|(name, fields)| IdlEnumVariant { name, fields }),
+            1..=6,
+        ),
+        arb::arb_idl_instruction(),
+        prop::collection::vec(arb::arb_idl_instruction(), 0..=4),
+    )
+        .prop_map(|(enum_name, variants, mut main_inst, mut extra_insts)| {
+            main_inst.args = vec![IdlField {
+                name: "data".to_string(),
+                r#type: IdlType::Defined(Defined::String(enum_name.clone())),
+            }];
+            extra_insts.push(main_inst);
+            let idl = Idl {
+                instructions: extra_insts,
+                types: vec![IdlTypeDefinition {
+                    name: enum_name,
+                    r#type: IdlTypeDefinitionType::Enum { variants },
+                }],
+            };
+            serde_json::to_string(&idl).unwrap()
+        })
 }
 
 /// IDL JSON where the single instruction has a `Vec` arg.
@@ -204,6 +252,36 @@ proptest! {
                             "defined-type instruction must dispatch to the correct handler");
                     }
                     // Err is acceptable — random arg bytes may not satisfy struct field layout
+                }
+            } else {
+                let _ = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
+            }
+        }
+    }
+
+    /// IDLs with defined enum types must not panic regardless of instruction bytes.
+    /// Uses the same 50/50 valid-discriminator mix as the struct variant test.
+    ///
+    /// Exercises unit, tuple, and named enum variants through the `Defined` →
+    /// `Enum` type resolution path.
+    #[test]
+    fn fuzz_defined_enum_types_never_panics(
+        idl_json in arb_defined_enum_idl_json(),
+        use_valid_disc in any::<bool>(),
+        inst_idx in any::<usize>(),
+        data in prop::collection::vec(any::<u8>(), 0..200usize),
+    ) {
+        if let Ok(idl) = decode_idl_data(&idl_json) {
+            if use_valid_disc && !idl.instructions.is_empty() {
+                let inst = &idl.instructions[inst_idx % idl.instructions.len()];
+                let expected_name = inst.name.clone();
+                if let Some(disc) = &inst.discriminator {
+                    let mut d = disc.clone();
+                    d.extend_from_slice(&data);
+                    if let Ok(result) = parse_instruction_with_idl(&d, TEST_PROGRAM_ID, &idl) {
+                        prop_assert_eq!(&result.instruction_name, &expected_name,
+                            "enum-type instruction must dispatch to the correct handler");
+                    }
                 }
             } else {
                 let _ = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
