@@ -148,7 +148,7 @@ let abi_json = std::fs::read_to_string("/path/to/abi.json")
 // Create ABI mapping keyed by contract address
 let mut abi_mappings = BTreeMap::new();
 abi_mappings.insert(
-    "0x1234...abcd".to_string(),
+    "0xdAC17F958D2ee523a2206206994597C13D831ec7".to_string(), // Replace with your contract address
     Abi {
         value: abi_json,
         signature: None, // Optional: include signature for validation
