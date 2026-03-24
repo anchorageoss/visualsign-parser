@@ -76,10 +76,17 @@ async fn health_handler(
     State(state): State<AppState>,
 ) -> (axum::http::StatusCode, Json<serde_json::Value>) {
     let tcp_addr = match state.grpc_addr.parse::<axum::http::Uri>() {
-        Ok(uri) => uri
-            .authority()
-            .map(|a| a.to_string())
-            .unwrap_or_else(|| state.grpc_addr.to_string()),
+        Ok(uri) => match (uri.host(), uri.port_u16()) {
+            (Some(host), Some(port)) => format!("{host}:{port}"),
+            (Some(host), None) => {
+                let default_port = match uri.scheme_str() {
+                    Some("https") => 443,
+                    _ => 80,
+                };
+                format!("{host}:{default_port}")
+            }
+            _ => state.grpc_addr.to_string(),
+        },
         Err(_) => state.grpc_addr.to_string(),
     };
 
