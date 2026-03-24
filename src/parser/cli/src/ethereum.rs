@@ -203,7 +203,9 @@ mod tests {
 
     #[test]
     fn test_create_chain_metadata_invalid_abi_file_skipped() {
-        let mappings = vec!["BadABI:/nonexistent/abi.json:0xDEAD".to_string()];
+        let mappings = vec![
+            "BadABI:/nonexistent/abi.json:0xdAC17F958D2ee523a2206206994597C13D831ec7".to_string(),
+        ];
         let meta = create_chain_metadata(None, &mappings)
             .unwrap()
             .expect("should return Some");

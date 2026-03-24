@@ -144,7 +144,8 @@ mod tests {
 
     #[test]
     fn test_create_chain_metadata_invalid_file_skipped() {
-        let mappings = vec!["Bad:/nonexistent/idl.json:ProgramId123".to_string()];
+        let mappings =
+            vec!["Bad:/nonexistent/idl.json:11111111111111111111111111111111".to_string()];
         let meta = create_chain_metadata(&mappings).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
