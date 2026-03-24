@@ -7,11 +7,11 @@
 
 /// Macro to define network constants and generate lookup functions from a single source.
 ///
-/// Each entry: (chain_module, network_const, chain_id, display_name, native_asset_symbol)
+/// Each entry: (chain_module, network_const, chain_id, display_name, fee_paying_asset_symbol)
 /// Generates:
 /// - `id::{chain_module}::{network_const}` constants
 /// - `get_network_name()` - chain_id -> display name
-/// - `get_native_asset_symbol()` - chain_id -> native asset ticker (e.g., "ETH", "POL")
+/// - `get_fee_paying_asset_symbol()` - chain_id -> fee-paying asset ticker (e.g., "ETH", "POL")
 /// - `chain_id_to_network_id()` - chain_id -> canonical ID (e.g., "ETHEREUM_MAINNET")
 /// - `network_id_to_chain_id()` - canonical ID -> chain_id
 macro_rules! define_networks {
@@ -47,16 +47,16 @@ macro_rules! define_networks {
             }
         }
 
-        /// Returns the native asset symbol for a given chain ID.
+        /// Returns the fee-paying asset symbol for a given chain ID.
         ///
         /// For known networks, returns the configured symbol (e.g., "ETH", "POL", "BNB").
         /// For unknown chains, returns a neutral label to avoid mislabeling.
-        pub fn get_native_asset_symbol(chain_id: u64) -> String {
+        pub fn get_fee_paying_asset_symbol(chain_id: u64) -> String {
             match chain_id {
                 $($(
                     id::$chain::$network => $symbol.to_string(),
                 )*)*
-                _ => "Native Asset".to_string(),
+                _ => "Fee Asset".to_string(),
             }
         }
 
@@ -90,7 +90,7 @@ macro_rules! define_networks {
 }
 
 // Define all supported networks
-// Format: chain { NETWORK = chain_id => "Display Name", "NativeAssetSymbol" }
+// Format: chain { NETWORK = chain_id => "Display Name", "FeePayingAssetSymbol" }
 define_networks! {
     // L1 Chains
     ethereum {
@@ -369,16 +369,16 @@ mod tests {
     }
 
     #[test]
-    fn test_all_networks_get_native_asset_symbol() {
+    fn test_all_networks_get_fee_paying_asset_symbol() {
         for &(chain_id, _, _, symbol) in ALL_NETWORKS {
-            assert_eq!(get_native_asset_symbol(chain_id), symbol);
+            assert_eq!(get_fee_paying_asset_symbol(chain_id), symbol);
         }
     }
 
     #[test]
-    fn test_get_native_asset_symbol_unknown_returns_neutral_label() {
-        assert_eq!(get_native_asset_symbol(999999999), "Native Asset");
-        assert_eq!(get_native_asset_symbol(0), "Native Asset");
+    fn test_get_fee_paying_asset_symbol_unknown_returns_neutral_label() {
+        assert_eq!(get_fee_paying_asset_symbol(999999999), "Fee Asset");
+        assert_eq!(get_fee_paying_asset_symbol(0), "Fee Asset");
     }
 
     #[test]
