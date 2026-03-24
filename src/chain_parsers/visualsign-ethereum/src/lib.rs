@@ -430,7 +430,7 @@ fn convert_to_visual_sign_payload(
             address_v2: SignablePayloadFieldAddressV2 {
                 address: to.to_string(),
                 name: "To".to_string(),
-                asset_label: fee_symbol.clone(),
+                asset_label: fee_symbol.clone().unwrap_or_default(),
                 memo: None,
                 badge_text: None,
             },
@@ -439,12 +439,15 @@ fn convert_to_visual_sign_payload(
     fields.extend([
         SignablePayloadField::AmountV2 {
             common: SignablePayloadFieldCommon {
-                fallback_text: format!("{} {}", format_ether(transaction.value()), fee_symbol),
+                fallback_text: fee_symbol.as_deref().map_or_else(
+                    || format_ether(transaction.value()),
+                    |s| format!("{} {}", format_ether(transaction.value()), s),
+                ),
                 label: "Value".to_string(),
             },
             amount_v2: SignablePayloadFieldAmountV2 {
                 amount: format_ether(transaction.value()),
-                abbreviation: Some(fee_symbol),
+                abbreviation: fee_symbol,
             },
         },
         SignablePayloadField::TextV2 {

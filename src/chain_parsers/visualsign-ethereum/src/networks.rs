@@ -47,16 +47,16 @@ macro_rules! define_networks {
             }
         }
 
-        /// Returns the fee-paying asset symbol for a given chain ID.
+        /// Returns the fee-paying asset symbol for a given chain ID, if known.
         ///
         /// For known networks, returns the configured symbol (e.g., "ETH", "POL", "BNB").
-        /// For unknown chains, returns a neutral label to avoid mislabeling.
-        pub fn get_fee_paying_asset_symbol(chain_id: u64) -> String {
+        /// For unknown chains, returns `None`.
+        pub fn get_fee_paying_asset_symbol(chain_id: u64) -> Option<String> {
             match chain_id {
                 $($(
-                    id::$chain::$network => $symbol.to_string(),
+                    id::$chain::$network => Some($symbol.to_string()),
                 )*)*
-                _ => "Fee Asset".to_string(),
+                _ => None,
             }
         }
 
@@ -370,14 +370,17 @@ mod tests {
     #[test]
     fn test_all_networks_get_fee_paying_asset_symbol() {
         for &(chain_id, _, _, symbol) in ALL_NETWORKS {
-            assert_eq!(get_fee_paying_asset_symbol(chain_id), symbol);
+            assert_eq!(
+                get_fee_paying_asset_symbol(chain_id),
+                Some(symbol.to_string())
+            );
         }
     }
 
     #[test]
-    fn test_get_fee_paying_asset_symbol_unknown_returns_neutral_label() {
-        assert_eq!(get_fee_paying_asset_symbol(999999999), "Fee Asset");
-        assert_eq!(get_fee_paying_asset_symbol(0), "Fee Asset");
+    fn test_get_fee_paying_asset_symbol_unknown_returns_none() {
+        assert_eq!(get_fee_paying_asset_symbol(999999999), None);
+        assert_eq!(get_fee_paying_asset_symbol(0), None);
     }
 
     #[test]
