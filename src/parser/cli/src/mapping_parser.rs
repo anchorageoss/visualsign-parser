@@ -355,11 +355,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(format!("large_{}_{}.json", std::process::id(), "too_big"));
         let mut file = std::fs::File::create(&path).unwrap();
-        // Write just over MAX_JSON_FILE_SIZE bytes
-        let chunk = vec![b'x'; 1024 * 1024]; // 1 MB
-        for _ in 0..11 {
-            file.write_all(&chunk).unwrap();
-        }
+        // Write just over MAX_JSON_FILE_SIZE bytes, derived from the constant
+        let bytes_to_write = super::MAX_JSON_FILE_SIZE + 1;
+        let chunk = vec![b'x'; bytes_to_write as usize];
+        file.write_all(&chunk).unwrap();
         drop(file);
 
         let result = load_json_file(path.to_str().unwrap());
