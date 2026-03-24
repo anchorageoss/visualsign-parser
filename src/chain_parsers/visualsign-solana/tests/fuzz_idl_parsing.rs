@@ -707,6 +707,50 @@ fn roundtrip_nested_defined_struct() {
     assert_eq!(config["active"], serde_json::json!(true));
 }
 
+/// An instruction whose arg is a defined enum with unit, tuple, and named
+/// variants — exercises enum discriminant dispatch and field decoding.
+#[test]
+fn roundtrip_defined_enum_arg() {
+    let idl_json = serde_json::json!({
+        "instructions": [{"name": "setMode", "accounts": [], "args": [
+            {"name": "mode", "type": {"defined": "Mode"}}
+        ]}],
+        "types": [{
+            "name": "Mode",
+            "type": {"kind": "enum", "variants": [
+                {"name": "Off"},
+                {"name": "Fixed", "fields": [{"name": "rate", "type": "u64"}]},
+                {"name": "Scaled", "fields": ["u32", "bool"]},
+            ]}
+        }]
+    })
+    .to_string();
+
+    let idl = decode_idl_data(&idl_json).unwrap();
+    let disc = idl.instructions[0].discriminator.as_ref().unwrap();
+
+    // Variant 0: Off (unit)
+    let mut data = disc.clone();
+    data.push(0u8); // variant index
+    let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl).unwrap();
+    assert_eq!(result.instruction_name, "setMode");
+
+    // Variant 1: Fixed { rate: 500 } (named)
+    let mut data = disc.clone();
+    data.push(1u8); // variant index
+    data.extend_from_slice(&500u64.to_le_bytes());
+    let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl).unwrap();
+    assert_eq!(result.instruction_name, "setMode");
+
+    // Variant 2: Scaled(100, true) (tuple)
+    let mut data = disc.clone();
+    data.push(2u8); // variant index
+    data.extend_from_slice(&100u32.to_le_bytes());
+    data.push(1u8); // true
+    let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl).unwrap();
+    assert_eq!(result.instruction_name, "setMode");
+}
+
 // ── Error-path tests ─────────────────────────────────────────────────────────
 
 /// An instruction arg that references a `Defined("MissingType")` not present in
@@ -819,36 +863,49 @@ fn load_idl_from_env() -> Option<(String, solana_parser::solana::structs::Idl)> 
     }
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig::default())]
+/// Crash-safety test against a real IDL loaded from IDL_FILE.
+///
+/// Uses TestRunner::run directly to load the IDL once (not per iteration).
+/// Applies the same 50/50 valid/random discriminator mix as
+/// `fuzz_idl_parsing_never_panics`. On `Ok` with a valid discriminator,
+/// asserts the instruction name matches the selected instruction.
+#[test]
+fn real_idl_never_panics() {
+    let Some((_, idl)) = load_idl_from_env() else {
+        return;
+    };
 
-    /// Crash-safety test against a real IDL loaded from IDL_FILE.
-    ///
-    /// Uses the same 50/50 valid/random discriminator mix as
-    /// `fuzz_idl_parsing_never_panics`. On `Ok` with a valid discriminator,
-    /// asserts the instruction name matches the selected instruction.
-    #[test]
-    fn real_idl_never_panics(
-        use_valid_disc in any::<bool>(),
-        inst_idx in any::<usize>(),
-        data in prop::collection::vec(any::<u8>(), 0..1300usize),
-    ) {
-        let Some((_, idl)) = load_idl_from_env() else { return Ok(()); };
-        if use_valid_disc && !idl.instructions.is_empty() {
-            let inst = &idl.instructions[inst_idx % idl.instructions.len()];
-            let expected_name = inst.name.clone();
-            if let Some(disc) = &inst.discriminator {
-                let mut d = disc.clone();
-                d.extend_from_slice(&data);
-                if let Ok(result) = parse_instruction_with_idl(&d, TEST_PROGRAM_ID, &idl) {
-                    prop_assert_eq!(&result.instruction_name, &expected_name,
-                        "discriminator must dispatch to the correct instruction");
+    let strategy = (
+        any::<bool>(),
+        any::<usize>(),
+        prop::collection::vec(any::<u8>(), 0..1300usize),
+    );
+
+    let config = ProptestConfig::default();
+    let mut runner = proptest::test_runner::TestRunner::new(config);
+    let idl_ref = idl.clone();
+    runner
+        .run(&strategy, move |(use_valid_disc, inst_idx, data)| {
+            if use_valid_disc && !idl_ref.instructions.is_empty() {
+                let inst = &idl_ref.instructions[inst_idx % idl_ref.instructions.len()];
+                let expected_name = &inst.name;
+                if let Some(disc) = &inst.discriminator {
+                    let mut d = disc.clone();
+                    d.extend_from_slice(&data);
+                    if let Ok(result) = parse_instruction_with_idl(&d, TEST_PROGRAM_ID, &idl_ref) {
+                        prop_assert_eq!(
+                            &result.instruction_name,
+                            expected_name,
+                            "discriminator must dispatch to the correct instruction"
+                        );
+                    }
                 }
+            } else {
+                let _ = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl_ref);
             }
-        } else {
-            let _ = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
-        }
-    }
+            Ok(())
+        })
+        .expect("real_idl_never_panics failed");
 }
 
 /// Valid-data parse test against a real IDL loaded from IDL_FILE.
