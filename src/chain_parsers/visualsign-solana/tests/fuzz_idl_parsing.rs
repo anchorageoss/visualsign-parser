@@ -11,6 +11,20 @@
 //!
 //! Run: `cargo test --test fuzz_idl_parsing`
 //! More iterations: `PROPTEST_CASES=5000 cargo test --test fuzz_idl_parsing`
+//!
+//! # Adding new tests
+//!
+//! 1. **Write a strategy** for the IDL shape you want to cover (see
+//!    `arb_defined_struct_idl_json` / `arb_defined_enum_idl_json` for examples),
+//!    or reuse one from `solana_parser_fuzz_core::proptest`.
+//! 2. **Add a proptest** in the `proptest!` block — use the 50/50 valid-disc /
+//!    random-data pattern for crash-safety, or `arb_idl_and_valid_bytes` for
+//!    correctness assertions.
+//! 3. **Add a concrete roundtrip test** that hand-crafts an IDL + borsh bytes
+//!    and asserts exact parsed values. This pins the behavior as
+//!    specification-by-example.
+//! 4. **Run tests** — proptest saves any failing seed to
+//!    `fuzz_idl_parsing.proptest-regressions`. Commit that file.
 
 use proptest::prelude::*;
 use solana_parser_fuzz_core::proptest as arb;
