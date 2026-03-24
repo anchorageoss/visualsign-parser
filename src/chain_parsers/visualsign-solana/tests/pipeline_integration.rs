@@ -368,6 +368,7 @@ proptest! {
         arg_bytes in prop::collection::vec(any::<u8>(), 0..200usize),
     ) {
         let Ok(idl) = decode_idl_data(&idl_json) else { return Ok(()); };
+        if idl.instructions.is_empty() { return Ok(()); }
         let inst = &idl.instructions[inst_idx % idl.instructions.len()];
         let Some(disc) = &inst.discriminator else { return Ok(()); };
 
