@@ -280,18 +280,28 @@ impl Cli {
 
         let plugin = plugins.iter().find(|p| p.chain() == chain);
 
-        if plugin.is_none() && chain != Chain::Unspecified {
-            let supported: Vec<String> = plugins.iter().map(|p| p.chain().as_str().to_string()).collect();
-            eprintln!(
-                "Error: chain '{}' is not supported by this CLI build.\n\
-                 Supported chains: {}",
-                args.chain,
-                if supported.is_empty() {
-                    "none".to_string()
-                } else {
-                    supported.join(", ")
-                }
-            );
+        if plugin.is_none() {
+            let supported: Vec<String> = plugins
+                .iter()
+                .map(|p| p.chain().as_str().to_string())
+                .collect();
+            let supported_str = if supported.is_empty() {
+                "none".to_string()
+            } else {
+                supported.join(", ")
+            };
+            if chain == Chain::Unspecified {
+                eprintln!(
+                    "Error: unrecognized chain '{}'.\nSupported chains: {supported_str}",
+                    args.chain,
+                );
+            } else {
+                eprintln!(
+                    "Error: chain '{}' is not supported by this CLI build.\n\
+                     Supported chains: {supported_str}",
+                    args.chain,
+                );
+            }
             std::process::exit(1);
         }
 
