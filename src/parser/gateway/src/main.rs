@@ -69,30 +69,35 @@ type GrpcClient = ParserServiceClient<tonic::transport::Channel>;
 #[derive(Clone)]
 struct AppState {
     grpc_client: GrpcClient,
-    grpc_addr: Arc<str>,
+    health_dial_addr: Arc<str>,
+}
+
+/// Extract a `host:port` TCP dial address from a URI string, suitable for `TcpStream::connect`.
+/// Brackets IPv6 hosts and applies scheme-based default ports when omitted.
+fn resolve_tcp_addr(uri_str: &str) -> String {
+    let Ok(uri) = uri_str.parse::<axum::http::Uri>() else {
+        return uri_str.to_string();
+    };
+    let Some(host) = uri.host() else {
+        return uri_str.to_string();
+    };
+    let port = uri.port_u16().unwrap_or(match uri.scheme_str() {
+        Some("https") => 443,
+        _ => 80,
+    });
+    if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
 }
 
 async fn health_handler(
     State(state): State<AppState>,
 ) -> (axum::http::StatusCode, Json<serde_json::Value>) {
-    let tcp_addr = match state.grpc_addr.parse::<axum::http::Uri>() {
-        Ok(uri) => match (uri.host(), uri.port_u16()) {
-            (Some(host), Some(port)) => format!("{host}:{port}"),
-            (Some(host), None) => {
-                let default_port = match uri.scheme_str() {
-                    Some("https") => 443,
-                    _ => 80,
-                };
-                format!("{host}:{default_port}")
-            }
-            _ => state.grpc_addr.to_string(),
-        },
-        Err(_) => state.grpc_addr.to_string(),
-    };
-
     match tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        tokio::net::TcpStream::connect(tcp_addr),
+        tokio::net::TcpStream::connect(state.health_dial_addr.as_ref()),
     )
     .await
     {
@@ -239,7 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState {
         grpc_client: client,
-        grpc_addr: Arc::from(grpc_addr.as_str()),
+        health_dial_addr: resolve_tcp_addr(&grpc_addr).into(),
     };
 
     let app = Router::new()
