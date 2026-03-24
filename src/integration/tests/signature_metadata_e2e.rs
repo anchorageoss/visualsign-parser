@@ -1,4 +1,7 @@
-use ed25519_dalek::{SigningKey as Ed25519SigningKey, VerifyingKey as Ed25519VerifyingKey};
+use ed25519_dalek::{
+    Signer as _, SigningKey as Ed25519SigningKey, Verifier as _,
+    VerifyingKey as Ed25519VerifyingKey,
+};
 /// End-to-end test for SignatureMetadata with cryptographic signature verification
 ///
 /// This test validates that:
@@ -12,8 +15,7 @@ use generated::parser::{
 use k256::EncodedPoint;
 use k256::ecdsa::SigningKey;
 use k256::ecdsa::VerifyingKey;
-use k256::ecdsa::signature::Signer;
-use k256::ecdsa::signature::Verifier;
+use k256::ecdsa::signature::hazmat::PrehashSigner;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
@@ -32,7 +34,9 @@ fn sign_with_secp256k1(content: &str) -> (String, String) {
     let verifying_key = VerifyingKey::from(&signing_key);
     let message_hash = hash_content_sha256(content);
 
-    let signature: k256::ecdsa::Signature = signing_key.sign(&message_hash);
+    let signature: k256::ecdsa::Signature = signing_key
+        .sign_prehash(&message_hash)
+        .expect("signing failed");
     // Use DER encoding for consistency with Turnkey API
     let signature_der = signature.to_der();
     let signature_hex = hex::encode(signature_der.as_ref()).to_string();
@@ -79,8 +83,9 @@ fn verify_secp256k1(
         .map_err(|e| format!("Failed to parse DER signature: {e}"))?;
 
     let message_hash = hash_content_sha256(content);
+    use k256::ecdsa::signature::hazmat::PrehashVerifier;
     verifying_key
-        .verify(&message_hash, &signature)
+        .verify_prehash(&message_hash, &signature)
         .map_err(|e| format!("Signature verification failed: {e}"))?;
 
     Ok(())
@@ -187,11 +192,16 @@ fn test_ethereum_abi_with_secp256k1_signature() {
         signature: Some(signature_metadata.clone()),
     };
 
-    // Create ParseRequest with EthereumMetadata containing signed ABI
+    // Create ParseRequest with EthereumMetadata containing signed ABI in abi_mappings
+    let mut abi_mappings = std::collections::BTreeMap::new();
+    abi_mappings.insert(
+        "0x1234567890abcdef1234567890abcdef12345678".to_string(),
+        abi,
+    );
     let ethereum_metadata = EthereumMetadata {
         network_id: None,
-        abi: Some(abi),
-        abi_mappings: Default::default(),
+        abi: None,
+        abi_mappings,
     };
     let parse_request = ParseRequest {
         unsigned_payload: "0x".to_string(),
@@ -216,8 +226,14 @@ fn test_ethereum_abi_with_secp256k1_signature() {
         chain_metadata::Metadata::Ethereum(eth_meta) => eth_meta,
         _ => panic!("Expected EthereumMetadata, found other"),
     };
-    let abi_data = eth_meta.abi.expect("ABI data should exist");
-    let sig_meta = abi_data.signature.expect("Signature metadata should exist");
+    let abi_data = eth_meta
+        .abi_mappings
+        .get("0x1234567890abcdef1234567890abcdef12345678")
+        .expect("ABI data for expected contract address should exist");
+    let sig_meta = abi_data
+        .signature
+        .clone()
+        .expect("Signature metadata should exist");
 
     let verification_result =
         verify_signature_metadata(&abi_data.value, &sig_meta, &public_key_hex);
@@ -348,10 +364,15 @@ fn test_signature_tampering_detection() {
         signature: Some(signature_metadata.clone()),
     };
 
+    let mut abi_mappings = std::collections::BTreeMap::new();
+    abi_mappings.insert(
+        "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_string(),
+        abi,
+    );
     let ethereum_metadata = EthereumMetadata {
         network_id: None,
-        abi: Some(abi),
-        abi_mappings: Default::default(),
+        abi: None,
+        abi_mappings,
     };
     let parse_request = ParseRequest {
         unsigned_payload: "0x".to_string(),
@@ -371,8 +392,14 @@ fn test_signature_tampering_detection() {
         chain_metadata::Metadata::Ethereum(eth_meta) => eth_meta,
         _ => panic!("Expected EthereumMetadata, found other"),
     };
-    let abi_data = eth_meta.abi.expect("ABI data should exist");
-    let sig_meta = abi_data.signature.expect("Signature metadata should exist");
+    let abi_data = eth_meta
+        .abi_mappings
+        .get("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+        .expect("ABI data for expected contract address should exist");
+    let sig_meta = abi_data
+        .signature
+        .clone()
+        .expect("Signature metadata should exist");
 
     // This should fail because we're verifying tampered content
     let verification_result = verify_signature_metadata(tampered_abi, &sig_meta, &public_key_hex);
