@@ -35,7 +35,9 @@ use solana_parser::solana::structs::{
 use solana_parser::{decode_idl_data, parse_instruction_with_idl};
 use std::sync::Arc;
 
-const TEST_PROGRAM_ID: &str = "11111111111111111111111111111111";
+// parse_instruction_with_idl ignores the program_id parameter (_program_id);
+// use an obviously fake value to avoid confusion with real known programs.
+const TEST_PROGRAM_ID: &str = "00000000000000000000000000000000";
 
 // ── Local strategies ─────────────────────────────────────────────────────────
 //

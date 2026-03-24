@@ -122,8 +122,7 @@ except Exception:
         FAIL=$(( FAIL + 1 ))
         FAILED_IDLS+=("$name ($idl_file)")
     else
-        failed_count=$(echo "$summary" | grep -oE "^[0-9]+ failed" | grep -oE "^[0-9]+" || \
-                       echo "$summary" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+")
+        failed_count=$(echo "$summary" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+")
         if [ "${failed_count:-0}" -gt 0 ]; then
             echo "FAIL ($summary)"
             FAIL=$(( FAIL + 1 ))
