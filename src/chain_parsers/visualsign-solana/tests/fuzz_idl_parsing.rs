@@ -49,11 +49,13 @@ const TEST_PROGRAM_ID: &str = "00000000000000000000000000000000";
 /// IDL JSON with a defined struct type correlated between `types` and instruction args.
 ///
 /// Exercises the `Defined` type resolution path through `types`.
+/// Fields use `arb_idl_type()` (not just primitives), so container types
+/// like `Vec<T>`, `Option<T>`, and `Array<T, N>` appear inside the struct.
 fn arb_defined_struct_idl_json() -> impl Strategy<Value = String> {
     (
         arb::arb_identifier(),
         prop::collection::vec(
-            (arb::arb_identifier(), arb::arb_primitive_idl_type())
+            (arb::arb_identifier(), arb::arb_idl_type())
                 .prop_map(|(n, t)| IdlField { name: n, r#type: t }),
             1..=8,
         ),
@@ -81,6 +83,7 @@ fn arb_defined_struct_idl_json() -> impl Strategy<Value = String> {
 ///
 /// Generates enums with a mix of unit, tuple, and named (struct-like) variants,
 /// exercising the `Defined` → `Enum` type resolution path.
+/// Variant fields use `arb_idl_type()` so containers appear inside variants.
 fn arb_defined_enum_idl_json() -> impl Strategy<Value = String> {
     (
         arb::arb_identifier(),
@@ -90,14 +93,14 @@ fn arb_defined_enum_idl_json() -> impl Strategy<Value = String> {
                 prop::option::of(prop::bool::ANY.prop_flat_map(|use_named| {
                     if use_named {
                         prop::collection::vec(
-                            (arb::arb_identifier(), arb::arb_primitive_idl_type())
+                            (arb::arb_identifier(), arb::arb_idl_type())
                                 .prop_map(|(n, t)| IdlField { name: n, r#type: t }),
                             1..=4,
                         )
                         .prop_map(|fields| EnumFields::Named(fields))
                         .boxed()
                     } else {
-                        prop::collection::vec(arb::arb_primitive_idl_type(), 1..=4)
+                        prop::collection::vec(arb::arb_idl_type(), 1..=4)
                             .prop_map(|types| EnumFields::Tuple(types))
                             .boxed()
                     }
@@ -120,6 +123,34 @@ fn arb_defined_enum_idl_json() -> impl Strategy<Value = String> {
                 types: vec![IdlTypeDefinition {
                     name: enum_name,
                     r#type: IdlTypeDefinitionType::Enum { variants },
+                }],
+            };
+            serde_json::to_string(&idl).unwrap()
+        })
+}
+
+/// IDL JSON with a defined alias type (a named wrapper around another type).
+///
+/// Exercises the `Defined` → `Alias` type resolution path. The alias value
+/// uses `arb_idl_type()` so it can be a primitive, Vec, Option, or Array.
+fn arb_defined_alias_idl_json() -> impl Strategy<Value = String> {
+    (
+        arb::arb_identifier(),
+        arb::arb_idl_type(),
+        arb::arb_idl_instruction(),
+        prop::collection::vec(arb::arb_idl_instruction(), 0..=4),
+    )
+        .prop_map(|(alias_name, alias_type, mut main_inst, mut extra_insts)| {
+            main_inst.args = vec![IdlField {
+                name: "data".to_string(),
+                r#type: IdlType::Defined(Defined::String(alias_name.clone())),
+            }];
+            extra_insts.push(main_inst);
+            let idl = Idl {
+                instructions: extra_insts,
+                types: vec![IdlTypeDefinition {
+                    name: alias_name,
+                    r#type: IdlTypeDefinitionType::Alias { value: alias_type },
                 }],
             };
             serde_json::to_string(&idl).unwrap()
@@ -297,6 +328,35 @@ proptest! {
                     if let Ok(result) = parse_instruction_with_idl(&d, TEST_PROGRAM_ID, &idl) {
                         prop_assert_eq!(&result.instruction_name, &expected_name,
                             "enum-type instruction must dispatch to the correct handler");
+                    }
+                }
+            } else {
+                let _ = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
+            }
+        }
+    }
+
+    /// IDLs with defined alias types must not panic regardless of instruction bytes.
+    /// Uses the same 50/50 valid-discriminator mix as the struct/enum tests.
+    ///
+    /// An alias is a named wrapper around another type (e.g., `type Amount = u64`).
+    #[test]
+    fn fuzz_defined_alias_types_never_panics(
+        idl_json in arb_defined_alias_idl_json(),
+        use_valid_disc in any::<bool>(),
+        inst_idx in any::<usize>(),
+        data in prop::collection::vec(any::<u8>(), 0..200usize),
+    ) {
+        if let Ok(idl) = decode_idl_data(&idl_json) {
+            if use_valid_disc && !idl.instructions.is_empty() {
+                let inst = &idl.instructions[inst_idx % idl.instructions.len()];
+                let expected_name = inst.name.clone();
+                if let Some(disc) = &inst.discriminator {
+                    let mut d = disc.clone();
+                    d.extend_from_slice(&data);
+                    if let Ok(result) = parse_instruction_with_idl(&d, TEST_PROGRAM_ID, &idl) {
+                        prop_assert_eq!(&result.instruction_name, &expected_name,
+                            "alias-type instruction must dispatch to the correct handler");
                     }
                 }
             } else {
@@ -642,6 +702,34 @@ fn roundtrip_nested_defined_struct() {
     let config = &order["config"];
     assert_eq!(config["decimals"], serde_json::json!(6));
     assert_eq!(config["active"],   serde_json::json!(true));
+}
+
+// ── Error-path tests ─────────────────────────────────────────────────────────
+
+/// An instruction arg that references a `Defined("MissingType")` not present in
+/// the `types` array must produce `Err`, not panic.
+///
+/// Note: `decode_idl_data` does NOT validate that instruction-arg Defined
+/// references exist in `types` — the error only surfaces at parse time.
+#[test]
+fn dangling_defined_reference_returns_err() {
+    let idl_json = serde_json::json!({
+        "instructions": [{"name": "broken", "accounts": [], "args": [
+            {"name": "data", "type": {"defined": "MissingType"}}
+        ]}],
+        "types": []
+    })
+    .to_string();
+
+    // IDL loads successfully — dangling ref is not caught at load time.
+    let idl = decode_idl_data(&idl_json).unwrap();
+    let disc = idl.instructions[0].discriminator.as_ref().unwrap();
+
+    let mut data = disc.clone();
+    data.extend_from_slice(&[0u8; 16]); // arbitrary payload
+
+    let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
+    assert!(result.is_err(), "expected Err for dangling Defined reference, got Ok");
 }
 
 // ── SizeGuard boundary tests ──────────────────────────────────────────────────
