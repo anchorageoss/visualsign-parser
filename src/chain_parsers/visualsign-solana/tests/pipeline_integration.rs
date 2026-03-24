@@ -21,21 +21,25 @@ use std::collections::HashMap;
 
 use generated::parser::{ChainMetadata, Idl as ProtoIdl, SolanaMetadata, chain_metadata};
 use proptest::prelude::*;
-use solana_parser_fuzz_core::proptest as arb;
 use solana_parser::decode_idl_data;
+use solana_parser_fuzz_core::proptest as arb;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::message::Message;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::transaction::Transaction as SolanaTransaction;
+use visualsign::vsptrait::VisualSignOptions;
 use visualsign::{
     AnnotatedPayloadField, SignablePayload, SignablePayloadField, SignablePayloadFieldPreviewLayout,
 };
-use visualsign::vsptrait::VisualSignOptions;
 use visualsign_solana::transaction_to_visual_sign;
 
 // ── Transaction builders ──────────────────────────────────────────────────────
 
-fn build_transaction(program_id: Pubkey, extra_accounts: Vec<Pubkey>, data: Vec<u8>) -> SolanaTransaction {
+fn build_transaction(
+    program_id: Pubkey,
+    extra_accounts: Vec<Pubkey>,
+    data: Vec<u8>,
+) -> SolanaTransaction {
     let fee_payer = Pubkey::new_unique();
     let account_metas: Vec<AccountMeta> = extra_accounts
         .iter()
@@ -98,14 +102,22 @@ fn options_no_idl() -> VisualSignOptions {
 /// Returns the PreviewLayout for every instruction field in the payload.
 /// Instruction fields have label "Instruction N"; the Accounts summary uses "Accounts".
 fn instruction_fields(payload: &SignablePayload) -> Vec<&SignablePayloadFieldPreviewLayout> {
-    payload.fields.iter().filter_map(|f| {
-        if let SignablePayloadField::PreviewLayout { common, preview_layout } = f {
-            if common.label.starts_with("Instruction") {
-                return Some(preview_layout);
+    payload
+        .fields
+        .iter()
+        .filter_map(|f| {
+            if let SignablePayloadField::PreviewLayout {
+                common,
+                preview_layout,
+            } = f
+            {
+                if common.label.starts_with("Instruction") {
+                    return Some(preview_layout);
+                }
             }
-        }
-        None
-    }).collect()
+            None
+        })
+        .collect()
 }
 
 /// Searches a flat slice of AnnotatedPayloadFields for a TextV2 field with the given label.
@@ -133,7 +145,8 @@ fn pipeline_idl_path_correct_data() {
             {"name": "amount", "type": "u64"}
         ]}],
         "types": []
-    }).to_string();
+    })
+    .to_string();
 
     let idl = decode_idl_data(&idl_json).unwrap();
     let disc = idl.instructions[0].discriminator.as_ref().unwrap();
@@ -144,7 +157,8 @@ fn pipeline_idl_path_correct_data() {
     let payload = transaction_to_visual_sign(
         build_transaction(program_id, vec![], data),
         options_with_idl(&program_id, &idl_json, "My Program"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let inst_fields = instruction_fields(&payload);
     assert_eq!(inst_fields.len(), 1);
@@ -154,7 +168,10 @@ fn pipeline_idl_path_correct_data() {
     assert!(title.contains("(IDL)"), "expected IDL title, got: {title}");
 
     let condensed = layout.condensed.as_ref().unwrap();
-    assert_eq!(find_text(&condensed.fields, "Instruction"), Some("deposit".into()));
+    assert_eq!(
+        find_text(&condensed.fields, "Instruction"),
+        Some("deposit".into())
+    );
     assert_eq!(find_text(&condensed.fields, "amount"), Some("42".into()));
 }
 
@@ -167,7 +184,8 @@ fn pipeline_idl_discriminator_miss() {
     let idl_json = serde_json::json!({
         "instructions": [{"name": "deposit", "accounts": [], "args": []}],
         "types": []
-    }).to_string();
+    })
+    .to_string();
 
     // Discriminator that will never match "deposit"
     let data = vec![0xde, 0xad, 0xbe, 0xef, 0x00, 0x01, 0x02, 0x03];
@@ -175,7 +193,8 @@ fn pipeline_idl_discriminator_miss() {
     let payload = transaction_to_visual_sign(
         build_transaction(program_id, vec![], data),
         options_with_idl(&program_id, &idl_json, "My Program"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let inst_fields = instruction_fields(&payload);
     let layout = inst_fields[0];
@@ -201,7 +220,8 @@ fn pipeline_no_idl_registered() {
     let payload = transaction_to_visual_sign(
         build_transaction(program_id, vec![], vec![1, 2, 3]),
         options_no_idl(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let inst_fields = instruction_fields(&payload);
     let layout = inst_fields[0];
@@ -223,7 +243,8 @@ fn pipeline_named_accounts() {
             "args": []
         }],
         "types": []
-    }).to_string();
+    })
+    .to_string();
 
     let idl = decode_idl_data(&idl_json).unwrap();
     let disc = idl.instructions[0].discriminator.as_ref().unwrap();
@@ -231,7 +252,8 @@ fn pipeline_named_accounts() {
     let payload = transaction_to_visual_sign(
         build_transaction(program_id, vec![depositor], disc.clone()),
         options_with_idl(&program_id, &idl_json, "Test Program"),
-    ).unwrap();
+    )
+    .unwrap();
 
     let inst_fields = instruction_fields(&payload);
     let expanded = inst_fields[0].expanded.as_ref().unwrap();
@@ -267,7 +289,8 @@ fn pipeline_multi_instruction_mixed_programs() {
     let idl_json = serde_json::json!({
         "instructions": [{"name": "swap", "accounts": [], "args": []}],
         "types": []
-    }).to_string();
+    })
+    .to_string();
 
     let idl = decode_idl_data(&idl_json).unwrap();
     let disc_a = idl.instructions[0].discriminator.as_ref().unwrap().clone();
@@ -277,19 +300,25 @@ fn pipeline_multi_instruction_mixed_programs() {
         (program_b, vec![0xde, 0xad]),
     ]);
 
-    let payload = transaction_to_visual_sign(tx, options_with_idl(&program_a, &idl_json, "A")).unwrap();
+    let payload =
+        transaction_to_visual_sign(tx, options_with_idl(&program_a, &idl_json, "A")).unwrap();
 
     let inst_fields = instruction_fields(&payload);
     assert_eq!(inst_fields.len(), 2);
 
     let title_a = inst_fields[0].title.as_ref().unwrap().text.as_str();
-    assert!(title_a.contains("(IDL)"), "program_a has IDL, got: {title_a}");
+    assert!(
+        title_a.contains("(IDL)"),
+        "program_a has IDL, got: {title_a}"
+    );
 
     let title_b = inst_fields[1].title.as_ref().unwrap().text.as_str();
-    assert!(!title_b.contains("(IDL)"), "program_b has no IDL, got: {title_b}");
+    assert!(
+        !title_b.contains("(IDL)"),
+        "program_b has no IDL, got: {title_b}"
+    );
     assert_eq!(title_b, program_b.to_string());
 }
-
 
 // ── Property-based pipeline tests ────────────────────────────────────────────
 
