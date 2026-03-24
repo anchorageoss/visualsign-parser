@@ -223,9 +223,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let grpc_addr =
         std::env::var("GRPC_ADDR").unwrap_or_else(|_| "http://127.0.0.1:44020".to_string());
 
-    let client = ParserServiceClient::connect(grpc_addr.clone())
-        .await
-        .map_err(|e| format!("failed to connect to gRPC server at {grpc_addr}: {e}"))?
+    let endpoint = tonic::transport::Endpoint::from_shared(grpc_addr.clone())
+        .map_err(|e| format!("invalid gRPC address {grpc_addr}: {e}"))?;
+    let channel = endpoint.connect_lazy();
+    let client = ParserServiceClient::new(channel)
         .max_decoding_message_size(GRPC_MAX_RECV_MSG_SIZE)
         .max_encoding_message_size(GRPC_MAX_RECV_MSG_SIZE);
 
