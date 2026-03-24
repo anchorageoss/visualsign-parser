@@ -56,6 +56,18 @@ fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (BTreeMap<Stri
         "IDL",
         "JupiterSwap:/home/user/jupiter.json:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
         "ProgramId",
+        |id| {
+            let bytes = bs58::decode(id)
+                .into_vec()
+                .map_err(|e| format!("invalid base58: {e}"))?;
+            if bytes.len() != 32 {
+                return Err(format!(
+                    "expected 32-byte pubkey, got {} bytes",
+                    bytes.len()
+                ));
+            }
+            Ok(())
+        },
         |components, json| Idl {
             value: json,
             idl_type: Some(SolanaIdlType::Anchor as i32),
@@ -145,12 +157,9 @@ mod tests {
         let path1 = write_temp_json("idl_a.json", r#"{"name":"a"}"#);
         let path2 = write_temp_json("idl_b.json", r#"{"name":"b"}"#);
         let mappings = vec![
+            format!("A:{}:11111111111111111111111111111111", path1.display()),
             format!(
-                "A:{}:Prog1111111111111111111111111111111111111111",
-                path1.display()
-            ),
-            format!(
-                "B:{}:Prog2222222222222222222222222222222222222222",
+                "B:{}:TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
                 path2.display()
             ),
         ];
@@ -162,11 +171,11 @@ mod tests {
         assert_eq!(sol.idl_mappings.len(), 2);
         assert!(
             sol.idl_mappings
-                .contains_key("Prog1111111111111111111111111111111111111111")
+                .contains_key("11111111111111111111111111111111")
         );
         assert!(
             sol.idl_mappings
-                .contains_key("Prog2222222222222222222222222222222222222222")
+                .contains_key("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
         );
     }
 
@@ -188,7 +197,10 @@ mod tests {
         let path = write_temp_json("sol_good.json", r#"{"works": true}"#);
         let mappings = vec![
             "bad-format".to_string(),
-            format!("Good:{}:GoodProg", path.display()),
+            format!(
+                "Good:{}:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+                path.display()
+            ),
             "Also:/missing/file.json:BadProg".to_string(),
         ];
 
@@ -197,6 +209,9 @@ mod tests {
             panic!("expected Solana metadata");
         };
         assert_eq!(sol.idl_mappings.len(), 1);
-        assert!(sol.idl_mappings.contains_key("GoodProg"));
+        assert!(
+            sol.idl_mappings
+                .contains_key("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4")
+        );
     }
 }

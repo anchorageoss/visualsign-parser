@@ -56,6 +56,19 @@ fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (BTreeMap<Stri
         "ABI",
         "UniswapV2:/home/user/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
         "ContractAddress",
+        |addr| {
+            let addr = addr
+                .strip_prefix("0x")
+                .or(addr.strip_prefix("0X"))
+                .unwrap_or(addr);
+            if addr.len() != 40 {
+                return Err(format!("expected 40 hex chars, got {}", addr.len()));
+            }
+            if !addr.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err("contains non-hex characters".to_string());
+            }
+            Ok(())
+        },
         |_components, json| Abi {
             value: json,
             signature: None,
@@ -168,7 +181,10 @@ mod tests {
     #[test]
     fn test_create_chain_metadata_with_abi_mappings() {
         let path = write_temp_json("eth_abi.json", r#"[{"type":"function","name":"swap"}]"#);
-        let mappings = vec![format!("Uniswap:{}:0xABCD", path.display())];
+        let mappings = vec![format!(
+            "Uniswap:{}:0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            path.display()
+        )];
 
         let meta = create_chain_metadata(None, &mappings)
             .unwrap()
@@ -177,7 +193,10 @@ mod tests {
             panic!("expected Ethereum metadata");
         };
         assert_eq!(eth.abi_mappings.len(), 1);
-        let abi = eth.abi_mappings.get("0xABCD").expect("mapping present");
+        let abi = eth
+            .abi_mappings
+            .get("0xdAC17F958D2ee523a2206206994597C13D831ec7")
+            .expect("mapping present");
         assert!(abi.value.contains("swap"));
         assert!(abi.signature.is_none());
     }
@@ -199,8 +218,14 @@ mod tests {
         let path1 = write_temp_json("abi_a.json", r#"{"fn":"a"}"#);
         let path2 = write_temp_json("abi_b.json", r#"{"fn":"b"}"#);
         let mappings = vec![
-            format!("A:{}:0x1111", path1.display()),
-            format!("B:{}:0x2222", path2.display()),
+            format!(
+                "A:{}:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                path1.display()
+            ),
+            format!(
+                "B:{}:0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+                path2.display()
+            ),
         ];
 
         let meta = create_chain_metadata(None, &mappings)
@@ -210,8 +235,14 @@ mod tests {
             panic!("expected Ethereum metadata");
         };
         assert_eq!(eth.abi_mappings.len(), 2);
-        assert!(eth.abi_mappings.contains_key("0x1111"));
-        assert!(eth.abi_mappings.contains_key("0x2222"));
+        assert!(
+            eth.abi_mappings
+                .contains_key("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+        );
+        assert!(
+            eth.abi_mappings
+                .contains_key("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+        );
     }
 
     #[test]

@@ -280,7 +280,8 @@ impl Cli {
 
         let plugin = plugins.iter().find(|p| p.chain() == chain);
 
-        let chain_metadata = match plugin.as_ref().map(|p| p.create_metadata(args.network)) {
+        let network = args.network.clone();
+        let chain_metadata = match plugin.as_ref().map(|p| p.create_metadata(network)) {
             Some(Ok(meta)) => meta,
             Some(Err(e)) => {
                 eprintln!("Error: {e}");
