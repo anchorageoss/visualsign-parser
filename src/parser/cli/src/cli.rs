@@ -305,14 +305,15 @@ impl Cli {
             std::process::exit(1);
         }
 
-        let network = args.network.clone();
-        let chain_metadata = match plugin.as_ref().map(|p| p.create_metadata(network)) {
-            Some(Ok(meta)) => meta,
-            Some(Err(e)) => {
+        // Safe: plugin is guaranteed Some after the is_none() exit guard above.
+        let plugin = plugin.unwrap();
+
+        let chain_metadata = match plugin.create_metadata(args.network.clone()) {
+            Ok(meta) => meta,
+            Err(e) => {
                 eprintln!("Error: {e}");
                 std::process::exit(1);
             }
-            None => None,
         };
 
         let options = VisualSignOptions {
