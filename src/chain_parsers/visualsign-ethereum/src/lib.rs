@@ -412,7 +412,7 @@ fn convert_to_visual_sign_payload(
         .and_then(|any_reg| any_reg.downcast_ref::<abi_registry::AbiRegistry>());
 
     let network_name = networks::get_network_name(Some(chain_id));
-    let native_symbol = networks::get_native_asset_symbol(chain_id);
+    let fee_symbol = networks::get_fee_paying_asset_symbol(chain_id);
 
     let mut fields = vec![SignablePayloadField::TextV2 {
         common: SignablePayloadFieldCommon {
@@ -430,7 +430,7 @@ fn convert_to_visual_sign_payload(
             address_v2: SignablePayloadFieldAddressV2 {
                 address: to.to_string(),
                 name: "To".to_string(),
-                asset_label: native_symbol.clone(),
+                asset_label: fee_symbol.clone(),
                 memo: None,
                 badge_text: None,
             },
@@ -439,12 +439,12 @@ fn convert_to_visual_sign_payload(
     fields.extend([
         SignablePayloadField::AmountV2 {
             common: SignablePayloadFieldCommon {
-                fallback_text: format!("{} {}", format_ether(transaction.value()), native_symbol),
+                fallback_text: format!("{} {}", format_ether(transaction.value()), fee_symbol),
                 label: "Value".to_string(),
             },
             amount_v2: SignablePayloadFieldAmountV2 {
                 amount: format_ether(transaction.value()),
-                abbreviation: Some(native_symbol),
+                abbreviation: Some(fee_symbol),
             },
         },
         SignablePayloadField::TextV2 {
