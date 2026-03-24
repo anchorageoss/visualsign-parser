@@ -598,6 +598,50 @@ fn roundtrip_defined_struct_arg() {
     assert_eq!(params["side"],     serde_json::json!(true));
 }
 
+/// An instruction whose arg is a defined struct containing a field that
+/// references another defined struct — exercises recursive type resolution.
+#[test]
+fn roundtrip_nested_defined_struct() {
+    let idl_json = serde_json::json!({
+        "instructions": [{"name": "placeOrder", "accounts": [], "args": [
+            {"name": "order", "type": {"defined": "Order"}}
+        ]}],
+        "types": [
+            {
+                "name": "Order",
+                "type": {"kind": "struct", "fields": [
+                    {"name": "amount",  "type": "u64"},
+                    {"name": "config",  "type": {"defined": "AssetConfig"}},
+                ]}
+            },
+            {
+                "name": "AssetConfig",
+                "type": {"kind": "struct", "fields": [
+                    {"name": "decimals", "type": "u8"},
+                    {"name": "active",   "type": "bool"},
+                ]}
+            },
+        ]
+    })
+    .to_string();
+
+    let idl = decode_idl_data(&idl_json).unwrap();
+    let disc = idl.instructions[0].discriminator.as_ref().unwrap();
+
+    let mut data = disc.clone();
+    data.extend_from_slice(&7500u64.to_le_bytes()); // order.amount
+    data.push(6u8);                                   // order.config.decimals
+    data.push(1u8);                                   // order.config.active = true
+
+    let result = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl).unwrap();
+    assert_eq!(result.instruction_name, "placeOrder");
+    let order = &result.program_call_args["order"];
+    assert_eq!(order["amount"], serde_json::json!(7500));
+    let config = &order["config"];
+    assert_eq!(config["decimals"], serde_json::json!(6));
+    assert_eq!(config["active"],   serde_json::json!(true));
+}
+
 // ── SizeGuard boundary tests ──────────────────────────────────────────────────
 
 /// A Vec<u8> arg with a length prefix that vastly exceeds the backing data
