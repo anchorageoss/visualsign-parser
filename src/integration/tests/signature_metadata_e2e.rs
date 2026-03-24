@@ -34,7 +34,9 @@ fn sign_with_secp256k1(content: &str) -> (String, String) {
     let verifying_key = VerifyingKey::from(&signing_key);
     let message_hash = hash_content_sha256(content);
 
-    let signature: k256::ecdsa::Signature = signing_key.sign_prehash(&message_hash).expect("signing failed");
+    let signature: k256::ecdsa::Signature = signing_key
+        .sign_prehash(&message_hash)
+        .expect("signing failed");
     // Use DER encoding for consistency with Turnkey API
     let signature_der = signature.to_der();
     let signature_hex = hex::encode(signature_der.as_ref()).to_string();
@@ -226,9 +228,8 @@ fn test_ethereum_abi_with_secp256k1_signature() {
     };
     let abi_data = eth_meta
         .abi_mappings
-        .values()
-        .next()
-        .expect("ABI data should exist");
+        .get("0x1234567890abcdef1234567890abcdef12345678")
+        .expect("ABI data for expected contract address should exist");
     let sig_meta = abi_data
         .signature
         .clone()
@@ -393,9 +394,8 @@ fn test_signature_tampering_detection() {
     };
     let abi_data = eth_meta
         .abi_mappings
-        .values()
-        .next()
-        .expect("ABI data should exist");
+        .get("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+        .expect("ABI data for expected contract address should exist");
     let sig_meta = abi_data
         .signature
         .clone()
