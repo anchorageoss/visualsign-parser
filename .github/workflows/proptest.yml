@@ -54,7 +54,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ steps.proptest.outcome }}" = "failure" ]; then
-            gh pr edit ${{ github.event.pull_request.number }} --add-label proptest-failure
+            gh pr edit ${{ github.event.pull_request.number }} --add-label proptest-failure || true
           else
             gh pr edit ${{ github.event.pull_request.number }} --remove-label proptest-failure || true
           fi

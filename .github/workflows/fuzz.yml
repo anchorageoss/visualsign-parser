@@ -61,7 +61,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${{ steps.fuzz_transaction_string.outcome }}" = "failure" ] || [ "${{ steps.fuzz_versioned_transaction.outcome }}" = "failure" ]; then
-            gh pr edit ${{ github.event.pull_request.number }} --add-label fuzz-failure
+            gh pr edit ${{ github.event.pull_request.number }} --add-label fuzz-failure || true
           else
             gh pr edit ${{ github.event.pull_request.number }} --remove-label fuzz-failure || true
           fi
