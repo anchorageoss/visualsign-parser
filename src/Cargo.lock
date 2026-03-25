@@ -6201,6 +6201,7 @@ version = "0.1.0"
 dependencies = [
  "axum 0.6.20",
  "generated",
+ "health_check",
  "host_primitives",
  "serde",
  "serde_json",

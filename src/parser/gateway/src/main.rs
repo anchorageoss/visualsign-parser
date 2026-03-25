@@ -2,7 +2,11 @@ use axum::{
     Json, Router,
     extract::DefaultBodyLimit,
     extract::State,
+    http::StatusCode,
     routing::{get, post},
+};
+use generated::grpc::health::v1::{
+    HealthCheckRequest, health_check_response::ServingStatus, health_client::HealthClient,
 };
 use generated::parser::{
     Chain, ParseRequest, SignatureScheme, parser_service_client::ParserServiceClient,
@@ -11,9 +15,7 @@ use generated::tonic;
 use host_primitives::GRPC_MAX_RECV_MSG_SIZE;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use std::sync::Arc;
-
-// --- Turnkey JSON types (matching Go client's format) ---
+use std::time::Duration;
 
 #[derive(Deserialize)]
 struct TurnkeyRequestWrapper {
@@ -62,53 +64,55 @@ struct TurnkeySignature {
     signature: String,
 }
 
-// --- Handler ---
-
 type GrpcClient = ParserServiceClient<tonic::transport::Channel>;
 
 #[derive(Clone)]
 struct AppState {
     grpc_client: GrpcClient,
-    health_dial_addr: Arc<str>,
+    health_client: HealthClient<tonic::transport::Channel>,
 }
 
-/// Extract a `host:port` TCP dial address from a URI string, suitable for `TcpStream::connect`.
-/// Brackets IPv6 hosts and applies scheme-based default ports when omitted.
-fn resolve_tcp_addr(uri_str: &str) -> String {
-    let Ok(uri) = uri_str.parse::<axum::http::Uri>() else {
-        return uri_str.to_string();
-    };
-    let Some(host) = uri.host() else {
-        return uri_str.to_string();
-    };
-    let port = uri.port_u16().unwrap_or(match uri.scheme_str() {
-        Some("https") => 443,
-        _ => 80,
-    });
-    if host.contains(':') {
-        format!("[{host}]:{port}")
-    } else {
-        format!("{host}:{port}")
-    }
-}
+const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
+const PARSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 async fn health_handler(
-    State(state): State<AppState>,
-) -> (axum::http::StatusCode, Json<serde_json::Value>) {
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        tokio::net::TcpStream::connect(state.health_dial_addr.as_ref()),
-    )
-    .await
-    {
-        Ok(Ok(_)) => (
-            axum::http::StatusCode::OK,
-            Json(serde_json::json!({"status": "ok"})),
-        ),
-        _ => (
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({"status": "unhealthy", "reason": "grpc backend unreachable"})),
-        ),
+    State(AppState {
+        mut health_client, ..
+    }): State<AppState>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let request = tonic::Request::new(HealthCheckRequest {
+        service: health_check::DEFAULT_SERVICE.to_string(),
+    });
+    match tokio::time::timeout(HEALTH_CHECK_TIMEOUT, health_client.check(request)).await {
+        Ok(Ok(resp)) => {
+            let status = resp.into_inner().status;
+            if status == ServingStatus::Serving as i32 {
+                (StatusCode::OK, Json(serde_json::json!({"status": "ok"})))
+            } else {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(
+                        serde_json::json!({"status": "unhealthy", "reason": "grpc service not serving"}),
+                    ),
+                )
+            }
+        }
+        Ok(Err(e)) => {
+            eprintln!("health check failed: {e}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"status": "unhealthy", "reason": "backend unavailable"})),
+            )
+        }
+        Err(_) => {
+            eprintln!("health check timed out after {HEALTH_CHECK_TIMEOUT:?}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(
+                    serde_json::json!({"status": "unhealthy", "reason": "health check timed out"}),
+                ),
+            )
+        }
     }
 }
 
@@ -117,12 +121,12 @@ async fn parse_handler(
         mut grpc_client, ..
     }): State<AppState>,
     Json(wrapper): Json<TurnkeyRequestWrapper>,
-) -> (axum::http::StatusCode, Json<TurnkeyResponseWrapper>) {
+) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
     let chain = match Chain::from_str_name(&wrapper.request.chain) {
         Some(c) => c as i32,
         None => {
             return (
-                axum::http::StatusCode::BAD_REQUEST,
+                StatusCode::BAD_REQUEST,
                 Json(error_response(format!(
                     "unknown chain: {}",
                     wrapper.request.chain
@@ -137,17 +141,27 @@ async fn parse_handler(
         chain_metadata: None,
     });
 
-    let response = match grpc_client.parse(request).await {
-        Ok(r) => r.into_inner(),
-        Err(e) => {
-            let http_status = match e.code() {
-                tonic::Code::InvalidArgument => axum::http::StatusCode::BAD_REQUEST,
-                tonic::Code::NotFound => axum::http::StatusCode::NOT_FOUND,
-                _ => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+    let response = match tokio::time::timeout(PARSE_TIMEOUT, grpc_client.parse(request)).await {
+        Ok(Ok(r)) => r.into_inner(),
+        Ok(Err(e)) => {
+            let (http_status, msg) = match e.code() {
+                tonic::Code::InvalidArgument => (StatusCode::BAD_REQUEST, e.message().to_string()),
+                tonic::Code::NotFound => (StatusCode::NOT_FOUND, e.message().to_string()),
+                _ => {
+                    eprintln!("gRPC error: {e}");
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "internal error".to_string(),
+                    )
+                }
             };
+            return (http_status, Json(error_response(msg)));
+        }
+        Err(_) => {
+            eprintln!("parse RPC timed out after {PARSE_TIMEOUT:?}");
             return (
-                http_status,
-                Json(error_response(format!("gRPC error: {e}"))),
+                StatusCode::GATEWAY_TIMEOUT,
+                Json(error_response("request timed out".to_string())),
             );
         }
     };
@@ -156,7 +170,7 @@ async fn parse_handler(
         Some(tx) => tx,
         None => {
             return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                StatusCode::INTERNAL_SERVER_ERROR,
                 Json(error_response(
                     "missing parsed_transaction in response".to_string(),
                 )),
@@ -168,7 +182,7 @@ async fn parse_handler(
         Some(p) => p,
         None => {
             return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                StatusCode::INTERNAL_SERVER_ERROR,
                 Json(error_response("missing payload in response".to_string())),
             );
         }
@@ -191,7 +205,7 @@ async fn parse_handler(
     });
 
     (
-        axum::http::StatusCode::OK,
+        StatusCode::OK,
         Json(TurnkeyResponseWrapper {
             response: TurnkeyResponse {
                 parsed_transaction: TurnkeyParsedTransaction {
@@ -220,8 +234,6 @@ fn error_response(msg: String) -> TurnkeyResponseWrapper {
     }
 }
 
-// --- Server startup ---
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port: u16 = match std::env::var("GATEWAY_PORT") {
@@ -238,13 +250,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let endpoint = tonic::transport::Endpoint::from_shared(grpc_addr.clone())
         .map_err(|e| format!("invalid gRPC address {grpc_addr}: {e}"))?;
     let channel = endpoint.connect_lazy();
-    let client = ParserServiceClient::new(channel)
+    let grpc_client = ParserServiceClient::new(channel.clone())
         .max_decoding_message_size(GRPC_MAX_RECV_MSG_SIZE)
         .max_encoding_message_size(GRPC_MAX_RECV_MSG_SIZE);
+    let health_client = HealthClient::new(channel);
 
     let state = AppState {
-        grpc_client: client,
-        health_dial_addr: resolve_tcp_addr(&grpc_addr).into(),
+        grpc_client,
+        health_client,
     };
 
     let app = Router::new()
@@ -257,7 +270,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Gateway listening on {addr}");
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
+        .with_graceful_shutdown(shutdown_signal())
         .await?;
 
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = tokio::signal::ctrl_c();
+    #[cfg(unix)]
+    {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to register SIGTERM handler");
+        tokio::select! {
+            _ = ctrl_c => {}
+            _ = sigterm.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    ctrl_c.await.expect("failed to listen for ctrl-c");
+
+    println!("Shutting down gateway");
 }
