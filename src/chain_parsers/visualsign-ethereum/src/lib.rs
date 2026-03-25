@@ -23,6 +23,7 @@ pub mod abi_registry;
 pub mod context;
 pub mod contracts;
 pub mod embedded_abis;
+pub mod eth_json;
 pub mod fmt;
 pub mod grpc_abi;
 pub mod networks;
@@ -41,6 +42,8 @@ pub enum EthereumParserError {
     UnsupportedTransactionType(String),
     #[error("Failed to decode transaction: {0}")]
     FailedToDecodeTransaction(String),
+    #[error("Failed to parse JSON transaction: {0}")]
+    FailedToParseJsonTransaction(String),
 }
 
 // Helper function to extract gas price from different transaction types
@@ -121,6 +124,17 @@ impl EthereumTransactionWrapper {
         data: &str,
         developer_config: Option<&DeveloperConfig>,
     ) -> Result<Self, TransactionParseError> {
+        // JSON path: detect and route early.
+        // developer_config is intentionally not consulted here — JSON input is always
+        // an unsigned transaction structure (no signature fields), so the
+        // allow_signed_transactions flag does not apply.
+        if eth_json::is_json_input(data) {
+            let transaction = eth_json::decode_json_transaction(data)
+                .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?;
+            return Ok(Self { transaction });
+        }
+
+        // Existing RLP path
         let format = if data.starts_with("0x") {
             SupportedEncodings::Hex
         } else {
