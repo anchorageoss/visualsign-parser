@@ -1,6 +1,6 @@
 use crate::chains::parse_chain;
 use clap::Parser;
-use visualsign::registry::TransactionConverterRegistry;
+use visualsign::registry::{Chain, TransactionConverterRegistry};
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
 
@@ -280,9 +280,41 @@ impl Cli {
 
         let plugin = plugins.iter().find(|p| p.chain() == chain);
 
-        let chain_metadata = plugin
-            .as_ref()
-            .and_then(|p| p.create_metadata(args.network));
+        if plugin.is_none() {
+            let supported: Vec<String> = plugins
+                .iter()
+                .map(|p| p.chain().as_str().to_string())
+                .collect();
+            let supported_str = if supported.is_empty() {
+                "none".to_string()
+            } else {
+                supported.join(", ")
+            };
+            if chain == Chain::Unspecified {
+                eprintln!(
+                    "Error: unrecognized chain '{}'.\nSupported chains: {supported_str}",
+                    args.chain,
+                );
+            } else {
+                eprintln!(
+                    "Error: chain '{}' is not supported by this CLI build.\n\
+                     Supported chains: {supported_str}",
+                    args.chain,
+                );
+            }
+            std::process::exit(1);
+        }
+
+        // Safe: plugin is guaranteed Some after the is_none() exit guard above.
+        let plugin = plugin.unwrap();
+
+        let chain_metadata = match plugin.create_metadata(args.network.clone()) {
+            Ok(meta) => meta,
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+        };
 
         let options = VisualSignOptions {
             decode_transfers: true,
@@ -292,12 +324,6 @@ impl Cli {
                 allow_signed_transactions: true,
             }),
             abi_registry: None,
-        };
-
-        let options = if let Some(p) = plugin {
-            p.apply_options(options)
-        } else {
-            options
         };
 
         parse_and_display(
