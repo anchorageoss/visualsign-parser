@@ -220,8 +220,8 @@ mod tests {
 
     #[test]
     fn test_create_chain_metadata_multiple_abi_mappings() {
-        let path1 = write_temp_json("abi_a.json", r#"{"fn":"a"}"#);
-        let path2 = write_temp_json("abi_b.json", r#"{"fn":"b"}"#);
+        let path1 = write_temp_json("abi_a.json", r#"[{"type":"function","name":"a"}]"#);
+        let path2 = write_temp_json("abi_b.json", r#"[{"type":"function","name":"b"}]"#);
         let mappings = vec![
             format!(
                 "A:{}:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
