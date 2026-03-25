@@ -38,7 +38,6 @@ pub fn parse(
         transaction_name: None,
         metadata: parse_request.chain_metadata.clone(),
         developer_config: None, // Production API: only accept unsigned transactions
-        abi_registry: None,
     };
     let registry = create_registry();
     let proto_chain = ProtoChain::from_i32(parse_request.chain)
@@ -138,14 +137,12 @@ mod tests {
         let metadata_ab = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: mappings_ab,
             })),
         };
         let metadata_ba = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: mappings_ba,
             })),
         };

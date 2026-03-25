@@ -38,7 +38,6 @@ fn test_with_fixtures() {
             transaction_name: None,
             metadata: None,
             developer_config: None,
-            abi_registry: None,
         };
 
         let result = transaction_string_to_visual_sign(transaction_hex, options);
@@ -84,7 +83,6 @@ fn test_ethereum_charset_validation() {
             transaction_name: None,
             metadata: None,
             developer_config: None,
-            abi_registry: None,
         };
 
         let result = transaction_string_to_visual_sign(transaction_hex, options);
@@ -151,7 +149,6 @@ fn test_trait_path_without_abi_metadata() {
         transaction_name: None,
         metadata: None,
         developer_config: None,
-        abi_registry: None,
     };
 
     let result = transaction_string_to_visual_sign(transaction_hex, options).unwrap();
@@ -232,12 +229,10 @@ fn test_abi_from_metadata_decodes_function() {
         metadata: Some(ChainMetadata {
             metadata: Some(Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings,
             })),
         }),
         developer_config: None,
-        abi_registry: None,
     };
 
     let converter = EthereumVisualSignConverter::new();

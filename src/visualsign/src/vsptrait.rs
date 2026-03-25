@@ -1,6 +1,4 @@
-use std::any::Any;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use crate::SignablePayload;
 
@@ -22,7 +20,6 @@ pub struct VisualSignOptions {
     pub metadata: Option<ChainMetadata>,
     /// Developer-only options. None for production API use.
     pub developer_config: Option<DeveloperConfig>,
-    pub abi_registry: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl Debug for VisualSignOptions {
@@ -32,7 +29,6 @@ impl Debug for VisualSignOptions {
             .field("transaction_name", &self.transaction_name)
             .field("metadata", &self.metadata)
             .field("developer_config", &self.developer_config)
-            .field("abi_registry", &"<registry>")
             .finish()
     }
 }
@@ -284,7 +280,6 @@ mod tests {
             transaction_name: Some("Custom Transaction".to_string()),
             metadata: None,
             developer_config: None,
-            abi_registry: None,
         };
 
         let result = converter.to_visual_sign_payload(transaction, options);

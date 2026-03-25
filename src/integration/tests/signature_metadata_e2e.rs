@@ -200,7 +200,6 @@ fn test_ethereum_abi_with_secp256k1_signature() {
     );
     let ethereum_metadata = EthereumMetadata {
         network_id: None,
-        abi: None,
         abi_mappings,
     };
     let parse_request = ParseRequest {
@@ -371,7 +370,6 @@ fn test_signature_tampering_detection() {
     );
     let ethereum_metadata = EthereumMetadata {
         network_id: None,
-        abi: None,
         abi_mappings,
     };
     let parse_request = ParseRequest {

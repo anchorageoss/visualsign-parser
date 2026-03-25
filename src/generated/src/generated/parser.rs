@@ -214,8 +214,6 @@ pub struct EthereumMetadata {
     /// Network identifier string (e.g., "ETHEREUM_MAINNET", "POLYGON_MAINNET", "ARBITRUM_MAINNET")
     #[prost(string, optional, tag = "2")]
     pub network_id: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(message, optional, tag = "1")]
-    pub abi: ::core::option::Option<Abi>,
     /// Map of contract address to ABI definitions.
     /// Contract addresses are expected to be 0x-prefixed, 20-byte hexadecimal Ethereum addresses.
     /// Allows wallets to provide multiple ABIs, one per contract. Use a consistent address casing
