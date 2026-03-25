@@ -102,21 +102,12 @@ pub fn options_with_idl(program_id: &Pubkey, idl_json: &str, name: &str) -> Visu
                 idl: None,
             })),
         }),
-        decode_transfers: false,
-        transaction_name: None,
-        developer_config: None,
-        abi_registry: None,
+        ..VisualSignOptions::default()
     }
 }
 
 pub fn options_no_idl() -> VisualSignOptions {
-    VisualSignOptions {
-        metadata: None,
-        decode_transfers: false,
-        transaction_name: None,
-        developer_config: None,
-        abi_registry: None,
-    }
+    VisualSignOptions::default()
 }
 
 // ── Field inspection helpers ──────────────────────────────────────────────────
