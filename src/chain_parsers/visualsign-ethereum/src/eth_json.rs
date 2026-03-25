@@ -103,12 +103,16 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
         .map(parse_hex_u64)
         .transpose()?
         .unwrap_or(DEFAULT_GAS_LIMIT);
-    let chain_id = tx
-        .chain_id
-        .as_deref()
-        .map(parse_hex_u64)
-        .transpose()?
-        .unwrap_or(DEFAULT_CHAIN_ID);
+    let is_eip1559 = tx.max_fee_per_gas.is_some();
+    let chain_id = match tx.chain_id.as_deref() {
+        Some(raw) => parse_hex_u64(raw)?,
+        None if is_eip1559 => {
+            return Err(EthereumParserError::FailedToParseJsonTransaction(
+                "'chainId' is required for EIP-1559 transactions".to_string(),
+            ));
+        }
+        None => DEFAULT_CHAIN_ID,
+    };
     let input_data = tx
         .data
         .as_deref()
@@ -159,10 +163,20 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
 /// Truncate a string for safe inclusion in error messages.
 /// Uses char boundaries to avoid panicking on multi-byte UTF-8 input.
 fn error_preview(s: &str) -> &str {
-    if s.len() <= ERROR_PREVIEW_LEN {
+    truncate_at_char_boundary(s, ERROR_PREVIEW_LEN)
+}
+
+/// Like `error_preview` but reserves 3 chars for a trailing "..." ellipsis,
+/// so the total output (preview + "...") stays within `ERROR_PREVIEW_LEN`.
+fn error_preview_with_ellipsis(s: &str) -> &str {
+    truncate_at_char_boundary(s, ERROR_PREVIEW_LEN.saturating_sub(3))
+}
+
+fn truncate_at_char_boundary(s: &str, max_len: usize) -> &str {
+    if s.len() <= max_len {
         return s;
     }
-    let mut end = ERROR_PREVIEW_LEN;
+    let mut end = max_len;
     while end > 0 && !s.is_char_boundary(end) {
         end -= 1;
     }
@@ -220,13 +234,14 @@ fn parse_hex_bytes(s: &str) -> Result<Bytes, EthereumParserError> {
             MAX_HEX_DATA_LEN,
         )));
     }
-    let truncated = s.len() > ERROR_PREVIEW_LEN;
     let decoded = hex::decode(hex).map_err(|e| {
+        let preview = if s.len() > ERROR_PREVIEW_LEN {
+            format!("{}...", error_preview_with_ellipsis(s))
+        } else {
+            s.to_string()
+        };
         EthereumParserError::FailedToParseJsonTransaction(format!(
-            "Invalid hex data '{}{}': {}",
-            error_preview(s),
-            if truncated { "..." } else { "" },
-            e,
+            "Invalid hex data '{preview}': {e}",
         ))
     })?;
     Ok(Bytes::from(decoded))
@@ -445,6 +460,22 @@ mod tests {
             EthereumParserError::FailedToParseJsonTransaction(msg) => {
                 assert!(msg.contains("maxPriorityFeePerGas"));
                 assert!(msg.contains("maxFeePerGas"));
+            }
+            _ => panic!("Expected FailedToParseJsonTransaction"),
+        }
+    }
+
+    #[test]
+    fn test_eip1559_requires_chain_id() {
+        let json = r#"{
+            "type": "transaction",
+            "maxFeePerGas": "0x4a817c800"
+        }"#;
+        let err = decode_json_transaction(json).unwrap_err();
+        match err {
+            EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("chainId"));
+                assert!(msg.contains("required"));
             }
             _ => panic!("Expected FailedToParseJsonTransaction"),
         }
