@@ -8,6 +8,8 @@ jobs:
   fuzz:
     if: contains(github.event.pull_request.labels.*.name, 'fuzz')
     runs-on: ubuntu-latest-4-cores
+    permissions:
+      pull-requests: write
     steps:
       - name: git checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -45,10 +47,21 @@ jobs:
       - name: Run codegen
         run: make -C src generated
       - name: Fuzz fuzz_transaction_string (30s)
+        id: fuzz_transaction_string
         continue-on-error: true
         run: cargo +nightly fuzz run fuzz_transaction_string -- -max_total_time=30
         working-directory: src/chain_parsers/visualsign-solana/fuzz
       - name: Fuzz fuzz_versioned_transaction (30s)
+        id: fuzz_versioned_transaction
         continue-on-error: true
         run: cargo +nightly fuzz run fuzz_versioned_transaction -- -max_total_time=30
         working-directory: src/chain_parsers/visualsign-solana/fuzz
+      - name: Label PR on fuzz failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ steps.fuzz_transaction_string.outcome }}" = "failure" ] || [ "${{ steps.fuzz_versioned_transaction.outcome }}" = "failure" ]; then
+            gh pr edit ${{ github.event.pull_request.number }} --add-label fuzz-failure
+          else
+            gh pr edit ${{ github.event.pull_request.number }} --remove-label fuzz-failure || true
+          fi
