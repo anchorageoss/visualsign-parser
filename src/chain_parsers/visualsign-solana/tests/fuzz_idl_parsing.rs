@@ -37,7 +37,7 @@ use std::sync::Arc;
 
 // parse_instruction_with_idl ignores the program_id parameter (_program_id);
 // use an obviously fake value to avoid confusion with real known programs.
-const TEST_PROGRAM_ID: &str = "00000000000000000000000000000000";
+const TEST_PROGRAM_ID: &str = "deadbeef1234deadbeef5678deadbeef";
 
 // ── Local strategies ─────────────────────────────────────────────────────────
 //
