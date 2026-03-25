@@ -22,7 +22,7 @@ pub mod abi_registry;
 pub mod context;
 pub mod contracts;
 pub mod embedded_abis;
-pub mod eth_json;
+pub(crate) mod eth_json;
 pub mod fmt;
 pub mod grpc_abi;
 pub mod networks;
@@ -129,7 +129,7 @@ impl EthereumTransactionWrapper {
         // allow_signed_transactions flag does not apply.
         if eth_json::is_json_input(data) {
             let transaction = eth_json::decode_json_transaction(data)
-                .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?;
+                .map_err(|e| TransactionParseError::InvalidFormat(e.to_string()))?;
             return Ok(Self { transaction });
         }
 
