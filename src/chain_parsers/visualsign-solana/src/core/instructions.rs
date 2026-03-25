@@ -27,12 +27,15 @@ pub fn decode_instructions(
 
     if account_keys.is_empty() {
         return Err(VisualSignError::ParseError(
-            TransactionParseError::DecodeError("Transaction has no account keys".to_string()),
+            TransactionParseError::DecodeError(
+                "Legacy transaction has no account keys".to_string(),
+            ),
         ));
     }
 
-    // Convert compiled instructions to full instructions, skipping any with
-    // out-of-bounds account indices (same approach as v0 transaction handling).
+    // Convert compiled instructions to full instructions. Instructions with an
+    // out-of-bounds program_id_index are skipped entirely, while individual
+    // out-of-bounds account indices are silently omitted (same approach as v0 transaction handling).
     let instructions: Vec<Instruction> = message
         .instructions
         .iter()

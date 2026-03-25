@@ -809,4 +809,45 @@ mod tests {
             _ => panic!("Expected PreviewLayout field"),
         }
     }
+
+    /// Malformed legacy message: header counts exceed account keys length.
+    /// Must not panic (saturating_sub prevents underflow).
+    #[test]
+    fn test_decode_accounts_inconsistent_header_no_panic() {
+        let account1 = Pubkey::new_unique();
+
+        // num_required_signatures (5) > account_keys.len() (1),
+        // num_readonly_signed_accounts (3) > num_required_signatures would be too,
+        // num_readonly_unsigned_accounts (2) > total non-signers (0).
+        let message = create_test_message(5, 3, 2, vec![account1]);
+
+        // Must not panic — the saturating_sub ensures graceful degradation.
+        let accounts = decode_accounts(&message).unwrap();
+        assert_eq!(accounts.len(), 1);
+    }
+
+    /// Malformed V0 message: header counts exceed account keys length.
+    /// Must not panic (saturating_sub prevents underflow).
+    #[test]
+    fn test_decode_v0_accounts_inconsistent_header_no_panic() {
+        use solana_sdk::message::{MessageHeader, v0::Message as V0Message};
+
+        let account1 = Pubkey::new_unique();
+
+        let v0_message = V0Message {
+            header: MessageHeader {
+                num_required_signatures: 10,
+                num_readonly_signed_accounts: 8,
+                num_readonly_unsigned_accounts: 5,
+            },
+            account_keys: vec![account1],
+            recent_blockhash: Hash::new_unique(),
+            instructions: vec![],
+            address_table_lookups: vec![],
+        };
+
+        // Must not panic — the saturating_sub ensures graceful degradation.
+        let accounts = decode_v0_accounts(&v0_message).unwrap();
+        assert_eq!(accounts.len(), 1);
+    }
 }
