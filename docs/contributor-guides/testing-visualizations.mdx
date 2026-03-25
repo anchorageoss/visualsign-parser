@@ -156,7 +156,7 @@ cargo test -p visualsign-solana --test semantic_pipeline
 The `fuzz/` directory contains [libFuzzer](https://llvm.org/docs/LibFuzzer.html) targets that feed arbitrary bytes into the full visualsign-solana stack. These require a nightly toolchain and `cargo-fuzz`:
 
 ```bash
-cargo install cargo-fuzz
+cargo install cargo-fuzz --locked
 
 # Run a fuzz target for 30 seconds (same as CI)
 cd src/chain_parsers/visualsign-solana/fuzz
