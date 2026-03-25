@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn test_data_size_limit() {
         let huge_hex = format!("0x{}", "aa".repeat(MAX_HEX_DATA_LEN));
-        let json = format!(r#"{{"type": "transaction", "data": "{}"}}"#, huge_hex);
+        let json = format!(r#"{{"type": "transaction", "data": "{huge_hex}"}}"#);
         let err = decode_json_transaction(&json).unwrap_err();
         match err {
             EthereumParserError::FailedToParseJsonTransaction(msg) => {
