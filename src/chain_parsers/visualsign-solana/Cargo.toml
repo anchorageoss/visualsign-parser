@@ -6,10 +6,7 @@ edition = "2024"
 [dependencies]
 
 tracing = { workspace = true }
-# Using custom fork for IDL-based instruction parsing features not yet in upstream
-# Features: parse_instruction_with_idl, CustomIdlConfig, decode_idl_data
-# Tracking: https://github.com/tkhq/solana-parser/pull/20
-solana_parser = { git = "https://github.com/prasincs/solana-parser.git", rev = "8248d99e42ce8a56ad440ed9b2201607feb1a150" }
+solana_parser = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "a0c554d" }
 visualsign = { workspace = true }
 generated = { path = "../../generated" }
 serde_json = { workspace = true }
@@ -28,8 +25,10 @@ spl-token-2022 = "10.0.0"
 spl-token-2022-interface = "2.1.0"
 
 [dev-dependencies]
+solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "a0c554d", features = ["proptest"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 jupiter-swap-api-client = "0.2.0"
 base64 = "0.22.1"
 bs58 = "0.5"
+proptest = "1"

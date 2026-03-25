@@ -9369,6 +9369,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-parser-fuzz-core"
+version = "0.0.0"
+source = "git+https://github.com/anchorageoss/solana-parser.git?rev=a0c554d#a0c554d7a4d756cbe6c9bed080737faa9aa74705"
+dependencies = [
+ "proptest",
+ "serde_json",
+ "solana_parser",
+]
+
+[[package]]
 name = "solana-poh-config"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10562,7 +10572,7 @@ dependencies = [
 [[package]]
 name = "solana_parser"
 version = "0.1.0"
-source = "git+https://github.com/prasincs/solana-parser.git?rev=8248d99e42ce8a56ad440ed9b2201607feb1a150#8248d99e42ce8a56ad440ed9b2201607feb1a150"
+source = "git+https://github.com/anchorageoss/solana-parser.git?rev=a0c554d#a0c554d7a4d756cbe6c9bed080737faa9aa74705"
 dependencies = [
  "bincode",
  "bs58 0.5.1",
@@ -13034,8 +13044,10 @@ dependencies = [
  "generated",
  "hex",
  "jupiter-swap-api-client",
+ "proptest",
  "serde",
  "serde_json",
+ "solana-parser-fuzz-core",
  "solana-program",
  "solana-sdk",
  "solana-system-interface 1.0.0",

@@ -60,3 +60,4 @@ tracing = "0.1.41"
 
 # Pin visualsign dependencies
 visualsign = { path = "./visualsign" }
+
