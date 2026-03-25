@@ -1,0 +1,9 @@
+{
+  "type": "transaction",
+  "to": "0x2910543Af39abA0Cd09dBb2D50200b3E800A63D2",
+  "value": "0x14060569202010e0000",
+  "nonce": "0x0",
+  "gas": "0xc350",
+  "gasPrice": "0x110c8f7d8de",
+  "data": "0x454e354d5154544630"
+}

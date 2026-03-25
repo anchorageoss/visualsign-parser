@@ -12,7 +12,14 @@ fn fixture_path(name: &str) -> PathBuf {
     path
 }
 
-static FIXTURES: [&str; 4] = ["1559", "legacy", "uniswap-v2swap", "uniswap-v3swap"];
+static FIXTURES: [&str; 6] = [
+    "1559",
+    "legacy",
+    "uniswap-v2swap",
+    "uniswap-v3swap",
+    "json-eip1559",
+    "json-legacy",
+];
 
 #[test]
 fn test_with_fixtures() {
