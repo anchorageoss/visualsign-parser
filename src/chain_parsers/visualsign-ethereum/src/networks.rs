@@ -51,10 +51,10 @@ macro_rules! define_networks {
         ///
         /// For known networks, returns the configured symbol (e.g., "ETH", "POL", "BNB").
         /// For unknown chains, returns `None`.
-        pub fn get_fee_paying_asset_symbol(chain_id: u64) -> Option<String> {
+        pub fn get_fee_paying_asset_symbol(chain_id: u64) -> Option<&'static str> {
             match chain_id {
                 $($(
-                    id::$chain::$network => Some($symbol.to_string()),
+                    id::$chain::$network => Some($symbol),
                 )*)*
                 _ => None,
             }
@@ -115,7 +115,7 @@ define_networks! {
         MAINNET = 250 => "Fantom Opera", "FTM",
     },
     gnosis {
-        MAINNET = 100 => "Gnosis Chain", "xDAI",
+        MAINNET = 100 => "Gnosis Chain", "XDAI",
     },
     celo {
         MAINNET = 42220 => "Celo Mainnet", "CELO",
@@ -310,7 +310,7 @@ mod tests {
             id::gnosis::MAINNET,
             "GNOSIS_MAINNET",
             "Gnosis Chain",
-            "xDAI",
+            "XDAI",
         ),
         (id::celo::MAINNET, "CELO_MAINNET", "Celo Mainnet", "CELO"),
         (
@@ -370,10 +370,7 @@ mod tests {
     #[test]
     fn test_all_networks_get_fee_paying_asset_symbol() {
         for &(chain_id, _, _, symbol) in ALL_NETWORKS {
-            assert_eq!(
-                get_fee_paying_asset_symbol(chain_id),
-                Some(symbol.to_string())
-            );
+            assert_eq!(get_fee_paying_asset_symbol(chain_id), Some(symbol));
         }
     }
 
