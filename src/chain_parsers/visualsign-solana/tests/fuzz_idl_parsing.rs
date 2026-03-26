@@ -35,6 +35,8 @@ use solana_parser::{decode_idl_data, parse_instruction_with_idl};
 use solana_parser_fuzz_core::proptest as arb;
 use std::sync::Arc;
 
+mod common;
+
 // parse_instruction_with_idl ignores the program_id parameter (_program_id);
 // use an obviously fake value to avoid confusion with real known programs.
 const TEST_PROGRAM_ID: &str = "deadbeef1234deadbeef5678deadbeef";
@@ -849,19 +851,7 @@ fn size_guard_vec_u64_over_budget() {
 //
 // See scripts/fuzz_all_idls.sh to run against all embedded IDLs in one pass.
 
-fn load_idl_from_env() -> Option<(String, solana_parser::solana::structs::Idl)> {
-    let path = std::env::var("IDL_FILE").ok()?;
-    let json = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("IDL_FILE={path}: {e}"));
-    match decode_idl_data(&json) {
-        Ok(idl) => Some((json, idl)),
-        Err(e) => {
-            // IDL failed validation (e.g. duplicate type names, cyclic references).
-            // Skip these tests — they are not valid inputs for real_idl_* tests.
-            eprintln!("IDL_FILE={path}: skipping — decode failed: {e}");
-            None
-        }
-    }
-}
+use common::load_idl_from_env;
 
 /// Crash-safety test against a real IDL loaded from IDL_FILE.
 ///
