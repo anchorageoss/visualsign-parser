@@ -942,3 +942,203 @@ fn real_idl_valid_data_always_parses_ok() {
         })
         .expect("real_idl_valid_data_always_parses_ok failed");
 }
+
+// ── Additional real-IDL property tests ───────────────────────────────────────
+
+/// After a successful parse with correctly-encoded bytes, every arg name
+/// declared in the IDL for that instruction must appear as a key in
+/// program_call_args.
+///
+/// This is stronger than checking the instruction name: it verifies that
+/// arg decoding was complete, not just that dispatch succeeded.
+#[test]
+fn real_idl_all_arg_names_in_parsed_output() {
+    let Some((_, idl)) = load_idl_from_env() else {
+        return;
+    };
+    let n = idl.instructions.len();
+    if n == 0 {
+        return;
+    }
+
+    let types = Arc::new(idl.types.clone());
+    let instructions = idl.instructions.clone();
+
+    let strategy = (0..n).prop_flat_map(move |inst_idx| {
+        arb::arb_valid_instruction_bytes(&instructions[inst_idx], types.clone())
+            .prop_map(move |bytes| (inst_idx, bytes))
+    });
+
+    let config = ProptestConfig::default();
+    let mut runner = proptest::test_runner::TestRunner::new(config);
+    let idl_ref = idl.clone();
+    runner
+        .run(&strategy, move |(inst_idx, bytes)| {
+            let inst = &idl_ref.instructions[inst_idx];
+            let result = parse_instruction_with_idl(&bytes, TEST_PROGRAM_ID, &idl_ref);
+            prop_assert!(
+                result.is_ok(),
+                "instruction '{}': valid bytes must parse ok: {:?}",
+                inst.name,
+                result
+            );
+            let parsed = result.unwrap();
+            for arg in &inst.args {
+                prop_assert!(
+                    parsed.program_call_args.contains_key(&arg.name),
+                    "instruction '{}': arg '{}' missing from parsed output",
+                    inst.name,
+                    arg.name
+                );
+            }
+            Ok(())
+        })
+        .expect("real_idl_all_arg_names_in_parsed_output failed");
+}
+
+/// Valid bytes with one extra byte appended must be rejected.
+///
+/// The parser checks that the cursor sits exactly at the end of the data after
+/// all args are consumed. Any trailing byte is an error.
+#[test]
+fn real_idl_overlong_data_is_rejected() {
+    let Some((_, idl)) = load_idl_from_env() else {
+        return;
+    };
+    let n = idl.instructions.len();
+    if n == 0 {
+        return;
+    }
+
+    let types = Arc::new(idl.types.clone());
+    let instructions = idl.instructions.clone();
+
+    let strategy = (0..n, any::<u8>()).prop_flat_map(move |(inst_idx, extra)| {
+        arb::arb_valid_instruction_bytes(&instructions[inst_idx], types.clone()).prop_map(
+            move |mut bytes| {
+                bytes.push(extra);
+                (inst_idx, bytes)
+            },
+        )
+    });
+
+    let config = ProptestConfig::default();
+    let mut runner = proptest::test_runner::TestRunner::new(config);
+    let idl_ref = idl.clone();
+    runner
+        .run(&strategy, move |(inst_idx, bytes)| {
+            let name = &idl_ref.instructions[inst_idx].name;
+            let result = parse_instruction_with_idl(&bytes, TEST_PROGRAM_ID, &idl_ref);
+            prop_assert!(
+                result.is_err(),
+                "instruction '{name}': overlong data (1 extra byte) must be rejected"
+            );
+            Ok(())
+        })
+        .expect("real_idl_overlong_data_is_rejected failed");
+}
+
+/// Valid bytes with the last byte removed must be rejected.
+///
+/// Tests the arg-decoding underflow path — the cursor runs out of data
+/// before all declared args are consumed.
+#[test]
+fn real_idl_truncated_data_is_rejected() {
+    let Some((_, idl)) = load_idl_from_env() else {
+        return;
+    };
+    let n = idl.instructions.len();
+    if n == 0 {
+        return;
+    }
+
+    let types = Arc::new(idl.types.clone());
+    let instructions = idl.instructions.clone();
+
+    let strategy = (0..n).prop_flat_map(move |inst_idx| {
+        arb::arb_valid_instruction_bytes(&instructions[inst_idx], types.clone())
+            .prop_map(move |bytes| (inst_idx, bytes))
+    });
+
+    let config = ProptestConfig::default();
+    let mut runner = proptest::test_runner::TestRunner::new(config);
+    let idl_ref = idl.clone();
+    runner
+        .run(&strategy, move |(inst_idx, mut bytes)| {
+            if bytes.is_empty() {
+                return Ok(());
+            }
+            bytes.pop();
+            let name = &idl_ref.instructions[inst_idx].name;
+            let result = parse_instruction_with_idl(&bytes, TEST_PROGRAM_ID, &idl_ref);
+            prop_assert!(
+                result.is_err(),
+                "instruction '{name}': truncated data (1 byte removed) must be rejected"
+            );
+            Ok(())
+        })
+        .expect("real_idl_truncated_data_is_rejected failed");
+}
+
+/// Replacing instruction j's discriminator with instruction i's discriminator
+/// must not cause the parser to dispatch as instruction j.
+///
+/// Verifies discriminator isolation: each discriminator exclusively identifies
+/// its own instruction and cannot be misread as another.
+#[test]
+fn real_idl_wrong_discriminator_not_dispatched_as_original() {
+    let Some((_, idl)) = load_idl_from_env() else {
+        return;
+    };
+    let n = idl.instructions.len();
+    if n < 2 {
+        return;
+    }
+
+    let types = Arc::new(idl.types.clone());
+    let instructions = idl.instructions.clone();
+
+    // Generate (i, j, valid_bytes_for_j): replace disc_j with disc_i in bytes.
+    let strategy = (0..n, 0..n).prop_flat_map(move |(i, j)| {
+        arb::arb_valid_instruction_bytes(&instructions[j], types.clone())
+            .prop_map(move |bytes| (i, j, bytes))
+    });
+
+    let config = ProptestConfig::default();
+    let mut runner = proptest::test_runner::TestRunner::new(config);
+    let idl_ref = idl.clone();
+    runner
+        .run(&strategy, move |(i, j, mut bytes)| {
+            if i == j {
+                return Ok(());
+            }
+            let disc_i = match &idl_ref.instructions[i].discriminator {
+                Some(d) => d.clone(),
+                None => return Ok(()),
+            };
+            let disc_j = match &idl_ref.instructions[j].discriminator {
+                Some(d) => d.clone(),
+                None => return Ok(()),
+            };
+            if disc_i == disc_j {
+                return Ok(());
+            }
+            if bytes.len() < disc_i.len() {
+                return Ok(());
+            }
+
+            bytes[..disc_i.len()].copy_from_slice(&disc_i);
+
+            if let Ok(result) = parse_instruction_with_idl(&bytes, TEST_PROGRAM_ID, &idl_ref) {
+                prop_assert_ne!(
+                    &result.instruction_name,
+                    &idl_ref.instructions[j].name,
+                    "disc_i must not dispatch as instruction j (i={}, j={})",
+                    i,
+                    j
+                );
+            }
+            Ok(())
+        })
+        .expect("real_idl_wrong_discriminator_not_dispatched_as_original failed");
+}
