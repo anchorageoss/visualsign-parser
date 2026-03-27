@@ -1,19 +1,15 @@
-name: Continuous Integration
+name: Property Tests
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
     types: [opened, synchronize, reopened, labeled]
 
 jobs:
-  ubuntu:
-    if: |
-      github.ref == 'refs/heads/main' ||
-      github.base_ref == 'main' ||
-      contains(github.event.pull_request.labels.*.name, 'ci')
+  proptest:
+    if: contains(github.event.pull_request.labels.*.name, 'proptest')
     runs-on: ubuntu-latest-4-cores
+    permissions:
+      pull-requests: write
     steps:
       - name: git checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -23,7 +19,6 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
         with:
           components: clippy, rustfmt
-
       - name: Cache Rust dependencies
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
@@ -32,8 +27,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             src/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-proptest-${{ hashFiles('src/Cargo.lock') }}
           restore-keys: |
+            ${{ runner.os }}-cargo-proptest-
             ${{ runner.os }}-cargo-
       - name: install protoc
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
@@ -48,14 +44,18 @@ jobs:
           df -h
       - name: Run codegen
         run: make -C src generated
-      - name: Ensure working tree is clean
+      - name: Run proptest tests
+        id: proptest
+        continue-on-error: true
+        run: cargo test -p visualsign-solana
+        working-directory: src
+      - name: Label PR on proptest failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          if ! git diff --quiet --exit-code; then
-            echo "Uncommitted changes detected. Run codegen locally and commit the results."
-            git --no-pager diff
-            exit 1
+          if [ "${{ steps.proptest.outcome }}" = "failure" ]; then
+            gh pr edit "$PR_NUMBER" --add-label proptest-failure || true
+          else
+            gh pr edit "$PR_NUMBER" --remove-label proptest-failure || true
           fi
-      - name: Run linters
-        run: make -C src lint
-      - name: Run tests
-        run: make -C src test

@@ -132,15 +132,49 @@ Solana IDL parsing includes [proptest](https://proptest-rs.github.io/proptest/)-
 
 - `src/chain_parsers/visualsign-solana/tests/fuzz_idl_parsing.rs` — parser-level fuzz and roundtrip tests
 - `src/chain_parsers/visualsign-solana/tests/pipeline_integration.rs` — full-pipeline integration tests
+- `src/chain_parsers/visualsign-solana/tests/semantic_pipeline.rs` — deterministic tests with real embedded IDLs
+- `src/chain_parsers/visualsign-solana/tests/common/mod.rs` — shared test helpers
 
-### Running fuzz tests
+### Running proptest tests
 
 ```bash
+# Run all tests (proptest + semantic + fuzz_idl_parsing)
+cargo test -p visualsign-solana
+
 # Default 256 cases per property
 cargo test -p visualsign-solana --test fuzz_idl_parsing
 
 # More iterations for deeper fuzzing
 PROPTEST_CASES=5000 cargo test -p visualsign-solana --test fuzz_idl_parsing
+
+# Semantic tests only (real embedded IDLs)
+cargo test -p visualsign-solana --test semantic_pipeline
+```
+
+### Running cargo fuzz targets (libFuzzer)
+
+The `fuzz/` directory contains [libFuzzer](https://llvm.org/docs/LibFuzzer.html) targets that feed arbitrary bytes into the full visualsign-solana stack. These require a nightly toolchain and `cargo-fuzz`:
+
+```bash
+cargo install cargo-fuzz --locked
+
+# Run a fuzz target for 30 seconds (same as CI)
+cd src/chain_parsers/visualsign-solana/fuzz
+cargo +nightly fuzz run fuzz_transaction_string -- -max_total_time=30
+cargo +nightly fuzz run fuzz_versioned_transaction -- -max_total_time=30
+```
+
+Available targets:
+
+| Target | Entry point | What it exercises |
+|--------|-------------|-------------------|
+| `fuzz_transaction_string` | `transaction_string_to_visual_sign` | base64/hex decoding, transaction deserialization, IDL dispatch |
+| `fuzz_versioned_transaction` | `versioned_transaction_to_visual_sign` | bincode deserialization, versioned transaction path, address table lookups |
+
+When a crash is found, libFuzzer writes a reproducer to `artifacts/`. Reproduce it with:
+
+```bash
+cargo +nightly fuzz run <target> artifacts/<target>/crash-<hash>
 ```
 
 ### Testing against real IDLs
@@ -176,6 +210,18 @@ Both kinds complement each other: concrete roundtrips pin down known-good behavi
 3. Add a concrete roundtrip test for the same scenario to serve as specification-by-example
 4. Run the tests — if proptest finds a failure, it saves a regression seed to `.proptest-regressions`
 5. Commit the `.proptest-regressions` file so the failing case is reproduced in CI
+
+### CI workflows
+
+Tests are triggered by adding labels to a PR:
+
+| Label | Workflow | What runs |
+|-------|----------|-----------|
+| `proptest` | `proptest.yml` | `cargo test -p visualsign-solana` |
+| `fuzz` | `fuzz.yml` | Both libFuzzer targets for 30 seconds each |
+| `ci` | `main.yml` | Full build, lint, and test suite |
+
+If a fuzz target crashes, the `fuzz-failure` label is added to the PR. If a proptest fails, the `proptest-failure` label is added. These labels are removed automatically on a clean run.
 
 ## Validation checklist
 

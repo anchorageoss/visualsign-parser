@@ -25,23 +25,43 @@ pub fn decode_instructions(
     let message = &transaction.message;
     let account_keys = &message.account_keys;
 
-    // Convert compiled instructions to full instructions
+    if account_keys.is_empty() {
+        return Err(VisualSignError::ParseError(
+            TransactionParseError::DecodeError(
+                "Legacy transaction has no account keys".to_string(),
+            ),
+        ));
+    }
+
+    // Convert compiled instructions to full instructions. Instructions with an
+    // out-of-bounds program_id_index are skipped entirely, while individual
+    // out-of-bounds account indices are silently omitted (same approach as v0 transaction handling).
     let instructions: Vec<Instruction> = message
         .instructions
         .iter()
-        .map(|ci| Instruction {
-            program_id: account_keys[ci.program_id_index as usize],
-            accounts: ci
+        .filter_map(|ci| {
+            if (ci.program_id_index as usize) >= account_keys.len() {
+                return None;
+            }
+            let accounts: Vec<solana_sdk::instruction::AccountMeta> = ci
                 .accounts
                 .iter()
-                .map(|&i| {
-                    solana_sdk::instruction::AccountMeta::new_readonly(
-                        account_keys[i as usize],
-                        false,
-                    )
+                .filter_map(|&i| {
+                    if (i as usize) < account_keys.len() {
+                        Some(solana_sdk::instruction::AccountMeta::new_readonly(
+                            account_keys[i as usize],
+                            false,
+                        ))
+                    } else {
+                        None
+                    }
                 })
-                .collect(),
-            data: ci.data.clone(),
+                .collect();
+            Some(Instruction {
+                program_id: account_keys[ci.program_id_index as usize],
+                accounts,
+                data: ci.data.clone(),
+            })
         })
         .collect();
 
