@@ -7,17 +7,18 @@
 
 /// Macro to define network constants and generate lookup functions from a single source.
 ///
-/// Each entry: (chain_module, network_const, chain_id, display_name)
+/// Each entry: (chain_module, network_const, chain_id, display_name, fee_paying_asset_symbol)
 /// Generates:
 /// - `id::{chain_module}::{network_const}` constants
 /// - `get_network_name()` - chain_id -> display name
+/// - `get_fee_paying_asset_symbol()` - chain_id -> fee-paying asset ticker (e.g., "ETH", "POL")
 /// - `chain_id_to_network_id()` - chain_id -> canonical ID (e.g., "ETHEREUM_MAINNET")
 /// - `network_id_to_chain_id()` - canonical ID -> chain_id
 macro_rules! define_networks {
     (
         $(
             $chain:ident {
-                $( $network:ident = $id:expr => $display:expr ),* $(,)?
+                $( $network:ident = $id:expr => $display:expr, $symbol:expr ),* $(,)?
             }
         ),* $(,)?
     ) => {
@@ -43,6 +44,19 @@ macro_rules! define_networks {
                 )*)*
                 Some(chain_id) => format!("Unknown Network (Chain ID: {chain_id})"),
                 None => "Unknown Network".to_string(),
+            }
+        }
+
+        /// Returns the fee-paying asset symbol for a given chain ID, if known.
+        ///
+        /// For known networks, returns the configured symbol (e.g., "ETH", "POL", "BNB").
+        /// For unknown chains, returns `None`.
+        pub fn get_fee_paying_asset_symbol(chain_id: u64) -> Option<&'static str> {
+            match chain_id {
+                $($(
+                    id::$chain::$network => Some($symbol),
+                )*)*
+                _ => None,
             }
         }
 
@@ -76,78 +90,78 @@ macro_rules! define_networks {
 }
 
 // Define all supported networks
-// Format: chain { NETWORK = chain_id => "Display Name" }
+// Format: chain { NETWORK = chain_id => "Display Name", "FeePayingAssetSymbol" }
 define_networks! {
     // L1 Chains
     ethereum {
-        MAINNET = 1 => "Ethereum Mainnet",
-        SEPOLIA = 11155111 => "Ethereum Sepolia",
-        GOERLI = 5 => "Ethereum Goerli (deprecated)",
-        HOLESKY = 17000 => "Ethereum Holesky",
+        MAINNET = 1 => "Ethereum Mainnet", "ETH",
+        SEPOLIA = 11155111 => "Ethereum Sepolia", "ETH",
+        GOERLI = 5 => "Ethereum Goerli (deprecated)", "ETH",
+        HOLESKY = 17000 => "Ethereum Holesky", "ETH",
     },
     bsc {
-        MAINNET = 56 => "BNB Smart Chain Mainnet",
-        TESTNET = 97 => "BNB Smart Chain Testnet",
+        MAINNET = 56 => "BNB Smart Chain Mainnet", "BNB",
+        TESTNET = 97 => "BNB Smart Chain Testnet", "BNB",
     },
     polygon {
-        MAINNET = 137 => "Polygon Mainnet",
-        AMOY = 80002 => "Polygon Amoy",
+        MAINNET = 137 => "Polygon Mainnet", "POL",
+        AMOY = 80002 => "Polygon Amoy", "POL",
     },
     avalanche {
-        MAINNET = 43114 => "Avalanche C-Chain",
-        FUJI = 43113 => "Avalanche Fuji Testnet",
+        MAINNET = 43114 => "Avalanche C-Chain", "AVAX",
+        FUJI = 43113 => "Avalanche Fuji Testnet", "AVAX",
     },
     fantom {
-        MAINNET = 250 => "Fantom Opera",
+        MAINNET = 250 => "Fantom Opera", "FTM",
     },
     gnosis {
-        MAINNET = 100 => "Gnosis Chain",
+        MAINNET = 100 => "Gnosis Chain", "XDAI",
     },
     celo {
-        MAINNET = 42220 => "Celo Mainnet",
-        ALFAJORES = 44787 => "Celo Alfajores Testnet",
+        MAINNET = 42220 => "Celo Mainnet", "CELO",
+        ALFAJORES = 44787 => "Celo Alfajores Testnet", "CELO",
     },
 
     // L2 Chains - Optimistic Rollups
     optimism {
-        MAINNET = 10 => "OP Mainnet",
-        SEPOLIA = 11155420 => "OP Sepolia",
+        MAINNET = 10 => "OP Mainnet", "ETH",
+        SEPOLIA = 11155420 => "OP Sepolia", "ETH",
     },
     arbitrum {
-        MAINNET = 42161 => "Arbitrum One",
-        SEPOLIA = 421614 => "Arbitrum Sepolia",
+        MAINNET = 42161 => "Arbitrum One", "ETH",
+        SEPOLIA = 421614 => "Arbitrum Sepolia", "ETH",
     },
     base {
-        MAINNET = 8453 => "Base",
-        SEPOLIA = 84532 => "Base Sepolia",
+        MAINNET = 8453 => "Base", "ETH",
+        SEPOLIA = 84532 => "Base Sepolia", "ETH",
     },
     blast {
-        MAINNET = 81457 => "Blast",
+        MAINNET = 81457 => "Blast", "ETH",
     },
     mantle {
-        MAINNET = 5000 => "Mantle",
+        MAINNET = 5000 => "Mantle", "MNT",
     },
     worldchain {
-        MAINNET = 480 => "World Chain",
+        MAINNET = 480 => "World Chain", "ETH",
     },
 
     // L2 Chains - ZK Rollups
     zksync {
-        MAINNET = 324 => "zkSync Era",
+        MAINNET = 324 => "zkSync Era", "ETH",
     },
     linea {
-        MAINNET = 59144 => "Linea",
+        MAINNET = 59144 => "Linea", "ETH",
     },
     scroll {
-        MAINNET = 534352 => "Scroll",
+        MAINNET = 534352 => "Scroll", "ETH",
     },
 
     // App-Specific Chains
     zora {
-        MAINNET = 7777777 => "Zora",
+        MAINNET = 7777777 => "Zora", "ETH",
     },
     unichain {
-        MAINNET = 130 => "Unichain",
+        MAINNET = 130 => "Unichain", "ETH",
     },
 }
 
@@ -234,94 +248,155 @@ pub fn extract_chain_id_from_metadata(
 mod tests {
     use super::*;
 
-    // All 28 networks for parametrized testing
-    const ALL_NETWORKS: &[(u64, &str, &str)] = &[
+    // All 28 networks for parametrized testing: (chain_id, network_id, display_name, fee_paying_asset_symbol)
+    const ALL_NETWORKS: &[(u64, &str, &str, &str)] = &[
         (
             id::ethereum::MAINNET,
             "ETHEREUM_MAINNET",
             "Ethereum Mainnet",
+            "ETH",
         ),
         (
             id::ethereum::SEPOLIA,
             "ETHEREUM_SEPOLIA",
             "Ethereum Sepolia",
+            "ETH",
         ),
         (
             id::ethereum::GOERLI,
             "ETHEREUM_GOERLI",
             "Ethereum Goerli (deprecated)",
+            "ETH",
         ),
         (
             id::ethereum::HOLESKY,
             "ETHEREUM_HOLESKY",
             "Ethereum Holesky",
+            "ETH",
         ),
-        (id::bsc::MAINNET, "BSC_MAINNET", "BNB Smart Chain Mainnet"),
-        (id::bsc::TESTNET, "BSC_TESTNET", "BNB Smart Chain Testnet"),
-        (id::polygon::MAINNET, "POLYGON_MAINNET", "Polygon Mainnet"),
-        (id::polygon::AMOY, "POLYGON_AMOY", "Polygon Amoy"),
+        (
+            id::bsc::MAINNET,
+            "BSC_MAINNET",
+            "BNB Smart Chain Mainnet",
+            "BNB",
+        ),
+        (
+            id::bsc::TESTNET,
+            "BSC_TESTNET",
+            "BNB Smart Chain Testnet",
+            "BNB",
+        ),
+        (
+            id::polygon::MAINNET,
+            "POLYGON_MAINNET",
+            "Polygon Mainnet",
+            "POL",
+        ),
+        (id::polygon::AMOY, "POLYGON_AMOY", "Polygon Amoy", "POL"),
         (
             id::avalanche::MAINNET,
             "AVALANCHE_MAINNET",
             "Avalanche C-Chain",
+            "AVAX",
         ),
         (
             id::avalanche::FUJI,
             "AVALANCHE_FUJI",
             "Avalanche Fuji Testnet",
+            "AVAX",
         ),
-        (id::fantom::MAINNET, "FANTOM_MAINNET", "Fantom Opera"),
-        (id::gnosis::MAINNET, "GNOSIS_MAINNET", "Gnosis Chain"),
-        (id::celo::MAINNET, "CELO_MAINNET", "Celo Mainnet"),
+        (id::fantom::MAINNET, "FANTOM_MAINNET", "Fantom Opera", "FTM"),
+        (
+            id::gnosis::MAINNET,
+            "GNOSIS_MAINNET",
+            "Gnosis Chain",
+            "XDAI",
+        ),
+        (id::celo::MAINNET, "CELO_MAINNET", "Celo Mainnet", "CELO"),
         (
             id::celo::ALFAJORES,
             "CELO_ALFAJORES",
             "Celo Alfajores Testnet",
+            "CELO",
         ),
-        (id::optimism::MAINNET, "OPTIMISM_MAINNET", "OP Mainnet"),
-        (id::optimism::SEPOLIA, "OPTIMISM_SEPOLIA", "OP Sepolia"),
-        (id::arbitrum::MAINNET, "ARBITRUM_MAINNET", "Arbitrum One"),
+        (
+            id::optimism::MAINNET,
+            "OPTIMISM_MAINNET",
+            "OP Mainnet",
+            "ETH",
+        ),
+        (
+            id::optimism::SEPOLIA,
+            "OPTIMISM_SEPOLIA",
+            "OP Sepolia",
+            "ETH",
+        ),
+        (
+            id::arbitrum::MAINNET,
+            "ARBITRUM_MAINNET",
+            "Arbitrum One",
+            "ETH",
+        ),
         (
             id::arbitrum::SEPOLIA,
             "ARBITRUM_SEPOLIA",
             "Arbitrum Sepolia",
+            "ETH",
         ),
-        (id::base::MAINNET, "BASE_MAINNET", "Base"),
-        (id::base::SEPOLIA, "BASE_SEPOLIA", "Base Sepolia"),
-        (id::blast::MAINNET, "BLAST_MAINNET", "Blast"),
-        (id::mantle::MAINNET, "MANTLE_MAINNET", "Mantle"),
-        (id::worldchain::MAINNET, "WORLDCHAIN_MAINNET", "World Chain"),
-        (id::zksync::MAINNET, "ZKSYNC_MAINNET", "zkSync Era"),
-        (id::linea::MAINNET, "LINEA_MAINNET", "Linea"),
-        (id::scroll::MAINNET, "SCROLL_MAINNET", "Scroll"),
-        (id::zora::MAINNET, "ZORA_MAINNET", "Zora"),
-        (id::unichain::MAINNET, "UNICHAIN_MAINNET", "Unichain"),
+        (id::base::MAINNET, "BASE_MAINNET", "Base", "ETH"),
+        (id::base::SEPOLIA, "BASE_SEPOLIA", "Base Sepolia", "ETH"),
+        (id::blast::MAINNET, "BLAST_MAINNET", "Blast", "ETH"),
+        (id::mantle::MAINNET, "MANTLE_MAINNET", "Mantle", "MNT"),
+        (
+            id::worldchain::MAINNET,
+            "WORLDCHAIN_MAINNET",
+            "World Chain",
+            "ETH",
+        ),
+        (id::zksync::MAINNET, "ZKSYNC_MAINNET", "zkSync Era", "ETH"),
+        (id::linea::MAINNET, "LINEA_MAINNET", "Linea", "ETH"),
+        (id::scroll::MAINNET, "SCROLL_MAINNET", "Scroll", "ETH"),
+        (id::zora::MAINNET, "ZORA_MAINNET", "Zora", "ETH"),
+        (id::unichain::MAINNET, "UNICHAIN_MAINNET", "Unichain", "ETH"),
     ];
 
     #[test]
     fn test_all_networks_get_network_name() {
-        for &(chain_id, _, display_name) in ALL_NETWORKS {
+        for &(chain_id, _, display_name, _) in ALL_NETWORKS {
             assert_eq!(get_network_name(Some(chain_id)), display_name);
         }
     }
 
     #[test]
+    fn test_all_networks_get_fee_paying_asset_symbol() {
+        for &(chain_id, _, _, symbol) in ALL_NETWORKS {
+            assert_eq!(get_fee_paying_asset_symbol(chain_id), Some(symbol));
+        }
+    }
+
+    #[test]
+    fn test_get_fee_paying_asset_symbol_unknown_returns_none() {
+        assert_eq!(get_fee_paying_asset_symbol(999999999), None);
+        assert_eq!(get_fee_paying_asset_symbol(0), None);
+    }
+
+    #[test]
     fn test_all_networks_chain_id_to_network_id() {
-        for &(chain_id, network_id, _) in ALL_NETWORKS {
+        for &(chain_id, network_id, _, _) in ALL_NETWORKS {
             assert_eq!(chain_id_to_network_id(chain_id), Some(network_id));
         }
     }
 
     #[test]
     fn test_all_networks_network_id_to_chain_id() {
-        for &(chain_id, network_id, _) in ALL_NETWORKS {
+        for &(chain_id, network_id, _, _) in ALL_NETWORKS {
             assert_eq!(network_id_to_chain_id(network_id), Some(chain_id));
         }
     }
 
     #[test]
     fn test_all_networks_parse_network_by_chain_id() {
-        for &(chain_id, network_id, _) in ALL_NETWORKS {
+        for &(chain_id, network_id, _, _) in ALL_NETWORKS {
             assert_eq!(
                 parse_network(&chain_id.to_string()),
                 Some(network_id.to_string())
@@ -331,14 +406,14 @@ mod tests {
 
     #[test]
     fn test_all_networks_parse_network_by_name() {
-        for &(_, network_id, _) in ALL_NETWORKS {
+        for &(_, network_id, _, _) in ALL_NETWORKS {
             assert_eq!(parse_network(network_id), Some(network_id.to_string()));
         }
     }
 
     #[test]
     fn test_all_networks_roundtrip() {
-        for &(chain_id, network_id, _) in ALL_NETWORKS {
+        for &(chain_id, network_id, _, _) in ALL_NETWORKS {
             assert_eq!(chain_id_to_network_id(chain_id), Some(network_id));
             assert_eq!(network_id_to_chain_id(network_id), Some(chain_id));
             assert_eq!(
@@ -423,24 +498,24 @@ mod tests {
     #[test]
     fn test_constants_are_unique() {
         let mut seen_ids = std::collections::HashSet::new();
-        for &(chain_id, _, _) in ALL_NETWORKS {
+        for &(chain_id, _, _, _) in ALL_NETWORKS {
             assert!(seen_ids.insert(chain_id));
         }
 
         let mut seen_names = std::collections::HashSet::new();
-        for &(_, network_id, _) in ALL_NETWORKS {
+        for &(_, network_id, _, _) in ALL_NETWORKS {
             assert!(seen_names.insert(network_id));
         }
 
         let mut seen_displays = std::collections::HashSet::new();
-        for &(_, _, display) in ALL_NETWORKS {
+        for &(_, _, display, _) in ALL_NETWORKS {
             assert!(seen_displays.insert(display));
         }
     }
 
     #[test]
     fn test_network_id_format_consistency() {
-        for &(_, network_id, _) in ALL_NETWORKS {
+        for &(_, network_id, _, _) in ALL_NETWORKS {
             assert!(network_id.contains('_'));
             let parts: Vec<&str> = network_id.split('_').collect();
             assert_eq!(parts.len(), 2);

@@ -412,6 +412,7 @@ fn convert_to_visual_sign_payload(
         .and_then(|any_reg| any_reg.downcast_ref::<abi_registry::AbiRegistry>());
 
     let network_name = networks::get_network_name(Some(chain_id));
+    let fee_symbol = networks::get_fee_paying_asset_symbol(chain_id);
 
     let mut fields = vec![SignablePayloadField::TextV2 {
         common: SignablePayloadFieldCommon {
@@ -429,21 +430,22 @@ fn convert_to_visual_sign_payload(
             address_v2: SignablePayloadFieldAddressV2 {
                 address: to.to_string(),
                 name: "To".to_string(),
-                asset_label: "Test Asset".to_string(),
+                asset_label: fee_symbol.unwrap_or_default().to_string(),
                 memo: None,
                 badge_text: None,
             },
         });
     }
+    let value = format_ether(transaction.value());
     fields.extend([
         SignablePayloadField::AmountV2 {
             common: SignablePayloadFieldCommon {
-                fallback_text: format!("{} ETH", format_ether(transaction.value())),
+                fallback_text: fee_symbol.map_or_else(|| value.clone(), |s| format!("{value} {s}")),
                 label: "Value".to_string(),
             },
             amount_v2: SignablePayloadFieldAmountV2 {
-                amount: format_ether(transaction.value()),
-                abbreviation: Some("ETH".to_string()),
+                amount: value,
+                abbreviation: fee_symbol.map(|s| s.to_string()),
             },
         },
         SignablePayloadField::TextV2 {
@@ -593,7 +595,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{SignableTransaction, TxLegacy, TypedTransaction};
     use alloy_primitives::{Address, Bytes, ChainId, U256};
-    use visualsign::SignablePayloadFieldAddressV2;
+    use visualsign::{SignablePayloadFieldAddressV2, SignablePayloadFieldAmountV2};
 
     fn unsigned_to_hex(tx: &TypedTransaction) -> String {
         let mut encoded = Vec::new();
@@ -635,22 +637,27 @@ mod tests {
                         text: "Ethereum Mainnet".to_string(),
                     },
                 },
-                SignablePayloadField::TextV2 {
+                SignablePayloadField::AddressV2 {
                     common: SignablePayloadFieldCommon {
                         fallback_text: "0x000000000000000000000000000000000000dEaD".to_string(),
                         label: "To".to_string(),
                     },
-                    text_v2: SignablePayloadFieldTextV2 {
-                        text: "0x000000000000000000000000000000000000dEaD".to_string(),
+                    address_v2: SignablePayloadFieldAddressV2 {
+                        address: "0x000000000000000000000000000000000000dEaD".to_string(),
+                        name: "To".to_string(),
+                        asset_label: "ETH".to_string(),
+                        memo: None,
+                        badge_text: None,
                     },
                 },
-                SignablePayloadField::TextV2 {
+                SignablePayloadField::AmountV2 {
                     common: SignablePayloadFieldCommon {
                         fallback_text: "1 ETH".to_string(),
                         label: "Value".to_string(),
                     },
-                    text_v2: SignablePayloadFieldTextV2 {
-                        text: "1 ETH".to_string(),
+                    amount_v2: SignablePayloadFieldAmountV2 {
+                        amount: "1".to_string(),
+                        abbreviation: Some("ETH".to_string()),
                     },
                 },
                 SignablePayloadField::TextV2 {
@@ -695,18 +702,53 @@ mod tests {
             expected_payload.fields.iter().zip(payload.fields.iter())
         {
             assert_eq!(expected_field.label(), actual_field.label());
-            if let (
-                SignablePayloadField::TextV2 {
-                    text_v2: expected_text,
-                    ..
-                },
-                SignablePayloadField::TextV2 {
-                    text_v2: actual_text,
-                    ..
-                },
-            ) = (expected_field, actual_field)
-            {
-                assert_eq!(expected_text.text, actual_text.text);
+            match (expected_field, actual_field) {
+                (
+                    SignablePayloadField::TextV2 {
+                        text_v2: expected_text,
+                        ..
+                    },
+                    SignablePayloadField::TextV2 {
+                        text_v2: actual_text,
+                        ..
+                    },
+                ) => {
+                    assert_eq!(expected_text.text, actual_text.text);
+                }
+                (
+                    SignablePayloadField::AddressV2 {
+                        address_v2: expected_addr,
+                        ..
+                    },
+                    SignablePayloadField::AddressV2 {
+                        address_v2: actual_addr,
+                        ..
+                    },
+                ) => {
+                    assert_eq!(expected_addr.address, actual_addr.address);
+                    assert_eq!(expected_addr.asset_label, actual_addr.asset_label);
+                }
+                (
+                    SignablePayloadField::AmountV2 {
+                        amount_v2: expected_amt,
+                        ..
+                    },
+                    SignablePayloadField::AmountV2 {
+                        amount_v2: actual_amt,
+                        ..
+                    },
+                ) => {
+                    assert_eq!(expected_amt.amount, actual_amt.amount);
+                    assert_eq!(expected_amt.abbreviation, actual_amt.abbreviation);
+                }
+                _ => {
+                    panic!(
+                        "Field type mismatch for label '{}': expected {:?}, got {:?}",
+                        expected_field.label(),
+                        std::mem::discriminant(expected_field),
+                        std::mem::discriminant(actual_field)
+                    );
+                }
             }
         }
     }
@@ -956,11 +998,52 @@ mod tests {
             .iter()
             .find(|f| f.label() == "Value")
             .unwrap();
-        if let SignablePayloadField::TextV2 { text_v2, .. } = value_field {
-            assert!(text_v2.text.contains("0"));
-            assert!(text_v2.text.contains("ETH"));
+        if let SignablePayloadField::AmountV2 { amount_v2, common } = value_field {
+            assert!(amount_v2.amount.contains("0"));
+            assert_eq!(amount_v2.abbreviation.as_deref(), Some("ETH"));
+            assert_eq!(common.fallback_text, "0 ETH");
+        } else {
+            panic!("Expected AmountV2 for Value field");
         }
     }
+
+    #[test]
+    fn test_non_eth_chain_fee_symbol() {
+        // Polygon (chain 137) should use "POL" as the fee-paying asset symbol
+        let tx = TypedTransaction::Legacy(TxLegacy {
+            chain_id: Some(ChainId::from(137u64)),
+            nonce: 0,
+            gas_price: 30_000_000_000u128,
+            gas_limit: 21000,
+            to: alloy_primitives::TxKind::Call(Address::ZERO),
+            value: U256::from(1000000000000000000u64), // 1 POL
+            input: Bytes::new(),
+        });
+
+        let options = VisualSignOptions::default();
+        let payload = transaction_to_visual_sign(tx, options).unwrap();
+
+        let to_field = payload.fields.iter().find(|f| f.label() == "To").unwrap();
+        if let SignablePayloadField::AddressV2 { address_v2, .. } = to_field {
+            assert_eq!(address_v2.asset_label, "POL");
+        } else {
+            panic!("Expected AddressV2 for To field");
+        }
+
+        let value_field = payload
+            .fields
+            .iter()
+            .find(|f| f.label() == "Value")
+            .unwrap();
+        if let SignablePayloadField::AmountV2 { amount_v2, common } = value_field {
+            assert_eq!(amount_v2.amount, "1");
+            assert_eq!(amount_v2.abbreviation.as_deref(), Some("POL"));
+            assert_eq!(common.fallback_text, "1 POL");
+        } else {
+            panic!("Expected AmountV2 for Value field");
+        }
+    }
+
     #[test]
     fn test_transaction_to_visual_sign_public_api() {
         // Test the public API function
@@ -1008,7 +1091,7 @@ mod tests {
                         address_v2: SignablePayloadFieldAddressV2 {
                             address: "0x0000000000000000000000000000000000000000".to_string(),
                             name: "To".to_string(),
-                            asset_label: "Test Asset".to_string(),
+                            asset_label: "ETH".to_string(),
                             memo: None,
                             badge_text: None,
                         },
