@@ -1,0 +1,128 @@
+# Coverage Configuration for VisualSign Parser
+# This file defines coverage thresholds and policies for different packages
+
+# Global thresholds (apply to all packages unless overridden)
+global:
+  critical: 50  # Below this is considered critical
+  warning: 70   # Below this generates a warning
+  good: 80      # At or above this is considered good
+
+  # Fail PR if coverage drops by more than this percentage
+  max_drop: 5.0
+
+  # Fail PR if any package is below critical threshold
+  fail_on_critical: true
+
+# Per-package thresholds (override global settings)
+packages:
+  # Core library - high standards
+  visualsign:
+    critical: 80
+    warning: 85
+    good: 90
+    max_drop: 3.0
+
+  # Chain parsers - good standards
+  visualsign-ethereum:
+    critical: 60
+    warning: 70
+    good: 80
+    max_drop: 5.0
+
+  visualsign-solana:
+    critical: 70
+    warning: 75
+    good: 85
+    max_drop: 5.0
+
+  visualsign-sui:
+    critical: 60
+    warning: 70
+    good: 80
+    max_drop: 5.0
+
+  # Parser app - critical service
+  parser_app:
+    critical: 60
+    warning: 70
+    good: 80
+    max_drop: 5.0
+
+  # Stub implementations - lower requirements
+  visualsign-tron:
+    critical: 30
+    warning: 50
+    good: 70
+    max_drop: 10.0
+
+  visualsign-unspecified:
+    critical: 50
+    warning: 60
+    good: 70
+    max_drop: 10.0
+
+# Package groups for reporting
+groups:
+  core:
+    - visualsign
+
+  chain_parsers:
+    - visualsign-ethereum
+    - visualsign-solana
+    - visualsign-sui
+    - visualsign-tron
+    - visualsign-unspecified
+
+  services:
+    - parser_app
+    - parser_cli
+    - parser_host
+
+  infrastructure:
+    - generated
+    - metrics
+    - health_check
+    - integration
+
+# Coverage report options
+report:
+  # Include module-level breakdown in PR comments
+  show_modules: true
+
+  # Show file-level coverage for critical packages
+  show_files_for_critical: true
+
+  # Include trend chart (if base coverage available)
+  show_trends: true
+
+  # Add suggestions for improving coverage
+  show_suggestions: true
+
+# CI behavior
+ci:
+  # Post comment on every PR
+  comment_on_pr: true
+
+  # Update existing comment instead of creating new ones
+  update_comment: true
+
+  # Run coverage on push to main
+  run_on_main: true
+
+  # Cache base coverage for faster comparisons
+  cache_base_coverage: true
+
+  # Upload to codecov.io
+  upload_to_codecov: false  # Set to true if you have CODECOV_TOKEN
+
+# Dependency tracking
+dependencies:
+  # Automatically test packages that depend on changed packages
+  test_dependents: true
+
+  # Maximum depth for dependency traversal
+  max_depth: 3
+
+  # Exclude certain packages from dependent testing
+  exclude_dependents:
+    - generated  # Always generated, doesn't need coverage
