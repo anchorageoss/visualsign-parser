@@ -5,11 +5,16 @@ use serde::Deserialize;
 use crate::EthereumParserError;
 
 const DEFAULT_GAS_LIMIT: u64 = 21_000;
-const DEFAULT_CHAIN_ID: u64 = 1;
+// chainId is always required — no default. Silently defaulting to mainnet
+// is too dangerous for a signing service.
 
 /// Maximum hex-encoded data length accepted (512 KB of hex = 256 KB decoded).
 /// Real Ethereum calldata is bounded by block gas limits to much less than this.
 const MAX_HEX_DATA_LEN: usize = 512 * 1024;
+
+/// Maximum raw JSON input size before deserialization (1 MB).
+/// A valid Ethereum transaction JSON is at most a few KB; this is generous.
+const MAX_JSON_INPUT_LEN: usize = 1024 * 1024;
 
 /// Maximum length of a raw input value to include in error messages.
 /// Prevents leaking large calldata payloads into logs or error responses.
@@ -49,12 +54,19 @@ pub(crate) struct EthJsonTransaction {
 ///
 /// This is a safe heuristic: '{' is not a valid character in hex strings or standard
 /// base64 encoding, so no legitimate RLP-encoded transaction can be misrouted.
-pub fn is_json_input(data: &str) -> bool {
+pub(crate) fn is_json_input(data: &str) -> bool {
     data.trim_start().starts_with('{')
 }
 
 /// Parse a JSON string into a TypedTransaction.
-pub fn decode_json_transaction(data: &str) -> Result<TypedTransaction, EthereumParserError> {
+pub(crate) fn decode_json_transaction(data: &str) -> Result<TypedTransaction, EthereumParserError> {
+    if data.len() > MAX_JSON_INPUT_LEN {
+        return Err(EthereumParserError::FailedToParseJsonTransaction(format!(
+            "JSON input too large: {} bytes (max {})",
+            data.len(),
+            MAX_JSON_INPUT_LEN,
+        )));
+    }
     let input: EthJsonInput = serde_json::from_str(data)
         .map_err(|e| EthereumParserError::FailedToParseJsonTransaction(e.to_string()))?;
     match input {
@@ -63,7 +75,8 @@ pub fn decode_json_transaction(data: &str) -> Result<TypedTransaction, EthereumP
 }
 
 fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, EthereumParserError> {
-    if tx.from.is_some() {
+    if let Some(ref from_str) = tx.from {
+        let _ = parse_address(from_str)?;
         log::debug!("JSON transaction contains 'from' field which is accepted but ignored");
     }
 
@@ -97,21 +110,26 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
         .map(parse_hex_u64)
         .transpose()?
         .unwrap_or(0);
-    let gas_limit = tx
-        .gas
-        .as_deref()
-        .map(parse_hex_u64)
-        .transpose()?
-        .unwrap_or(DEFAULT_GAS_LIMIT);
-    let is_eip1559 = tx.max_fee_per_gas.is_some();
+    let gas_limit = match tx.gas.as_deref() {
+        Some(raw) => {
+            let parsed = parse_hex_u64(raw)?;
+            if parsed == 0 {
+                return Err(EthereumParserError::FailedToParseJsonTransaction(
+                    "'gas' must be greater than 0; omit the field to use the default (21000)"
+                        .to_string(),
+                ));
+            }
+            parsed
+        }
+        None => DEFAULT_GAS_LIMIT,
+    };
     let chain_id = match tx.chain_id.as_deref() {
         Some(raw) => parse_hex_u64(raw)?,
-        None if is_eip1559 => {
+        None => {
             return Err(EthereumParserError::FailedToParseJsonTransaction(
-                "'chainId' is required for EIP-1559 transactions".to_string(),
+                "'chainId' is required".to_string(),
             ));
         }
-        None => DEFAULT_CHAIN_ID,
     };
     let input_data = tx
         .data
@@ -138,6 +156,7 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
             to,
             value,
             input: input_data,
+            // accessList is not supported via JSON input in v1; defaults to empty.
             access_list: Default::default(),
         }))
     } else {
@@ -147,6 +166,12 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
             .map(parse_hex_u128)
             .transpose()?
             .unwrap_or(0);
+
+        if gas_price == 0 {
+            log::warn!(
+                "Legacy transaction has gas_price=0; will not be mined on most networks"
+            );
+        }
 
         Ok(TypedTransaction::Legacy(TxLegacy {
             chain_id: Some(chain_id),
@@ -315,12 +340,25 @@ mod tests {
     }
 
     #[test]
-    fn test_minimal_json_defaults() {
+    fn test_requires_chain_id() {
         let json = r#"{"type": "transaction"}"#;
+        let err = decode_json_transaction(json).unwrap_err();
+        match err {
+            EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("chainId"));
+                assert!(msg.contains("required"));
+            }
+            _ => panic!("Expected FailedToParseJsonTransaction"),
+        }
+    }
+
+    #[test]
+    fn test_minimal_json_with_chain_id() {
+        let json = r#"{"type": "transaction", "chainId": "0x1"}"#;
         let tx = decode_json_transaction(json).unwrap();
         match &tx {
             TypedTransaction::Legacy(inner) => {
-                assert_eq!(inner.chain_id, Some(DEFAULT_CHAIN_ID));
+                assert_eq!(inner.chain_id, Some(1));
                 assert_eq!(inner.nonce, 0);
                 assert_eq!(inner.gas_limit, DEFAULT_GAS_LIMIT);
                 assert_eq!(inner.gas_price, 0);
@@ -374,7 +412,8 @@ mod tests {
             "type": "transaction",
             "from": "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD28",
             "to": "0x000000000000000000000000000000000000dEaD",
-            "value": "0x0"
+            "value": "0x0",
+            "chainId": "0x1"
         }"#;
         let tx = decode_json_transaction(json).unwrap();
         assert_eq!(tx.value(), U256::ZERO);
@@ -384,7 +423,8 @@ mod tests {
     fn test_to_absent_is_create() {
         let json = r#"{
             "type": "transaction",
-            "data": "0x6060604052"
+            "data": "0x6060604052",
+            "chainId": "0x1"
         }"#;
         let tx = decode_json_transaction(json).unwrap();
         match &tx {
@@ -403,7 +443,8 @@ mod tests {
     fn test_large_value_u256() {
         let json = r#"{
             "type": "transaction",
-            "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            "value": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "chainId": "0x1"
         }"#;
         let tx = decode_json_transaction(json).unwrap();
         assert_eq!(tx.value(), U256::MAX);
@@ -419,17 +460,46 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_hex_prefix_treated_as_zero() {
+    fn test_empty_hex_prefix_value_and_nonce_are_zero() {
         let json = r#"{
             "type": "transaction",
             "value": "0x",
             "nonce": "0x",
-            "gas": "0x"
+            "chainId": "0x1"
         }"#;
         let tx = decode_json_transaction(json).unwrap();
         assert_eq!(tx.value(), U256::ZERO);
         assert_eq!(tx.nonce(), 0);
-        assert_eq!(tx.gas_limit(), 0);
+        assert_eq!(tx.gas_limit(), DEFAULT_GAS_LIMIT);
+    }
+
+    #[test]
+    fn test_gas_zero_rejected() {
+        let json = r#"{
+            "type": "transaction",
+            "gas": "0x0",
+            "chainId": "0x1"
+        }"#;
+        let err = decode_json_transaction(json).unwrap_err();
+        match err {
+            EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("gas"));
+                assert!(msg.contains("greater than 0"));
+            }
+            _ => panic!("Expected FailedToParseJsonTransaction"),
+        }
+
+        // "0x" (empty hex) also parses to 0 and should be rejected
+        let json2 = r#"{
+            "type": "transaction",
+            "gas": "0x",
+            "chainId": "0x1"
+        }"#;
+        let err2 = decode_json_transaction(json2).unwrap_err();
+        assert!(matches!(
+            err2,
+            EthereumParserError::FailedToParseJsonTransaction(_)
+        ));
     }
 
     #[test]
@@ -466,7 +536,7 @@ mod tests {
     }
 
     #[test]
-    fn test_eip1559_requires_chain_id() {
+    fn test_eip1559_also_requires_chain_id() {
         let json = r#"{
             "type": "transaction",
             "maxFeePerGas": "0x4a817c800"
@@ -510,7 +580,37 @@ mod tests {
     #[test]
     fn test_data_size_limit() {
         let huge_hex = format!("0x{}", "aa".repeat(MAX_HEX_DATA_LEN));
-        let json = format!(r#"{{"type": "transaction", "data": "{huge_hex}"}}"#);
+        let json = format!(r#"{{"type": "transaction", "chainId": "0x1", "data": "{huge_hex}"}}"#);
+        let err = decode_json_transaction(&json).unwrap_err();
+        match err {
+            EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("too large"));
+            }
+            _ => panic!("Expected FailedToParseJsonTransaction"),
+        }
+    }
+
+    #[test]
+    fn test_from_field_invalid_rejected() {
+        let json = r#"{
+            "type": "transaction",
+            "from": "not-an-address",
+            "chainId": "0x1"
+        }"#;
+        let err = decode_json_transaction(json).unwrap_err();
+        match err {
+            EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("Invalid address"));
+            }
+            _ => panic!("Expected FailedToParseJsonTransaction"),
+        }
+    }
+
+    #[test]
+    fn test_json_input_size_limit() {
+        let padding = "a".repeat(MAX_JSON_INPUT_LEN);
+        let json = format!(r#"{{"type": "transaction", "data": "{padding}"}}"#);
+        assert!(json.len() > MAX_JSON_INPUT_LEN);
         let err = decode_json_transaction(&json).unwrap_err();
         match err {
             EthereumParserError::FailedToParseJsonTransaction(msg) => {
