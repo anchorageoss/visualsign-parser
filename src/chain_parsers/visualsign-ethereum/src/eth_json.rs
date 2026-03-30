@@ -168,9 +168,7 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
             .unwrap_or(0);
 
         if gas_price == 0 {
-            log::warn!(
-                "Legacy transaction has gas_price=0; will not be mined on most networks"
-            );
+            log::warn!("Legacy transaction has gas_price=0; will not be mined on most networks");
         }
 
         Ok(TypedTransaction::Legacy(TxLegacy {
