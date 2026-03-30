@@ -638,12 +638,17 @@ mod tests {
 
     #[test]
     fn test_data_size_limit() {
-        let huge_hex = format!("0x{}", "aa".repeat(MAX_HEX_DATA_LEN));
+        // Construct hex data just over MAX_HEX_DATA_LEN, but keep overall JSON under
+        // MAX_JSON_INPUT_LEN so we hit the hex data-length guard, not the JSON size guard.
+        let over_limit_hex_len = MAX_HEX_DATA_LEN + 2;
+        let repeat_count = over_limit_hex_len / 2;
+        let huge_hex = format!("0x{}", "aa".repeat(repeat_count));
         let json = format!(r#"{{"type": "transaction", "chainId": "0x1", "data": "{huge_hex}"}}"#);
+        assert!(json.len() < MAX_JSON_INPUT_LEN);
         let err = decode_json_transaction(&json).unwrap_err();
         match err {
             EthereumParserError::FailedToParseJsonTransaction(msg) => {
-                assert!(msg.contains("too large"));
+                assert!(msg.contains("Hex data too large"));
             }
             _ => panic!("Expected FailedToParseJsonTransaction"),
         }
