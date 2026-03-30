@@ -5,5 +5,6 @@
   "nonce": "0x0",
   "gas": "0xc350",
   "gasPrice": "0x110c8f7d8de",
+  "chainId": "0x1",
   "data": "0x454e354d5154544630"
 }
