@@ -717,29 +717,38 @@ mod tests {
                 }
                 (
                     SignablePayloadField::AddressV2 {
+                        common: expected_common,
                         address_v2: expected_addr,
                         ..
                     },
                     SignablePayloadField::AddressV2 {
+                        common: actual_common,
                         address_v2: actual_addr,
                         ..
                     },
                 ) => {
+                    assert_eq!(expected_common.fallback_text, actual_common.fallback_text);
                     assert_eq!(expected_addr.address, actual_addr.address);
                     assert_eq!(expected_addr.asset_label, actual_addr.asset_label);
+                    assert_eq!(expected_addr.name, actual_addr.name);
+                    assert_eq!(expected_addr.memo, actual_addr.memo);
+                    assert_eq!(expected_addr.badge_text, actual_addr.badge_text);
                 }
                 (
                     SignablePayloadField::AmountV2 {
                         amount_v2: expected_amt,
+                        common: expected_common,
                         ..
                     },
                     SignablePayloadField::AmountV2 {
                         amount_v2: actual_amt,
+                        common: actual_common,
                         ..
                     },
                 ) => {
                     assert_eq!(expected_amt.amount, actual_amt.amount);
                     assert_eq!(expected_amt.abbreviation, actual_amt.abbreviation);
+                    assert_eq!(expected_common.fallback_text, actual_common.fallback_text);
                 }
                 _ => {
                     panic!(
@@ -1039,6 +1048,44 @@ mod tests {
             assert_eq!(amount_v2.amount, "1");
             assert_eq!(amount_v2.abbreviation.as_deref(), Some("POL"));
             assert_eq!(common.fallback_text, "1 POL");
+        } else {
+            panic!("Expected AmountV2 for Value field");
+        }
+    }
+
+    #[test]
+    fn test_unknown_chain_fee_symbol() {
+        // Unknown chain (999999) should have no fee-paying asset symbol:
+        // empty asset_label, no abbreviation, and value-only fallback text.
+        let tx = TypedTransaction::Legacy(TxLegacy {
+            chain_id: Some(ChainId::from(999999u64)),
+            nonce: 0,
+            gas_price: 1_000_000_000u128,
+            gas_limit: 21000,
+            to: alloy_primitives::TxKind::Call(Address::ZERO),
+            value: U256::from(1000000000000000000u64),
+            input: Bytes::new(),
+        });
+
+        let options = VisualSignOptions::default();
+        let payload = transaction_to_visual_sign(tx, options).unwrap();
+
+        let to_field = payload.fields.iter().find(|f| f.label() == "To").unwrap();
+        if let SignablePayloadField::AddressV2 { address_v2, .. } = to_field {
+            assert_eq!(address_v2.asset_label, "");
+        } else {
+            panic!("Expected AddressV2 for To field");
+        }
+
+        let value_field = payload
+            .fields
+            .iter()
+            .find(|f| f.label() == "Value")
+            .unwrap();
+        if let SignablePayloadField::AmountV2 { amount_v2, common } = value_field {
+            assert_eq!(amount_v2.amount, "1");
+            assert_eq!(amount_v2.abbreviation, None);
+            assert_eq!(common.fallback_text, "1");
         } else {
             panic!("Expected AmountV2 for Value field");
         }
