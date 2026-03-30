@@ -33,6 +33,7 @@ pub mod token_metadata;
 pub mod visualizer;
 
 #[derive(Debug, Eq, PartialEq, thiserror::Error)]
+#[non_exhaustive]
 pub enum EthereumParserError {
     #[error("Unexpected trailing data: {0}")]
     UnexpectedTrailingData(String),

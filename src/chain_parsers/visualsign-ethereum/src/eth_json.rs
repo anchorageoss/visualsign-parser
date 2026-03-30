@@ -30,8 +30,10 @@ pub(crate) enum EthJsonInput {
 }
 
 /// Ethereum transaction fields matching JSON-RPC `eth_sendTransaction` format.
-/// All fields are optional with sensible defaults. Numeric values are hex strings
-/// with optional `0x` prefix.
+/// All fields except `chainId` are optional with sensible defaults. `chainId`
+/// must always be provided and has no default; defaulting to mainnet is too
+/// dangerous for a signing service. Numeric values are hex strings with
+/// optional `0x` prefix.
 ///
 /// Uses `deny_unknown_fields` to reject typos (e.g., `"chainID"` vs `"chainId"`)
 /// that would silently fall back to defaults -- dangerous for a signing service.
@@ -124,7 +126,15 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
         None => DEFAULT_GAS_LIMIT,
     };
     let chain_id = match tx.chain_id.as_deref() {
-        Some(raw) => parse_hex_u64(raw)?,
+        Some(raw) => {
+            let parsed = parse_hex_u64(raw)?;
+            if parsed == 0 {
+                return Err(EthereumParserError::FailedToParseJsonTransaction(
+                    "'chainId' must be greater than 0".to_string(),
+                ));
+            }
+            parsed
+        }
         None => {
             return Err(EthereumParserError::FailedToParseJsonTransaction(
                 "'chainId' is required".to_string(),
@@ -492,6 +502,33 @@ mod tests {
             "type": "transaction",
             "gas": "0x",
             "chainId": "0x1"
+        }"#;
+        let err2 = decode_json_transaction(json2).unwrap_err();
+        assert!(matches!(
+            err2,
+            EthereumParserError::FailedToParseJsonTransaction(_)
+        ));
+    }
+
+    #[test]
+    fn test_chain_id_zero_rejected() {
+        let json = r#"{
+            "type": "transaction",
+            "chainId": "0x0"
+        }"#;
+        let err = decode_json_transaction(json).unwrap_err();
+        match err {
+            EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("chainId"));
+                assert!(msg.contains("greater than 0"));
+            }
+            _ => panic!("Expected FailedToParseJsonTransaction"),
+        }
+
+        // "0x" (empty hex) also parses to 0 and should be rejected
+        let json2 = r#"{
+            "type": "transaction",
+            "chainId": "0x"
         }"#;
         let err2 = decode_json_transaction(json2).unwrap_err();
         assert!(matches!(
