@@ -221,6 +221,7 @@ pub fn parse_network(input: &str) -> Option<String> {
 ///     metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
 ///         network_id: Some("POLYGON_MAINNET".to_string()),
 ///         abi: None,
+///         abi_mappings: Default::default(),
 ///     })),
 /// };
 ///

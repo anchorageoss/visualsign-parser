@@ -216,6 +216,15 @@ pub struct EthereumMetadata {
     pub network_id: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(message, optional, tag = "1")]
     pub abi: ::core::option::Option<Abi>,
+    /// Map of contract address to ABI definitions.
+    /// Contract addresses are expected to be 0x-prefixed, 20-byte hexadecimal Ethereum addresses.
+    /// Allows wallets to provide multiple ABIs, one per contract. Use a consistent address casing
+    /// convention (for example, all lowercase or EIP-55 checksummed) to avoid duplicate/mismatched entries.
+    #[prost(btree_map = "string, message", tag = "3")]
+    pub abi_mappings: ::prost::alloc::collections::BTreeMap<
+        ::prost::alloc::string::String,
+        Abi,
+    >,
 }
 #[cfg_attr(
     feature = "serde_derive",
@@ -233,8 +242,11 @@ pub struct SolanaMetadata {
     pub idl: ::core::option::Option<Idl>,
     /// Map of program_id (base58 string) to IDL definitions
     /// Allows wallet to provide multiple IDLs, one per program
-    #[prost(map = "string, message", tag = "3")]
-    pub idl_mappings: ::std::collections::HashMap<::prost::alloc::string::String, Idl>,
+    #[prost(btree_map = "string, message", tag = "3")]
+    pub idl_mappings: ::prost::alloc::collections::BTreeMap<
+        ::prost::alloc::string::String,
+        Idl,
+    >,
 }
 #[cfg_attr(
     feature = "serde_derive",
