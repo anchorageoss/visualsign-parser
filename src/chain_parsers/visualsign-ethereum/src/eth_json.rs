@@ -157,6 +157,12 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
             .transpose()?
             .unwrap_or(0);
 
+        if max_priority_fee_per_gas > max_fee_per_gas {
+            return Err(EthereumParserError::FailedToParseJsonTransaction(
+                "'maxPriorityFeePerGas' cannot exceed 'maxFeePerGas'".to_string(),
+            ));
+        }
+
         Ok(TypedTransaction::Eip1559(TxEip1559 {
             chain_id,
             nonce,
@@ -565,6 +571,24 @@ mod tests {
             EthereumParserError::FailedToParseJsonTransaction(msg) => {
                 assert!(msg.contains("maxPriorityFeePerGas"));
                 assert!(msg.contains("maxFeePerGas"));
+            }
+            _ => panic!("Expected FailedToParseJsonTransaction"),
+        }
+    }
+
+    #[test]
+    fn test_priority_fee_exceeds_max_fee_rejected() {
+        let json = r#"{
+            "type": "transaction",
+            "maxFeePerGas": "0x3b9aca00",
+            "maxPriorityFeePerGas": "0x4a817c800",
+            "chainId": "0x1"
+        }"#;
+        let err = decode_json_transaction(json).unwrap_err();
+        match err {
+            EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("maxPriorityFeePerGas"));
+                assert!(msg.contains("cannot exceed"));
             }
             _ => panic!("Expected FailedToParseJsonTransaction"),
         }
