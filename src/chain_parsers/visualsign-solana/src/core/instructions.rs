@@ -6,6 +6,7 @@ use solana_sdk::instruction::Instruction;
 use solana_sdk::transaction::Transaction as SolanaTransaction;
 use visualsign::AnnotatedPayloadField;
 use visualsign::errors::{TransactionParseError, VisualSignError};
+use visualsign::field_builders::create_diagnostic_field;
 
 // The following include! macro pulls in visualizer implementations generated at build time.
 // The file "generated_visualizers.rs" is created by the build script and contains code for
@@ -33,37 +34,66 @@ pub fn decode_instructions(
         ));
     }
 
-    // Convert compiled instructions to full instructions. Instructions with an
-    // out-of-bounds program_id_index are skipped entirely, while individual
-    // out-of-bounds account indices are silently omitted (same approach as v0 transaction handling).
-    let instructions: Vec<Instruction> = message
-        .instructions
-        .iter()
-        .filter_map(|ci| {
-            if (ci.program_id_index as usize) >= account_keys.len() {
-                return None;
-            }
-            let accounts: Vec<solana_sdk::instruction::AccountMeta> = ci
-                .accounts
-                .iter()
-                .filter_map(|&i| {
-                    if (i as usize) < account_keys.len() {
-                        Some(solana_sdk::instruction::AccountMeta::new_readonly(
-                            account_keys[i as usize],
-                            false,
-                        ))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            Some(Instruction {
-                program_id: account_keys[ci.program_id_index as usize],
-                accounts,
-                data: ci.data.clone(),
+    // Convert compiled instructions to full instructions, emitting diagnostics
+    // for out-of-bounds indices instead of silently dropping them.
+    let mut instructions: Vec<Instruction> = Vec::new();
+    let mut diagnostics: Vec<AnnotatedPayloadField> = Vec::new();
+
+    for (ci_index, ci) in message.instructions.iter().enumerate() {
+        if (ci.program_id_index as usize) >= account_keys.len() {
+            diagnostics.push(create_diagnostic_field(
+                "transaction::oob_program_id",
+                "transaction",
+                "warn",
+                &format!(
+                    "instruction {} skipped: program_id_index {} out of bounds ({} accounts)",
+                    ci_index,
+                    ci.program_id_index,
+                    account_keys.len()
+                ),
+                Some(ci_index as u32),
+            ));
+            continue;
+        }
+
+        let mut oob_account_indices: Vec<u8> = Vec::new();
+        let accounts: Vec<solana_sdk::instruction::AccountMeta> = ci
+            .accounts
+            .iter()
+            .filter_map(|&i| {
+                if (i as usize) < account_keys.len() {
+                    Some(solana_sdk::instruction::AccountMeta::new_readonly(
+                        account_keys[i as usize],
+                        false,
+                    ))
+                } else {
+                    oob_account_indices.push(i);
+                    None
+                }
             })
-        })
-        .collect();
+            .collect();
+
+        if !oob_account_indices.is_empty() {
+            diagnostics.push(create_diagnostic_field(
+                "transaction::oob_account_index",
+                "transaction",
+                "warn",
+                &format!(
+                    "instruction {}: account indices {:?} out of bounds ({} accounts)",
+                    ci_index,
+                    oob_account_indices,
+                    account_keys.len()
+                ),
+                Some(ci_index as u32),
+            ));
+        }
+
+        instructions.push(Instruction {
+            program_id: account_keys[ci.program_id_index as usize],
+            accounts,
+            data: ci.data.clone(),
+        });
+    }
 
     let results: Result<Vec<AnnotatedPayloadField>, VisualSignError> = instructions
         .iter()
@@ -91,7 +121,7 @@ pub fn decode_instructions(
         })
         .collect();
 
-    let fields = results?;
+    let mut fields = results?;
 
     // Self-check: ensure we have the same number of instruction fields as input instructions
     if fields.len() != instructions.len() {
@@ -101,6 +131,9 @@ pub fn decode_instructions(
             fields.len()
         )));
     }
+
+    // Append diagnostics after instruction fields
+    fields.extend(diagnostics);
 
     Ok(fields)
 }
