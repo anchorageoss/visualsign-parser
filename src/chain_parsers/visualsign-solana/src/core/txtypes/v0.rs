@@ -162,6 +162,7 @@ pub fn decode_v0_instructions(
     let mut diagnostics: Vec<AnnotatedPayloadField> = Vec::new();
     let mut oob_program_id_count: usize = 0;
     let mut oob_account_index_count: usize = 0;
+    let mut oob_account_index_in_skipped_count: usize = 0;
 
     let oob_pid_severity = lint_config.severity_for(
         "transaction::oob_program_id",
@@ -169,6 +170,10 @@ pub fn decode_v0_instructions(
     );
     let oob_acct_severity = lint_config.severity_for(
         "transaction::oob_account_index",
+        visualsign::lint::Severity::Warn,
+    );
+    let oob_acct_skipped_severity = lint_config.severity_for(
+        "transaction::oob_account_index_in_skipped_instruction",
         visualsign::lint::Severity::Warn,
     );
 
@@ -188,6 +193,32 @@ pub fn decode_v0_instructions(
                     ),
                     Some(ci_index as u32),
                 ));
+            }
+            // Even though this instruction is skipped, check its account indices
+            // under a separate rule so the oob_account_index_in_skipped_instruction
+            // rule can attest they were examined.
+            let mut skipped_oob: Vec<u8> = Vec::new();
+            for &i in ci.accounts.iter() {
+                if (i as usize) >= account_keys.len() {
+                    skipped_oob.push(i);
+                }
+            }
+            if !skipped_oob.is_empty() {
+                oob_account_index_in_skipped_count += 1;
+                if !matches!(oob_acct_skipped_severity, visualsign::lint::Severity::Allow) {
+                    diagnostics.push(create_diagnostic_field(
+                        "transaction::oob_account_index_in_skipped_instruction",
+                        "transaction",
+                        oob_acct_skipped_severity.as_str(),
+                        &format!(
+                            "instruction {} (skipped): account indices {:?} reference lookup table accounts ({} static keys)",
+                            ci_index,
+                            skipped_oob,
+                            account_keys.len()
+                        ),
+                        Some(ci_index as u32),
+                    ));
+                }
             }
             continue;
         }
@@ -253,7 +284,21 @@ pub fn decode_v0_instructions(
             "ok",
             &format!(
                 "all {} instructions have valid account indices",
-                v0_message.instructions.len()
+                instructions.len()
+            ),
+            None,
+        ));
+    }
+    if oob_account_index_in_skipped_count == 0
+        && lint_config
+            .should_report_ok("transaction::oob_account_index_in_skipped_instruction")
+    {
+        diagnostics.push(create_diagnostic_field(
+            "transaction::oob_account_index_in_skipped_instruction",
+            "transaction",
+            "ok",
+            &format!(
+                "all {oob_program_id_count} skipped instructions have valid account indices"
             ),
             None,
         ));
@@ -458,4 +503,187 @@ pub fn create_address_lookup_table_field(
             expanded: Some(expanded_list),
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solana_sdk::pubkey::Pubkey;
+    use visualsign::SignablePayloadField;
+    use visualsign::lint::LintConfig;
+
+    fn v0_message_with_oob_program_id() -> solana_sdk::message::v0::Message {
+        let key0 = Pubkey::new_unique();
+        let key1 = Pubkey::new_unique();
+        solana_sdk::message::v0::Message {
+            header: solana_sdk::message::MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys: vec![key0, key1],
+            recent_blockhash: solana_sdk::hash::Hash::default(),
+            instructions: vec![
+                solana_sdk::instruction::CompiledInstruction {
+                    program_id_index: 1,
+                    accounts: vec![0],
+                    data: vec![0xAA],
+                },
+                solana_sdk::instruction::CompiledInstruction {
+                    program_id_index: 99, // OOB: only 2 static keys
+                    accounts: vec![0],
+                    data: vec![0xBB],
+                },
+            ],
+            address_table_lookups: vec![],
+        }
+    }
+
+    fn v0_message_with_oob_program_id_and_oob_account() -> solana_sdk::message::v0::Message {
+        let key0 = Pubkey::new_unique();
+        let key1 = Pubkey::new_unique();
+        solana_sdk::message::v0::Message {
+            header: solana_sdk::message::MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys: vec![key0, key1],
+            recent_blockhash: solana_sdk::hash::Hash::default(),
+            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 99, // OOB
+                accounts: vec![0, 88], // 88 is also OOB
+                data: vec![0xCC],
+            }],
+            address_table_lookups: vec![],
+        }
+    }
+
+    #[test]
+    fn test_v0_oob_program_id_emits_diagnostic() {
+        let msg = v0_message_with_oob_program_id();
+        let registry = crate::idl::IdlRegistry::new();
+        let config = LintConfig::default();
+        let result = decode_v0_instructions(&msg, &registry, &config);
+        let fields = [result.fields, result.diagnostics].concat();
+
+        let warns: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. }
+                    if diagnostic.level == "warn" =>
+                {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(warns.len(), 1);
+        assert_eq!(warns[0].rule, "transaction::oob_program_id");
+        assert_eq!(warns[0].instruction_index, Some(1));
+
+        let passes: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. } if diagnostic.level == "ok" => {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(passes.iter().any(|d| d.rule == "transaction::oob_account_index"));
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
+        );
+    }
+
+    #[test]
+    fn test_v0_oob_program_id_and_oob_account_index_emits_both_diagnostics() {
+        let msg = v0_message_with_oob_program_id_and_oob_account();
+        let registry = crate::idl::IdlRegistry::new();
+        let config = LintConfig::default();
+        let result = decode_v0_instructions(&msg, &registry, &config);
+        let fields = [result.fields, result.diagnostics].concat();
+
+        let warns: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. }
+                    if diagnostic.level == "warn" =>
+                {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(warns.len(), 2);
+        assert!(warns.iter().any(|d| d.rule == "transaction::oob_program_id"));
+        assert!(
+            warns
+                .iter()
+                .any(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
+        );
+        let skipped_warn = warns
+            .iter()
+            .find(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
+            .unwrap();
+        assert_eq!(skipped_warn.instruction_index, Some(0));
+        assert!(skipped_warn.message.contains("88"));
+
+        let passes: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. } if diagnostic.level == "ok" => {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(passes.iter().any(|d| d.rule == "transaction::oob_account_index"));
+    }
+
+    #[test]
+    fn test_v0_valid_transaction_emits_three_pass_diagnostics() {
+        let key0 = Pubkey::new_unique();
+        let key1 = Pubkey::new_unique();
+        let msg = solana_sdk::message::v0::Message {
+            header: solana_sdk::message::MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys: vec![key0, key1],
+            recent_blockhash: solana_sdk::hash::Hash::default(),
+            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0],
+                data: vec![0xDD],
+            }],
+            address_table_lookups: vec![],
+        };
+        let registry = crate::idl::IdlRegistry::new();
+        let config = LintConfig::default();
+        let result = decode_v0_instructions(&msg, &registry, &config);
+        let fields = [result.fields, result.diagnostics].concat();
+
+        let passes: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. } if diagnostic.level == "ok" => {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(passes.len(), 3);
+        assert!(passes.iter().any(|d| d.rule == "transaction::oob_program_id"));
+        assert!(passes.iter().any(|d| d.rule == "transaction::oob_account_index"));
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
+        );
+    }
 }

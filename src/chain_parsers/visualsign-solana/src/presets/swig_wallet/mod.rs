@@ -2302,8 +2302,8 @@ mod tests {
 
         assert_eq!(
             payload.fields.len(),
-            5,
-            "Expected five top-level fields (network, instruction, accounts, 2 pass diagnostics)"
+            6,
+            "Expected six top-level fields (network, instruction, accounts, 3 pass diagnostics)"
         );
 
         // Network field
@@ -2435,8 +2435,8 @@ mod tests {
 
         assert_eq!(
             payload.fields.len(),
-            7,
-            "Expected seven top-level fields (network + 3 instructions + accounts + 2 pass diagnostics)"
+            8,
+            "Expected eight top-level fields (network + 3 instructions + accounts + 3 pass diagnostics)"
         );
 
         // Instruction 1 - Compute budget
