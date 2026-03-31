@@ -60,6 +60,7 @@ pub fn decode_instructions(
     let mut diagnostics: Vec<AnnotatedPayloadField> = Vec::new();
     let mut oob_program_id_count: usize = 0;
     let mut oob_account_index_count: usize = 0;
+    let mut oob_account_index_in_skipped_count: usize = 0;
 
     let oob_pid_severity = lint_config.severity_for(
         "transaction::oob_program_id",
@@ -67,6 +68,10 @@ pub fn decode_instructions(
     );
     let oob_acct_severity = lint_config.severity_for(
         "transaction::oob_account_index",
+        visualsign::lint::Severity::Warn,
+    );
+    let oob_acct_skipped_severity = lint_config.severity_for(
+        "transaction::oob_account_index_in_skipped_instruction",
         visualsign::lint::Severity::Warn,
     );
 
@@ -86,6 +91,32 @@ pub fn decode_instructions(
                     ),
                     Some(ci_index as u32),
                 ));
+            }
+            // Even though this instruction is skipped, check its account indices
+            // under a separate rule so the oob_account_index_in_skipped_instruction
+            // rule can attest they were examined.
+            let mut skipped_oob: Vec<u8> = Vec::new();
+            for &i in ci.accounts.iter() {
+                if (i as usize) >= account_keys.len() {
+                    skipped_oob.push(i);
+                }
+            }
+            if !skipped_oob.is_empty() {
+                oob_account_index_in_skipped_count += 1;
+                if !matches!(oob_acct_skipped_severity, visualsign::lint::Severity::Allow) {
+                    diagnostics.push(create_diagnostic_field(
+                        "transaction::oob_account_index_in_skipped_instruction",
+                        "transaction",
+                        oob_acct_skipped_severity.as_str(),
+                        &format!(
+                            "instruction {} (skipped): account indices {:?} out of bounds ({} accounts)",
+                            ci_index,
+                            skipped_oob,
+                            account_keys.len()
+                        ),
+                        Some(ci_index as u32),
+                    ));
+                }
             }
             continue;
         }
@@ -154,7 +185,21 @@ pub fn decode_instructions(
             "ok",
             &format!(
                 "all {} instructions have valid account indices",
-                message.instructions.len()
+                instructions.len()
+            ),
+            None,
+        ));
+    }
+    if oob_account_index_in_skipped_count == 0
+        && lint_config
+            .should_report_ok("transaction::oob_account_index_in_skipped_instruction")
+    {
+        diagnostics.push(create_diagnostic_field(
+            "transaction::oob_account_index_in_skipped_instruction",
+            "transaction",
+            "ok",
+            &format!(
+                "all {oob_program_id_count} skipped instructions have valid account indices"
             ),
             None,
         ));
@@ -369,7 +414,8 @@ mod tests {
         assert_eq!(warns[0].rule, "transaction::oob_program_id");
         assert_eq!(warns[0].instruction_index, Some(1));
 
-        // oob_account_index should pass since the valid instruction has valid accounts
+        // oob_account_index and oob_account_index_in_skipped_instruction should pass
+        // since all instructions (including the skipped one) have valid account indices
         let passes: Vec<_> = fields
             .iter()
             .filter_map(|f| match &f.signable_payload_field {
@@ -383,6 +429,11 @@ mod tests {
             passes
                 .iter()
                 .any(|d| d.rule == "transaction::oob_account_index")
+        );
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
         );
 
         let non_diagnostics: Vec<_> = fields
@@ -475,8 +526,8 @@ mod tests {
                 _ => None,
             })
             .collect();
-        // Both rules should report pass
-        assert_eq!(passes.len(), 2);
+        // All three rules should report pass
+        assert_eq!(passes.len(), 3);
         assert!(
             passes
                 .iter()
@@ -486,6 +537,11 @@ mod tests {
             passes
                 .iter()
                 .any(|d| d.rule == "transaction::oob_account_index")
+        );
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
         );
 
         let warns: Vec<_> = fields
@@ -503,5 +559,69 @@ mod tests {
             warns.is_empty(),
             "valid transaction should have no warnings"
         );
+    }
+
+    #[test]
+    fn test_oob_program_id_and_oob_account_index_emits_both_diagnostics() {
+        // Instruction has both an OOB program_id_index and OOB account indices.
+        // The new rule fires to attest that account indices in skipped instructions
+        // are also examined.
+        let key0 = Pubkey::new_unique();
+        let key1 = Pubkey::new_unique();
+        let message = Message {
+            header: MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys: vec![key0, key1],
+            recent_blockhash: Hash::default(),
+            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 99, // OOB: only 2 keys
+                accounts: vec![0, 77], // index 77 is also OOB
+                data: vec![0xEE],
+            }],
+        };
+        let tx = SolanaTransaction {
+            signatures: vec![],
+            message,
+        };
+        let registry = IdlRegistry::new();
+        let config = LintConfig::default();
+        let result = decode_instructions(&tx, &registry, &config);
+        let fields = [result.fields, result.diagnostics].concat();
+
+        let warns: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. }
+                    if diagnostic.level == "warn" =>
+                {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(warns.len(), 2, "expected oob_program_id and oob_account_index_in_skipped_instruction warns");
+        assert!(warns.iter().any(|d| d.rule == "transaction::oob_program_id"));
+        assert!(warns.iter().any(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction"));
+        let skipped_warn = warns
+            .iter()
+            .find(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
+            .unwrap();
+        assert_eq!(skipped_warn.instruction_index, Some(0));
+        assert!(skipped_warn.message.contains("77"), "message should mention the OOB index 77");
+
+        // oob_account_index (for non-skipped instructions) should report ok
+        let passes: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. } if diagnostic.level == "ok" => {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(passes.iter().any(|d| d.rule == "transaction::oob_account_index"));
     }
 }
