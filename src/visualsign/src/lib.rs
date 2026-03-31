@@ -205,6 +205,14 @@ pub enum SignablePayloadField {
         #[serde(rename = "Unknown")]
         unknown: SignablePayloadFieldUnknown,
     },
+
+    #[serde(rename = "diagnostic")]
+    Diagnostic {
+        #[serde(flatten)]
+        common: SignablePayloadFieldCommon,
+        #[serde(rename = "Diagnostic")]
+        diagnostic: SignablePayloadFieldDiagnostic,
+    },
 }
 
 // Trait to ensure all SignablePayloadField variants implement serialization correctly
@@ -288,6 +296,17 @@ impl FieldSerializer for SignablePayloadField {
             SignablePayloadField::Unknown { common, unknown } => {
                 serialize_field_variant!(fields, "unknown", common, ("Unknown", unknown));
             }
+            SignablePayloadField::Diagnostic {
+                common,
+                diagnostic,
+            } => {
+                serialize_field_variant!(
+                    fields,
+                    "diagnostic",
+                    common,
+                    ("Diagnostic", diagnostic)
+                );
+            }
         }
 
         // Convert to BTreeMap for alphabetical ordering
@@ -309,6 +328,7 @@ impl FieldSerializer for SignablePayloadField {
             SignablePayloadField::PreviewLayout { .. } => base_fields.push("PreviewLayout"),
             SignablePayloadField::ListLayout { .. } => base_fields.push("ListLayout"),
             SignablePayloadField::Unknown { .. } => base_fields.push("Unknown"),
+            SignablePayloadField::Diagnostic { .. } => base_fields.push("Diagnostic"),
         }
 
         base_fields.sort();
@@ -381,6 +401,7 @@ impl SignablePayloadField {
             SignablePayloadField::PreviewLayout { common, .. } => &common.fallback_text,
             SignablePayloadField::ListLayout { common, .. } => &common.fallback_text,
             SignablePayloadField::Unknown { common, .. } => &common.fallback_text,
+            SignablePayloadField::Diagnostic { common, .. } => &common.fallback_text,
         }
     }
 
@@ -397,6 +418,7 @@ impl SignablePayloadField {
             SignablePayloadField::PreviewLayout { common, .. } => &common.label,
             SignablePayloadField::ListLayout { common, .. } => &common.label,
             SignablePayloadField::Unknown { common, .. } => &common.label,
+            SignablePayloadField::Diagnostic { common, .. } => &common.label,
         }
     }
 
@@ -413,6 +435,7 @@ impl SignablePayloadField {
             SignablePayloadField::PreviewLayout { .. } => "preview_layout",
             SignablePayloadField::ListLayout { .. } => "list_layout",
             SignablePayloadField::Unknown { .. } => "unknown",
+            SignablePayloadField::Diagnostic { .. } => "diagnostic",
         }
     }
 }
@@ -599,6 +622,47 @@ pub struct SignablePayloadFieldUnknown {
 
 // Implement DeterministicOrdering for SignablePayloadFieldUnknown
 impl DeterministicOrdering for SignablePayloadFieldUnknown {}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SignablePayloadFieldDiagnostic {
+    #[serde(rename = "Rule")]
+    pub rule: String,
+    #[serde(rename = "Domain")]
+    pub domain: String,
+    #[serde(rename = "Level")]
+    pub level: String,
+    #[serde(rename = "Message")]
+    pub message: String,
+    #[serde(rename = "InstructionIndex", skip_serializing_if = "Option::is_none")]
+    pub instruction_index: Option<u32>,
+}
+
+impl Serialize for SignablePayloadFieldDiagnostic {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        use std::collections::BTreeMap;
+
+        let mut map = BTreeMap::new();
+        map.insert("Domain", serde_json::to_value(&self.domain).unwrap());
+        if let Some(ref idx) = self.instruction_index {
+            map.insert("InstructionIndex", serde_json::to_value(idx).unwrap());
+        }
+        map.insert("Level", serde_json::to_value(&self.level).unwrap());
+        map.insert("Message", serde_json::to_value(&self.message).unwrap());
+        map.insert("Rule", serde_json::to_value(&self.rule).unwrap());
+
+        let mut map_ser = serializer.serialize_map(Some(map.len()))?;
+        for (k, v) in &map {
+            map_ser.serialize_entry(k, v)?;
+        }
+        map_ser.end()
+    }
+}
+
+impl DeterministicOrdering for SignablePayloadFieldDiagnostic {}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SignablePayloadFieldStaticAnnotation {
