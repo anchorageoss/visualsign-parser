@@ -929,9 +929,10 @@ fn summarize_visualized_field(field: &AnnotatedPayloadField) -> Option<String> {
                 Some(address_v2.address.clone())
             }
         }
-        ListLayout { common, .. } | Divider { common, .. } | Unknown { common, .. } => {
-            fallback_summary(common)
-        }
+        ListLayout { common, .. }
+        | Divider { common, .. }
+        | Unknown { common, .. }
+        | Diagnostic { common, .. } => fallback_summary(common),
     }
 }
 
