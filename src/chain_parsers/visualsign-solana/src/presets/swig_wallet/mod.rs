@@ -2302,8 +2302,8 @@ mod tests {
 
         assert_eq!(
             payload.fields.len(),
-            3,
-            "Expected three top-level fields (network, instruction, accounts)"
+            5,
+            "Expected five top-level fields (network, instruction, accounts, 2 pass diagnostics)"
         );
 
         // Network field
@@ -2389,7 +2389,7 @@ mod tests {
         );
         assert_text_field(expanded_fields, "Actions (hex)", "0700000008000000");
 
-        // Accounts field
+        // Accounts field (diagnostics are appended after accounts)
         match &payload.fields[2] {
             SignablePayloadField::PreviewLayout {
                 common,
@@ -2435,8 +2435,8 @@ mod tests {
 
         assert_eq!(
             payload.fields.len(),
-            5,
-            "Expected five top-level fields (network + 3 instructions + accounts)"
+            7,
+            "Expected seven top-level fields (network + 3 instructions + accounts + 2 pass diagnostics)"
         );
 
         // Instruction 1 - Compute budget

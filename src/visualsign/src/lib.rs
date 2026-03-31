@@ -5,6 +5,7 @@ use serde_json::Value;
 pub mod encodings;
 pub mod errors;
 pub mod field_builders;
+pub mod lint;
 pub mod registry;
 pub mod test_utils;
 pub mod vsptrait;

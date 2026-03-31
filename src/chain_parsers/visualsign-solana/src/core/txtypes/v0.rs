@@ -115,10 +115,22 @@ pub fn decode_v0_transfers(
 
 /// Decode V0 transaction instructions using the visualizer framework
 /// This works for all V0 transactions, including those with lookup tables
+/// Result of decoding v0 instructions: display fields, per-instruction errors,
+/// and lint diagnostics separately. The function always succeeds — individual
+/// instruction failures are captured in `errors` rather than aborting the parse.
+pub struct DecodeV0InstructionsResult {
+    pub fields: Vec<AnnotatedPayloadField>,
+    pub errors: Vec<(usize, VisualSignError)>,
+    pub diagnostics: Vec<AnnotatedPayloadField>,
+}
+
+/// Always succeeds — data quality issues become diagnostics, per-instruction
+/// failures are collected in errors.
 pub fn decode_v0_instructions(
     v0_message: &solana_sdk::message::v0::Message,
     idl_registry: &crate::idl::IdlRegistry,
-) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    lint_config: &visualsign::lint::LintConfig,
+) -> DecodeV0InstructionsResult {
     // Get visualizers
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
     let visualizers_refs: Vec<&dyn InstructionVisualizer> =
@@ -130,32 +142,53 @@ pub fn decode_v0_instructions(
     let account_keys = &v0_message.account_keys;
 
     if account_keys.is_empty() {
-        return Err(VisualSignError::ParseError(
-            visualsign::vsptrait::TransactionParseError::DecodeError(
-                "V0 transaction has no account keys".to_string(),
-            ),
-        ));
+        return DecodeV0InstructionsResult {
+            fields: Vec::new(),
+            errors: Vec::new(),
+            diagnostics: vec![create_diagnostic_field(
+                "transaction::empty_account_keys",
+                "transaction",
+                "error",
+                "v0 transaction has no account keys",
+                None,
+            )],
+        };
     }
 
     // Convert compiled instructions to full instructions, emitting diagnostics
     // for indices that reference lookup table accounts (unresolvable without on-chain data).
+    // Every rule always reports (pass or warn), providing boot-metric-style attestation.
     let mut instructions: Vec<Instruction> = Vec::new();
     let mut diagnostics: Vec<AnnotatedPayloadField> = Vec::new();
+    let mut oob_program_id_count: usize = 0;
+    let mut oob_account_index_count: usize = 0;
+
+    let oob_pid_severity = lint_config.severity_for(
+        "transaction::oob_program_id",
+        visualsign::lint::Severity::Warn,
+    );
+    let oob_acct_severity = lint_config.severity_for(
+        "transaction::oob_account_index",
+        visualsign::lint::Severity::Warn,
+    );
 
     for (ci_index, ci) in v0_message.instructions.iter().enumerate() {
         if (ci.program_id_index as usize) >= account_keys.len() {
-            diagnostics.push(create_diagnostic_field(
-                "transaction::oob_program_id",
-                "transaction",
-                "warn",
-                &format!(
-                    "instruction {} skipped: program_id_index {} references a lookup table account ({} static keys)",
-                    ci_index,
-                    ci.program_id_index,
-                    account_keys.len()
-                ),
-                Some(ci_index as u32),
-            ));
+            oob_program_id_count += 1;
+            if !matches!(oob_pid_severity, visualsign::lint::Severity::Allow) {
+                diagnostics.push(create_diagnostic_field(
+                    "transaction::oob_program_id",
+                    "transaction",
+                    oob_pid_severity.as_str(),
+                    &format!(
+                        "instruction {} skipped: program_id_index {} references a lookup table account ({} static keys)",
+                        ci_index,
+                        ci.program_id_index,
+                        account_keys.len()
+                    ),
+                    Some(ci_index as u32),
+                ));
+            }
             continue;
         }
 
@@ -174,18 +207,21 @@ pub fn decode_v0_instructions(
             .collect();
 
         if !oob_account_indices.is_empty() {
-            diagnostics.push(create_diagnostic_field(
-                "transaction::oob_account_index",
-                "transaction",
-                "warn",
-                &format!(
-                    "instruction {}: account indices {:?} reference lookup table accounts ({} static keys)",
-                    ci_index,
-                    oob_account_indices,
-                    account_keys.len()
-                ),
-                Some(ci_index as u32),
-            ));
+            oob_account_index_count += 1;
+            if !matches!(oob_acct_severity, visualsign::lint::Severity::Allow) {
+                diagnostics.push(create_diagnostic_field(
+                    "transaction::oob_account_index",
+                    "transaction",
+                    oob_acct_severity.as_str(),
+                    &format!(
+                        "instruction {}: account indices {:?} reference lookup table accounts ({} static keys)",
+                        ci_index,
+                        oob_account_indices,
+                        account_keys.len()
+                    ),
+                    Some(ci_index as u32),
+                ));
+            }
         }
 
         instructions.push(Instruction {
@@ -195,29 +231,66 @@ pub fn decode_v0_instructions(
         });
     }
 
+    // Emit pass diagnostics when all checks passed (boot-metric-style attestation)
+    if oob_program_id_count == 0 && lint_config.should_report_ok("transaction::oob_program_id") {
+        diagnostics.push(create_diagnostic_field(
+            "transaction::oob_program_id",
+            "transaction",
+            "ok",
+            &format!(
+                "all {} instructions have valid program_id_index",
+                v0_message.instructions.len()
+            ),
+            None,
+        ));
+    }
+    if oob_account_index_count == 0
+        && lint_config.should_report_ok("transaction::oob_account_index")
+    {
+        diagnostics.push(create_diagnostic_field(
+            "transaction::oob_account_index",
+            "transaction",
+            "ok",
+            &format!(
+                "all {} instructions have valid account indices",
+                v0_message.instructions.len()
+            ),
+            None,
+        ));
+    }
+
     // Process each instruction with the visualizer framework
-    let results: Result<Vec<AnnotatedPayloadField>, VisualSignError> = instructions
-        .iter()
-        .enumerate()
-        .filter_map(|(instruction_index, _)| {
-            let sender = SolanaAccount {
-                account_key: account_keys[0].to_string(),
-                signer: false,
-                writable: false,
-            };
+    let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
+    let mut errors: Vec<(usize, VisualSignError)> = Vec::new();
 
-            visualize_with_any(
-                &visualizers_refs,
-                &VisualizerContext::new(&sender, instruction_index, &instructions, idl_registry),
-            )
-        })
-        .map(|res| res.map(|viz_result| viz_result.field))
-        .collect();
+    for (instruction_index, instruction) in instructions.iter().enumerate() {
+        let sender = SolanaAccount {
+            account_key: account_keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
 
-    let mut fields = results?;
-    fields.extend(diagnostics);
+        match visualize_with_any(
+            &visualizers_refs,
+            &VisualizerContext::new(&sender, instruction_index, &instructions, idl_registry),
+        ) {
+            Some(Ok(viz_result)) => fields.push(viz_result.field),
+            Some(Err(e)) => errors.push((instruction_index, e)),
+            None => errors.push((
+                instruction_index,
+                VisualSignError::DecodeError(format!(
+                    "No visualizer available for instruction {} at index {}",
+                    instruction.program_id, instruction_index
+                )),
+            )),
+        }
+    }
 
-    Ok(fields)
+    DecodeV0InstructionsResult {
+        fields,
+        errors,
+        diagnostics,
+    }
 }
 
 /// Create a rich address lookup table field with detailed information

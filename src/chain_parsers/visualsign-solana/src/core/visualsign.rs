@@ -244,8 +244,11 @@ fn convert_to_visual_sign_payload(
     }
 
     // Process instructions with visualizers (pass IDL registry for future use)
+    let lint_config = visualsign::lint::LintConfig::default();
+    let decode_result = instructions::decode_instructions(transaction, &idl_registry, &lint_config);
     fields.extend(
-        instructions::decode_instructions(transaction, &idl_registry)?
+        decode_result
+            .fields
             .iter()
             .map(|e| e.signable_payload_field.clone()),
     );
@@ -257,6 +260,14 @@ fn convert_to_visual_sign_payload(
     let preview_layout_advanced = create_accounts_advanced_preview_layout("Accounts", &accounts)?;
     // Add Accounts field at the bottom using PreviewLayout instead of ListLayout
     fields.push(preview_layout_advanced);
+
+    // Append diagnostics after all display fields
+    fields.extend(
+        decode_result
+            .diagnostics
+            .iter()
+            .map(|e| e.signable_payload_field.clone()),
+    );
 
     Ok(SignablePayload::new(
         0,
@@ -328,29 +339,15 @@ fn convert_v0_to_visual_sign_payload(
 
     // Directly process V0 instructions using the visualizer framework
     // This approach works for all V0 transactions, including those with lookup tables
-    match decode_v0_instructions(v0_message, &idl_registry) {
-        Ok(instruction_fields) => {
-            for (index, instruction_field) in instruction_fields.iter().enumerate() {
-                tracing::debug!(
-                    "Handling instruction {} with visualizer {:?}",
-                    index,
-                    "V0 Instruction"
-                );
-                fields.push(instruction_field.signable_payload_field.clone());
-            }
-        }
-        Err(e) => {
-            // Add a note about instruction decoding failure
-            fields.push(SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: format!("Instruction decoding failed: {e}"),
-                    label: "Instruction Decoding Note".to_string(),
-                },
-                text_v2: visualsign::SignablePayloadFieldTextV2 {
-                    text: format!("Instruction decoding failed: {e}"),
-                },
-            });
-        }
+    let lint_config = visualsign::lint::LintConfig::default();
+    let v0_result = decode_v0_instructions(v0_message, &idl_registry, &lint_config);
+    for (index, instruction_field) in v0_result.fields.iter().enumerate() {
+        tracing::debug!(
+            "Handling instruction {} with visualizer {:?}",
+            index,
+            "V0 Instruction"
+        );
+        fields.push(instruction_field.signable_payload_field.clone());
     }
 
     // Process V0 transfer decoding using solana-parser
@@ -381,6 +378,14 @@ fn convert_v0_to_visual_sign_payload(
     // Add Accounts field at the bottom using PreviewLayout instead of ListLayout
     let preview_layout_advanced = create_accounts_advanced_preview_layout("Accounts", &accounts)?;
     fields.push(preview_layout_advanced);
+
+    // Append diagnostics after all display fields
+    fields.extend(
+        v0_result
+            .diagnostics
+            .iter()
+            .map(|e| e.signable_payload_field.clone()),
+    );
 
     Ok(SignablePayload::new(
         0,
