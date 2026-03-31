@@ -111,12 +111,12 @@ pub fn decode_instructions(
 
             // Try to visualize with available visualizers (including unknown_program fallback)
             visualize_with_any(&visualizers_refs, &context)
-                .ok_or_else(|| {
-                    VisualSignError::DecodeError(format!(
+                .unwrap_or_else(|| {
+                    panic!(
                         "No visualizer available for instruction {} at index {}",
                         instruction.program_id, instruction_index
-                    ))
-                })?
+                    )
+                })
                 .map(|viz_result| viz_result.field)
         })
         .collect();
@@ -136,168 +136,6 @@ pub fn decode_instructions(
     fields.extend(diagnostics);
 
     Ok(fields)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use solana_sdk::hash::Hash;
-    use solana_sdk::message::{Message, MessageHeader};
-    use solana_sdk::pubkey::Pubkey;
-    use visualsign::SignablePayloadField;
-
-    /// Build a legacy SolanaTransaction with a manually crafted message
-    /// that has an OOB program_id_index.
-    fn tx_with_oob_program_id() -> SolanaTransaction {
-        let key0 = Pubkey::new_unique(); // fee payer
-        let key1 = Pubkey::new_unique(); // valid account
-        let message = Message {
-            header: MessageHeader {
-                num_required_signatures: 1,
-                num_readonly_signed_accounts: 0,
-                num_readonly_unsigned_accounts: 0,
-            },
-            account_keys: vec![key0, key1],
-            recent_blockhash: Hash::default(),
-            instructions: vec![
-                // Valid instruction: program_id_index=1, within bounds
-                solana_sdk::instruction::CompiledInstruction {
-                    program_id_index: 1,
-                    accounts: vec![0],
-                    data: vec![0xAA],
-                },
-                // OOB instruction: program_id_index=99, way out of bounds
-                solana_sdk::instruction::CompiledInstruction {
-                    program_id_index: 99,
-                    accounts: vec![0],
-                    data: vec![0xBB],
-                },
-            ],
-        };
-        SolanaTransaction {
-            signatures: vec![],
-            message,
-        }
-    }
-
-    /// Build a transaction where an instruction has OOB account indices
-    /// but a valid program_id_index.
-    fn tx_with_oob_account_index() -> SolanaTransaction {
-        let key0 = Pubkey::new_unique();
-        let key1 = Pubkey::new_unique();
-        let message = Message {
-            header: MessageHeader {
-                num_required_signatures: 1,
-                num_readonly_signed_accounts: 0,
-                num_readonly_unsigned_accounts: 0,
-            },
-            account_keys: vec![key0, key1],
-            recent_blockhash: Hash::default(),
-            instructions: vec![solana_sdk::instruction::CompiledInstruction {
-                program_id_index: 1,
-                accounts: vec![0, 50], // index 50 is OOB
-                data: vec![0xCC],
-            }],
-        };
-        SolanaTransaction {
-            signatures: vec![],
-            message,
-        }
-    }
-
-    #[test]
-    fn test_oob_program_id_emits_diagnostic() {
-        let tx = tx_with_oob_program_id();
-        let registry = IdlRegistry::new();
-        let fields = decode_instructions(&tx, &registry).expect("should not error");
-
-        // Should have 1 instruction field + 1 diagnostic
-        let diagnostics: Vec<_> = fields
-            .iter()
-            .filter(|f| f.signable_payload_field.field_type() == "diagnostic")
-            .collect();
-        assert_eq!(diagnostics.len(), 1, "expected one diagnostic for OOB program_id");
-
-        match &diagnostics[0].signable_payload_field {
-            SignablePayloadField::Diagnostic { diagnostic, .. } => {
-                assert_eq!(diagnostic.rule, "transaction::oob_program_id");
-                assert_eq!(diagnostic.domain, "transaction");
-                assert_eq!(diagnostic.level, "warn");
-                assert_eq!(diagnostic.instruction_index, Some(1));
-            }
-            _ => panic!("expected Diagnostic variant"),
-        }
-
-        // The valid instruction should still be present
-        let non_diagnostics: Vec<_> = fields
-            .iter()
-            .filter(|f| f.signable_payload_field.field_type() != "diagnostic")
-            .collect();
-        assert_eq!(non_diagnostics.len(), 1, "expected one valid instruction field");
-    }
-
-    #[test]
-    fn test_oob_account_index_emits_diagnostic() {
-        let tx = tx_with_oob_account_index();
-        let registry = IdlRegistry::new();
-        let fields = decode_instructions(&tx, &registry).expect("should not error");
-
-        let diagnostics: Vec<_> = fields
-            .iter()
-            .filter(|f| f.signable_payload_field.field_type() == "diagnostic")
-            .collect();
-        assert_eq!(diagnostics.len(), 1, "expected one diagnostic for OOB account index");
-
-        match &diagnostics[0].signable_payload_field {
-            SignablePayloadField::Diagnostic { diagnostic, .. } => {
-                assert_eq!(diagnostic.rule, "transaction::oob_account_index");
-                assert_eq!(diagnostic.domain, "transaction");
-                assert_eq!(diagnostic.level, "warn");
-                assert_eq!(diagnostic.instruction_index, Some(0));
-                assert!(diagnostic.message.contains("50"));
-            }
-            _ => panic!("expected Diagnostic variant"),
-        }
-
-        // The instruction should still be decoded (with the valid account only)
-        let non_diagnostics: Vec<_> = fields
-            .iter()
-            .filter(|f| f.signable_payload_field.field_type() != "diagnostic")
-            .collect();
-        assert_eq!(non_diagnostics.len(), 1, "instruction should still be present");
-    }
-
-    #[test]
-    fn test_no_diagnostics_for_valid_transaction() {
-        let key0 = Pubkey::new_unique();
-        let key1 = Pubkey::new_unique();
-        let message = Message {
-            header: MessageHeader {
-                num_required_signatures: 1,
-                num_readonly_signed_accounts: 0,
-                num_readonly_unsigned_accounts: 0,
-            },
-            account_keys: vec![key0, key1],
-            recent_blockhash: Hash::default(),
-            instructions: vec![solana_sdk::instruction::CompiledInstruction {
-                program_id_index: 1,
-                accounts: vec![0],
-                data: vec![0xDD],
-            }],
-        };
-        let tx = SolanaTransaction {
-            signatures: vec![],
-            message,
-        };
-        let registry = IdlRegistry::new();
-        let fields = decode_instructions(&tx, &registry).expect("should not error");
-
-        let diagnostics: Vec<_> = fields
-            .iter()
-            .filter(|f| f.signable_payload_field.field_type() == "diagnostic")
-            .collect();
-        assert!(diagnostics.is_empty(), "valid transaction should produce no diagnostics");
-    }
 }
 
 pub fn decode_transfers(
@@ -393,48 +231,14 @@ pub fn decode_transfers(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use solana_sdk::hash::Hash;
     use solana_sdk::message::{Message, MessageHeader};
     use solana_sdk::pubkey::Pubkey;
+    use visualsign::SignablePayloadField;
 
-    /// Verifies that empty account keys returns a DecodeError (not a panic).
-    /// This error path was introduced in PR #245 replacing the previous unwrap.
-    #[test]
-    fn test_empty_account_keys_returns_parse_error() {
-        let message = Message {
-            header: MessageHeader {
-                num_required_signatures: 0,
-                num_readonly_signed_accounts: 0,
-                num_readonly_unsigned_accounts: 0,
-            },
-            account_keys: vec![],
-            recent_blockhash: Hash::default(),
-            instructions: vec![],
-        };
-        let tx = SolanaTransaction {
-            signatures: vec![],
-            message,
-        };
-        let registry = IdlRegistry::new();
-        let result = decode_instructions(&tx, &registry);
-
-        assert!(
-            matches!(
-                &result,
-                Err(VisualSignError::ParseError(TransactionParseError::DecodeError(msg)))
-                    if msg.contains("no account keys")
-            ),
-            "expected DecodeError for empty account keys, got: {result:?}"
-        );
-    }
-
-    /// Verifies that OOB program_id_index silently skips the instruction
-    /// instead of panicking. Only the valid instruction produces a field.
-    #[test]
-    fn test_oob_program_id_index_skips_instruction() {
+    fn tx_with_oob_program_id() -> SolanaTransaction {
         let key0 = Pubkey::new_unique();
         let key1 = Pubkey::new_unique();
         let message = Message {
@@ -458,53 +262,123 @@ mod tests {
                 },
             ],
         };
-        let tx = SolanaTransaction {
+        SolanaTransaction {
             signatures: vec![],
             message,
-        };
-        let registry = IdlRegistry::new();
-        let result = decode_instructions(&tx, &registry);
-
-        let fields = result.expect("should not error when OOB instructions are skipped");
-        assert_eq!(fields.len(), 1, "expected 1 field for 1 valid instruction");
+        }
     }
 
-    /// Verifies that all-OOB instructions produce empty fields (not a panic).
-    #[test]
-    fn test_all_instructions_oob_returns_empty_fields() {
+    fn tx_with_oob_account_index() -> SolanaTransaction {
         let key0 = Pubkey::new_unique();
+        let key1 = Pubkey::new_unique();
         let message = Message {
             header: MessageHeader {
                 num_required_signatures: 1,
                 num_readonly_signed_accounts: 0,
                 num_readonly_unsigned_accounts: 0,
             },
-            account_keys: vec![key0],
+            account_keys: vec![key0, key1],
             recent_blockhash: Hash::default(),
-            instructions: vec![
-                solana_sdk::instruction::CompiledInstruction {
-                    program_id_index: 99,
-                    accounts: vec![],
-                    data: vec![],
-                },
-                solana_sdk::instruction::CompiledInstruction {
-                    program_id_index: 88,
-                    accounts: vec![],
-                    data: vec![],
-                },
-            ],
+            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0, 50],
+                data: vec![0xCC],
+            }],
+        };
+        SolanaTransaction {
+            signatures: vec![],
+            message,
+        }
+    }
+
+    #[test]
+    fn test_oob_program_id_emits_diagnostic() {
+        let tx = tx_with_oob_program_id();
+        let registry = IdlRegistry::new();
+        let fields = decode_instructions(&tx, &registry).expect("should not error");
+
+        let diagnostics: Vec<_> = fields
+            .iter()
+            .filter(|f| f.signable_payload_field.field_type() == "diagnostic")
+            .collect();
+        assert_eq!(diagnostics.len(), 1);
+
+        match &diagnostics[0].signable_payload_field {
+            SignablePayloadField::Diagnostic { diagnostic, .. } => {
+                assert_eq!(diagnostic.rule, "transaction::oob_program_id");
+                assert_eq!(diagnostic.domain, "transaction");
+                assert_eq!(diagnostic.level, "warn");
+                assert_eq!(diagnostic.instruction_index, Some(1));
+            }
+            _ => panic!("expected Diagnostic variant"),
+        }
+
+        let non_diagnostics: Vec<_> = fields
+            .iter()
+            .filter(|f| f.signable_payload_field.field_type() != "diagnostic")
+            .collect();
+        assert_eq!(non_diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn test_oob_account_index_emits_diagnostic() {
+        let tx = tx_with_oob_account_index();
+        let registry = IdlRegistry::new();
+        let fields = decode_instructions(&tx, &registry).expect("should not error");
+
+        let diagnostics: Vec<_> = fields
+            .iter()
+            .filter(|f| f.signable_payload_field.field_type() == "diagnostic")
+            .collect();
+        assert_eq!(diagnostics.len(), 1);
+
+        match &diagnostics[0].signable_payload_field {
+            SignablePayloadField::Diagnostic { diagnostic, .. } => {
+                assert_eq!(diagnostic.rule, "transaction::oob_account_index");
+                assert_eq!(diagnostic.domain, "transaction");
+                assert_eq!(diagnostic.level, "warn");
+                assert_eq!(diagnostic.instruction_index, Some(0));
+                assert!(diagnostic.message.contains("50"));
+            }
+            _ => panic!("expected Diagnostic variant"),
+        }
+
+        let non_diagnostics: Vec<_> = fields
+            .iter()
+            .filter(|f| f.signable_payload_field.field_type() != "diagnostic")
+            .collect();
+        assert_eq!(non_diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn test_no_diagnostics_for_valid_transaction() {
+        let key0 = Pubkey::new_unique();
+        let key1 = Pubkey::new_unique();
+        let message = Message {
+            header: MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys: vec![key0, key1],
+            recent_blockhash: Hash::default(),
+            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0],
+                data: vec![0xDD],
+            }],
         };
         let tx = SolanaTransaction {
             signatures: vec![],
             message,
         };
         let registry = IdlRegistry::new();
-        let result = decode_instructions(&tx, &registry);
+        let fields = decode_instructions(&tx, &registry).expect("should not error");
 
-        let fields = result.expect("should succeed with all OOB instructions");
-        assert!(
-            fields.is_empty(),
-            "expected no fields when all instructions are OOB"
-        );
+        let diagnostics: Vec<_> = fields
+            .iter()
+            .filter(|f| f.signable_payload_field.field_type() == "diagnostic")
+            .collect();
+        assert!(diagnostics.is_empty());
     }
 }

@@ -296,16 +296,8 @@ impl FieldSerializer for SignablePayloadField {
             SignablePayloadField::Unknown { common, unknown } => {
                 serialize_field_variant!(fields, "unknown", common, ("Unknown", unknown));
             }
-            SignablePayloadField::Diagnostic {
-                common,
-                diagnostic,
-            } => {
-                serialize_field_variant!(
-                    fields,
-                    "diagnostic",
-                    common,
-                    ("Diagnostic", diagnostic)
-                );
+            SignablePayloadField::Diagnostic { common, diagnostic } => {
+                serialize_field_variant!(fields, "diagnostic", common, ("Diagnostic", diagnostic));
             }
         }
 
@@ -2530,10 +2522,7 @@ mod tests {
         let keys: Vec<&String> = obj.keys().collect();
 
         // Verify top-level alphabetical ordering
-        assert_eq!(
-            keys,
-            vec!["Diagnostic", "FallbackText", "Label", "Type"]
-        );
+        assert_eq!(keys, vec!["Diagnostic", "FallbackText", "Label", "Type"]);
 
         // Verify nested Diagnostic fields are alphabetical
         let diag = obj.get("Diagnostic").unwrap().as_object().unwrap();
