@@ -355,6 +355,28 @@ async fn parser_solana_native_transfer_e2e() {
                         }
                     },
                     "Type": "preview_layout"
+                },
+                {
+                    "Diagnostic": {
+                        "Domain": "transaction",
+                        "Level": "ok",
+                        "Message": "all 1 instructions have valid program_id_index",
+                        "Rule": "transaction::oob_program_id"
+                    },
+                    "FallbackText": "ok: all 1 instructions have valid program_id_index",
+                    "Label": "transaction::oob_program_id",
+                    "Type": "diagnostic"
+                },
+                {
+                    "Diagnostic": {
+                        "Domain": "transaction",
+                        "Level": "ok",
+                        "Message": "all 1 instructions have valid account indices",
+                        "Rule": "transaction::oob_account_index"
+                    },
+                    "FallbackText": "ok: all 1 instructions have valid account indices",
+                    "Label": "transaction::oob_account_index",
+                    "Type": "diagnostic"
                 }
             ],
             "PayloadType": "SolanaTx",

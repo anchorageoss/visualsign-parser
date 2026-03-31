@@ -7,17 +7,30 @@ use solana_sdk::transaction::Transaction as SolanaTransaction;
 use visualsign::AnnotatedPayloadField;
 use visualsign::errors::{TransactionParseError, VisualSignError};
 use visualsign::field_builders::create_diagnostic_field;
+use visualsign::lint::LintConfig;
 
 // The following include! macro pulls in visualizer implementations generated at build time.
 // The file "generated_visualizers.rs" is created by the build script and contains code for
 // available_visualizers and related items, which are used to decode and visualize instructions.
 include!(concat!(env!("OUT_DIR"), "/generated_visualizers.rs"));
 
-/// Visualizes all the instructions and related fields in a transaction/message
+/// Result of decoding instructions: display fields, per-instruction errors,
+/// and lint diagnostics separately. The function always succeeds — individual
+/// instruction failures are captured in `errors` rather than aborting the parse.
+pub struct DecodeInstructionsResult {
+    pub fields: Vec<AnnotatedPayloadField>,
+    pub errors: Vec<(usize, VisualSignError)>,
+    pub diagnostics: Vec<AnnotatedPayloadField>,
+}
+
+/// Visualizes all the instructions and related fields in a transaction/message.
+/// Always succeeds — data quality issues become diagnostics, per-instruction
+/// failures are collected in errors.
 pub fn decode_instructions(
     transaction: &SolanaTransaction,
     idl_registry: &IdlRegistry,
-) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    lint_config: &LintConfig,
+) -> DecodeInstructionsResult {
     // available_visualizers is generated at build time by build.rs
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
     let visualizers_refs: Vec<&dyn InstructionVisualizer> =
@@ -27,32 +40,53 @@ pub fn decode_instructions(
     let account_keys = &message.account_keys;
 
     if account_keys.is_empty() {
-        return Err(VisualSignError::ParseError(
-            TransactionParseError::DecodeError(
-                "Legacy transaction has no account keys".to_string(),
-            ),
-        ));
+        return DecodeInstructionsResult {
+            fields: Vec::new(),
+            errors: Vec::new(),
+            diagnostics: vec![create_diagnostic_field(
+                "transaction::empty_account_keys",
+                "transaction",
+                "error",
+                "legacy transaction has no account keys",
+                None,
+            )],
+        };
     }
 
     // Convert compiled instructions to full instructions, emitting diagnostics
     // for out-of-bounds indices instead of silently dropping them.
+    // Every rule always reports (pass or warn), providing boot-metric-style attestation.
     let mut instructions: Vec<Instruction> = Vec::new();
     let mut diagnostics: Vec<AnnotatedPayloadField> = Vec::new();
+    let mut oob_program_id_count: usize = 0;
+    let mut oob_account_index_count: usize = 0;
+
+    let oob_pid_severity = lint_config.severity_for(
+        "transaction::oob_program_id",
+        visualsign::lint::Severity::Warn,
+    );
+    let oob_acct_severity = lint_config.severity_for(
+        "transaction::oob_account_index",
+        visualsign::lint::Severity::Warn,
+    );
 
     for (ci_index, ci) in message.instructions.iter().enumerate() {
         if (ci.program_id_index as usize) >= account_keys.len() {
-            diagnostics.push(create_diagnostic_field(
-                "transaction::oob_program_id",
-                "transaction",
-                "warn",
-                &format!(
-                    "instruction {} skipped: program_id_index {} out of bounds ({} accounts)",
-                    ci_index,
-                    ci.program_id_index,
-                    account_keys.len()
-                ),
-                Some(ci_index as u32),
-            ));
+            oob_program_id_count += 1;
+            if !matches!(oob_pid_severity, visualsign::lint::Severity::Allow) {
+                diagnostics.push(create_diagnostic_field(
+                    "transaction::oob_program_id",
+                    "transaction",
+                    oob_pid_severity.as_str(),
+                    &format!(
+                        "instruction {} skipped: program_id_index {} out of bounds ({} accounts)",
+                        ci_index,
+                        ci.program_id_index,
+                        account_keys.len()
+                    ),
+                    Some(ci_index as u32),
+                ));
+            }
             continue;
         }
 
@@ -74,18 +108,21 @@ pub fn decode_instructions(
             .collect();
 
         if !oob_account_indices.is_empty() {
-            diagnostics.push(create_diagnostic_field(
-                "transaction::oob_account_index",
-                "transaction",
-                "warn",
-                &format!(
-                    "instruction {}: account indices {:?} out of bounds ({} accounts)",
-                    ci_index,
-                    oob_account_indices,
-                    account_keys.len()
-                ),
-                Some(ci_index as u32),
-            ));
+            oob_account_index_count += 1;
+            if !matches!(oob_acct_severity, visualsign::lint::Severity::Allow) {
+                diagnostics.push(create_diagnostic_field(
+                    "transaction::oob_account_index",
+                    "transaction",
+                    oob_acct_severity.as_str(),
+                    &format!(
+                        "instruction {}: account indices {:?} out of bounds ({} accounts)",
+                        ci_index,
+                        oob_account_indices,
+                        account_keys.len()
+                    ),
+                    Some(ci_index as u32),
+                ));
+            }
         }
 
         instructions.push(Instruction {
@@ -95,47 +132,65 @@ pub fn decode_instructions(
         });
     }
 
-    let results: Result<Vec<AnnotatedPayloadField>, VisualSignError> = instructions
-        .iter()
-        .enumerate()
-        .map(|(instruction_index, instruction)| {
-            // Create sender account from first account key (typically the fee payer)
-            let sender = SolanaAccount {
-                account_key: account_keys[0].to_string(),
-                signer: false,
-                writable: false,
-            };
-
-            let context =
-                VisualizerContext::new(&sender, instruction_index, &instructions, idl_registry);
-
-            // Try to visualize with available visualizers (including unknown_program fallback)
-            visualize_with_any(&visualizers_refs, &context)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "No visualizer available for instruction {} at index {}",
-                        instruction.program_id, instruction_index
-                    )
-                })
-                .map(|viz_result| viz_result.field)
-        })
-        .collect();
-
-    let mut fields = results?;
-
-    // Self-check: ensure we have the same number of instruction fields as input instructions
-    if fields.len() != instructions.len() {
-        return Err(VisualSignError::InvariantViolation(format!(
-            "Instruction count mismatch: expected {} instructions, got {} fields. This should never happen with unknown_program fallback.",
-            instructions.len(),
-            fields.len()
-        )));
+    // Emit pass diagnostics when all checks passed (boot-metric-style attestation)
+    if oob_program_id_count == 0 && lint_config.should_report_ok("transaction::oob_program_id") {
+        diagnostics.push(create_diagnostic_field(
+            "transaction::oob_program_id",
+            "transaction",
+            "ok",
+            &format!(
+                "all {} instructions have valid program_id_index",
+                message.instructions.len()
+            ),
+            None,
+        ));
+    }
+    if oob_account_index_count == 0
+        && lint_config.should_report_ok("transaction::oob_account_index")
+    {
+        diagnostics.push(create_diagnostic_field(
+            "transaction::oob_account_index",
+            "transaction",
+            "ok",
+            &format!(
+                "all {} instructions have valid account indices",
+                message.instructions.len()
+            ),
+            None,
+        ));
     }
 
-    // Append diagnostics after instruction fields
-    fields.extend(diagnostics);
+    let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
+    let mut errors: Vec<(usize, VisualSignError)> = Vec::new();
 
-    Ok(fields)
+    for (instruction_index, instruction) in instructions.iter().enumerate() {
+        let sender = SolanaAccount {
+            account_key: account_keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
+
+        let context =
+            VisualizerContext::new(&sender, instruction_index, &instructions, idl_registry);
+
+        match visualize_with_any(&visualizers_refs, &context) {
+            Some(Ok(viz_result)) => fields.push(viz_result.field),
+            Some(Err(e)) => errors.push((instruction_index, e)),
+            None => errors.push((
+                instruction_index,
+                VisualSignError::DecodeError(format!(
+                    "No visualizer available for instruction {} at index {}",
+                    instruction.program_id, instruction_index
+                )),
+            )),
+        }
+    }
+
+    DecodeInstructionsResult {
+        fields,
+        errors,
+        diagnostics,
+    }
 }
 
 pub fn decode_transfers(
@@ -295,23 +350,40 @@ mod tests {
     fn test_oob_program_id_emits_diagnostic() {
         let tx = tx_with_oob_program_id();
         let registry = IdlRegistry::new();
-        let fields = decode_instructions(&tx, &registry).expect("should not error");
+        let config = LintConfig::default();
+        let result = decode_instructions(&tx, &registry, &config);
+        let fields = [result.fields, result.diagnostics].concat();
 
-        let diagnostics: Vec<_> = fields
+        let warns: Vec<_> = fields
             .iter()
-            .filter(|f| f.signable_payload_field.field_type() == "diagnostic")
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. }
+                    if diagnostic.level == "warn" =>
+                {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
             .collect();
-        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(warns.len(), 1);
+        assert_eq!(warns[0].rule, "transaction::oob_program_id");
+        assert_eq!(warns[0].instruction_index, Some(1));
 
-        match &diagnostics[0].signable_payload_field {
-            SignablePayloadField::Diagnostic { diagnostic, .. } => {
-                assert_eq!(diagnostic.rule, "transaction::oob_program_id");
-                assert_eq!(diagnostic.domain, "transaction");
-                assert_eq!(diagnostic.level, "warn");
-                assert_eq!(diagnostic.instruction_index, Some(1));
-            }
-            _ => panic!("expected Diagnostic variant"),
-        }
+        // oob_account_index should pass since the valid instruction has valid accounts
+        let passes: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. } if diagnostic.level == "ok" => {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_account_index")
+        );
 
         let non_diagnostics: Vec<_> = fields
             .iter()
@@ -324,24 +396,41 @@ mod tests {
     fn test_oob_account_index_emits_diagnostic() {
         let tx = tx_with_oob_account_index();
         let registry = IdlRegistry::new();
-        let fields = decode_instructions(&tx, &registry).expect("should not error");
+        let config = LintConfig::default();
+        let result = decode_instructions(&tx, &registry, &config);
+        let fields = [result.fields, result.diagnostics].concat();
 
-        let diagnostics: Vec<_> = fields
+        let warns: Vec<_> = fields
             .iter()
-            .filter(|f| f.signable_payload_field.field_type() == "diagnostic")
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. }
+                    if diagnostic.level == "warn" =>
+                {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
             .collect();
-        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(warns.len(), 1);
+        assert_eq!(warns[0].rule, "transaction::oob_account_index");
+        assert_eq!(warns[0].instruction_index, Some(0));
+        assert!(warns[0].message.contains("50"));
 
-        match &diagnostics[0].signable_payload_field {
-            SignablePayloadField::Diagnostic { diagnostic, .. } => {
-                assert_eq!(diagnostic.rule, "transaction::oob_account_index");
-                assert_eq!(diagnostic.domain, "transaction");
-                assert_eq!(diagnostic.level, "warn");
-                assert_eq!(diagnostic.instruction_index, Some(0));
-                assert!(diagnostic.message.contains("50"));
-            }
-            _ => panic!("expected Diagnostic variant"),
-        }
+        // oob_program_id should pass since the instruction has a valid program_id_index
+        let passes: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. } if diagnostic.level == "ok" => {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_program_id")
+        );
 
         let non_diagnostics: Vec<_> = fields
             .iter()
@@ -351,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn test_no_diagnostics_for_valid_transaction() {
+    fn test_valid_transaction_emits_pass_diagnostics() {
         let key0 = Pubkey::new_unique();
         let key1 = Pubkey::new_unique();
         let message = Message {
@@ -373,12 +462,46 @@ mod tests {
             message,
         };
         let registry = IdlRegistry::new();
-        let fields = decode_instructions(&tx, &registry).expect("should not error");
+        let config = LintConfig::default();
+        let result = decode_instructions(&tx, &registry, &config);
+        let fields = [result.fields, result.diagnostics].concat();
 
-        let diagnostics: Vec<_> = fields
+        let passes: Vec<_> = fields
             .iter()
-            .filter(|f| f.signable_payload_field.field_type() == "diagnostic")
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. } if diagnostic.level == "ok" => {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
             .collect();
-        assert!(diagnostics.is_empty());
+        // Both rules should report pass
+        assert_eq!(passes.len(), 2);
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_program_id")
+        );
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_account_index")
+        );
+
+        let warns: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. }
+                    if diagnostic.level == "warn" =>
+                {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            warns.is_empty(),
+            "valid transaction should have no warnings"
+        );
     }
 }
