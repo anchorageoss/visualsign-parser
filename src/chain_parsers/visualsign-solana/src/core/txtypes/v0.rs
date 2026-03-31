@@ -7,7 +7,7 @@ use solana_sdk::transaction::VersionedTransaction;
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
-    vsptrait::VisualSignError,
+    field_builders::create_diagnostic_field, vsptrait::VisualSignError,
 };
 
 /// Decode V0 transaction transfers using solana-parser
@@ -129,43 +129,6 @@ pub fn decode_v0_instructions(
     // since lookup table accounts would require on-chain resolution
     let account_keys = &v0_message.account_keys;
 
-    // Convert compiled instructions to full instructions using static account keys only
-    // Instructions that reference lookup table accounts will be processed with limited info
-    let instructions: Vec<Instruction> = v0_message
-        .instructions
-        .iter()
-        .filter_map(|ci| {
-            // Only process instructions where program_id is in static account keys
-            if (ci.program_id_index as usize) < account_keys.len() {
-                let program_id = account_keys[ci.program_id_index as usize];
-
-                let accounts: Vec<AccountMeta> = ci
-                    .accounts
-                    .iter()
-                    .filter_map(|&i| {
-                        // Only include accounts that are in static account keys
-                        if (i as usize) < account_keys.len() {
-                            Some(AccountMeta::new_readonly(account_keys[i as usize], false))
-                        } else {
-                            // Account is in lookup table - we can't resolve it without on-chain data
-                            None
-                        }
-                    })
-                    .collect();
-
-                Some(Instruction {
-                    program_id,
-                    accounts,
-                    data: ci.data.clone(),
-                })
-            } else {
-                // Program ID is in lookup table - skip this instruction
-                None
-            }
-        })
-        .collect();
-
-    // Process each instruction with the visualizer framework
     if account_keys.is_empty() {
         return Err(VisualSignError::ParseError(
             visualsign::vsptrait::TransactionParseError::DecodeError(
@@ -174,11 +137,69 @@ pub fn decode_v0_instructions(
         ));
     }
 
-    instructions
+    // Convert compiled instructions to full instructions, emitting diagnostics
+    // for indices that reference lookup table accounts (unresolvable without on-chain data).
+    let mut instructions: Vec<Instruction> = Vec::new();
+    let mut diagnostics: Vec<AnnotatedPayloadField> = Vec::new();
+
+    for (ci_index, ci) in v0_message.instructions.iter().enumerate() {
+        if (ci.program_id_index as usize) >= account_keys.len() {
+            diagnostics.push(create_diagnostic_field(
+                "transaction::oob_program_id",
+                "transaction",
+                "warn",
+                &format!(
+                    "instruction {} skipped: program_id_index {} references a lookup table account ({} static keys)",
+                    ci_index,
+                    ci.program_id_index,
+                    account_keys.len()
+                ),
+                Some(ci_index as u32),
+            ));
+            continue;
+        }
+
+        let mut oob_account_indices: Vec<u8> = Vec::new();
+        let accounts: Vec<AccountMeta> = ci
+            .accounts
+            .iter()
+            .filter_map(|&i| {
+                if (i as usize) < account_keys.len() {
+                    Some(AccountMeta::new_readonly(account_keys[i as usize], false))
+                } else {
+                    oob_account_indices.push(i);
+                    None
+                }
+            })
+            .collect();
+
+        if !oob_account_indices.is_empty() {
+            diagnostics.push(create_diagnostic_field(
+                "transaction::oob_account_index",
+                "transaction",
+                "warn",
+                &format!(
+                    "instruction {}: account indices {:?} reference lookup table accounts ({} static keys)",
+                    ci_index,
+                    oob_account_indices,
+                    account_keys.len()
+                ),
+                Some(ci_index as u32),
+            ));
+        }
+
+        instructions.push(Instruction {
+            program_id: account_keys[ci.program_id_index as usize],
+            accounts,
+            data: ci.data.clone(),
+        });
+    }
+
+    // Process each instruction with the visualizer framework
+    let results: Result<Vec<AnnotatedPayloadField>, VisualSignError> = instructions
         .iter()
         .enumerate()
         .filter_map(|(instruction_index, _)| {
-            // Create sender account from first account key (typically the fee payer)
             let sender = SolanaAccount {
                 account_key: account_keys[0].to_string(),
                 signer: false,
@@ -191,7 +212,12 @@ pub fn decode_v0_instructions(
             )
         })
         .map(|res| res.map(|viz_result| viz_result.field))
-        .collect()
+        .collect();
+
+    let mut fields = results?;
+    fields.extend(diagnostics);
+
+    Ok(fields)
 }
 
 /// Create a rich address lookup table field with detailed information
