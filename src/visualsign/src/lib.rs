@@ -2502,4 +2502,139 @@ mod tests {
         );
         assert!(pos_title < pos_version, "Title should come before Version");
     }
+
+    #[test]
+    fn test_diagnostic_field_serialization_alphabetical() {
+        let field = SignablePayloadField::Diagnostic {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "warn: account index 7 out of bounds".to_string(),
+                label: "transaction::oob_account_index".to_string(),
+            },
+            diagnostic: SignablePayloadFieldDiagnostic {
+                rule: "transaction::oob_account_index".to_string(),
+                domain: "transaction".to_string(),
+                level: "warn".to_string(),
+                message: "account index 7 out of bounds".to_string(),
+                instruction_index: Some(2),
+            },
+        };
+
+        field
+            .verify_deterministic_ordering()
+            .expect("Diagnostic field should have deterministic ordering");
+
+        let json = serde_json::to_string(&field).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let obj = value.as_object().unwrap();
+        let keys: Vec<&String> = obj.keys().collect();
+
+        // Verify top-level alphabetical ordering
+        assert_eq!(
+            keys,
+            vec!["Diagnostic", "FallbackText", "Label", "Type"]
+        );
+
+        // Verify nested Diagnostic fields are alphabetical
+        let diag = obj.get("Diagnostic").unwrap().as_object().unwrap();
+        let diag_keys: Vec<&String> = diag.keys().collect();
+        assert_eq!(
+            diag_keys,
+            vec!["Domain", "InstructionIndex", "Level", "Message", "Rule"]
+        );
+
+        assert_eq!(obj.get("Type").unwrap(), "diagnostic");
+    }
+
+    #[test]
+    fn test_diagnostic_field_without_instruction_index() {
+        let field = SignablePayloadField::Diagnostic {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "warn: general issue".to_string(),
+                label: "wallet::missing_idl_mapping".to_string(),
+            },
+            diagnostic: SignablePayloadFieldDiagnostic {
+                rule: "wallet::missing_idl_mapping".to_string(),
+                domain: "wallet".to_string(),
+                level: "warn".to_string(),
+                message: "general issue".to_string(),
+                instruction_index: None,
+            },
+        };
+
+        field
+            .verify_deterministic_ordering()
+            .expect("Diagnostic field should have deterministic ordering");
+
+        let json = serde_json::to_string(&field).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let diag = value.get("Diagnostic").unwrap().as_object().unwrap();
+
+        // InstructionIndex should be absent when None
+        assert!(!diag.contains_key("InstructionIndex"));
+        let diag_keys: Vec<&String> = diag.keys().collect();
+        assert_eq!(diag_keys, vec!["Domain", "Level", "Message", "Rule"]);
+    }
+
+    #[test]
+    fn test_diagnostic_field_roundtrip() {
+        let original = SignablePayloadField::Diagnostic {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "warn: oob program id".to_string(),
+                label: "transaction::oob_program_id".to_string(),
+            },
+            diagnostic: SignablePayloadFieldDiagnostic {
+                rule: "transaction::oob_program_id".to_string(),
+                domain: "transaction".to_string(),
+                level: "warn".to_string(),
+                message: "oob program id".to_string(),
+                instruction_index: Some(0),
+            },
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: SignablePayloadField = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_diagnostic_in_signable_payload() {
+        let payload = SignablePayload::new(
+            0,
+            "Test Transaction".to_string(),
+            None,
+            vec![
+                SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: "Solana".to_string(),
+                        label: "Network".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "Solana".to_string(),
+                    },
+                },
+                SignablePayloadField::Diagnostic {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: "warn: instruction 1 skipped".to_string(),
+                        label: "transaction::oob_program_id".to_string(),
+                    },
+                    diagnostic: SignablePayloadFieldDiagnostic {
+                        rule: "transaction::oob_program_id".to_string(),
+                        domain: "transaction".to_string(),
+                        level: "warn".to_string(),
+                        message: "instruction 1 skipped".to_string(),
+                        instruction_index: Some(1),
+                    },
+                },
+            ],
+            String::new(),
+        );
+
+        payload
+            .verify_deterministic_ordering()
+            .expect("Payload with diagnostic should have deterministic ordering");
+
+        let json = payload.to_json().expect("should serialize");
+        assert!(json.contains("\"Type\":\"diagnostic\""));
+        assert!(json.contains("\"Rule\":\"transaction::oob_program_id\""));
+    }
 }
