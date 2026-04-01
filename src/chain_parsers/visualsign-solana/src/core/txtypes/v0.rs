@@ -180,31 +180,6 @@ pub fn decode_v0_instructions(
     let mut indexed_instructions: Vec<(usize, Instruction)> = Vec::new();
 
     for (ci_index, ci) in v0_message.instructions.iter().enumerate() {
-        // Always check account indices, even if program_id is OOB
-        let mut oob_account_indices: Vec<u8> = Vec::new();
-        for &i in &ci.accounts {
-            if (i as usize) >= account_keys.len() {
-                oob_account_indices.push(i);
-            }
-        }
-        if !oob_account_indices.is_empty() {
-            oob_account_index_count += 1;
-            if !matches!(oob_acct_severity, visualsign::lint::Severity::Allow) {
-                diagnostics.push(create_diagnostic_field(
-                    "transaction::oob_account_index",
-                    "transaction",
-                    oob_acct_severity.as_str(),
-                    &format!(
-                        "instruction {}: account indices {:?} reference lookup table accounts ({} static keys)",
-                        ci_index,
-                        oob_account_indices,
-                        account_keys.len()
-                    ),
-                    Some(ci_index as u32),
-                ));
-            }
-        }
-
         if (ci.program_id_index as usize) >= account_keys.len() {
             oob_program_id_count += 1;
             if !matches!(oob_pid_severity, visualsign::lint::Severity::Allow) {
@@ -250,6 +225,7 @@ pub fn decode_v0_instructions(
             continue;
         }
 
+        let mut oob_account_indices: Vec<u8> = Vec::new();
         let accounts: Vec<AccountMeta> = ci
             .accounts
             .iter()
@@ -257,10 +233,29 @@ pub fn decode_v0_instructions(
                 if (i as usize) < account_keys.len() {
                     Some(AccountMeta::new_readonly(account_keys[i as usize], false))
                 } else {
-                    None // already counted above
+                    oob_account_indices.push(i);
+                    None
                 }
             })
             .collect();
+
+        if !oob_account_indices.is_empty() {
+            oob_account_index_count += 1;
+            if !matches!(oob_acct_severity, visualsign::lint::Severity::Allow) {
+                diagnostics.push(create_diagnostic_field(
+                    "transaction::oob_account_index",
+                    "transaction",
+                    oob_acct_severity.as_str(),
+                    &format!(
+                        "instruction {}: account indices {:?} reference lookup table accounts ({} static keys)",
+                        ci_index,
+                        oob_account_indices,
+                        account_keys.len()
+                    ),
+                    Some(ci_index as u32),
+                ));
+            }
+        }
 
         indexed_instructions.push((
             ci_index,
@@ -294,22 +289,19 @@ pub fn decode_v0_instructions(
             "ok",
             &format!(
                 "all {} instructions have valid account indices",
-                instructions.len()
+                v0_message.instructions.len()
             ),
             None,
         ));
     }
     if oob_account_index_in_skipped_count == 0
-        && lint_config
-            .should_report_ok("transaction::oob_account_index_in_skipped_instruction")
+        && lint_config.should_report_ok("transaction::oob_account_index_in_skipped_instruction")
     {
         diagnostics.push(create_diagnostic_field(
             "transaction::oob_account_index_in_skipped_instruction",
             "transaction",
             "ok",
-            &format!(
-                "all {oob_program_id_count} skipped instructions have valid account indices"
-            ),
+            &format!("all {oob_program_id_count} skipped instructions have valid account indices"),
             None,
         ));
     }
@@ -566,7 +558,7 @@ mod tests {
             account_keys: vec![key0, key1],
             recent_blockhash: solana_sdk::hash::Hash::default(),
             instructions: vec![solana_sdk::instruction::CompiledInstruction {
-                program_id_index: 99, // OOB
+                program_id_index: 99,  // OOB
                 accounts: vec![0, 88], // 88 is also OOB
                 data: vec![0xCC],
             }],
@@ -606,7 +598,11 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(passes.iter().any(|d| d.rule == "transaction::oob_account_index"));
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_account_index")
+        );
         assert!(
             passes
                 .iter()
@@ -634,7 +630,11 @@ mod tests {
             })
             .collect();
         assert_eq!(warns.len(), 2);
-        assert!(warns.iter().any(|d| d.rule == "transaction::oob_program_id"));
+        assert!(
+            warns
+                .iter()
+                .any(|d| d.rule == "transaction::oob_program_id")
+        );
         assert!(
             warns
                 .iter()
@@ -656,7 +656,11 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(passes.iter().any(|d| d.rule == "transaction::oob_account_index"));
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_account_index")
+        );
     }
 
     #[test]
@@ -693,8 +697,16 @@ mod tests {
             })
             .collect();
         assert_eq!(passes.len(), 3);
-        assert!(passes.iter().any(|d| d.rule == "transaction::oob_program_id"));
-        assert!(passes.iter().any(|d| d.rule == "transaction::oob_account_index"));
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_program_id")
+        );
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_account_index")
+        );
         assert!(
             passes
                 .iter()

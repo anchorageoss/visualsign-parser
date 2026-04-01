@@ -763,6 +763,19 @@ SignablePayload {
                 instruction_index: None,
             },
         },
+        Diagnostic {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "ok: all 0 skipped instructions have valid account indices",
+                label: "transaction::oob_account_index_in_skipped_instruction",
+            },
+            diagnostic: SignablePayloadFieldDiagnostic {
+                rule: "transaction::oob_account_index_in_skipped_instruction",
+                domain: "transaction",
+                level: "ok",
+                message: "all 0 skipped instructions have valid account indices",
+                instruction_index: None,
+            },
+        },
     ],
     payload_type: "SolanaTx",
     subtitle: None,
