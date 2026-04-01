@@ -101,36 +101,108 @@ fn test_cli_with_fixtures() {
         let output = command
             .output()
             .unwrap_or_else(|e| panic!("Failed to execute CLI: {e}"));
-        println!("Output {test_name:?}: {output:?}");
-
-        // Construct expected output path
-        let expected_path = fixtures_dir.join(format!("{test_name}.expected"));
-
-        // Read expected output
-        let expected_output = fs::read_to_string(&expected_path)
-            .unwrap_or_else(|_| panic!("Expected output file not found: {expected_path:?}"));
 
         let actual_output = String::from_utf8(output.stdout)
             .unwrap_or_else(|e| panic!("Invalid UTF-8 output: {e}"));
 
-        let expected = expected_output.trim();
-        let actual = actual_output.trim();
+        // Display fixture: compare non-diagnostic fields
+        let display_path = fixtures_dir.join(format!("{test_name}.display.expected"));
+        assert!(
+            display_path.exists(),
+            "Display fixture not found: {display_path:?}"
+        );
 
-        if expected != actual {
-            let diff = TextDiff::from_lines(expected, actual);
-            let mut diff_output = String::new();
+        let actual_json: serde_json::Value = serde_json::from_str(actual_output.trim())
+            .unwrap_or_else(|e| {
+                panic!("Failed to parse CLI output as JSON for '{test_name}': {e}")
+            });
 
-            for change in diff.iter_all_changes() {
-                let sign = match change.tag() {
-                    ChangeTag::Delete => "-",
-                    ChangeTag::Insert => "+",
-                    ChangeTag::Equal => " ",
-                };
-                diff_output.push_str(&format!("{sign}{change}"));
+        // Filter to display fields only
+        let mut display_payload = actual_json.clone();
+        if let Some(fields) = display_payload
+            .get_mut("Fields")
+            .and_then(|f| f.as_array_mut())
+        {
+            fields.retain(|f| f.get("Type").and_then(|t| t.as_str()) != Some("diagnostic"));
+        }
+        let actual_display =
+            serde_json::to_string_pretty(&display_payload).expect("failed to serialize");
+
+        let expected_display = fs::read_to_string(&display_path)
+            .unwrap_or_else(|_| panic!("Display fixture not found: {display_path:?}"));
+
+        assert_strings_match(
+            &test_name,
+            "display",
+            expected_display.trim(),
+            &actual_display,
+        );
+
+        // Diagnostics fixture: compare rule/level pairs
+        let diagnostics_path = fixtures_dir.join(format!("{test_name}.diagnostics.expected"));
+        if diagnostics_path.exists() {
+            let expected_diags: Vec<serde_json::Value> = serde_json::from_str(
+                &fs::read_to_string(&diagnostics_path)
+                    .unwrap_or_else(|_| panic!("Failed to read: {diagnostics_path:?}")),
+            )
+            .unwrap_or_else(|e| panic!("Failed to parse diagnostics fixture: {e}"));
+
+            let actual_diags: Vec<(String, String)> = actual_json
+                .get("Fields")
+                .and_then(|f| f.as_array())
+                .map(|fields| {
+                    fields
+                        .iter()
+                        .filter(|f| f.get("Type").and_then(|t| t.as_str()) == Some("diagnostic"))
+                        .map(|f| {
+                            let diag = &f["Diagnostic"];
+                            (
+                                diag["Rule"].as_str().unwrap().to_string(),
+                                diag["Level"].as_str().unwrap().to_string(),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // Every expected diagnostic must be present
+            for expected in &expected_diags {
+                let rule = expected["rule"].as_str().unwrap();
+                let level = expected["level"].as_str().unwrap();
+                assert!(
+                    actual_diags.iter().any(|(r, l)| r == rule && l == level),
+                    "Test '{test_name}': missing diagnostic rule={rule}, level={level}"
+                );
             }
 
-            panic!("Test case '{test_name}' failed:\n{diff_output}");
+            // No unexpected diagnostics
+            assert_eq!(
+                expected_diags.len(),
+                actual_diags.len(),
+                "Test '{test_name}': expected {} diagnostics, got {}. Actual: {:?}",
+                expected_diags.len(),
+                actual_diags.len(),
+                actual_diags
+            );
         }
+    }
+}
+
+fn assert_strings_match(test_name: &str, fixture_type: &str, expected: &str, actual: &str) {
+    if expected != actual {
+        let diff = TextDiff::from_lines(expected, actual);
+        let mut diff_output = String::new();
+
+        for change in diff.iter_all_changes() {
+            let sign = match change.tag() {
+                ChangeTag::Delete => "-",
+                ChangeTag::Insert => "+",
+                ChangeTag::Equal => " ",
+            };
+            diff_output.push_str(&format!("{sign}{change}"));
+        }
+
+        panic!("Test case '{test_name}' ({fixture_type}) failed:\n{diff_output}");
     }
 }
 
@@ -333,5 +405,5 @@ fn test_cli_solana_idl_invalid_file_still_parses() {
 
     let json: serde_json::Value =
         serde_json::from_str(&output).expect("CLI output should be valid JSON");
-    assert_eq!(json["Title"], "Solana Transaction");
+    assert_eq!(json["Title"], "Solana Transaction")
 }
