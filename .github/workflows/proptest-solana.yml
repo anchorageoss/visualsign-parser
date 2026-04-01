@@ -1,4 +1,4 @@
-name: Property Tests
+name: "Property Tests: Solana"
 
 on:
   pull_request:

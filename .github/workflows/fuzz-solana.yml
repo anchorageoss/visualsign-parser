@@ -1,8 +1,11 @@
-name: Fuzz Testing
+name: "Fuzz Testing: Solana"
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
+
+env:
+  NIGHTLY_VERSION: nightly-2026-03-13
 
 jobs:
   fuzz:
@@ -18,7 +21,7 @@ jobs:
       - name: Install Rust (nightly)
         uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
         with:
-          toolchain: nightly-2026-03-13
+          toolchain: ${{ env.NIGHTLY_VERSION }}
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Cache Rust dependencies
@@ -50,12 +53,12 @@ jobs:
       - name: Fuzz fuzz_transaction_string (30s)
         id: fuzz_transaction_string
         continue-on-error: true
-        run: cargo +nightly-2026-03-13 fuzz run fuzz_transaction_string -- -max_total_time=30
+        run: cargo +${{ env.NIGHTLY_VERSION }} fuzz run fuzz_transaction_string -- -max_total_time=30
         working-directory: src/chain_parsers/visualsign-solana/fuzz
       - name: Fuzz fuzz_versioned_transaction (30s)
         id: fuzz_versioned_transaction
         continue-on-error: true
-        run: cargo +nightly-2026-03-13 fuzz run fuzz_versioned_transaction -- -max_total_time=30
+        run: cargo +${{ env.NIGHTLY_VERSION }} fuzz run fuzz_versioned_transaction -- -max_total_time=30
         working-directory: src/chain_parsers/visualsign-solana/fuzz
       - name: Label PR on fuzz failure
         env:
