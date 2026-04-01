@@ -261,7 +261,21 @@ fn convert_to_visual_sign_payload(
     // Add Accounts field at the bottom using PreviewLayout instead of ListLayout
     fields.push(preview_layout_advanced);
 
-    // Append diagnostics after all display fields
+    // Surface per-instruction errors as diagnostics
+    for (idx, err) in &decode_result.errors {
+        fields.push(
+            visualsign::field_builders::create_diagnostic_field(
+                "decode::visualizer_error",
+                "decode",
+                "error",
+                &format!("instruction {idx}: {err}"),
+                Some(*idx as u32),
+            )
+            .signable_payload_field,
+        );
+    }
+
+    // Append lint diagnostics after all display fields and error diagnostics
     fields.extend(
         decode_result
             .diagnostics
@@ -379,7 +393,21 @@ fn convert_v0_to_visual_sign_payload(
     let preview_layout_advanced = create_accounts_advanced_preview_layout("Accounts", &accounts)?;
     fields.push(preview_layout_advanced);
 
-    // Append diagnostics after all display fields
+    // Surface per-instruction errors as diagnostics
+    for (idx, err) in &v0_result.errors {
+        fields.push(
+            visualsign::field_builders::create_diagnostic_field(
+                "decode::visualizer_error",
+                "decode",
+                "error",
+                &format!("instruction {idx}: {err}"),
+                Some(*idx as u32),
+            )
+            .signable_payload_field,
+        );
+    }
+
+    // Append lint diagnostics after all display fields and error diagnostics
     fields.extend(
         v0_result
             .diagnostics

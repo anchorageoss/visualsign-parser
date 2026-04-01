@@ -4,14 +4,22 @@ Issue: #228
 
 ## Goal
 
-Add structured lint diagnostics to `SignablePayload` as a new `Diagnostic` variant of `SignablePayloadField`. Diagnostics are attested alongside display fields in the signed payload. This first slice implements two rules for Solana legacy transactions, replacing the current silent data dropping.
+Add structured lint diagnostics to `SignablePayload` as a new `Diagnostic` variant of `SignablePayloadField`. Diagnostics are attested alongside display fields in the signed payload. This first slice implements rules for Solana legacy and v0 transactions and introduces a `LintConfig` framework for configuring rule severity, replacing the current silent data dropping.
+
+## Error categorization
+
+| Category | Handled by | Example |
+|----------|------------|---------|
+| **Parser errors** (`VisualSignError`) | Collected per-instruction in `errors` vec, surfaced as `decode::visualizer_error` diagnostics | No visualizer found |
+| **Data quality diagnostics** (attested) | Emitted as `Diagnostic` fields in `SignablePayload` | OOB indices, empty account keys |
+| **Configuration** (`LintConfig`) | Caller controls severity per-rule | Override `oob_program_id` to `Allow` |
 
 ## Core Types (`visualsign` crate)
 
 ### `SignablePayloadFieldDiagnostic`
 
 ```rust
-#[derive(Deserialize, Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SignablePayloadFieldDiagnostic {
     #[serde(rename = "Rule")]
     pub rule: String,
@@ -40,11 +48,6 @@ Diagnostic {
 },
 ```
 
-Updates required:
-- `serialize_to_map()` — add `Diagnostic` arm returning the diagnostic fields
-- `get_expected_fields()` — add `Diagnostic` arm returning `["Diagnostic", "FallbackText", "Label", "Type"]`
-- Borsh enum variant index — append after `Unknown` (index 11)
-
 ### Field builder
 
 ```rust
@@ -54,34 +57,49 @@ pub fn create_diagnostic_field(
     level: &str,
     message: &str,
     instruction_index: Option<u32>,
-) -> Result<AnnotatedPayloadField, VisualSignError>
+) -> AnnotatedPayloadField
 ```
 
 Sets `label` to the rule ID, `fallback_text` to `"{level}: {message}"`.
 
+### `LintConfig`
+
+```rust
+pub struct LintConfig {
+    pub overrides: HashMap<String, Severity>,
+    pub report_all_rules: bool,
+}
+```
+
+Severity levels: `Ok`, `Warn`, `Error`, `Allow`.
+
+Currently constructed as `LintConfig::default()` in the conversion functions. Future work will wire overrides from `VisualSignOptions` / request metadata.
+
 ## Solana Integration (`visualsign-solana` crate)
 
-### `instructions.rs` — `decode_instructions()`
+### `decode_instructions()` and `decode_v0_instructions()`
 
-Current behavior: `filter_map` silently drops instructions with OOB `program_id_index` and accounts with OOB indices.
+Functions always succeed. Return `DecodeInstructionsResult` with separate `fields`, `errors`, and `diagnostics` vecs.
 
-New behavior: collect instructions that can be decoded normally, and emit `Diagnostic` fields for dropped data.
-
-Two rules:
+Three rules:
 
 | Rule | Domain | Default Level | When |
 |------|--------|---------------|------|
 | `transaction::oob_program_id` | `transaction` | `warn` | `ci.program_id_index >= account_keys.len()` |
 | `transaction::oob_account_index` | `transaction` | `warn` | account index `>= account_keys.len()` |
+| `transaction::empty_account_keys` | `transaction` | `error` | `account_keys.is_empty()` |
 
-The function signature changes from returning `Result<Vec<AnnotatedPayloadField>, VisualSignError>` to include diagnostics in the returned fields vec. Diagnostics are appended after the instruction fields.
+Account indices are checked on all instructions, including those with OOB program IDs. Original instruction indices are preserved through the visualizer loop for consistent labeling.
+
+### Boot-metric attestation
+
+When `report_all_rules` is true (default), every rule emits a diagnostic — either `ok` (no issues) or `warn`/`error` (issues found). The attester can verify all expected rules ran.
 
 ### What does NOT change
 
-- v0 transaction handling (`txtypes/v0.rs`) — left for a follow-up, keeps current silent drop behavior
-- No lint configuration in this slice — all rules use hardcoded default severity
 - No changes to `ParseRequest`, `ChainMetadata`, or proto definitions
-- No changes to the signing/attestation flow — diagnostics are in `SignablePayload` which is already signed
+- No changes to the signing/attestation flow — only the contents of `SignablePayload` have been extended to include diagnostics
+- `LintConfig` uses defaults only in this slice — wiring from request metadata is future work
 
 ## Serialized Output Example
 
@@ -115,13 +133,13 @@ The function signature changes from returning `Result<Vec<AnnotatedPayloadField>
 ## Tests
 
 1. **Serialization roundtrip** — `SignablePayloadFieldDiagnostic` serializes to JSON with alphabetical keys, deserializes back, passes `verify_deterministic_ordering()`
-2. **Borsh roundtrip** — diagnostic field survives borsh serialize/deserialize
-3. **Integration** — construct a `SolanaTransaction` with an OOB program_id_index, parse it, verify the output contains a `Diagnostic` field with rule `transaction::oob_program_id`
-4. **Mixed output** — transaction with some valid and some OOB instructions produces both display fields and diagnostic fields
+2. **Integration** — construct a `SolanaTransaction` with an OOB program_id_index, parse it, verify the output contains a `Diagnostic` field with rule `transaction::oob_program_id`
+3. **Mixed output** — transaction with some valid and some OOB instructions produces both display fields and diagnostic fields
+4. **Boot metrics** — valid transaction emits ok-level diagnostics for all rules
 5. **Builder** — `create_diagnostic_field()` produces expected output
 
 ## Backwards Compatibility
 
 - Wallets that don't know `Type: "diagnostic"` will hit the `Unknown` deserialization path and can display `FallbackText`
-- Payloads without diagnostics are unchanged — no new fields appear unless a rule fires
-- Borsh enum variant is appended (index 11), not inserted — existing variant indices are stable
+- Payloads without diagnostics are unchanged when `report_all_rules` is false
+- Enum variant is appended (index 11), not inserted — existing variant indices are stable
