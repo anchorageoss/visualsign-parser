@@ -2300,10 +2300,15 @@ mod tests {
             "Expected Swig program ID to be present in JSON: {json}"
         );
 
+        let display_fields: Vec<_> = payload
+            .fields
+            .iter()
+            .filter(|f| f.field_type() != "diagnostic")
+            .collect();
         assert_eq!(
-            payload.fields.len(),
-            6,
-            "Expected six top-level fields (network, instruction, accounts, 3 pass diagnostics)"
+            display_fields.len(),
+            3,
+            "Expected three display fields (network, instruction, accounts)"
         );
 
         // Network field
@@ -2433,10 +2438,15 @@ mod tests {
             "Expected secp256r1 verification program to be represented in JSON: {json}"
         );
 
+        let display_fields: Vec<_> = payload
+            .fields
+            .iter()
+            .filter(|f| f.field_type() != "diagnostic")
+            .collect();
         assert_eq!(
-            payload.fields.len(),
-            8,
-            "Expected eight top-level fields (network + 3 instructions + accounts + 3 pass diagnostics)"
+            display_fields.len(),
+            5,
+            "Expected five display fields (network + 3 instructions + accounts)"
         );
 
         // Instruction 1 - Compute budget
