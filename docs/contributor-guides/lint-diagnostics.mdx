@@ -168,3 +168,22 @@ fn test_my_rule_emits_diagnostic() {
     assert_eq!(warns[0].rule, "transaction::my_rule");
 }
 ```
+
+### Updating fixtures and snapshots when adding rules
+
+Adding a new rule that emits ok-level diagnostics changes the output of every transaction parse. You must update:
+
+1. **CLI fixtures** -- regenerate `src/parser/cli/tests/fixtures/solana-json.expected` and `solana-text.expected` by running the CLI against the fixture input:
+
+   ```bash
+   cargo run --bin parser_cli -- --chain solana -o json -t "$(cat src/parser/cli/tests/fixtures/solana-json.input | tail -1)" > src/parser/cli/tests/fixtures/solana-json.expected
+   cargo run --bin parser_cli -- --chain solana -t "$(cat src/parser/cli/tests/fixtures/solana-text.input | tail -1)" > src/parser/cli/tests/fixtures/solana-text.expected
+   ```
+
+2. **Integration test expected JSON** -- update `src/integration/tests/parser.rs` to include the new diagnostic fields in the `expected_sp` JSON
+
+3. **Field count assertions** -- tests that assert `payload.fields.len()` (e.g., swig_wallet tests) need their counts updated to include the new ok-level diagnostics
+
+4. **Fuzz and proptest** -- run `cargo test -p visualsign-solana --test fuzz_idl_parsing` and `--test pipeline_integration` to verify no regressions
+
+Run `make -C src fmt && make -C src lint && make -C src test` to verify everything passes before pushing.
