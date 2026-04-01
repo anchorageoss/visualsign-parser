@@ -29,7 +29,7 @@ pub struct LintConfig {
     /// (e.g., "transaction::oob_program_id").
     pub overrides: HashMap<String, Severity>,
 
-    /// When true, rules that pass emit a "pass" diagnostic.
+    /// When true, rules that find no issues emit an "ok" diagnostic.
     /// This provides boot-metric-style attestation where the verifier
     /// can confirm every expected rule ran.
     pub report_all_rules: bool,

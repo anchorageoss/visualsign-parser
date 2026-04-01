@@ -56,7 +56,6 @@ pub fn decode_instructions(
     // Convert compiled instructions to full instructions, emitting diagnostics
     // for out-of-bounds indices instead of silently dropping them.
     // Every rule always reports (pass or warn), providing boot-metric-style attestation.
-    let mut instructions: Vec<Instruction> = Vec::new();
     let mut diagnostics: Vec<AnnotatedPayloadField> = Vec::new();
     let mut oob_program_id_count: usize = 0;
     let mut oob_account_index_count: usize = 0;
@@ -75,7 +74,35 @@ pub fn decode_instructions(
         visualsign::lint::Severity::Warn,
     );
 
+    // Each entry preserves the original instruction index for consistent labeling.
+    let mut indexed_instructions: Vec<(usize, Instruction)> = Vec::new();
+
     for (ci_index, ci) in message.instructions.iter().enumerate() {
+        // Always check account indices, even if program_id is OOB
+        let mut oob_account_indices: Vec<u8> = Vec::new();
+        for &i in &ci.accounts {
+            if (i as usize) >= account_keys.len() {
+                oob_account_indices.push(i);
+            }
+        }
+        if !oob_account_indices.is_empty() {
+            oob_account_index_count += 1;
+            if !matches!(oob_acct_severity, visualsign::lint::Severity::Allow) {
+                diagnostics.push(create_diagnostic_field(
+                    "transaction::oob_account_index",
+                    "transaction",
+                    oob_acct_severity.as_str(),
+                    &format!(
+                        "instruction {}: account indices {:?} out of bounds ({} accounts)",
+                        ci_index,
+                        oob_account_indices,
+                        account_keys.len()
+                    ),
+                    Some(ci_index as u32),
+                ));
+            }
+        }
+
         if (ci.program_id_index as usize) >= account_keys.len() {
             oob_program_id_count += 1;
             if !matches!(oob_pid_severity, visualsign::lint::Severity::Allow) {
@@ -121,7 +148,6 @@ pub fn decode_instructions(
             continue;
         }
 
-        let mut oob_account_indices: Vec<u8> = Vec::new();
         let accounts: Vec<solana_sdk::instruction::AccountMeta> = ci
             .accounts
             .iter()
@@ -132,35 +158,19 @@ pub fn decode_instructions(
                         false,
                     ))
                 } else {
-                    oob_account_indices.push(i);
-                    None
+                    None // already counted above
                 }
             })
             .collect();
 
-        if !oob_account_indices.is_empty() {
-            oob_account_index_count += 1;
-            if !matches!(oob_acct_severity, visualsign::lint::Severity::Allow) {
-                diagnostics.push(create_diagnostic_field(
-                    "transaction::oob_account_index",
-                    "transaction",
-                    oob_acct_severity.as_str(),
-                    &format!(
-                        "instruction {}: account indices {:?} out of bounds ({} accounts)",
-                        ci_index,
-                        oob_account_indices,
-                        account_keys.len()
-                    ),
-                    Some(ci_index as u32),
-                ));
-            }
-        }
-
-        instructions.push(Instruction {
-            program_id: account_keys[ci.program_id_index as usize],
-            accounts,
-            data: ci.data.clone(),
-        });
+        indexed_instructions.push((
+            ci_index,
+            Instruction {
+                program_id: account_keys[ci.program_id_index as usize],
+                accounts,
+                data: ci.data.clone(),
+            },
+        ));
     }
 
     // Emit pass diagnostics when all checks passed (boot-metric-style attestation)
@@ -208,24 +218,29 @@ pub fn decode_instructions(
     let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
     let mut errors: Vec<(usize, VisualSignError)> = Vec::new();
 
-    for (instruction_index, instruction) in instructions.iter().enumerate() {
+    // Extract just the instructions for the visualizer context (it needs the full slice)
+    let instructions: Vec<Instruction> = indexed_instructions
+        .iter()
+        .map(|(_, ix)| ix.clone())
+        .collect();
+
+    for (original_index, instruction) in &indexed_instructions {
         let sender = SolanaAccount {
             account_key: account_keys[0].to_string(),
             signer: false,
             writable: false,
         };
 
-        let context =
-            VisualizerContext::new(&sender, instruction_index, &instructions, idl_registry);
+        let context = VisualizerContext::new(&sender, *original_index, &instructions, idl_registry);
 
         match visualize_with_any(&visualizers_refs, &context) {
             Some(Ok(viz_result)) => fields.push(viz_result.field),
-            Some(Err(e)) => errors.push((instruction_index, e)),
+            Some(Err(e)) => errors.push((*original_index, e)),
             None => errors.push((
-                instruction_index,
+                *original_index,
                 VisualSignError::DecodeError(format!(
                     "No visualizer available for instruction {} at index {}",
-                    instruction.program_id, instruction_index
+                    instruction.program_id, original_index
                 )),
             )),
         }
