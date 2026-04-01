@@ -377,6 +377,17 @@ async fn parser_solana_native_transfer_e2e() {
                     "FallbackText": "ok: all 1 instructions have valid account indices",
                     "Label": "transaction::oob_account_index",
                     "Type": "diagnostic"
+                },
+                {
+                    "Diagnostic": {
+                        "Domain": "transaction",
+                        "Level": "ok",
+                        "Message": "all 0 skipped instructions have valid account indices",
+                        "Rule": "transaction::oob_account_index_in_skipped_instruction"
+                    },
+                    "FallbackText": "ok: all 0 skipped instructions have valid account indices",
+                    "Label": "transaction::oob_account_index_in_skipped_instruction",
+                    "Type": "diagnostic"
                 }
             ],
             "PayloadType": "SolanaTx",
