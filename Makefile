@@ -2,6 +2,10 @@ out/parser_app/index.json: \
 	$(shell git ls-files images/parser_app src)
 	$(call build,parser_app)
 
+out/parser_cli/index.json: \
+	$(shell git ls-files images/parser_cli src)
+	$(call build,parser_cli)
+
 out/parser_gateway/index.json: \
 	$(shell git ls-files images/parser_gateway src)
 	$(call build,parser_gateway)
