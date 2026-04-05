@@ -929,9 +929,10 @@ fn summarize_visualized_field(field: &AnnotatedPayloadField) -> Option<String> {
                 Some(address_v2.address.clone())
             }
         }
-        ListLayout { common, .. } | Divider { common, .. } | Unknown { common, .. } => {
-            fallback_summary(common)
-        }
+        ListLayout { common, .. }
+        | Divider { common, .. }
+        | Unknown { common, .. }
+        | Diagnostic { common, .. } => fallback_summary(common),
     }
 }
 
@@ -2300,10 +2301,15 @@ mod tests {
             "Expected Swig program ID to be present in JSON: {json}"
         );
 
+        let display_fields: Vec<_> = payload
+            .fields
+            .iter()
+            .filter(|f| f.field_type() != "diagnostic")
+            .collect();
         assert_eq!(
-            payload.fields.len(),
+            display_fields.len(),
             3,
-            "Expected three top-level fields (network, instruction, accounts)"
+            "Expected three display fields (network, instruction, accounts)"
         );
 
         // Network field
@@ -2389,7 +2395,7 @@ mod tests {
         );
         assert_text_field(expanded_fields, "Actions (hex)", "0700000008000000");
 
-        // Accounts field
+        // Accounts field (diagnostics are appended after accounts)
         match &payload.fields[2] {
             SignablePayloadField::PreviewLayout {
                 common,
@@ -2433,10 +2439,15 @@ mod tests {
             "Expected secp256r1 verification program to be represented in JSON: {json}"
         );
 
+        let display_fields: Vec<_> = payload
+            .fields
+            .iter()
+            .filter(|f| f.field_type() != "diagnostic")
+            .collect();
         assert_eq!(
-            payload.fields.len(),
+            display_fields.len(),
             5,
-            "Expected five top-level fields (network + 3 instructions + accounts)"
+            "Expected five display fields (network + 3 instructions + accounts)"
         );
 
         // Instruction 1 - Compute budget

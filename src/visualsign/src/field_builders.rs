@@ -1,8 +1,9 @@
 use crate::errors;
 use crate::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldAddressV2,
-    SignablePayloadFieldAmountV2, SignablePayloadFieldCommon, SignablePayloadFieldListLayout,
-    SignablePayloadFieldNumber, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
+    SignablePayloadFieldAmountV2, SignablePayloadFieldCommon, SignablePayloadFieldDiagnostic,
+    SignablePayloadFieldListLayout, SignablePayloadFieldNumber, SignablePayloadFieldPreviewLayout,
+    SignablePayloadFieldTextV2,
 };
 
 use regex::Regex;
@@ -208,6 +209,32 @@ pub fn create_preview_layout(
         },
         static_annotation: None,
         dynamic_annotation: None,
+    }
+}
+
+pub fn create_diagnostic_field(
+    rule: &str,
+    domain: &str,
+    level: &str,
+    message: &str,
+    instruction_index: Option<u32>,
+) -> AnnotatedPayloadField {
+    AnnotatedPayloadField {
+        static_annotation: None,
+        dynamic_annotation: None,
+        signable_payload_field: SignablePayloadField::Diagnostic {
+            common: SignablePayloadFieldCommon {
+                fallback_text: format!("{level}: {message}"),
+                label: rule.to_string(),
+            },
+            diagnostic: SignablePayloadFieldDiagnostic {
+                rule: rule.to_string(),
+                domain: domain.to_string(),
+                level: level.to_string(),
+                message: message.to_string(),
+                instruction_index,
+            },
+        },
     }
 }
 
