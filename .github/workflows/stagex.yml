@@ -37,6 +37,7 @@ jobs:
       matrix:
         target:
           - name: parser_app
+          - name: parser_cli
           - name: parser_gateway
     steps:
       - name: Checkout sources
