@@ -6,7 +6,39 @@ use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePaylo
 
 use crate::protocols::uniswap::contracts::permit2::Permit2Visualizer;
 use crate::registry::{ContractRegistry, ContractType};
-use crate::visualizer::CalldataVisualizer;
+
+/// Formats a token amount using the registry when possible, falling back to raw string.
+/// Avoids the silent-zero bug where U256 values > u128::MAX would display as "0".
+fn format_amount_with_registry(
+    amount: &U256,
+    chain_id: u64,
+    token: Address,
+    registry: Option<&ContractRegistry>,
+) -> (String, String) {
+    let token_symbol = registry
+        .and_then(|r| r.get_token_symbol(chain_id, token))
+        .unwrap_or_else(|| format!("{token:?}"));
+
+    match amount.to_string().parse::<u128>() {
+        Ok(amount_u128) => registry
+            .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
+            .unwrap_or_else(|| (amount.to_string(), token_symbol.clone())),
+        Err(_) => {
+            // Value exceeds u128::MAX — show raw string instead of silent 0
+            (amount.to_string(), token_symbol.clone())
+        }
+    }
+}
+
+/// Truncates a byte slice to hex, capping at `limit` bytes to avoid unbounded
+/// memory allocation from untrusted calldata.
+fn truncated_hex(bytes: &[u8], limit: usize) -> String {
+    if bytes.len() > limit {
+        format!("0x{}...", hex::encode(&bytes[..limit]))
+    } else {
+        format!("0x{}", hex::encode(bytes))
+    }
+}
 
 // Uniswap Universal Router interface definitions
 //
@@ -108,18 +140,12 @@ sol! {
     }
 
     /// Parameters for TRANSFER command
+    /// Source: https://github.com/Uniswap/universal-router/blob/main/contracts/libraries/Dispatcher.sol
+    /// (address token, address recipient, uint256 value)
     struct TransferParams {
-        address from;
-        address to;
-        uint160 amount;
-    }
-
-    /// Parameters for PERMIT2_TRANSFER_FROM command
-    struct Permit2TransferFromParams {
-        address from;
-        address to;
-        uint160 amount;
         address token;
+        address recipient;
+        uint256 value;
     }
 
     /// Parameters for PERMIT2_PERMIT command
@@ -177,14 +203,8 @@ pub enum Command {
     ExecuteSubPlan = 0x21,
 }
 
-fn map_commands(raw: &[u8]) -> Vec<Command> {
-    let mut out = Vec::with_capacity(raw.len());
-    for &b in raw {
-        if let Ok(cmd) = Command::try_from(b) {
-            out.push(cmd);
-        }
-    }
-    out
+fn map_commands(raw: &[u8]) -> Vec<Option<Command>> {
+    raw.iter().map(|&b| Command::try_from(b).ok()).collect()
 }
 
 /// Visualizer for Uniswap Universal Router
@@ -229,6 +249,7 @@ impl UniversalRouterVisualizer {
                 deadline,
                 chain_id,
                 registry,
+                0,
             );
         }
 
@@ -240,11 +261,25 @@ impl UniversalRouterVisualizer {
                 None,
                 chain_id,
                 registry,
+                0,
             );
         }
 
         None
     }
+
+    /// Format a command name for display, showing the debug name for known
+    /// commands or the raw byte for unknown ones.
+    fn format_cmd_name(maybe_cmd: &Option<Command>, raw_byte: u8) -> String {
+        match maybe_cmd {
+            Some(cmd) => format!("{cmd:?}"),
+            None => format!("Unknown(0x{raw_byte:02x})"),
+        }
+    }
+
+    /// Maximum recursion depth for nested ExecuteSubPlan commands.
+    /// Prevents stack overflow from maliciously crafted deeply-nested sub-plans.
+    const MAX_SUB_PLAN_DEPTH: usize = 4;
 
     /// Helper function to visualize commands (shared by both execute variants)
     fn visualize_commands(
@@ -253,46 +288,30 @@ impl UniversalRouterVisualizer {
         deadline: Option<String>,
         chain_id: u64,
         registry: Option<&ContractRegistry>,
+        depth: usize,
     ) -> Option<SignablePayloadField> {
         let mapped = map_commands(commands);
         let mut detail_fields = Vec::new();
 
-        for (i, cmd) in mapped.iter().enumerate() {
+        // Iterate over ALL command bytes (including unknown) to keep indices
+        // aligned with the inputs array. Unknown commands are shown explicitly
+        // rather than silently dropped — dropping would shift all subsequent
+        // command-input pairings.
+        for (i, maybe_cmd) in mapped.iter().enumerate() {
             let input_bytes = inputs.get(i).map(|b| &b.0[..]);
 
             // Decode command-specific parameters
             let field = if let Some(bytes) = input_bytes {
-                match cmd {
-                    Command::V3SwapExactIn => {
-                        Self::decode_v3_swap_exact_in(bytes, chain_id, registry)
-                    }
-                    Command::V3SwapExactOut => {
-                        Self::decode_v3_swap_exact_out(bytes, chain_id, registry)
-                    }
-                    Command::V2SwapExactIn => {
-                        Self::decode_v2_swap_exact_in(bytes, chain_id, registry)
-                    }
-                    Command::V2SwapExactOut => {
-                        Self::decode_v2_swap_exact_out(bytes, chain_id, registry)
-                    }
-                    Command::PayPortion => Self::decode_pay_portion(bytes, chain_id, registry),
-                    Command::WrapEth => Self::decode_wrap_eth(bytes, chain_id, registry),
-                    Command::UnwrapWeth => Self::decode_unwrap_weth(bytes, chain_id, registry),
-                    Command::Sweep => Self::decode_sweep(bytes, chain_id, registry),
-                    Command::Transfer => Self::decode_transfer(bytes, chain_id, registry),
-                    Command::Permit2TransferFrom => {
-                        Self::decode_permit2_transfer_from(bytes, chain_id, registry)
-                    }
-                    Command::Permit2Permit => {
-                        Self::decode_permit2_permit(bytes, chain_id, registry)
-                    }
-                    _ => {
-                        // For unimplemented commands, show hex
-                        let input_hex = format!("0x{}", hex::encode(bytes));
+                match maybe_cmd {
+                    Some(cmd) => Self::decode_known_command(*cmd, bytes, chain_id, registry, depth),
+                    None => {
+                        // Unknown command — show truncated hex so user can see it
+                        let cmd_name = Self::format_cmd_name(maybe_cmd, commands[i]);
+                        let input_hex = truncated_hex(bytes, 32);
                         SignablePayloadField::TextV2 {
                             common: SignablePayloadFieldCommon {
-                                fallback_text: format!("{cmd:?} input: {input_hex}"),
-                                label: format!("{cmd:?}"),
+                                fallback_text: format!("{cmd_name} input: {input_hex}"),
+                                label: cmd_name,
                             },
                             text_v2: SignablePayloadFieldTextV2 {
                                 text: format!("Input: {input_hex}"),
@@ -301,10 +320,11 @@ impl UniversalRouterVisualizer {
                     }
                 }
             } else {
+                let cmd_label = Self::format_cmd_name(maybe_cmd, commands[i]);
                 SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("{cmd:?} input: None"),
-                        label: format!("{cmd:?}"),
+                        fallback_text: format!("{cmd_label} input: None"),
+                        label: cmd_label,
                     },
                     text_v2: SignablePayloadFieldTextV2 {
                         text: "Input: None".to_string(),
@@ -348,20 +368,27 @@ impl UniversalRouterVisualizer {
             });
         }
 
+        // Build a human-readable list of command names for the fallback text
+        let cmd_names: Vec<String> = mapped
+            .iter()
+            .enumerate()
+            .map(|(i, maybe_cmd)| Self::format_cmd_name(maybe_cmd, commands[i]))
+            .collect();
+
         Some(SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: if let Some(dl) = &deadline {
                     format!(
-                        "Uniswap Universal Router Execute: {} commands ({:?}), deadline {}",
+                        "Uniswap Universal Router Execute: {} commands ([{}]), deadline {}",
                         mapped.len(),
-                        mapped,
+                        cmd_names.join(", "),
                         dl
                     )
                 } else {
                     format!(
-                        "Uniswap Universal Router Execute: {} commands ({:?})",
+                        "Uniswap Universal Router Execute: {} commands ([{}])",
                         mapped.len(),
-                        mapped
+                        cmd_names.join(", ")
                     )
                 },
                 label: "Universal Router".to_string(),
@@ -394,6 +421,141 @@ impl UniversalRouterVisualizer {
         })
     }
 
+    /// Dispatches a known command to its specific decoder
+    fn decode_known_command(
+        cmd: Command,
+        bytes: &[u8],
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
+        depth: usize,
+    ) -> SignablePayloadField {
+        match cmd {
+            Command::V3SwapExactIn => Self::decode_v3_swap_exact_in(bytes, chain_id, registry),
+            Command::V3SwapExactOut => Self::decode_v3_swap_exact_out(bytes, chain_id, registry),
+            Command::V2SwapExactIn => Self::decode_v2_swap_exact_in(bytes, chain_id, registry),
+            Command::V2SwapExactOut => Self::decode_v2_swap_exact_out(bytes, chain_id, registry),
+            Command::PayPortion => Self::decode_pay_portion(bytes, chain_id, registry),
+            Command::WrapEth => Self::decode_wrap_eth(bytes, chain_id, registry),
+            Command::UnwrapWeth => Self::decode_unwrap_weth(bytes, chain_id, registry),
+            Command::Sweep => Self::decode_sweep(bytes, chain_id, registry),
+            Command::Transfer => Self::decode_transfer(bytes, chain_id, registry),
+            Command::Permit2TransferFrom => {
+                Self::decode_permit2_transfer_from(bytes, chain_id, registry)
+            }
+            Command::Permit2Permit => Self::decode_permit2_permit(bytes, chain_id, registry),
+            Command::ExecuteSubPlan => {
+                Self::decode_execute_sub_plan(bytes, chain_id, registry, depth)
+            }
+            _ => {
+                // For recognized but unimplemented commands, show truncated hex
+                let input_hex = truncated_hex(bytes, 32);
+                SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{cmd:?} input: {input_hex}"),
+                        label: format!("{cmd:?}"),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("Input: {input_hex}"),
+                    },
+                }
+            }
+        }
+    }
+
+    /// Decodes EXECUTE_SUB_PLAN command by recursively visualizing nested commands.
+    /// Sub-plan format: (bytes commands, bytes[] inputs)
+    /// Depth is bounded by MAX_SUB_PLAN_DEPTH to prevent stack overflow.
+    fn decode_execute_sub_plan(
+        bytes: &[u8],
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
+        depth: usize,
+    ) -> SignablePayloadField {
+        // Guard against stack overflow from maliciously nested sub-plans
+        if depth >= Self::MAX_SUB_PLAN_DEPTH {
+            let input_hex = truncated_hex(bytes, 32);
+            return SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!("ExecuteSubPlan (depth limit): {input_hex}"),
+                    label: "ExecuteSubPlan".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 {
+                    text: format!(
+                        "Sub-plan nesting exceeds maximum depth ({})",
+                        Self::MAX_SUB_PLAN_DEPTH
+                    ),
+                },
+            };
+        }
+
+        // Sub-plan is ABI-encoded as (bytes commands, bytes[] inputs)
+        // Use sol_data types for proper ABI tuple decoding
+        use alloy_sol_types::sol_data;
+        type SubPlanParams = (sol_data::Bytes, sol_data::Array<sol_data::Bytes>);
+
+        let params = match SubPlanParams::abi_decode_params(bytes) {
+            Ok(p) => p,
+            Err(_) => {
+                let input_hex = truncated_hex(bytes, 32);
+                return SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("ExecuteSubPlan: {input_hex}"),
+                        label: "ExecuteSubPlan".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "Failed to decode sub-plan parameters".to_string(),
+                    },
+                };
+            }
+        };
+
+        let (sub_commands, sub_inputs) = params;
+        let sub_inputs_bytes: Vec<alloy_primitives::Bytes> = sub_inputs.into_iter().collect();
+
+        // Recursively visualize the nested commands with incremented depth
+        if let Some(nested_field) = Self::visualize_commands(
+            &sub_commands,
+            &sub_inputs_bytes,
+            None,
+            chain_id,
+            registry,
+            depth + 1,
+        ) {
+            // Re-label nested field to distinguish from the top-level execute
+            match nested_field {
+                SignablePayloadField::PreviewLayout {
+                    common,
+                    preview_layout,
+                } => SignablePayloadField::PreviewLayout {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: common
+                            .fallback_text
+                            .replace("Uniswap Universal Router Execute", "Sub-Plan"),
+                        label: "Sub-Plan".to_string(),
+                    },
+                    preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
+                        title: Some(visualsign::SignablePayloadFieldTextV2 {
+                            text: format!("Sub-Plan ({} commands)", sub_commands.len()),
+                        }),
+                        ..preview_layout
+                    },
+                },
+                other => other,
+            }
+        } else {
+            let input_hex = truncated_hex(bytes, 32);
+            SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!("ExecuteSubPlan: {input_hex}"),
+                    label: "ExecuteSubPlan".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 {
+                    text: "Empty sub-plan".to_string(),
+                },
+            }
+        }
+    }
+
     /// Decodes V3_SWAP_EXACT_IN command parameters
     /// Uses abi_decode_params for proper ABI decoding of raw calldata bytes
     fn decode_v3_swap_exact_in(
@@ -411,7 +573,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("V3 Swap Exact In: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("V3 Swap Exact In: {}", truncated_hex(bytes, 32)),
                         label: "V3 Swap Exact In".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -436,30 +598,17 @@ impl UniversalRouterVisualizer {
             };
         }
 
-        // Extract token addresses and fee from path
+        // Extract token addresses from path
+        // ExactIn path: tokenIn(20) | fee(3) | token(20) | fee(3) | ... | tokenOut(20)
         let token_in = Address::from_slice(&path[0..20]);
         let fee = u32::from_be_bytes([0, path[20], path[21], path[22]]);
-        let token_out = Address::from_slice(&path[23..43]);
+        let token_out = Address::from_slice(&path[path.len() - 20..]);
 
-        // Resolve token symbols
-        let token_in_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_in))
-            .unwrap_or_else(|| format!("{token_in:?}"));
-        let token_out_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_out))
-            .unwrap_or_else(|| format!("{token_out:?}"));
-
-        // Format amounts
-        let amount_in_u128: u128 = amount_in.to_string().parse().unwrap_or(0);
-        let amount_out_min_u128: u128 = amount_out_min.to_string().parse().unwrap_or(0);
-
-        let (amount_in_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_u128))
-            .unwrap_or_else(|| (amount_in.to_string(), token_in_symbol.clone()));
-
-        let (amount_out_min_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_min_u128))
-            .unwrap_or_else(|| (amount_out_min.to_string(), token_out_symbol.clone()));
+        // Format amounts via registry (overflow-safe)
+        let (amount_in_str, token_in_symbol) =
+            format_amount_with_registry(&amount_in, chain_id, token_in, registry);
+        let (amount_out_min_str, token_out_symbol) =
+            format_amount_with_registry(&amount_out_min, chain_id, token_out, registry);
 
         // Calculate fee percentage
         let fee_pct = fee as f64 / 10000.0;
@@ -563,7 +712,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("Pay Portion: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("Pay Portion: {}", truncated_hex(bytes, 32)),
                         label: "Pay Portion".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -578,9 +727,13 @@ impl UniversalRouterVisualizer {
             .unwrap_or_else(|| format!("{:?}", params.token));
 
         // Convert bips to percentage (10000 bips = 100%)
-        let bips_value: u128 = params.bips.to_string().parse().unwrap_or(0);
+        // Compare as U256 before narrowing to avoid silent overflow
+        let over_100_pct = params.bips > alloy_primitives::U256::from(10000u64);
+        let bips_value: u128 = params.bips.to_string().parse().unwrap_or(u128::MAX);
         let bips_pct = (bips_value as f64) / 100.0;
-        let percentage_str = if bips_pct >= 1.0 {
+        let percentage_str = if over_100_pct {
+            format!("{bips_pct:.2}% (WARNING: >100%)")
+        } else if bips_pct >= 1.0 {
             format!("{bips_pct:.2}%")
         } else {
             format!("{bips_pct:.4}%")
@@ -661,7 +814,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("Unwrap WETH: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("Unwrap WETH: {}", truncated_hex(bytes, 32)),
                         label: "Unwrap WETH".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -673,16 +826,15 @@ impl UniversalRouterVisualizer {
 
         // Get WETH address for this chain and format the amount
         // WETH is registered in the token registry via UniswapConfig::register_common_tokens
+        // Fall back to format_ether if registry unavailable
         let amount_min_str =
             crate::protocols::uniswap::config::UniswapConfig::weth_address(chain_id)
                 .and_then(|weth_addr| {
-                    let amount_min_u128: u128 =
-                        params.amountMinimum.to_string().parse().unwrap_or(0);
-                    registry
-                        .and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_min_u128))
+                    let amount_u128: u128 = params.amountMinimum.to_string().parse().ok()?;
+                    registry.and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_u128))
                 })
                 .map(|(amt, _)| amt)
-                .unwrap_or_else(|| params.amountMinimum.to_string());
+                .unwrap_or_else(|| crate::fmt::format_ether(params.amountMinimum));
 
         // Create individual parameter fields
         let fields = vec![
@@ -752,7 +904,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("V3 Swap Exact Out: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("V3 Swap Exact Out: {}", truncated_hex(bytes, 32)),
                         label: "V3 Swap Exact Out".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -777,31 +929,17 @@ impl UniversalRouterVisualizer {
             };
         }
 
-        // Extract token addresses and fee from path
-        let token_in = Address::from_slice(&path[0..20]);
+        // Extract token addresses from path
+        // ExactOut path is REVERSED: tokenOut(20) | fee(3) | ... | tokenIn(20)
+        let token_out = Address::from_slice(&path[0..20]);
         let fee = u32::from_be_bytes([0, path[20], path[21], path[22]]);
-        let token_out = Address::from_slice(&path[23..43]);
+        let token_in = Address::from_slice(&path[path.len() - 20..]);
 
-        // Resolve token symbols
-        let token_in_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_in))
-            .unwrap_or_else(|| format!("{token_in:?}"));
-        let token_out_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_out))
-            .unwrap_or_else(|| format!("{token_out:?}"));
-
-        // Convert amounts to u128 for formatting
-        let amount_out_u128: u128 = amount_out.to_string().parse().unwrap_or(0);
-        let amount_in_max_u128: u128 = amount_in_max.to_string().parse().unwrap_or(0);
-
-        // Format amounts with token decimals
-        let (amount_out_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_u128))
-            .unwrap_or_else(|| (amount_out.to_string(), token_out_symbol.clone()));
-
-        let (amount_in_max_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_max_u128))
-            .unwrap_or_else(|| (amount_in_max.to_string(), token_in_symbol.clone()));
+        // Format amounts via registry (overflow-safe)
+        let (amount_out_str, token_out_symbol) =
+            format_amount_with_registry(&amount_out, chain_id, token_out, registry);
+        let (amount_in_max_str, token_in_symbol) =
+            format_amount_with_registry(&amount_in_max, chain_id, token_in, registry);
 
         // Calculate fee percentage
         let fee_pct = fee as f64 / 10000.0;
@@ -916,7 +1054,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("V2 Swap Exact In: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("V2 Swap Exact In: {}", truncated_hex(bytes, 32)),
                         label: "V2 Swap Exact In".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -944,23 +1082,11 @@ impl UniversalRouterVisualizer {
         let token_in = path[0];
         let token_out = path[path.len() - 1];
 
-        let token_in_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_in))
-            .unwrap_or_else(|| format!("{token_in:?}"));
-        let token_out_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_out))
-            .unwrap_or_else(|| format!("{token_out:?}"));
-
-        let amount_in_u128: u128 = amount_in.to_string().parse().unwrap_or(0);
-        let amount_out_min_u128: u128 = amount_out_minimum.to_string().parse().unwrap_or(0);
-
-        let (amount_in_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_u128))
-            .unwrap_or_else(|| (amount_in.to_string(), token_in_symbol.clone()));
-
-        let (amount_out_min_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_min_u128))
-            .unwrap_or_else(|| (amount_out_minimum.to_string(), token_out_symbol.clone()));
+        // Format amounts via registry (overflow-safe)
+        let (amount_in_str, token_in_symbol) =
+            format_amount_with_registry(&amount_in, chain_id, token_in, registry);
+        let (amount_out_min_str, token_out_symbol) =
+            format_amount_with_registry(&amount_out_minimum, chain_id, token_out, registry);
 
         let hops = path.len() - 1;
         let text = format!(
@@ -1073,7 +1199,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("V2 Swap Exact Out: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("V2 Swap Exact Out: {}", truncated_hex(bytes, 32)),
                         label: "V2 Swap Exact Out".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -1101,23 +1227,11 @@ impl UniversalRouterVisualizer {
         let token_in = path[0];
         let token_out = path[path.len() - 1];
 
-        let token_in_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_in))
-            .unwrap_or_else(|| format!("{token_in:?}"));
-        let token_out_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_out))
-            .unwrap_or_else(|| format!("{token_out:?}"));
-
-        let amount_out_u128: u128 = amount_out.to_string().parse().unwrap_or(0);
-        let amount_in_max_u128: u128 = amount_in_maximum.to_string().parse().unwrap_or(0);
-
-        let (amount_out_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_u128))
-            .unwrap_or_else(|| (amount_out.to_string(), token_out_symbol.clone()));
-
-        let (amount_in_max_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_max_u128))
-            .unwrap_or_else(|| (amount_in_maximum.to_string(), token_in_symbol.clone()));
+        // Format amounts via registry (overflow-safe)
+        let (amount_out_str, token_out_symbol) =
+            format_amount_with_registry(&amount_out, chain_id, token_out, registry);
+        let (amount_in_max_str, token_in_symbol) =
+            format_amount_with_registry(&amount_in_maximum, chain_id, token_in, registry);
 
         let hops = path.len() - 1;
         let text = format!(
@@ -1222,7 +1336,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("Wrap ETH: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("Wrap ETH: {}", truncated_hex(bytes, 32)),
                         label: "Wrap ETH".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -1232,20 +1346,16 @@ impl UniversalRouterVisualizer {
             }
         };
 
-        // Format amount with ETH decimals (18)
-        // Get WETH address for this chain to use its decimals
+        // Format amount with ETH decimals (18) — overflow-safe
+        // Try registry first, fall back to format_ether if registry unavailable
         let amount_min_str =
             crate::protocols::uniswap::config::UniswapConfig::weth_address(chain_id)
                 .and_then(|weth_addr| {
-                    let amount_min_u128: u128 = params.amountMin.to_string().parse().unwrap_or(0);
-                    registry
-                        .and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_min_u128))
+                    let amount_u128: u128 = params.amountMin.to_string().parse().ok()?;
+                    registry.and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_u128))
                 })
                 .map(|(amt, _)| amt)
-                .unwrap_or_else(|| {
-                    // Fallback: format as ETH with 18 decimals manually
-                    crate::fmt::format_ether(params.amountMin)
-                });
+                .unwrap_or_else(|| crate::fmt::format_ether(params.amountMin));
 
         let text = format!("Wrap >={amount_min_str} ETH to WETH");
 
@@ -1269,7 +1379,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("Sweep: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("Sweep: {}", truncated_hex(bytes, 32)),
                         label: "Sweep".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -1279,15 +1389,9 @@ impl UniversalRouterVisualizer {
             }
         };
 
-        let token_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, params.token))
-            .unwrap_or_else(|| format!("{:?}", params.token));
-
-        // Format amount with token decimals
-        let amount_min_u128: u128 = params.amountMinimum.to_string().parse().unwrap_or(0);
-        let (amount_min_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, params.token, amount_min_u128))
-            .unwrap_or_else(|| (params.amountMinimum.to_string(), token_symbol.clone()));
+        // Format amount via registry (overflow-safe)
+        let (amount_min_str, token_symbol) =
+            format_amount_with_registry(&params.amountMinimum, chain_id, params.token, registry);
 
         let text = format!(
             "Sweep >={amount_min_str} {token_symbol} to {:?}",
@@ -1304,17 +1408,18 @@ impl UniversalRouterVisualizer {
     }
 
     /// Decodes TRANSFER command parameters
+    /// Source: (address token, address recipient, uint256 value)
     fn decode_transfer(
         bytes: &[u8],
-        _chain_id: u64,
-        _registry: Option<&ContractRegistry>,
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
         let params = match <TransferParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("Transfer: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("Transfer: {}", truncated_hex(bytes, 32)),
                         label: "Transfer".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -1324,9 +1429,12 @@ impl UniversalRouterVisualizer {
             }
         };
 
+        let (value_str, token_symbol) =
+            format_amount_with_registry(&params.value, chain_id, params.token, registry);
+
         let text = format!(
-            "Transfer {} tokens from {:?} to {:?}",
-            params.amount, params.from, params.to
+            "Transfer {} {} to {:?}",
+            value_str, token_symbol, params.recipient
         );
 
         SignablePayloadField::TextV2 {
@@ -1338,41 +1446,106 @@ impl UniversalRouterVisualizer {
         }
     }
 
-    /// Decodes PERMIT2_TRANSFER_FROM command by delegating to Permit2Visualizer
+    /// Decodes PERMIT2_TRANSFER_FROM command parameters directly.
+    /// Universal Router encodes this as (address token, address recipient, uint160 amount)
+    /// — raw ABI params without a function selector.
     fn decode_permit2_transfer_from(
         bytes: &[u8],
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        let visualizer = Permit2Visualizer;
-        visualizer
-            .visualize_calldata(bytes, chain_id, registry)
-            .unwrap_or_else(|| SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: format!("Permit2 Transfer From: 0x{}", hex::encode(bytes)),
-                    label: "Permit2 Transfer From".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 {
-                    text: "Failed to decode parameters".to_string(),
-                },
-            })
+        // Decode directly: (address token, address recipient, uint160 amount)
+        type TransferFromParams = (Address, Address, alloy_primitives::U160);
+
+        let params = match TransferFromParams::abi_decode_params(bytes) {
+            Ok(p) => p,
+            Err(_) => {
+                return SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!(
+                            "Permit2 Transfer From: {}",
+                            truncated_hex(bytes, 32)
+                        ),
+                        label: "Permit2 Transfer From".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "Failed to decode parameters".to_string(),
+                    },
+                };
+            }
+        };
+
+        let (token, recipient, amount) = params;
+
+        let amount_u256 = U256::from(amount);
+        let (amount_str, token_symbol) =
+            format_amount_with_registry(&amount_u256, chain_id, token, registry);
+
+        let text = format!("Permit2 Transfer {amount_str} {token_symbol} to {recipient:?}");
+
+        SignablePayloadField::TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: text.clone(),
+                label: "Permit2 Transfer From".to_string(),
+            },
+            text_v2: SignablePayloadFieldTextV2 { text },
+        }
     }
 
-    /// Decodes PERMIT2_PERMIT (0x0a) command by delegating to Permit2Visualizer
+    /// Decodes PERMIT2_PERMIT (0x0a) command.
+    /// Universal Router encodes this as inline PermitSingle bytes + signature,
+    /// without a function selector. Try custom permit decoding first, then
+    /// fall back to showing raw hex slot breakdown.
     fn decode_permit2_permit(
         bytes: &[u8],
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        let visualizer = Permit2Visualizer;
-        visualizer
-            .visualize_calldata(bytes, chain_id, registry)
-            .unwrap_or_else(|| Self::show_decode_error(bytes, &"Failed to decode parameters"))
+        // Try custom permit decoding (inline PermitSingle without selector)
+        if let Ok(permit_single) = Permit2Visualizer::decode_custom_permit_params(bytes) {
+            let token = permit_single.details.token;
+            let token_symbol = registry
+                .and_then(|r| r.get_token_symbol(chain_id, token))
+                .unwrap_or_else(|| format!("{token:?}"));
+
+            let amount_str = match permit_single.details.amount.to_string().parse::<u128>() {
+                Ok(amount_u128) => registry
+                    .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
+                    .map(|(s, _)| s)
+                    .unwrap_or_else(|| permit_single.details.amount.to_string()),
+                Err(_) => {
+                    // Value exceeds u128::MAX — show raw amount string
+                    permit_single.details.amount.to_string()
+                }
+            };
+
+            let amount_display = if permit_single.details.amount == alloy_primitives::U160::MAX {
+                format!("Unlimited {token_symbol}")
+            } else {
+                format!("{amount_str} {token_symbol}")
+            };
+
+            let text = format!(
+                "Permit {} to spend {}",
+                permit_single.spender, amount_display
+            );
+
+            return SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: text.clone(),
+                    label: "Permit2 Permit".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 { text },
+            };
+        }
+
+        // Fall back to showing raw hex with slot breakdown
+        Self::show_decode_error(bytes, &"Failed to decode parameters")
     }
 
     /// Helper function to display decoding error with raw hex slots
     fn show_decode_error(bytes: &[u8], err: &dyn std::fmt::Display) -> SignablePayloadField {
-        let hex_data = format!("0x{}", hex::encode(bytes));
+        let hex_data = truncated_hex(bytes, 32);
         let chunk_size = 32;
         let mut fields = vec![];
 
@@ -1835,55 +2008,65 @@ mod tests {
 
     #[test]
     fn test_visualize_tx_commands_unrecognized_command() {
-        // 0xff is not a valid Command, so it should be skipped
+        // 0xff is not a valid Command — it should be preserved as Unknown to keep indices aligned
         let commands = vec![0xff, Command::Transfer as u8];
         let inputs = vec![vec![0x01], vec![0x02]];
         let deadline = 0u64;
         let input = encode_execute_call(&commands, inputs.clone(), deadline);
 
-        assert_eq!(
-            UniversalRouterVisualizer {}
-                .visualize_tx_commands(&input, 1, None)
-                .unwrap(),
-            SignablePayloadField::PreviewLayout {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: "Uniswap Universal Router Execute: 1 commands ([Transfer])"
-                        .to_string(),
-                    label: "Universal Router".to_string(),
-                },
-                preview_layout: SignablePayloadFieldPreviewLayout {
-                    title: Some(SignablePayloadFieldTextV2 {
-                        text: "Uniswap Universal Router Execute".to_string(),
-                    }),
-                    subtitle: Some(SignablePayloadFieldTextV2 {
-                        text: "1 commands".to_string(),
-                    }),
-                    condensed: None,
-                    expanded: Some(SignablePayloadFieldListLayout {
-                        fields: vec![AnnotatedPayloadField {
-                            signable_payload_field: SignablePayloadField::PreviewLayout {
-                                common: SignablePayloadFieldCommon {
-                                    fallback_text: "Transfer: 0x01".to_string(),
-                                    label: "Command 1".to_string(),
-                                },
-                                preview_layout: SignablePayloadFieldPreviewLayout {
-                                    title: Some(SignablePayloadFieldTextV2 {
-                                        text: "Transfer".to_string(),
-                                    }),
-                                    subtitle: Some(SignablePayloadFieldTextV2 {
-                                        text: "Failed to decode parameters".to_string(),
-                                    }),
-                                    condensed: None,
-                                    expanded: None,
-                                },
-                            },
-                            static_annotation: None,
-                            dynamic_annotation: None,
-                        }],
-                    }),
-                },
+        let result = UniversalRouterVisualizer {}
+            .visualize_tx_commands(&input, 1, None)
+            .unwrap();
+
+        if let SignablePayloadField::PreviewLayout {
+            common,
+            preview_layout,
+        } = result
+        {
+            assert!(
+                common
+                    .fallback_text
+                    .contains("2 commands ([Unknown(0xff), Transfer])"),
+                "Expected 2 commands with Unknown(0xff), got: {}",
+                common.fallback_text,
+            );
+            let fields = preview_layout.expanded.unwrap().fields;
+            assert_eq!(
+                fields.len(),
+                2,
+                "Expected 2 fields (2 commands, no deadline for epoch 0)"
+            );
+
+            // Command 1: Unknown command 0xff with input 0x01
+            let unknown_field = &fields[0].signable_payload_field;
+            match unknown_field {
+                SignablePayloadField::PreviewLayout {
+                    preview_layout: pl, ..
+                } => {
+                    assert_eq!(pl.title.as_ref().unwrap().text, "Unknown(0xff)");
+                    assert_eq!(pl.subtitle.as_ref().unwrap().text, "Input: 0x01");
+                }
+                _ => panic!("Expected PreviewLayout for unknown command"),
             }
-        );
+
+            // Command 2: Transfer with input 0x02 (its correct input)
+            let transfer_field = &fields[1].signable_payload_field;
+            match transfer_field {
+                SignablePayloadField::PreviewLayout {
+                    preview_layout: pl, ..
+                } => {
+                    assert_eq!(pl.title.as_ref().unwrap().text, "Transfer");
+                    // 0x02 is too short to decode Transfer params
+                    assert_eq!(
+                        pl.subtitle.as_ref().unwrap().text,
+                        "Failed to decode parameters"
+                    );
+                }
+                _ => panic!("Expected PreviewLayout for Transfer command"),
+            }
+        } else {
+            panic!("Expected PreviewLayout");
+        }
     }
 
     #[test]
@@ -2246,6 +2429,79 @@ mod tests {
                 );
             }
             _ => panic!("Expected TextV2 field"),
+        }
+    }
+
+    #[test]
+    fn test_bug1_unknown_command_preserves_index_alignment() {
+        // Tests that unknown commands keep indices aligned with inputs array
+        // Build: [V3SwapExactIn, UNKNOWN(0x07), WrapEth] with valid WrapEth input at position 2
+        let recipient: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let amount = U256::from(1_000_000_000_000_000_000u64);
+        let wrap_eth_encoded = (recipient, amount).abi_encode();
+        let commands = vec![Command::V3SwapExactIn as u8, 0x07, Command::WrapEth as u8];
+        let inputs = vec![vec![0xde, 0xad], vec![0xbe, 0xef], wrap_eth_encoded];
+        let input = encode_execute_call(&commands, inputs, 1_700_000_000);
+        let result = UniversalRouterVisualizer {}
+            .visualize_tx_commands(&input, 1, None)
+            .unwrap();
+        if let SignablePayloadField::PreviewLayout {
+            common,
+            preview_layout,
+        } = result
+        {
+            assert!(
+                common.fallback_text.contains("3 commands"),
+                "Expected 3 commands, got: {}",
+                common.fallback_text,
+            );
+            assert!(
+                common.fallback_text.contains("Unknown(0x07)"),
+                "Expected Unknown(0x07), got: {}",
+                common.fallback_text,
+            );
+            let fields = preview_layout.expanded.unwrap().fields;
+            assert_eq!(fields.len(), 4, "Expected 4 fields (3 commands + deadline)");
+            // WrapEth (Command 3) should decode successfully — NOT "Failed to decode"
+            let wrap_field = &fields[2].signable_payload_field;
+            let wrap_text = match wrap_field {
+                SignablePayloadField::PreviewLayout {
+                    preview_layout: pl, ..
+                } => pl.subtitle.as_ref().unwrap().text.clone(),
+                _ => panic!("Expected PreviewLayout for WrapEth"),
+            };
+            assert!(
+                wrap_text.contains("1.0")
+                    || wrap_text.contains("1 ETH")
+                    || wrap_text.contains("Wrap"),
+                "WrapEth should decode correctly, got: {wrap_text}",
+            );
+            assert!(
+                !wrap_text.contains("Failed to decode"),
+                "WrapEth should NOT fail to decode -- index alignment is broken if it does",
+            );
+        } else {
+            panic!("Expected PreviewLayout");
+        }
+    }
+
+    #[test]
+    fn test_bug1_multiple_unknown_commands_all_shown() {
+        let commands = vec![0xFE, 0xFF, Command::Sweep as u8];
+        let inputs = vec![vec![0x01], vec![0x02], vec![0x03]];
+        let input = encode_execute_call(&commands, inputs, 0);
+        let result = UniversalRouterVisualizer {}
+            .visualize_tx_commands(&input, 1, None)
+            .unwrap();
+        if let SignablePayloadField::PreviewLayout { common, .. } = result {
+            assert!(common.fallback_text.contains("3 commands"));
+            assert!(common.fallback_text.contains("Unknown(0xfe)"));
+            assert!(common.fallback_text.contains("Unknown(0xff)"));
+            assert!(common.fallback_text.contains("Sweep"));
+        } else {
+            panic!("Expected PreviewLayout");
         }
     }
 }

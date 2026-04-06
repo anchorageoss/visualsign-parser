@@ -111,6 +111,42 @@ impl Permit2Visualizer {
             .map_err(|e| format!("Failed to decode PermitSingle: {e}").into())
     }
 
+    /// Max uint48 value — Permit2 uses this to mean "never expires"
+    const U48_MAX: u64 = (1u64 << 48) - 1;
+
+    /// Safely format a timestamp, handling edge cases
+    fn format_timestamp(value_u64: u64) -> String {
+        if value_u64 == 0 {
+            return "epoch (1970-01-01)".to_string();
+        }
+        // Check for overflow when casting to i64
+        if let Ok(ts) = i64::try_from(value_u64) {
+            if let Some(dt) = Utc.timestamp_opt(ts, 0).single() {
+                return dt.format("%Y-%m-%d %H:%M UTC").to_string();
+            }
+        }
+        format!("timestamp {value_u64}")
+    }
+
+    /// Format a uint48 expiration, treating max-uint48 as "never"
+    fn format_expiration_u48(value: u64) -> String {
+        if value == Self::U48_MAX {
+            "never".to_string()
+        } else {
+            Self::format_timestamp(value)
+        }
+    }
+
+    /// Format a uint256 deadline, treating very large values gracefully.
+    /// Accepts a string because uint256 may not fit in u64.
+    fn format_deadline_u256(raw: &str) -> String {
+        match raw.parse::<u64>() {
+            Ok(v) if v == u64::MAX => "never".to_string(),
+            Ok(v) => Self::format_timestamp(v),
+            Err(_) => "never".to_string(), // Value > u64::MAX is effectively infinite
+        }
+    }
+
     /// Decodes approve function call
     fn decode_approve(
         call: IPermit2::approveCall,
@@ -121,24 +157,21 @@ impl Permit2Visualizer {
             .and_then(|r| r.get_token_symbol(chain_id, call.token))
             .unwrap_or_else(|| format!("{:?}", call.token));
 
-        // Format amount with proper decimals
-        let amount_u128: u128 = call.amount.to_string().parse().unwrap_or(0);
-        let (amount_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, call.token, amount_u128))
-            .unwrap_or_else(|| (call.amount.to_string(), token_symbol.clone()));
-
-        // Format expiration timestamp
-        let expiration_u64: u64 = call.expiration.to_string().parse().unwrap_or(0);
-        let expiration_str = if expiration_u64 == u64::MAX {
-            "never".to_string()
-        } else {
-            let dt = Utc.timestamp_opt(expiration_u64 as i64, 0).unwrap();
-            dt.format("%Y-%m-%d %H:%M UTC").to_string()
+        // Format amount with proper decimals — avoid silent U160→u128 overflow
+        let amount_str = match call.amount.to_string().parse::<u128>() {
+            Ok(amount_u128) => registry
+                .and_then(|r| r.format_token_amount(chain_id, call.token, amount_u128))
+                .map(|(s, _)| s)
+                .unwrap_or_else(|| call.amount.to_string()),
+            Err(_) => call.amount.to_string(),
         };
 
+        // Format expiration timestamp (uint48 — max means "never")
+        let expiration_str = Self::format_expiration_u48(call.expiration.to::<u64>());
+
         let text = format!(
-            "Approve {} {} {} to spend {} (expires: {})",
-            call.spender, amount_str, token_symbol, token_symbol, expiration_str
+            "Approve {} to spend {} {} (expires: {})",
+            call.spender, amount_str, token_symbol, expiration_str
         );
 
         SignablePayloadField::TextV2 {
@@ -161,51 +194,22 @@ impl Permit2Visualizer {
             .and_then(|r| r.get_token_symbol(chain_id, token))
             .unwrap_or_else(|| format!("{token:?}"));
 
-        // Format amount with proper decimals
-        let amount_u128: u128 = call
-            .permitSingle
-            .details
-            .amount
-            .to_string()
-            .parse()
-            .unwrap_or(0);
-        let (amount_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
-            .unwrap_or_else(|| {
-                (
-                    call.permitSingle.details.amount.to_string(),
-                    token_symbol.clone(),
-                )
-            });
-
-        // Format expiration timestamp
-        let expiration_u64: u64 = call
-            .permitSingle
-            .details
-            .expiration
-            .to_string()
-            .parse()
-            .unwrap_or(0);
-        let expiration_str = if expiration_u64 == u64::MAX {
-            "never".to_string()
-        } else {
-            let dt = Utc.timestamp_opt(expiration_u64 as i64, 0).unwrap();
-            dt.format("%Y-%m-%d %H:%M UTC").to_string()
+        // Format amount with proper decimals — avoid silent U160→u128 overflow
+        let amount_str = match call.permitSingle.details.amount.to_string().parse::<u128>() {
+            Ok(amount_u128) => registry
+                .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
+                .map(|(s, _)| s)
+                .unwrap_or_else(|| call.permitSingle.details.amount.to_string()),
+            Err(_) => call.permitSingle.details.amount.to_string(),
         };
 
-        // Format sig deadline timestamp
-        let sig_deadline_u64: u64 = call
-            .permitSingle
-            .sigDeadline
-            .to_string()
-            .parse()
-            .unwrap_or(0);
-        let sig_deadline_str = if sig_deadline_u64 == u64::MAX {
-            "never".to_string()
-        } else {
-            let dt = Utc.timestamp_opt(sig_deadline_u64 as i64, 0).unwrap();
-            dt.format("%Y-%m-%d %H:%M UTC").to_string()
-        };
+        // Format expiration timestamp (uint48 — max means "never")
+        let expiration_str =
+            Self::format_expiration_u48(call.permitSingle.details.expiration.to::<u64>());
+
+        // Format sig deadline timestamp (uint256 — values > u64::MAX treated as "never")
+        let sig_deadline_str =
+            Self::format_deadline_u256(&call.permitSingle.sigDeadline.to_string());
 
         // Determine if amount is "unlimited" (max u160)
         let amount_display = if call.permitSingle.details.amount == U160::MAX {
@@ -240,11 +244,11 @@ impl Permit2Visualizer {
             AnnotatedPayloadField {
                 signable_payload_field: SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: call.permitSingle.details.amount.to_string(),
+                        fallback_text: format!("{amount_str} {token_symbol}"),
                         label: "Amount".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
-                        text: call.permitSingle.details.amount.to_string(),
+                        text: format!("{amount_str} {token_symbol}"),
                     },
                 },
                 static_annotation: None,
@@ -319,11 +323,14 @@ impl Permit2Visualizer {
             .and_then(|r| r.get_token_symbol(chain_id, call.token))
             .unwrap_or_else(|| format!("{:?}", call.token));
 
-        // Format amount with proper decimals
-        let amount_u128: u128 = call.amount.to_string().parse().unwrap_or(0);
-        let (amount_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, call.token, amount_u128))
-            .unwrap_or_else(|| (call.amount.to_string(), token_symbol.clone()));
+        // Format amount with proper decimals — avoid silent U160→u128 overflow
+        let amount_str = match call.amount.to_string().parse::<u128>() {
+            Ok(amount_u128) => registry
+                .and_then(|r| r.format_token_amount(chain_id, call.token, amount_u128))
+                .map(|(s, _)| s)
+                .unwrap_or_else(|| call.amount.to_string()),
+            Err(_) => call.amount.to_string(),
+        };
 
         let text = format!(
             "Transfer {} {} from {} to {}",
