@@ -258,6 +258,15 @@ impl UniversalRouterVisualizer {
         None
     }
 
+    /// Format a command name for display, showing the debug name for known
+    /// commands or the raw byte for unknown ones.
+    fn format_cmd_name(maybe_cmd: &Option<Command>, raw_byte: u8) -> String {
+        match maybe_cmd {
+            Some(cmd) => format!("{cmd:?}"),
+            None => format!("Unknown(0x{raw_byte:02x})"),
+        }
+    }
+
     /// Maximum recursion depth for nested ExecuteSubPlan commands.
     /// Prevents stack overflow from maliciously crafted deeply-nested sub-plans.
     const MAX_SUB_PLAN_DEPTH: usize = 4;
@@ -286,15 +295,20 @@ impl UniversalRouterVisualizer {
                 match maybe_cmd {
                     Some(cmd) => Self::decode_known_command(*cmd, bytes, chain_id, registry, depth),
                     None => {
-                        // Unknown command — show raw hex so user can see it
-                        let raw_byte = commands[i]; // Safe: mapped.len() == commands.len()
-                        let input_hex = format!("0x{}", hex::encode(bytes));
+                        // Unknown command — show truncated hex so user can see it
+                        let cmd_name = Self::format_cmd_name(maybe_cmd, commands[i]);
+                        let input_hex = {
+                            let full = hex::encode(bytes);
+                            if full.len() > 64 {
+                                format!("0x{}...", &full[..64])
+                            } else {
+                                format!("0x{full}")
+                            }
+                        };
                         SignablePayloadField::TextV2 {
                             common: SignablePayloadFieldCommon {
-                                fallback_text: format!(
-                                    "Unknown(0x{raw_byte:02x}) input: {input_hex}"
-                                ),
-                                label: format!("Unknown(0x{raw_byte:02x})"),
+                                fallback_text: format!("{cmd_name} input: {input_hex}"),
+                                label: cmd_name,
                             },
                             text_v2: SignablePayloadFieldTextV2 {
                                 text: format!("Input: {input_hex}"),
@@ -303,13 +317,7 @@ impl UniversalRouterVisualizer {
                     }
                 }
             } else {
-                let cmd_label = match maybe_cmd {
-                    Some(cmd) => format!("{cmd:?}"),
-                    None => {
-                        let raw_byte = commands[i]; // Safe: mapped.len() == commands.len()
-                        format!("Unknown(0x{raw_byte:02x})")
-                    }
-                };
+                let cmd_label = Self::format_cmd_name(maybe_cmd, commands[i]);
                 SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
                         fallback_text: format!("{cmd_label} input: None"),
@@ -361,13 +369,7 @@ impl UniversalRouterVisualizer {
         let cmd_names: Vec<String> = mapped
             .iter()
             .enumerate()
-            .map(|(i, maybe_cmd)| match maybe_cmd {
-                Some(cmd) => format!("{cmd:?}"),
-                None => {
-                    let raw_byte = commands[i]; // Safe: mapped.len() == commands.len()
-                    format!("Unknown(0x{raw_byte:02x})")
-                }
-            })
+            .map(|(i, maybe_cmd)| Self::format_cmd_name(maybe_cmd, commands[i]))
             .collect();
 
         Some(SignablePayloadField::PreviewLayout {
@@ -716,10 +718,11 @@ impl UniversalRouterVisualizer {
             .unwrap_or_else(|| format!("{:?}", params.token));
 
         // Convert bips to percentage (10000 bips = 100%)
-        let bips_str = params.bips.to_string();
-        let bips_value: u128 = bips_str.parse().unwrap_or(u128::MAX);
+        // Compare as U256 before narrowing to avoid silent overflow
+        let over_100_pct = params.bips > alloy_primitives::U256::from(10000u64);
+        let bips_value: u128 = params.bips.to_string().parse().unwrap_or(u128::MAX);
         let bips_pct = (bips_value as f64) / 100.0;
-        let percentage_str = if bips_value > 10000 {
+        let percentage_str = if over_100_pct {
             format!("{bips_pct:.2}% (WARNING: >100%)")
         } else if bips_pct >= 1.0 {
             format!("{bips_pct:.2}%")
@@ -1529,7 +1532,7 @@ impl UniversalRouterVisualizer {
     /// Decodes PERMIT2_PERMIT (0x0a) command.
     /// Universal Router encodes this as inline PermitSingle bytes + signature,
     /// without a function selector. Try custom permit decoding first, then
-    /// fall back to delegating to Permit2Visualizer.
+    /// fall back to showing raw hex slot breakdown.
     fn decode_permit2_permit(
         bytes: &[u8],
         chain_id: u64,
@@ -1542,20 +1545,16 @@ impl UniversalRouterVisualizer {
                 .and_then(|r| r.get_token_symbol(chain_id, token))
                 .unwrap_or_else(|| format!("{token:?}"));
 
-            let amount_u128: u128 = permit_single
-                .details
-                .amount
-                .to_string()
-                .parse()
-                .unwrap_or(0);
-            let (amount_str, _) = registry
-                .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
-                .unwrap_or_else(|| {
-                    (
-                        permit_single.details.amount.to_string(),
-                        token_symbol.clone(),
-                    )
-                });
+            let amount_str = match permit_single.details.amount.to_string().parse::<u128>() {
+                Ok(amount_u128) => registry
+                    .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
+                    .map(|(s, _)| s)
+                    .unwrap_or_else(|| permit_single.details.amount.to_string()),
+                Err(_) => {
+                    // Value exceeds u128::MAX — show raw amount string
+                    permit_single.details.amount.to_string()
+                }
+            };
 
             let amount_display = if permit_single.details.amount == alloy_primitives::U160::MAX {
                 format!("Unlimited {token_symbol}")

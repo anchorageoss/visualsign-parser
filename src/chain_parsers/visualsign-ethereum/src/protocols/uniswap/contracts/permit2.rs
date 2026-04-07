@@ -130,7 +130,7 @@ impl Permit2Visualizer {
 
     /// Format a uint48 expiration, treating max-uint48 as "never"
     fn format_expiration_u48(value: u64) -> String {
-        if value >= Self::U48_MAX {
+        if value == Self::U48_MAX {
             "never".to_string()
         } else {
             Self::format_timestamp(value)
@@ -157,11 +157,14 @@ impl Permit2Visualizer {
             .and_then(|r| r.get_token_symbol(chain_id, call.token))
             .unwrap_or_else(|| format!("{:?}", call.token));
 
-        // Format amount with proper decimals
-        let amount_u128: u128 = call.amount.to_string().parse().unwrap_or(0);
-        let (amount_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, call.token, amount_u128))
-            .unwrap_or_else(|| (call.amount.to_string(), token_symbol.clone()));
+        // Format amount with proper decimals — avoid silent U160→u128 overflow
+        let amount_str = match call.amount.to_string().parse::<u128>() {
+            Ok(amount_u128) => registry
+                .and_then(|r| r.format_token_amount(chain_id, call.token, amount_u128))
+                .map(|(s, _)| s)
+                .unwrap_or_else(|| call.amount.to_string()),
+            Err(_) => call.amount.to_string(),
+        };
 
         // Format expiration timestamp (uint48 — max means "never")
         let expiration_str =
@@ -335,11 +338,14 @@ impl Permit2Visualizer {
             .and_then(|r| r.get_token_symbol(chain_id, call.token))
             .unwrap_or_else(|| format!("{:?}", call.token));
 
-        // Format amount with proper decimals
-        let amount_u128: u128 = call.amount.to_string().parse().unwrap_or(0);
-        let (amount_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, call.token, amount_u128))
-            .unwrap_or_else(|| (call.amount.to_string(), token_symbol.clone()));
+        // Format amount with proper decimals — avoid silent U160→u128 overflow
+        let amount_str = match call.amount.to_string().parse::<u128>() {
+            Ok(amount_u128) => registry
+                .and_then(|r| r.format_token_amount(chain_id, call.token, amount_u128))
+                .map(|(s, _)| s)
+                .unwrap_or_else(|| call.amount.to_string()),
+            Err(_) => call.amount.to_string(),
+        };
 
         let text = format!(
             "Transfer {} {} from {} to {}",
@@ -473,12 +479,17 @@ mod tests {
 
     #[test]
     fn test_bug7_u64_max_is_not_u48_max() {
-        // u64::MAX was the old buggy check — it should NOT match u48 values
-        // u64::MAX = 18446744073709551615 — this can't come from a uint48
-        // But if someone passes it, it should still show "never" (it's > u48 max)
+        // u64::MAX (18446744073709551615) is NOT u48::MAX, so with == check
+        // it should NOT match — it falls through to timestamp formatting
         let result = Permit2Visualizer::format_expiration_u48(u64::MAX);
-        // This is > u48::MAX, so should also show "never"
-        assert_eq!(result, "never");
+        // u64::MAX is not u48::MAX, so it should NOT be "never"
+        assert_ne!(result, "never");
+        // It should fall back to the "timestamp N" format since the value
+        // is too large for a valid Unix timestamp
+        assert!(
+            result.contains("timestamp"),
+            "u64::MAX should show fallback timestamp format, got: {result}"
+        );
     }
 
     // --- Bug 8: sigDeadline uint256 handling ---
