@@ -111,6 +111,42 @@ impl Permit2Visualizer {
             .map_err(|e| format!("Failed to decode PermitSingle: {e}").into())
     }
 
+    /// Max uint48 value — Permit2 uses this to mean "never expires"
+    const U48_MAX: u64 = (1u64 << 48) - 1;
+
+    /// Safely format a timestamp, handling edge cases
+    fn format_timestamp(value_u64: u64) -> String {
+        if value_u64 == 0 {
+            return "epoch (1970-01-01)".to_string();
+        }
+        // Check for overflow when casting to i64
+        if let Ok(ts) = i64::try_from(value_u64) {
+            if let Some(dt) = Utc.timestamp_opt(ts, 0).single() {
+                return dt.format("%Y-%m-%d %H:%M UTC").to_string();
+            }
+        }
+        format!("timestamp {value_u64}")
+    }
+
+    /// Format a uint48 expiration, treating max-uint48 as "never"
+    fn format_expiration_u48(value: u64) -> String {
+        if value >= Self::U48_MAX {
+            "never".to_string()
+        } else {
+            Self::format_timestamp(value)
+        }
+    }
+
+    /// Format a uint256 deadline, treating very large values gracefully.
+    /// Accepts a string because uint256 may not fit in u64.
+    fn format_deadline_u256(raw: &str) -> String {
+        match raw.parse::<u64>() {
+            Ok(v) if v == u64::MAX => "never".to_string(),
+            Ok(v) => Self::format_timestamp(v),
+            Err(_) => "never".to_string(), // Value > u64::MAX is effectively infinite
+        }
+    }
+
     /// Decodes approve function call
     fn decode_approve(
         call: IPermit2::approveCall,
@@ -127,18 +163,13 @@ impl Permit2Visualizer {
             .and_then(|r| r.format_token_amount(chain_id, call.token, amount_u128))
             .unwrap_or_else(|| (call.amount.to_string(), token_symbol.clone()));
 
-        // Format expiration timestamp
-        let expiration_u64: u64 = call.expiration.to_string().parse().unwrap_or(0);
-        let expiration_str = if expiration_u64 == u64::MAX {
-            "never".to_string()
-        } else {
-            let dt = Utc.timestamp_opt(expiration_u64 as i64, 0).unwrap();
-            dt.format("%Y-%m-%d %H:%M UTC").to_string()
-        };
+        // Format expiration timestamp (uint48 — max means "never")
+        let expiration_str =
+            Self::format_expiration_u48(call.expiration.to_string().parse().unwrap_or(0));
 
         let text = format!(
-            "Approve {} {} {} to spend {} (expires: {})",
-            call.spender, amount_str, token_symbol, token_symbol, expiration_str
+            "Approve {} to spend {} {} (expires: {})",
+            call.spender, amount_str, token_symbol, expiration_str
         );
 
         SignablePayloadField::TextV2 {
@@ -178,34 +209,19 @@ impl Permit2Visualizer {
                 )
             });
 
-        // Format expiration timestamp
-        let expiration_u64: u64 = call
-            .permitSingle
-            .details
-            .expiration
-            .to_string()
-            .parse()
-            .unwrap_or(0);
-        let expiration_str = if expiration_u64 == u64::MAX {
-            "never".to_string()
-        } else {
-            let dt = Utc.timestamp_opt(expiration_u64 as i64, 0).unwrap();
-            dt.format("%Y-%m-%d %H:%M UTC").to_string()
-        };
+        // Format expiration timestamp (uint48 — max means "never")
+        let expiration_str = Self::format_expiration_u48(
+            call.permitSingle
+                .details
+                .expiration
+                .to_string()
+                .parse()
+                .unwrap_or(0),
+        );
 
-        // Format sig deadline timestamp
-        let sig_deadline_u64: u64 = call
-            .permitSingle
-            .sigDeadline
-            .to_string()
-            .parse()
-            .unwrap_or(0);
-        let sig_deadline_str = if sig_deadline_u64 == u64::MAX {
-            "never".to_string()
-        } else {
-            let dt = Utc.timestamp_opt(sig_deadline_u64 as i64, 0).unwrap();
-            dt.format("%Y-%m-%d %H:%M UTC").to_string()
-        };
+        // Format sig deadline timestamp (uint256 — values > u64::MAX treated as "never")
+        let sig_deadline_str =
+            Self::format_deadline_u256(&call.permitSingle.sigDeadline.to_string());
 
         // Determine if amount is "unlimited" (max u160)
         let amount_display = if call.permitSingle.details.amount == U160::MAX {
@@ -422,5 +438,228 @@ mod tests {
         );
     }
 
-    // TODO: Add tests for Permit2 functions once implemented
+    // =========================================================================
+    // Bug fix regression tests
+    // =========================================================================
+
+    // --- Bug 7: u48::MAX expiration shows "never" ---
+
+    #[test]
+    fn test_bug7_u48_max_expiration_shows_never() {
+        // Max uint48 = 2^48 - 1 = 281474976710655
+        let result = Permit2Visualizer::format_expiration_u48(281474976710655);
+        assert_eq!(result, "never", "Max uint48 should display as 'never'");
+    }
+
+    #[test]
+    fn test_bug7_normal_expiration_shows_date() {
+        // 1700000000 = 2023-11-14
+        let result = Permit2Visualizer::format_expiration_u48(1700000000);
+        assert!(
+            result.contains("2023"),
+            "Normal timestamp should show a date, got: {result}"
+        );
+        assert_ne!(result, "never", "Normal timestamp should not be 'never'");
+    }
+
+    #[test]
+    fn test_bug7_zero_expiration() {
+        let result = Permit2Visualizer::format_expiration_u48(0);
+        assert!(
+            result.contains("epoch") || result.contains("1970"),
+            "Zero should show epoch, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_bug7_u64_max_is_not_u48_max() {
+        // u64::MAX was the old buggy check — it should NOT match u48 values
+        // u64::MAX = 18446744073709551615 — this can't come from a uint48
+        // But if someone passes it, it should still show "never" (it's > u48 max)
+        let result = Permit2Visualizer::format_expiration_u48(u64::MAX);
+        // This is > u48::MAX, so should also show "never"
+        assert_eq!(result, "never");
+    }
+
+    // --- Bug 8: sigDeadline uint256 handling ---
+
+    #[test]
+    fn test_bug8_large_sig_deadline_shows_never() {
+        // Value > u64::MAX should show "never" (not epoch 1970)
+        let result =
+            Permit2Visualizer::format_deadline_u256("99999999999999999999999999999999999999");
+        assert_eq!(
+            result, "never",
+            "Very large deadline should show 'never', got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_bug8_u64_max_deadline_shows_never() {
+        let result = Permit2Visualizer::format_deadline_u256("18446744073709551615");
+        assert_eq!(result, "never", "u64::MAX deadline should be 'never'");
+    }
+
+    #[test]
+    fn test_bug8_normal_deadline_shows_date() {
+        let result = Permit2Visualizer::format_deadline_u256("1700000000");
+        assert!(
+            result.contains("2023"),
+            "Normal deadline should show date, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_bug8_zero_deadline() {
+        let result = Permit2Visualizer::format_deadline_u256("0");
+        assert!(
+            result.contains("epoch") || result.contains("1970"),
+            "Zero deadline should show epoch, got: {result}"
+        );
+    }
+
+    // --- Bug 10: decode_approve format string ---
+
+    #[test]
+    fn test_bug10_decode_approve_format_is_grammatical() {
+        use alloy_primitives::U160;
+
+        // Build an approveCall
+        let token: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            .parse()
+            .unwrap();
+        let spender: Address = "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad"
+            .parse()
+            .unwrap();
+        let amount = U160::from(1_000_000u64); // 1 USDC (6 decimals)
+        let expiration = alloy_primitives::Uint::<48, 1>::from(1700000000u64);
+
+        let call = IPermit2::approveCall {
+            token,
+            spender,
+            amount,
+            expiration,
+        };
+
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+        let field = Permit2Visualizer::decode_approve(call, 1, Some(&registry));
+
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                // Should be "Approve <spender> to spend <amount> <token>"
+                assert!(
+                    text_v2.text.contains("to spend"),
+                    "Should contain 'to spend', got: {}",
+                    text_v2.text
+                );
+                // Token symbol should appear exactly once after "to spend"
+                let count = text_v2.text.matches("USDC").count();
+                assert_eq!(
+                    count, 1,
+                    "Token symbol should appear once (not duplicated), got: {}",
+                    text_v2.text
+                );
+                // Spender address should appear before "to spend"
+                let spender_pos = text_v2
+                    .text
+                    .to_lowercase()
+                    .find("3fc91a3a")
+                    .expect("Spender should be in text");
+                let to_spend_pos = text_v2.text.find("to spend").unwrap();
+                assert!(
+                    spender_pos < to_spend_pos,
+                    "Spender should appear before 'to spend'"
+                );
+            }
+            _ => panic!("Expected TextV2 field"),
+        }
+    }
+
+    // --- Bug 13: Safe timestamp formatting ---
+
+    #[test]
+    fn test_bug13_format_timestamp_normal() {
+        let result = Permit2Visualizer::format_timestamp(1700000000);
+        assert!(
+            result.contains("2023"),
+            "Should show 2023 date, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_bug13_format_timestamp_zero() {
+        let result = Permit2Visualizer::format_timestamp(0);
+        assert!(
+            result.contains("epoch"),
+            "Zero should show epoch, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_bug13_format_timestamp_large_value_no_panic() {
+        // Values > i64::MAX should not panic (old code used `as i64` + `.unwrap()`)
+        let result = Permit2Visualizer::format_timestamp(u64::MAX);
+        // Should return something reasonable, not panic
+        assert!(
+            !result.is_empty(),
+            "Should return some string for large timestamp"
+        );
+    }
+
+    #[test]
+    fn test_bug13_format_timestamp_i64_max_boundary() {
+        // i64::MAX = 9223372036854775807 — just at the boundary
+        let result = Permit2Visualizer::format_timestamp(i64::MAX as u64);
+        // Should not panic
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_bug13_format_timestamp_i64_max_plus_one() {
+        // Just past i64::MAX — would overflow with `as i64`
+        let result = Permit2Visualizer::format_timestamp(i64::MAX as u64 + 1);
+        // Should not panic, should return a fallback
+        assert!(
+            result.contains("timestamp"),
+            "Should show fallback for un-representable timestamp, got: {result}"
+        );
+    }
+
+    // --- Integration: full Permit2 approve with edge cases ---
+
+    #[test]
+    fn test_permit2_approve_max_expiration_and_formatting() {
+        use alloy_primitives::U160;
+
+        let token: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let spender: Address = "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad"
+            .parse()
+            .unwrap();
+        let amount = U160::MAX; // Unlimited
+        // Max uint48 expiration = never
+        let expiration = alloy_primitives::Uint::<48, 1>::from(Permit2Visualizer::U48_MAX);
+
+        let call = IPermit2::approveCall {
+            token,
+            spender,
+            amount,
+            expiration,
+        };
+
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+        let field = Permit2Visualizer::decode_approve(call, 1, Some(&registry));
+
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                assert!(
+                    text_v2.text.contains("never"),
+                    "Max u48 expiration should show 'never', got: {}",
+                    text_v2.text
+                );
+            }
+            _ => panic!("Expected TextV2 field"),
+        }
+    }
 }

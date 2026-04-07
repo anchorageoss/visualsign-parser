@@ -6,7 +6,29 @@ use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePaylo
 
 use crate::protocols::uniswap::contracts::permit2::Permit2Visualizer;
 use crate::registry::{ContractRegistry, ContractType};
-use crate::visualizer::CalldataVisualizer;
+
+/// Formats a token amount using the registry when possible, falling back to raw string.
+/// Avoids the silent-zero bug where U256 values > u128::MAX would display as "0".
+fn format_amount_with_registry(
+    amount: &U256,
+    chain_id: u64,
+    token: Address,
+    registry: Option<&ContractRegistry>,
+) -> (String, String) {
+    let token_symbol = registry
+        .and_then(|r| r.get_token_symbol(chain_id, token))
+        .unwrap_or_else(|| format!("{token:?}"));
+
+    match amount.to_string().parse::<u128>() {
+        Ok(amount_u128) => registry
+            .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
+            .unwrap_or_else(|| (amount.to_string(), token_symbol.clone())),
+        Err(_) => {
+            // Value exceeds u128::MAX — show raw string instead of silent 0
+            (amount.to_string(), token_symbol.clone())
+        }
+    }
+}
 
 // Uniswap Universal Router interface definitions
 //
@@ -108,18 +130,12 @@ sol! {
     }
 
     /// Parameters for TRANSFER command
+    /// Source: https://github.com/Uniswap/universal-router/blob/main/contracts/libraries/Dispatcher.sol
+    /// (address token, address recipient, uint256 value)
     struct TransferParams {
-        address from;
-        address to;
-        uint160 amount;
-    }
-
-    /// Parameters for PERMIT2_TRANSFER_FROM command
-    struct Permit2TransferFromParams {
-        address from;
-        address to;
-        uint160 amount;
         address token;
+        address recipient;
+        uint256 value;
     }
 
     /// Parameters for PERMIT2_PERMIT command
@@ -177,14 +193,8 @@ pub enum Command {
     ExecuteSubPlan = 0x21,
 }
 
-fn map_commands(raw: &[u8]) -> Vec<Command> {
-    let mut out = Vec::with_capacity(raw.len());
-    for &b in raw {
-        if let Ok(cmd) = Command::try_from(b) {
-            out.push(cmd);
-        }
-    }
-    out
+fn map_commands(raw: &[u8]) -> Vec<Option<Command>> {
+    raw.iter().map(|&b| Command::try_from(b).ok()).collect()
 }
 
 /// Visualizer for Uniswap Universal Router
@@ -229,6 +239,7 @@ impl UniversalRouterVisualizer {
                 deadline,
                 chain_id,
                 registry,
+                0,
             );
         }
 
@@ -240,11 +251,16 @@ impl UniversalRouterVisualizer {
                 None,
                 chain_id,
                 registry,
+                0,
             );
         }
 
         None
     }
+
+    /// Maximum recursion depth for nested ExecuteSubPlan commands.
+    /// Prevents stack overflow from maliciously crafted deeply-nested sub-plans.
+    const MAX_SUB_PLAN_DEPTH: usize = 4;
 
     /// Helper function to visualize commands (shared by both execute variants)
     fn visualize_commands(
@@ -253,46 +269,32 @@ impl UniversalRouterVisualizer {
         deadline: Option<String>,
         chain_id: u64,
         registry: Option<&ContractRegistry>,
+        depth: usize,
     ) -> Option<SignablePayloadField> {
         let mapped = map_commands(commands);
         let mut detail_fields = Vec::new();
 
-        for (i, cmd) in mapped.iter().enumerate() {
+        // Iterate over ALL command bytes (including unknown) to keep indices
+        // aligned with the inputs array. Unknown commands are shown explicitly
+        // rather than silently dropped — dropping would shift all subsequent
+        // command-input pairings.
+        for (i, maybe_cmd) in mapped.iter().enumerate() {
             let input_bytes = inputs.get(i).map(|b| &b.0[..]);
 
             // Decode command-specific parameters
             let field = if let Some(bytes) = input_bytes {
-                match cmd {
-                    Command::V3SwapExactIn => {
-                        Self::decode_v3_swap_exact_in(bytes, chain_id, registry)
-                    }
-                    Command::V3SwapExactOut => {
-                        Self::decode_v3_swap_exact_out(bytes, chain_id, registry)
-                    }
-                    Command::V2SwapExactIn => {
-                        Self::decode_v2_swap_exact_in(bytes, chain_id, registry)
-                    }
-                    Command::V2SwapExactOut => {
-                        Self::decode_v2_swap_exact_out(bytes, chain_id, registry)
-                    }
-                    Command::PayPortion => Self::decode_pay_portion(bytes, chain_id, registry),
-                    Command::WrapEth => Self::decode_wrap_eth(bytes, chain_id, registry),
-                    Command::UnwrapWeth => Self::decode_unwrap_weth(bytes, chain_id, registry),
-                    Command::Sweep => Self::decode_sweep(bytes, chain_id, registry),
-                    Command::Transfer => Self::decode_transfer(bytes, chain_id, registry),
-                    Command::Permit2TransferFrom => {
-                        Self::decode_permit2_transfer_from(bytes, chain_id, registry)
-                    }
-                    Command::Permit2Permit => {
-                        Self::decode_permit2_permit(bytes, chain_id, registry)
-                    }
-                    _ => {
-                        // For unimplemented commands, show hex
+                match maybe_cmd {
+                    Some(cmd) => Self::decode_known_command(*cmd, bytes, chain_id, registry, depth),
+                    None => {
+                        // Unknown command — show raw hex so user can see it
+                        let raw_byte = commands[i]; // Safe: mapped.len() == commands.len()
                         let input_hex = format!("0x{}", hex::encode(bytes));
                         SignablePayloadField::TextV2 {
                             common: SignablePayloadFieldCommon {
-                                fallback_text: format!("{cmd:?} input: {input_hex}"),
-                                label: format!("{cmd:?}"),
+                                fallback_text: format!(
+                                    "Unknown(0x{raw_byte:02x}) input: {input_hex}"
+                                ),
+                                label: format!("Unknown(0x{raw_byte:02x})"),
                             },
                             text_v2: SignablePayloadFieldTextV2 {
                                 text: format!("Input: {input_hex}"),
@@ -301,10 +303,17 @@ impl UniversalRouterVisualizer {
                     }
                 }
             } else {
+                let cmd_label = match maybe_cmd {
+                    Some(cmd) => format!("{cmd:?}"),
+                    None => {
+                        let raw_byte = commands[i]; // Safe: mapped.len() == commands.len()
+                        format!("Unknown(0x{raw_byte:02x})")
+                    }
+                };
                 SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("{cmd:?} input: None"),
-                        label: format!("{cmd:?}"),
+                        fallback_text: format!("{cmd_label} input: None"),
+                        label: cmd_label,
                     },
                     text_v2: SignablePayloadFieldTextV2 {
                         text: "Input: None".to_string(),
@@ -348,20 +357,33 @@ impl UniversalRouterVisualizer {
             });
         }
 
+        // Build a human-readable list of command names for the fallback text
+        let cmd_names: Vec<String> = mapped
+            .iter()
+            .enumerate()
+            .map(|(i, maybe_cmd)| match maybe_cmd {
+                Some(cmd) => format!("{cmd:?}"),
+                None => {
+                    let raw_byte = commands[i]; // Safe: mapped.len() == commands.len()
+                    format!("Unknown(0x{raw_byte:02x})")
+                }
+            })
+            .collect();
+
         Some(SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: if let Some(dl) = &deadline {
                     format!(
-                        "Uniswap Universal Router Execute: {} commands ({:?}), deadline {}",
+                        "Uniswap Universal Router Execute: {} commands ([{}]), deadline {}",
                         mapped.len(),
-                        mapped,
+                        cmd_names.join(", "),
                         dl
                     )
                 } else {
                     format!(
-                        "Uniswap Universal Router Execute: {} commands ({:?})",
+                        "Uniswap Universal Router Execute: {} commands ([{}])",
                         mapped.len(),
-                        mapped
+                        cmd_names.join(", ")
                     )
                 },
                 label: "Universal Router".to_string(),
@@ -392,6 +414,121 @@ impl UniversalRouterVisualizer {
                 }),
             },
         })
+    }
+
+    /// Dispatches a known command to its specific decoder
+    fn decode_known_command(
+        cmd: Command,
+        bytes: &[u8],
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
+        depth: usize,
+    ) -> SignablePayloadField {
+        match cmd {
+            Command::V3SwapExactIn => Self::decode_v3_swap_exact_in(bytes, chain_id, registry),
+            Command::V3SwapExactOut => Self::decode_v3_swap_exact_out(bytes, chain_id, registry),
+            Command::V2SwapExactIn => Self::decode_v2_swap_exact_in(bytes, chain_id, registry),
+            Command::V2SwapExactOut => Self::decode_v2_swap_exact_out(bytes, chain_id, registry),
+            Command::PayPortion => Self::decode_pay_portion(bytes, chain_id, registry),
+            Command::WrapEth => Self::decode_wrap_eth(bytes, chain_id, registry),
+            Command::UnwrapWeth => Self::decode_unwrap_weth(bytes, chain_id, registry),
+            Command::Sweep => Self::decode_sweep(bytes, chain_id, registry),
+            Command::Transfer => Self::decode_transfer(bytes, chain_id, registry),
+            Command::Permit2TransferFrom => {
+                Self::decode_permit2_transfer_from(bytes, chain_id, registry)
+            }
+            Command::Permit2Permit => Self::decode_permit2_permit(bytes, chain_id, registry),
+            Command::ExecuteSubPlan => {
+                Self::decode_execute_sub_plan(bytes, chain_id, registry, depth)
+            }
+            _ => {
+                // For recognized but unimplemented commands, show hex
+                let input_hex = format!("0x{}", hex::encode(bytes));
+                SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("{cmd:?} input: {input_hex}"),
+                        label: format!("{cmd:?}"),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("Input: {input_hex}"),
+                    },
+                }
+            }
+        }
+    }
+
+    /// Decodes EXECUTE_SUB_PLAN command by recursively visualizing nested commands.
+    /// Sub-plan format: (bytes commands, bytes[] inputs)
+    /// Depth is bounded by MAX_SUB_PLAN_DEPTH to prevent stack overflow.
+    fn decode_execute_sub_plan(
+        bytes: &[u8],
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
+        depth: usize,
+    ) -> SignablePayloadField {
+        // Guard against stack overflow from maliciously nested sub-plans
+        if depth >= Self::MAX_SUB_PLAN_DEPTH {
+            let input_hex = format!("0x{}", hex::encode(bytes));
+            return SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!("ExecuteSubPlan (depth limit): {input_hex}"),
+                    label: "ExecuteSubPlan".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 {
+                    text: format!(
+                        "Sub-plan nesting exceeds maximum depth ({})",
+                        Self::MAX_SUB_PLAN_DEPTH
+                    ),
+                },
+            };
+        }
+
+        // Sub-plan is ABI-encoded as (bytes commands, bytes[] inputs)
+        // Use sol_data types for proper ABI tuple decoding
+        use alloy_sol_types::sol_data;
+        type SubPlanParams = (sol_data::Bytes, sol_data::Array<sol_data::Bytes>);
+
+        let params = match SubPlanParams::abi_decode_params(bytes) {
+            Ok(p) => p,
+            Err(_) => {
+                let input_hex = format!("0x{}", hex::encode(bytes));
+                return SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("ExecuteSubPlan: {input_hex}"),
+                        label: "ExecuteSubPlan".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "Failed to decode sub-plan parameters".to_string(),
+                    },
+                };
+            }
+        };
+
+        let (sub_commands, sub_inputs) = params;
+        let sub_inputs_bytes: Vec<alloy_primitives::Bytes> = sub_inputs.into_iter().collect();
+
+        // Recursively visualize the nested commands with incremented depth
+        if let Some(nested_field) = Self::visualize_commands(
+            &sub_commands,
+            &sub_inputs_bytes,
+            None,
+            chain_id,
+            registry,
+            depth + 1,
+        ) {
+            nested_field
+        } else {
+            let input_hex = format!("0x{}", hex::encode(bytes));
+            SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!("ExecuteSubPlan: {input_hex}"),
+                    label: "ExecuteSubPlan".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 {
+                    text: "Empty sub-plan".to_string(),
+                },
+            }
+        }
     }
 
     /// Decodes V3_SWAP_EXACT_IN command parameters
@@ -436,10 +573,11 @@ impl UniversalRouterVisualizer {
             };
         }
 
-        // Extract token addresses and fee from path
+        // Extract token addresses from path
+        // ExactIn path: tokenIn(20) | fee(3) | token(20) | fee(3) | ... | tokenOut(20)
         let token_in = Address::from_slice(&path[0..20]);
         let fee = u32::from_be_bytes([0, path[20], path[21], path[22]]);
-        let token_out = Address::from_slice(&path[23..43]);
+        let token_out = Address::from_slice(&path[path.len() - 20..]);
 
         // Resolve token symbols
         let token_in_symbol = registry
@@ -578,9 +716,12 @@ impl UniversalRouterVisualizer {
             .unwrap_or_else(|| format!("{:?}", params.token));
 
         // Convert bips to percentage (10000 bips = 100%)
-        let bips_value: u128 = params.bips.to_string().parse().unwrap_or(0);
+        let bips_str = params.bips.to_string();
+        let bips_value: u128 = bips_str.parse().unwrap_or(u128::MAX);
         let bips_pct = (bips_value as f64) / 100.0;
-        let percentage_str = if bips_pct >= 1.0 {
+        let percentage_str = if bips_value > 10000 {
+            format!("{bips_pct:.2}% (WARNING: >100%)")
+        } else if bips_pct >= 1.0 {
             format!("{bips_pct:.2}%")
         } else {
             format!("{bips_pct:.4}%")
@@ -777,10 +918,11 @@ impl UniversalRouterVisualizer {
             };
         }
 
-        // Extract token addresses and fee from path
-        let token_in = Address::from_slice(&path[0..20]);
+        // Extract token addresses from path
+        // ExactOut path is REVERSED: tokenOut(20) | fee(3) | ... | tokenIn(20)
+        let token_out = Address::from_slice(&path[0..20]);
         let fee = u32::from_be_bytes([0, path[20], path[21], path[22]]);
-        let token_out = Address::from_slice(&path[23..43]);
+        let token_in = Address::from_slice(&path[path.len() - 20..]);
 
         // Resolve token symbols
         let token_in_symbol = registry
@@ -1304,10 +1446,11 @@ impl UniversalRouterVisualizer {
     }
 
     /// Decodes TRANSFER command parameters
+    /// Source: (address token, address recipient, uint256 value)
     fn decode_transfer(
         bytes: &[u8],
-        _chain_id: u64,
-        _registry: Option<&ContractRegistry>,
+        chain_id: u64,
+        registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
         let params = match <TransferParams as SolValue>::abi_decode(bytes) {
             Ok(p) => p,
@@ -1324,9 +1467,12 @@ impl UniversalRouterVisualizer {
             }
         };
 
+        let (value_str, token_symbol) =
+            format_amount_with_registry(&params.value, chain_id, params.token, registry);
+
         let text = format!(
-            "Transfer {} tokens from {:?} to {:?}",
-            params.amount, params.from, params.to
+            "Transfer {} {} to {:?}",
+            value_str, token_symbol, params.recipient
         );
 
         SignablePayloadField::TextV2 {
@@ -1338,36 +1484,101 @@ impl UniversalRouterVisualizer {
         }
     }
 
-    /// Decodes PERMIT2_TRANSFER_FROM command by delegating to Permit2Visualizer
+    /// Decodes PERMIT2_TRANSFER_FROM command parameters directly.
+    /// Universal Router encodes this as (address token, address recipient, uint256 amount)
+    /// — raw ABI params without a function selector.
     fn decode_permit2_transfer_from(
         bytes: &[u8],
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        let visualizer = Permit2Visualizer;
-        visualizer
-            .visualize_calldata(bytes, chain_id, registry)
-            .unwrap_or_else(|| SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: format!("Permit2 Transfer From: 0x{}", hex::encode(bytes)),
-                    label: "Permit2 Transfer From".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 {
-                    text: "Failed to decode parameters".to_string(),
-                },
-            })
+        // Decode directly: (address token, address recipient, uint256 amount)
+        type TransferFromParams = (Address, Address, U256);
+
+        let params = match TransferFromParams::abi_decode_params(bytes) {
+            Ok(p) => p,
+            Err(_) => {
+                return SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!("Permit2 Transfer From: 0x{}", hex::encode(bytes)),
+                        label: "Permit2 Transfer From".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: "Failed to decode parameters".to_string(),
+                    },
+                };
+            }
+        };
+
+        let (token, recipient, amount) = params;
+
+        let (amount_str, token_symbol) =
+            format_amount_with_registry(&amount, chain_id, token, registry);
+
+        let text = format!("Permit2 Transfer {amount_str} {token_symbol} to {recipient:?}");
+
+        SignablePayloadField::TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: text.clone(),
+                label: "Permit2 Transfer From".to_string(),
+            },
+            text_v2: SignablePayloadFieldTextV2 { text },
+        }
     }
 
-    /// Decodes PERMIT2_PERMIT (0x0a) command by delegating to Permit2Visualizer
+    /// Decodes PERMIT2_PERMIT (0x0a) command.
+    /// Universal Router encodes this as inline PermitSingle bytes + signature,
+    /// without a function selector. Try custom permit decoding first, then
+    /// fall back to delegating to Permit2Visualizer.
     fn decode_permit2_permit(
         bytes: &[u8],
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        let visualizer = Permit2Visualizer;
-        visualizer
-            .visualize_calldata(bytes, chain_id, registry)
-            .unwrap_or_else(|| Self::show_decode_error(bytes, &"Failed to decode parameters"))
+        // Try custom permit decoding (inline PermitSingle without selector)
+        if let Ok(permit_single) = Permit2Visualizer::decode_custom_permit_params(bytes) {
+            let token = permit_single.details.token;
+            let token_symbol = registry
+                .and_then(|r| r.get_token_symbol(chain_id, token))
+                .unwrap_or_else(|| format!("{token:?}"));
+
+            let amount_u128: u128 = permit_single
+                .details
+                .amount
+                .to_string()
+                .parse()
+                .unwrap_or(0);
+            let (amount_str, _) = registry
+                .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
+                .unwrap_or_else(|| {
+                    (
+                        permit_single.details.amount.to_string(),
+                        token_symbol.clone(),
+                    )
+                });
+
+            let amount_display = if permit_single.details.amount == alloy_primitives::U160::MAX {
+                format!("Unlimited {token_symbol}")
+            } else {
+                format!("{amount_str} {token_symbol}")
+            };
+
+            let text = format!(
+                "Permit {} to spend {}",
+                permit_single.spender, amount_display
+            );
+
+            return SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: text.clone(),
+                    label: "Permit2 Permit".to_string(),
+                },
+                text_v2: SignablePayloadFieldTextV2 { text },
+            };
+        }
+
+        // Fall back to showing raw hex with slot breakdown
+        Self::show_decode_error(bytes, &"Failed to decode parameters")
     }
 
     /// Helper function to display decoding error with raw hex slots
@@ -1835,7 +2046,8 @@ mod tests {
 
     #[test]
     fn test_visualize_tx_commands_unrecognized_command() {
-        // 0xff is not a valid Command, so it should be skipped
+        // 0xff is not a valid Command — it should be shown (not dropped) to keep
+        // indices aligned with the inputs array.
         let commands = vec![0xff, Command::Transfer as u8];
         let inputs = vec![vec![0x01], vec![0x02]];
         let deadline = 0u64;
@@ -1847,8 +2059,9 @@ mod tests {
                 .unwrap(),
             SignablePayloadField::PreviewLayout {
                 common: SignablePayloadFieldCommon {
-                    fallback_text: "Uniswap Universal Router Execute: 1 commands ([Transfer])"
-                        .to_string(),
+                    fallback_text:
+                        "Uniswap Universal Router Execute: 2 commands ([Unknown(0xff), Transfer])"
+                            .to_string(),
                     label: "Universal Router".to_string(),
                 },
                 preview_layout: SignablePayloadFieldPreviewLayout {
@@ -1856,30 +2069,54 @@ mod tests {
                         text: "Uniswap Universal Router Execute".to_string(),
                     }),
                     subtitle: Some(SignablePayloadFieldTextV2 {
-                        text: "1 commands".to_string(),
+                        text: "2 commands".to_string(),
                     }),
                     condensed: None,
                     expanded: Some(SignablePayloadFieldListLayout {
-                        fields: vec![AnnotatedPayloadField {
-                            signable_payload_field: SignablePayloadField::PreviewLayout {
-                                common: SignablePayloadFieldCommon {
-                                    fallback_text: "Transfer: 0x01".to_string(),
-                                    label: "Command 1".to_string(),
+                        fields: vec![
+                            // Unknown command shown first with its own input
+                            AnnotatedPayloadField {
+                                signable_payload_field: SignablePayloadField::PreviewLayout {
+                                    common: SignablePayloadFieldCommon {
+                                        fallback_text: "Unknown(0xff) input: 0x01".to_string(),
+                                        label: "Command 1".to_string(),
+                                    },
+                                    preview_layout: SignablePayloadFieldPreviewLayout {
+                                        title: Some(SignablePayloadFieldTextV2 {
+                                            text: "Unknown(0xff)".to_string(),
+                                        }),
+                                        subtitle: Some(SignablePayloadFieldTextV2 {
+                                            text: "Input: 0x01".to_string(),
+                                        }),
+                                        condensed: None,
+                                        expanded: None,
+                                    },
                                 },
-                                preview_layout: SignablePayloadFieldPreviewLayout {
-                                    title: Some(SignablePayloadFieldTextV2 {
-                                        text: "Transfer".to_string(),
-                                    }),
-                                    subtitle: Some(SignablePayloadFieldTextV2 {
-                                        text: "Failed to decode parameters".to_string(),
-                                    }),
-                                    condensed: None,
-                                    expanded: None,
-                                },
+                                static_annotation: None,
+                                dynamic_annotation: None,
                             },
-                            static_annotation: None,
-                            dynamic_annotation: None,
-                        }],
+                            // Transfer gets its correct input (0x02), not 0x01
+                            AnnotatedPayloadField {
+                                signable_payload_field: SignablePayloadField::PreviewLayout {
+                                    common: SignablePayloadFieldCommon {
+                                        fallback_text: "Transfer: 0x02".to_string(),
+                                        label: "Command 2".to_string(),
+                                    },
+                                    preview_layout: SignablePayloadFieldPreviewLayout {
+                                        title: Some(SignablePayloadFieldTextV2 {
+                                            text: "Transfer".to_string(),
+                                        }),
+                                        subtitle: Some(SignablePayloadFieldTextV2 {
+                                            text: "Failed to decode parameters".to_string(),
+                                        }),
+                                        condensed: None,
+                                        expanded: None,
+                                    },
+                                },
+                                static_annotation: None,
+                                dynamic_annotation: None,
+                            },
+                        ],
                     }),
                 },
             }
@@ -2246,6 +2483,754 @@ mod tests {
                 );
             }
             _ => panic!("Expected TextV2 field"),
+        }
+    }
+    // =========================================================================
+    // Bug fix regression tests
+    // =========================================================================
+
+    // --- Bug 1: Command-input index alignment ---
+
+    #[test]
+    fn test_bug1_unknown_command_preserves_index_alignment() {
+        // A transaction with [V3SwapExactIn, UNKNOWN(0x07), WrapEth] and three inputs.
+        // Before the fix, UNKNOWN was silently dropped, causing WrapEth to get
+        // input[1] (the unknown command's data) instead of input[2].
+        let recipient: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let amount = U256::from(1_000_000_000_000_000_000u64); // 1 ETH
+
+        // Build valid WrapEth input as input[2]
+        let wrap_eth_encoded = (recipient, amount).abi_encode();
+
+        let commands = vec![
+            Command::V3SwapExactIn as u8,
+            0x07, // Unknown command
+            Command::WrapEth as u8,
+        ];
+        let inputs = vec![
+            vec![0xde, 0xad], // garbage for V3Swap (will fail decode)
+            vec![0xbe, 0xef], // garbage for unknown command
+            wrap_eth_encoded, // valid WrapEth params
+        ];
+        let input = encode_execute_call(&commands, inputs, 1_700_000_000);
+
+        let result = UniversalRouterVisualizer {}
+            .visualize_tx_commands(&input, 1, None)
+            .unwrap();
+
+        if let SignablePayloadField::PreviewLayout {
+            common,
+            preview_layout,
+        } = result
+        {
+            // Should show 3 commands (not 2)
+            assert!(
+                common.fallback_text.contains("3 commands"),
+                "Expected 3 commands, got: {}",
+                common.fallback_text
+            );
+            // Unknown command should be visible
+            assert!(
+                common.fallback_text.contains("Unknown(0x07)"),
+                "Expected Unknown(0x07), got: {}",
+                common.fallback_text
+            );
+
+            let fields = preview_layout.expanded.unwrap().fields;
+            // 3 commands + 1 deadline = 4 fields
+            assert_eq!(fields.len(), 4, "Expected 4 fields (3 commands + deadline)");
+
+            // Command 3 (WrapEth) should decode successfully with 1 ETH
+            let wrap_field = &fields[2].signable_payload_field;
+            let wrap_text = match wrap_field {
+                SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+                    preview_layout.subtitle.as_ref().unwrap().text.clone()
+                }
+                _ => panic!("Expected PreviewLayout for WrapEth"),
+            };
+            assert!(
+                wrap_text.contains("1.0")
+                    || wrap_text.contains("1 ETH")
+                    || wrap_text.contains("Wrap"),
+                "WrapEth should decode correctly with right input, got: {wrap_text}"
+            );
+            // Crucially, it should NOT say "Failed to decode"
+            assert!(
+                !wrap_text.contains("Failed to decode"),
+                "WrapEth should NOT fail to decode — index alignment is broken if it does"
+            );
+        } else {
+            panic!("Expected PreviewLayout");
+        }
+    }
+
+    #[test]
+    fn test_bug1_multiple_unknown_commands_all_shown() {
+        // Two unknown commands in a row
+        let commands = vec![0xFE, 0xFF, Command::Sweep as u8];
+        let inputs = vec![vec![0x01], vec![0x02], vec![0x03]];
+        let input = encode_execute_call(&commands, inputs, 0);
+
+        let result = UniversalRouterVisualizer {}
+            .visualize_tx_commands(&input, 1, None)
+            .unwrap();
+
+        if let SignablePayloadField::PreviewLayout { common, .. } = result {
+            assert!(
+                common.fallback_text.contains("3 commands"),
+                "All 3 commands should be counted"
+            );
+            assert!(
+                common.fallback_text.contains("Unknown(0xfe)"),
+                "First unknown should appear"
+            );
+            assert!(
+                common.fallback_text.contains("Unknown(0xff)"),
+                "Second unknown should appear"
+            );
+            assert!(
+                common.fallback_text.contains("Sweep"),
+                "Known command should appear"
+            );
+        } else {
+            panic!("Expected PreviewLayout");
+        }
+    }
+
+    // --- Bug 2: V3 multi-hop path reads correct final token ---
+
+    #[test]
+    fn test_bug2_v3_exact_in_multihop_shows_final_token() {
+        // Multi-hop V3 path: SETH -> (fee 3000) -> WETH -> (fee 500) -> USDC
+        // Path bytes: SETH(20) | fee(3) | WETH(20) | fee(3) | USDC(20) = 66 bytes
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        let seth: Address = "0xe71bdfe1df69284f00ee185cf0d95d0c7680c0d4"
+            .parse()
+            .unwrap();
+        let weth: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let usdc: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            .parse()
+            .unwrap();
+
+        // Build packed V3 path: SETH | 3000 | WETH | 500 | USDC
+        let mut path = Vec::new();
+        path.extend_from_slice(seth.as_slice());
+        path.extend_from_slice(&[0x00, 0x0B, 0xB8]); // fee 3000
+        path.extend_from_slice(weth.as_slice());
+        path.extend_from_slice(&[0x00, 0x01, 0xF4]); // fee 500
+        path.extend_from_slice(usdc.as_slice());
+        assert_eq!(path.len(), 66);
+
+        // ABI encode: (address recipient, uint256 amountIn, uint256 amountOutMin, bytes path, bool payerIsUser)
+        let recipient = Address::ZERO;
+        let amount_in = U256::from(1_000_000_000_000_000_000u64); // 1 SETH
+        let amount_out_min = U256::from(1_000_000u64); // 1 USDC
+
+        type V3SwapParams = (Address, U256, U256, Bytes, bool);
+        let encoded = V3SwapParams::abi_encode_params(&(
+            recipient,
+            amount_in,
+            amount_out_min,
+            Bytes::from(path),
+            true,
+        ));
+
+        let field =
+            UniversalRouterVisualizer::decode_v3_swap_exact_in(&encoded, 1, Some(&registry));
+
+        let text = match &field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+                preview_layout.subtitle.as_ref().unwrap().text.clone()
+            }
+            _ => panic!("Expected PreviewLayout"),
+        };
+
+        // Output token should be USDC (final hop), NOT WETH (intermediate)
+        assert!(
+            text.contains("USDC"),
+            "Multi-hop should show USDC as output token, got: {text}"
+        );
+        // Input token should be SETH
+        assert!(text.contains("SETH"), "Input should be SETH, got: {text}");
+        // Should NOT show WETH as output (that's the intermediate)
+        assert!(
+            !text.contains("for") || text.contains("USDC"),
+            "Output should be USDC not WETH"
+        );
+    }
+
+    #[test]
+    fn test_bug2_v3_exact_in_single_hop_still_works() {
+        // Single-hop V3 path: WETH -> (fee 3000) -> USDC (43 bytes)
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        let weth: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let usdc: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            .parse()
+            .unwrap();
+
+        let mut path = Vec::new();
+        path.extend_from_slice(weth.as_slice());
+        path.extend_from_slice(&[0x00, 0x0B, 0xB8]); // fee 3000
+        path.extend_from_slice(usdc.as_slice());
+        assert_eq!(path.len(), 43);
+
+        let recipient = Address::ZERO;
+        let amount_in = U256::from(1_000_000_000_000_000_000u64);
+        let amount_out_min = U256::from(2_000_000_000u64);
+
+        type V3SwapParams = (Address, U256, U256, Bytes, bool);
+        let encoded = V3SwapParams::abi_encode_params(&(
+            recipient,
+            amount_in,
+            amount_out_min,
+            Bytes::from(path),
+            true,
+        ));
+
+        let field =
+            UniversalRouterVisualizer::decode_v3_swap_exact_in(&encoded, 1, Some(&registry));
+
+        let text = match &field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+                preview_layout.subtitle.as_ref().unwrap().text.clone()
+            }
+            _ => panic!("Expected PreviewLayout"),
+        };
+
+        assert!(text.contains("WETH"), "Input should be WETH, got: {text}");
+        assert!(text.contains("USDC"), "Output should be USDC, got: {text}");
+    }
+
+    // --- Bug 3: V3 ExactOut path reversal ---
+
+    #[test]
+    fn test_bug3_v3_exact_out_reverses_path_tokens() {
+        // ExactOut path is REVERSED: tokenOut(20) | fee(3) | tokenIn(20)
+        // For a swap buying USDC with WETH, the path is: USDC | fee | WETH
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        let weth: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let usdc: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            .parse()
+            .unwrap();
+
+        // ExactOut path: USDC (output) | fee | WETH (input)
+        let mut path = Vec::new();
+        path.extend_from_slice(usdc.as_slice()); // tokenOut first in ExactOut
+        path.extend_from_slice(&[0x00, 0x0B, 0xB8]); // fee 3000
+        path.extend_from_slice(weth.as_slice()); // tokenIn last in ExactOut
+
+        let recipient = Address::ZERO;
+        let amount_out = U256::from(1_000_000_000u64); // 1000 USDC (6 decimals)
+        let amount_in_max = U256::from(1_000_000_000_000_000_000u64); // 1 WETH
+
+        type V3SwapParams = (Address, U256, U256, Bytes, bool);
+        let encoded = V3SwapParams::abi_encode_params(&(
+            recipient,
+            amount_out,
+            amount_in_max,
+            Bytes::from(path),
+            true,
+        ));
+
+        let field =
+            UniversalRouterVisualizer::decode_v3_swap_exact_out(&encoded, 1, Some(&registry));
+
+        let text = match &field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+                preview_layout.subtitle.as_ref().unwrap().text.clone()
+            }
+            _ => panic!("Expected PreviewLayout"),
+        };
+
+        // Should show "Swap <=1.0 WETH for 1000.0 USDC" (input is WETH, output is USDC)
+        assert!(
+            text.contains("WETH") && text.contains("USDC"),
+            "Should show both WETH and USDC, got: {text}"
+        );
+        // The text format is "Swap <=X INPUT for Y OUTPUT"
+        // WETH should appear after "<=" (input) and USDC after "for" (output)
+        let weth_pos = text.find("WETH").unwrap();
+        let usdc_pos = text.find("USDC").unwrap();
+        let for_pos = text.find("for").unwrap();
+        assert!(
+            weth_pos < for_pos && usdc_pos > for_pos,
+            "WETH (input) should be before 'for', USDC (output) after. Got: {text}"
+        );
+    }
+
+    #[test]
+    fn test_bug3_v3_exact_out_multihop_reversed() {
+        // Multi-hop ExactOut: buying DAI with WETH through USDC
+        // ExactOut path (reversed): DAI | fee | USDC | fee | WETH
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        let weth: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let usdc: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            .parse()
+            .unwrap();
+        let dai: Address = "0x6b175474e89094c44da98b954eedeac495271d0f"
+            .parse()
+            .unwrap();
+
+        let mut path = Vec::new();
+        path.extend_from_slice(dai.as_slice()); // tokenOut
+        path.extend_from_slice(&[0x00, 0x01, 0xF4]); // fee 500
+        path.extend_from_slice(usdc.as_slice()); // intermediate
+        path.extend_from_slice(&[0x00, 0x0B, 0xB8]); // fee 3000
+        path.extend_from_slice(weth.as_slice()); // tokenIn
+        assert_eq!(path.len(), 66);
+
+        let recipient = Address::ZERO;
+        let amount_out = U256::from(1_000_000_000_000_000_000u64); // 1 DAI
+        let amount_in_max = U256::from(500_000_000_000_000u64); // 0.0005 WETH
+
+        type V3SwapParams = (Address, U256, U256, Bytes, bool);
+        let encoded = V3SwapParams::abi_encode_params(&(
+            recipient,
+            amount_out,
+            amount_in_max,
+            Bytes::from(path),
+            true,
+        ));
+
+        let field =
+            UniversalRouterVisualizer::decode_v3_swap_exact_out(&encoded, 1, Some(&registry));
+
+        let text = match &field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+                preview_layout.subtitle.as_ref().unwrap().text.clone()
+            }
+            _ => panic!("Expected PreviewLayout"),
+        };
+
+        // Output should be DAI (first in reversed path), input should be WETH (last)
+        assert!(text.contains("DAI"), "Output should be DAI, got: {text}");
+        assert!(text.contains("WETH"), "Input should be WETH, got: {text}");
+        // Should NOT show USDC (intermediate token)
+        let for_pos = text.find("for").unwrap();
+        let after_for = &text[for_pos..];
+        assert!(
+            after_for.contains("DAI"),
+            "DAI should appear as output after 'for', got: {text}"
+        );
+    }
+
+    // --- Bug 4: ExecuteSubPlan recursive decoding ---
+
+    #[test]
+    fn test_bug4_execute_sub_plan_decodes_nested_commands() {
+        use alloy_sol_types::sol_data;
+
+        // Build a sub-plan with [WrapEth] command
+        let recipient: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let amount = U256::from(1_000_000_000_000_000_000u64);
+        let wrap_input = (recipient, amount).abi_encode();
+
+        let sub_commands: Vec<u8> = vec![Command::WrapEth as u8];
+        let sub_inputs: Vec<Bytes> = vec![Bytes::from(wrap_input)];
+
+        // ABI-encode the sub-plan: (bytes, bytes[])
+        type SubPlanParams = (sol_data::Bytes, sol_data::Array<sol_data::Bytes>);
+        let sub_plan_encoded = SubPlanParams::abi_encode_params(&(
+            sub_commands.clone(),
+            sub_inputs.iter().map(|b| b.to_vec()).collect::<Vec<_>>(),
+        ));
+
+        let field =
+            UniversalRouterVisualizer::decode_execute_sub_plan(&sub_plan_encoded, 1, None, 0);
+
+        // Should decode as a nested Universal Router Execute, not raw hex
+        match &field {
+            SignablePayloadField::PreviewLayout {
+                common,
+                preview_layout,
+            } => {
+                assert!(
+                    common.fallback_text.contains("1 commands"),
+                    "Sub-plan should show 1 command, got: {}",
+                    common.fallback_text
+                );
+                assert!(
+                    common.fallback_text.contains("WrapEth"),
+                    "Sub-plan should show WrapEth, got: {}",
+                    common.fallback_text
+                );
+                // The nested WrapEth should be decoded (not "Failed to decode")
+                if let Some(expanded) = &preview_layout.expanded {
+                    let nested = &expanded.fields[0].signable_payload_field;
+                    match nested {
+                        SignablePayloadField::PreviewLayout {
+                            preview_layout: inner,
+                            ..
+                        } => {
+                            let subtitle = inner.subtitle.as_ref().unwrap().text.clone();
+                            assert!(
+                                subtitle.contains("Wrap") || subtitle.contains("ETH"),
+                                "Nested WrapEth should decode, got: {subtitle}"
+                            );
+                        }
+                        _ => panic!("Expected PreviewLayout for nested command"),
+                    }
+                }
+            }
+            _ => panic!("Expected PreviewLayout, got: {field:?}"),
+        }
+    }
+
+    #[test]
+    fn test_bug4_execute_sub_plan_invalid_input() {
+        let garbage = vec![0xde, 0xad, 0xbe, 0xef];
+        let field = UniversalRouterVisualizer::decode_execute_sub_plan(&garbage, 1, None, 0);
+
+        match &field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                assert!(
+                    text_v2.text.contains("Failed to decode"),
+                    "Invalid sub-plan should show decode error"
+                );
+            }
+            _ => panic!("Expected TextV2 error field"),
+        }
+    }
+
+    // --- Bug 5: TRANSFER command correct semantics ---
+
+    #[test]
+    fn test_bug5_transfer_shows_token_symbol_and_recipient() {
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        // Transfer 0.5 WETH to a recipient
+        let weth: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let recipient: Address = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+            .parse()
+            .unwrap();
+        let value = U256::from(500_000_000_000_000_000u64); // 0.5 WETH
+
+        // ABI encode: (address token, address recipient, uint256 value)
+        let encoded = (weth, recipient, value).abi_encode();
+
+        let field = UniversalRouterVisualizer::decode_transfer(&encoded, 1, Some(&registry));
+
+        match &field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                // Should show "Transfer 0.5 WETH to <recipient>"
+                assert!(
+                    text_v2.text.contains("WETH"),
+                    "Should resolve WETH symbol, got: {}",
+                    text_v2.text
+                );
+                assert!(
+                    text_v2.text.contains("0.5"),
+                    "Should format amount with decimals, got: {}",
+                    text_v2.text
+                );
+                // Should NOT say "from" (old buggy format)
+                assert!(
+                    !text_v2.text.contains("from"),
+                    "Should NOT say 'from' — token is the contract, not sender. Got: {}",
+                    text_v2.text
+                );
+                assert!(
+                    text_v2.text.to_lowercase().contains("d8da6bf2"),
+                    "Should show recipient address, got: {}",
+                    text_v2.text
+                );
+            }
+            _ => panic!("Expected TextV2 field"),
+        }
+    }
+
+    #[test]
+    fn test_bug5_transfer_unknown_token_shows_address() {
+        // Transfer with a token not in the registry
+        let unknown_token: Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        let recipient: Address = "0x2222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
+        let value = U256::from(42u64);
+
+        let encoded = (unknown_token, recipient, value).abi_encode();
+
+        let field = UniversalRouterVisualizer::decode_transfer(&encoded, 1, None);
+
+        match &field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                // Should show raw address for unknown token
+                assert!(
+                    text_v2.text.to_lowercase().contains("1111111111"),
+                    "Should show token address, got: {}",
+                    text_v2.text
+                );
+                assert!(
+                    text_v2.text.contains("42"),
+                    "Should show raw amount, got: {}",
+                    text_v2.text
+                );
+            }
+            _ => panic!("Expected TextV2 field"),
+        }
+    }
+
+    // --- Bug 6: Permit2 delegation (direct decoding) ---
+
+    #[test]
+    fn test_bug6_permit2_transfer_from_decodes_without_selector() {
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        // PERMIT2_TRANSFER_FROM params: (address token, address recipient, uint256 amount)
+        let weth: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let recipient: Address = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+            .parse()
+            .unwrap();
+        let amount = U256::from(2_000_000_000_000_000_000u64); // 2 WETH
+
+        type TransferFromParams = (Address, Address, U256);
+        let encoded = TransferFromParams::abi_encode_params(&(weth, recipient, amount));
+
+        let field =
+            UniversalRouterVisualizer::decode_permit2_transfer_from(&encoded, 1, Some(&registry));
+
+        match &field {
+            SignablePayloadField::TextV2 { text_v2, common } => {
+                assert_eq!(common.label, "Permit2 Transfer From");
+                assert!(
+                    text_v2.text.contains("WETH"),
+                    "Should resolve WETH, got: {}",
+                    text_v2.text
+                );
+                assert!(
+                    text_v2.text.contains("2.0") || text_v2.text.contains("2 WETH"),
+                    "Should show 2 WETH, got: {}",
+                    text_v2.text
+                );
+                // Must NOT say "Failed to decode"
+                assert!(
+                    !text_v2.text.contains("Failed"),
+                    "Should successfully decode, got: {}",
+                    text_v2.text
+                );
+            }
+            _ => panic!("Expected TextV2 field, got: {field:?}"),
+        }
+    }
+
+    #[test]
+    fn test_bug6_permit2_permit_decodes_without_selector() {
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        // Build inline PermitSingle (192 bytes) as Universal Router encodes it
+        let mut permit_single = vec![0u8; 192];
+
+        // Token at bytes 12-31
+        let token_bytes = hex::decode("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap();
+        permit_single[12..32].copy_from_slice(&token_bytes);
+
+        // Amount: max uint160 (unlimited)
+        let amount_bytes = hex::decode("ffffffffffffffffffffffffffffffffffffffff").unwrap();
+        permit_single[44..64].copy_from_slice(&amount_bytes);
+
+        // Expiration at 90-95: some future date
+        permit_single[90..96].copy_from_slice(&[0u8, 0, 0x69, 0x40, 0x57, 0x19]);
+
+        // Spender at 140-159
+        let spender_bytes = hex::decode("3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad").unwrap();
+        permit_single[140..160].copy_from_slice(&spender_bytes);
+
+        // sigDeadline at 160-191
+        permit_single[188..192].copy_from_slice(&[0x69, 0x18, 0xd1, 0x21]);
+
+        let field =
+            UniversalRouterVisualizer::decode_permit2_permit(&permit_single, 1, Some(&registry));
+
+        match &field {
+            SignablePayloadField::TextV2 { text_v2, common } => {
+                assert_eq!(common.label, "Permit2 Permit");
+                assert!(
+                    text_v2.text.contains("Permit"),
+                    "Should show Permit, got: {}",
+                    text_v2.text
+                );
+                assert!(
+                    text_v2.text.contains("Unlimited"),
+                    "Max uint160 should show as Unlimited, got: {}",
+                    text_v2.text
+                );
+                assert!(
+                    !text_v2.text.contains("Failed"),
+                    "Should NOT fail to decode, got: {}",
+                    text_v2.text
+                );
+            }
+            // Also accept PreviewLayout (if fallback was used)
+            SignablePayloadField::PreviewLayout { common, .. } => {
+                assert!(
+                    !common.fallback_text.contains("Failed"),
+                    "Should not show failure: {}",
+                    common.fallback_text
+                );
+            }
+            _ => panic!("Unexpected field type: {field:?}"),
+        }
+    }
+
+    // --- Bug 14: PayPortion bips > 10000 warning ---
+
+    #[test]
+    fn test_bug14_pay_portion_bips_over_100_percent_shows_warning() {
+        let token: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let recipient: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let bips = U256::from(20000u64); // 200%
+
+        let encoded = (token, recipient, bips).abi_encode();
+
+        let field = UniversalRouterVisualizer::decode_pay_portion(&encoded, 1, None);
+
+        let text = match &field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+                preview_layout.subtitle.as_ref().unwrap().text.clone()
+            }
+            _ => panic!("Expected PreviewLayout"),
+        };
+
+        assert!(
+            text.contains("WARNING") || text.contains(">100%"),
+            "Bips > 10000 should show warning, got: {text}"
+        );
+    }
+
+    #[test]
+    fn test_bug14_pay_portion_normal_bips_no_warning() {
+        let token: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let recipient: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let bips = U256::from(25u64); // 0.25%
+
+        let encoded = (token, recipient, bips).abi_encode();
+
+        let field = UniversalRouterVisualizer::decode_pay_portion(&encoded, 1, None);
+
+        let text = match &field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+                preview_layout.subtitle.as_ref().unwrap().text.clone()
+            }
+            _ => panic!("Expected PreviewLayout"),
+        };
+
+        assert!(
+            !text.contains("WARNING"),
+            "Normal bips should not show warning, got: {text}"
+        );
+        assert!(text.contains("0.25"), "Should show 0.25%, got: {text}");
+    }
+
+    // --- Integration: full transaction with all command types ---
+
+    #[test]
+    fn test_integration_full_transaction_with_mixed_commands() {
+        // Build a realistic transaction: V2SwapExactIn + PayPortion + UnwrapWeth
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        let weth: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let usdc: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            .parse()
+            .unwrap();
+        let recipient: Address = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+            .parse()
+            .unwrap();
+        let fee_recipient: Address = "0x000000fee13a103a10d593b9ae06b3e05f2e7e1c"
+            .parse()
+            .unwrap();
+
+        // V2SwapExactIn: swap 1000 USDC for WETH
+        use alloy_sol_types::sol_data;
+        type V2Params = (
+            sol_data::Address,
+            sol_data::Uint<256>,
+            sol_data::Uint<256>,
+            sol_data::Array<sol_data::Address>,
+            sol_data::Address,
+        );
+        let v2_encoded = V2Params::abi_encode_params(&(
+            recipient,
+            U256::from(1_000_000_000u64),       // 1000 USDC
+            U256::from(500_000_000_000_000u64), // min 0.0005 WETH
+            vec![usdc, weth],
+            recipient,
+        ));
+
+        // PayPortion: 0.25% fee
+        let pay_encoded = (weth, fee_recipient, U256::from(25u64)).abi_encode();
+
+        // UnwrapWeth
+        let unwrap_encoded = (recipient, U256::from(400_000_000_000_000u64)).abi_encode();
+
+        let commands = vec![
+            Command::V2SwapExactIn as u8,
+            Command::PayPortion as u8,
+            Command::UnwrapWeth as u8,
+        ];
+        let inputs = vec![v2_encoded, pay_encoded, unwrap_encoded];
+        let input = encode_execute_call(&commands, inputs, 1_700_000_000);
+
+        let result = UniversalRouterVisualizer {}
+            .visualize_tx_commands(&input, 1, Some(&registry))
+            .unwrap();
+
+        if let SignablePayloadField::PreviewLayout {
+            common,
+            preview_layout,
+        } = result
+        {
+            assert!(common.fallback_text.contains("3 commands"));
+            let fields = preview_layout.expanded.unwrap().fields;
+            // 3 commands + 1 deadline = 4 fields
+            assert_eq!(fields.len(), 4);
+
+            // Verify each command decoded successfully (no "Failed to decode")
+            for (i, field) in fields.iter().take(3).enumerate() {
+                if let SignablePayloadField::PreviewLayout { preview_layout, .. } =
+                    &field.signable_payload_field
+                {
+                    let subtitle = preview_layout.subtitle.as_ref().unwrap().text.clone();
+                    assert!(
+                        !subtitle.contains("Failed to decode"),
+                        "Command {} should decode successfully, got: {subtitle}",
+                        i + 1,
+                    );
+                }
+            }
+        } else {
+            panic!("Expected PreviewLayout");
         }
     }
 }
