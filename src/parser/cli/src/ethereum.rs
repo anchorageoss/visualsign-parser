@@ -158,6 +158,10 @@ pub fn create_chain_metadata(network: Option<String>) -> Option<ChainMetadata> {
         metadata: Some(Metadata::Ethereum(EthereumMetadata {
             network_id: Some(network_id),
             abi: None,
+            abi_mappings: {
+                #[allow(clippy::default_trait_access)]
+                Default::default()
+            },
         })),
     })
 }

@@ -109,6 +109,11 @@ message EthereumMetadata {
   // Network identifier string (e.g., "ETHEREUM_MAINNET", "POLYGON_MAINNET", "ARBITRUM_MAINNET")
   optional string network_id = 2;
   optional Abi abi = 1;
+  // Map of contract address to ABI definitions.
+  // Contract addresses are expected to be 0x-prefixed, 20-byte hexadecimal Ethereum addresses.
+  // Allows wallets to provide multiple ABIs, one per contract. Use a consistent address casing
+  // convention (for example, all lowercase or EIP-55 checksummed) to avoid duplicate/mismatched entries.
+  map<string, Abi> abi_mappings = 3;
 }
 
 message SolanaMetadata {
