@@ -6,9 +6,9 @@
 use crate::abi_registry::AbiRegistry;
 use crate::embedded_abis::{AbiEmbeddingError, register_embedded_abi};
 use k256::EncodedPoint;
+use k256::ecdsa::signature::hazmat::PrehashVerifier;
 use k256::ecdsa::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
-use k256::ecdsa::signature::hazmat::PrehashVerifier;
 
 /// Error type for gRPC ABI operations
 #[derive(Debug, thiserror::Error)]
@@ -174,8 +174,7 @@ mod tests {
         let hash: [u8; 32] = hasher.finalize().into();
 
         // Sign the pre-hashed content
-        let signature: Signature =
-            signing_key.sign_prehash(&hash).expect("signing failed");
+        let signature: Signature = signing_key.sign_prehash(&hash).expect("signing failed");
         let signature_der = signature.to_der();
         let signature_hex = hex::encode(signature_der.as_bytes());
 

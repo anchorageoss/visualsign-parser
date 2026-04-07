@@ -1,5 +1,5 @@
 use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use visualsign::vsptrait::{VisualSignConverterFromString, VisualSignOptions};
@@ -217,7 +217,7 @@ fn test_abi_from_metadata_decodes_function() {
         "stateMutability": "nonpayable"
     }]"#;
 
-    let mut abi_mappings = BTreeMap::new();
+    let mut abi_mappings = HashMap::new();
     abi_mappings.insert(
         unknown_contract.to_string(),
         Abi {

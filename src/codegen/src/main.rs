@@ -47,16 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .include_file(INCLUDE_FILE)
         .protoc_arg("--experimental_allow_proto3_optional")
         .compile_with_config(
-            {
-                let mut config = prost_build::Config::new();
-                // Use BTreeMap for proto map fields to ensure deterministic
-                // borsh serialization order (required for stable metadata_digest).
-                config.btree_map([
-                    ".parser.EthereumMetadata",
-                    ".parser.SolanaMetadata",
-                ]);
-                config
-            },
+            prost_build::Config::new(),
             &[
                 "../proto/parser/parser.proto",
                 "../proto/health/rpc.proto",

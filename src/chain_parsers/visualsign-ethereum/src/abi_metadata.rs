@@ -378,7 +378,7 @@ mod tests {
 
     const TEST_ADDRESS: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 
-    fn make_abi_mappings(entries: Vec<(&str, Abi)>) -> std::collections::BTreeMap<String, Abi> {
+    fn make_abi_mappings(entries: Vec<(&str, Abi)>) -> std::collections::HashMap<String, Abi> {
         entries
             .into_iter()
             .map(|(addr, abi)| (addr.to_string(), abi))

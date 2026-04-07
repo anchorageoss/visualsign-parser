@@ -220,8 +220,8 @@ pub struct EthereumMetadata {
     /// Contract addresses are expected to be 0x-prefixed, 20-byte hexadecimal Ethereum addresses.
     /// Allows wallets to provide multiple ABIs, one per contract. Use a consistent address casing
     /// convention (for example, all lowercase or EIP-55 checksummed) to avoid duplicate/mismatched entries.
-    #[prost(btree_map = "string, message", tag = "3")]
-    pub abi_mappings: ::prost::alloc::collections::BTreeMap<::prost::alloc::string::String, Abi>,
+    #[prost(map = "string, message", tag = "3")]
+    pub abi_mappings: ::std::collections::HashMap<::prost::alloc::string::String, Abi>,
 }
 #[cfg_attr(
     feature = "serde_derive",
@@ -239,8 +239,8 @@ pub struct SolanaMetadata {
     pub idl: ::core::option::Option<Idl>,
     /// Map of program_id (base58 string) to IDL definitions
     /// Allows wallet to provide multiple IDLs, one per program
-    #[prost(btree_map = "string, message", tag = "3")]
-    pub idl_mappings: ::prost::alloc::collections::BTreeMap<::prost::alloc::string::String, Idl>,
+    #[prost(map = "string, message", tag = "3")]
+    pub idl_mappings: ::std::collections::HashMap<::prost::alloc::string::String, Idl>,
 }
 #[cfg_attr(
     feature = "serde_derive",
@@ -362,7 +362,9 @@ impl SignatureScheme {
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
             "SIGNATURE_SCHEME_UNSPECIFIED" => Some(Self::Unspecified),
-            "SIGNATURE_SCHEME_TURNKEY_P256_EPHEMERAL_KEY" => Some(Self::TurnkeyP256EphemeralKey),
+            "SIGNATURE_SCHEME_TURNKEY_P256_EPHEMERAL_KEY" => {
+                Some(Self::TurnkeyP256EphemeralKey)
+            }
             _ => None,
         }
     }
@@ -403,8 +405,8 @@ impl SolanaIdlType {
 #[cfg(feature = "tonic_types")]
 pub mod parser_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
-    use tonic::codegen::http::Uri;
     use tonic::codegen::*;
+    use tonic::codegen::http::Uri;
     #[derive(Debug, Clone)]
     pub struct ParserServiceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -443,13 +445,14 @@ pub mod parser_service_client {
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
             T: tonic::codegen::Service<
-                    http::Request<tonic::body::BoxBody>,
-                    Response = http::Response<
-                        <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
-                    >,
+                http::Request<tonic::body::BoxBody>,
+                Response = http::Response<
+                    <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
                 >,
-            <T as tonic::codegen::Service<http::Request<tonic::body::BoxBody>>>::Error:
-                Into<StdError> + Send + Sync,
+            >,
+            <T as tonic::codegen::Service<
+                http::Request<tonic::body::BoxBody>,
+            >>::Error: Into<StdError> + Send + Sync,
         {
             ParserServiceClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -488,14 +491,19 @@ pub mod parser_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::ParseRequest>,
         ) -> std::result::Result<tonic::Response<super::ParseResponse>, tonic::Status> {
-            self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
-            })?;
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static("/parser.ParserService/Parse");
+            let path = http::uri::PathAndQuery::from_static(
+                "/parser.ParserService/Parse",
+            );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("parser.ParserService", "Parse"));
@@ -539,7 +547,10 @@ pub mod parser_service_server {
                 max_encoding_message_size: None,
             }
         }
-        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
+        pub fn with_interceptor<F>(
+            inner: T,
+            interceptor: F,
+        ) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -595,9 +606,14 @@ pub mod parser_service_server {
                 "/parser.ParserService/Parse" => {
                     #[allow(non_camel_case_types)]
                     struct ParseSvc<T: ParserService>(pub Arc<T>);
-                    impl<T: ParserService> tonic::server::UnaryService<super::ParseRequest> for ParseSvc<T> {
+                    impl<
+                        T: ParserService,
+                    > tonic::server::UnaryService<super::ParseRequest> for ParseSvc<T> {
                         type Response = super::ParseResponse;
-                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::ParseRequest>,
@@ -630,14 +646,18 @@ pub mod parser_service_server {
                     };
                     Box::pin(fut)
                 }
-                _ => Box::pin(async move {
-                    Ok(http::Response::builder()
-                        .status(200)
-                        .header("grpc-status", "12")
-                        .header("content-type", "application/grpc")
-                        .body(empty_body())
-                        .unwrap())
-                }),
+                _ => {
+                    Box::pin(async move {
+                        Ok(
+                            http::Response::builder()
+                                .status(200)
+                                .header("grpc-status", "12")
+                                .header("content-type", "application/grpc")
+                                .body(empty_body())
+                                .unwrap(),
+                        )
+                    })
+                }
             }
         }
     }

@@ -193,7 +193,7 @@ fn test_ethereum_abi_with_secp256k1_signature() {
     };
 
     // Create ParseRequest with EthereumMetadata containing signed ABI in abi_mappings
-    let mut abi_mappings = std::collections::BTreeMap::new();
+    let mut abi_mappings = std::collections::HashMap::new();
     abi_mappings.insert(
         "0x1234567890abcdef1234567890abcdef12345678".to_string(),
         abi,
@@ -364,7 +364,7 @@ fn test_signature_tampering_detection() {
         signature: Some(signature_metadata.clone()),
     };
 
-    let mut abi_mappings = std::collections::BTreeMap::new();
+    let mut abi_mappings = std::collections::HashMap::new();
     abi_mappings.insert(
         "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_string(),
         abi,
