@@ -167,8 +167,7 @@ impl Permit2Visualizer {
         };
 
         // Format expiration timestamp (uint48 — max means "never")
-        let expiration_str =
-            Self::format_expiration_u48(call.expiration.to_string().parse().unwrap_or(0));
+        let expiration_str = Self::format_expiration_u48(call.expiration.to::<u64>());
 
         let text = format!(
             "Approve {} to spend {} {} (expires: {})",
@@ -195,32 +194,18 @@ impl Permit2Visualizer {
             .and_then(|r| r.get_token_symbol(chain_id, token))
             .unwrap_or_else(|| format!("{token:?}"));
 
-        // Format amount with proper decimals
-        let amount_u128: u128 = call
-            .permitSingle
-            .details
-            .amount
-            .to_string()
-            .parse()
-            .unwrap_or(0);
-        let (amount_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
-            .unwrap_or_else(|| {
-                (
-                    call.permitSingle.details.amount.to_string(),
-                    token_symbol.clone(),
-                )
-            });
+        // Format amount with proper decimals — avoid silent U160→u128 overflow
+        let amount_str = match call.permitSingle.details.amount.to_string().parse::<u128>() {
+            Ok(amount_u128) => registry
+                .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
+                .map(|(s, _)| s)
+                .unwrap_or_else(|| call.permitSingle.details.amount.to_string()),
+            Err(_) => call.permitSingle.details.amount.to_string(),
+        };
 
         // Format expiration timestamp (uint48 — max means "never")
-        let expiration_str = Self::format_expiration_u48(
-            call.permitSingle
-                .details
-                .expiration
-                .to_string()
-                .parse()
-                .unwrap_or(0),
-        );
+        let expiration_str =
+            Self::format_expiration_u48(call.permitSingle.details.expiration.to::<u64>());
 
         // Format sig deadline timestamp (uint256 — values > u64::MAX treated as "never")
         let sig_deadline_str =
@@ -259,11 +244,11 @@ impl Permit2Visualizer {
             AnnotatedPayloadField {
                 signable_payload_field: SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: call.permitSingle.details.amount.to_string(),
+                        fallback_text: format!("{amount_str} {token_symbol}"),
                         label: "Amount".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
-                        text: call.permitSingle.details.amount.to_string(),
+                        text: format!("{amount_str} {token_symbol}"),
                     },
                 },
                 static_annotation: None,

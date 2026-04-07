@@ -30,6 +30,16 @@ fn format_amount_with_registry(
     }
 }
 
+/// Truncates a byte slice to hex, capping at `limit` bytes to avoid unbounded
+/// memory allocation from untrusted calldata.
+fn truncated_hex(bytes: &[u8], limit: usize) -> String {
+    if bytes.len() > limit {
+        format!("0x{}...", hex::encode(&bytes[..limit]))
+    } else {
+        format!("0x{}", hex::encode(bytes))
+    }
+}
+
 // Uniswap Universal Router interface definitions
 //
 // Official Documentation:
@@ -297,14 +307,7 @@ impl UniversalRouterVisualizer {
                     None => {
                         // Unknown command — show truncated hex so user can see it
                         let cmd_name = Self::format_cmd_name(maybe_cmd, commands[i]);
-                        let input_hex = {
-                            let full = hex::encode(bytes);
-                            if full.len() > 64 {
-                                format!("0x{}...", &full[..64])
-                            } else {
-                                format!("0x{full}")
-                            }
-                        };
+                        let input_hex = truncated_hex(bytes, 32);
                         SignablePayloadField::TextV2 {
                             common: SignablePayloadFieldCommon {
                                 fallback_text: format!("{cmd_name} input: {input_hex}"),
@@ -444,8 +447,8 @@ impl UniversalRouterVisualizer {
                 Self::decode_execute_sub_plan(bytes, chain_id, registry, depth)
             }
             _ => {
-                // For recognized but unimplemented commands, show hex
-                let input_hex = format!("0x{}", hex::encode(bytes));
+                // For recognized but unimplemented commands, show truncated hex
+                let input_hex = truncated_hex(bytes, 32);
                 SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
                         fallback_text: format!("{cmd:?} input: {input_hex}"),
@@ -470,7 +473,7 @@ impl UniversalRouterVisualizer {
     ) -> SignablePayloadField {
         // Guard against stack overflow from maliciously nested sub-plans
         if depth >= Self::MAX_SUB_PLAN_DEPTH {
-            let input_hex = format!("0x{}", hex::encode(bytes));
+            let input_hex = truncated_hex(bytes, 32);
             return SignablePayloadField::TextV2 {
                 common: SignablePayloadFieldCommon {
                     fallback_text: format!("ExecuteSubPlan (depth limit): {input_hex}"),
@@ -493,7 +496,7 @@ impl UniversalRouterVisualizer {
         let params = match SubPlanParams::abi_decode_params(bytes) {
             Ok(p) => p,
             Err(_) => {
-                let input_hex = format!("0x{}", hex::encode(bytes));
+                let input_hex = truncated_hex(bytes, 32);
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
                         fallback_text: format!("ExecuteSubPlan: {input_hex}"),
@@ -518,9 +521,29 @@ impl UniversalRouterVisualizer {
             registry,
             depth + 1,
         ) {
-            nested_field
+            // Re-label nested field to distinguish from the top-level execute
+            match nested_field {
+                SignablePayloadField::PreviewLayout {
+                    common,
+                    preview_layout,
+                } => SignablePayloadField::PreviewLayout {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: common
+                            .fallback_text
+                            .replace("Uniswap Universal Router Execute", "Sub-Plan"),
+                        label: "Sub-Plan".to_string(),
+                    },
+                    preview_layout: visualsign::SignablePayloadFieldPreviewLayout {
+                        title: Some(visualsign::SignablePayloadFieldTextV2 {
+                            text: format!("Sub-Plan ({} commands)", sub_commands.len()),
+                        }),
+                        ..preview_layout
+                    },
+                },
+                other => other,
+            }
         } else {
-            let input_hex = format!("0x{}", hex::encode(bytes));
+            let input_hex = truncated_hex(bytes, 32);
             SignablePayloadField::TextV2 {
                 common: SignablePayloadFieldCommon {
                     fallback_text: format!("ExecuteSubPlan: {input_hex}"),
@@ -550,7 +573,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("V3 Swap Exact In: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("V3 Swap Exact In: {}", truncated_hex(bytes, 32)),
                         label: "V3 Swap Exact In".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -581,25 +604,11 @@ impl UniversalRouterVisualizer {
         let fee = u32::from_be_bytes([0, path[20], path[21], path[22]]);
         let token_out = Address::from_slice(&path[path.len() - 20..]);
 
-        // Resolve token symbols
-        let token_in_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_in))
-            .unwrap_or_else(|| format!("{token_in:?}"));
-        let token_out_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_out))
-            .unwrap_or_else(|| format!("{token_out:?}"));
-
-        // Format amounts
-        let amount_in_u128: u128 = amount_in.to_string().parse().unwrap_or(0);
-        let amount_out_min_u128: u128 = amount_out_min.to_string().parse().unwrap_or(0);
-
-        let (amount_in_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_u128))
-            .unwrap_or_else(|| (amount_in.to_string(), token_in_symbol.clone()));
-
-        let (amount_out_min_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_min_u128))
-            .unwrap_or_else(|| (amount_out_min.to_string(), token_out_symbol.clone()));
+        // Format amounts via registry (overflow-safe)
+        let (amount_in_str, token_in_symbol) =
+            format_amount_with_registry(&amount_in, chain_id, token_in, registry);
+        let (amount_out_min_str, token_out_symbol) =
+            format_amount_with_registry(&amount_out_min, chain_id, token_out, registry);
 
         // Calculate fee percentage
         let fee_pct = fee as f64 / 10000.0;
@@ -703,7 +712,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("Pay Portion: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("Pay Portion: {}", truncated_hex(bytes, 32)),
                         label: "Pay Portion".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -805,7 +814,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("Unwrap WETH: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("Unwrap WETH: {}", truncated_hex(bytes, 32)),
                         label: "Unwrap WETH".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -817,16 +826,15 @@ impl UniversalRouterVisualizer {
 
         // Get WETH address for this chain and format the amount
         // WETH is registered in the token registry via UniswapConfig::register_common_tokens
+        // Fall back to format_ether if registry unavailable
         let amount_min_str =
             crate::protocols::uniswap::config::UniswapConfig::weth_address(chain_id)
                 .and_then(|weth_addr| {
-                    let amount_min_u128: u128 =
-                        params.amountMinimum.to_string().parse().unwrap_or(0);
-                    registry
-                        .and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_min_u128))
+                    let amount_u128: u128 = params.amountMinimum.to_string().parse().ok()?;
+                    registry.and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_u128))
                 })
                 .map(|(amt, _)| amt)
-                .unwrap_or_else(|| params.amountMinimum.to_string());
+                .unwrap_or_else(|| crate::fmt::format_ether(params.amountMinimum));
 
         // Create individual parameter fields
         let fields = vec![
@@ -896,7 +904,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("V3 Swap Exact Out: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("V3 Swap Exact Out: {}", truncated_hex(bytes, 32)),
                         label: "V3 Swap Exact Out".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -927,26 +935,11 @@ impl UniversalRouterVisualizer {
         let fee = u32::from_be_bytes([0, path[20], path[21], path[22]]);
         let token_in = Address::from_slice(&path[path.len() - 20..]);
 
-        // Resolve token symbols
-        let token_in_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_in))
-            .unwrap_or_else(|| format!("{token_in:?}"));
-        let token_out_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_out))
-            .unwrap_or_else(|| format!("{token_out:?}"));
-
-        // Convert amounts to u128 for formatting
-        let amount_out_u128: u128 = amount_out.to_string().parse().unwrap_or(0);
-        let amount_in_max_u128: u128 = amount_in_max.to_string().parse().unwrap_or(0);
-
-        // Format amounts with token decimals
-        let (amount_out_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_u128))
-            .unwrap_or_else(|| (amount_out.to_string(), token_out_symbol.clone()));
-
-        let (amount_in_max_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_max_u128))
-            .unwrap_or_else(|| (amount_in_max.to_string(), token_in_symbol.clone()));
+        // Format amounts via registry (overflow-safe)
+        let (amount_out_str, token_out_symbol) =
+            format_amount_with_registry(&amount_out, chain_id, token_out, registry);
+        let (amount_in_max_str, token_in_symbol) =
+            format_amount_with_registry(&amount_in_max, chain_id, token_in, registry);
 
         // Calculate fee percentage
         let fee_pct = fee as f64 / 10000.0;
@@ -1061,7 +1054,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("V2 Swap Exact In: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("V2 Swap Exact In: {}", truncated_hex(bytes, 32)),
                         label: "V2 Swap Exact In".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -1089,23 +1082,11 @@ impl UniversalRouterVisualizer {
         let token_in = path[0];
         let token_out = path[path.len() - 1];
 
-        let token_in_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_in))
-            .unwrap_or_else(|| format!("{token_in:?}"));
-        let token_out_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_out))
-            .unwrap_or_else(|| format!("{token_out:?}"));
-
-        let amount_in_u128: u128 = amount_in.to_string().parse().unwrap_or(0);
-        let amount_out_min_u128: u128 = amount_out_minimum.to_string().parse().unwrap_or(0);
-
-        let (amount_in_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_u128))
-            .unwrap_or_else(|| (amount_in.to_string(), token_in_symbol.clone()));
-
-        let (amount_out_min_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_min_u128))
-            .unwrap_or_else(|| (amount_out_minimum.to_string(), token_out_symbol.clone()));
+        // Format amounts via registry (overflow-safe)
+        let (amount_in_str, token_in_symbol) =
+            format_amount_with_registry(&amount_in, chain_id, token_in, registry);
+        let (amount_out_min_str, token_out_symbol) =
+            format_amount_with_registry(&amount_out_minimum, chain_id, token_out, registry);
 
         let hops = path.len() - 1;
         let text = format!(
@@ -1218,7 +1199,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("V2 Swap Exact Out: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("V2 Swap Exact Out: {}", truncated_hex(bytes, 32)),
                         label: "V2 Swap Exact Out".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -1246,23 +1227,11 @@ impl UniversalRouterVisualizer {
         let token_in = path[0];
         let token_out = path[path.len() - 1];
 
-        let token_in_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_in))
-            .unwrap_or_else(|| format!("{token_in:?}"));
-        let token_out_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, token_out))
-            .unwrap_or_else(|| format!("{token_out:?}"));
-
-        let amount_out_u128: u128 = amount_out.to_string().parse().unwrap_or(0);
-        let amount_in_max_u128: u128 = amount_in_maximum.to_string().parse().unwrap_or(0);
-
-        let (amount_out_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_u128))
-            .unwrap_or_else(|| (amount_out.to_string(), token_out_symbol.clone()));
-
-        let (amount_in_max_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_max_u128))
-            .unwrap_or_else(|| (amount_in_maximum.to_string(), token_in_symbol.clone()));
+        // Format amounts via registry (overflow-safe)
+        let (amount_out_str, token_out_symbol) =
+            format_amount_with_registry(&amount_out, chain_id, token_out, registry);
+        let (amount_in_max_str, token_in_symbol) =
+            format_amount_with_registry(&amount_in_maximum, chain_id, token_in, registry);
 
         let hops = path.len() - 1;
         let text = format!(
@@ -1367,7 +1336,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("Wrap ETH: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("Wrap ETH: {}", truncated_hex(bytes, 32)),
                         label: "Wrap ETH".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -1377,20 +1346,16 @@ impl UniversalRouterVisualizer {
             }
         };
 
-        // Format amount with ETH decimals (18)
-        // Get WETH address for this chain to use its decimals
+        // Format amount with ETH decimals (18) — overflow-safe
+        // Try registry first, fall back to format_ether if registry unavailable
         let amount_min_str =
             crate::protocols::uniswap::config::UniswapConfig::weth_address(chain_id)
                 .and_then(|weth_addr| {
-                    let amount_min_u128: u128 = params.amountMin.to_string().parse().unwrap_or(0);
-                    registry
-                        .and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_min_u128))
+                    let amount_u128: u128 = params.amountMin.to_string().parse().ok()?;
+                    registry.and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_u128))
                 })
                 .map(|(amt, _)| amt)
-                .unwrap_or_else(|| {
-                    // Fallback: format as ETH with 18 decimals manually
-                    crate::fmt::format_ether(params.amountMin)
-                });
+                .unwrap_or_else(|| crate::fmt::format_ether(params.amountMin));
 
         let text = format!("Wrap >={amount_min_str} ETH to WETH");
 
@@ -1414,7 +1379,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("Sweep: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("Sweep: {}", truncated_hex(bytes, 32)),
                         label: "Sweep".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -1424,15 +1389,9 @@ impl UniversalRouterVisualizer {
             }
         };
 
-        let token_symbol = registry
-            .and_then(|r| r.get_token_symbol(chain_id, params.token))
-            .unwrap_or_else(|| format!("{:?}", params.token));
-
-        // Format amount with token decimals
-        let amount_min_u128: u128 = params.amountMinimum.to_string().parse().unwrap_or(0);
-        let (amount_min_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, params.token, amount_min_u128))
-            .unwrap_or_else(|| (params.amountMinimum.to_string(), token_symbol.clone()));
+        // Format amount via registry (overflow-safe)
+        let (amount_min_str, token_symbol) =
+            format_amount_with_registry(&params.amountMinimum, chain_id, params.token, registry);
 
         let text = format!(
             "Sweep >={amount_min_str} {token_symbol} to {:?}",
@@ -1460,7 +1419,7 @@ impl UniversalRouterVisualizer {
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("Transfer: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!("Transfer: {}", truncated_hex(bytes, 32)),
                         label: "Transfer".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -1488,22 +1447,25 @@ impl UniversalRouterVisualizer {
     }
 
     /// Decodes PERMIT2_TRANSFER_FROM command parameters directly.
-    /// Universal Router encodes this as (address token, address recipient, uint256 amount)
+    /// Universal Router encodes this as (address token, address recipient, uint160 amount)
     /// — raw ABI params without a function selector.
     fn decode_permit2_transfer_from(
         bytes: &[u8],
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        // Decode directly: (address token, address recipient, uint256 amount)
-        type TransferFromParams = (Address, Address, U256);
+        // Decode directly: (address token, address recipient, uint160 amount)
+        type TransferFromParams = (Address, Address, alloy_primitives::U160);
 
         let params = match TransferFromParams::abi_decode_params(bytes) {
             Ok(p) => p,
             Err(_) => {
                 return SignablePayloadField::TextV2 {
                     common: SignablePayloadFieldCommon {
-                        fallback_text: format!("Permit2 Transfer From: 0x{}", hex::encode(bytes)),
+                        fallback_text: format!(
+                            "Permit2 Transfer From: {}",
+                            truncated_hex(bytes, 32)
+                        ),
                         label: "Permit2 Transfer From".to_string(),
                     },
                     text_v2: SignablePayloadFieldTextV2 {
@@ -1515,8 +1477,9 @@ impl UniversalRouterVisualizer {
 
         let (token, recipient, amount) = params;
 
+        let amount_u256 = U256::from(amount);
         let (amount_str, token_symbol) =
-            format_amount_with_registry(&amount, chain_id, token, registry);
+            format_amount_with_registry(&amount_u256, chain_id, token, registry);
 
         let text = format!("Permit2 Transfer {amount_str} {token_symbol} to {recipient:?}");
 
@@ -1582,7 +1545,7 @@ impl UniversalRouterVisualizer {
 
     /// Helper function to display decoding error with raw hex slots
     fn show_decode_error(bytes: &[u8], err: &dyn std::fmt::Display) -> SignablePayloadField {
-        let hex_data = format!("0x{}", hex::encode(bytes));
+        let hex_data = truncated_hex(bytes, 32);
         let chunk_size = 32;
         let mut fields = vec![];
 
@@ -2815,15 +2778,25 @@ mod tests {
             _ => panic!("Expected PreviewLayout"),
         };
 
-        // Output should be DAI (first in reversed path), input should be WETH (last)
+        // Verify correct token ordering: input WETH, output DAI
         assert!(text.contains("DAI"), "Output should be DAI, got: {text}");
         assert!(text.contains("WETH"), "Input should be WETH, got: {text}");
-        // Should NOT show USDC (intermediate token)
-        let for_pos = text.find("for").unwrap();
+        // USDC is an intermediate token and should NOT appear in the summary
+        assert!(
+            !text.contains("USDC") && !text.contains(&format!("{usdc:?}")),
+            "Intermediate token USDC should not appear, got: {text}"
+        );
+        // Verify ordering: WETH should appear before "for" and DAI after
+        let for_pos = text.find("for").expect("expected 'for' in swap text");
+        let before_for = &text[..for_pos];
         let after_for = &text[for_pos..];
         assert!(
+            before_for.contains("WETH"),
+            "WETH should appear before 'for' as input, got: {text}"
+        );
+        assert!(
             after_for.contains("DAI"),
-            "DAI should appear as output after 'for', got: {text}"
+            "DAI should appear after 'for' as output, got: {text}"
         );
     }
 
