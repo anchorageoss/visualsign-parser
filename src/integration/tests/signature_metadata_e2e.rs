@@ -2,12 +2,12 @@ use ed25519_dalek::{
     Signer as _, SigningKey as Ed25519SigningKey, Verifier as _,
     VerifyingKey as Ed25519VerifyingKey,
 };
-/// End-to-end test for SignatureMetadata with cryptographic signature verification
+/// Tests for SignatureMetadata structure and cryptographic signature verification.
 ///
-/// This test validates that:
+/// These tests validate that:
 /// 1. A client can create a ParseRequest with ABI/IDL containing cryptographically signed SignatureMetadata
-/// 2. The parser receives and processes it correctly
-/// 3. The signature can be verified by the parser using the metadata algorithm and public key
+/// 2. Signatures can be verified using the metadata algorithm and public key
+/// 3. Tampering with signed content is detected
 use generated::parser::{
     Abi, Chain, ChainMetadata, EthereumMetadata, Idl, Metadata, ParseRequest, SignatureMetadata,
     SolanaIdlType, SolanaMetadata, chain_metadata,
@@ -54,7 +54,8 @@ fn sign_with_ed25519(content: &str) -> (String, String) {
     let verifying_key = Ed25519VerifyingKey::from(&signing_key);
 
     let message_hash = hash_content_sha256(content);
-    // Create actual Ed25519 signature using the signing key
+    // Ed25519 sign() treats the input as a raw message (no internal re-hash),
+    // unlike k256's sign() which would double-hash. So sign() is correct here.
     let signature = signing_key.sign(&message_hash);
 
     let signature_hex = hex::encode(signature.to_bytes());
@@ -242,7 +243,7 @@ fn test_ethereum_abi_with_secp256k1_signature() {
         "Signature verification failed: {:?}",
         verification_result.err()
     );
-    println!("✓ Ethereum ABI signature verified with secp256k1");
+    println!("[ok] Ethereum ABI signature verified with secp256k1");
 }
 
 #[test]
@@ -335,7 +336,7 @@ fn test_solana_idl_with_ed25519_signature() {
         "Signature verification failed: {:?}",
         verification_result.err()
     );
-    println!("✓ Solana IDL signature verified with ed25519");
+    println!("[ok] Solana IDL signature verified with ed25519");
 }
 
 #[test]
@@ -407,7 +408,7 @@ fn test_signature_tampering_detection() {
         verification_result.is_err(),
         "Tampering should be detected!"
     );
-    println!("✓ Tampering detected: {:?}", verification_result.err());
+    println!("[ok] Tampering detected: {:?}", verification_result.err());
 }
 
 #[test]

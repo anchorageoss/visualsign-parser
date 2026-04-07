@@ -252,4 +252,8 @@ fn test_abi_from_metadata_decodes_function() {
         json.contains("transfer"),
         "Payload should contain decoded function name 'transfer' from metadata ABI, got: {json}"
     );
+    assert!(
+        !json.contains("a9059cbb"),
+        "Raw selector should not appear when ABI is decoded, got: {json}"
+    );
 }

@@ -46,8 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .file_descriptor_set_path(DESCRIPTOR_PATH)
         .include_file(INCLUDE_FILE)
         .protoc_arg("--experimental_allow_proto3_optional")
-        .compile_with_config(
-            prost_build::Config::new(),
+        .compile(
             &[
                 "../proto/parser/parser.proto",
                 "../proto/health/rpc.proto",
