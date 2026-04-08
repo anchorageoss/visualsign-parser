@@ -6,13 +6,12 @@
 
 use generated::parser::ChainMetadata;
 use visualsign::registry::{Chain, TransactionConverterRegistry};
-use visualsign::vsptrait::VisualSignOptions;
 
 /// Chain-related functionality and types.
 pub mod chains;
 /// Command-line interface functionality and types.
 pub mod cli;
-/// Ethereum-specific CLI handling: ABI registry, network metadata.
+/// Ethereum-specific CLI handling: ABI mappings, network metadata.
 #[cfg(feature = "ethereum")]
 pub mod ethereum;
 /// Common mapping parser for ABI and IDL file mappings.
@@ -20,11 +19,13 @@ pub mod mapping_parser;
 /// Solana-specific CLI handling: IDL mappings, Solana metadata.
 #[cfg(feature = "solana")]
 pub mod solana;
+/// Shared test helpers (temp file creation, etc.).
+#[cfg(test)]
+pub(crate) mod test_utils;
 
 /// Trait for integrating a chain into the CLI.
 ///
 /// Implement this in a chain module, then register it in [`build_plugins`].
-/// Each method has a sensible default so only relevant behaviour needs overriding.
 pub trait ChainPlugin {
     /// The chain this plugin handles.
     fn chain(&self) -> Chain;
@@ -34,13 +35,7 @@ pub trait ChainPlugin {
 
     /// Build chain-specific metadata. `network` is the shared `--network` flag;
     /// any chain-specific args (e.g. ABI or IDL mappings) are owned by the plugin.
-    fn create_metadata(&self, network: Option<String>) -> Option<ChainMetadata>;
-
-    /// Post-process [`VisualSignOptions`] after metadata is set.
-    /// Default: pass through unchanged.
-    fn apply_options(&self, options: VisualSignOptions) -> VisualSignOptions {
-        options
-    }
+    fn create_metadata(&self, network: Option<String>) -> Result<Option<ChainMetadata>, String>;
 }
 
 /// Constructs all enabled chain plugins, each pre-loaded with its CLI args.
