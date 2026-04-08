@@ -11,6 +11,11 @@ use k256::ecdsa::signature::hazmat::PrehashVerifier;
 use k256::ecdsa::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
 
+/// Maximum size for ABI JSON from proto messages (1 MB).
+/// File-based ABI loading has a 10 MB cap; proto-supplied ABIs use a tighter bound
+/// since they arrive per-request and are deserialized on the hot path.
+const MAX_ABI_JSON_BYTES: usize = 1_024 * 1_024;
+
 /// Error type for ABI signature validation.
 #[derive(Debug, thiserror::Error)]
 enum AbiSignatureError {
@@ -52,6 +57,13 @@ pub fn try_extract_from_chain_metadata(
         // lookup should migrate to `abi_mappings`. This fallback exists so the ABI
         // is at least available via `list_abis()` for tooling that iterates all ABIs.
         let legacy_abi = ethereum.abi.as_ref()?;
+        if legacy_abi.value.len() > MAX_ABI_JSON_BYTES {
+            log::warn!(
+                "Legacy ABI exceeds size limit ({} bytes > {MAX_ABI_JSON_BYTES})",
+                legacy_abi.value.len()
+            );
+            return None;
+        }
         let mut registry = AbiRegistry::new();
         if let Some(proto_sig) = legacy_abi.signature.as_ref() {
             let signature = convert_proto_signature(proto_sig);
@@ -79,6 +91,15 @@ pub fn try_extract_from_chain_metadata(
                 continue;
             }
         };
+
+        // Reject oversized ABI JSON before expensive operations
+        if abi.value.len() > MAX_ABI_JSON_BYTES {
+            log::warn!(
+                "Skipping ABI mapping for '{address}': exceeds size limit ({} bytes > {MAX_ABI_JSON_BYTES})",
+                abi.value.len()
+            );
+            continue;
+        }
 
         // Validate signature if present
         if let Some(proto_sig) = abi.signature.as_ref() {
@@ -372,13 +393,14 @@ mod tests {
         assert_eq!(sig.algorithm, Some("secp256k1".to_string()));
         assert_eq!(sig.public_key, Some("04abcd1234".to_string()));
         assert_eq!(sig.issuer, Some("issuer.example.com".to_string()));
+        assert_eq!(sig.timestamp, Some("2024-01-01T00:00:00Z".to_string()));
     }
 
     // --- try_extract_from_chain_metadata tests ---
 
     const TEST_ADDRESS: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 
-    fn make_abi_mappings(entries: Vec<(&str, Abi)>) -> std::collections::BTreeMap<String, Abi> {
+    fn make_abi_mappings(entries: Vec<(&str, Abi)>) -> std::collections::HashMap<String, Abi> {
         entries
             .into_iter()
             .map(|(addr, abi)| (addr.to_string(), abi))
@@ -574,5 +596,56 @@ mod tests {
         let registry = try_extract_from_chain_metadata(Some(&metadata), 1)
             .expect("should contain the valid ABI");
         assert!(registry.list_abis().contains(&valid_address));
+    }
+
+    // --- Legacy `abi` field fallback tests ---
+
+    #[test]
+    fn test_try_extract_legacy_abi_no_signature() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi: Some(Abi {
+                    value: VALID_ABI.to_string(),
+                    signature: None,
+                }),
+                abi_mappings: Default::default(),
+            })),
+        };
+        let registry =
+            try_extract_from_chain_metadata(Some(&metadata), 1).expect("legacy ABI should work");
+        assert!(registry.list_abis().contains(&"wallet_provided"));
+    }
+
+    #[test]
+    fn test_try_extract_legacy_abi_invalid_signature_rejected() {
+        use generated::parser::Metadata;
+
+        let proto_sig = generated::parser::SignatureMetadata {
+            value: "deadbeef".to_string(),
+            metadata: vec![
+                Metadata {
+                    key: "algorithm".to_string(),
+                    value: "secp256k1".to_string(),
+                },
+                Metadata {
+                    key: "public_key".to_string(),
+                    value: "deadbeef".to_string(),
+                },
+            ],
+        };
+
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi: Some(Abi {
+                    value: VALID_ABI.to_string(),
+                    signature: Some(proto_sig),
+                }),
+                abi_mappings: Default::default(),
+            })),
+        };
+        // Invalid signature on legacy ABI should cause rejection
+        assert!(try_extract_from_chain_metadata(Some(&metadata), 1).is_none());
     }
 }

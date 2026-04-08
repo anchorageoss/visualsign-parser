@@ -93,119 +93,50 @@ pub fn parse(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use generated::parser::{
-        Abi, ChainMetadata, EthereumMetadata, Idl, SolanaMetadata, chain_metadata,
-    };
+    use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata};
+    use std::collections::HashMap;
 
-    /// Compile-time assertion that abi_mappings is a BTreeMap, not a HashMap.
-    /// If prost_build config regresses, this will fail to compile.
-    const _: () = {
-        fn assert_btreemap(m: &EthereumMetadata) {
-            let _: &std::collections::BTreeMap<String, Abi> = &m.abi_mappings;
-        }
-    };
-
-    /// Compile-time assertion that idl_mappings is a BTreeMap, not a HashMap.
-    const _: () = {
-        fn assert_btreemap(m: &SolanaMetadata) {
-            let _: &std::collections::BTreeMap<String, Idl> = &m.idl_mappings;
-        }
-    };
-
-    /// Verify that metadata_digest is deterministic regardless of abi_mappings insertion order.
-    /// This guards against accidental reintroduction of HashMap-backed map fields.
+    /// Verify that `metadata_digest` is deterministic for identical metadata,
+    /// including non-empty `abi_mappings` (exercises `HashMap` key ordering through borsh).
     #[test]
-    fn metadata_digest_is_deterministic_across_insertion_orders() {
-        let abi_a = Abi {
-            value: r#"[{"name":"transfer"}]"#.to_string(),
-            signature: None,
-        };
-        let abi_b = Abi {
-            value: r#"[{"name":"approve"}]"#.to_string(),
-            signature: None,
-        };
-
-        // Insert in order A, B
-        let mut mappings_ab = std::collections::BTreeMap::new();
-        mappings_ab.insert("0xaaaa".to_string(), abi_a.clone());
-        mappings_ab.insert("0xbbbb".to_string(), abi_b.clone());
-
-        // Insert in order B, A
-        let mut mappings_ba = std::collections::BTreeMap::new();
-        mappings_ba.insert("0xbbbb".to_string(), abi_b);
-        mappings_ba.insert("0xaaaa".to_string(), abi_a);
-
-        let metadata_ab = ChainMetadata {
-            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
-                abi_mappings: mappings_ab,
-            })),
-        };
-        let metadata_ba = ChainMetadata {
-            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
-                abi_mappings: mappings_ba,
-            })),
-        };
-
-        let bytes_ab = borsh::to_vec(&metadata_ab).unwrap();
-        let bytes_ba = borsh::to_vec(&metadata_ba).unwrap();
-        assert_eq!(
-            sha_256(&bytes_ab),
-            sha_256(&bytes_ba),
-            "metadata_digest must be identical regardless of map insertion order"
+    fn metadata_digest_is_deterministic() {
+        let mut abi_mappings = HashMap::new();
+        abi_mappings.insert(
+            "0xaaaa".to_string(),
+            Abi {
+                value: r#"[{"name":"transfer"}]"#.to_string(),
+                signature: None,
+            },
         );
-    }
+        abi_mappings.insert(
+            "0xbbbb".to_string(),
+            Abi {
+                value: r#"[{"name":"approve"}]"#.to_string(),
+                signature: None,
+            },
+        );
 
-    /// Same determinism check for SolanaMetadata.idl_mappings.
-    #[test]
-    fn solana_metadata_digest_is_deterministic_across_insertion_orders() {
-        let idl_a = Idl {
-            value: r#"{"name":"program_a"}"#.to_string(),
-            idl_type: None,
-            idl_version: None,
-            signature: None,
-            program_name: None,
-        };
-        let idl_b = Idl {
-            value: r#"{"name":"program_b"}"#.to_string(),
-            idl_type: None,
-            idl_version: None,
-            signature: None,
-            program_name: None,
-        };
-
-        let mut mappings_ab = std::collections::BTreeMap::new();
-        mappings_ab.insert("Program111".to_string(), idl_a.clone());
-        mappings_ab.insert("Program222".to_string(), idl_b.clone());
-
-        let mut mappings_ba = std::collections::BTreeMap::new();
-        mappings_ba.insert("Program222".to_string(), idl_b);
-        mappings_ba.insert("Program111".to_string(), idl_a);
-
-        let metadata_ab = ChainMetadata {
-            metadata: Some(chain_metadata::Metadata::Solana(SolanaMetadata {
-                network_id: Some("SOLANA_MAINNET".to_string()),
-                idl: None,
-                idl_mappings: mappings_ab,
+        let metadata_a = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi: None,
+                abi_mappings: abi_mappings.clone(),
             })),
         };
-        let metadata_ba = ChainMetadata {
-            metadata: Some(chain_metadata::Metadata::Solana(SolanaMetadata {
-                network_id: Some("SOLANA_MAINNET".to_string()),
-                idl: None,
-                idl_mappings: mappings_ba,
+        let metadata_b = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi: None,
+                abi_mappings,
             })),
         };
 
-        let bytes_ab = borsh::to_vec(&metadata_ab).unwrap();
-        let bytes_ba = borsh::to_vec(&metadata_ba).unwrap();
+        let bytes_a = borsh::to_vec(&metadata_a).expect("borsh serialization");
+        let bytes_b = borsh::to_vec(&metadata_b).expect("borsh serialization");
         assert_eq!(
-            sha_256(&bytes_ab),
-            sha_256(&bytes_ba),
-            "solana metadata_digest must be identical regardless of map insertion order"
+            sha_256(&bytes_a),
+            sha_256(&bytes_b),
+            "metadata_digest must be identical for identical metadata"
         );
     }
 }

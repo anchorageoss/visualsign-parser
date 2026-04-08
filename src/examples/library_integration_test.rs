@@ -1,7 +1,7 @@
 // Test file to verify library documentation examples compile
 // Run with: cargo run -p library_integration_test
 
-use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
+use generated::parser::{chain_metadata::Metadata, ChainMetadata, EthereumMetadata};
 use parser_app::registry::create_registry;
 use visualsign::registry::Chain;
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
@@ -48,7 +48,6 @@ fn main() {
     // Configure parsing options
     let options = VisualSignOptions {
         decode_transfers: true,
-        transaction_name: None,
         metadata: Some(ChainMetadata {
             metadata: Some(Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
@@ -59,7 +58,7 @@ fn main() {
         developer_config: Some(DeveloperConfig {
             allow_signed_transactions: true,
         }),
-        abi_registry: None,
+        ..Default::default()
     };
 
     // Parse the transaction
