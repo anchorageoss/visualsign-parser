@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 use clap::Args as ClapArgs;
 use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
@@ -49,12 +49,12 @@ impl crate::ChainPlugin for EthereumPlugin {
     }
 }
 
-/// Load ABI JSON files and create `BTreeMap` for `EthereumMetadata.abi_mappings`
-fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (BTreeMap<String, Abi>, usize) {
+/// Load ABI JSON files and build mappings for `EthereumMetadata.abi_mappings`.
+fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<String, Abi>, usize) {
     mapping_parser::load_mappings(
         abi_json_mappings,
         "ABI",
-        "UniswapV2:/home/user/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
+        "UniswapV2:path/to/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
         "ContractAddress",
         |addr| {
             let hex = addr
@@ -86,7 +86,7 @@ fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (BTreeMap<Stri
 /// # Panics
 ///
 /// Panics if `ETHEREUM_MAINNET` cannot be parsed (should never happen).
-pub fn create_chain_metadata(
+pub(crate) fn create_chain_metadata(
     network: Option<String>,
     abi_json_mappings: &[String],
 ) -> Result<Option<ChainMetadata>, String> {
@@ -107,7 +107,7 @@ pub fn create_chain_metadata(
     };
 
     let abi_mappings = if abi_json_mappings.is_empty() {
-        BTreeMap::new()
+        HashMap::new()
     } else {
         eprintln!("Loading custom ABIs:");
         let (mappings, valid_count) = build_abi_mappings_from_files(abi_json_mappings);

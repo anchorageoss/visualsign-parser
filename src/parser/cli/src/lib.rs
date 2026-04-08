@@ -11,7 +11,7 @@ use visualsign::registry::{Chain, TransactionConverterRegistry};
 pub mod chains;
 /// Command-line interface functionality and types.
 pub mod cli;
-/// Ethereum-specific CLI handling: ABI registry, network metadata.
+/// Ethereum-specific CLI handling: ABI mappings, network metadata.
 #[cfg(feature = "ethereum")]
 pub mod ethereum;
 /// Common mapping parser for ABI and IDL file mappings.
@@ -26,7 +26,6 @@ pub(crate) mod test_utils;
 /// Trait for integrating a chain into the CLI.
 ///
 /// Implement this in a chain module, then register it in [`build_plugins`].
-/// Each method has a sensible default so only relevant behaviour needs overriding.
 pub trait ChainPlugin {
     /// The chain this plugin handles.
     fn chain(&self) -> Chain;

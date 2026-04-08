@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 use clap::Args as ClapArgs;
 use generated::parser::{
@@ -50,11 +50,11 @@ impl crate::ChainPlugin for SolanaPlugin {
     }
 }
 
-fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (BTreeMap<String, Idl>, usize) {
+fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (HashMap<String, Idl>, usize) {
     mapping_parser::load_mappings(
         idl_json_mappings,
         "IDL",
-        "JupiterSwap:/home/user/jupiter.json:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+        "JupiterSwap:path/to/jupiter.json:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
         "ProgramId",
         |id| {
             let bytes = bs58::decode(id)
@@ -81,7 +81,7 @@ fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (BTreeMap<Stri
 /// Creates Solana chain metadata from IDL mappings.
 /// Returns `None` if no IDL mappings are provided.
 #[must_use]
-pub fn create_chain_metadata(idl_json_mappings: &[String]) -> Option<ChainMetadata> {
+pub(crate) fn create_chain_metadata(idl_json_mappings: &[String]) -> Option<ChainMetadata> {
     if idl_json_mappings.is_empty() {
         return None;
     }

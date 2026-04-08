@@ -1,12 +1,12 @@
 /// Parsed components of a mapping string: name:path:identifier
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MappingComponents {
+pub(crate) struct MappingComponents {
     /// User-provided descriptive name for the contract/program
-    pub name: String,
+    pub(crate) name: String,
     /// File path to JSON file (ABI or IDL)
-    pub path: String,
+    pub(crate) path: String,
     /// Program ID (Solana base58) or Contract Address (Ethereum 0x hex)
-    pub identifier: String,
+    pub(crate) identifier: String,
 }
 
 /// Parse mapping format: `<Name:/path/to/file.json:Identifier>`
@@ -16,7 +16,7 @@ pub struct MappingComponents {
 /// section is the file path, and the first part is the name.
 ///
 /// Returns: `MappingComponents` { name, path, identifier }
-pub fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, String> {
+pub(crate) fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, String> {
     // Split from right to get identifier (last : separator)
     let (name_and_path, identifier) = mapping_str.rsplit_once(':').ok_or_else(|| {
         format!("Invalid mapping format (expected name:path:identifier): {mapping_str}")
@@ -38,22 +38,22 @@ pub fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, String> {
     })
 }
 
-/// Load JSON files from CLI mapping strings and build a `BTreeMap`.
+/// Load JSON files from CLI mapping strings and build a `HashMap`.
 ///
 /// Each mapping string is parsed, the JSON file is loaded, and `build_value` converts
 /// the loaded JSON + components into the target value type. The identifier from the
 /// mapping becomes the map key.
 ///
 /// Returns the populated map and the count of successfully loaded entries.
-pub fn load_mappings<V>(
+pub(crate) fn load_mappings<V>(
     mappings: &[String],
     kind: &str,
     example: &str,
     identifier_label: &str,
     validate_identifier: impl Fn(&str) -> Result<(), String>,
     build_value: impl Fn(&MappingComponents, String) -> V,
-) -> (std::collections::BTreeMap<String, V>, usize) {
-    let mut map = std::collections::BTreeMap::new();
+) -> (std::collections::HashMap<String, V>, usize) {
+    let mut map = std::collections::HashMap::new();
     let mut valid_count = 0;
 
     for mapping in mappings {
@@ -106,7 +106,7 @@ pub fn load_mappings<V>(
 const MAX_JSON_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
 /// Load and validate JSON file from path
-pub fn load_json_file(path: &str) -> Result<String, String> {
+pub(crate) fn load_json_file(path: &str) -> Result<String, String> {
     use std::io::Read;
 
     let file =
@@ -357,7 +357,7 @@ mod tests {
         let mut file = std::fs::File::create(&path).unwrap();
         // Write just over MAX_JSON_FILE_SIZE bytes, derived from the constant
         let bytes_to_write = super::MAX_JSON_FILE_SIZE + 1;
-        let chunk = vec![b'x'; bytes_to_write as usize];
+        let chunk = vec![b'x'; usize::try_from(bytes_to_write).unwrap()];
         file.write_all(&chunk).unwrap();
         drop(file);
 

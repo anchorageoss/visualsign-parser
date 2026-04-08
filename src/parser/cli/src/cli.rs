@@ -305,8 +305,9 @@ impl Cli {
             std::process::exit(1);
         }
 
-        // Safe: plugin is guaranteed Some after the is_none() exit guard above.
-        let plugin = plugin.unwrap();
+        let Some(plugin) = plugin else {
+            unreachable!("exit guard above ensures plugin is Some");
+        };
 
         let chain_metadata = match plugin.create_metadata(args.network.clone()) {
             Ok(meta) => meta,

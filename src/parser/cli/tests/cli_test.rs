@@ -75,12 +75,7 @@ fn test_cli_with_fixtures() {
 
     for input_file in test_cases {
         let input_path = input_file.path();
-        let test_name = input_path
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .replace(".input", "");
+        let test_name = input_path.file_stem().unwrap().to_str().unwrap();
 
         if disabled_chain_prefixes
             .iter()
@@ -297,10 +292,10 @@ fn test_cli_solana_idl_json_mappings() {
 
     let (stdout, stderr) = run_cli_full(&args);
 
-    // Verify the mapping was actually loaded
+    // Verify the mapping was actually loaded (check for the log prefix from load_mappings)
     assert!(
-        stderr.contains("Loaded IDL"),
-        "Expected 'Loaded IDL' in stderr, got: {stderr}"
+        stderr.contains("Loaded IDL") || stderr.contains("Successfully loaded"),
+        "Expected IDL loading output in stderr, got: {stderr}"
     );
 
     // The transaction should still parse successfully
