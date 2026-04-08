@@ -90,10 +90,11 @@ fn test_cli_with_fixtures() {
         let input_contents = fs::read_to_string(&input_path)
             .unwrap_or_else(|_| panic!("Failed to read input file: {input_path:?}"));
 
+        let fixtures_dir_str = fixtures_dir.to_str().unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_parser_cli"));
         for line in input_contents.lines() {
             if !line.trim().is_empty() {
-                command.arg(line);
+                command.arg(line.replace("{{FIXTURES_DIR}}", fixtures_dir_str));
             }
         }
 

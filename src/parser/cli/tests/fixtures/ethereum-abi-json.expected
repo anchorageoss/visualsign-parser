@@ -1,0 +1,99 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "Ethereum Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "Ethereum Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AddressV2": {
+        "Address": "0x1111111111111111111111111111111111111111",
+        "AssetLabel": "ETH",
+        "Name": "To"
+      },
+      "FallbackText": "0x1111111111111111111111111111111111111111",
+      "Label": "To",
+      "Type": "address_v2"
+    },
+    {
+      "AmountV2": {
+        "Abbreviation": "ETH",
+        "Amount": "0"
+      },
+      "FallbackText": "0 ETH",
+      "Label": "Value",
+      "Type": "amount_v2"
+    },
+    {
+      "FallbackText": "100000",
+      "Label": "Gas Limit",
+      "TextV2": {
+        "Text": "100000"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "1 gwei",
+      "Label": "Gas Price",
+      "TextV2": {
+        "Text": "1 gwei"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0.001 gwei",
+      "Label": "Max Priority Fee Per Gas",
+      "TextV2": {
+        "Text": "0.001 gwei"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "0"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "transfer(address,uint256)",
+      "Label": "transfer",
+      "PreviewLayout": {
+        "Expanded": {
+          "Fields": [
+            {
+              "FallbackText": "0x000000000000000000000000000000000000dead",
+              "Label": "to",
+              "TextV2": {
+                "Text": "0x000000000000000000000000000000000000dead"
+              },
+              "Type": "text_v2"
+            },
+            {
+              "FallbackText": "1000000",
+              "Label": "amount",
+              "TextV2": {
+                "Text": "1000000"
+              },
+              "Type": "text_v2"
+            }
+          ]
+        },
+        "Subtitle": {
+          "Text": "transfer(address,uint256)"
+        },
+        "Title": {
+          "Text": "transfer"
+        }
+      },
+      "Type": "preview_layout"
+    }
+  ],
+  "PayloadType": "EthereumTx",
+  "Title": "Ethereum Transaction",
+  "Version": "0"
+}
