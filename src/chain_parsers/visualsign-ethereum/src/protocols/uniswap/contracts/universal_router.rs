@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, Bytes, U256};
-use alloy_sol_types::{SolCall as _, SolType, SolValue, sol};
+use alloy_sol_types::{SolCall as _, SolType, SolValue, sol, sol_data};
 use chrono::{TimeZone, Utc};
 use num_enum::TryFromPrimitive;
 use visualsign::{SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2};
@@ -490,7 +490,6 @@ impl UniversalRouterVisualizer {
 
         // Sub-plan is ABI-encoded as (bytes commands, bytes[] inputs)
         // Use sol_data types for proper ABI tuple decoding
-        use alloy_sol_types::sol_data;
         type SubPlanParams = (sol_data::Bytes, sol_data::Array<sol_data::Bytes>);
 
         let params = match SubPlanParams::abi_decode_params(bytes) {
@@ -1039,8 +1038,6 @@ impl UniversalRouterVisualizer {
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        use alloy_sol_types::sol_data;
-
         type V2SwapParams = (
             sol_data::Address,
             sol_data::Uint<256>,
@@ -1492,55 +1489,20 @@ impl UniversalRouterVisualizer {
         }
     }
 
-    /// Decodes PERMIT2_PERMIT (0x0a) command.
+    /// Decodes PERMIT2_PERMIT (0x0a) command by delegating to Permit2Visualizer.
     /// Universal Router encodes this as inline PermitSingle bytes + signature,
-    /// without a function selector. Try custom permit decoding first, then
-    /// fall back to showing raw hex slot breakdown.
+    /// without a function selector. Permit2Visualizer.visualize_tx_commands
+    /// handles this via decode_custom_permit_params and produces a rich
+    /// PreviewLayout with Token, Amount, Spender, Expires, and Sig Deadline.
     fn decode_permit2_permit(
         bytes: &[u8],
         chain_id: u64,
         registry: Option<&ContractRegistry>,
     ) -> SignablePayloadField {
-        // Try custom permit decoding (inline PermitSingle without selector)
-        if let Ok(permit_single) = Permit2Visualizer::decode_custom_permit_params(bytes) {
-            let token = permit_single.details.token;
-            let token_symbol = registry
-                .and_then(|r| r.get_token_symbol(chain_id, token))
-                .unwrap_or_else(|| format!("{token:?}"));
-
-            let amount_str = match permit_single.details.amount.to_string().parse::<u128>() {
-                Ok(amount_u128) => registry
-                    .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
-                    .map(|(s, _)| s)
-                    .unwrap_or_else(|| permit_single.details.amount.to_string()),
-                Err(_) => {
-                    // Value exceeds u128::MAX — show raw amount string
-                    permit_single.details.amount.to_string()
-                }
-            };
-
-            let amount_display = if permit_single.details.amount == alloy_primitives::U160::MAX {
-                format!("Unlimited {token_symbol}")
-            } else {
-                format!("{amount_str} {token_symbol}")
-            };
-
-            let text = format!(
-                "Permit {} to spend {}",
-                permit_single.spender, amount_display
-            );
-
-            return SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: text.clone(),
-                    label: "Permit2 Permit".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 { text },
-            };
-        }
-
-        // Fall back to showing raw hex with slot breakdown
-        Self::show_decode_error(bytes, &"Failed to decode parameters")
+        let visualizer = Permit2Visualizer;
+        visualizer
+            .visualize_tx_commands(bytes, chain_id, registry)
+            .unwrap_or_else(|| Self::show_decode_error(bytes, &"Failed to decode parameters"))
     }
 
     /// Helper function to display decoding error with raw hex slots
@@ -1549,7 +1511,8 @@ impl UniversalRouterVisualizer {
         let chunk_size = 32;
         let mut fields = vec![];
 
-        for (i, chunk) in bytes.chunks(chunk_size).enumerate() {
+        // Cap at 16 slots (512 bytes) to prevent unbounded allocation from large payloads
+        for (i, chunk) in bytes.chunks(chunk_size).take(16).enumerate() {
             let chunk_hex = format!("0x{}", hex::encode(chunk));
             fields.push(visualsign::AnnotatedPayloadField {
                 signable_payload_field: SignablePayloadField::TextV2 {

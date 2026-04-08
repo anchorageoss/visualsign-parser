@@ -5,7 +5,7 @@
 //!
 //! Reference: <https://github.com/Uniswap/permit2>
 
-#![allow(unused_imports)]
+#![allow(unused_imports)] // SolCall used implicitly via abi_decode trait methods
 
 use alloy_primitives::{Address, U160};
 use alloy_sol_types::{SolCall, sol};
@@ -428,6 +428,4 @@ mod tests {
             None
         );
     }
-
-    // TODO: Add tests for Permit2 functions once implemented
 }
