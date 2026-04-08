@@ -178,13 +178,23 @@ fn build_parsed_fields(
     }
 
     for (account_name, account_address) in &instruction.named_accounts {
-        if let Ok(f) = create_text_field(account_name, account_address) {
+        let label = if parsed.program_call_args.contains_key(account_name) {
+            format!("Current {account_name}")
+        } else {
+            account_name.clone()
+        };
+        if let Ok(f) = create_text_field(&label, account_address) {
             expanded_fields.push(f);
         }
     }
 
     for (key, value) in &parsed.program_call_args {
-        if let Ok(f) = create_text_field(key, &format_arg_value(value)) {
+        let label = if instruction.named_accounts.contains_key(key) {
+            format!("New {key}")
+        } else {
+            key.clone()
+        };
+        if let Ok(f) = create_text_field(&label, &format_arg_value(value)) {
             expanded_fields.push(f);
         }
     }
