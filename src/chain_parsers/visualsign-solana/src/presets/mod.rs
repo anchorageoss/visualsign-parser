@@ -1,5 +1,6 @@
 pub mod associated_token_account;
 pub mod compute_budget;
+pub mod drift;
 pub mod jupiter_swap;
 pub mod squads_multisig;
 pub mod stakepool;
