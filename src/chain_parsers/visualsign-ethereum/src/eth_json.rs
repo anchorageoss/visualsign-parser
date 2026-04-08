@@ -77,9 +77,22 @@ pub(crate) fn decode_json_transaction(data: &str) -> Result<TypedTransaction, Et
     }
 }
 
+/// Wrap a parse error with the JSON field name for easier debugging.
+fn field_context<T>(
+    field: &str,
+    result: Result<T, EthereumParserError>,
+) -> Result<T, EthereumParserError> {
+    result.map_err(|e| match e {
+        EthereumParserError::FailedToParseJsonTransaction(msg) => {
+            EthereumParserError::FailedToParseJsonTransaction(format!("'{field}': {msg}"))
+        }
+        other => other,
+    })
+}
+
 fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, EthereumParserError> {
     if let Some(ref from_str) = tx.from {
-        let _ = parse_address(from_str)?;
+        let _ = field_context("from", parse_address(from_str))?;
         log::debug!("JSON transaction contains 'from' field which is accepted but ignored");
     }
 
@@ -98,24 +111,16 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
     }
 
     let to = match &tx.to {
-        Some(addr) => TxKind::Call(parse_address(addr)?),
+        Some(addr) => TxKind::Call(field_context("to", parse_address(addr))?),
         None => TxKind::Create,
     };
-    let value = tx
-        .value
-        .as_deref()
-        .map(parse_hex_u256)
-        .transpose()?
+    let value = field_context("value", tx.value.as_deref().map(parse_hex_u256).transpose())?
         .unwrap_or(U256::ZERO);
-    let nonce = tx
-        .nonce
-        .as_deref()
-        .map(parse_hex_u64)
-        .transpose()?
-        .unwrap_or(0);
+    let nonce =
+        field_context("nonce", tx.nonce.as_deref().map(parse_hex_u64).transpose())?.unwrap_or(0);
     let gas_limit = match tx.gas.as_deref() {
         Some(raw) => {
-            let parsed = parse_hex_u64(raw)?;
+            let parsed = field_context("gas", parse_hex_u64(raw))?;
             if parsed == 0 {
                 return Err(EthereumParserError::FailedToParseJsonTransaction(
                     "'gas' must be greater than 0; omit the field to use the default (21000)"
@@ -128,7 +133,7 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
     };
     let chain_id = match tx.chain_id.as_deref() {
         Some(raw) => {
-            let parsed = parse_hex_u64(raw)?;
+            let parsed = field_context("chainId", parse_hex_u64(raw))?;
             if parsed == 0 {
                 return Err(EthereumParserError::FailedToParseJsonTransaction(
                     "'chainId' must be greater than 0".to_string(),
@@ -142,26 +147,24 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
             ));
         }
     };
-    let input_data = tx
-        .data
-        .as_deref()
-        .map(parse_hex_bytes)
-        .transpose()?
+    let input_data = field_context("data", tx.data.as_deref().map(parse_hex_bytes).transpose())?
         .unwrap_or_default();
 
     if let Some(ref fee) = tx.max_fee_per_gas {
-        let max_fee_per_gas = parse_hex_u128(fee)?;
+        let max_fee_per_gas = field_context("maxFeePerGas", parse_hex_u128(fee))?;
         if max_fee_per_gas == 0 {
             log::warn!(
                 "EIP-1559 transaction has maxFeePerGas=0; will not be mined on most networks"
             );
         }
-        let max_priority_fee_per_gas = tx
-            .max_priority_fee_per_gas
-            .as_deref()
-            .map(parse_hex_u128)
-            .transpose()?
-            .unwrap_or(0);
+        let max_priority_fee_per_gas = field_context(
+            "maxPriorityFeePerGas",
+            tx.max_priority_fee_per_gas
+                .as_deref()
+                .map(parse_hex_u128)
+                .transpose(),
+        )?
+        .unwrap_or(0);
 
         if max_priority_fee_per_gas > max_fee_per_gas {
             return Err(EthereumParserError::FailedToParseJsonTransaction(
@@ -182,12 +185,11 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
             access_list: Default::default(),
         }))
     } else {
-        let gas_price = tx
-            .gas_price
-            .as_deref()
-            .map(parse_hex_u128)
-            .transpose()?
-            .unwrap_or(0);
+        let gas_price = field_context(
+            "gasPrice",
+            tx.gas_price.as_deref().map(parse_hex_u128).transpose(),
+        )?
+        .unwrap_or(0);
 
         if tx.gas_price.is_some() && gas_price == 0 {
             log::warn!("Legacy transaction has gasPrice=0; will not be mined on most networks");
@@ -400,6 +402,7 @@ mod tests {
         let err = decode_json_transaction(json).unwrap_err();
         match err {
             EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("chainId"), "should name the field: {msg}");
                 assert!(msg.contains("0x"));
                 assert!(msg.contains("prefix"));
             }
@@ -414,10 +417,12 @@ mod tests {
             "value": "0xGHIJ"
         }"#;
         let err = decode_json_transaction(json).unwrap_err();
-        assert!(matches!(
-            err,
-            EthereumParserError::FailedToParseJsonTransaction(_)
-        ));
+        match err {
+            EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("value"), "should name the field: {msg}");
+            }
+            _ => panic!("Expected FailedToParseJsonTransaction"),
+        }
     }
 
     #[test]
