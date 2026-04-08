@@ -1,3 +1,7 @@
+use alloy_consensus::TxEip1559;
+use alloy_primitives::U256;
+use alloy_rlp::Encodable;
+use alloy_sol_types::{SolCall, sol};
 use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 use std::collections::HashMap;
 use std::fs;
@@ -172,9 +176,6 @@ fn test_abi_from_metadata_decodes_function() {
     // We use an ERC-20 transfer calldata (selector 0xa9059cbb) sent to a contract
     // address that is NOT in the built-in visualizer registry, so the dynamic ABI
     // path via metadata is the only way the function name can appear in the output.
-    use alloy_primitives::U256;
-    use alloy_sol_types::{SolCall, sol};
-
     sol! {
         function transfer(address to, uint256 amount) external returns (bool);
     }
@@ -193,7 +194,6 @@ fn test_abi_from_metadata_decodes_function() {
         .parse()
         .unwrap();
 
-    use alloy_consensus::TxEip1559;
     let tx = TxEip1559 {
         chain_id: 1,
         nonce: 0,
@@ -206,7 +206,6 @@ fn test_abi_from_metadata_decodes_function() {
     };
 
     // RLP-encode as unsigned EIP-1559 (type 0x02)
-    use alloy_rlp::Encodable;
     let mut buf = Vec::new();
     buf.push(0x02); // EIP-1559 type byte
     tx.encode(&mut buf);

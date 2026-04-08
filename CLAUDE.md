@@ -73,6 +73,7 @@ Raw tx bytes → ChainPlugin (CLI) or gRPC request
 - Fixture-based snapshot tests: `tests/fixtures/{name}.input` + `{name}.expected` pairs per chain crate
 - Integration tests in `integration/tests/` use gRPC client against built binaries
 - `test_utils` module in `visualsign` provides shared test helpers
+- Place all `use` imports at the top of the test module, not inside individual test functions
 
 ### Local Dev Container
 
