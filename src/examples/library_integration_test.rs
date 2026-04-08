@@ -48,10 +48,9 @@ fn main() {
     // Configure parsing options
     let options = VisualSignOptions {
         decode_transfers: true,
-        transaction_name: None,
         metadata: Some(ChainMetadata {
             metadata: Some(Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("1".to_string()), // Ethereum Mainnet
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
                 abi: None,
                 abi_mappings: Default::default(),
             })),
@@ -59,7 +58,7 @@ fn main() {
         developer_config: Some(DeveloperConfig {
             allow_signed_transactions: true,
         }),
-        abi_registry: None,
+        ..Default::default()
     };
 
     // Parse the transaction

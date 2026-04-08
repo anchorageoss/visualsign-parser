@@ -89,3 +89,54 @@ pub fn parse(
         }),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata};
+    use std::collections::HashMap;
+
+    /// Verify that `metadata_digest` is deterministic for identical metadata,
+    /// including non-empty `abi_mappings` (exercises `HashMap` key ordering through borsh).
+    #[test]
+    fn metadata_digest_is_deterministic() {
+        let mut abi_mappings = HashMap::new();
+        abi_mappings.insert(
+            "0xaaaa".to_string(),
+            Abi {
+                value: r#"[{"name":"transfer"}]"#.to_string(),
+                signature: None,
+            },
+        );
+        abi_mappings.insert(
+            "0xbbbb".to_string(),
+            Abi {
+                value: r#"[{"name":"approve"}]"#.to_string(),
+                signature: None,
+            },
+        );
+
+        let metadata_a = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi: None,
+                abi_mappings: abi_mappings.clone(),
+            })),
+        };
+        let metadata_b = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi: None,
+                abi_mappings,
+            })),
+        };
+
+        let bytes_a = borsh::to_vec(&metadata_a).expect("borsh serialization");
+        let bytes_b = borsh::to_vec(&metadata_b).expect("borsh serialization");
+        assert_eq!(
+            sha_256(&bytes_a),
+            sha_256(&bytes_b),
+            "metadata_digest must be identical for identical metadata"
+        );
+    }
+}
