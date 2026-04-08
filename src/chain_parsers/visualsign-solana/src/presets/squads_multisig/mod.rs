@@ -45,7 +45,9 @@ impl VaultTransactionMessage {
     /// Parse from Squads' compact wire format (mimics Solana Message serialization).
     /// Format: 3×u8 header, u8 account_keys count + pubkeys,
     ///         u8 instructions count + compiled instructions,
-    ///         u8 address_table_lookups count + lookups
+    ///         u8 address_table_lookups count + lookups.
+    /// Within compiled instructions, data length is encoded as u16 LE
+    /// (matching the Squads v4 on-chain format).
     fn deserialize(data: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
         let mut pos = 0;
 
@@ -55,6 +57,15 @@ impl VaultTransactionMessage {
             }
             let val = data[*pos];
             *pos += 1;
+            Ok(val)
+        };
+
+        let read_u16_le = |pos: &mut usize| -> Result<u16, Box<dyn std::error::Error>> {
+            if *pos + 2 > data.len() {
+                return Err("unexpected end of data".into());
+            }
+            let val = u16::from_le_bytes([data[*pos], data[*pos + 1]]);
+            *pos += 2;
             Ok(val)
         };
 
@@ -88,7 +99,7 @@ impl VaultTransactionMessage {
             let program_id_index = read_u8(&mut pos)?;
             let num_account_indexes = read_u8(&mut pos)? as usize;
             let account_indexes = read_bytes(&mut pos, num_account_indexes)?.to_vec();
-            let data_len = read_u8(&mut pos)? as usize;
+            let data_len = read_u16_le(&mut pos)? as usize;
             let instruction_data = read_bytes(&mut pos, data_len)?.to_vec();
             instructions.push(MultisigCompiledInstruction {
                 program_id_index,
@@ -173,8 +184,10 @@ impl InstructionVisualizer for SquadsMultisigVisualizer {
     }
 }
 
-fn get_squads_idl() -> Option<Idl> {
-    decode_idl_data(SQUADS_IDL_JSON).ok()
+fn get_squads_idl() -> Option<&'static Idl> {
+    static IDL: std::sync::LazyLock<Option<Idl>> =
+        std::sync::LazyLock::new(|| decode_idl_data(SQUADS_IDL_JSON).ok());
+    IDL.as_ref()
 }
 
 fn parse_squads_instruction(
@@ -186,9 +199,9 @@ fn parse_squads_instruction(
     }
 
     let idl = get_squads_idl().ok_or("Squads Multisig IDL not available")?;
-    let parsed = parse_instruction_with_idl(data, SQUADS_MULTISIG_PROGRAM_ID, &idl)?;
+    let parsed = parse_instruction_with_idl(data, SQUADS_MULTISIG_PROGRAM_ID, idl)?;
 
-    let named_accounts = build_named_accounts(data, &idl, accounts);
+    let named_accounts = build_named_accounts(data, idl, accounts);
 
     Ok(SquadsParsedInstruction {
         parsed,
