@@ -37,7 +37,7 @@ fn test_with_fixtures() {
             .unwrap_or_else(|_| panic!("Failed to read input file: {input_path:?}"));
 
         // Parse the input to extract transaction data
-        let transaction_hex = input_contents.trim();
+        let transaction_input = input_contents.trim();
 
         // Create options for the transaction
         let options = VisualSignOptions {
@@ -48,7 +48,7 @@ fn test_with_fixtures() {
             abi_registry: None,
         };
 
-        let result = transaction_string_to_visual_sign(transaction_hex, options);
+        let result = transaction_string_to_visual_sign(transaction_input, options);
 
         let actual_output = match result {
             Ok(payload) => payload.to_json().unwrap(),
@@ -83,7 +83,7 @@ fn test_ethereum_charset_validation() {
             .unwrap_or_else(|_| panic!("Failed to read input file: {input_path:?}"));
 
         // Parse the input to extract transaction data
-        let transaction_hex = input_contents.trim();
+        let transaction_input = input_contents.trim();
 
         // Create options for the transaction
         let options = VisualSignOptions {
@@ -94,7 +94,7 @@ fn test_ethereum_charset_validation() {
             abi_registry: None,
         };
 
-        let result = transaction_string_to_visual_sign(transaction_hex, options);
+        let result = transaction_string_to_visual_sign(transaction_input, options);
 
         match result {
             Ok(payload) => {

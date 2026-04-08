@@ -24,6 +24,7 @@ const ERROR_PREVIEW_LEN: usize = 64;
 /// Extensible for future JSON entry types (EIP-712 typed data, ERC-7730 clear signing).
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[non_exhaustive]
 pub(crate) enum EthJsonInput {
     #[serde(rename = "transaction")]
     Transaction(EthJsonTransaction),
@@ -33,7 +34,7 @@ pub(crate) enum EthJsonInput {
 /// All fields except `chainId` are optional with sensible defaults. `chainId`
 /// must always be provided and has no default; defaulting to mainnet is too
 /// dangerous for a signing service. Numeric values are hex strings with
-/// optional `0x` prefix.
+/// required `0x` prefix (e.g., `"0x1"`, `"0x5208"`).
 ///
 /// Uses `deny_unknown_fields` to reject typos (e.g., `"chainID"` vs `"chainId"`)
 /// that would silently fall back to defaults -- dangerous for a signing service.
@@ -150,6 +151,11 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
 
     if let Some(ref fee) = tx.max_fee_per_gas {
         let max_fee_per_gas = parse_hex_u128(fee)?;
+        if max_fee_per_gas == 0 {
+            log::warn!(
+                "EIP-1559 transaction has maxFeePerGas=0; will not be mined on most networks"
+            );
+        }
         let max_priority_fee_per_gas = tx
             .max_priority_fee_per_gas
             .as_deref()
@@ -183,8 +189,8 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
             .transpose()?
             .unwrap_or(0);
 
-        if gas_price == 0 {
-            log::warn!("Legacy transaction has gas_price=0; will not be mined on most networks");
+        if tx.gas_price.is_some() && gas_price == 0 {
+            log::warn!("Legacy transaction has gasPrice=0; will not be mined on most networks");
         }
 
         Ok(TypedTransaction::Legacy(TxLegacy {
@@ -200,46 +206,48 @@ fn build_transaction(tx: EthJsonTransaction) -> Result<TypedTransaction, Ethereu
 }
 
 /// Truncate a string for safe inclusion in error messages.
-/// Uses char boundaries to avoid panicking on multi-byte UTF-8 input.
-fn error_preview(s: &str) -> &str {
-    truncate_at_char_boundary(s, ERROR_PREVIEW_LEN)
-}
-
-/// Like `error_preview` but reserves 3 chars for a trailing "..." ellipsis,
-/// so the total output (preview + "...") stays within `ERROR_PREVIEW_LEN`.
-fn error_preview_with_ellipsis(s: &str) -> &str {
-    truncate_at_char_boundary(s, ERROR_PREVIEW_LEN.saturating_sub(3))
-}
-
-fn truncate_at_char_boundary(s: &str, max_len: usize) -> &str {
-    if s.len() <= max_len {
-        return s;
+/// Returns the original string if short enough, otherwise truncates at a
+/// UTF-8 char boundary and appends "..." so the caller always knows
+/// whether the value was clipped.
+fn truncate_for_error(s: &str) -> String {
+    if s.len() <= ERROR_PREVIEW_LEN {
+        return s.to_string();
     }
-    let mut end = max_len;
+    let max = ERROR_PREVIEW_LEN.saturating_sub(3);
+    let mut end = max;
     while end > 0 && !s.is_char_boundary(end) {
         end -= 1;
     }
-    &s[..end]
+    format!("{}...", &s[..end])
 }
 
-fn strip_hex_prefix(s: &str) -> &str {
+fn require_hex_prefix(s: &str) -> Result<&str, EthereumParserError> {
     s.strip_prefix("0x")
         .or_else(|| s.strip_prefix("0X"))
-        .unwrap_or(s)
+        .ok_or_else(|| {
+            EthereumParserError::FailedToParseJsonTransaction(format!(
+                "Hex value '{}' must start with '0x' prefix",
+                truncate_for_error(s),
+            ))
+        })
 }
 
 macro_rules! parse_hex_int {
-    ($name:ident, $ty:ty, $zero:expr, $label:literal) => {
+    ($name:ident, $ty:ty, $label:literal) => {
         fn $name(s: &str) -> Result<$ty, EthereumParserError> {
-            let hex = strip_hex_prefix(s);
+            let hex = require_hex_prefix(s)?;
             if hex.is_empty() {
-                return Ok($zero);
+                return Err(EthereumParserError::FailedToParseJsonTransaction(format!(
+                    "Empty hex {} '{}'; use '0x0' for zero",
+                    $label,
+                    truncate_for_error(s),
+                )));
             }
             <$ty>::from_str_radix(hex, 16).map_err(|e| {
                 EthereumParserError::FailedToParseJsonTransaction(format!(
                     "Invalid hex {} '{}': {}",
                     $label,
-                    error_preview(s),
+                    truncate_for_error(s),
                     e,
                 ))
             })
@@ -247,22 +255,22 @@ macro_rules! parse_hex_int {
     };
 }
 
-parse_hex_int!(parse_hex_u64, u64, 0, "u64");
-parse_hex_int!(parse_hex_u128, u128, 0, "u128");
-parse_hex_int!(parse_hex_u256, U256, U256::ZERO, "U256");
+parse_hex_int!(parse_hex_u64, u64, "u64");
+parse_hex_int!(parse_hex_u128, u128, "u128");
+parse_hex_int!(parse_hex_u256, U256, "U256");
 
 fn parse_address(s: &str) -> Result<Address, EthereumParserError> {
     s.parse::<Address>().map_err(|e| {
         EthereumParserError::FailedToParseJsonTransaction(format!(
             "Invalid address '{}': {}",
-            error_preview(s),
+            truncate_for_error(s),
             e,
         ))
     })
 }
 
 fn parse_hex_bytes(s: &str) -> Result<Bytes, EthereumParserError> {
-    let hex = strip_hex_prefix(s);
+    let hex = require_hex_prefix(s)?;
     if hex.is_empty() {
         return Ok(Bytes::new());
     }
@@ -274,13 +282,10 @@ fn parse_hex_bytes(s: &str) -> Result<Bytes, EthereumParserError> {
         )));
     }
     let decoded = hex::decode(hex).map_err(|e| {
-        let preview = if s.len() > ERROR_PREVIEW_LEN {
-            format!("{}...", error_preview_with_ellipsis(s))
-        } else {
-            s.to_string()
-        };
         EthereumParserError::FailedToParseJsonTransaction(format!(
-            "Invalid hex data '{preview}': {e}",
+            "Invalid hex data '{}': {}",
+            truncate_for_error(s),
+            e,
         ))
     })?;
     Ok(Bytes::from(decoded))
@@ -385,16 +390,21 @@ mod tests {
     }
 
     #[test]
-    fn test_hex_without_prefix() {
+    fn test_missing_hex_prefix_rejected() {
+        // Values without "0x" prefix are rejected to prevent silent hex/decimal confusion
+        // (e.g., "10" would be hex 16, not decimal 10)
         let json = r#"{
             "type": "transaction",
-            "nonce": "2a",
-            "gas": "5208",
             "chainId": "1"
         }"#;
-        let tx = decode_json_transaction(json).unwrap();
-        assert_eq!(tx.nonce(), 42);
-        assert_eq!(tx.gas_limit(), 21000);
+        let err = decode_json_transaction(json).unwrap_err();
+        match err {
+            EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("0x"));
+                assert!(msg.contains("prefix"));
+            }
+            _ => panic!("Expected FailedToParseJsonTransaction"),
+        }
     }
 
     #[test]
@@ -474,17 +484,38 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_hex_prefix_value_and_nonce_are_zero() {
+    fn test_empty_hex_numeric_rejected() {
+        // "0x" (prefix only) is rejected for numeric fields; use "0x0" for zero
         let json = r#"{
             "type": "transaction",
             "value": "0x",
-            "nonce": "0x",
+            "chainId": "0x1"
+        }"#;
+        let err = decode_json_transaction(json).unwrap_err();
+        match err {
+            EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("Empty hex"));
+                assert!(msg.contains("0x0"));
+            }
+            _ => panic!("Expected FailedToParseJsonTransaction"),
+        }
+    }
+
+    #[test]
+    fn test_empty_hex_data_is_empty_bytes() {
+        // "0x" for data field means empty calldata (standard Ethereum convention)
+        let json = r#"{
+            "type": "transaction",
+            "data": "0x",
             "chainId": "0x1"
         }"#;
         let tx = decode_json_transaction(json).unwrap();
-        assert_eq!(tx.value(), U256::ZERO);
-        assert_eq!(tx.nonce(), 0);
-        assert_eq!(tx.gas_limit(), DEFAULT_GAS_LIMIT);
+        match &tx {
+            TypedTransaction::Legacy(inner) => {
+                assert!(inner.input.is_empty());
+            }
+            _ => panic!("Expected Legacy"),
+        }
     }
 
     #[test]
@@ -503,17 +534,19 @@ mod tests {
             _ => panic!("Expected FailedToParseJsonTransaction"),
         }
 
-        // "0x" (empty hex) also parses to 0 and should be rejected
+        // "0x" (empty hex) is now rejected at the parse level
         let json2 = r#"{
             "type": "transaction",
             "gas": "0x",
             "chainId": "0x1"
         }"#;
         let err2 = decode_json_transaction(json2).unwrap_err();
-        assert!(matches!(
-            err2,
-            EthereumParserError::FailedToParseJsonTransaction(_)
-        ));
+        match err2 {
+            EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("Empty hex"));
+            }
+            _ => panic!("Expected FailedToParseJsonTransaction"),
+        }
     }
 
     #[test]
@@ -531,16 +564,18 @@ mod tests {
             _ => panic!("Expected FailedToParseJsonTransaction"),
         }
 
-        // "0x" (empty hex) also parses to 0 and should be rejected
+        // "0x" (empty hex) is now rejected at the parse level
         let json2 = r#"{
             "type": "transaction",
             "chainId": "0x"
         }"#;
         let err2 = decode_json_transaction(json2).unwrap_err();
-        assert!(matches!(
-            err2,
-            EthereumParserError::FailedToParseJsonTransaction(_)
-        ));
+        match err2 {
+            EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("Empty hex"));
+            }
+            _ => panic!("Expected FailedToParseJsonTransaction"),
+        }
     }
 
     #[test]
@@ -685,12 +720,49 @@ mod tests {
     }
 
     #[test]
-    fn test_error_preview_multibyte_safe() {
+    fn test_truncate_for_error_multibyte_safe() {
         // 4-byte emoji repeated to exceed ERROR_PREVIEW_LEN bytes
         let s = "\u{1F600}".repeat(20); // 80 bytes
-        let preview = error_preview(&s);
+        let preview = truncate_for_error(&s);
         assert!(preview.len() <= ERROR_PREVIEW_LEN);
-        // Verify the preview is valid UTF-8 (won't panic when used as &str)
+        assert!(preview.ends_with("..."));
+        // Verify the preview is valid UTF-8 (won't panic)
         assert!(std::str::from_utf8(preview.as_bytes()).is_ok());
+
+        // Short strings are returned as-is without "..."
+        let short = "hello";
+        assert_eq!(truncate_for_error(short), "hello");
+    }
+
+    #[test]
+    fn test_access_list_field_rejected() {
+        // accessList is not supported in v1; deny_unknown_fields rejects it
+        let json = r#"{
+            "type": "transaction",
+            "chainId": "0x1",
+            "accessList": []
+        }"#;
+        let err = decode_json_transaction(json).unwrap_err();
+        assert!(matches!(
+            err,
+            EthereumParserError::FailedToParseJsonTransaction(_)
+        ));
+    }
+
+    #[test]
+    fn test_data_without_hex_prefix_rejected() {
+        let json = r#"{
+            "type": "transaction",
+            "data": "6060604052",
+            "chainId": "0x1"
+        }"#;
+        let err = decode_json_transaction(json).unwrap_err();
+        match err {
+            EthereumParserError::FailedToParseJsonTransaction(msg) => {
+                assert!(msg.contains("0x"));
+                assert!(msg.contains("prefix"));
+            }
+            _ => panic!("Expected FailedToParseJsonTransaction"),
+        }
     }
 }
