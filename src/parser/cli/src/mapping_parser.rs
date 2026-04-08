@@ -1,3 +1,5 @@
+use std::io::Read;
+
 /// Parsed components of a mapping string: name:path:identifier
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MappingComponents {
@@ -107,8 +109,6 @@ const MAX_JSON_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
 /// Load and validate JSON file from path
 pub(crate) fn load_json_file(path: &str) -> Result<String, String> {
-    use std::io::Read;
-
     let file =
         std::fs::File::open(path).map_err(|e| format!("Failed to read file at {path}: {e}"))?;
 
