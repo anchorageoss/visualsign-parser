@@ -292,10 +292,14 @@ fn test_cli_solana_idl_json_mappings() {
 
     let (stdout, stderr) = run_cli_full(&args);
 
-    // Verify the mapping was actually loaded (check for the log prefix from load_mappings)
+    // Verify the mapping was actually loaded — check the per-entry success line
     assert!(
-        stderr.contains("Loaded IDL") || stderr.contains("Successfully loaded"),
-        "Expected IDL loading output in stderr, got: {stderr}"
+        stderr.contains("Loaded IDL 'TestProgram'"),
+        "Expected per-mapping 'Loaded IDL' line in stderr, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("Successfully loaded 1/1 IDL mappings"),
+        "Expected 1/1 IDL mappings loaded, got: {stderr}"
     );
 
     // The transaction should still parse successfully
