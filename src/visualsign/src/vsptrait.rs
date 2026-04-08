@@ -13,24 +13,13 @@ pub struct DeveloperConfig {
     pub allow_signed_transactions: bool,
 }
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct VisualSignOptions {
     pub decode_transfers: bool,
     pub transaction_name: Option<String>,
     pub metadata: Option<ChainMetadata>,
     /// Developer-only options. None for production API use.
     pub developer_config: Option<DeveloperConfig>,
-}
-
-impl Debug for VisualSignOptions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VisualSignOptions")
-            .field("decode_transfers", &self.decode_transfers)
-            .field("transaction_name", &self.transaction_name)
-            .field("metadata", &self.metadata)
-            .field("developer_config", &self.developer_config)
-            .finish()
-    }
 }
 
 pub trait VisualSignConverter<T: Transaction> {
