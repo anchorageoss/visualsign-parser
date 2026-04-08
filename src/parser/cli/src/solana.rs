@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 use clap::Args as ClapArgs;
 use generated::parser::{
@@ -50,7 +50,7 @@ impl crate::ChainPlugin for SolanaPlugin {
     }
 }
 
-fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (BTreeMap<String, Idl>, usize) {
+fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (HashMap<String, Idl>, usize) {
     mapping_parser::load_mappings(
         idl_json_mappings,
         "IDL",

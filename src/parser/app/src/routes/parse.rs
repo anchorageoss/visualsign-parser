@@ -118,14 +118,12 @@ mod tests {
         let metadata_a = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: abi_mappings.clone(),
             })),
         };
         let metadata_b = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings,
             })),
         };
