@@ -283,7 +283,7 @@ impl Cli {
         if plugin.is_none() {
             let supported: Vec<String> = plugins
                 .iter()
-                .map(|p| p.chain().as_str().to_string())
+                .map(|p| p.chain().as_str().to_lowercase())
                 .collect();
             let supported_str = if supported.is_empty() {
                 "none".to_string()
