@@ -50,35 +50,7 @@ pub fn try_extract_from_chain_metadata(
         return None;
     };
     if ethereum.abi_mappings.is_empty() {
-        // Fallback to legacy `abi` field for backwards compatibility.
-        // Note: the legacy field has no contract address, so the ABI is registered
-        // as "wallet_provided" without an address mapping. The decoder's
-        // `get_abi_for_address` won't find it — callers that need address-based
-        // lookup should migrate to `abi_mappings`. This fallback exists so the ABI
-        // is at least available via `list_abis()` for tooling that iterates all ABIs.
-        let legacy_abi = ethereum.abi.as_ref()?;
-        if legacy_abi.value.len() > MAX_ABI_JSON_BYTES {
-            log::warn!(
-                "Legacy ABI exceeds size limit ({} bytes > {MAX_ABI_JSON_BYTES})",
-                legacy_abi.value.len()
-            );
-            return None;
-        }
-        let mut registry = AbiRegistry::new();
-        if let Some(proto_sig) = legacy_abi.signature.as_ref() {
-            let signature = convert_proto_signature(proto_sig);
-            if let Err(e) = validate_abi_signature(&legacy_abi.value, &signature) {
-                log::warn!("Legacy ABI signature validation failed: {e}");
-                return None;
-            }
-        }
-        match register_embedded_abi(&mut registry, "wallet_provided", &legacy_abi.value) {
-            Ok(()) => return Some(registry),
-            Err(e) => {
-                log::warn!("Failed to register legacy ABI: {e}");
-                return None;
-            }
-        }
+        return None;
     }
 
     let mut registry = AbiRegistry::new();
@@ -429,7 +401,6 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: Default::default(),
             })),
         };
@@ -441,7 +412,6 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: make_abi_mappings(vec![(
                     TEST_ADDRESS,
                     Abi {
@@ -499,7 +469,6 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: make_abi_mappings(vec![(
                     TEST_ADDRESS,
                     Abi {
@@ -534,7 +503,6 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: make_abi_mappings(vec![(
                     "not_an_address",
                     Abi {
@@ -553,7 +521,6 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: make_abi_mappings(vec![(
                     TEST_ADDRESS,
                     Abi {
@@ -573,7 +540,6 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: None,
                 abi_mappings: make_abi_mappings(vec![
                     (
                         "not_an_address",
@@ -596,56 +562,5 @@ mod tests {
         let registry = try_extract_from_chain_metadata(Some(&metadata), 1)
             .expect("should contain the valid ABI");
         assert!(registry.list_abis().contains(&valid_address));
-    }
-
-    // --- Legacy `abi` field fallback tests ---
-
-    #[test]
-    fn test_try_extract_legacy_abi_no_signature() {
-        let metadata = ChainMetadata {
-            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: Some(Abi {
-                    value: VALID_ABI.to_string(),
-                    signature: None,
-                }),
-                abi_mappings: Default::default(),
-            })),
-        };
-        let registry =
-            try_extract_from_chain_metadata(Some(&metadata), 1).expect("legacy ABI should work");
-        assert!(registry.list_abis().contains(&"wallet_provided"));
-    }
-
-    #[test]
-    fn test_try_extract_legacy_abi_invalid_signature_rejected() {
-        use generated::parser::Metadata;
-
-        let proto_sig = generated::parser::SignatureMetadata {
-            value: "deadbeef".to_string(),
-            metadata: vec![
-                Metadata {
-                    key: "algorithm".to_string(),
-                    value: "secp256k1".to_string(),
-                },
-                Metadata {
-                    key: "public_key".to_string(),
-                    value: "deadbeef".to_string(),
-                },
-            ],
-        };
-
-        let metadata = ChainMetadata {
-            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi: Some(Abi {
-                    value: VALID_ABI.to_string(),
-                    signature: Some(proto_sig),
-                }),
-                abi_mappings: Default::default(),
-            })),
-        };
-        // Invalid signature on legacy ABI should cause rejection
-        assert!(try_extract_from_chain_metadata(Some(&metadata), 1).is_none());
     }
 }

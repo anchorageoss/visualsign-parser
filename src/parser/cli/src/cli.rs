@@ -324,7 +324,6 @@ impl Cli {
             developer_config: Some(DeveloperConfig {
                 allow_signed_transactions: true,
             }),
-            abi_registry: None,
         };
 
         parse_and_display(

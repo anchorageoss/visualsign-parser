@@ -106,9 +106,10 @@ message Signature {
 }
 
 message EthereumMetadata {
+  reserved 1;       // was: optional Abi abi
+  reserved "abi";   // prevent reuse of removed field name
   // Network identifier string (e.g., "ETHEREUM_MAINNET", "POLYGON_MAINNET", "ARBITRUM_MAINNET")
   optional string network_id = 2;
-  optional Abi abi = 1;
   // Map of contract address to ABI definitions.
   // Contract addresses are expected to be 0x-prefixed, 20-byte hexadecimal Ethereum addresses.
   // Allows wallets to provide multiple ABIs, one per contract. Use a consistent address casing
