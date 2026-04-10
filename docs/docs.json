@@ -114,7 +114,8 @@
               "adding-new-chain",
               "contributing",
               "contributor-guides/project-structure",
-              "contributor-guides/best-practices"
+              "contributor-guides/best-practices",
+              "contributor-guides/lint-diagnostics"
             ]
           }
         ]
