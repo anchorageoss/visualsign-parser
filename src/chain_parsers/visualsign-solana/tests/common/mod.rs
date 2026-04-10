@@ -149,8 +149,8 @@ pub fn find_text(fields: &[AnnotatedPayloadField], label: &str) -> Option<String
 /// Load a real IDL from the path in the `IDL_FILE` environment variable.
 ///
 /// Returns `None` when `IDL_FILE` is unset or the IDL fails validation,
-/// allowing `real_idl_*` tests to be silently skipped in CI.
-pub fn load_idl_from_env() -> Option<(String, solana_parser::solana::structs::Idl)> {
+/// allowing `real_idl_*` tests to be skipped in CI (decode failures are logged to stderr).
+pub fn load_idl_from_env() -> Option<(String, Idl)> {
     let path = std::env::var("IDL_FILE").ok()?;
     let json = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("IDL_FILE={path}: {e}"));
     match decode_idl_data(&json) {

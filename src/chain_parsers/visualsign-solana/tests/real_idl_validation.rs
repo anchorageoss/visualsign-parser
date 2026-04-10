@@ -43,15 +43,17 @@ fn real_idl_discriminators_are_unique() {
     };
     let mut seen: std::collections::HashMap<Vec<u8>, &str> = std::collections::HashMap::new();
     for inst in &idl.instructions {
-        if let Some(disc) = &inst.discriminator {
-            if let Some(existing) = seen.get(disc) {
-                panic!(
-                    "discriminator collision between '{}' and '{}': {:?}",
-                    existing, inst.name, disc
-                );
-            }
-            seen.insert(disc.clone(), &inst.name);
+        let disc = inst
+            .discriminator
+            .as_ref()
+            .unwrap_or_else(|| panic!("instruction '{}' has no discriminator", inst.name));
+        if let Some(existing) = seen.get(disc) {
+            panic!(
+                "discriminator collision between '{}' and '{}': {:?}",
+                existing, inst.name, disc
+            );
         }
+        seen.insert(disc.clone(), &inst.name);
     }
 }
 
