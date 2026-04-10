@@ -132,7 +132,7 @@ fn test_cli_with_fixtures() {
             .unwrap_or_else(|_| panic!("Display fixture not found: {display_path:?}"));
 
         assert_strings_match(
-            &test_name,
+            test_name,
             "display",
             expected_display.trim(),
             &actual_display,

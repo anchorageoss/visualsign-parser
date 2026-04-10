@@ -221,6 +221,12 @@ pub fn create_diagnostic_field(
     message: &str,
     instruction_index: Option<u32>,
 ) -> AnnotatedPayloadField {
+    match level {
+        "warn" | "error" => {
+            tracing::warn!(rule, domain, level, ?instruction_index, "{message}");
+        }
+        _ => {}
+    }
     AnnotatedPayloadField {
         static_annotation: None,
         dynamic_annotation: None,
