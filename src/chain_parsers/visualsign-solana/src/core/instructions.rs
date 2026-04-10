@@ -196,3 +196,120 @@ pub fn decode_transfers(
 
     Ok(fields)
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use solana_sdk::hash::Hash;
+    use solana_sdk::message::{Message, MessageHeader};
+    use solana_sdk::pubkey::Pubkey;
+
+    /// Verifies that empty account keys returns a DecodeError (not a panic).
+    /// This error path was introduced in PR #245 replacing the previous unwrap.
+    #[test]
+    fn test_empty_account_keys_returns_parse_error() {
+        let message = Message {
+            header: MessageHeader {
+                num_required_signatures: 0,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys: vec![],
+            recent_blockhash: Hash::default(),
+            instructions: vec![],
+        };
+        let tx = SolanaTransaction {
+            signatures: vec![],
+            message,
+        };
+        let registry = IdlRegistry::new();
+        let result = decode_instructions(&tx, &registry);
+
+        assert!(
+            matches!(
+                &result,
+                Err(VisualSignError::ParseError(TransactionParseError::DecodeError(msg)))
+                    if msg.contains("no account keys")
+            ),
+            "expected DecodeError for empty account keys, got: {result:?}"
+        );
+    }
+
+    /// Verifies that OOB program_id_index silently skips the instruction
+    /// instead of panicking. Only the valid instruction produces a field.
+    #[test]
+    fn test_oob_program_id_index_skips_instruction() {
+        let key0 = Pubkey::new_unique();
+        let key1 = Pubkey::new_unique();
+        let message = Message {
+            header: MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys: vec![key0, key1],
+            recent_blockhash: Hash::default(),
+            instructions: vec![
+                solana_sdk::instruction::CompiledInstruction {
+                    program_id_index: 1,
+                    accounts: vec![0],
+                    data: vec![0xAA],
+                },
+                solana_sdk::instruction::CompiledInstruction {
+                    program_id_index: 99,
+                    accounts: vec![0],
+                    data: vec![0xBB],
+                },
+            ],
+        };
+        let tx = SolanaTransaction {
+            signatures: vec![],
+            message,
+        };
+        let registry = IdlRegistry::new();
+        let result = decode_instructions(&tx, &registry);
+
+        let fields = result.expect("should not error when OOB instructions are skipped");
+        assert_eq!(fields.len(), 1, "expected 1 field for 1 valid instruction");
+    }
+
+    /// Verifies that all-OOB instructions produce empty fields (not a panic).
+    #[test]
+    fn test_all_instructions_oob_returns_empty_fields() {
+        let key0 = Pubkey::new_unique();
+        let message = Message {
+            header: MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys: vec![key0],
+            recent_blockhash: Hash::default(),
+            instructions: vec![
+                solana_sdk::instruction::CompiledInstruction {
+                    program_id_index: 99,
+                    accounts: vec![],
+                    data: vec![],
+                },
+                solana_sdk::instruction::CompiledInstruction {
+                    program_id_index: 88,
+                    accounts: vec![],
+                    data: vec![],
+                },
+            ],
+        };
+        let tx = SolanaTransaction {
+            signatures: vec![],
+            message,
+        };
+        let registry = IdlRegistry::new();
+        let result = decode_instructions(&tx, &registry);
+
+        let fields = result.expect("should succeed with all OOB instructions");
+        assert!(
+            fields.is_empty(),
+            "expected no fields when all instructions are OOB"
+        );
+    }
+}
