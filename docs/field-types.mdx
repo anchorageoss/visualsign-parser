@@ -493,6 +493,7 @@ Reports data quality findings from the parser's lint framework. Diagnostics are 
 |------|--------|-------------|
 | `transaction::oob_program_id` | `transaction` | Instruction references a program ID index beyond account keys |
 | `transaction::oob_account_index` | `transaction` | Instruction references account indices beyond account keys |
+| `transaction::oob_account_index_in_skipped_instruction` | `transaction` | Out-of-bounds account indices in instruction already skipped due to OOB program ID |
 | `transaction::empty_account_keys` | `transaction` | Transaction has no account keys |
 
 ## Future field types

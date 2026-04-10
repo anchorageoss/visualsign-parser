@@ -60,7 +60,7 @@ pub fn create_diagnostic_field(
 ) -> AnnotatedPayloadField
 ```
 
-Sets `label` to the rule ID, `fallback_text` to `"{level}: {message}"`.
+Sets `label` to the rule ID, `fallback_text` to `"{level}: {message}"`. Automatically emits `tracing::warn!` for warn/error-level diagnostics, providing operator log visibility without per-chain boilerplate.
 
 ### `LintConfig`
 

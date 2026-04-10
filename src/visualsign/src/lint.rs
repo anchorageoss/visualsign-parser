@@ -55,7 +55,7 @@ impl LintConfig {
         if !self.report_all_rules {
             return false;
         }
-        // If the rule is explicitly set to Allow, don't emit pass either
+        // If the rule is explicitly set to Allow, don't emit ok either
         if let Some(Severity::Allow) = self.overrides.get(rule) {
             return false;
         }
@@ -68,7 +68,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default_config_emits_pass() {
+    fn test_default_config_emits_ok() {
         let config = LintConfig::default();
         assert!(config.report_all_rules);
         assert!(config.should_report_ok("transaction::oob_program_id"));
@@ -91,7 +91,7 @@ mod tests {
     }
 
     #[test]
-    fn test_allow_suppresses_pass() {
+    fn test_allow_suppresses_ok() {
         let mut config = LintConfig::default();
         config
             .overrides
@@ -101,7 +101,7 @@ mod tests {
     }
 
     #[test]
-    fn test_disable_pass_diagnostics() {
+    fn test_disable_ok_diagnostics() {
         let config = LintConfig {
             report_all_rules: false,
             ..LintConfig::default()

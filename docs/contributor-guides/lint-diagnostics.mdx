@@ -63,6 +63,8 @@ if !matches!(severity, visualsign::lint::Severity::Allow) {
 }
 ```
 
+`create_diagnostic_field` automatically emits `tracing::warn!` for warn and error-level diagnostics, giving operators production log visibility without any extra code in chain parsers.
+
 ### 4. Emit ok-level diagnostics for rules that pass
 
 When `report_all_rules` is enabled, rules that find no issues still report:
@@ -98,7 +100,8 @@ The caller (`visualsign.rs`) appends diagnostics after all display fields.
 Rules follow the `domain::rule_name` format:
 
 - **`transaction::oob_program_id`** -- instruction references out-of-bounds program ID
-- **`transaction::oob_account_index`** -- instruction references out-of-bounds account
+- **`transaction::oob_account_index`** -- instruction references out-of-bounds account (in processed instructions)
+- **`transaction::oob_account_index_in_skipped_instruction`** -- out-of-bounds account in instruction already skipped due to OOB program ID
 - **`transaction::empty_account_keys`** -- transaction has no account keys
 
 Domains reflect who owns the problem:
