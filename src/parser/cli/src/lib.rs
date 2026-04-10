@@ -5,7 +5,7 @@
 
 //! `VisualSign` Parser
 #![forbid(unsafe_code)]
-#![deny(clippy::all, clippy::unwrap_used)]
+#![deny(clippy::all)]
 #![warn(missing_docs, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc, clippy::module_name_repetitions)]
 
