@@ -1,3 +1,8 @@
+// TODO(#231): Remove these exemptions and fix violations in a follow-up PR.
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::panic)]
+
 //! Convert Sui transactions into `VisualSign` payloads and visualize protocol-specific commands.
 #![warn(clippy::all, clippy::pedantic)]
 

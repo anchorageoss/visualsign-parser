@@ -81,12 +81,12 @@ pub fn decode_instructions(
 
             // Try to visualize with available visualizers (including unknown_program fallback)
             visualize_with_any(&visualizers_refs, &context)
-                .unwrap_or_else(|| {
-                    panic!(
+                .ok_or_else(|| {
+                    VisualSignError::DecodeError(format!(
                         "No visualizer available for instruction {} at index {}",
                         instruction.program_id, instruction_index
-                    )
-                })
+                    ))
+                })?
                 .map(|viz_result| viz_result.field)
         })
         .collect();

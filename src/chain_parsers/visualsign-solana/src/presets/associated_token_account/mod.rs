@@ -51,8 +51,8 @@ impl InstructionVisualizer for AssociatedTokenAccountVisualizer {
 
         let expanded = SignablePayloadFieldListLayout {
             fields: vec![
-                create_text_field("Program ID", &instruction.program_id.to_string()).unwrap(),
-                create_text_field("Instruction", &instruction_text).unwrap(),
+                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Instruction", &instruction_text)?,
             ],
         };
 
@@ -123,6 +123,7 @@ fn format_ata_instruction(instruction: &AssociatedTokenAccountInstruction) -> St
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 

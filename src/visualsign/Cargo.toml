@@ -19,3 +19,6 @@ generated = { path = "../generated" }
 [dev-dependencies]
 base64 = "0.22.1"
 hex = "0.4.3"
+
+[lints]
+workspace = true

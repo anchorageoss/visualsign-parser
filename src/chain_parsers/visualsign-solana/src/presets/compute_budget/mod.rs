@@ -59,7 +59,7 @@ impl InstructionVisualizer for ComputeBudgetVisualizer {
                 &compute_budget_instruction,
                 &instruction.program_id.to_string(),
                 &instruction.data,
-            ),
+            )?,
         };
 
         let preview_layout = SignablePayloadFieldPreviewLayout {
@@ -123,33 +123,38 @@ fn create_compute_budget_expanded_fields(
     instruction: &ComputeBudgetInstruction,
     program_id: &str,
     data: &[u8],
-) -> Vec<AnnotatedPayloadField> {
-    let mut fields = vec![create_text_field("Program ID", program_id).unwrap()];
+) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    let mut fields = vec![create_text_field("Program ID", program_id)?];
 
     // Add specific fields based on instruction type
     match instruction {
         ComputeBudgetInstruction::RequestHeapFrame(bytes) => {
-            fields
-                .push(create_number_field("Heap Frame Size", &bytes.to_string(), "bytes").unwrap());
+            fields.push(create_number_field(
+                "Heap Frame Size",
+                &bytes.to_string(),
+                "bytes",
+            )?);
         }
         ComputeBudgetInstruction::SetComputeUnitLimit(units) => {
-            fields.push(
-                create_number_field("Compute Unit Limit", &units.to_string(), "units").unwrap(),
-            );
+            fields.push(create_number_field(
+                "Compute Unit Limit",
+                &units.to_string(),
+                "units",
+            )?);
         }
         ComputeBudgetInstruction::SetComputeUnitPrice(micro_lamports) => {
-            fields.push(
-                create_number_field(
-                    "Price per Compute Unit",
-                    &micro_lamports.to_string(),
-                    "micro-lamports",
-                )
-                .unwrap(),
-            );
+            fields.push(create_number_field(
+                "Price per Compute Unit",
+                &micro_lamports.to_string(),
+                "micro-lamports",
+            )?);
         }
         ComputeBudgetInstruction::SetLoadedAccountsDataSizeLimit(bytes) => {
-            fields
-                .push(create_number_field("Data Size Limit", &bytes.to_string(), "bytes").unwrap());
+            fields.push(create_number_field(
+                "Data Size Limit",
+                &bytes.to_string(),
+                "bytes",
+            )?);
         }
         ComputeBudgetInstruction::Unused => {
             // No additional fields for unused instruction
@@ -157,8 +162,8 @@ fn create_compute_budget_expanded_fields(
     }
 
     let hex_fallback_string = hex::encode(data).to_string();
-    let raw_data_field = create_raw_data_field(data, Some(hex_fallback_string)).unwrap();
+    let raw_data_field = create_raw_data_field(data, Some(hex_fallback_string))?;
 
     fields.push(raw_data_field);
-    fields
+    Ok(fields)
 }

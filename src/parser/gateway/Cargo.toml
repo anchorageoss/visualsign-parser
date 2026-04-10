@@ -12,3 +12,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "
 serde_json = { workspace = true }
 axum = { version = "0.6.20", features = ["http1", "tokio", "json"], default-features = false }
 serde = { workspace = true }
+
+[lints]
+workspace = true

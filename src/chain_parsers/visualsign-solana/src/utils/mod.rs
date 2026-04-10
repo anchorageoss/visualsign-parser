@@ -4,7 +4,9 @@ use base64::{self, Engine};
 
 // Constants
 const ADDRESS_TRUNCATION_LENGTH: usize = 8;
-/// Helper function to create a complete Solana transaction from a message with empty signatures
+/// Helper function to create a complete Solana transaction from a message with empty signatures.
+/// Only used in tests.
+#[allow(clippy::unwrap_used)]
 pub fn create_transaction_with_empty_signatures(message_base64: &str) -> String {
     // Decode the message
     let message_bytes = base64::engine::general_purpose::STANDARD
@@ -131,6 +133,7 @@ pub fn get_token_info(address: &str, amount: u64) -> SwapTokenInfo {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 pub mod test_utils {
     use crate::transaction_string_to_visual_sign;
     use visualsign::SignablePayload;

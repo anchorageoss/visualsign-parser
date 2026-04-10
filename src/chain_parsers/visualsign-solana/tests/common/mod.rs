@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Shared test helpers for IDL-based fuzz and integration tests.
 #![allow(dead_code)]
 

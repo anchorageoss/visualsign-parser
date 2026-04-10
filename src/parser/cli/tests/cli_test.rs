@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use similar::{ChangeTag, TextDiff};
 use std::fs;
 use std::path::PathBuf;

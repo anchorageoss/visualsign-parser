@@ -1,3 +1,6 @@
+// Build scripts run at compile time — panicking on failure is acceptable.
+#![allow(clippy::unwrap_used)]
+
 use std::{env, fs, path::PathBuf};
 
 fn main() {

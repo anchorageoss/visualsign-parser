@@ -2213,6 +2213,7 @@ fn format_web_authn_field_order(order: &[u8]) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use crate::core::{SolanaTransactionWrapper, SolanaVisualSignConverter};
     use solana_sdk::pubkey::Pubkey;

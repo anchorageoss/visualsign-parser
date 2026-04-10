@@ -392,6 +392,7 @@ fn convert_v0_to_visual_sign_payload(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use crate::test_utils::payload_from_b64;

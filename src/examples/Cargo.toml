@@ -12,3 +12,6 @@ path = "library_integration_test.rs"
 parser_app = { path = "../parser/app" }
 visualsign = { path = "../visualsign" }
 generated = { path = "../generated" }
+
+[lints]
+workspace = true

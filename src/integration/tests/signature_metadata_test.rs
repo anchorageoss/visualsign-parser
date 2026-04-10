@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 /// Test to validate SignatureMetadata concept with ABI and IDL
 ///
 /// This test demonstrates how SignatureMetadata works:

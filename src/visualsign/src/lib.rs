@@ -879,6 +879,7 @@ impl SignablePayload {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;

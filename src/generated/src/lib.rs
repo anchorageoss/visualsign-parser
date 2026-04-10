@@ -1,7 +1,8 @@
 //! Proto based Rust types.
 
-// We don't wan't to run clippy on generated code.
+// We don't want to run clippy on generated code.
 #![allow(clippy::all)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 // Allow unused imports as they may be used by generated code -- currently it is required for post::Message and google::rpc::Status to work
 #![allow(unused_imports)]
 
