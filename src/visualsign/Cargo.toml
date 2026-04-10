@@ -14,6 +14,7 @@ pretty_assertions = "1.4.1"
 thiserror = "2.0.12"
 # the most minimal regex import so that I can do number validation
 regex = { version = "1.11.1", default-features = false, features = ["std"] }
+tracing = { workspace = true }
 generated = { path = "../generated" }
 
 [dev-dependencies]

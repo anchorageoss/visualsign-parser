@@ -22,14 +22,14 @@ impl Severity {
 /// Configuration for lint rule behavior.
 ///
 /// Controls which rules run, their default severity, and whether
-/// pass-level diagnostics are emitted (boot metrics mode).
+/// ok-level diagnostics are emitted (boot metrics mode).
 #[derive(Debug, Clone)]
 pub struct LintConfig {
     /// Override severity for specific rules. Key is the rule ID
     /// (e.g., "transaction::oob_program_id").
     pub overrides: HashMap<String, Severity>,
 
-    /// When true, rules that find no issues emit an "ok" diagnostic.
+    /// When true, rules that find no issues emit an ok-level diagnostic.
     /// This provides boot-metric-style attestation where the verifier
     /// can confirm every expected rule ran.
     pub report_all_rules: bool,
@@ -50,7 +50,7 @@ impl LintConfig {
         self.overrides.get(rule).cloned().unwrap_or(default)
     }
 
-    /// Whether a pass diagnostic should be emitted for this rule.
+    /// Whether an ok-level diagnostic should be emitted for this rule.
     pub fn should_report_ok(&self, rule: &str) -> bool {
         if !self.report_all_rules {
             return false;

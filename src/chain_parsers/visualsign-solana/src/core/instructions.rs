@@ -168,7 +168,7 @@ pub fn decode_instructions(
         ));
     }
 
-    // Emit pass diagnostics when all checks passed (boot-metric-style attestation)
+    // Emit ok diagnostics when all checks passed (boot-metric-style attestation)
     if oob_program_id_count == 0 && lint_config.should_report_ok("transaction::oob_program_id") {
         diagnostics.push(create_diagnostic_field(
             "transaction::oob_program_id",
