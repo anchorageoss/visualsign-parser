@@ -164,21 +164,24 @@ mod tests {
     #[test]
     fn test_transaction_parsing() {
         let raw_tx = "your_test_transaction_data";
-        let tx = YourChainTransactionWrapper::from_string(raw_tx).unwrap();
+        let tx = YourChainTransactionWrapper::from_string(raw_tx)
+            .expect("failed to parse test transaction");
         assert_eq!(tx.transaction_type(), "YourChainName");
     }
 
     #[test]
     fn test_visual_sign_conversion() {
         let raw_tx = "your_test_transaction_data";
-        let tx = YourChainTransactionWrapper::from_string(raw_tx).unwrap();
+        let tx = YourChainTransactionWrapper::from_string(raw_tx)
+            .expect("failed to parse test transaction");
         let converter = YourChainVisualSignConverter;
         let options = VisualSignOptions {
             decode_transfers: true,
             ..Default::default()
         };
 
-        let result = converter.to_visual_sign_payload(tx, options).unwrap();
+        let result = converter.to_visual_sign_payload(tx, options)
+            .expect("failed to convert to visual sign");
         assert!(result.title.contains("YourChainName"));
     }
 }

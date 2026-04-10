@@ -99,25 +99,29 @@ The `IdlRegistry` in `visualsign-solana` manages both built-in and custom IDLs, 
 
 ```rust
 use solana_parser::{parse_instruction_with_idl, decode_idl_data, ProgramType};
+use visualsign::errors::VisualSignError;
 
-let program_id = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
-let idl = ProgramType::from_program_id(program_id)
-    .and_then(|pt| decode_idl_data(pt.idl_json()).ok())
-    .expect("IDL not found");
+fn parse_jupiter_instruction(data: &[u8]) -> Result<(), VisualSignError> {
+    let program_id = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+    let idl = ProgramType::from_program_id(program_id)
+        .and_then(|pt| decode_idl_data(pt.idl_json()).ok())
+        .ok_or_else(|| VisualSignError::DecodeError("IDL not found".into()))?;
 
-let parsed = parse_instruction_with_idl(data, program_id, &idl)
-    .expect("Failed to parse instruction");
+    let parsed = parse_instruction_with_idl(data, program_id, &idl)
+        .map_err(|e| VisualSignError::DecodeError(format!("Failed to parse instruction: {e}")))?;
 
-match parsed.instruction_name.as_str() {
-    "shared_accounts_route" => {
-        let slippage_bps = parsed.program_call_args
-            .get("slippage_bps")
-            .and_then(|v| v.as_u64());
-        // ... build visualization fields
+    match parsed.instruction_name.as_str() {
+        "shared_accounts_route" => {
+            let slippage_bps = parsed.program_call_args
+                .get("slippage_bps")
+                .and_then(|v| v.as_u64());
+            // ... build visualization fields
+        }
+        _ => {
+            // Unknown instruction — still has instruction_name from the IDL
+        }
     }
-    _ => {
-        // Unknown instruction — still has instruction_name from the IDL
-    }
+    Ok(())
 }
 ```
 
@@ -163,7 +167,10 @@ fn parse_transfer(data: &[u8]) -> Result<MyInstruction, MyError> {
         return Err(MyError::DataTooShort("transfer data"));
     }
 
-    let amount = u64::from_le_bytes(data[2..10].try_into().unwrap());
+    let amount = u64::from_le_bytes(
+        data[2..10].try_into()
+            .map_err(|_| MyError::DataTooShort("transfer amount"))?,
+    );
     let destination = &data[10..42]; // 32-byte pubkey
     // ...
 }
