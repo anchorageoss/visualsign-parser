@@ -21,7 +21,7 @@ on:
 
 jobs:
   parser:
-    name: Build parser images
+    name: Build ${{ matrix.target.label || matrix.target.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -38,6 +38,7 @@ jobs:
         target:
           - name: parser_app
           - name: parser_cli
+            label: "parser_cli (Solana)"
           - name: parser_gateway
     steps:
       - name: Checkout sources
