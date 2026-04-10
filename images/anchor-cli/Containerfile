@@ -1,0 +1,24 @@
+FROM rust:1.88-slim-bookworm AS build
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       pkg-config libssl-dev build-essential curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Solana CLI (required by anchor for RPC calls)
+RUN curl -sSfL https://release.anza.xyz/v2.2.4/install | sh
+ENV PATH="/root/.local/share/solana/install/active_release/bin:${PATH}"
+
+# Install Anchor CLI
+RUN cargo install --git https://github.com/coral-xyz/anchor --tag v0.31.1 anchor-cli
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /usr/local/cargo/bin/anchor /usr/local/bin/anchor
+COPY --from=build /root/.local/share/solana /root/.local/share/solana
+ENV PATH="/root/.local/share/solana/install/active_release/bin:${PATH}"
+
+ENTRYPOINT ["anchor"]
