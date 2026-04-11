@@ -21,3 +21,6 @@ sui-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.52.2"
 sui-json-rpc-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.52.2", package = "sui-json-rpc-types" }
 
 visualsign = { workspace = true }
+
+[lints]
+workspace = true

@@ -7,3 +7,6 @@ publish = false
 [dependencies]
 tonic-build = { version = "0.9", features = ["cleanup-markdown"] }
 protobuf-src = { version = "1" }
+
+[lints]
+workspace = true

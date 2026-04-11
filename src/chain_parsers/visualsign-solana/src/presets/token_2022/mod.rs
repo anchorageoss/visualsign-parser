@@ -535,6 +535,7 @@ fn create_token_2022_preview_layout(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     mod fixture_test;

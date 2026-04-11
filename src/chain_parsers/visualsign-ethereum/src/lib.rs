@@ -1,3 +1,8 @@
+// TODO(#231): Remove these exemptions once Ethereum violations are fixed in a follow-up PR.
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::panic)]
+
 use std::sync::Arc;
 
 use crate::fmt::{format_ether, format_gwei};

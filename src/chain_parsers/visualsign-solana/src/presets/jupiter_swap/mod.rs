@@ -416,6 +416,7 @@ fn create_jupiter_swap_expanded_fields(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     mod fixture_test;

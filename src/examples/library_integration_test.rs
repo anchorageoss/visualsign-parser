@@ -1,3 +1,8 @@
+// TODO(#231): Remove these exemptions and fix violations in a follow-up PR.
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::panic)]
+
 // Test file to verify library documentation examples compile
 // Run with: cargo run -p library_integration_test
 

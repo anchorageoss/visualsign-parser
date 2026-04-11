@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Full-pipeline integration tests for IDL-based instruction visualization.
 //!
 //! These tests drive the complete stack end-to-end:

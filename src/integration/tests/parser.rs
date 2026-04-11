@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use generated::health::{AppHealthRequest, AppHealthResponse};
 use generated::parser::{Chain, ParseRequest};
 use integration::TestArgs;

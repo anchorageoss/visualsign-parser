@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use alloy_consensus::TxEip1559;
 use alloy_primitives::U256;
 use alloy_rlp::Encodable;

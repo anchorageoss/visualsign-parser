@@ -16,3 +16,6 @@ tokio = { version = "1.0", features = [
   "signal",
 ], default-features = false }
 tokio-stream = "0.1"
+
+[lints]
+workspace = true

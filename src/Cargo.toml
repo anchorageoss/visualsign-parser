@@ -61,3 +61,11 @@ tracing = "0.1.41"
 # Pin visualsign dependencies
 visualsign = { path = "./visualsign" }
 
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+

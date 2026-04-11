@@ -35,3 +35,6 @@ tonic-reflection = { version = "0.9", optional = true, default-features = false 
 serde_derive = ["serde", "serde_json"]
 # Tonic server and clients
 tonic_types = ["tonic", "tonic-reflection"]
+
+[lints]
+workspace = true

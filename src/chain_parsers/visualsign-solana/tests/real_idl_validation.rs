@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Structural invariant tests for real production IDLs.
 //!
 //! These tests assert properties of the decoded IDL structure itself —

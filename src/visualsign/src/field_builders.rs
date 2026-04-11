@@ -20,6 +20,8 @@ use std::sync::LazyLock;
 // which are valid representations of zero.
 // The reason it's implemented this way is to avoid adding a large dependency like bignum on this library which could be used in a wide range of applications.
 // The regex is designed to be simple and efficient for the common use case of validating signed decimal. We don't yet use it as a numeric type yet, if that ever changes, this will be refactored.
+// Regex literal — infallible at runtime; panicking at init is acceptable.
+#[allow(clippy::expect_used)]
 static SIGNED_PROPER_NUMBER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^([-+]?[0-9]+(\.[0-9]+)?|[-+]?0)$")
         .expect("Failed to compile regex for signed proper number")
@@ -212,6 +214,7 @@ pub fn create_preview_layout(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use crate::errors::VisualSignError;

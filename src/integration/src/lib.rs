@@ -1,3 +1,8 @@
+// TODO(#231): Remove these exemptions and fix violations in a follow-up PR.
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::panic)]
+
 //! Utilities for integration tests
 #![forbid(unsafe_code)]
 #![deny(clippy::all)] // don't deny unwraps for integration testing

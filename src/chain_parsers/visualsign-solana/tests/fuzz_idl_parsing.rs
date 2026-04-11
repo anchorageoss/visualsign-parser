@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Property-based fuzz tests for IDL instruction parsing.
 //!
 //! These tests verify that `decode_idl_data` and `parse_instruction_with_idl`

@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use metrics::{
     Collector, Server, lazy_static,
     prometheus::{Counter, Registry},

@@ -1,6 +1,11 @@
+// TODO(#231): Remove these exemptions and fix violations in a follow-up PR.
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::panic)]
+
 //! `VisualSign` Parser
 #![forbid(unsafe_code)]
-#![deny(clippy::all, clippy::unwrap_used)]
+#![deny(clippy::all)]
 #![warn(missing_docs, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc, clippy::module_name_repetitions)]
 

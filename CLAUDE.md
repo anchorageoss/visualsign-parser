@@ -79,6 +79,16 @@ Raw tx bytes → ChainPlugin (CLI) or gRPC request
 
 A unified Docker container (see `images/parser_app/Containerfile`) bundles parser_app + simulator_enclave + parser_host + Go gateway into a single image for non-TEE local development. Same API as production TDX deployment, only difference is no attestation. REST at `:8080`, gRPC at `:44020`. Build with `make non-oci-docker-images` from repo root.
 
+### Workspace Lint Policy
+
+Workspace-level clippy lints are enforced in `src/Cargo.toml`:
+- **`unwrap_used = "deny"`** — Use `?` operator or explicit error handling instead of `.unwrap()`
+- **`expect_used = "deny"`** — Same; use `?` or `.ok_or_else(|| ...)?`
+- **`panic = "deny"`** — Return `Err(...)` instead of `panic!()`
+- **`unsafe_code = "forbid"`** — No `unsafe` blocks
+
+Exceptions: test modules use `#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`. Build scripts allow `unwrap_used`. Some crates have temporary crate-level exemptions with `TODO(#231)` pending cleanup.
+
 ### Design Decisions
 
 - **Deterministic serialization everywhere** — BTreeMap for proto maps, `DeterministicOrdering` trait, alphabetical field ordering for stable metadata hashing (borsh encoding)

@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Semantic pipeline tests: real embedded IDLs with realistic instruction data.
 //!
 //! Each test uses a real embedded IDL and constructs valid Borsh-serialized

@@ -319,6 +319,7 @@ pub fn create_accounts_advanced_preview_layout(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use solana_sdk::{hash::Hash, message::MessageHeader, pubkey::Pubkey};
