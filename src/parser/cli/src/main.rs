@@ -10,5 +10,8 @@ use parser_cli::cli::Cli;
 fn main() {
     logger::setup_logger();
 
-    Cli::execute()
+    if let Err(e) = Cli::execute() {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
+    }
 }

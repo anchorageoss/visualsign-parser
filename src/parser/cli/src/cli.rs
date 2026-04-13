@@ -229,46 +229,38 @@ fn parse_and_display(
     options: VisualSignOptions,
     output_format: OutputFormat,
     condensed_only: bool,
-) {
+) -> Result<(), String> {
     let registry_chain = parse_chain(chain);
-    let signable_payload_str = registry.convert_transaction(&registry_chain, raw_tx, options);
-    match signable_payload_str {
-        Ok(payload) => match output_format {
-            OutputFormat::Json => {
-                if let Ok(json_output) = serde_json::to_string_pretty(&payload) {
-                    println!("{json_output}");
-                } else {
-                    eprintln!("Error: Failed to serialize output as JSON");
-                }
+    let payload = registry
+        .convert_transaction(&registry_chain, raw_tx, options)
+        .map_err(|err| format!("{err:?}"))?;
+    match output_format {
+        OutputFormat::Json => {
+            let json_output = serde_json::to_string_pretty(&payload)
+                .map_err(|err| format!("Failed to serialize output as JSON: {err}"))?;
+            println!("{json_output}");
+        }
+        OutputFormat::Text => {
+            println!("{payload:#?}");
+        }
+        OutputFormat::Human => {
+            let formatter = HumanReadableFormatter::new(&payload, condensed_only);
+            println!("{formatter}");
+            if !condensed_only {
+                eprintln!(
+                    "\nRun with `--condensed-only` to see what users see on hardware wallets"
+                );
             }
-            OutputFormat::Text => {
-                println!("{payload:#?}");
-            }
-            OutputFormat::Human => {
-                let formatter = HumanReadableFormatter::new(&payload, condensed_only);
-                println!("{formatter}");
-                if !condensed_only {
-                    eprintln!(
-                        "\nRun with `--condensed-only` to see what users see on hardware wallets"
-                    );
-                }
-            }
-        },
-        Err(err) => {
-            eprintln!("Error: {err:?}");
         }
     }
+    Ok(())
 }
 
 /// app cli
 pub struct Cli;
 impl Cli {
     /// start the parser cli
-    ///
-    /// # Panics
-    ///
-    /// Executes the CLI application, parsing command line arguments and processing the transaction
-    pub fn execute() {
+    pub fn execute() -> Result<(), String> {
         let args = Args::parse();
         let chain = parse_chain(&args.chain);
         let plugins = crate::build_plugins(&args);
@@ -278,9 +270,7 @@ impl Cli {
             plugin.register(&mut registry);
         }
 
-        let plugin = plugins.iter().find(|p| p.chain() == chain);
-
-        if plugin.is_none() {
+        let plugin = plugins.iter().find(|p| p.chain() == chain).ok_or_else(|| {
             let supported: Vec<String> = plugins
                 .iter()
                 .map(|p| p.chain().as_str().to_lowercase())
@@ -291,31 +281,20 @@ impl Cli {
                 supported.join(", ")
             };
             if chain == Chain::Unspecified {
-                eprintln!(
-                    "Error: unrecognized chain '{}'.\nSupported chains: {supported_str}",
+                format!(
+                    "unrecognized chain '{}'.\nSupported chains: {supported_str}",
                     args.chain,
-                );
+                )
             } else {
-                eprintln!(
-                    "Error: chain '{}' is not supported by this CLI build.\n\
+                format!(
+                    "chain '{}' is not supported by this CLI build.\n\
                      Supported chains: {supported_str}",
                     args.chain,
-                );
+                )
             }
-            std::process::exit(1);
-        }
+        })?;
 
-        let Some(plugin) = plugin else {
-            unreachable!("exit guard above ensures plugin is Some");
-        };
-
-        let chain_metadata = match plugin.create_metadata(args.network.clone()) {
-            Ok(meta) => meta,
-            Err(e) => {
-                eprintln!("Error: {e}");
-                std::process::exit(1);
-            }
-        };
+        let chain_metadata = plugin.create_metadata(args.network.clone())?;
 
         let options = VisualSignOptions {
             decode_transfers: true,
@@ -333,6 +312,6 @@ impl Cli {
             options,
             args.output,
             args.condensed_only,
-        );
+        )
     }
 }
