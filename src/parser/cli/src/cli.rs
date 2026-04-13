@@ -233,7 +233,7 @@ fn parse_and_display(
     let registry_chain = parse_chain(chain);
     let payload = registry
         .convert_transaction(&registry_chain, raw_tx, options)
-        .map_err(|err| format!("{err:?}"))?;
+        .map_err(|err| err.to_string())?;
     match output_format {
         OutputFormat::Json => {
             let json_output = serde_json::to_string_pretty(&payload)
