@@ -23,7 +23,7 @@ use visualsign_solana::{SolanaTransactionWrapper, SolanaVisualSignConverter};
 
 /// Smoke-test: start surfpool, verify the RPC endpoint responds with a
 /// version string, then let `SurfpoolManager` tear it down on drop.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn surfpool_lifecycle() {
     let manager = SurfpoolManager::start(SurfpoolConfig::default())
@@ -45,7 +45,7 @@ async fn surfpool_lifecycle() {
 /// instruction's discriminator, build a transaction containing those bytes,
 /// and run it through the visual-sign converter. The converter must return
 /// `Ok` with at least one field (the instruction line).
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn surfpool_jupiter_swap_roundtrip() {
     // Skip gracefully when IDL_FILE is not set.

@@ -20,35 +20,36 @@ pub struct SurfpoolManager {
 
 impl SurfpoolManager {
     /// Start a new Surfpool instance with the given configuration.
+    ///
+    /// Runs `surfpool start` with `--no-tui` (headless) and the flags derived
+    /// from [`SurfpoolConfig`].
     pub async fn start(config: SurfpoolConfig) -> Result<Self> {
         info!("Starting Surfpool with config: {:?}", config);
 
-        let rpc_port = config.rpc_port.map_or_else(Self::find_free_port, Ok)?;
+        let rpc_port = config.port.map_or_else(Self::find_free_port, Ok)?;
         let ws_port = config.ws_port.map_or_else(Self::find_free_port, Ok)?;
 
         let rpc_url = format!("http://127.0.0.1:{rpc_port}");
         let ws_url = format!("ws://127.0.0.1:{ws_port}");
 
         let mut args = vec![
-            "--rpc-port".to_string(),
+            "start".to_string(),
+            "--no-tui".to_string(),
+            "--port".to_string(),
             rpc_port.to_string(),
             "--ws-port".to_string(),
             ws_port.to_string(),
-            "--log".to_string(),
+            "--log-level".to_string(),
+            config.log_level.clone(),
         ];
 
-        if let Some(fork_url) = &config.fork_url {
-            args.push("--url".to_string());
-            args.push(fork_url.clone());
+        if let Some(upstream) = &config.rpc_url {
+            args.push("--rpc-url".to_string());
+            args.push(upstream.clone());
         }
 
-        if let Some(ledger_path) = &config.ledger_path {
-            args.push("--ledger".to_string());
-            args.push(ledger_path.to_string_lossy().to_string());
-        }
-
-        if config.reset_ledger {
-            args.push("--reset".to_string());
+        if config.ci {
+            args.push("--ci".to_string());
         }
 
         debug!("Spawning surfpool with args: {:?}", args);
