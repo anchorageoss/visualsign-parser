@@ -1,0 +1,16 @@
+[package]
+name = "solana_test_utils"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+solana-sdk = "2.1.15"
+solana-client = "2.1.15"
+tokio = { workspace = true, features = ["full"] }
+anyhow = "1.0"
+tracing = { workspace = true }
+
+[lints]
+workspace = true
