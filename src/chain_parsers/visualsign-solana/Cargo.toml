@@ -26,12 +26,14 @@ spl-token-2022-interface = "2.1.0"
 
 [dev-dependencies]
 solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "a0c554d", features = ["proptest"] }
+solana_test_utils = { path = "../../solana_test_utils" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 jupiter-swap-api-client = "0.2.0"
 base64 = "0.22.1"
 bs58 = "0.5"
 proptest = "1"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

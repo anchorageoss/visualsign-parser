@@ -14088,11 +14088,13 @@ dependencies = [
  "solana-system-interface 1.0.0",
  "solana-transaction-status",
  "solana_parser",
+ "solana_test_utils",
  "spl-associated-token-account 6.0.0",
  "spl-stake-pool",
  "spl-token 7.0.0",
  "spl-token-2022 10.0.0",
  "spl-token-2022-interface",
+ "tokio",
  "tracing",
  "visualsign",
 ]
