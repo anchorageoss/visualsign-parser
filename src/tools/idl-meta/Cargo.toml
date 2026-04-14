@@ -1,0 +1,14 @@
+[package]
+name = "idl-meta"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+serde = { workspace = true }
+anyhow = "1.0"
+
+[lints]
+workspace = true
