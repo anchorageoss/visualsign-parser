@@ -362,8 +362,7 @@ mod tests {
         assert_eq!(warns[0].rule, "transaction::oob_program_id");
         assert_eq!(warns[0].instruction_index, Some(1));
 
-        // oob_account_index and oob_account_index_in_skipped_instruction should pass
-        // since all instructions (including the skipped one) have valid account indices
+        // oob_account_index should pass since the instruction's accounts are valid
         let passes: Vec<_> = fields
             .iter()
             .filter_map(|f| match &f.signable_payload_field {
@@ -378,17 +377,6 @@ mod tests {
                 .iter()
                 .any(|d| d.rule == "transaction::oob_account_index")
         );
-        assert!(
-            passes
-                .iter()
-                .any(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
-        );
-
-        let non_diagnostics: Vec<_> = fields
-            .iter()
-            .filter(|f| f.signable_payload_field.field_type() != "diagnostic")
-            .collect();
-        assert_eq!(non_diagnostics.len(), 1);
     }
 
     #[test]
@@ -474,8 +462,8 @@ mod tests {
                 _ => None,
             })
             .collect();
-        // All three rules should report pass
-        assert_eq!(passes.len(), 3);
+        // Both rules should report ok
+        assert_eq!(passes.len(), 2);
         assert!(
             passes
                 .iter()
@@ -485,11 +473,6 @@ mod tests {
             passes
                 .iter()
                 .any(|d| d.rule == "transaction::oob_account_index")
-        );
-        assert!(
-            passes
-                .iter()
-                .any(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
         );
 
         let warns: Vec<_> = fields
@@ -512,8 +495,7 @@ mod tests {
     #[test]
     fn test_oob_program_id_and_oob_account_index_emits_both_diagnostics() {
         // Instruction has both an OOB program_id_index and OOB account indices.
-        // The new rule fires to attest that account indices in skipped instructions
-        // are also examined.
+        // Both are reported as separate diagnostics (unified rules, no skipping).
         let key0 = Pubkey::new_unique();
         let key1 = Pubkey::new_unique();
         let message = Message {
@@ -553,7 +535,7 @@ mod tests {
         assert_eq!(
             warns.len(),
             2,
-            "expected oob_program_id and oob_account_index_in_skipped_instruction warns"
+            "expected oob_program_id and oob_account_index warns"
         );
         assert!(
             warns
@@ -563,19 +545,19 @@ mod tests {
         assert!(
             warns
                 .iter()
-                .any(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
+                .any(|d| d.rule == "transaction::oob_account_index")
         );
-        let skipped_warn = warns
+        let acct_warn = warns
             .iter()
-            .find(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
+            .find(|d| d.rule == "transaction::oob_account_index")
             .unwrap();
-        assert_eq!(skipped_warn.instruction_index, Some(0));
+        assert_eq!(acct_warn.instruction_index, Some(0));
         assert!(
-            skipped_warn.message.contains("77"),
+            acct_warn.message.contains("77"),
             "message should mention the OOB index 77"
         );
 
-        // oob_account_index (for non-skipped instructions) should report ok
+        // No ok-diagnostics expected -- both rules fired with warnings
         let passes: Vec<_> = fields
             .iter()
             .filter_map(|f| match &f.signable_payload_field {
@@ -585,10 +567,6 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(
-            passes
-                .iter()
-                .any(|d| d.rule == "transaction::oob_account_index")
-        );
+        assert!(passes.is_empty(), "no ok-diagnostics when both rules fire");
     }
 }

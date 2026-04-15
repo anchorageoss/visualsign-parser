@@ -447,11 +447,6 @@ mod tests {
                 .iter()
                 .any(|d| d.rule == "transaction::oob_account_index")
         );
-        assert!(
-            passes
-                .iter()
-                .any(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
-        );
     }
 
     #[test]
@@ -482,15 +477,16 @@ mod tests {
         assert!(
             warns
                 .iter()
-                .any(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
+                .any(|d| d.rule == "transaction::oob_account_index")
         );
-        let skipped_warn = warns
+        let acct_warn = warns
             .iter()
-            .find(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
+            .find(|d| d.rule == "transaction::oob_account_index")
             .unwrap();
-        assert_eq!(skipped_warn.instruction_index, Some(0));
-        assert!(skipped_warn.message.contains("88"));
+        assert_eq!(acct_warn.instruction_index, Some(0));
+        assert!(acct_warn.message.contains("88"));
 
+        // No ok-diagnostics when both rules fire
         let passes: Vec<_> = fields
             .iter()
             .filter_map(|f| match &f.signable_payload_field {
@@ -500,15 +496,11 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(
-            passes
-                .iter()
-                .any(|d| d.rule == "transaction::oob_account_index")
-        );
+        assert!(passes.is_empty(), "no ok-diagnostics when both rules fire");
     }
 
     #[test]
-    fn test_v0_valid_transaction_emits_three_pass_diagnostics() {
+    fn test_v0_valid_transaction_emits_two_ok_diagnostics() {
         let key0 = Pubkey::new_unique();
         let key1 = Pubkey::new_unique();
         let msg = solana_sdk::message::v0::Message {
@@ -540,7 +532,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(passes.len(), 3);
+        assert_eq!(passes.len(), 2);
         assert!(
             passes
                 .iter()
@@ -550,11 +542,6 @@ mod tests {
             passes
                 .iter()
                 .any(|d| d.rule == "transaction::oob_account_index")
-        );
-        assert!(
-            passes
-                .iter()
-                .any(|d| d.rule == "transaction::oob_account_index_in_skipped_instruction")
         );
     }
 }
