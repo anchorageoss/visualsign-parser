@@ -4,7 +4,8 @@
 
 mod config;
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::UnknownProgramConfig;
 use solana_parser::{SolanaParsedInstructionData, parse_instruction_with_idl};
@@ -21,25 +22,26 @@ static UNKNOWN_PROGRAM_CONFIG: UnknownProgramConfig = UnknownProgramConfig;
 pub struct UnknownProgramVisualizer;
 
 impl InstructionVisualizer for UnknownProgramVisualizer {
+    fn can_handle(&self, _context: &VisualizerContext) -> bool {
+        true // catch-all: handles everything including unresolved program_ids
+    }
+
     fn visualize_tx_commands(
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
-
         let idl_registry = context.idl_registry();
 
-        // Try IDL-based parsing if available for this program
-        if idl_registry.has_idl(&instruction.program_id) {
-            if let Ok(field) = try_idl_parsing(context, idl_registry) {
-                return Ok(field);
+        // Try IDL parsing only if program_id is resolvable
+        if let ProgramRef::Resolved(program_id) = context.program_id() {
+            if idl_registry.has_idl(program_id) {
+                if let Ok(field) = try_idl_parsing(context, idl_registry) {
+                    return Ok(field);
+                }
             }
-            // IDL parsing failed, fall through to default visualization
         }
 
-        create_unknown_program_preview_layout(instruction, context)
+        create_unknown_program_preview_layout(context)
     }
 
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
@@ -51,22 +53,41 @@ impl InstructionVisualizer for UnknownProgramVisualizer {
     }
 }
 
+fn resolve_program_id_str(context: &VisualizerContext) -> String {
+    match context.program_id() {
+        ProgramRef::Resolved(pk) => pk.to_string(),
+        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
+    }
+}
+
+fn resolve_account_str(context: &VisualizerContext, position: usize) -> String {
+    match context.account(position) {
+        Some(AccountRef::Resolved(pk)) => pk.to_string(),
+        Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
+        None => "unknown".to_string(),
+    }
+}
+
 /// Attempt to parse instruction using IDL from solana_parser
 fn try_idl_parsing(
     context: &VisualizerContext,
     idl_registry: &crate::idl::IdlRegistry,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
-    let instruction = context
-        .current_instruction()
-        .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
+    let program_id = match context.program_id() {
+        ProgramRef::Resolved(pk) => pk,
+        ProgramRef::Unresolved { .. } => {
+            return Err(VisualSignError::MissingData(
+                "No program_id resolved".into(),
+            ));
+        }
+    };
 
-    let program_id = &instruction.program_id;
     let program_name = idl_registry.get_program_name(program_id);
     let idl_name = idl_registry.get_idl_name(program_id);
 
     // Try to parse the instruction with IDL
-    let parsed_result = try_parse_with_idl(instruction, idl_registry);
-    let instruction_data_hex = hex::encode(&instruction.data);
+    let parsed_result = try_parse_with_idl(context, idl_registry);
+    let instruction_data_hex = hex::encode(context.data());
 
     // Format program display as "UserName (name: idl_name)" if IDL name exists
     let program_display = if let Some(idl_name) = &idl_name {
@@ -240,7 +261,7 @@ fn try_idl_parsing(
         dynamic_annotation: None,
         signable_payload_field: SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
-                label: format!("Instruction {}", context.instruction_index() + 1),
+                label: format!("{program_name} (IDL)"),
                 fallback_text: format!("Program ID: {program_id}\nData: {instruction_data_hex}"),
             },
             preview_layout,
@@ -249,20 +270,19 @@ fn try_idl_parsing(
 }
 
 fn create_unknown_program_preview_layout(
-    instruction: &solana_sdk::instruction::Instruction,
     context: &VisualizerContext,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     use visualsign::field_builders::*;
 
-    let program_id = instruction.program_id.to_string();
-    let instruction_data_hex = hex::encode(&instruction.data);
+    let program_id_str = resolve_program_id_str(context);
+    let instruction_data_hex = hex::encode(context.data());
 
     // Condensed view - just the essentials
-    let condensed_fields = vec![create_text_field("Program", &program_id)?];
+    let condensed_fields = vec![create_text_field("Program", &program_id_str)?];
 
     // Expanded view - adds instruction data
     let expanded_fields = vec![
-        create_text_field("Program ID", &program_id)?,
+        create_text_field("Program ID", &program_id_str)?,
         create_text_field("Instruction Data", &instruction_data_hex)?,
     ];
 
@@ -275,7 +295,7 @@ fn create_unknown_program_preview_layout(
 
     let preview_layout = SignablePayloadFieldPreviewLayout {
         title: Some(visualsign::SignablePayloadFieldTextV2 {
-            text: program_id.clone(),
+            text: program_id_str.clone(),
         }),
         subtitle: Some(visualsign::SignablePayloadFieldTextV2 {
             text: String::new(),
@@ -289,21 +309,27 @@ fn create_unknown_program_preview_layout(
         dynamic_annotation: None,
         signable_payload_field: SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
-                label: format!("Instruction {}", context.instruction_index() + 1),
-                fallback_text: format!("Program ID: {program_id}\nData: {instruction_data_hex}"),
+                label: program_id_str.clone(),
+                fallback_text: format!(
+                    "Program ID: {program_id_str}\nData: {instruction_data_hex}"
+                ),
             },
             preview_layout,
         },
     })
 }
 
-/// Try to parse instruction using the new parse_instruction_with_idl function
+/// Try to parse instruction using the parse_instruction_with_idl function
 fn try_parse_with_idl(
-    instruction: &solana_sdk::instruction::Instruction,
+    context: &VisualizerContext,
     idl_registry: &crate::idl::IdlRegistry,
 ) -> Result<solana_parser::SolanaParsedInstructionData, Box<dyn std::error::Error>> {
-    let program_id_str = instruction.program_id.to_string();
-    let instruction_data = &instruction.data;
+    let program_id = match context.program_id() {
+        ProgramRef::Resolved(pk) => pk,
+        ProgramRef::Unresolved { .. } => return Err("No program_id resolved".into()),
+    };
+    let program_id_str = program_id.to_string();
+    let instruction_data = context.data();
 
     // Try to get the IDL for this program
     let idl = idl_registry
@@ -326,9 +352,10 @@ fn try_parse_with_idl(
         }
     }) {
         // Match each account in the instruction with its name from the IDL
-        for (index, account_meta) in instruction.accounts.iter().enumerate() {
+        for index in 0..context.num_accounts() {
             if let Some(idl_account) = idl_instruction.accounts.get(index) {
-                named_accounts.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
+                named_accounts
+                    .insert(idl_account.name.clone(), resolve_account_str(context, index));
             }
         }
     }

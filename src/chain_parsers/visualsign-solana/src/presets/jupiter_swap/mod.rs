@@ -3,7 +3,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use crate::utils::{SwapTokenInfo, get_token_info};
 use config::JupiterSwapConfig;
@@ -56,65 +57,21 @@ impl InstructionVisualizer for JupiterSwapVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
-
-        let instruction_accounts: Vec<String> = instruction
-            .accounts
-            .iter()
-            .map(|account| account.pubkey.to_string())
+        let instruction_accounts: Vec<String> = (0..context.num_accounts())
+            .map(|i| match context.account(i) {
+                Some(AccountRef::Resolved(pk)) => pk.to_string(),
+                Some(AccountRef::Unresolved { raw_index }) => {
+                    format!("unresolved({raw_index})")
+                }
+                None => "unknown".to_string(),
+            })
             .collect();
 
         let jupiter_instruction =
-            parse_jupiter_swap_instruction(&instruction.data, &instruction_accounts)
+            parse_jupiter_swap_instruction(context.data(), &instruction_accounts)
                 .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
-        let instruction_text = format_jupiter_swap_instruction(&jupiter_instruction);
-
-        let condensed = SignablePayloadFieldListLayout {
-            fields: vec![
-                create_text_field("Instruction", &instruction_text)
-                    .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
-            ],
-        };
-
-        let expanded = SignablePayloadFieldListLayout {
-            fields: create_jupiter_swap_expanded_fields(
-                &jupiter_instruction,
-                &instruction.program_id.to_string(),
-                &instruction.data,
-            )?,
-        };
-
-        let preview_layout = SignablePayloadFieldPreviewLayout {
-            title: Some(SignablePayloadFieldTextV2 {
-                text: instruction_text.clone(),
-            }),
-            subtitle: Some(SignablePayloadFieldTextV2 {
-                text: String::new(),
-            }),
-            condensed: Some(condensed),
-            expanded: Some(expanded),
-        };
-
-        let fallback_text = format!(
-            "Program ID: {}\nData: {}",
-            instruction.program_id,
-            hex::encode(&instruction.data)
-        );
-
-        Ok(AnnotatedPayloadField {
-            static_annotation: None,
-            dynamic_annotation: None,
-            signable_payload_field: SignablePayloadField::PreviewLayout {
-                common: SignablePayloadFieldCommon {
-                    label: format!("Instruction {}", context.instruction_index() + 1),
-                    fallback_text,
-                },
-                preview_layout,
-            },
-        })
+        create_jupiter_preview_layout(&jupiter_instruction, context)
     }
 
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
@@ -319,13 +276,65 @@ fn format_token_symbol(token: &Option<SwapTokenInfo>) -> String {
         .unwrap_or_else(|| "Unknown".to_string())
 }
 
+fn create_jupiter_preview_layout(
+    instruction: &JupiterSwapInstruction,
+    context: &VisualizerContext,
+) -> Result<AnnotatedPayloadField, VisualSignError> {
+    let program_id_str = match context.program_id() {
+        ProgramRef::Resolved(pk) => pk.to_string(),
+        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
+    };
+    let instruction_text = format_jupiter_swap_instruction(instruction);
+
+    let condensed = SignablePayloadFieldListLayout {
+        fields: vec![
+            create_text_field("Instruction", &instruction_text)
+                .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
+        ],
+    };
+
+    let expanded = SignablePayloadFieldListLayout {
+        fields: create_jupiter_swap_expanded_fields(instruction, context)?,
+    };
+
+    let preview_layout = SignablePayloadFieldPreviewLayout {
+        title: Some(SignablePayloadFieldTextV2 {
+            text: instruction_text.clone(),
+        }),
+        subtitle: Some(SignablePayloadFieldTextV2 {
+            text: String::new(),
+        }),
+        condensed: Some(condensed),
+        expanded: Some(expanded),
+    };
+
+    Ok(AnnotatedPayloadField {
+        static_annotation: None,
+        dynamic_annotation: None,
+        signable_payload_field: SignablePayloadField::PreviewLayout {
+            common: SignablePayloadFieldCommon {
+                label: instruction_text,
+                fallback_text: format!(
+                    "Program ID: {}\nData: {}",
+                    program_id_str,
+                    hex::encode(context.data())
+                ),
+            },
+            preview_layout,
+        },
+    })
+}
+
 fn create_jupiter_swap_expanded_fields(
     instruction: &JupiterSwapInstruction,
-    program_id: &str,
-    data: &[u8],
+    context: &VisualizerContext,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    let program_id_str = match context.program_id() {
+        ProgramRef::Resolved(pk) => pk.to_string(),
+        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
+    };
     let mut fields = vec![
-        create_text_field("Program ID", program_id)
+        create_text_field("Program ID", &program_id_str)
             .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
     ];
 
@@ -408,7 +417,7 @@ fn create_jupiter_swap_expanded_fields(
 
     // Add raw data field
     fields.push(
-        create_raw_data_field(data, Some(hex::encode(data)))
+        create_raw_data_field(context.data(), Some(hex::encode(context.data())))
             .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
     );
 
@@ -419,7 +428,43 @@ fn create_jupiter_swap_expanded_fields(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use solana_parser::solana::structs::SolanaAccount;
+    use solana_sdk::instruction::CompiledInstruction;
+    use solana_sdk::pubkey::Pubkey;
     mod fixture_test;
+
+    /// Test helper: bundles the owned data needed to create a VisualizerContext.
+    /// Holds ownership so the context can borrow from it.
+    struct TestContextData {
+        sender: SolanaAccount,
+        ci: CompiledInstruction,
+        account_keys: Vec<Pubkey>,
+        registry: crate::idl::IdlRegistry,
+    }
+
+    impl TestContextData {
+        fn new(data: &[u8]) -> Self {
+            let jup_pk: Pubkey = JUPITER_PROGRAM_ID.parse().unwrap();
+            Self {
+                sender: SolanaAccount {
+                    account_key: Pubkey::new_unique().to_string(),
+                    signer: false,
+                    writable: false,
+                },
+                ci: CompiledInstruction {
+                    program_id_index: 0,
+                    accounts: vec![],
+                    data: data.to_vec(),
+                },
+                account_keys: vec![jup_pk],
+                registry: crate::idl::IdlRegistry::new(),
+            }
+        }
+
+        fn context(&self) -> VisualizerContext<'_> {
+            VisualizerContext::new(&self.sender, &self.ci, &self.account_keys, &self.registry)
+        }
+    }
 
     /// Real instruction data from sample_route.json fixture (WSOL -> USELESS swap)
     fn fixture_instruction_data() -> Vec<u8> {
@@ -463,12 +508,8 @@ mod tests {
         assert!(formatted.contains("Jupiter"), "Should contain 'Jupiter'");
         assert!(formatted.contains("50bps"), "Should contain slippage");
 
-        let fields = create_jupiter_swap_expanded_fields(
-            &parsed,
-            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
-            &data,
-        )
-        .unwrap();
+        let tcd = TestContextData::new(&data);
+        let fields = create_jupiter_swap_expanded_fields(&parsed, &tcd.context()).unwrap();
 
         let has_program_id = fields.iter().any(|f| {
             if let SignablePayloadField::TextV2 { common, .. } = &f.signable_payload_field {
@@ -502,12 +543,9 @@ mod tests {
             JupiterSwapInstruction::Route { slippage_bps, .. } => {
                 assert_eq!(slippage_bps, 50);
 
-                let fields = create_jupiter_swap_expanded_fields(
-                    &result,
-                    "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
-                    &data,
-                )
-                .unwrap();
+                let tcd = TestContextData::new(&data);
+                let fields =
+                    create_jupiter_swap_expanded_fields(&result, &tcd.context()).unwrap();
 
                 let fields_json = serde_json::to_value(&fields).unwrap();
                 assert!(
@@ -573,12 +611,8 @@ mod tests {
             "Should contain platform fee when non-zero"
         );
 
-        let fields = create_jupiter_swap_expanded_fields(
-            &instruction,
-            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
-            &[0x01, 0x02, 0x03],
-        )
-        .unwrap();
+        let tcd = TestContextData::new(&[0x01, 0x02, 0x03]);
+        let fields = create_jupiter_swap_expanded_fields(&instruction, &tcd.context()).unwrap();
 
         let has_platform_fee = fields.iter().any(|f| {
             if let SignablePayloadField::Number { common, .. } = &f.signable_payload_field {
@@ -622,12 +656,8 @@ mod tests {
         let formatted = format_jupiter_swap_instruction(&instruction);
         assert_eq!(formatted, "Jupiter: Unknown Instruction");
 
-        let fields = create_jupiter_swap_expanded_fields(
-            &instruction,
-            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
-            &garbage_data,
-        )
-        .unwrap();
+        let tcd = TestContextData::new(&garbage_data);
+        let fields = create_jupiter_swap_expanded_fields(&instruction, &tcd.context()).unwrap();
 
         assert!(fields.len() >= 3, "Should have at least 3 fields");
 
@@ -752,12 +782,8 @@ mod tests {
         );
         assert!(formatted.contains("50bps"), "Should contain slippage");
 
-        let fields = create_jupiter_swap_expanded_fields(
-            &parsed,
-            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
-            &data,
-        )
-        .unwrap();
+        let tcd = TestContextData::new(&data);
+        let fields = create_jupiter_swap_expanded_fields(&parsed, &tcd.context()).unwrap();
 
         let has_program_id = fields.iter().any(|f| {
             if let SignablePayloadField::TextV2 { common, .. } = &f.signable_payload_field {
@@ -820,12 +846,8 @@ mod tests {
         );
         assert!(formatted.contains("50bps"), "Should contain slippage");
 
-        let fields = create_jupiter_swap_expanded_fields(
-            &parsed,
-            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
-            &data,
-        )
-        .unwrap();
+        let tcd = TestContextData::new(&data);
+        let fields = create_jupiter_swap_expanded_fields(&parsed, &tcd.context()).unwrap();
 
         let has_program_id = fields.iter().any(|f| {
             if let SignablePayloadField::TextV2 { common, .. } = &f.signable_payload_field {
