@@ -11,8 +11,8 @@
     {
       "AddressV2": {
         "Address": "0x1111111111111111111111111111111111111111",
-        "AssetLabel": "ETH",
-        "Name": "To"
+        "Name": "To",
+        "AssetLabel": "ETH"
       },
       "FallbackText": "0x1111111111111111111111111111111111111111",
       "Label": "To",
