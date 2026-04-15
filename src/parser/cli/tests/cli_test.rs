@@ -74,6 +74,10 @@ fn test_cli_with_fixtures() {
         "solana",
     ];
 
+    let fixtures_dir_str = fixtures_dir
+        .to_str()
+        .unwrap_or_else(|| panic!("fixtures_dir is not valid UTF-8: {fixtures_dir:?}"));
+
     for input_file in test_cases {
         let input_path = input_file.path();
         let test_name = input_path.file_stem().unwrap().to_str().unwrap();
@@ -90,7 +94,6 @@ fn test_cli_with_fixtures() {
         let input_contents = fs::read_to_string(&input_path)
             .unwrap_or_else(|_| panic!("Failed to read input file: {input_path:?}"));
 
-        let fixtures_dir_str = fixtures_dir.to_str().unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_parser_cli"));
         for line in input_contents.lines() {
             if !line.trim().is_empty() {
