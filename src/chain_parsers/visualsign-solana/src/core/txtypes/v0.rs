@@ -2,7 +2,6 @@ use crate::core::{
     InstructionVisualizer, SolanaAccount, VisualizerContext, available_visualizers,
     visualize_with_any,
 };
-use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::transaction::VersionedTransaction;
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
@@ -113,32 +112,27 @@ pub fn decode_v0_transfers(
     Ok(fields)
 }
 
-/// Decode V0 transaction instructions using the visualizer framework
-/// This works for all V0 transactions, including those with lookup tables
 /// Result of decoding v0 instructions: display fields, per-instruction errors,
-/// and lint diagnostics separately. The function always succeeds — individual
-/// instruction failures are captured in `errors` rather than aborting the parse.
+/// and lint diagnostics separately.
 pub struct DecodeV0InstructionsResult {
     pub fields: Vec<AnnotatedPayloadField>,
     pub errors: Vec<(usize, VisualSignError)>,
     pub diagnostics: Vec<AnnotatedPayloadField>,
 }
 
-/// Always succeeds — data quality issues become diagnostics, per-instruction
+/// Decode V0 transaction instructions using the visualizer framework.
+/// This works for all V0 transactions, including those with lookup tables.
+/// Always succeeds -- data quality issues become diagnostics, per-instruction
 /// failures are collected in errors.
 pub fn decode_v0_instructions(
     v0_message: &solana_sdk::message::v0::Message,
     idl_registry: &crate::idl::IdlRegistry,
     lint_config: &visualsign::lint::LintConfig,
 ) -> DecodeV0InstructionsResult {
-    // Get visualizers
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
     let visualizers_refs: Vec<&dyn InstructionVisualizer> =
         visualizers.iter().map(|v| v.as_ref()).collect::<Vec<_>>();
 
-    // For V0 transactions, we need to resolve account keys from both static keys and lookup tables
-    // For now, we'll work with just the static account keys for instruction processing
-    // since lookup table accounts would require on-chain resolution
     let account_keys = &v0_message.account_keys;
 
     if account_keys.is_empty() {
@@ -155,184 +149,34 @@ pub fn decode_v0_instructions(
         };
     }
 
-    // Convert compiled instructions to full instructions, emitting diagnostics
-    // for indices that reference lookup table accounts (unresolvable without on-chain data).
-    // Every rule always reports (pass or warn), providing boot-metric-style attestation.
-    let mut diagnostics: Vec<AnnotatedPayloadField> = Vec::new();
-    let mut oob_program_id_count: usize = 0;
-    let mut oob_account_index_count: usize = 0;
-    let mut oob_account_index_in_skipped_count: usize = 0;
-
-    let oob_pid_severity = lint_config.severity_for(
-        "transaction::oob_program_id",
-        visualsign::lint::Severity::Warn,
-    );
-    let oob_acct_severity = lint_config.severity_for(
-        "transaction::oob_account_index",
-        visualsign::lint::Severity::Warn,
-    );
-    let oob_acct_skipped_severity = lint_config.severity_for(
-        "transaction::oob_account_index_in_skipped_instruction",
-        visualsign::lint::Severity::Warn,
+    // Diagnostic scan: check all indices, emit diagnostics for inaccessible ones.
+    // Uses the shared scan function from instructions.rs.
+    let diagnostics = super::super::instructions::scan_instruction_diagnostics(
+        &v0_message.instructions,
+        account_keys,
+        lint_config,
     );
 
-    // Each entry preserves the original instruction index for consistent labeling.
-    let mut indexed_instructions: Vec<(usize, Instruction)> = Vec::new();
-
-    for (ci_index, ci) in v0_message.instructions.iter().enumerate() {
-        if (ci.program_id_index as usize) >= account_keys.len() {
-            oob_program_id_count += 1;
-            if !matches!(oob_pid_severity, visualsign::lint::Severity::Allow) {
-                diagnostics.push(create_diagnostic_field(
-                    "transaction::oob_program_id",
-                    "transaction",
-                    oob_pid_severity.as_str(),
-                    &format!(
-                        "instruction {} skipped: program_id_index {} references a lookup table account ({} static keys)",
-                        ci_index,
-                        ci.program_id_index,
-                        account_keys.len()
-                    ),
-                    Some(ci_index as u32),
-                ));
-            }
-            // Even though this instruction is skipped, check its account indices
-            // under a separate rule so the oob_account_index_in_skipped_instruction
-            // rule can attest they were examined.
-            let mut skipped_oob: Vec<u8> = Vec::new();
-            for &i in ci.accounts.iter() {
-                if (i as usize) >= account_keys.len() {
-                    skipped_oob.push(i);
-                }
-            }
-            if !skipped_oob.is_empty() {
-                oob_account_index_in_skipped_count += 1;
-                if !matches!(oob_acct_skipped_severity, visualsign::lint::Severity::Allow) {
-                    diagnostics.push(create_diagnostic_field(
-                        "transaction::oob_account_index_in_skipped_instruction",
-                        "transaction",
-                        oob_acct_skipped_severity.as_str(),
-                        &format!(
-                            "instruction {} (skipped): account indices {:?} reference lookup table accounts ({} static keys)",
-                            ci_index,
-                            skipped_oob,
-                            account_keys.len()
-                        ),
-                        Some(ci_index as u32),
-                    ));
-                }
-            }
-            continue;
-        }
-
-        let mut oob_account_indices: Vec<u8> = Vec::new();
-        let accounts: Vec<AccountMeta> = ci
-            .accounts
-            .iter()
-            .filter_map(|&i| {
-                if (i as usize) < account_keys.len() {
-                    Some(AccountMeta::new_readonly(account_keys[i as usize], false))
-                } else {
-                    oob_account_indices.push(i);
-                    None
-                }
-            })
-            .collect();
-
-        if !oob_account_indices.is_empty() {
-            oob_account_index_count += 1;
-            if !matches!(oob_acct_severity, visualsign::lint::Severity::Allow) {
-                diagnostics.push(create_diagnostic_field(
-                    "transaction::oob_account_index",
-                    "transaction",
-                    oob_acct_severity.as_str(),
-                    &format!(
-                        "instruction {}: account indices {:?} reference lookup table accounts ({} static keys)",
-                        ci_index,
-                        oob_account_indices,
-                        account_keys.len()
-                    ),
-                    Some(ci_index as u32),
-                ));
-            }
-        }
-
-        indexed_instructions.push((
-            ci_index,
-            Instruction {
-                program_id: account_keys[ci.program_id_index as usize],
-                accounts,
-                data: ci.data.clone(),
-            },
-        ));
-    }
-
-    // Emit ok diagnostics when all checks passed (boot-metric-style attestation)
-    if oob_program_id_count == 0 && lint_config.should_report_ok("transaction::oob_program_id") {
-        diagnostics.push(create_diagnostic_field(
-            "transaction::oob_program_id",
-            "transaction",
-            "ok",
-            &format!(
-                "all {} instructions have valid program_id_index",
-                v0_message.instructions.len()
-            ),
-            None,
-        ));
-    }
-    if oob_account_index_count == 0
-        && lint_config.should_report_ok("transaction::oob_account_index")
-    {
-        diagnostics.push(create_diagnostic_field(
-            "transaction::oob_account_index",
-            "transaction",
-            "ok",
-            &format!(
-                "all {} instructions have valid account indices",
-                v0_message.instructions.len()
-            ),
-            None,
-        ));
-    }
-    if oob_account_index_in_skipped_count == 0
-        && lint_config.should_report_ok("transaction::oob_account_index_in_skipped_instruction")
-    {
-        diagnostics.push(create_diagnostic_field(
-            "transaction::oob_account_index_in_skipped_instruction",
-            "transaction",
-            "ok",
-            &format!("all {oob_program_id_count} skipped instructions have valid account indices"),
-            None,
-        ));
-    }
-
-    // Process each instruction with the visualizer framework
+    // Visualization: process every instruction (no skipping)
     let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
     let mut errors: Vec<(usize, VisualSignError)> = Vec::new();
 
-    let instructions: Vec<Instruction> = indexed_instructions
-        .iter()
-        .map(|(_, ix)| ix.clone())
-        .collect();
-
-    for (original_index, instruction) in &indexed_instructions {
+    for (i, ci) in v0_message.instructions.iter().enumerate() {
         let sender = SolanaAccount {
             account_key: account_keys[0].to_string(),
             signer: false,
             writable: false,
         };
 
-        match visualize_with_any(
-            &visualizers_refs,
-            &VisualizerContext::new(&sender, *original_index, &instructions, idl_registry),
-        ) {
+        let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry);
+
+        match visualize_with_any(&visualizers_refs, &context) {
             Some(Ok(viz_result)) => fields.push(viz_result.field),
-            Some(Err(e)) => errors.push((*original_index, e)),
+            Some(Err(e)) => errors.push((i, e)),
             None => errors.push((
-                *original_index,
+                i,
                 VisualSignError::DecodeError(format!(
-                    "No visualizer available for instruction {} at index {}",
-                    instruction.program_id, original_index
+                    "No visualizer available for instruction at index {i}"
                 )),
             )),
         }

@@ -2,7 +2,6 @@ use crate::core::{InstructionVisualizer, VisualizerContext, visualize_with_any};
 use crate::idl::IdlRegistry;
 use solana_parser::solana::parser::parse_transaction;
 use solana_parser::solana::structs::SolanaAccount;
-use solana_sdk::instruction::Instruction;
 use solana_sdk::transaction::Transaction as SolanaTransaction;
 use visualsign::AnnotatedPayloadField;
 use visualsign::errors::{TransactionParseError, VisualSignError};
@@ -53,13 +52,56 @@ pub fn decode_instructions(
         };
     }
 
-    // Convert compiled instructions to full instructions, emitting diagnostics
-    // for out-of-bounds indices instead of silently dropping them.
-    // Every rule always reports (pass or warn), providing boot-metric-style attestation.
+    // Diagnostic scan: check all indices, emit diagnostics for inaccessible ones.
+    // This is purely informational — no instructions are skipped.
+    let diagnostics = scan_instruction_diagnostics(
+        &message.instructions,
+        account_keys,
+        lint_config,
+    );
+
+    // Visualization: process every instruction (no skipping)
+    let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
+    let mut errors: Vec<(usize, VisualSignError)> = Vec::new();
+
+    for (i, ci) in message.instructions.iter().enumerate() {
+        let sender = SolanaAccount {
+            account_key: account_keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
+
+        let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry);
+
+        match visualize_with_any(&visualizers_refs, &context) {
+            Some(Ok(viz_result)) => fields.push(viz_result.field),
+            Some(Err(e)) => errors.push((i, e)),
+            None => errors.push((
+                i,
+                VisualSignError::DecodeError(format!(
+                    "No visualizer available for instruction at index {i}"
+                )),
+            )),
+        }
+    }
+
+    DecodeInstructionsResult {
+        fields,
+        errors,
+        diagnostics,
+    }
+}
+
+/// Scan compiled instructions for inaccessible indices and emit diagnostics.
+/// Does not modify or filter instructions — purely informational.
+pub fn scan_instruction_diagnostics(
+    instructions: &[solana_sdk::instruction::CompiledInstruction],
+    account_keys: &[solana_sdk::pubkey::Pubkey],
+    lint_config: &LintConfig,
+) -> Vec<AnnotatedPayloadField> {
     let mut diagnostics: Vec<AnnotatedPayloadField> = Vec::new();
     let mut oob_program_id_count: usize = 0;
     let mut oob_account_index_count: usize = 0;
-    let mut oob_account_index_in_skipped_count: usize = 0;
 
     let oob_pid_severity = lint_config.severity_for(
         "transaction::oob_program_id",
@@ -69,15 +111,8 @@ pub fn decode_instructions(
         "transaction::oob_account_index",
         visualsign::lint::Severity::Warn,
     );
-    let oob_acct_skipped_severity = lint_config.severity_for(
-        "transaction::oob_account_index_in_skipped_instruction",
-        visualsign::lint::Severity::Warn,
-    );
 
-    // Each entry preserves the original instruction index for consistent labeling.
-    let mut indexed_instructions: Vec<(usize, Instruction)> = Vec::new();
-
-    for (ci_index, ci) in message.instructions.iter().enumerate() {
+    for (ci_index, ci) in instructions.iter().enumerate() {
         if (ci.program_id_index as usize) >= account_keys.len() {
             oob_program_id_count += 1;
             if !matches!(oob_pid_severity, visualsign::lint::Severity::Allow) {
@@ -86,61 +121,22 @@ pub fn decode_instructions(
                     "transaction",
                     oob_pid_severity.as_str(),
                     &format!(
-                        "instruction {} skipped: program_id_index {} out of bounds ({} accounts)",
-                        ci_index,
-                        ci.program_id_index,
-                        account_keys.len()
+                        "instruction {}: program_id_index {} out of bounds ({} account keys)",
+                        ci_index, ci.program_id_index, account_keys.len()
                     ),
                     Some(ci_index as u32),
                 ));
             }
-            // Even though this instruction is skipped, check its account indices
-            // under a separate rule so the oob_account_index_in_skipped_instruction
-            // rule can attest they were examined.
-            let mut skipped_oob: Vec<u8> = Vec::new();
-            for &i in ci.accounts.iter() {
-                if (i as usize) >= account_keys.len() {
-                    skipped_oob.push(i);
-                }
-            }
-            if !skipped_oob.is_empty() {
-                oob_account_index_in_skipped_count += 1;
-                if !matches!(oob_acct_skipped_severity, visualsign::lint::Severity::Allow) {
-                    diagnostics.push(create_diagnostic_field(
-                        "transaction::oob_account_index_in_skipped_instruction",
-                        "transaction",
-                        oob_acct_skipped_severity.as_str(),
-                        &format!(
-                            "instruction {} (skipped): account indices {:?} out of bounds ({} accounts)",
-                            ci_index,
-                            skipped_oob,
-                            account_keys.len()
-                        ),
-                        Some(ci_index as u32),
-                    ));
-                }
-            }
-            continue;
         }
 
-        let mut oob_account_indices: Vec<u8> = Vec::new();
-        let accounts: Vec<solana_sdk::instruction::AccountMeta> = ci
+        // Check all account indices (unified — no separate "skipped" rule)
+        let oob_accounts: Vec<u8> = ci
             .accounts
             .iter()
-            .filter_map(|&i| {
-                if (i as usize) < account_keys.len() {
-                    Some(solana_sdk::instruction::AccountMeta::new_readonly(
-                        account_keys[i as usize],
-                        false,
-                    ))
-                } else {
-                    oob_account_indices.push(i);
-                    None
-                }
-            })
+            .filter(|&&idx| (idx as usize) >= account_keys.len())
+            .copied()
             .collect();
-
-        if !oob_account_indices.is_empty() {
+        if !oob_accounts.is_empty() {
             oob_account_index_count += 1;
             if !matches!(oob_acct_severity, visualsign::lint::Severity::Allow) {
                 diagnostics.push(create_diagnostic_field(
@@ -148,35 +144,26 @@ pub fn decode_instructions(
                     "transaction",
                     oob_acct_severity.as_str(),
                     &format!(
-                        "instruction {}: account indices {:?} out of bounds ({} accounts)",
-                        ci_index,
-                        oob_account_indices,
-                        account_keys.len()
+                        "instruction {}: account indices {:?} out of bounds ({} account keys)",
+                        ci_index, oob_accounts, account_keys.len()
                     ),
                     Some(ci_index as u32),
                 ));
             }
         }
-
-        indexed_instructions.push((
-            ci_index,
-            Instruction {
-                program_id: account_keys[ci.program_id_index as usize],
-                accounts,
-                data: ci.data.clone(),
-            },
-        ));
     }
 
-    // Emit ok diagnostics when all checks passed (boot-metric-style attestation)
-    if oob_program_id_count == 0 && lint_config.should_report_ok("transaction::oob_program_id") {
+    // Boot-metric ok diagnostics
+    if oob_program_id_count == 0
+        && lint_config.should_report_ok("transaction::oob_program_id")
+    {
         diagnostics.push(create_diagnostic_field(
             "transaction::oob_program_id",
             "transaction",
             "ok",
             &format!(
                 "all {} instructions have valid program_id_index",
-                message.instructions.len()
+                instructions.len()
             ),
             None,
         ));
@@ -190,59 +177,13 @@ pub fn decode_instructions(
             "ok",
             &format!(
                 "all {} instructions have valid account indices",
-                message.instructions.len()
+                instructions.len()
             ),
             None,
         ));
     }
-    if oob_account_index_in_skipped_count == 0
-        && lint_config.should_report_ok("transaction::oob_account_index_in_skipped_instruction")
-    {
-        diagnostics.push(create_diagnostic_field(
-            "transaction::oob_account_index_in_skipped_instruction",
-            "transaction",
-            "ok",
-            &format!("all {oob_program_id_count} skipped instructions have valid account indices"),
-            None,
-        ));
-    }
 
-    let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
-    let mut errors: Vec<(usize, VisualSignError)> = Vec::new();
-
-    // Extract just the instructions for the visualizer context (it needs the full slice)
-    let instructions: Vec<Instruction> = indexed_instructions
-        .iter()
-        .map(|(_, ix)| ix.clone())
-        .collect();
-
-    for (original_index, instruction) in &indexed_instructions {
-        let sender = SolanaAccount {
-            account_key: account_keys[0].to_string(),
-            signer: false,
-            writable: false,
-        };
-
-        let context = VisualizerContext::new(&sender, *original_index, &instructions, idl_registry);
-
-        match visualize_with_any(&visualizers_refs, &context) {
-            Some(Ok(viz_result)) => fields.push(viz_result.field),
-            Some(Err(e)) => errors.push((*original_index, e)),
-            None => errors.push((
-                *original_index,
-                VisualSignError::DecodeError(format!(
-                    "No visualizer available for instruction {} at index {}",
-                    instruction.program_id, original_index
-                )),
-            )),
-        }
-    }
-
-    DecodeInstructionsResult {
-        fields,
-        errors,
-        diagnostics,
-    }
+    diagnostics
 }
 
 pub fn decode_transfers(

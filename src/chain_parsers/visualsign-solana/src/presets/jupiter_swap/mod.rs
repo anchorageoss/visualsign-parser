@@ -707,12 +707,8 @@ mod tests {
         );
 
         // Test expanded fields show the instruction name
-        let fields = create_jupiter_swap_expanded_fields(
-            &instruction,
-            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
-            &[0x01, 0x02, 0x03], // minimal data
-        )
-        .unwrap();
+        let tcd = TestContextData::new(&[0x01, 0x02, 0x03]);
+        let fields = create_jupiter_swap_expanded_fields(&instruction, &tcd.context()).unwrap();
 
         // Check that status field includes the instruction name
         let status_field = fields.iter().find(|f| {

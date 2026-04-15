@@ -97,17 +97,25 @@ fn test_route_real_transaction() {
     println!();
 
     let instruction = create_instruction_from_fixture(&fixture);
-    let instructions = vec![instruction.clone()];
 
-    // Create a context - using index 0 since we only loaded the one relevant instruction
-    // In reality, the fixture.instruction_index would be used with all transaction instructions
+    // Build account_keys and CompiledInstruction from the resolved Instruction.
+    let mut account_keys = vec![instruction.program_id];
+    for meta in &instruction.accounts {
+        account_keys.push(meta.pubkey);
+    }
+    let compiled = solana_sdk::instruction::CompiledInstruction {
+        program_id_index: 0,
+        accounts: (1..=instruction.accounts.len() as u8).collect(),
+        data: instruction.data.clone(),
+    };
+
     let sender = SolanaAccount {
         account_key: fixture.accounts.first().unwrap().pubkey.clone(),
         signer: false,
         writable: false,
     };
     let idl_registry = crate::idl::IdlRegistry::new();
-    let context = VisualizerContext::new(&sender, 0, &instructions, &idl_registry);
+    let context = VisualizerContext::new(&sender, &compiled, &account_keys, &idl_registry);
 
     // Visualize
     let visualizer = super::JupiterSwapVisualizer;
