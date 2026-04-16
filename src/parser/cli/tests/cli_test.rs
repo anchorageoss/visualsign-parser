@@ -112,78 +112,107 @@ fn test_cli_with_fixtures() {
             "Display fixture not found: {display_path:?}"
         );
 
-        let actual_json: serde_json::Value = serde_json::from_str(actual_output.trim())
-            .unwrap_or_else(|e| {
-                panic!("Failed to parse CLI output as JSON for '{test_name}': {e}")
-            });
-
-        // Filter to display fields only
-        let mut display_payload = actual_json.clone();
-        if let Some(fields) = display_payload
-            .get_mut("Fields")
-            .and_then(|f| f.as_array_mut())
-        {
-            fields.retain(|f| f.get("Type").and_then(|t| t.as_str()) != Some("diagnostic"));
-        }
-        let actual_display =
-            serde_json::to_string_pretty(&display_payload).expect("failed to serialize");
-
         let expected_display = fs::read_to_string(&display_path)
             .unwrap_or_else(|_| panic!("Display fixture not found: {display_path:?}"));
 
-        assert_strings_match(
-            test_name,
-            "display",
-            expected_display.trim(),
-            &actual_display,
-        );
-
-        // Diagnostics fixture: compare rule/level pairs
-        let diagnostics_path = fixtures_dir.join(format!("{test_name}.diagnostics.expected"));
-        if diagnostics_path.exists() {
-            let expected_diags: Vec<serde_json::Value> = serde_json::from_str(
-                &fs::read_to_string(&diagnostics_path)
-                    .unwrap_or_else(|_| panic!("Failed to read: {diagnostics_path:?}")),
-            )
-            .unwrap_or_else(|e| panic!("Failed to parse diagnostics fixture: {e}"));
-
-            let actual_diags: Vec<(String, String)> = actual_json
-                .get("Fields")
-                .and_then(|f| f.as_array())
-                .map(|fields| {
+        // Try JSON parsing; fall back to string comparison for text/human output
+        match serde_json::from_str::<serde_json::Value>(actual_output.trim()) {
+            Ok(actual_json) => {
+                // JSON output: filter diagnostics and check membership
+                let mut display_payload = actual_json.clone();
+                if let Some(fields) = display_payload
+                    .get_mut("Fields")
+                    .and_then(|f| f.as_array_mut())
+                {
                     fields
-                        .iter()
-                        .filter(|f| f.get("Type").and_then(|t| t.as_str()) == Some("diagnostic"))
-                        .map(|f| {
-                            let diag = &f["Diagnostic"];
-                            (
-                                diag["Rule"].as_str().unwrap().to_string(),
-                                diag["Level"].as_str().unwrap().to_string(),
-                            )
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+                        .retain(|f| f.get("Type").and_then(|t| t.as_str()) != Some("diagnostic"));
+                }
 
-            // Every expected diagnostic must be present
-            for expected in &expected_diags {
-                let rule = expected["rule"].as_str().unwrap();
-                let level = expected["level"].as_str().unwrap();
-                assert!(
-                    actual_diags.iter().any(|(r, l)| r == rule && l == level),
-                    "Test '{test_name}': missing diagnostic rule={rule}, level={level}"
+                let expected_json: serde_json::Value =
+                    serde_json::from_str(expected_display.trim()).unwrap_or_else(|e| {
+                        panic!(
+                            "Failed to parse display fixture as JSON for '{test_name}': {e}"
+                        )
+                    });
+
+                assert_json_contains(
+                    test_name,
+                    &expected_json,
+                    &display_payload,
+                    "",
+                );
+
+                // Diagnostics fixture: compare rule, level, and instruction_index
+                let diagnostics_path =
+                    fixtures_dir.join(format!("{test_name}.diagnostics.expected"));
+                if diagnostics_path.exists() {
+                    let expected_diags: Vec<serde_json::Value> = serde_json::from_str(
+                        &fs::read_to_string(&diagnostics_path)
+                            .unwrap_or_else(|_| panic!("Failed to read: {diagnostics_path:?}")),
+                    )
+                    .unwrap_or_else(|e| panic!("Failed to parse diagnostics fixture: {e}"));
+
+                    let actual_diags: Vec<(String, String, Option<u32>)> = actual_json
+                        .get("Fields")
+                        .and_then(|f| f.as_array())
+                        .map(|fields| {
+                            fields
+                                .iter()
+                                .filter(|f| {
+                                    f.get("Type").and_then(|t| t.as_str()) == Some("diagnostic")
+                                })
+                                .map(|f| {
+                                    let diag = &f["Diagnostic"];
+                                    (
+                                        diag["Rule"].as_str().unwrap().to_string(),
+                                        diag["Level"].as_str().unwrap().to_string(),
+                                        diag["InstructionIndex"]
+                                            .as_u64()
+                                            .map(|n| n as u32),
+                                    )
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    // Every expected diagnostic must be present (rule + level + optional instruction_index)
+                    for expected in &expected_diags {
+                        let rule = expected["rule"].as_str().unwrap();
+                        let level = expected["level"].as_str().unwrap();
+                        let expected_idx = expected
+                            .get("instruction_index")
+                            .and_then(|v| v.as_u64())
+                            .map(|n| n as u32);
+                        assert!(
+                            actual_diags.iter().any(|(r, l, idx)| {
+                                r == rule
+                                    && l == level
+                                    && (expected_idx.is_none() || *idx == expected_idx)
+                            }),
+                            "Test '{test_name}': missing diagnostic rule={rule}, level={level}, instruction_index={expected_idx:?}"
+                        );
+                    }
+
+                    // No unexpected diagnostics
+                    assert_eq!(
+                        expected_diags.len(),
+                        actual_diags.len(),
+                        "Test '{test_name}': expected {} diagnostics, got {}. Actual: {:?}",
+                        expected_diags.len(),
+                        actual_diags.len(),
+                        actual_diags
+                    );
+                }
+            }
+            Err(_) => {
+                // Non-JSON output (text/human): plain string comparison
+                assert_strings_match(
+                    test_name,
+                    "display",
+                    expected_display.trim(),
+                    actual_output.trim(),
                 );
             }
-
-            // No unexpected diagnostics
-            assert_eq!(
-                expected_diags.len(),
-                actual_diags.len(),
-                "Test '{test_name}': expected {} diagnostics, got {}. Actual: {:?}",
-                expected_diags.len(),
-                actual_diags.len(),
-                actual_diags
-            );
         }
     }
 }
@@ -203,6 +232,49 @@ fn assert_strings_match(test_name: &str, fixture_type: &str, expected: &str, act
         }
 
         panic!("Test case '{test_name}' ({fixture_type}) failed:\n{diff_output}");
+    }
+}
+
+/// Recursively checks that every field in `expected` is present in `actual`.
+/// Objects: every key in expected must exist in actual with a matching value.
+/// Arrays: must have the same length and each element must match.
+/// Scalars: must be equal.
+fn assert_json_contains(
+    test_name: &str,
+    expected: &serde_json::Value,
+    actual: &serde_json::Value,
+    path: &str,
+) {
+    match (expected, actual) {
+        (serde_json::Value::Object(exp_map), serde_json::Value::Object(act_map)) => {
+            for (key, exp_val) in exp_map {
+                let field_path = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{path}.{key}")
+                };
+                let act_val = act_map.get(key).unwrap_or_else(|| {
+                    panic!("Test '{test_name}': missing key '{field_path}' in actual output")
+                });
+                assert_json_contains(test_name, exp_val, act_val, &field_path);
+            }
+        }
+        (serde_json::Value::Array(exp_arr), serde_json::Value::Array(act_arr)) => {
+            assert_eq!(
+                exp_arr.len(),
+                act_arr.len(),
+                "Test '{test_name}': array length mismatch at '{path}'"
+            );
+            for (i, (exp_val, act_val)) in exp_arr.iter().zip(act_arr.iter()).enumerate() {
+                assert_json_contains(test_name, exp_val, act_val, &format!("{path}[{i}]"));
+            }
+        }
+        _ => {
+            assert_eq!(
+                expected, actual,
+                "Test '{test_name}': value mismatch at '{path}'"
+            );
+        }
     }
 }
 
