@@ -217,13 +217,14 @@ pub fn create_preview_layout(
 pub fn create_diagnostic_field(
     rule: &str,
     domain: &str,
-    level: &str,
+    level: crate::lint::Severity,
     message: &str,
     instruction_index: Option<u32>,
 ) -> AnnotatedPayloadField {
+    let level_str = level.as_str();
     match level {
-        "warn" | "error" => {
-            tracing::warn!(rule, domain, level, ?instruction_index, "{message}");
+        crate::lint::Severity::Warn | crate::lint::Severity::Error => {
+            tracing::warn!(rule, domain, level = level_str, ?instruction_index, "{message}");
         }
         _ => {}
     }
@@ -232,13 +233,13 @@ pub fn create_diagnostic_field(
         dynamic_annotation: None,
         signable_payload_field: SignablePayloadField::Diagnostic {
             common: SignablePayloadFieldCommon {
-                fallback_text: format!("{level}: {message}"),
+                fallback_text: format!("{level_str}: {message}"),
                 label: rule.to_string(),
             },
             diagnostic: SignablePayloadFieldDiagnostic {
                 rule: rule.to_string(),
                 domain: domain.to_string(),
-                level: level.to_string(),
+                level: level_str.to_string(),
                 message: message.to_string(),
                 instruction_index,
             },

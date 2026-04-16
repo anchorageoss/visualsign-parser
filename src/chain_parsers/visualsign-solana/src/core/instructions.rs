@@ -45,7 +45,7 @@ pub fn decode_instructions(
             diagnostics: vec![create_diagnostic_field(
                 "transaction::empty_account_keys",
                 "transaction",
-                "error",
+                visualsign::lint::Severity::Error,
                 "legacy transaction has no account keys",
                 None,
             )],
@@ -119,7 +119,7 @@ pub fn scan_instruction_diagnostics(
                 diagnostics.push(create_diagnostic_field(
                     "transaction::oob_program_id",
                     "transaction",
-                    oob_pid_severity.as_str(),
+                    oob_pid_severity.clone(),
                     &format!(
                         "instruction {}: program_id_index {} out of bounds ({} account keys)",
                         ci_index, ci.program_id_index, account_keys.len()
@@ -142,7 +142,7 @@ pub fn scan_instruction_diagnostics(
                 diagnostics.push(create_diagnostic_field(
                     "transaction::oob_account_index",
                     "transaction",
-                    oob_acct_severity.as_str(),
+                    oob_acct_severity.clone(),
                     &format!(
                         "instruction {}: account indices {:?} out of bounds ({} account keys)",
                         ci_index, oob_accounts, account_keys.len()
@@ -160,7 +160,7 @@ pub fn scan_instruction_diagnostics(
         diagnostics.push(create_diagnostic_field(
             "transaction::oob_program_id",
             "transaction",
-            "ok",
+            visualsign::lint::Severity::Ok,
             &format!(
                 "all {} instructions have valid program_id_index",
                 instructions.len()
@@ -174,7 +174,7 @@ pub fn scan_instruction_diagnostics(
         diagnostics.push(create_diagnostic_field(
             "transaction::oob_account_index",
             "transaction",
-            "ok",
+            visualsign::lint::Severity::Ok,
             &format!(
                 "all {} instructions have valid account indices",
                 instructions.len()

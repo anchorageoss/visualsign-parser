@@ -142,7 +142,7 @@ pub fn decode_v0_instructions(
             diagnostics: vec![create_diagnostic_field(
                 "transaction::empty_account_keys",
                 "transaction",
-                "error",
+                visualsign::lint::Severity::Error,
                 "v0 transaction has no account keys",
                 None,
             )],

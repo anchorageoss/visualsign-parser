@@ -159,23 +159,24 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
         transaction_wrapper: SolanaTransactionWrapper,
         options: VisualSignOptions,
     ) -> Result<SignablePayload, VisualSignError> {
+        let lint_config = visualsign::lint::LintConfig::default();
         match transaction_wrapper {
             SolanaTransactionWrapper::Legacy(transaction) => {
-                // Convert the legacy transaction to a VisualSign payload
                 convert_to_visual_sign_payload(
                     &transaction,
                     options.decode_transfers,
                     options.transaction_name.clone(),
                     &options,
+                    &lint_config,
                 )
             }
             SolanaTransactionWrapper::Versioned(versioned_tx) => {
-                // Handle versioned transactions
                 convert_versioned_to_visual_sign_payload(
                     &versioned_tx,
                     options.decode_transfers,
                     options.transaction_name.clone(),
                     &options,
+                    &lint_config,
                 )
             }
         }
@@ -218,6 +219,7 @@ fn convert_to_visual_sign_payload(
     decode_transfers: bool,
     title: Option<String>,
     options: &VisualSignOptions,
+    lint_config: &visualsign::lint::LintConfig,
 ) -> Result<SignablePayload, VisualSignError> {
     let message = &transaction.message;
 
@@ -243,9 +245,8 @@ fn convert_to_visual_sign_payload(
         );
     }
 
-    // Process instructions with visualizers (pass IDL registry for future use)
-    let lint_config = visualsign::lint::LintConfig::default();
-    let decode_result = instructions::decode_instructions(transaction, &idl_registry, &lint_config);
+    // Process instructions with visualizers
+    let decode_result = instructions::decode_instructions(transaction, &idl_registry, lint_config);
     fields.extend(
         decode_result
             .fields
@@ -261,13 +262,16 @@ fn convert_to_visual_sign_payload(
     // Add Accounts field at the bottom using PreviewLayout instead of ListLayout
     fields.push(preview_layout_advanced);
 
-    // Surface per-instruction errors as diagnostics
+    // Surface per-instruction errors as diagnostics.
+    // decode::visualizer_error is intentionally not routed through LintConfig --
+    // visualizer failures are always surfaced so consumers know which
+    // instructions could not be decoded.
     for (idx, err) in &decode_result.errors {
         fields.push(
             visualsign::field_builders::create_diagnostic_field(
                 "decode::visualizer_error",
                 "decode",
-                "error",
+                visualsign::lint::Severity::Error,
                 &format!("instruction {idx}: {err}"),
                 Some(*idx as u32),
             )
@@ -298,24 +302,30 @@ fn convert_versioned_to_visual_sign_payload(
     decode_transfers: bool,
     title: Option<String>,
     options: &VisualSignOptions,
+    lint_config: &visualsign::lint::LintConfig,
 ) -> Result<SignablePayload, VisualSignError> {
     match &versioned_tx.message {
         VersionedMessage::Legacy(legacy_message) => {
-            // For legacy messages in versioned transactions, create a legacy transaction
             let legacy_tx = SolanaTransaction {
                 signatures: versioned_tx.signatures.clone(),
                 message: legacy_message.clone(),
             };
-            convert_to_visual_sign_payload(&legacy_tx, decode_transfers, title, options)
+            convert_to_visual_sign_payload(
+                &legacy_tx,
+                decode_transfers,
+                title,
+                options,
+                lint_config,
+            )
         }
         VersionedMessage::V0(v0_message) => {
-            // Handle V0 transactions - try to use the same instruction processing pipeline
             convert_v0_to_visual_sign_payload(
                 versioned_tx,
                 v0_message,
                 decode_transfers,
                 title,
                 options,
+                lint_config,
             )
         }
     }
@@ -328,6 +338,7 @@ fn convert_v0_to_visual_sign_payload(
     decode_transfers: bool,
     title: Option<String>,
     options: &VisualSignOptions,
+    lint_config: &visualsign::lint::LintConfig,
 ) -> Result<SignablePayload, VisualSignError> {
     // Create IDL registry from options metadata
     let idl_registry = create_idl_registry_from_options(options)?;
@@ -353,8 +364,7 @@ fn convert_v0_to_visual_sign_payload(
 
     // Directly process V0 instructions using the visualizer framework
     // This approach works for all V0 transactions, including those with lookup tables
-    let lint_config = visualsign::lint::LintConfig::default();
-    let v0_result = decode_v0_instructions(v0_message, &idl_registry, &lint_config);
+    let v0_result = decode_v0_instructions(v0_message, &idl_registry, lint_config);
     for (index, instruction_field) in v0_result.fields.iter().enumerate() {
         tracing::debug!(
             "Handling instruction {} with visualizer {:?}",
@@ -393,13 +403,16 @@ fn convert_v0_to_visual_sign_payload(
     let preview_layout_advanced = create_accounts_advanced_preview_layout("Accounts", &accounts)?;
     fields.push(preview_layout_advanced);
 
-    // Surface per-instruction errors as diagnostics
+    // Surface per-instruction errors as diagnostics.
+    // decode::visualizer_error is intentionally not routed through LintConfig --
+    // visualizer failures are always surfaced so consumers know which
+    // instructions could not be decoded.
     for (idx, err) in &v0_result.errors {
         fields.push(
             visualsign::field_builders::create_diagnostic_field(
                 "decode::visualizer_error",
                 "decode",
-                "error",
+                visualsign::lint::Severity::Error,
                 &format!("instruction {idx}: {err}"),
                 Some(*idx as u32),
             )

@@ -636,22 +636,18 @@ impl Serialize for SignablePayloadFieldDiagnostic {
         S: serde::Serializer,
     {
         use serde::ser::SerializeMap;
-        use std::collections::BTreeMap;
 
-        let mut map = BTreeMap::new();
-        map.insert("Domain", serde_json::to_value(&self.domain).unwrap());
+        let len = if self.instruction_index.is_some() { 5 } else { 4 };
+        // Fields emitted in alphabetical key order for deterministic serialization.
+        let mut map = serializer.serialize_map(Some(len))?;
+        map.serialize_entry("Domain", &self.domain)?;
         if let Some(ref idx) = self.instruction_index {
-            map.insert("InstructionIndex", serde_json::to_value(idx).unwrap());
+            map.serialize_entry("InstructionIndex", idx)?;
         }
-        map.insert("Level", serde_json::to_value(&self.level).unwrap());
-        map.insert("Message", serde_json::to_value(&self.message).unwrap());
-        map.insert("Rule", serde_json::to_value(&self.rule).unwrap());
-
-        let mut map_ser = serializer.serialize_map(Some(map.len()))?;
-        for (k, v) in &map {
-            map_ser.serialize_entry(k, v)?;
-        }
-        map_ser.end()
+        map.serialize_entry("Level", &self.level)?;
+        map.serialize_entry("Message", &self.message)?;
+        map.serialize_entry("Rule", &self.rule)?;
+        map.end()
     }
 }
 

@@ -81,16 +81,17 @@ Currently constructed as `LintConfig::default()` in the conversion functions. Fu
 
 Functions always succeed. Return `DecodeInstructionsResult` with separate `fields`, `errors`, and `diagnostics` vecs.
 
-Four rules:
+Three rules:
 
 | Rule | Domain | Default Level | When |
 |------|--------|---------------|------|
 | `transaction::oob_program_id` | `transaction` | `warn` | `ci.program_id_index >= account_keys.len()` |
-| `transaction::oob_account_index` | `transaction` | `warn` | account index `>= account_keys.len()` in instructions with a valid program_id |
-| `transaction::oob_account_index_in_skipped_instruction` | `transaction` | `warn` | account index `>= account_keys.len()` in instructions skipped due to OOB program_id |
+| `transaction::oob_account_index` | `transaction` | `warn` | any account index `>= account_keys.len()` |
 | `transaction::empty_account_keys` | `transaction` | `error` | `account_keys.is_empty()` |
 
-Account indices are checked on all instructions, including those with OOB program IDs. Original instruction indices are preserved through the visualizer loop for consistent labeling.
+No instructions are skipped. All instructions are processed by the visualizer pipeline regardless of whether their program_id or account indices are resolvable. The `VisualizerContext` provides `ProgramRef` and `AccountRef` types that distinguish resolved from unresolved indices, allowing visualizers to handle each case explicitly.
+
+Additionally, `decode::visualizer_error` diagnostics are emitted for any instruction whose visualizer fails. This rule is intentionally always-on and not configurable via `LintConfig`.
 
 ### Boot-metric attestation
 
