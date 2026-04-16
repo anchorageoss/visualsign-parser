@@ -354,8 +354,10 @@ fn try_parse_with_idl(
         // Match each account in the instruction with its name from the IDL
         for index in 0..context.num_accounts() {
             if let Some(idl_account) = idl_instruction.accounts.get(index) {
-                named_accounts
-                    .insert(idl_account.name.clone(), resolve_account_str(context, index));
+                named_accounts.insert(
+                    idl_account.name.clone(),
+                    resolve_account_str(context, index),
+                );
             }
         }
     }

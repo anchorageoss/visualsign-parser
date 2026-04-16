@@ -161,15 +161,13 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
     ) -> Result<SignablePayload, VisualSignError> {
         let lint_config = visualsign::lint::LintConfig::default();
         match transaction_wrapper {
-            SolanaTransactionWrapper::Legacy(transaction) => {
-                convert_to_visual_sign_payload(
-                    &transaction,
-                    options.decode_transfers,
-                    options.transaction_name.clone(),
-                    &options,
-                    &lint_config,
-                )
-            }
+            SolanaTransactionWrapper::Legacy(transaction) => convert_to_visual_sign_payload(
+                &transaction,
+                options.decode_transfers,
+                options.transaction_name.clone(),
+                &options,
+                &lint_config,
+            ),
             SolanaTransactionWrapper::Versioned(versioned_tx) => {
                 convert_versioned_to_visual_sign_payload(
                     &versioned_tx,
@@ -318,16 +316,14 @@ fn convert_versioned_to_visual_sign_payload(
                 lint_config,
             )
         }
-        VersionedMessage::V0(v0_message) => {
-            convert_v0_to_visual_sign_payload(
-                versioned_tx,
-                v0_message,
-                decode_transfers,
-                title,
-                options,
-                lint_config,
-            )
-        }
+        VersionedMessage::V0(v0_message) => convert_v0_to_visual_sign_payload(
+            versioned_tx,
+            v0_message,
+            decode_transfers,
+            title,
+            options,
+            lint_config,
+        ),
     }
 }
 
@@ -1089,12 +1085,7 @@ mod tests {
         let instruction_fields: Vec<_> = payload
             .fields
             .iter()
-            .filter(|f| {
-                matches!(
-                    f,
-                    SignablePayloadField::PreviewLayout { .. }
-                )
-            })
+            .filter(|f| matches!(f, SignablePayloadField::PreviewLayout { .. }))
             .collect();
 
         assert!(

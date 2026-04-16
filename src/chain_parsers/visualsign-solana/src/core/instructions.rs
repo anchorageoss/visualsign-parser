@@ -54,11 +54,8 @@ pub fn decode_instructions(
 
     // Diagnostic scan: check all indices, emit diagnostics for inaccessible ones.
     // This is purely informational — no instructions are skipped.
-    let diagnostics = scan_instruction_diagnostics(
-        &message.instructions,
-        account_keys,
-        lint_config,
-    );
+    let diagnostics =
+        scan_instruction_diagnostics(&message.instructions, account_keys, lint_config);
 
     // Visualization: process every instruction (no skipping)
     let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
@@ -122,7 +119,9 @@ pub fn scan_instruction_diagnostics(
                     oob_pid_severity.clone(),
                     &format!(
                         "instruction {}: program_id_index {} out of bounds ({} account keys)",
-                        ci_index, ci.program_id_index, account_keys.len()
+                        ci_index,
+                        ci.program_id_index,
+                        account_keys.len()
                     ),
                     Some(ci_index as u32),
                 ));
@@ -145,7 +144,9 @@ pub fn scan_instruction_diagnostics(
                     oob_acct_severity.clone(),
                     &format!(
                         "instruction {}: account indices {:?} out of bounds ({} account keys)",
-                        ci_index, oob_accounts, account_keys.len()
+                        ci_index,
+                        oob_accounts,
+                        account_keys.len()
                     ),
                     Some(ci_index as u32),
                 ));
@@ -154,9 +155,7 @@ pub fn scan_instruction_diagnostics(
     }
 
     // Boot-metric ok diagnostics
-    if oob_program_id_count == 0
-        && lint_config.should_report_ok("transaction::oob_program_id")
-    {
+    if oob_program_id_count == 0 && lint_config.should_report_ok("transaction::oob_program_id") {
         diagnostics.push(create_diagnostic_field(
             "transaction::oob_program_id",
             "transaction",

@@ -198,8 +198,16 @@ mod tests {
     #[test]
     fn test_program_id_resolved() {
         let keys = vec![Pubkey::new_unique(), Pubkey::new_unique()];
-        let ci = CompiledInstruction { program_id_index: 1, accounts: vec![0], data: vec![0xAA] };
-        let sender = SolanaAccount { account_key: keys[0].to_string(), signer: false, writable: false };
+        let ci = CompiledInstruction {
+            program_id_index: 1,
+            accounts: vec![0],
+            data: vec![0xAA],
+        };
+        let sender = SolanaAccount {
+            account_key: keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
         let registry = crate::idl::IdlRegistry::new();
         let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry);
         assert_eq!(ctx.program_id(), ProgramRef::Resolved(&keys[1]));
@@ -208,8 +216,16 @@ mod tests {
     #[test]
     fn test_program_id_unresolved() {
         let keys = vec![Pubkey::new_unique()];
-        let ci = CompiledInstruction { program_id_index: 99, accounts: vec![], data: vec![] };
-        let sender = SolanaAccount { account_key: keys[0].to_string(), signer: false, writable: false };
+        let ci = CompiledInstruction {
+            program_id_index: 99,
+            accounts: vec![],
+            data: vec![],
+        };
+        let sender = SolanaAccount {
+            account_key: keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
         let registry = crate::idl::IdlRegistry::new();
         let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry);
         assert_eq!(ctx.program_id(), ProgramRef::Unresolved { raw_index: 99 });
@@ -218,20 +234,39 @@ mod tests {
     #[test]
     fn test_account_resolved_and_unresolved() {
         let keys = vec![Pubkey::new_unique(), Pubkey::new_unique()];
-        let ci = CompiledInstruction { program_id_index: 1, accounts: vec![0, 50], data: vec![] };
-        let sender = SolanaAccount { account_key: keys[0].to_string(), signer: false, writable: false };
+        let ci = CompiledInstruction {
+            program_id_index: 1,
+            accounts: vec![0, 50],
+            data: vec![],
+        };
+        let sender = SolanaAccount {
+            account_key: keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
         let registry = crate::idl::IdlRegistry::new();
         let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry);
         assert_eq!(ctx.account(0), Some(AccountRef::Resolved(&keys[0])));
-        assert_eq!(ctx.account(1), Some(AccountRef::Unresolved { raw_index: 50 }));
+        assert_eq!(
+            ctx.account(1),
+            Some(AccountRef::Unresolved { raw_index: 50 })
+        );
         assert_eq!(ctx.account(99), None); // no such position
     }
 
     #[test]
     fn test_data_and_num_accounts() {
         let keys = vec![Pubkey::new_unique()];
-        let ci = CompiledInstruction { program_id_index: 0, accounts: vec![0, 0, 0], data: vec![0xDE, 0xAD] };
-        let sender = SolanaAccount { account_key: keys[0].to_string(), signer: false, writable: false };
+        let ci = CompiledInstruction {
+            program_id_index: 0,
+            accounts: vec![0, 0, 0],
+            data: vec![0xDE, 0xAD],
+        };
+        let sender = SolanaAccount {
+            account_key: keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
         let registry = crate::idl::IdlRegistry::new();
         let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry);
         assert_eq!(ctx.data(), &[0xDE, 0xAD]);

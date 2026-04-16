@@ -637,7 +637,11 @@ impl Serialize for SignablePayloadFieldDiagnostic {
     {
         use serde::ser::SerializeMap;
 
-        let len = if self.instruction_index.is_some() { 5 } else { 4 };
+        let len = if self.instruction_index.is_some() {
+            5
+        } else {
+            4
+        };
         // Fields emitted in alphabetical key order for deterministic serialization.
         let mut map = serializer.serialize_map(Some(len))?;
         map.serialize_entry("Domain", &self.domain)?;

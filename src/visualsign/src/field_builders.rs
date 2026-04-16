@@ -224,7 +224,13 @@ pub fn create_diagnostic_field(
     let level_str = level.as_str();
     match level {
         crate::lint::Severity::Warn | crate::lint::Severity::Error => {
-            tracing::warn!(rule, domain, level = level_str, ?instruction_index, "{message}");
+            tracing::warn!(
+                rule,
+                domain,
+                level = level_str,
+                ?instruction_index,
+                "{message}"
+            );
         }
         _ => {}
     }

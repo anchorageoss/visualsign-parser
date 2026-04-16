@@ -25,12 +25,10 @@ impl InstructionVisualizer for ComputeBudgetVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let compute_budget_instruction =
-            ComputeBudgetInstruction::try_from_slice(context.data()).map_err(|e| {
-                VisualSignError::DecodeError(format!(
-                    "Failed to parse compute budget instruction: {e}"
-                ))
-            })?;
+        let compute_budget_instruction = ComputeBudgetInstruction::try_from_slice(context.data())
+            .map_err(|e| {
+            VisualSignError::DecodeError(format!("Failed to parse compute budget instruction: {e}"))
+        })?;
 
         create_compute_budget_preview_layout(&compute_budget_instruction, context)
     }
@@ -92,8 +90,11 @@ fn create_compute_budget_preview_layout(
 
     match instruction {
         ComputeBudgetInstruction::RequestHeapFrame(bytes) => {
-            expanded_fields
-                .push(create_number_field("Heap Frame Size", &bytes.to_string(), "bytes")?);
+            expanded_fields.push(create_number_field(
+                "Heap Frame Size",
+                &bytes.to_string(),
+                "bytes",
+            )?);
         }
         ComputeBudgetInstruction::SetComputeUnitLimit(units) => {
             expanded_fields.push(create_number_field(
@@ -110,14 +111,20 @@ fn create_compute_budget_preview_layout(
             )?);
         }
         ComputeBudgetInstruction::SetLoadedAccountsDataSizeLimit(bytes) => {
-            expanded_fields
-                .push(create_number_field("Data Size Limit", &bytes.to_string(), "bytes")?);
+            expanded_fields.push(create_number_field(
+                "Data Size Limit",
+                &bytes.to_string(),
+                "bytes",
+            )?);
         }
         ComputeBudgetInstruction::Unused => {}
     }
 
     let hex_fallback_string = hex::encode(context.data());
-    expanded_fields.push(create_raw_data_field(context.data(), Some(hex_fallback_string))?);
+    expanded_fields.push(create_raw_data_field(
+        context.data(),
+        Some(hex_fallback_string),
+    )?);
 
     let expanded = SignablePayloadFieldListLayout {
         fields: expanded_fields,

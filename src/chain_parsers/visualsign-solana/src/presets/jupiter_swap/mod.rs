@@ -544,8 +544,7 @@ mod tests {
                 assert_eq!(slippage_bps, 50);
 
                 let tcd = TestContextData::new(&data);
-                let fields =
-                    create_jupiter_swap_expanded_fields(&result, &tcd.context()).unwrap();
+                let fields = create_jupiter_swap_expanded_fields(&result, &tcd.context()).unwrap();
 
                 let fields_json = serde_json::to_value(&fields).unwrap();
                 assert!(
