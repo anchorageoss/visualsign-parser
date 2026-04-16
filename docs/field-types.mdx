@@ -461,12 +461,12 @@ Reports data quality findings from the parser's lint framework. Diagnostics are 
 {
   "Type": "diagnostic",
   "Label": "transaction::oob_program_id",
-  "FallbackText": "warn: instruction 1 skipped: program_id_index 8 out of bounds (5 accounts)",
+  "FallbackText": "warn: instruction 1: program_id_index 8 out of bounds (5 account keys)",
   "Diagnostic": {
     "Rule": "transaction::oob_program_id",
     "Domain": "transaction",
     "Level": "warn",
-    "Message": "instruction 1 skipped: program_id_index 8 out of bounds (5 accounts)",
+    "Message": "instruction 1: program_id_index 8 out of bounds (5 account keys)",
     "InstructionIndex": 1
   }
 }
@@ -491,10 +491,10 @@ Reports data quality findings from the parser's lint framework. Diagnostics are 
 
 | Rule | Domain | Description |
 |------|--------|-------------|
-| `transaction::oob_program_id` | `transaction` | Instruction references a program ID index beyond account keys |
-| `transaction::oob_account_index` | `transaction` | Instruction references account indices beyond account keys |
-| `transaction::oob_account_index_in_skipped_instruction` | `transaction` | Out-of-bounds account indices in instruction already skipped due to OOB program ID |
+| `transaction::oob_program_id` | `transaction` | Instruction's program_id_index is out of bounds in account_keys |
+| `transaction::oob_account_index` | `transaction` | Instruction references account indices beyond account_keys |
 | `transaction::empty_account_keys` | `transaction` | Transaction has no account keys |
+| `decode::visualizer_error` | `decode` | A visualizer failed to decode an instruction (always-on) |
 
 ## Future field types
 
