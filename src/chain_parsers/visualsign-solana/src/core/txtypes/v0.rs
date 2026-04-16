@@ -357,6 +357,7 @@ pub fn create_address_lookup_table_field(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use solana_sdk::pubkey::Pubkey;
