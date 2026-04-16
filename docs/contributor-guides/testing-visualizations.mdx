@@ -254,15 +254,17 @@ SolanaTransactionWrapper
   ║    ▼                                                                ║
   ║  find_instruction_by_discriminator()                                ║
   ║    │  PROP: fuzz_valid_discriminator_random_args                    ║
-  ║    │  PROP: real_idl_wrong_discriminator_not_dispatched             ║
-  ║    │  CONCRETE: roundtrip_multiple_instructions_dispatch            ║
+  ║    │  PROP: real_idl_wrong_discriminator_not_dispatched_as_original  ║
+  ║    │  CONCRETE: roundtrip_multiple_instructions_distinct_dispatch   ║
   ║    │                                                                ║
   ║    │ remaining bytes after disc                                     ║
   ║    ▼                                                                ║
   ║  parse_data_into_args()                                             ║
   ║    │  PROP: fuzz_idl_parsing_never_panics (random IDL)              ║
   ║    │  PROP: fuzz_valid_data_always_parses_ok (correct Borsh)        ║
-  ║    │  PROP: fuzz_defined_struct/enum/alias_never_panics             ║
+  ║    │  PROP: fuzz_defined_struct_types_never_panics                  ║
+  ║    │  PROP: fuzz_defined_enum_types_never_panics                    ║
+  ║    │  PROP: fuzz_defined_alias_types_never_panics                   ║
   ║    │  PROP: real_idl_never_panics (production IDLs)                 ║
   ║    │  PROP: real_idl_valid_data_always_parses_ok                    ║
   ║    │  PROP: real_idl_all_arg_names_in_parsed_output                 ║
@@ -342,12 +344,12 @@ SignablePayload                      PIPELINE: pipeline_field_count_equals_instr
   │      ├─ condensed_fields         SEMANTIC: semantic_raydium_swap
   │      │   └─ TextV2{label, text}  SEMANTIC: semantic_orca_swap (u128 decoding)
   │      └─ expanded_fields          SEMANTIC: semantic_meteora/kamino/stabble/openbook
-  │          ├─ Address{label, addr} SURFPOOL: surfpool_jupiter_swap_roundtrip (Ok + non-empty)
+  │          ├─ Address{label, addr}
   │          ├─ TextV2{label, text}
   │          └─ RawData{label, hex}
   │
   ▼
-to_validated_json()                  (tested implicitly by fixture snapshot tests)
+to_validated_json()                  (explicit validate_charset() + to_validated_json() assertions)
   │ ASCII-only JSON string
   │ no unicode escapes
   ▼
@@ -364,8 +366,6 @@ Wallet display
 | **SEMANTIC** | Real DeFi protocol data | Real-world instruction args decode correctly |
 | **STRUCTURAL** | IDL invariant checks | Production IDLs are well-formed |
 | **PIPELINE** | Full end-to-end pipeline | IdlRegistry -> dispatch -> SignablePayload correct |
-| **SURFPOOL** | Mainnet fork integration | Parser handles transactions against real account state |
-
 ### Format summary
 
 | Stage | Format | Covered by |
@@ -378,7 +378,6 @@ Wallet display
 | IDL definition | Anchor IDL JSON (instructions, discriminators, arg types, defined types) | PROP + STRUCTURAL |
 | Parsed args | `serde_json::Value` (JSON in memory) | CONCRETE + SEMANTIC |
 | Final output | `SignablePayload` -> validated JSON (ASCII-only) | PIPELINE + SEMANTIC |
-| `simulateTransaction` via surfpool | RPC submission + mainnet account state | **Not tested** (gap) |
 
 ## Validation checklist
 
