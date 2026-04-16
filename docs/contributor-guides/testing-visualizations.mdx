@@ -223,6 +223,163 @@ Tests are triggered by adding labels to a PR:
 
 If a fuzz target crashes, the `fuzz-failure` label is added to the PR. If a proptest fails, the `proptest-failure` label is added. These labels are removed automatically on a clean run.
 
+## End-to-end format chain with test coverage
+
+This traces every data format transformation from wallet input to visual output, annotated with which testing methodology covers each stage.
+
+```
+Wallet/Client
+  │
+  │ base64 or hex encoded string
+  │
+  ▼
+from_string()                        FUZZ: fuzz_transaction_string (arbitrary UTF-8)
+  │ detect encoding (base64 vs hex)
+  │ decode to Vec<u8>
+  │
+  ▼
+bincode::deserialize()               FUZZ: fuzz_versioned_transaction (arbitrary bytes)
+  │ try VersionedTransaction first
+  │ fallback to legacy SolanaTransaction
+  │
+  ▼
+SolanaTransactionWrapper
+  │ extract message.instructions
+  │
+  ╔══════════════════════════════════ PER INSTRUCTION ═══════════════════╗
+  ║                                                                     ║
+  ║  &[u8] raw instruction data                                         ║
+  ║    │                                                                ║
+  ║    │ first 8 bytes                                                  ║
+  ║    ▼                                                                ║
+  ║  find_instruction_by_discriminator()                                ║
+  ║    │  PROP: fuzz_valid_discriminator_random_args                    ║
+  ║    │  PROP: real_idl_wrong_discriminator_not_dispatched             ║
+  ║    │  CONCRETE: roundtrip_multiple_instructions_dispatch            ║
+  ║    │                                                                ║
+  ║    │ remaining bytes after disc                                     ║
+  ║    ▼                                                                ║
+  ║  parse_data_into_args()                                             ║
+  ║    │  PROP: fuzz_idl_parsing_never_panics (random IDL)              ║
+  ║    │  PROP: fuzz_valid_data_always_parses_ok (correct Borsh)        ║
+  ║    │  PROP: fuzz_defined_struct/enum/alias_never_panics             ║
+  ║    │  PROP: real_idl_never_panics (production IDLs)                 ║
+  ║    │  PROP: real_idl_valid_data_always_parses_ok                    ║
+  ║    │  PROP: real_idl_all_arg_names_in_parsed_output                 ║
+  ║    │  PROP: real_idl_overlong_data_is_rejected                      ║
+  ║    │  PROP: real_idl_truncated_data_is_rejected                     ║
+  ║    │  CONCRETE: all roundtrip_* tests                               ║
+  ║    │                                                                ║
+  ║    ├─ primitives                                                    ║
+  ║    │   read_u8/u16/u32/u64/u128, i8..i128, f32, f64                ║
+  ║    │   bool (u8: 0/1), PublicKey (32 bytes -> bs58)                 ║
+  ║    │   CONCRETE: roundtrip_single_u64_arg                           ║
+  ║    │   CONCRETE: roundtrip_mixed_primitive_args                     ║
+  ║    │                                                                ║
+  ║    ├─ String / Bytes                                                ║
+  ║    │   u32 LE length prefix + raw bytes                             ║
+  ║    │   (SizeGuard: budget 29,568 bytes)                             ║
+  ║    │   PROP: fuzz_size_guard_vec_length_prefix                      ║
+  ║    │   CONCRETE: size_guard_huge_vec_*                              ║
+  ║    │                                                                ║
+  ║    ├─ Vec<T>                                                        ║
+  ║    │   u32 LE length prefix + N elements (recursive)                ║
+  ║    │   (SizeGuard checked)                                          ║
+  ║    │   PROP: fuzz_size_guard_vec_length_prefix                      ║
+  ║    │   CONCRETE: roundtrip_vec_u8, roundtrip_vec_u32                ║
+  ║    │   CONCRETE: size_guard_vec_u64_over_budget                     ║
+  ║    │                                                                ║
+  ║    ├─ Array<T, N>                                                   ║
+  ║    │   N elements (size from IDL, SizeGuard checked)                ║
+  ║    │   CONCRETE: roundtrip_array_u32                                ║
+  ║    │                                                                ║
+  ║    ├─ Option<T>                                                     ║
+  ║    │   u8 flag (0=None, 1=Some) + value if Some                     ║
+  ║    │   CONCRETE: roundtrip_option_some/none                         ║
+  ║    │   SEMANTIC: semantic_stabble_swap (Option<u64>)                 ║
+  ║    │                                                                ║
+  ║    └─ Defined(name)                                                 ║
+  ║        TypeResolver lookup, recursive parse_type()                  ║
+  ║        (max depth 10)                                               ║
+  ║        PROP: fuzz_defined_struct_types_never_panics                 ║
+  ║        PROP: fuzz_defined_enum_types_never_panics                   ║
+  ║        PROP: fuzz_defined_alias_types_never_panics                  ║
+  ║        CONCRETE: roundtrip_defined_struct_arg                       ║
+  ║        CONCRETE: roundtrip_nested_defined_struct                    ║
+  ║        CONCRETE: roundtrip_defined_enum_arg                         ║
+  ║        CONCRETE: dangling_defined_reference_returns_err             ║
+  ║                                                                     ║
+  ║    ▼                                                                ║
+  ║  serde_json::Map<String, Value>                                     ║
+  ║    (arg name -> decoded JSON value)                                 ║
+  ║                                                                     ║
+  ╚═════════════════════════════════════════════════════════════════════╝
+  │
+  ▼
+IDL JSON                             PROP: fuzz_decode_idl_data_arbitrary_input
+  │ Anchor IDL format                STRUCTURAL: real_idl_all_instructions_have_discriminators
+  │ decode_idl_data() -> Idl struct  STRUCTURAL: real_idl_discriminators_are_unique
+  │                                  STRUCTURAL: real_idl_instruction_names_are_unique
+  │                                  STRUCTURAL: real_idl_idl_hash_is_stable
+  │
+  ▼
+IdlRegistry                          PIPELINE: pipeline_idl_path_correct_data
+  │ program_id -> IdlRecord mapping  PIPELINE: pipeline_no_idl_registered
+  │ built-in + wallet-provided IDLs  PIPELINE: pipeline_multi_instruction_mixed_programs
+  │                                  PROP: fuzz_pipeline_idl_path_taken_on_valid_discriminator
+  │
+  ▼
+Visualizer dispatch                  PIPELINE: pipeline_idl_discriminator_miss (fallback)
+  │ UnknownProgramVisualizer         PROP: fuzz_pipeline_never_panics
+  │ -> try_idl_parsing if IDL exists PROP: fuzz_pipeline_field_count_invariant
+  │ -> raw hex fallback if no IDL
+  │
+  ▼
+SignablePayload                      PIPELINE: pipeline_field_count_equals_instruction_count
+  │ fields: Vec<SignablePayloadField>PIPELINE: pipeline_named_accounts
+  │  └─ PreviewLayout per instr      SEMANTIC: semantic_drift_deposit (exact arg values)
+  │      ├─ title: "deposit (IDL)"   SEMANTIC: semantic_lifinity_swap
+  │      ├─ condensed_fields         SEMANTIC: semantic_raydium_swap
+  │      │   └─ TextV2{label, text}  SEMANTIC: semantic_orca_swap (u128 decoding)
+  │      └─ expanded_fields          SEMANTIC: semantic_meteora/kamino/stabble/openbook
+  │          ├─ Address{label, addr} SURFPOOL: surfpool_jupiter_swap_roundtrip (Ok + non-empty)
+  │          ├─ TextV2{label, text}
+  │          └─ RawData{label, hex}
+  │
+  ▼
+to_validated_json()                  (tested implicitly by fixture snapshot tests)
+  │ ASCII-only JSON string
+  │ no unicode escapes
+  ▼
+Wallet display
+```
+
+### Annotation legend
+
+| Marker | Testing type | What it proves |
+|--------|-------------|----------------|
+| **FUZZ** | cargo-fuzz / libfuzzer | Never panics on arbitrary binary input |
+| **PROP** | proptest (structured random) | Never panics + correctness invariants on structured input |
+| **CONCRETE** | Hand-crafted exact bytes | Exact decoded values match expected |
+| **SEMANTIC** | Real DeFi protocol data | Real-world instruction args decode correctly |
+| **STRUCTURAL** | IDL invariant checks | Production IDLs are well-formed |
+| **PIPELINE** | Full end-to-end pipeline | IdlRegistry -> dispatch -> SignablePayload correct |
+| **SURFPOOL** | Mainnet fork integration | Parser handles transactions against real account state |
+
+### Format summary
+
+| Stage | Format | Covered by |
+|-------|--------|------------|
+| Wire input | base64 or hex encoded string | FUZZ |
+| After decode | `Vec<u8>` raw bytes | FUZZ |
+| Transaction struct | bincode-deserialized `SolanaTransaction` or `VersionedTransaction` | FUZZ |
+| Discriminator matching | First 8 bytes of instruction data (byte comparison) | PROP + CONCRETE |
+| Arg encoding | Borsh (little-endian, length-prefixed strings/vecs) | PROP + CONCRETE + SizeGuard |
+| IDL definition | Anchor IDL JSON (instructions, discriminators, arg types, defined types) | PROP + STRUCTURAL |
+| Parsed args | `serde_json::Value` (JSON in memory) | CONCRETE + SEMANTIC |
+| Final output | `SignablePayload` -> validated JSON (ASCII-only) | PIPELINE + SEMANTIC |
+| `simulateTransaction` via surfpool | RPC submission + mainnet account state | **Not tested** (gap) |
+
 ## Validation checklist
 
 Before submitting your visualization:
