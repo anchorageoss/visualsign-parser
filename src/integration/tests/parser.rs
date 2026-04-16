@@ -243,7 +243,7 @@ async fn parser_solana_native_transfer_e2e() {
                 },
                 {
                     "FallbackText": "Program ID: 11111111111111111111111111111111\nData: 0200000000ca9a3b00000000",
-                    "Label": "Instruction 1",
+                    "Label": "Transfer: 1000000000 lamports",
                     "PreviewLayout": {
                         "Condensed": {
                             "Fields": [
@@ -387,10 +387,6 @@ async fn parser_solana_native_transfer_e2e() {
         let expected_diagnostics = vec![
             ("transaction::oob_program_id", "ok"),
             ("transaction::oob_account_index", "ok"),
-            (
-                "transaction::oob_account_index_in_skipped_instruction",
-                "ok",
-            ),
         ];
         let actual_diags: Vec<_> = signable_payload["Fields"]
             .as_array()

@@ -1095,7 +1095,7 @@ mod tests {
 
         // Verify we have instruction preview layouts (network + instruction + accounts = at least 1 instruction)
         assert!(
-            instruction_fields.len() >= 1,
+            !instruction_fields.is_empty(),
             "Should have at least 1 instruction preview layout"
         );
 
