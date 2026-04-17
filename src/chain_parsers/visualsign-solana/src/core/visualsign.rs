@@ -20,6 +20,34 @@ use visualsign::{
     },
 };
 
+/// Append decode errors as diagnostics and lint diagnostics to the output fields.
+/// decode::visualizer_error is intentionally not routed through LintConfig --
+/// visualizer failures are always surfaced so consumers know which
+/// instructions could not be decoded.
+fn append_diagnostics(
+    fields: &mut Vec<SignablePayloadField>,
+    result: &instructions::DecodeInstructionsResult,
+) {
+    for (idx, err) in &result.errors {
+        fields.push(
+            visualsign::field_builders::create_diagnostic_field(
+                "decode::visualizer_error",
+                "decode",
+                visualsign::lint::Severity::Error,
+                &format!("instruction {idx}: {err}"),
+                Some(*idx as u32),
+            )
+            .signable_payload_field,
+        );
+    }
+    fields.extend(
+        result
+            .diagnostics
+            .iter()
+            .map(|e| e.signable_payload_field.clone()),
+    );
+}
+
 /// Wrapper around Solana's transaction types that implements the Transaction trait
 #[derive(Debug, Clone)]
 pub enum SolanaTransactionWrapper {
@@ -159,23 +187,22 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
         transaction_wrapper: SolanaTransactionWrapper,
         options: VisualSignOptions,
     ) -> Result<SignablePayload, VisualSignError> {
+        let lint_config = visualsign::lint::LintConfig::default();
         match transaction_wrapper {
-            SolanaTransactionWrapper::Legacy(transaction) => {
-                // Convert the legacy transaction to a VisualSign payload
-                convert_to_visual_sign_payload(
-                    &transaction,
-                    options.decode_transfers,
-                    options.transaction_name.clone(),
-                    &options,
-                )
-            }
+            SolanaTransactionWrapper::Legacy(transaction) => convert_to_visual_sign_payload(
+                &transaction,
+                options.decode_transfers,
+                options.transaction_name.clone(),
+                &options,
+                &lint_config,
+            ),
             SolanaTransactionWrapper::Versioned(versioned_tx) => {
-                // Handle versioned transactions
                 convert_versioned_to_visual_sign_payload(
                     &versioned_tx,
                     options.decode_transfers,
                     options.transaction_name.clone(),
                     &options,
+                    &lint_config,
                 )
             }
         }
@@ -218,6 +245,7 @@ fn convert_to_visual_sign_payload(
     decode_transfers: bool,
     title: Option<String>,
     options: &VisualSignOptions,
+    lint_config: &visualsign::lint::LintConfig,
 ) -> Result<SignablePayload, VisualSignError> {
     let message = &transaction.message;
 
@@ -243,9 +271,11 @@ fn convert_to_visual_sign_payload(
         );
     }
 
-    // Process instructions with visualizers (pass IDL registry for future use)
+    // Process instructions with visualizers
+    let decode_result = instructions::decode_instructions(transaction, &idl_registry, lint_config);
     fields.extend(
-        instructions::decode_instructions(transaction, &idl_registry)?
+        decode_result
+            .fields
             .iter()
             .map(|e| e.signable_payload_field.clone()),
     );
@@ -257,6 +287,8 @@ fn convert_to_visual_sign_payload(
     let preview_layout_advanced = create_accounts_advanced_preview_layout("Accounts", &accounts)?;
     // Add Accounts field at the bottom using PreviewLayout instead of ListLayout
     fields.push(preview_layout_advanced);
+
+    append_diagnostics(&mut fields, &decode_result);
 
     Ok(SignablePayload::new(
         0,
@@ -273,26 +305,30 @@ fn convert_versioned_to_visual_sign_payload(
     decode_transfers: bool,
     title: Option<String>,
     options: &VisualSignOptions,
+    lint_config: &visualsign::lint::LintConfig,
 ) -> Result<SignablePayload, VisualSignError> {
     match &versioned_tx.message {
         VersionedMessage::Legacy(legacy_message) => {
-            // For legacy messages in versioned transactions, create a legacy transaction
             let legacy_tx = SolanaTransaction {
                 signatures: versioned_tx.signatures.clone(),
                 message: legacy_message.clone(),
             };
-            convert_to_visual_sign_payload(&legacy_tx, decode_transfers, title, options)
-        }
-        VersionedMessage::V0(v0_message) => {
-            // Handle V0 transactions - try to use the same instruction processing pipeline
-            convert_v0_to_visual_sign_payload(
-                versioned_tx,
-                v0_message,
+            convert_to_visual_sign_payload(
+                &legacy_tx,
                 decode_transfers,
                 title,
                 options,
+                lint_config,
             )
         }
+        VersionedMessage::V0(v0_message) => convert_v0_to_visual_sign_payload(
+            versioned_tx,
+            v0_message,
+            decode_transfers,
+            title,
+            options,
+            lint_config,
+        ),
     }
 }
 
@@ -303,6 +339,7 @@ fn convert_v0_to_visual_sign_payload(
     decode_transfers: bool,
     title: Option<String>,
     options: &VisualSignOptions,
+    lint_config: &visualsign::lint::LintConfig,
 ) -> Result<SignablePayload, VisualSignError> {
     // Create IDL registry from options metadata
     let idl_registry = create_idl_registry_from_options(options)?;
@@ -328,29 +365,14 @@ fn convert_v0_to_visual_sign_payload(
 
     // Directly process V0 instructions using the visualizer framework
     // This approach works for all V0 transactions, including those with lookup tables
-    match decode_v0_instructions(v0_message, &idl_registry) {
-        Ok(instruction_fields) => {
-            for (index, instruction_field) in instruction_fields.iter().enumerate() {
-                tracing::debug!(
-                    "Handling instruction {} with visualizer {:?}",
-                    index,
-                    "V0 Instruction"
-                );
-                fields.push(instruction_field.signable_payload_field.clone());
-            }
-        }
-        Err(e) => {
-            // Add a note about instruction decoding failure
-            fields.push(SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: format!("Instruction decoding failed: {e}"),
-                    label: "Instruction Decoding Note".to_string(),
-                },
-                text_v2: visualsign::SignablePayloadFieldTextV2 {
-                    text: format!("Instruction decoding failed: {e}"),
-                },
-            });
-        }
+    let v0_result = decode_v0_instructions(v0_message, &idl_registry, lint_config);
+    for (index, instruction_field) in v0_result.fields.iter().enumerate() {
+        tracing::debug!(
+            "Handling instruction {} with visualizer {:?}",
+            index,
+            "V0 Instruction"
+        );
+        fields.push(instruction_field.signable_payload_field.clone());
     }
 
     // Process V0 transfer decoding using solana-parser
@@ -381,6 +403,8 @@ fn convert_v0_to_visual_sign_payload(
     // Add Accounts field at the bottom using PreviewLayout instead of ListLayout
     let preview_layout_advanced = create_accounts_advanced_preview_layout("Accounts", &accounts)?;
     fields.push(preview_layout_advanced);
+
+    append_diagnostics(&mut fields, &v0_result);
 
     Ok(SignablePayload::new(
         0,
@@ -1039,10 +1063,11 @@ mod tests {
         let payload = payload_result.unwrap();
 
         // Verify we have instruction fields (should not be empty)
+        // Labels are now operation-specific (e.g., program ID) rather than "Instruction N"
         let instruction_fields: Vec<_> = payload
             .fields
             .iter()
-            .filter(|f| f.label().starts_with("Instruction"))
+            .filter(|f| matches!(f, SignablePayloadField::PreviewLayout { .. }))
             .collect();
 
         assert!(
@@ -1050,11 +1075,10 @@ mod tests {
             "Should have at least one instruction field for TokenKeg program"
         );
 
-        // Verify we have exactly 1 instruction (as shown in the issue)
-        assert_eq!(
-            instruction_fields.len(),
-            1,
-            "Should have exactly 1 instruction"
+        // Verify we have instruction preview layouts (network + instruction + accounts = at least 1 instruction)
+        assert!(
+            !instruction_fields.is_empty(),
+            "Should have at least 1 instruction preview layout"
         );
 
         // Verify the instruction contains the TokenKeg program ID

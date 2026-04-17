@@ -1,0 +1,4 @@
+[
+  { "rule": "transaction::oob_program_id", "level": "ok" },
+  { "rule": "transaction::oob_account_index", "level": "ok" }
+]

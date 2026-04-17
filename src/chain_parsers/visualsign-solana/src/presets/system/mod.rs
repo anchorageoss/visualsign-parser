@@ -3,7 +3,8 @@
 mod account_labels;
 mod config;
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::SystemConfig;
 use solana_program::system_instruction::SystemInstruction;
@@ -23,18 +24,12 @@ impl InstructionVisualizer for SystemVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
-
-        // Try to parse as system instruction
-        let system_instruction = bincode::deserialize::<SystemInstruction>(&instruction.data)
+        let system_instruction = bincode::deserialize::<SystemInstruction>(context.data())
             .map_err(|e| {
                 VisualSignError::DecodeError(format!("Failed to parse system instruction: {e}"))
             })?;
 
-        // Generate proper preview layout
-        create_system_preview_layout(&system_instruction, instruction, context)
+        create_system_preview_layout(&system_instruction, context)
     }
 
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
@@ -48,31 +43,24 @@ impl InstructionVisualizer for SystemVisualizer {
 
 fn create_system_preview_layout(
     instruction: &SystemInstruction,
-    solana_instruction: &solana_sdk::instruction::Instruction,
     context: &VisualizerContext,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     use visualsign::field_builders::*;
 
+    let program_id_str = match context.program_id() {
+        ProgramRef::Resolved(pk) => pk.to_string(),
+        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
+    };
+
     match instruction {
         SystemInstruction::Transfer { lamports } => {
-            let _from_key = solana_instruction
-                .accounts
-                .first()
-                .map(|meta| meta.pubkey.to_string())
-                .unwrap_or_else(|| "Unknown".to_string());
-            let _to_key = solana_instruction
-                .accounts
-                .get(1)
-                .map(|meta| meta.pubkey.to_string())
-                .unwrap_or_else(|| "Unknown".to_string());
-
             let condensed_fields = vec![create_text_field(
                 "Instruction",
                 &format!("Transfer: {lamports} lamports"),
             )?];
 
             let expanded_fields = vec![
-                create_text_field("Program ID", &solana_instruction.program_id.to_string())?,
+                create_text_field("Program ID", &program_id_str)?,
                 AnnotatedPayloadField {
                     static_annotation: None,
                     dynamic_annotation: None,
@@ -87,7 +75,7 @@ fn create_system_preview_layout(
                         },
                     },
                 },
-                create_text_field("Raw Data", &hex::encode(&solana_instruction.data))?,
+                create_text_field("Raw Data", &hex::encode(context.data()))?,
             ];
 
             let condensed = visualsign::SignablePayloadFieldListLayout {
@@ -113,11 +101,11 @@ fn create_system_preview_layout(
                 dynamic_annotation: None,
                 signable_payload_field: SignablePayloadField::PreviewLayout {
                     common: SignablePayloadFieldCommon {
-                        label: format!("Instruction {}", context.instruction_index() + 1),
+                        label: format!("Transfer: {lamports} lamports"),
                         fallback_text: format!(
                             "Program ID: {}\nData: {}",
-                            solana_instruction.program_id,
-                            hex::encode(&solana_instruction.data)
+                            program_id_str,
+                            hex::encode(context.data())
                         ),
                     },
                     preview_layout,
@@ -129,16 +117,16 @@ fn create_system_preview_layout(
             space,
             owner,
         } => {
-            let new_account = solana_instruction
-                .accounts
-                .get(1)
-                .map(|meta| meta.pubkey.to_string())
-                .unwrap_or_else(|| "Unknown".to_string());
-            let payer = solana_instruction
-                .accounts
-                .first()
-                .map(|meta| meta.pubkey.to_string())
-                .unwrap_or_else(|| "Unknown".to_string());
+            let new_account = match context.account(1) {
+                Some(AccountRef::Resolved(pk)) => pk.to_string(),
+                Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
+                None => "unknown".to_string(),
+            };
+            let payer = match context.account(0) {
+                Some(AccountRef::Resolved(pk)) => pk.to_string(),
+                Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
+                None => "unknown".to_string(),
+            };
 
             let condensed_fields = vec![
                 create_text_field("Action", "Create Account")?,
@@ -186,11 +174,11 @@ fn create_system_preview_layout(
                 dynamic_annotation: None,
                 signable_payload_field: SignablePayloadField::PreviewLayout {
                     common: SignablePayloadFieldCommon {
-                        label: format!("Instruction {}", context.instruction_index() + 1),
+                        label: "Create Account".to_string(),
                         fallback_text: format!(
                             "Program ID: {}\nData: {}",
-                            solana_instruction.program_id,
-                            hex::encode(&solana_instruction.data)
+                            program_id_str,
+                            hex::encode(context.data())
                         ),
                     },
                     preview_layout,
@@ -198,7 +186,6 @@ fn create_system_preview_layout(
             })
         }
         _ => {
-            // Handle other system instructions with basic layout
             let instruction_name = account_labels::system_instruction_label(instruction);
 
             let condensed_fields = vec![
@@ -235,11 +222,11 @@ fn create_system_preview_layout(
                 dynamic_annotation: None,
                 signable_payload_field: SignablePayloadField::PreviewLayout {
                     common: SignablePayloadFieldCommon {
-                        label: format!("Instruction {}", context.instruction_index() + 1),
+                        label: instruction_name,
                         fallback_text: format!(
                             "Program ID: {}\nData: {}",
-                            solana_instruction.program_id,
-                            hex::encode(&solana_instruction.data)
+                            program_id_str,
+                            hex::encode(context.data())
                         ),
                     },
                     preview_layout,

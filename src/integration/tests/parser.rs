@@ -243,7 +243,7 @@ async fn parser_solana_native_transfer_e2e() {
                 },
                 {
                     "FallbackText": "Program ID: 11111111111111111111111111111111\nData: 0200000000ca9a3b00000000",
-                    "Label": "Instruction 1",
+                    "Label": "Transfer: 1000000000 lamports",
                     "PreviewLayout": {
                         "Condensed": {
                             "Fields": [
@@ -373,8 +373,40 @@ async fn parser_solana_native_transfer_e2e() {
         tracing::debug!("📄 Emitted JSON for visual inspection:");
         tracing::debug!("{}", json_str);
 
-        // Validate that the parsed transaction contains all expected fields
-        validate_required_fields_present(&signable_payload, &expected_sp);
+        // Filter diagnostics from actual for display comparison
+        let mut display_payload = signable_payload.clone();
+        if let Some(fields) = display_payload
+            .get_mut("Fields")
+            .and_then(|f| f.as_array_mut())
+        {
+            fields.retain(|f| f.get("Type").and_then(|t| t.as_str()) != Some("diagnostic"));
+        }
+        validate_required_fields_present(&display_payload, &expected_sp);
+
+        // Validate diagnostics by rule/level
+        let expected_diagnostics = vec![
+            ("transaction::oob_program_id", "ok"),
+            ("transaction::oob_account_index", "ok"),
+        ];
+        let actual_diags: Vec<_> = signable_payload["Fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f.get("Type").and_then(|t| t.as_str()) == Some("diagnostic"))
+            .map(|f| {
+                (
+                    f["Diagnostic"]["Rule"].as_str().unwrap(),
+                    f["Diagnostic"]["Level"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        for (rule, level) in &expected_diagnostics {
+            assert!(
+                actual_diags.iter().any(|(r, l)| r == rule && l == level),
+                "Missing diagnostic: rule={rule}, level={level}"
+            );
+        }
+        assert_eq!(expected_diagnostics.len(), actual_diags.len());
     }
 
     integration::Builder::new().execute(test).await
