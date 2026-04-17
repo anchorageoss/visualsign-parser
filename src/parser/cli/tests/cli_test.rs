@@ -124,23 +124,15 @@ fn test_cli_with_fixtures() {
                     .get_mut("Fields")
                     .and_then(|f| f.as_array_mut())
                 {
-                    fields
-                        .retain(|f| f.get("Type").and_then(|t| t.as_str()) != Some("diagnostic"));
+                    fields.retain(|f| f.get("Type").and_then(|t| t.as_str()) != Some("diagnostic"));
                 }
 
                 let expected_json: serde_json::Value =
                     serde_json::from_str(expected_display.trim()).unwrap_or_else(|e| {
-                        panic!(
-                            "Failed to parse display fixture as JSON for '{test_name}': {e}"
-                        )
+                        panic!("Failed to parse display fixture as JSON for '{test_name}': {e}")
                     });
 
-                assert_json_contains(
-                    test_name,
-                    &expected_json,
-                    &display_payload,
-                    "",
-                );
+                assert_json_contains(test_name, &expected_json, &display_payload, "");
 
                 // Diagnostics fixture: compare rule, level, and instruction_index
                 let diagnostics_path =
@@ -166,9 +158,7 @@ fn test_cli_with_fixtures() {
                                     (
                                         diag["Rule"].as_str().unwrap().to_string(),
                                         diag["Level"].as_str().unwrap().to_string(),
-                                        diag["InstructionIndex"]
-                                            .as_u64()
-                                            .map(|n| n as u32),
+                                        diag["InstructionIndex"].as_u64().map(|n| n as u32),
                                     )
                                 })
                                 .collect()

@@ -47,11 +47,9 @@ impl InstructionVisualizer for Token2022Visualizer {
         let accounts: Vec<AccountMeta> = (0..context.num_accounts())
             .map(|i| match context.account(i) {
                 Some(AccountRef::Resolved(pk)) => Ok(AccountMeta::new_readonly(*pk, false)),
-                Some(AccountRef::Unresolved { raw_index }) => {
-                    Err(VisualSignError::DecodeError(format!(
-                        "token_2022: unresolved account index {raw_index} at position {i}"
-                    )))
-                }
+                Some(AccountRef::Unresolved { raw_index }) => Err(VisualSignError::DecodeError(
+                    format!("token_2022: unresolved account index {raw_index} at position {i}"),
+                )),
                 None => Err(VisualSignError::DecodeError(format!(
                     "token_2022: missing account at position {i}"
                 ))),
