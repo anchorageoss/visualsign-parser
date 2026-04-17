@@ -176,12 +176,14 @@ fn test_my_rule_emits_diagnostic() {
 
 Adding a new rule that emits ok-level diagnostics changes the output of every transaction parse. You must update:
 
-1. **CLI fixtures** -- regenerate `src/parser/cli/tests/fixtures/solana-json.expected` and `solana-text.expected` by running the CLI against the fixture input:
+1. **CLI fixtures** -- regenerate the `*.display.expected` fixtures and the matching `*.diagnostics.expected` fixtures by running the CLI against the fixture inputs:
 
    ```bash
-   cargo run --bin parser_cli -- --chain solana -o json -t "$(cat src/parser/cli/tests/fixtures/solana-json.input | tail -1)" > src/parser/cli/tests/fixtures/solana-json.expected
-   cargo run --bin parser_cli -- --chain solana -t "$(cat src/parser/cli/tests/fixtures/solana-text.input | tail -1)" > src/parser/cli/tests/fixtures/solana-text.expected
+   cargo run --bin parser_cli -- $(cat src/parser/cli/tests/fixtures/solana-json.input | tr '\n' ' ') > src/parser/cli/tests/fixtures/solana-json.display.expected
+   cargo run --bin parser_cli -- $(cat src/parser/cli/tests/fixtures/solana-text.input | tr '\n' ' ') > src/parser/cli/tests/fixtures/solana-text.display.expected
    ```
+
+   For JSON fixtures, filter diagnostics from the display expected file and update the diagnostics expected file separately.
 
 2. **Integration test expected JSON** -- update `src/integration/tests/parser.rs` to include the new diagnostic fields in the `expected_sp` JSON
 

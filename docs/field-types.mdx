@@ -485,7 +485,7 @@ Reports data quality findings from the parser's lint framework. Diagnostics are 
 **Wallet handling:**
 - Wallets that don't recognize `Type: "diagnostic"` can display the `FallbackText`
 - Diagnostics always appear after all display fields (network, instructions, accounts)
-- When `report_all_rules` is enabled (default), every rule emits a diagnostic -- either `ok` or `warn` -- so the attester can verify all expected rules ran
+- When `report_all_rules` is enabled (default), every rule emits a diagnostic -- `ok`, `warn`, or `error` -- so the attester can verify all expected rules ran
 
 **Current rules:**
 

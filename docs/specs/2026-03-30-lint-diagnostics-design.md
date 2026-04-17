@@ -115,13 +115,13 @@ When `report_all_rules` is true (default), every rule emits a diagnostic — eit
       "Type": "text_v2"
     },
     {
-      "FallbackText": "warn: instruction 1 skipped: program_id_index 8 out of bounds (5 accounts)",
+      "FallbackText": "warn: instruction 1: program_id_index 8 out of bounds (5 account keys)",
       "Label": "transaction::oob_program_id",
       "Diagnostic": {
         "Domain": "transaction",
         "InstructionIndex": 1,
         "Level": "warn",
-        "Message": "instruction 1 skipped: program_id_index 8 out of bounds (5 accounts)",
+        "Message": "instruction 1: program_id_index 8 out of bounds (5 account keys)",
         "Rule": "transaction::oob_program_id"
       },
       "Type": "diagnostic"
