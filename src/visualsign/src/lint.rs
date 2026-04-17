@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
@@ -27,7 +27,7 @@ impl Severity {
 pub struct LintConfig {
     /// Override severity for specific rules. Key is the rule ID
     /// (e.g., "transaction::oob_program_id").
-    pub overrides: HashMap<String, Severity>,
+    pub overrides: BTreeMap<String, Severity>,
 
     /// When true, rules that find no issues emit an ok-level diagnostic.
     /// This provides boot-metric-style attestation where the verifier
@@ -38,7 +38,7 @@ pub struct LintConfig {
 impl Default for LintConfig {
     fn default() -> Self {
         Self {
-            overrides: HashMap::new(),
+            overrides: BTreeMap::new(),
             report_all_rules: true,
         }
     }
@@ -47,7 +47,7 @@ impl Default for LintConfig {
 impl LintConfig {
     /// Get the effective severity for a rule, falling back to the provided default.
     pub fn severity_for(&self, rule: &str, default: Severity) -> Severity {
-        self.overrides.get(rule).cloned().unwrap_or(default)
+        self.overrides.get(rule).copied().unwrap_or(default)
     }
 
     /// Whether an ok-level diagnostic should be emitted for this rule.
