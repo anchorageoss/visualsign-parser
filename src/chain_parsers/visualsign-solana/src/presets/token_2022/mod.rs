@@ -41,16 +41,22 @@ impl InstructionVisualizer for Token2022Visualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        // Build AccountMeta shim for the parser (which expects &[AccountMeta])
+        // Build AccountMeta shim for the parser (which expects &[AccountMeta]).
+        // Unresolved accounts are rejected rather than substituted with
+        // Pubkey::default(), which would render as a valid-looking address.
         let accounts: Vec<AccountMeta> = (0..context.num_accounts())
-            .map(|i| {
-                let pubkey = match context.account(i) {
-                    Some(AccountRef::Resolved(pk)) => *pk,
-                    _ => solana_sdk::pubkey::Pubkey::default(),
-                };
-                AccountMeta::new_readonly(pubkey, false)
+            .map(|i| match context.account(i) {
+                Some(AccountRef::Resolved(pk)) => Ok(AccountMeta::new_readonly(*pk, false)),
+                Some(AccountRef::Unresolved { raw_index }) => {
+                    Err(VisualSignError::DecodeError(format!(
+                        "token_2022: unresolved account index {raw_index} at position {i}"
+                    )))
+                }
+                None => Err(VisualSignError::DecodeError(format!(
+                    "token_2022: missing account at position {i}"
+                ))),
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Parse the Token 2022 instruction
         let token_2022_instruction = parse_token_2022_instruction(context.data(), &accounts)

@@ -35,16 +35,22 @@ impl InstructionVisualizer for SwigWalletVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        // Build AccountMeta shim for the parser
+        // Build AccountMeta shim for the parser.
+        // Unresolved accounts are rejected rather than substituted with
+        // Pubkey::default(), which would render as a valid-looking address.
         let accounts: Vec<AccountMeta> = (0..context.num_accounts())
-            .map(|i| {
-                let pubkey = match context.account(i) {
-                    Some(AccountRef::Resolved(pk)) => *pk,
-                    _ => Pubkey::default(),
-                };
-                AccountMeta::new_readonly(pubkey, false)
+            .map(|i| match context.account(i) {
+                Some(AccountRef::Resolved(pk)) => Ok(AccountMeta::new_readonly(*pk, false)),
+                Some(AccountRef::Unresolved { raw_index }) => {
+                    Err(VisualSignError::DecodeError(format!(
+                        "swig: unresolved account index {raw_index} at position {i}"
+                    )))
+                }
+                None => Err(VisualSignError::DecodeError(format!(
+                    "swig: missing account at position {i}"
+                ))),
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let decoded = parse_swig_instruction(context.data(), &accounts)
             .map_err(|err| VisualSignError::DecodeError(err.to_string()))?;

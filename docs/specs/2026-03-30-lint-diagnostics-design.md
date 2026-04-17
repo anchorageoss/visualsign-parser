@@ -54,7 +54,7 @@ Diagnostic {
 pub fn create_diagnostic_field(
     rule: &str,
     domain: &str,
-    level: &str,
+    level: Severity,
     message: &str,
     instruction_index: Option<u32>,
 ) -> AnnotatedPayloadField
