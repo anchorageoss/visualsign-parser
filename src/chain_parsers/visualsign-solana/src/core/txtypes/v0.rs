@@ -128,16 +128,25 @@ pub fn decode_v0_instructions(
     let account_keys = &v0_message.account_keys;
 
     if account_keys.is_empty() {
+        let severity = lint_config.severity_for(
+            "transaction::empty_account_keys",
+            visualsign::lint::Severity::Error,
+        );
+        let diagnostics = if matches!(severity, visualsign::lint::Severity::Allow) {
+            Vec::new()
+        } else {
+            vec![create_diagnostic_field(
+                "transaction::empty_account_keys",
+                "transaction",
+                severity,
+                "v0 transaction has no account keys",
+                None,
+            )]
+        };
         return DecodeInstructionsResult {
             fields: Vec::new(),
             errors: Vec::new(),
-            diagnostics: vec![create_diagnostic_field(
-                "transaction::empty_account_keys",
-                "transaction",
-                visualsign::lint::Severity::Error,
-                "v0 transaction has no account keys",
-                None,
-            )],
+            diagnostics,
         };
     }
 
