@@ -865,9 +865,10 @@ fn visualize_inner_instruction(instruction: Instruction) -> Option<String> {
     for meta in &instruction.accounts {
         account_keys.push(meta.pubkey);
     }
+    let num_accounts = u8::try_from(instruction.accounts.len()).ok()?;
     let compiled = solana_sdk::instruction::CompiledInstruction {
         program_id_index: 0,
-        accounts: (1..=instruction.accounts.len() as u8).collect(),
+        accounts: (1..=num_accounts).collect(),
         data: instruction.data.clone(),
     };
 

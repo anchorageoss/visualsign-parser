@@ -20,6 +20,34 @@ use visualsign::{
     },
 };
 
+/// Append decode errors as diagnostics and lint diagnostics to the output fields.
+/// decode::visualizer_error is intentionally not routed through LintConfig --
+/// visualizer failures are always surfaced so consumers know which
+/// instructions could not be decoded.
+fn append_diagnostics(
+    fields: &mut Vec<SignablePayloadField>,
+    result: &instructions::DecodeInstructionsResult,
+) {
+    for (idx, err) in &result.errors {
+        fields.push(
+            visualsign::field_builders::create_diagnostic_field(
+                "decode::visualizer_error",
+                "decode",
+                visualsign::lint::Severity::Error,
+                &format!("instruction {idx}: {err}"),
+                Some(*idx as u32),
+            )
+            .signable_payload_field,
+        );
+    }
+    fields.extend(
+        result
+            .diagnostics
+            .iter()
+            .map(|e| e.signable_payload_field.clone()),
+    );
+}
+
 /// Wrapper around Solana's transaction types that implements the Transaction trait
 #[derive(Debug, Clone)]
 pub enum SolanaTransactionWrapper {
@@ -260,30 +288,7 @@ fn convert_to_visual_sign_payload(
     // Add Accounts field at the bottom using PreviewLayout instead of ListLayout
     fields.push(preview_layout_advanced);
 
-    // Surface per-instruction errors as diagnostics.
-    // decode::visualizer_error is intentionally not routed through LintConfig --
-    // visualizer failures are always surfaced so consumers know which
-    // instructions could not be decoded.
-    for (idx, err) in &decode_result.errors {
-        fields.push(
-            visualsign::field_builders::create_diagnostic_field(
-                "decode::visualizer_error",
-                "decode",
-                visualsign::lint::Severity::Error,
-                &format!("instruction {idx}: {err}"),
-                Some(*idx as u32),
-            )
-            .signable_payload_field,
-        );
-    }
-
-    // Append lint diagnostics after all display fields and error diagnostics
-    fields.extend(
-        decode_result
-            .diagnostics
-            .iter()
-            .map(|e| e.signable_payload_field.clone()),
-    );
+    append_diagnostics(&mut fields, &decode_result);
 
     Ok(SignablePayload::new(
         0,
@@ -399,30 +404,7 @@ fn convert_v0_to_visual_sign_payload(
     let preview_layout_advanced = create_accounts_advanced_preview_layout("Accounts", &accounts)?;
     fields.push(preview_layout_advanced);
 
-    // Surface per-instruction errors as diagnostics.
-    // decode::visualizer_error is intentionally not routed through LintConfig --
-    // visualizer failures are always surfaced so consumers know which
-    // instructions could not be decoded.
-    for (idx, err) in &v0_result.errors {
-        fields.push(
-            visualsign::field_builders::create_diagnostic_field(
-                "decode::visualizer_error",
-                "decode",
-                visualsign::lint::Severity::Error,
-                &format!("instruction {idx}: {err}"),
-                Some(*idx as u32),
-            )
-            .signable_payload_field,
-        );
-    }
-
-    // Append lint diagnostics after all display fields and error diagnostics
-    fields.extend(
-        v0_result
-            .diagnostics
-            .iter()
-            .map(|e| e.signable_payload_field.clone()),
-    );
+    append_diagnostics(&mut fields, &v0_result);
 
     Ok(SignablePayload::new(
         0,

@@ -1,6 +1,6 @@
 use crate::core::{
-    InstructionVisualizer, SolanaAccount, VisualizerContext, available_visualizers,
-    visualize_with_any,
+    DecodeInstructionsResult, InstructionVisualizer, SolanaAccount, VisualizerContext,
+    available_visualizers, visualize_with_any,
 };
 use solana_sdk::transaction::VersionedTransaction;
 use visualsign::{
@@ -112,14 +112,6 @@ pub fn decode_v0_transfers(
     Ok(fields)
 }
 
-/// Result of decoding v0 instructions: display fields, per-instruction errors,
-/// and lint diagnostics separately.
-pub struct DecodeV0InstructionsResult {
-    pub fields: Vec<AnnotatedPayloadField>,
-    pub errors: Vec<(usize, VisualSignError)>,
-    pub diagnostics: Vec<AnnotatedPayloadField>,
-}
-
 /// Decode V0 transaction instructions using the visualizer framework.
 /// This works for all V0 transactions, including those with lookup tables.
 /// Always succeeds -- data quality issues become diagnostics, per-instruction
@@ -128,7 +120,7 @@ pub fn decode_v0_instructions(
     v0_message: &solana_sdk::message::v0::Message,
     idl_registry: &crate::idl::IdlRegistry,
     lint_config: &visualsign::lint::LintConfig,
-) -> DecodeV0InstructionsResult {
+) -> DecodeInstructionsResult {
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
     let visualizers_refs: Vec<&dyn InstructionVisualizer> =
         visualizers.iter().map(|v| v.as_ref()).collect::<Vec<_>>();
@@ -136,7 +128,7 @@ pub fn decode_v0_instructions(
     let account_keys = &v0_message.account_keys;
 
     if account_keys.is_empty() {
-        return DecodeV0InstructionsResult {
+        return DecodeInstructionsResult {
             fields: Vec::new(),
             errors: Vec::new(),
             diagnostics: vec![create_diagnostic_field(
@@ -182,7 +174,7 @@ pub fn decode_v0_instructions(
         }
     }
 
-    DecodeV0InstructionsResult {
+    DecodeInstructionsResult {
         fields,
         errors,
         diagnostics,

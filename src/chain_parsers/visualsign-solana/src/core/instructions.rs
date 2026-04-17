@@ -116,7 +116,7 @@ pub fn scan_instruction_diagnostics(
                 diagnostics.push(create_diagnostic_field(
                     "transaction::oob_program_id",
                     "transaction",
-                    oob_pid_severity.clone(),
+                    oob_pid_severity,
                     &format!(
                         "instruction {}: program_id_index {} out of bounds ({} account keys)",
                         ci_index,
@@ -141,7 +141,7 @@ pub fn scan_instruction_diagnostics(
                 diagnostics.push(create_diagnostic_field(
                     "transaction::oob_account_index",
                     "transaction",
-                    oob_acct_severity.clone(),
+                    oob_acct_severity,
                     &format!(
                         "instruction {}: account indices {:?} out of bounds ({} account keys)",
                         ci_index,
