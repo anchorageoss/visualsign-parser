@@ -157,7 +157,9 @@ impl InstructionVisualizer for JupiterSwapVisualizer {
 /// Jupiter v6 IDL refreshed from mainnet.
 /// Kept locally (not sourced from `solana_parser::ProgramType`) so we can pick up
 /// newer instructions like `route_v2` without bumping the upstream rev.
-const JUPITER_IDL_JSON: &str = include_str!("jupiter_agg_v6.json");
+/// Also used to override the stale IDL bundled inside `solana_parser` when that
+/// crate parses a full transaction (see `decode_v0_transfers`).
+pub(crate) const JUPITER_IDL_JSON: &str = include_str!("jupiter_agg_v6.json");
 
 fn get_jupiter_idl() -> Option<Idl> {
     decode_idl_data(JUPITER_IDL_JSON).ok()
