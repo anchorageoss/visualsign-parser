@@ -1,10 +1,10 @@
-use super::JUPITER_LEND_PROGRAM_ID;
+use super::JUPITER_EARN_PROGRAM_ID;
 use crate::core::{SolanaIntegrationConfig, SolanaIntegrationConfigData};
 use std::collections::HashMap;
 
-pub struct JupiterLendConfig;
+pub struct JupiterEarnConfig;
 
-impl SolanaIntegrationConfig for JupiterLendConfig {
+impl SolanaIntegrationConfig for JupiterEarnConfig {
     fn new() -> Self {
         Self
     }
@@ -15,7 +15,7 @@ impl SolanaIntegrationConfig for JupiterLendConfig {
             let mut programs = HashMap::new();
             let mut instructions = HashMap::new();
             instructions.insert("*", vec!["*"]);
-            programs.insert(JUPITER_LEND_PROGRAM_ID, instructions);
+            programs.insert(JUPITER_EARN_PROGRAM_ID, instructions);
             SolanaIntegrationConfigData { programs }
         })
     }
