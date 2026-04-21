@@ -6,3 +6,4 @@ pub mod swig_wallet;
 pub mod system;
 pub mod token_2022;
 pub mod unknown_program;
+pub mod dflow_aggregator;
