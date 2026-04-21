@@ -1,11 +1,11 @@
-//! Jupiter Lend preset implementation for Solana
+//! Jupiter Earn preset implementation for Solana
 
 mod config;
 
 use crate::core::{
     InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
 };
-use config::JupiterLendConfig;
+use config::JupiterEarnConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
@@ -17,15 +17,15 @@ use visualsign::{
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
 };
 
-pub(crate) const JUPITER_LEND_PROGRAM_ID: &str = "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9";
+pub(crate) const JUPITER_EARN_PROGRAM_ID: &str = "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9";
 
-const JUPITER_LEND_IDL_JSON: &str = include_str!("jupiter_lend.json");
+const JUPITER_EARN_IDL_JSON: &str = include_str!("jupiter_earn.json");
 
-static JUPITER_LEND_CONFIG: JupiterLendConfig = JupiterLendConfig;
+static JUPITER_EARN_CONFIG: JupiterEarnConfig = JupiterEarnConfig;
 
-pub struct JupiterLendVisualizer;
+pub struct JupiterEarnVisualizer;
 
-impl InstructionVisualizer for JupiterLendVisualizer {
+impl InstructionVisualizer for JupiterEarnVisualizer {
     fn visualize_tx_commands(
         &self,
         context: &VisualizerContext,
@@ -40,7 +40,7 @@ impl InstructionVisualizer for JupiterLendVisualizer {
             instruction.program_id,
         );
 
-        let parsed = parse_jupiter_lend_instruction(&instruction.data, &instruction.accounts);
+        let parsed = parse_jupiter_earn_instruction(&instruction.data, &instruction.accounts);
 
         let (title, condensed_fields, expanded_fields) = match parsed {
             Ok(parsed) => build_parsed_fields(&parsed, &instruction.program_id.to_string()),
@@ -79,32 +79,32 @@ impl InstructionVisualizer for JupiterLendVisualizer {
     }
 
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
-        Some(&JUPITER_LEND_CONFIG)
+        Some(&JUPITER_EARN_CONFIG)
     }
 
     fn kind(&self) -> VisualizerKind {
-        VisualizerKind::Lending("Jupiter Lend")
+        VisualizerKind::Lending("Jupiter Earn")
     }
 }
 
-fn get_jupiter_lend_idl() -> Option<Idl> {
-    decode_idl_data(JUPITER_LEND_IDL_JSON).ok()
+fn get_jupiter_earn_idl() -> Option<Idl> {
+    decode_idl_data(JUPITER_EARN_IDL_JSON).ok()
 }
 
-fn parse_jupiter_lend_instruction(
+fn parse_jupiter_earn_instruction(
     data: &[u8],
     accounts: &[solana_sdk::instruction::AccountMeta],
-) -> Result<JupiterLendParsedInstruction, Box<dyn std::error::Error>> {
+) -> Result<JupiterEarnParsedInstruction, Box<dyn std::error::Error>> {
     if data.len() < 8 {
         return Err("Invalid instruction data length".into());
     }
 
-    let idl = get_jupiter_lend_idl().ok_or("Jupiter Lend IDL not available")?;
-    let parsed = parse_instruction_with_idl(data, JUPITER_LEND_PROGRAM_ID, &idl)?;
+    let idl = get_jupiter_earn_idl().ok_or("Jupiter Earn IDL not available")?;
+    let parsed = parse_instruction_with_idl(data, JUPITER_EARN_PROGRAM_ID, &idl)?;
 
     let named_accounts = build_named_accounts(data, &idl, accounts);
 
-    Ok(JupiterLendParsedInstruction {
+    Ok(JupiterEarnParsedInstruction {
         parsed,
         named_accounts,
     })
@@ -134,13 +134,13 @@ fn build_named_accounts(
     named_accounts
 }
 
-struct JupiterLendParsedInstruction {
+struct JupiterEarnParsedInstruction {
     parsed: SolanaParsedInstructionData,
     named_accounts: HashMap<String, String>,
 }
 
 fn build_parsed_fields(
-    instruction: &JupiterLendParsedInstruction,
+    instruction: &JupiterEarnParsedInstruction,
     program_id: &str,
 ) -> (
     String,
@@ -148,12 +148,12 @@ fn build_parsed_fields(
     Vec<AnnotatedPayloadField>,
 ) {
     let parsed = &instruction.parsed;
-    let title = format!("Jupiter Lend: {}", parsed.instruction_name);
+    let title = format!("Jupiter Earn: {}", parsed.instruction_name);
 
     let mut condensed_fields = vec![];
     let mut expanded_fields = vec![];
 
-    if let Ok(f) = create_text_field("Program", "Jupiter Lend") {
+    if let Ok(f) = create_text_field("Program", "Jupiter Earn") {
         condensed_fields.push(f);
     }
     if let Ok(f) = create_text_field("Instruction", &parsed.instruction_name) {
@@ -197,12 +197,12 @@ fn build_fallback_fields(
     Vec<AnnotatedPayloadField>,
     Vec<AnnotatedPayloadField>,
 ) {
-    let title = "Jupiter Lend: Unknown Instruction".to_string();
+    let title = "Jupiter Earn: Unknown Instruction".to_string();
 
     let mut condensed_fields = vec![];
     let mut expanded_fields = vec![];
 
-    if let Ok(f) = create_text_field("Program", "Jupiter Lend") {
+    if let Ok(f) = create_text_field("Program", "Jupiter Earn") {
         condensed_fields.push(f);
     }
     if let Ok(f) = create_text_field("Status", "Unknown instruction type") {
@@ -246,16 +246,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_jupiter_lend_idl_loads() {
-        let idl = get_jupiter_lend_idl();
-        assert!(idl.is_some(), "Jupiter Lend IDL should load successfully");
+    fn test_jupiter_earn_idl_loads() {
+        let idl = get_jupiter_earn_idl();
+        assert!(idl.is_some(), "Jupiter Earn IDL should load successfully");
         let idl = idl.unwrap();
         assert!(!idl.instructions.is_empty(), "IDL should have instructions");
     }
 
     #[test]
-    fn test_jupiter_lend_idl_has_discriminators() {
-        let idl = get_jupiter_lend_idl().unwrap();
+    fn test_jupiter_earn_idl_has_discriminators() {
+        let idl = get_jupiter_earn_idl().unwrap();
         for instruction in &idl.instructions {
             assert!(
                 instruction.discriminator.is_some(),
@@ -276,7 +276,7 @@ mod tests {
     fn test_unknown_discriminator_returns_error() {
         let garbage_data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09];
         let accounts = vec![];
-        let result = parse_jupiter_lend_instruction(&garbage_data, &accounts);
+        let result = parse_jupiter_earn_instruction(&garbage_data, &accounts);
         assert!(result.is_err(), "Unknown discriminator should return error");
     }
 
@@ -284,7 +284,7 @@ mod tests {
     fn test_short_data_returns_error() {
         let short_data = [0x01, 0x02, 0x03];
         let accounts = vec![];
-        let result = parse_jupiter_lend_instruction(&short_data, &accounts);
+        let result = parse_jupiter_earn_instruction(&short_data, &accounts);
         assert!(result.is_err(), "Short data should return error");
     }
 }
