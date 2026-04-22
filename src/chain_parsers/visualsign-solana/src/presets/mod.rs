@@ -8,6 +8,7 @@ pub mod kamino_borrow;
 pub mod kamino_farms;
 pub mod kamino_vault;
 pub mod meteora_damm_v2;
+pub mod meteora_dlmm;
 pub mod neutral_trade;
 pub mod onre_app;
 pub mod stakepool;
