@@ -1,0 +1,926 @@
+{
+  "accounts": [
+    {
+      "name": "ConditionalVault",
+      "type": {
+        "fields": [
+          {
+            "name": "question",
+            "type": "publicKey"
+          },
+          {
+            "name": "underlyingTokenMint",
+            "type": "publicKey"
+          },
+          {
+            "name": "underlyingTokenAccount",
+            "type": "publicKey"
+          },
+          {
+            "name": "conditionalTokenMints",
+            "type": {
+              "vec": "publicKey"
+            }
+          },
+          {
+            "name": "pdaBump",
+            "type": "u8"
+          },
+          {
+            "name": "decimals",
+            "type": "u8"
+          },
+          {
+            "name": "seqNum",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "docs": [
+        "Questions represent statements about future events.",
+        "",
+        "These statements include:",
+        "- \"Will this proposal pass?\"",
+        "- \"Who, if anyone, will be hired?\"",
+        "- \"How effective will the grant committee deem this grant?\"",
+        "",
+        "Questions have 2 or more possible outcomes. For a question like \"will this",
+        "proposal pass,\" the outcomes are \"yes\" and \"no.\" For a question like \"who",
+        "will be hired,\" the outcomes could be \"Alice,\" \"Bob,\" and \"neither.\"",
+        "",
+        "Outcomes resolve to a number between 0 and 1. Binary questions like \"will",
+        "this proposal pass\" have outcomes that resolve to exactly 0 or 1. You can",
+        "also have questions with scalar outcomes. For example, the question \"how",
+        "effective will the grant committee deem this grant\" could have two outcomes:",
+        "\"ineffective\" and \"effective.\" If the grant committee deems the grant 70%",
+        "effective, the \"effective\" outcome would resolve to 0.7 and the \"ineffective\"",
+        "outcome would resolve to 0.3.",
+        "",
+        "Once resolved, the sum of all outcome resolutions is exactly 1."
+      ],
+      "name": "Question",
+      "type": {
+        "fields": [
+          {
+            "name": "questionId",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "oracle",
+            "type": "publicKey"
+          },
+          {
+            "name": "payoutNumerators",
+            "type": {
+              "vec": "u32"
+            }
+          },
+          {
+            "name": "payoutDenominator",
+            "type": "u32"
+          }
+        ],
+        "kind": "struct"
+      }
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "msg": "An assertion failed",
+      "name": "AssertFailed"
+    },
+    {
+      "code": 6001,
+      "msg": "Insufficient underlying token balance to mint this amount of conditional tokens",
+      "name": "InsufficientUnderlyingTokens"
+    },
+    {
+      "code": 6002,
+      "msg": "Insufficient conditional token balance to merge this `amount`",
+      "name": "InsufficientConditionalTokens"
+    },
+    {
+      "code": 6003,
+      "msg": "This `vault_underlying_token_account` is not this vault's `underlying_token_account`",
+      "name": "InvalidVaultUnderlyingTokenAccount"
+    },
+    {
+      "code": 6004,
+      "msg": "This conditional token mint is not this vault's conditional token mint",
+      "name": "InvalidConditionalTokenMint"
+    },
+    {
+      "code": 6005,
+      "msg": "Question needs to be resolved before users can redeem conditional tokens for underlying tokens",
+      "name": "CantRedeemConditionalTokens"
+    },
+    {
+      "code": 6006,
+      "msg": "Questions need 2 or more conditions",
+      "name": "InsufficientNumConditions"
+    },
+    {
+      "code": 6007,
+      "msg": "Invalid number of payout numerators",
+      "name": "InvalidNumPayoutNumerators"
+    },
+    {
+      "code": 6008,
+      "msg": "Client needs to pass in the list of conditional mints for a vault followed by the user's token accounts for those tokens",
+      "name": "InvalidConditionals"
+    },
+    {
+      "code": 6009,
+      "msg": "Conditional mint not in vault",
+      "name": "ConditionalMintMismatch"
+    },
+    {
+      "code": 6010,
+      "msg": "Unable to deserialize a conditional token mint",
+      "name": "BadConditionalMint"
+    },
+    {
+      "code": 6011,
+      "msg": "Unable to deserialize a conditional token account",
+      "name": "BadConditionalTokenAccount"
+    },
+    {
+      "code": 6012,
+      "msg": "User conditional token account mint does not match conditional mint",
+      "name": "ConditionalTokenMintMismatch"
+    },
+    {
+      "code": 6013,
+      "msg": "Payouts must sum to 1 or more",
+      "name": "PayoutZero"
+    },
+    {
+      "code": 6014,
+      "msg": "Question already resolved",
+      "name": "QuestionAlreadyResolved"
+    },
+    {
+      "code": 6015,
+      "msg": "Conditional token metadata already set",
+      "name": "ConditionalTokenMetadataAlreadySet"
+    },
+    {
+      "code": 6016,
+      "msg": "Conditional token account is not owned by the authority",
+      "name": "UnauthorizedConditionalTokenAccount"
+    },
+    {
+      "code": 6017,
+      "msg": "Payout numerators are too large, causing an overflow",
+      "name": "InvalidPayoutNumerators"
+    },
+    {
+      "code": 6018,
+      "msg": "Questions can only have up to 10 outcomes",
+      "name": "TooManyOutcomes"
+    }
+  ],
+  "events": [
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "vault",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "conditionalTokenMint",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "conditionalTokenMetadata",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "index": false,
+          "name": "symbol",
+          "type": "string"
+        },
+        {
+          "index": false,
+          "name": "uri",
+          "type": "string"
+        },
+        {
+          "index": false,
+          "name": "seqNum",
+          "type": "u64"
+        }
+      ],
+      "name": "AddMetadataToConditionalTokensEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "vault",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "question",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "underlyingTokenMint",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "vaultUnderlyingTokenAccount",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "conditionalTokenMints",
+          "type": {
+            "vec": "publicKey"
+          }
+        },
+        {
+          "index": false,
+          "name": "pdaBump",
+          "type": "u8"
+        },
+        {
+          "index": false,
+          "name": "seqNum",
+          "type": "u64"
+        }
+      ],
+      "name": "InitializeConditionalVaultEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "questionId",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "index": false,
+          "name": "oracle",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "numOutcomes",
+          "type": "u8"
+        },
+        {
+          "index": false,
+          "name": "question",
+          "type": "publicKey"
+        }
+      ],
+      "name": "InitializeQuestionEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "user",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "vault",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postUserUnderlyingBalance",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postVaultUnderlyingBalance",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postUserConditionalTokenBalances",
+          "type": {
+            "vec": "u64"
+          }
+        },
+        {
+          "index": false,
+          "name": "postConditionalTokenSupplies",
+          "type": {
+            "vec": "u64"
+          }
+        },
+        {
+          "index": false,
+          "name": "seqNum",
+          "type": "u64"
+        }
+      ],
+      "name": "MergeTokensEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "user",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "vault",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postUserUnderlyingBalance",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postVaultUnderlyingBalance",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postConditionalTokenSupplies",
+          "type": {
+            "vec": "u64"
+          }
+        },
+        {
+          "index": false,
+          "name": "seqNum",
+          "type": "u64"
+        }
+      ],
+      "name": "RedeemTokensEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "question",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "payoutNumerators",
+          "type": {
+            "vec": "u32"
+          }
+        }
+      ],
+      "name": "ResolveQuestionEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "user",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "vault",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postUserUnderlyingBalance",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postVaultUnderlyingBalance",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postUserConditionalTokenBalances",
+          "type": {
+            "vec": "u64"
+          }
+        },
+        {
+          "index": false,
+          "name": "postConditionalTokenSupplies",
+          "type": {
+            "vec": "u64"
+          }
+        },
+        {
+          "index": false,
+          "name": "seqNum",
+          "type": "u64"
+        }
+      ],
+      "name": "SplitTokensEvent"
+    }
+  ],
+  "instructions": [
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "question"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "payer"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": "InitializeQuestionArgs"
+          }
+        }
+      ],
+      "name": "initializeQuestion"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "question"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "oracle"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": "ResolveQuestionArgs"
+          }
+        }
+      ],
+      "name": "resolveQuestion"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "vault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "question"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "underlyingTokenMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "vaultUnderlyingTokenAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "payer"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "associatedTokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [],
+      "name": "initializeConditionalVault"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "question"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "vault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "vaultUnderlyingTokenAccount"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "authority"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userUnderlyingTokenAccount"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ],
+      "name": "splitTokens"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "question"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "vault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "vaultUnderlyingTokenAccount"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "authority"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userUnderlyingTokenAccount"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ],
+      "name": "mergeTokens"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "question"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "vault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "vaultUnderlyingTokenAccount"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "authority"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userUnderlyingTokenAccount"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [],
+      "name": "redeemTokens"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "payer"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "vault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "conditionalTokenMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "conditionalTokenMetadata"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenMetadataProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "rent"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": "AddMetadataToConditionalTokensArgs"
+          }
+        }
+      ],
+      "name": "addMetadataToConditionalTokens"
+    }
+  ],
+  "name": "conditional_vault",
+  "types": [
+    {
+      "name": "CommonFields",
+      "type": {
+        "fields": [
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "unixTimestamp",
+            "type": "i64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "AddMetadataToConditionalTokensArgs",
+      "type": {
+        "fields": [
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "type": "string"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "InitializeQuestionArgs",
+      "type": {
+        "fields": [
+          {
+            "name": "questionId",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "oracle",
+            "type": "publicKey"
+          },
+          {
+            "name": "numOutcomes",
+            "type": "u8"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "ResolveQuestionArgs",
+      "type": {
+        "fields": [
+          {
+            "name": "payoutNumerators",
+            "type": {
+              "vec": "u32"
+            }
+          }
+        ],
+        "kind": "struct"
+      }
+    }
+  ],
+  "version": "0.4.0"
+}
