@@ -16,7 +16,8 @@ pub(crate) struct Args {
         short,
         long,
         value_name = "RAW_TX",
-        help = "Raw transaction hex string"
+        help = "Raw transaction string. Prefix with '@' to read from a file \
+                (e.g. '@/path/to/tx.hex'), or use '@-' to read from stdin."
     )]
     transaction: String,
 
@@ -326,9 +327,17 @@ impl Cli {
             }),
         };
 
+        let raw_tx = match crate::tx_input::resolve_transaction_input(&args.transaction) {
+            Ok(tx) => tx,
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
+        };
+
         parse_and_display(
             &args.chain,
-            &args.transaction,
+            &raw_tx,
             &registry,
             options,
             args.output,
