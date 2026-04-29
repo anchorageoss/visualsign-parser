@@ -18,12 +18,18 @@ pub fn resolve_transaction_input(input: &str) -> Result<String, String> {
         return Ok(input.to_string());
     };
 
-    let raw = if rest == "-" {
-        read_bounded(std::io::stdin().lock(), "<stdin>")?
-    } else {
-        let file = std::fs::File::open(rest)
-            .map_err(|e| format!("Failed to open transaction file '{rest}': {e}"))?;
-        read_bounded(file, rest)?
+    let raw = match rest {
+        "" => {
+            return Err(
+                "'@' must be followed by a path, or use '@-' to read from stdin".to_string(),
+            );
+        }
+        "-" => read_bounded(std::io::stdin().lock(), "<stdin>")?,
+        path => {
+            let file = std::fs::File::open(path)
+                .map_err(|e| format!("Failed to open transaction file '{path}': {e}"))?;
+            read_bounded(file, path)?
+        }
     };
 
     Ok(raw.trim().to_string())
@@ -47,6 +53,7 @@ fn read_bounded<R: Read>(reader: R, source: &str) -> Result<String, String> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use crate::test_utils::write_temp_json;
     use std::io::{Cursor, Write};
 
     #[test]
@@ -57,18 +64,7 @@ mod tests {
 
     #[test]
     fn reads_from_file_and_trims_whitespace() {
-        let dir = std::env::temp_dir().join("vsp_tx_input_tests");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(format!(
-            "tx_{}_{}.hex",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::write(&path, "  0xdeadbeef\n\n").unwrap();
-
+        let path = write_temp_json("vsp_tx_input_tests", "tx.hex", "  0xdeadbeef\n\n");
         let arg = format!("@{}", path.display());
         assert_eq!(resolve_transaction_input(&arg).unwrap(), "0xdeadbeef");
     }
@@ -83,20 +79,17 @@ mod tests {
     }
 
     #[test]
+    fn empty_at_returns_clear_error() {
+        let err = resolve_transaction_input("@").unwrap_err();
+        assert!(err.contains("must be followed by a path"), "got: {err}");
+    }
+
+    #[test]
     fn oversized_input_returns_error() {
         let limit = usize::try_from(MAX_TRANSACTION_INPUT_SIZE).unwrap();
         let oversized = vec![b'a'; limit + 16];
         let err = read_bounded(Cursor::new(oversized), "<test>").unwrap_err();
         assert!(err.contains("exceeds maximum size"), "got: {err}");
-    }
-
-    #[test]
-    fn at_dash_alone_is_stdin_marker() {
-        // Sanity: the `@-` path is exercised end-to-end in an integration test;
-        // here we just confirm `@-` is not treated as a literal.
-        // We can't easily inject stdin in a unit test without process boundaries,
-        // so verify via the stripped-prefix check.
-        assert_eq!("@-".strip_prefix('@'), Some("-"));
     }
 
     #[test]
@@ -112,7 +105,6 @@ mod tests {
 
     #[test]
     fn write_via_pipe_then_read_bounded() {
-        // Smoke test that read_bounded works on arbitrary Read implementations.
         let mut cur = Cursor::new(Vec::new());
         cur.write_all(b"  hello  \n").unwrap();
         cur.set_position(0);
