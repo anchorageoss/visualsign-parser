@@ -9,7 +9,9 @@ use config::DflowAggregatorConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use std::collections::HashMap;
+use solana_sdk::instruction::AccountMeta;
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -34,24 +36,22 @@ impl InstructionVisualizer for DflowAggregatorVisualizer {
             .current_instruction()
             .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
 
+        let program_id = instruction.program_id.to_string();
         let instruction_data_hex = hex::encode(&instruction.data);
-        let fallback_text = format!(
-            "Program ID: {}\nData: {instruction_data_hex}",
-            instruction.program_id,
-        );
+        let fallback_text = format!("Program ID: {program_id}\nData: {instruction_data_hex}");
 
         let parsed = parse_dflow_aggregator_instruction(&instruction.data, &instruction.accounts);
 
         let (title, condensed_fields, expanded_fields) = match parsed {
-            Ok(parsed) => build_parsed_fields(&parsed, &instruction.program_id.to_string()),
-            Err(_) => build_fallback_fields(&instruction.program_id.to_string()),
+            Ok(parsed) => build_parsed_fields(&parsed, &program_id)?,
+            Err(_) => build_fallback_fields(&program_id)?,
         };
 
         let condensed = SignablePayloadFieldListLayout {
             fields: condensed_fields,
         };
         let expanded_with_raw =
-            append_raw_data(expanded_fields, &instruction.data, &instruction_data_hex);
+            append_raw_data(expanded_fields, &instruction.data, &instruction_data_hex)?;
         let expanded = SignablePayloadFieldListLayout {
             fields: expanded_with_raw,
         };
@@ -65,12 +65,13 @@ impl InstructionVisualizer for DflowAggregatorVisualizer {
             expanded: Some(expanded),
         };
 
+        let index = context.instruction_index() + 1;
         Ok(AnnotatedPayloadField {
             static_annotation: None,
             dynamic_annotation: None,
             signable_payload_field: SignablePayloadField::PreviewLayout {
                 common: SignablePayloadFieldCommon {
-                    label: format!("Instruction {}", context.instruction_index() + 1),
+                    label: format!("Instruction {index}"),
                     fallback_text,
                 },
                 preview_layout,
@@ -87,22 +88,24 @@ impl InstructionVisualizer for DflowAggregatorVisualizer {
     }
 }
 
-fn get_dflow_aggregator_idl() -> Option<Idl> {
-    decode_idl_data(DFLOW_AGGREGATOR_IDL_JSON).ok()
+fn get_dflow_aggregator_idl() -> Option<&'static Idl> {
+    static IDL: OnceLock<Option<Idl>> = OnceLock::new();
+    IDL.get_or_init(|| decode_idl_data(DFLOW_AGGREGATOR_IDL_JSON).ok())
+        .as_ref()
 }
 
 fn parse_dflow_aggregator_instruction(
     data: &[u8],
-    accounts: &[solana_sdk::instruction::AccountMeta],
+    accounts: &[AccountMeta],
 ) -> Result<DflowAggregatorParsedInstruction, Box<dyn std::error::Error>> {
     if data.len() < 8 {
         return Err("Invalid instruction data length".into());
     }
 
     let idl = get_dflow_aggregator_idl().ok_or("DFlow Aggregator IDL not available")?;
-    let parsed = parse_instruction_with_idl(data, DFLOW_AGGREGATOR_PROGRAM_ID, &idl)?;
+    let parsed = parse_instruction_with_idl(data, DFLOW_AGGREGATOR_PROGRAM_ID, idl)?;
 
-    let named_accounts = build_named_accounts(data, &idl, accounts);
+    let named_accounts = build_named_accounts(data, idl, accounts);
 
     Ok(DflowAggregatorParsedInstruction {
         parsed,
@@ -113,14 +116,14 @@ fn parse_dflow_aggregator_instruction(
 fn build_named_accounts(
     data: &[u8],
     idl: &Idl,
-    accounts: &[solana_sdk::instruction::AccountMeta],
-) -> HashMap<String, String> {
-    let mut named_accounts = HashMap::new();
+    accounts: &[AccountMeta],
+) -> BTreeMap<String, String> {
+    let mut named_accounts = BTreeMap::new();
 
     let idl_instruction = idl.instructions.iter().find(|inst| {
         inst.discriminator
             .as_ref()
-            .is_some_and(|disc| data.len() >= disc.len() && data[..disc.len()] == *disc)
+            .is_some_and(|disc| data.get(..disc.len()) == Some(disc.as_slice()))
     });
 
     if let Some(idl_instruction) = idl_instruction {
@@ -136,98 +139,79 @@ fn build_named_accounts(
 
 struct DflowAggregatorParsedInstruction {
     parsed: SolanaParsedInstructionData,
-    named_accounts: HashMap<String, String>,
+    named_accounts: BTreeMap<String, String>,
 }
 
 fn build_parsed_fields(
     instruction: &DflowAggregatorParsedInstruction,
     program_id: &str,
-) -> (
-    String,
-    Vec<AnnotatedPayloadField>,
-    Vec<AnnotatedPayloadField>,
-) {
+) -> Result<
+    (
+        String,
+        Vec<AnnotatedPayloadField>,
+        Vec<AnnotatedPayloadField>,
+    ),
+    VisualSignError,
+> {
     let parsed = &instruction.parsed;
-    let title = format!("DFlow Aggregator: {}", parsed.instruction_name);
+    let instruction_name = &parsed.instruction_name;
+    let title = format!("DFlow Aggregator: {instruction_name}");
 
     let mut condensed_fields = vec![];
     let mut expanded_fields = vec![];
 
-    if let Ok(f) = create_text_field("Program", "DFlow Aggregator") {
-        condensed_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Instruction", &parsed.instruction_name) {
-        condensed_fields.push(f);
-    }
+    condensed_fields.push(create_text_field("Program", "DFlow Aggregator")?);
+    condensed_fields.push(create_text_field("Instruction", instruction_name)?);
     for (key, value) in &parsed.program_call_args {
-        if let Ok(f) = create_text_field(key, &format_arg_value(value)) {
-            condensed_fields.push(f);
-        }
+        condensed_fields.push(create_text_field(key, &format_arg_value(value))?);
     }
 
-    if let Ok(f) = create_text_field("Program ID", program_id) {
-        expanded_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Instruction", &parsed.instruction_name) {
-        expanded_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Discriminator", &parsed.discriminator) {
-        expanded_fields.push(f);
-    }
+    expanded_fields.push(create_text_field("Program ID", program_id)?);
+    expanded_fields.push(create_text_field("Instruction", instruction_name)?);
+    expanded_fields.push(create_text_field("Discriminator", &parsed.discriminator)?);
 
     for (account_name, account_address) in &instruction.named_accounts {
-        if let Ok(f) = create_text_field(account_name, account_address) {
-            expanded_fields.push(f);
-        }
+        expanded_fields.push(create_text_field(account_name, account_address)?);
     }
 
     for (key, value) in &parsed.program_call_args {
-        if let Ok(f) = create_text_field(key, &format_arg_value(value)) {
-            expanded_fields.push(f);
-        }
+        expanded_fields.push(create_text_field(key, &format_arg_value(value))?);
     }
 
-    (title, condensed_fields, expanded_fields)
+    Ok((title, condensed_fields, expanded_fields))
 }
 
 fn build_fallback_fields(
     program_id: &str,
-) -> (
-    String,
-    Vec<AnnotatedPayloadField>,
-    Vec<AnnotatedPayloadField>,
-) {
+) -> Result<
+    (
+        String,
+        Vec<AnnotatedPayloadField>,
+        Vec<AnnotatedPayloadField>,
+    ),
+    VisualSignError,
+> {
     let title = "DFlow Aggregator: Unknown Instruction".to_string();
 
     let mut condensed_fields = vec![];
     let mut expanded_fields = vec![];
 
-    if let Ok(f) = create_text_field("Program", "DFlow Aggregator") {
-        condensed_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Status", "Unknown instruction type") {
-        condensed_fields.push(f);
-    }
+    condensed_fields.push(create_text_field("Program", "DFlow Aggregator")?);
+    condensed_fields.push(create_text_field("Status", "Unknown instruction type")?);
 
-    if let Ok(f) = create_text_field("Program ID", program_id) {
-        expanded_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Status", "Unknown instruction type") {
-        expanded_fields.push(f);
-    }
+    expanded_fields.push(create_text_field("Program ID", program_id)?);
+    expanded_fields.push(create_text_field("Status", "Unknown instruction type")?);
 
-    (title, condensed_fields, expanded_fields)
+    Ok((title, condensed_fields, expanded_fields))
 }
 
 fn append_raw_data(
     mut fields: Vec<AnnotatedPayloadField>,
     data: &[u8],
     hex_str: &str,
-) -> Vec<AnnotatedPayloadField> {
-    if let Ok(f) = create_raw_data_field(data, Some(hex_str.to_string())) {
-        fields.push(f);
-    }
-    fields
+) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    fields.push(create_raw_data_field(data, Some(hex_str.to_string()))?);
+    Ok(fields)
 }
 
 fn format_arg_value(value: &serde_json::Value) -> String {
