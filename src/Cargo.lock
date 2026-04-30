@@ -6177,6 +6177,7 @@ dependencies = [
 name = "parser_cli"
 version = "0.1.0"
 dependencies = [
+ "axum 0.8.8",
  "bincode",
  "borsh 1.6.0",
  "bs58 0.5.1",
@@ -6186,6 +6187,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "similar",
+ "tokio",
  "tracing",
  "tracing-bunyan-formatter",
  "tracing-log 0.2.0",

@@ -21,6 +21,9 @@ pub mod cli;
 pub mod ethereum;
 /// Common mapping parser for ABI and IDL file mappings.
 pub mod mapping_parser;
+/// Local web UI for browsing decoded transactions from a directory.
+#[cfg(feature = "serve")]
+pub mod serve;
 /// Solana-specific CLI handling: IDL mappings, Solana metadata.
 #[cfg(feature = "solana")]
 pub mod solana;
@@ -45,14 +48,24 @@ pub trait ChainPlugin {
     fn create_metadata(&self, network: Option<String>) -> Result<Option<ChainMetadata>, String>;
 }
 
+/// Per-chain CLI args needed to construct plugins. Populated from whichever
+/// subcommand is running (`decode`, `serve`, …).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PluginArgs {
+    #[cfg(feature = "ethereum")]
+    pub ethereum: ethereum::EthereumArgs,
+    #[cfg(feature = "solana")]
+    pub solana: solana::SolanaArgs,
+}
+
 /// Constructs all enabled chain plugins, each pre-loaded with its CLI args.
 ///
 /// **To add a new chain:** create its module, implement [`ChainPlugin`],
 /// then add one entry here (behind its feature flag) and one
-/// `#[command(flatten)]` field to `cli::Args`.
+/// `#[command(flatten)]` field to whichever subcommand args struct uses it.
 #[must_use]
 #[allow(clippy::vec_init_then_push)] // cfg-gated pushes cannot be expressed as vec![...]
-pub(crate) fn build_plugins(args: &cli::Args) -> Vec<Box<dyn ChainPlugin>> {
+pub(crate) fn build_plugins(args: &PluginArgs) -> Vec<Box<dyn ChainPlugin>> {
     let mut plugins: Vec<Box<dyn ChainPlugin>> = vec![];
 
     #[cfg(feature = "ethereum")]
