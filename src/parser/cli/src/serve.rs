@@ -55,7 +55,7 @@ pub struct ServeArgs {
     pub dir: PathBuf,
 
     /// TCP port to bind on `127.0.0.1`.
-    #[arg(long, default_value_t = 8080, help = "Port to bind on 127.0.0.1")]
+    #[arg(long, default_value_t = 47474, help = "Port to bind on 127.0.0.1")]
     pub port: u16,
 
     /// Ethereum-specific CLI args (ABI mappings, etc.).
