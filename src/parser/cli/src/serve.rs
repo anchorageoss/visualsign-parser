@@ -1,8 +1,14 @@
 //! `serve` subcommand: scans a directory of raw-transaction files, decodes
-//! every file once, and serves a small local web UI for browsing the results.
+//! every file on each request, and serves a small local web UI for browsing
+//! the results. `.json` files are passed through as-is; other files are
+//! decoded as raw transactions through the chain registry.
 //!
 //! The server binds to `127.0.0.1` only — this is intentional, the feature
 //! is for local triage, not network exposure. There is no auth and no TLS.
+//!
+//! Re-decoding happens on every HTTP request rather than once at startup,
+//! so editing a fixture and refreshing the browser is enough to see the
+//! new state — no server restart needed.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,7 +22,6 @@ use axum::{
 };
 use clap::Args;
 use serde::{Deserialize, Serialize};
-use visualsign::SignablePayload;
 use visualsign::registry::TransactionConverterRegistry;
 use visualsign::vsptrait::VisualSignOptions;
 
@@ -78,12 +83,14 @@ impl ServeArgs {
 #[derive(Debug, Clone)]
 struct DecodedEntry {
     rel_path: String,
-    result: Result<SignablePayload, String>,
+    result: Result<serde_json::Value, String>,
 }
 
 #[derive(Clone)]
 struct AppState {
-    entries: Arc<Vec<DecodedEntry>>,
+    dir: Arc<PathBuf>,
+    chain: Arc<String>,
+    runtime: Arc<Runtime>,
 }
 
 #[derive(Deserialize)]
@@ -96,13 +103,15 @@ struct FileResponse<'a> {
     path: &'a str,
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    payload: Option<&'a SignablePayload>,
+    payload: Option<&'a serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<&'a str>,
 }
 
-/// Entry point for the `serve` subcommand. Decodes every file in
-/// `args.dir` once, then serves a small local web UI on `127.0.0.1:port`.
+/// Entry point for the `serve` subcommand. Validates the directory, then
+/// serves a small local web UI on `127.0.0.1:port`. Each request triggers
+/// a fresh re-walk and re-decode of the directory — refresh the browser to
+/// see edits.
 ///
 /// # Panics
 ///
@@ -118,30 +127,17 @@ pub fn execute_serve(args: &ServeArgs) {
         }
     };
 
-    let chain_str = args.chain.clone();
-    let entries = match decode_directory(&args.dir, &chain_str, &runtime) {
-        Ok(es) => es,
-        Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(1);
-        }
-    };
-
-    if entries.is_empty() {
-        eprintln!("No transaction files found in {}", args.dir.display());
-        return;
+    if let Err(e) = validate_dir(&args.dir) {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
     }
 
-    let ok = entries.iter().filter(|e| e.result.is_ok()).count();
-    let err = entries.len() - ok;
-    eprintln!(
-        "Loaded {} entries from {} ({ok} ok, {err} error)",
-        entries.len(),
-        args.dir.display(),
-    );
+    eprintln!("Watching {} (re-decoded per request)", args.dir.display());
 
     let state = AppState {
-        entries: Arc::new(entries),
+        dir: Arc::new(args.dir.clone()),
+        chain: Arc::new(args.chain.clone()),
+        runtime: Arc::new(runtime),
     };
     let app = Router::new()
         .route("/", get(handle_index))
@@ -173,17 +169,22 @@ pub fn execute_serve(args: &ServeArgs) {
     });
 }
 
-fn decode_directory(
-    dir: &Path,
-    chain_str: &str,
-    runtime: &Runtime,
-) -> Result<Vec<DecodedEntry>, String> {
+fn validate_dir(dir: &Path) -> Result<(), String> {
     if !dir.exists() {
         return Err(format!("directory does not exist: {}", dir.display()));
     }
     if !dir.is_dir() {
         return Err(format!("not a directory: {}", dir.display()));
     }
+    Ok(())
+}
+
+fn decode_directory(
+    dir: &Path,
+    chain_str: &str,
+    runtime: &Runtime,
+) -> Result<Vec<DecodedEntry>, String> {
+    validate_dir(dir)?;
 
     let mut entries = Vec::new();
     walk(dir, dir, &mut entries, chain_str, runtime)?;
@@ -252,28 +253,50 @@ fn decode_file(
     chain_str: &str,
     registry: &TransactionConverterRegistry,
     options: &VisualSignOptions,
-) -> Result<SignablePayload, String> {
+) -> Result<serde_json::Value, String> {
     let raw = std::fs::read_to_string(path).map_err(|e| format!("read: {e}"))?;
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("empty file".to_string());
     }
+
+    if path.extension().and_then(|s| s.to_str()) == Some("json") {
+        return serde_json::from_str::<serde_json::Value>(trimmed)
+            .map_err(|e| format!("invalid json: {e}"));
+    }
+
     let chain = crate::chains::parse_chain(chain_str);
-    registry
+    let payload = registry
         .convert_transaction(&chain, trimmed, options.clone())
-        .map_err(|e| format!("{e:?}"))
+        .map_err(|e| format!("{e:?}"))?;
+    serde_json::to_value(&payload).map_err(|e| format!("serialize: {e}"))
 }
 
-async fn handle_index(State(state): State<AppState>) -> Html<String> {
-    Html(render_html(&state.entries))
+async fn load_entries(state: &AppState) -> Result<Vec<DecodedEntry>, String> {
+    let dir = Arc::clone(&state.dir);
+    let chain = Arc::clone(&state.chain);
+    let runtime = Arc::clone(&state.runtime);
+    tokio::task::spawn_blocking(move || decode_directory(&dir, &chain, &runtime))
+        .await
+        .map_err(|e| format!("join: {e}"))?
+}
+
+async fn handle_index(State(state): State<AppState>) -> Result<Html<String>, StatusCode> {
+    let entries = match load_entries(&state).await {
+        Ok(es) => es,
+        Err(e) => return Ok(Html(render_error_page(&e))),
+    };
+    Ok(Html(render_html(&entries)))
 }
 
 async fn handle_file(
     State(state): State<AppState>,
     Query(q): Query<FileQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let entry = state
-        .entries
+    let entries = load_entries(&state)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let entry = entries
         .iter()
         .find(|e| e.rel_path == q.path)
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -312,16 +335,17 @@ fn html_escape(s: &str) -> String {
     out
 }
 
-fn render_html(entries: &[DecodedEntry]) -> String {
-    use std::fmt::Write as _;
-
-    const STYLE: &str = "body{font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:1100px;margin:1.5em auto;padding:0 1em;color:#222}\
+const STYLE: &str = "body{font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:1100px;margin:1.5em auto;padding:0 1em;color:#222}\
 h1{font-size:1.2em;margin-bottom:1em}\
 details{margin:0.4em 0;border-left:3px solid #ccc;padding:0.4em 0.8em;background:#fafafa}\
 details[open]{background:#fff;border-left-color:#456}\
 summary{font-family:ui-monospace,Menlo,Consolas,monospace;cursor:pointer;font-weight:600}\
 summary.err{color:#b00}\
-pre{background:#f5f5f5;padding:0.8em;overflow:auto;font-size:12.5px;border-radius:3px;margin-top:0.6em}";
+pre{background:#f5f5f5;padding:0.8em;overflow:auto;font-size:12.5px;border-radius:3px;margin-top:0.6em}\
+footer{margin-top:1.5em;color:#888;font-size:0.85em}";
+
+fn render_html(entries: &[DecodedEntry]) -> String {
+    use std::fmt::Write as _;
 
     let ok = entries.iter().filter(|e| e.result.is_ok()).count();
     let err = entries.len() - ok;
@@ -333,10 +357,14 @@ pre{background:#f5f5f5;padding:0.8em;overflow:auto;font-size:12.5px;border-radiu
         entries.len()
     );
 
+    if entries.is_empty() {
+        body.push_str("<p>No files found in directory.</p>");
+    }
+
     for entry in entries {
         match &entry.result {
-            Ok(payload) => {
-                let json = serde_json::to_string_pretty(payload)
+            Ok(value) => {
+                let json = serde_json::to_string_pretty(value)
                     .unwrap_or_else(|e| format!("(serialization error: {e})"));
                 let _ = write!(
                     body,
@@ -356,8 +384,17 @@ pre{background:#f5f5f5;padding:0.8em;overflow:auto;font-size:12.5px;border-radiu
         }
     }
 
+    body.push_str("<footer>Refresh to re-decode from disk. <code>.json</code> files are served as-is; everything else is decoded through the chain registry.</footer>");
+
     format!(
         "<!DOCTYPE html><html lang=en><head><meta charset=utf-8><title>parser_cli serve</title><style>{STYLE}</style></head><body>{body}</body></html>"
+    )
+}
+
+fn render_error_page(msg: &str) -> String {
+    format!(
+        "<!DOCTYPE html><html lang=en><head><meta charset=utf-8><title>parser_cli serve</title><style>{STYLE}</style></head><body><h1>parser_cli &mdash; error</h1><pre>{}</pre><footer>Refresh once the underlying issue is fixed.</footer></body></html>",
+        html_escape(msg)
     )
 }
 
@@ -439,6 +476,45 @@ mod tests {
     }
 
     #[test]
+    fn json_files_passthrough_as_is() {
+        let dir = temp_dir("json_passthrough");
+        let payload = serde_json::json!({"hello": "world", "n": 42});
+        fs::write(dir.join("expected.json"), payload.to_string()).unwrap();
+
+        let entries = decode_directory(&dir, "ethereum", &make_runtime()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].rel_path, "expected.json");
+        let value = entries[0].result.as_ref().expect("json should parse");
+        assert_eq!(value, &payload);
+    }
+
+    #[test]
+    fn malformed_json_errors_with_invalid_json_prefix() {
+        let dir = temp_dir("json_bad");
+        fs::write(dir.join("bad.json"), "{not json}").unwrap();
+
+        let entries = decode_directory(&dir, "ethereum", &make_runtime()).unwrap();
+        assert_eq!(entries.len(), 1);
+        let err = entries[0].result.as_ref().unwrap_err();
+        assert!(err.starts_with("invalid json:"), "got: {err}");
+    }
+
+    #[test]
+    fn mixed_hex_and_json_directory_decodes_both() {
+        let dir = temp_dir("mixed_hex_json");
+        fs::write(dir.join("a.hex"), VALID_HEX).unwrap();
+        fs::write(dir.join("b.json"), r#"{"sentinel":"value"}"#).unwrap();
+
+        let entries = decode_directory(&dir, "ethereum", &make_runtime()).unwrap();
+        assert_eq!(entries.len(), 2);
+        // Both succeed, but via different paths.
+        let hex_value = entries[0].result.as_ref().expect("hex should decode");
+        assert_eq!(hex_value["Title"], "Ethereum Transaction");
+        let json_value = entries[1].result.as_ref().expect("json should parse");
+        assert_eq!(json_value["sentinel"], "value");
+    }
+
+    #[test]
     fn html_escape_handles_all_specials() {
         assert_eq!(
             html_escape("<a href=\"x\">&'</a>"),
@@ -457,5 +533,6 @@ mod tests {
         assert!(html.contains("bad.hex"));
         assert!(html.contains("Ethereum Transaction"));
         assert!(html.contains("class=err"));
+        assert!(html.contains("Refresh to re-decode"));
     }
 }
