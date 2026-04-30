@@ -1,0 +1,3772 @@
+{
+  "accounts": [
+    {
+      "name": "AmmPosition",
+      "type": {
+        "fields": [
+          {
+            "name": "dao",
+            "type": "publicKey"
+          },
+          {
+            "name": "positionAuthority",
+            "type": "publicKey"
+          },
+          {
+            "name": "liquidity",
+            "type": "u128"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "Dao",
+      "type": {
+        "fields": [
+          {
+            "docs": [
+              "Embedded FutarchyAmm - 1:1 relationship"
+            ],
+            "name": "amm",
+            "type": {
+              "defined": "FutarchyAmm"
+            }
+          },
+          {
+            "docs": [
+              "`nonce` + `dao_creator` are PDA seeds"
+            ],
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "daoCreator",
+            "type": "publicKey"
+          },
+          {
+            "name": "pdaBump",
+            "type": "u8"
+          },
+          {
+            "name": "squadsMultisig",
+            "type": "publicKey"
+          },
+          {
+            "name": "squadsMultisigVault",
+            "type": "publicKey"
+          },
+          {
+            "name": "baseMint",
+            "type": "publicKey"
+          },
+          {
+            "name": "quoteMint",
+            "type": "publicKey"
+          },
+          {
+            "name": "proposalCount",
+            "type": "u32"
+          },
+          {
+            "name": "passThresholdBps",
+            "type": "u16"
+          },
+          {
+            "name": "secondsPerProposal",
+            "type": "u32"
+          },
+          {
+            "docs": [
+              "For manipulation-resistance the TWAP is a time-weighted average observation,",
+              "where observation tries to approximate price but can only move by",
+              "`twap_max_observation_change_per_update` per update. Because it can only move",
+              "a little bit per update, you need to check that it has a good initial observation.",
+              "Otherwise, an attacker could create a very high initial observation in the pass",
+              "market and a very low one in the fail market to force the proposal to pass.",
+              "",
+              "We recommend setting an initial observation around the spot price of the token,",
+              "and max observation change per update around 2% the spot price of the token.",
+              "For example, if the spot price of META is $400, we'd recommend setting an initial",
+              "observation of 400 (converted into the AMM prices) and a max observation change per",
+              "update of 8 (also converted into the AMM prices). Observations can be updated once",
+              "a minute, so 2% allows the proposal market to reach double the spot price or 0",
+              "in 50 minutes."
+            ],
+            "name": "twapInitialObservation",
+            "type": "u128"
+          },
+          {
+            "name": "twapMaxObservationChangePerUpdate",
+            "type": "u128"
+          },
+          {
+            "docs": [
+              "Forces TWAP calculation to start after `twap_start_delay_seconds` seconds"
+            ],
+            "name": "twapStartDelaySeconds",
+            "type": "u32"
+          },
+          {
+            "docs": [
+              "As an anti-spam measure and to help liquidity, you need to lock up some liquidity",
+              "in both futarchic markets in order to create a proposal.",
+              "",
+              "For example, for META, we can use a `min_quote_futarchic_liquidity` of",
+              "5000 * 1_000_000 (5000 USDC) and a `min_base_futarchic_liquidity` of",
+              "10 * 1_000_000_000 (10 META)."
+            ],
+            "name": "minQuoteFutarchicLiquidity",
+            "type": "u64"
+          },
+          {
+            "name": "minBaseFutarchicLiquidity",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "Minimum amount of base tokens that must be staked to launch a proposal"
+            ],
+            "name": "baseToStake",
+            "type": "u64"
+          },
+          {
+            "name": "seqNum",
+            "type": "u64"
+          },
+          {
+            "name": "initialSpendingLimit",
+            "type": {
+              "option": {
+                "defined": "InitialSpendingLimit"
+              }
+            }
+          },
+          {
+            "docs": [
+              "The percentage, in basis points, the pass price needs to be above the",
+              "fail price in order for the proposal to pass for team-sponsored proposals.",
+              "",
+              "Can be negative to allow for team-sponsored proposals to pass by default."
+            ],
+            "name": "teamSponsoredPassThresholdBps",
+            "type": "i16"
+          },
+          {
+            "name": "teamAddress",
+            "type": "publicKey"
+          },
+          {
+            "name": "optimisticProposal",
+            "type": {
+              "option": {
+                "defined": "OptimisticProposal"
+              }
+            }
+          },
+          {
+            "name": "isOptimisticGovernanceEnabled",
+            "type": "bool"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "OldDao",
+      "type": {
+        "fields": [
+          {
+            "docs": [
+              "Embedded FutarchyAmm - 1:1 relationship"
+            ],
+            "name": "amm",
+            "type": {
+              "defined": "FutarchyAmm"
+            }
+          },
+          {
+            "docs": [
+              "`nonce` + `dao_creator` are PDA seeds"
+            ],
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "daoCreator",
+            "type": "publicKey"
+          },
+          {
+            "name": "pdaBump",
+            "type": "u8"
+          },
+          {
+            "name": "squadsMultisig",
+            "type": "publicKey"
+          },
+          {
+            "name": "squadsMultisigVault",
+            "type": "publicKey"
+          },
+          {
+            "name": "baseMint",
+            "type": "publicKey"
+          },
+          {
+            "name": "quoteMint",
+            "type": "publicKey"
+          },
+          {
+            "name": "proposalCount",
+            "type": "u32"
+          },
+          {
+            "name": "passThresholdBps",
+            "type": "u16"
+          },
+          {
+            "name": "secondsPerProposal",
+            "type": "u32"
+          },
+          {
+            "docs": [
+              "For manipulation-resistance the TWAP is a time-weighted average observation,",
+              "where observation tries to approximate price but can only move by",
+              "`twap_max_observation_change_per_update` per update. Because it can only move",
+              "a little bit per update, you need to check that it has a good initial observation.",
+              "Otherwise, an attacker could create a very high initial observation in the pass",
+              "market and a very low one in the fail market to force the proposal to pass.",
+              "",
+              "We recommend setting an initial observation around the spot price of the token,",
+              "and max observation change per update around 2% the spot price of the token.",
+              "For example, if the spot price of META is $400, we'd recommend setting an initial",
+              "observation of 400 (converted into the AMM prices) and a max observation change per",
+              "update of 8 (also converted into the AMM prices). Observations can be updated once",
+              "a minute, so 2% allows the proposal market to reach double the spot price or 0",
+              "in 50 minutes."
+            ],
+            "name": "twapInitialObservation",
+            "type": "u128"
+          },
+          {
+            "name": "twapMaxObservationChangePerUpdate",
+            "type": "u128"
+          },
+          {
+            "docs": [
+              "Forces TWAP calculation to start after `twap_start_delay_seconds` seconds"
+            ],
+            "name": "twapStartDelaySeconds",
+            "type": "u32"
+          },
+          {
+            "docs": [
+              "As an anti-spam measure and to help liquidity, you need to lock up some liquidity",
+              "in both futarchic markets in order to create a proposal.",
+              "",
+              "For example, for META, we can use a `min_quote_futarchic_liquidity` of",
+              "5000 * 1_000_000 (5000 USDC) and a `min_base_futarchic_liquidity` of",
+              "10 * 1_000_000_000 (10 META)."
+            ],
+            "name": "minQuoteFutarchicLiquidity",
+            "type": "u64"
+          },
+          {
+            "name": "minBaseFutarchicLiquidity",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "Minimum amount of base tokens that must be staked to launch a proposal"
+            ],
+            "name": "baseToStake",
+            "type": "u64"
+          },
+          {
+            "name": "seqNum",
+            "type": "u64"
+          },
+          {
+            "name": "initialSpendingLimit",
+            "type": {
+              "option": {
+                "defined": "InitialSpendingLimit"
+              }
+            }
+          },
+          {
+            "docs": [
+              "The percentage, in basis points, the pass price needs to be above the",
+              "fail price in order for the proposal to pass for team-sponsored proposals.",
+              "",
+              "Can be negative to allow for team-sponsored proposals to pass by default."
+            ],
+            "name": "teamSponsoredPassThresholdBps",
+            "type": "i16"
+          },
+          {
+            "name": "teamAddress",
+            "type": "publicKey"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "Proposal",
+      "type": {
+        "fields": [
+          {
+            "name": "number",
+            "type": "u32"
+          },
+          {
+            "name": "proposer",
+            "type": "publicKey"
+          },
+          {
+            "name": "timestampEnqueued",
+            "type": "i64"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": "ProposalState"
+            }
+          },
+          {
+            "name": "baseVault",
+            "type": "publicKey"
+          },
+          {
+            "name": "quoteVault",
+            "type": "publicKey"
+          },
+          {
+            "name": "dao",
+            "type": "publicKey"
+          },
+          {
+            "name": "pdaBump",
+            "type": "u8"
+          },
+          {
+            "name": "question",
+            "type": "publicKey"
+          },
+          {
+            "name": "durationInSeconds",
+            "type": "u32"
+          },
+          {
+            "name": "squadsProposal",
+            "type": "publicKey"
+          },
+          {
+            "name": "passBaseMint",
+            "type": "publicKey"
+          },
+          {
+            "name": "passQuoteMint",
+            "type": "publicKey"
+          },
+          {
+            "name": "failBaseMint",
+            "type": "publicKey"
+          },
+          {
+            "name": "failQuoteMint",
+            "type": "publicKey"
+          },
+          {
+            "name": "isTeamSponsored",
+            "type": "bool"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "StakeAccount",
+      "type": {
+        "fields": [
+          {
+            "name": "proposal",
+            "type": "publicKey"
+          },
+          {
+            "name": "staker",
+            "type": "publicKey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ],
+        "kind": "struct"
+      }
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "msg": "Amms must have been created within 5 minutes (counted in slots) of proposal initialization",
+      "name": "AmmTooOld"
+    },
+    {
+      "code": 6001,
+      "msg": "An amm has an `initial_observation` that doesn't match the `dao`'s config",
+      "name": "InvalidInitialObservation"
+    },
+    {
+      "code": 6002,
+      "msg": "An amm has a `max_observation_change_per_update` that doesn't match the `dao`'s config",
+      "name": "InvalidMaxObservationChange"
+    },
+    {
+      "code": 6003,
+      "msg": "An amm has a `start_delay_slots` that doesn't match the `dao`'s config",
+      "name": "InvalidStartDelaySlots"
+    },
+    {
+      "code": 6004,
+      "msg": "One of the vaults has an invalid `settlement_authority`",
+      "name": "InvalidSettlementAuthority"
+    },
+    {
+      "code": 6005,
+      "msg": "Proposal is too young to be executed or rejected",
+      "name": "ProposalTooYoung"
+    },
+    {
+      "code": 6006,
+      "msg": "Markets too young for proposal to be finalized. TWAP might need to be cranked",
+      "name": "MarketsTooYoung"
+    },
+    {
+      "code": 6007,
+      "msg": "This proposal has already been finalized",
+      "name": "ProposalAlreadyFinalized"
+    },
+    {
+      "code": 6008,
+      "msg": "A conditional vault has an invalid nonce. A nonce should encode the proposal number",
+      "name": "InvalidVaultNonce"
+    },
+    {
+      "code": 6009,
+      "msg": "This proposal can't be executed because it isn't in the passed state",
+      "name": "ProposalNotPassed"
+    },
+    {
+      "code": 6010,
+      "msg": "More liquidity needs to be in the AMM to launch this proposal",
+      "name": "InsufficientLiquidity"
+    },
+    {
+      "code": 6011,
+      "msg": "Proposal duration must be longer 1 day and longer than 2 times the TWAP start delay",
+      "name": "ProposalDurationTooShort"
+    },
+    {
+      "code": 6012,
+      "msg": "Pass threshold must be less than 10%",
+      "name": "PassThresholdTooHigh"
+    },
+    {
+      "code": 6013,
+      "msg": "Question must have exactly 2 outcomes for binary futarchy",
+      "name": "QuestionMustBeBinary"
+    },
+    {
+      "code": 6014,
+      "msg": "Squads proposal must be in Active status",
+      "name": "InvalidSquadsProposalStatus"
+    },
+    {
+      "code": 6015,
+      "msg": "Casting overflow. If you're seeing this, please report this",
+      "name": "CastingOverflow"
+    },
+    {
+      "code": 6016,
+      "msg": "Insufficient balance",
+      "name": "InsufficientBalance"
+    },
+    {
+      "code": 6017,
+      "msg": "Cannot remove zero liquidity",
+      "name": "ZeroLiquidityRemove"
+    },
+    {
+      "code": 6018,
+      "msg": "Swap slippage exceeded",
+      "name": "SwapSlippageExceeded"
+    },
+    {
+      "code": 6019,
+      "msg": "Assert failed",
+      "name": "AssertFailed"
+    },
+    {
+      "code": 6020,
+      "msg": "Invalid admin",
+      "name": "InvalidAdmin"
+    },
+    {
+      "code": 6021,
+      "msg": "Proposal is not in draft state",
+      "name": "ProposalNotInDraftState"
+    },
+    {
+      "code": 6022,
+      "msg": "Insufficient token balance",
+      "name": "InsufficientTokenBalance"
+    },
+    {
+      "code": 6023,
+      "msg": "Invalid amount",
+      "name": "InvalidAmount"
+    },
+    {
+      "code": 6024,
+      "msg": "Insufficient stake to launch proposal",
+      "name": "InsufficientStakeToLaunch"
+    },
+    {
+      "code": 6025,
+      "msg": "Staker not found in proposal",
+      "name": "StakerNotFound"
+    },
+    {
+      "code": 6026,
+      "msg": "Pool must be in spot state",
+      "name": "PoolNotInSpotState"
+    },
+    {
+      "code": 6027,
+      "msg": "If you're providing liquidity, you must provide both base and quote token accounts",
+      "name": "InvalidDaoCreateLiquidity"
+    },
+    {
+      "code": 6028,
+      "msg": "Invalid stake account",
+      "name": "InvalidStakeAccount"
+    },
+    {
+      "code": 6029,
+      "msg": "An invariant was violated. You should get in contact with the MetaDAO team if you see this",
+      "name": "InvariantViolated"
+    },
+    {
+      "code": 6030,
+      "msg": "Proposal needs to be active to perform a conditional swap",
+      "name": "ProposalNotActive"
+    },
+    {
+      "code": 6031,
+      "msg": "This Squads transaction should only contain calls to update spending limits",
+      "name": "InvalidTransaction"
+    },
+    {
+      "code": 6032,
+      "msg": "Proposal has already been sponsored",
+      "name": "ProposalAlreadySponsored"
+    },
+    {
+      "code": 6033,
+      "msg": "Team sponsored pass threshold must be between -10% and 10%",
+      "name": "InvalidTeamSponsoredPassThreshold"
+    },
+    {
+      "code": 6034,
+      "msg": "Target K must be greater than the current K",
+      "name": "InvalidTargetK"
+    },
+    {
+      "code": 6035,
+      "msg": "Failed to compile transaction message for Squads vault transaction",
+      "name": "InvalidTransactionMessage"
+    },
+    {
+      "code": 6036,
+      "msg": "Base mint and quote mint must be different",
+      "name": "InvalidMint"
+    },
+    {
+      "code": 6037,
+      "msg": "Proposal is not ready to be unstaked",
+      "name": "ProposalNotReadyToUnstake"
+    },
+    {
+      "code": 6038,
+      "msg": "Optimistic governance is disabled",
+      "name": "OptimisticGovernanceDisabled"
+    },
+    {
+      "code": 6039,
+      "msg": "An active optimistic proposal is already enqueued",
+      "name": "ActiveOptimisticProposalAlreadyEnqueued"
+    },
+    {
+      "code": 6040,
+      "msg": "Optimistic proposal has already passed",
+      "name": "OptimisticProposalAlreadyPassed"
+    },
+    {
+      "code": 6041,
+      "msg": "Invalid spending limit mint. Must be the same as the DAO's quote mint",
+      "name": "InvalidSpendingLimitMint"
+    },
+    {
+      "code": 6042,
+      "msg": "No active optimistic proposal",
+      "name": "NoActiveOptimisticProposal"
+    }
+  ],
+  "events": [
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "baseTokenAccount",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "quoteTokenAccount",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "ammBaseVault",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "ammQuoteVault",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "quoteMint",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "baseMint",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "quoteFeesCollected",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "baseFeesCollected",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postAmmState",
+          "type": {
+            "defined": "FutarchyAmm"
+          }
+        }
+      ],
+      "name": "CollectFeesEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "baseMint",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "quoteMint",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "passThresholdBps",
+          "type": "u16"
+        },
+        {
+          "index": false,
+          "name": "secondsPerProposal",
+          "type": "u32"
+        },
+        {
+          "index": false,
+          "name": "twapInitialObservation",
+          "type": "u128"
+        },
+        {
+          "index": false,
+          "name": "twapMaxObservationChangePerUpdate",
+          "type": "u128"
+        },
+        {
+          "index": false,
+          "name": "twapStartDelaySeconds",
+          "type": "u32"
+        },
+        {
+          "index": false,
+          "name": "minQuoteFutarchicLiquidity",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "minBaseFutarchicLiquidity",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "baseToStake",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "initialSpendingLimit",
+          "type": {
+            "option": {
+              "defined": "InitialSpendingLimit"
+            }
+          }
+        },
+        {
+          "index": false,
+          "name": "squadsMultisig",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "squadsMultisigVault",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "teamSponsoredPassThresholdBps",
+          "type": "i16"
+        },
+        {
+          "index": false,
+          "name": "teamAddress",
+          "type": "publicKey"
+        }
+      ],
+      "name": "InitializeDaoEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "passThresholdBps",
+          "type": "u16"
+        },
+        {
+          "index": false,
+          "name": "secondsPerProposal",
+          "type": "u32"
+        },
+        {
+          "index": false,
+          "name": "twapInitialObservation",
+          "type": "u128"
+        },
+        {
+          "index": false,
+          "name": "twapMaxObservationChangePerUpdate",
+          "type": "u128"
+        },
+        {
+          "index": false,
+          "name": "twapStartDelaySeconds",
+          "type": "u32"
+        },
+        {
+          "index": false,
+          "name": "minQuoteFutarchicLiquidity",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "minBaseFutarchicLiquidity",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "baseToStake",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "teamSponsoredPassThresholdBps",
+          "type": "i16"
+        },
+        {
+          "index": false,
+          "name": "teamAddress",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "isOptimisticGovernanceEnabled",
+          "type": "bool"
+        }
+      ],
+      "name": "UpdateDaoEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "proposal",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "question",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "quoteVault",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "baseVault",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "proposer",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "number",
+          "type": "u32"
+        },
+        {
+          "index": false,
+          "name": "pdaBump",
+          "type": "u8"
+        },
+        {
+          "index": false,
+          "name": "durationInSeconds",
+          "type": "u32"
+        },
+        {
+          "index": false,
+          "name": "squadsProposal",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "squadsMultisig",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "squadsMultisigVault",
+          "type": "publicKey"
+        }
+      ],
+      "name": "InitializeProposalEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "proposal",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "staker",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "totalStaked",
+          "type": "u64"
+        }
+      ],
+      "name": "StakeToProposalEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "proposal",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "staker",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "totalStaked",
+          "type": "u64"
+        }
+      ],
+      "name": "UnstakeFromProposalEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "proposal",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "timestampEnqueued",
+          "type": "i64"
+        },
+        {
+          "index": false,
+          "name": "totalStaked",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postAmmState",
+          "type": {
+            "defined": "FutarchyAmm"
+          }
+        }
+      ],
+      "name": "LaunchProposalEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "proposal",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "passMarketTwap",
+          "type": "u128"
+        },
+        {
+          "index": false,
+          "name": "failMarketTwap",
+          "type": "u128"
+        },
+        {
+          "index": false,
+          "name": "threshold",
+          "type": "u128"
+        },
+        {
+          "index": false,
+          "name": "state",
+          "type": {
+            "defined": "ProposalState"
+          }
+        },
+        {
+          "index": false,
+          "name": "squadsProposal",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "squadsMultisig",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "postAmmState",
+          "type": {
+            "defined": "FutarchyAmm"
+          }
+        },
+        {
+          "index": false,
+          "name": "isTeamSponsored",
+          "type": "bool"
+        }
+      ],
+      "name": "FinalizeProposalEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "user",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "swapType",
+          "type": {
+            "defined": "SwapType"
+          }
+        },
+        {
+          "index": false,
+          "name": "inputAmount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "outputAmount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "minOutputAmount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postAmmState",
+          "type": {
+            "defined": "FutarchyAmm"
+          }
+        }
+      ],
+      "name": "SpotSwapEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "proposal",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "trader",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "market",
+          "type": {
+            "defined": "Market"
+          }
+        },
+        {
+          "index": false,
+          "name": "swapType",
+          "type": {
+            "defined": "SwapType"
+          }
+        },
+        {
+          "index": false,
+          "name": "inputAmount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "outputAmount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "minOutputAmount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postAmmState",
+          "type": {
+            "defined": "FutarchyAmm"
+          }
+        }
+      ],
+      "name": "ConditionalSwapEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "liquidityProvider",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "positionAuthority",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "quoteAmount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "baseAmount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "liquidityMinted",
+          "type": "u128"
+        },
+        {
+          "index": false,
+          "name": "minLiquidity",
+          "type": "u128"
+        },
+        {
+          "index": false,
+          "name": "postAmmState",
+          "type": {
+            "defined": "FutarchyAmm"
+          }
+        }
+      ],
+      "name": "ProvideLiquidityEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "liquidityProvider",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "liquidityWithdrawn",
+          "type": "u128"
+        },
+        {
+          "index": false,
+          "name": "minBaseAmount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "minQuoteAmount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "baseAmount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "quoteAmount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "postAmmState",
+          "type": {
+            "defined": "FutarchyAmm"
+          }
+        }
+      ],
+      "name": "WithdrawLiquidityEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "proposal",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "teamAddress",
+          "type": "publicKey"
+        }
+      ],
+      "name": "SponsorProposalEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "proposal",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "admin",
+          "type": "publicKey"
+        }
+      ],
+      "name": "RemoveProposalEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "proposal",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "admin",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "postAmmState",
+          "type": {
+            "defined": "FutarchyAmm"
+          }
+        }
+      ],
+      "name": "AdminCancelProposalEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "pool",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "baseTokenAccount",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "quoteTokenAccount",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "quoteMint",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "baseMint",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "quoteFeesCollected",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "baseFeesCollected",
+          "type": "u64"
+        }
+      ],
+      "name": "CollectMeteoraDammFeesEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "admin",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "ammPosition",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "oldAuthority",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "newAuthority",
+          "type": "publicKey"
+        }
+      ],
+      "name": "AdminFixPositionAuthorityEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "proposer",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "squadsProposal",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "squadsMultisig",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "squadsMultisigVault",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "index": false,
+          "name": "recipient",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "daoQuoteVaultAccount",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "recipientQuoteAccount",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "enqueuedTimestamp",
+          "type": "i64"
+        }
+      ],
+      "name": "InitiateVaultSpendOptimisticProposalEvent"
+    },
+    {
+      "fields": [
+        {
+          "index": false,
+          "name": "common",
+          "type": {
+            "defined": "CommonFields"
+          }
+        },
+        {
+          "index": false,
+          "name": "dao",
+          "type": "publicKey"
+        },
+        {
+          "index": false,
+          "name": "squadsProposal",
+          "type": "publicKey"
+        }
+      ],
+      "name": "FinalizeOptimisticProposalEvent"
+    }
+  ],
+  "instructions": [
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "daoCreator"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "payer"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "baseMint"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "quoteMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsMultisig"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsMultisigVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsProgramConfig"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsProgramConfigTreasury"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "spendingLimit"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "futarchyAmmBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "futarchyAmmQuoteVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "associatedTokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": "InitializeDaoParams"
+          }
+        }
+      ],
+      "name": "initializeDao"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "proposal"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsProposal"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsMultisig"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "question"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "quoteVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "baseVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "proposer"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "payer"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [],
+      "name": "initializeProposal"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "proposal"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "stakerBaseAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "proposalBaseAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "stakeAccount"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "staker"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "payer"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": "StakeToProposalParams"
+          }
+        }
+      ],
+      "name": "stakeToProposal"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "proposal"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "stakerBaseAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "proposalBaseAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "stakeAccount"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "baseMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "staker"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "associatedTokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": "UnstakeFromProposalParams"
+          }
+        }
+      ],
+      "name": "unstakeFromProposal"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "proposal"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "baseVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "quoteVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "passBaseMint"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "passQuoteMint"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "failBaseMint"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "failQuoteMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "payer"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammPassBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammPassQuoteVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammFailBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammFailQuoteVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsMultisig"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsProposal"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "associatedTokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [],
+      "name": "launchProposal"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "proposal"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "question"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsProposal"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsMultisig"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsMultisigProgram"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammPassBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammPassQuoteVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammFailBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammFailQuoteVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammQuoteVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "vaultProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "vaultEventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "quoteVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "quoteVaultUnderlyingTokenAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "passQuoteMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "failQuoteMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "passBaseMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "failBaseMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "baseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "baseVaultUnderlyingTokenAccount"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [],
+      "name": "finalizeProposal"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "squadsMultisigVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "daoParams",
+          "type": {
+            "defined": "UpdateDaoParams"
+          }
+        }
+      ],
+      "name": "updateDao"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "payer"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        }
+      ],
+      "args": [],
+      "name": "resizeDao"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userBaseAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userQuoteAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammQuoteVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "user"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": "SpotSwapParams"
+          }
+        }
+      ],
+      "name": "spotSwap"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammQuoteVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "proposal"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammPassBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammPassQuoteVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammFailBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammFailQuoteVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "trader"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userInputAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "userOutputAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "baseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "baseVaultUnderlyingTokenAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "quoteVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "quoteVaultUnderlyingTokenAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "passBaseMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "failBaseMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "passQuoteMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "failQuoteMint"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "conditionalVaultProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "vaultEventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "question"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": "ConditionalSwapParams"
+          }
+        }
+      ],
+      "name": "conditionalSwap"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "liquidityProvider"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "liquidityProviderBaseAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "liquidityProviderQuoteAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "payer"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammQuoteVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammPosition"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": "ProvideLiquidityParams"
+          }
+        }
+      ],
+      "name": "provideLiquidity"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "positionAuthority"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "liquidityProviderBaseAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "liquidityProviderQuoteAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammQuoteVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammPosition"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": "WithdrawLiquidityParams"
+          }
+        }
+      ],
+      "name": "withdrawLiquidity"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "admin"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "baseTokenAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "quoteTokenAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammQuoteVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [],
+      "name": "collectFees"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "proposal"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsProposal"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsMultisig"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsMultisigProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "vaultTransaction"
+        }
+      ],
+      "args": [],
+      "name": "executeSpendingLimitChange"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "proposal"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "teamAddress"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [],
+      "name": "sponsorProposal"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "admin"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsMultisig"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsMultisigVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsMultisigVaultTransaction"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsMultisigProposal"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "squadsMultisigPermissionlessAccount"
+        },
+        {
+          "accounts": [
+            {
+              "isMut": false,
+              "isSigner": false,
+              "name": "dammV2Program"
+            },
+            {
+              "isMut": false,
+              "isSigner": false,
+              "name": "dammV2EventAuthority"
+            },
+            {
+              "isMut": false,
+              "isSigner": false,
+              "name": "poolAuthority"
+            },
+            {
+              "isMut": false,
+              "isSigner": false,
+              "name": "pool"
+            },
+            {
+              "isMut": true,
+              "isSigner": false,
+              "name": "position"
+            },
+            {
+              "docs": [
+                "Token account of base tokens recipient"
+              ],
+              "isMut": true,
+              "isSigner": false,
+              "name": "tokenAAccount"
+            },
+            {
+              "docs": [
+                "Token account of quote tokens recipient"
+              ],
+              "isMut": true,
+              "isSigner": false,
+              "name": "tokenBAccount"
+            },
+            {
+              "isMut": true,
+              "isSigner": false,
+              "name": "tokenAVault"
+            },
+            {
+              "isMut": true,
+              "isSigner": false,
+              "name": "tokenBVault"
+            },
+            {
+              "isMut": false,
+              "isSigner": false,
+              "name": "tokenAMint"
+            },
+            {
+              "isMut": false,
+              "isSigner": false,
+              "name": "tokenBMint"
+            },
+            {
+              "isMut": false,
+              "isSigner": false,
+              "name": "positionNftAccount"
+            },
+            {
+              "isMut": false,
+              "isSigner": false,
+              "name": "owner"
+            },
+            {
+              "isMut": false,
+              "isSigner": false,
+              "name": "tokenAProgram"
+            },
+            {
+              "isMut": false,
+              "isSigner": false,
+              "name": "tokenBProgram"
+            }
+          ],
+          "name": "meteoraClaimPositionFeesAccounts"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "systemProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [],
+      "name": "collectMeteoraDammFees"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsMultisig"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsMultisigVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsSpendingLimit"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsProposal"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsVaultTransaction"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "daoQuoteVaultAccount"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "proposer"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "recipient"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "recipientQuoteAccount"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": "InitiateVaultSpendOptimisticProposalParams"
+          }
+        }
+      ],
+      "name": "initiateVaultSpendOptimisticProposal"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsMultisig"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsProposal"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [],
+      "name": "finalizeOptimisticProposal"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "admin"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsMultisig"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsMultisigProposal"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsMultisigProgram"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": "AdminApproveMultisigProposalArgs"
+          }
+        }
+      ],
+      "name": "adminApproveMultisigProposal"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "admin"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsMultisig"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsMultisigProposal"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsMultisigVaultTransaction"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsMultisigProgram"
+        }
+      ],
+      "args": [],
+      "name": "adminExecuteMultisigProposal"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "proposal"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "question"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "squadsProposal"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsMultisig"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "squadsMultisigProgram"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammPassBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammPassQuoteVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammFailBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammFailQuoteVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammBaseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "ammQuoteVault"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "vaultProgram"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "vaultEventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "tokenProgram"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "quoteVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "quoteVaultUnderlyingTokenAccount"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "passQuoteMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "failQuoteMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "passBaseMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "failBaseMint"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "baseVault"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "baseVaultUnderlyingTokenAccount"
+        },
+        {
+          "isMut": false,
+          "isSigner": true,
+          "name": "admin"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [],
+      "name": "adminCancelProposal"
+    },
+    {
+      "accounts": [
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "proposal"
+        },
+        {
+          "isMut": true,
+          "isSigner": false,
+          "name": "dao"
+        },
+        {
+          "isMut": true,
+          "isSigner": true,
+          "name": "admin"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "eventAuthority"
+        },
+        {
+          "isMut": false,
+          "isSigner": false,
+          "name": "program"
+        }
+      ],
+      "args": [],
+      "name": "adminRemoveProposal"
+    }
+  ],
+  "name": "futarchy",
+  "types": [
+    {
+      "name": "CommonFields",
+      "type": {
+        "fields": [
+          {
+            "name": "slot",
+            "type": "u64"
+          },
+          {
+            "name": "unixTimestamp",
+            "type": "i64"
+          },
+          {
+            "name": "daoSeqNum",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "AdminApproveMultisigProposalArgs",
+      "type": {
+        "fields": [
+          {
+            "name": "transactionIndex",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "ConditionalSwapParams",
+      "type": {
+        "fields": [
+          {
+            "name": "market",
+            "type": {
+              "defined": "Market"
+            }
+          },
+          {
+            "name": "swapType",
+            "type": {
+              "defined": "SwapType"
+            }
+          },
+          {
+            "name": "inputAmount",
+            "type": "u64"
+          },
+          {
+            "name": "minOutputAmount",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "InitializeDaoParams",
+      "type": {
+        "fields": [
+          {
+            "name": "twapInitialObservation",
+            "type": "u128"
+          },
+          {
+            "name": "twapMaxObservationChangePerUpdate",
+            "type": "u128"
+          },
+          {
+            "name": "twapStartDelaySeconds",
+            "type": "u32"
+          },
+          {
+            "name": "minQuoteFutarchicLiquidity",
+            "type": "u64"
+          },
+          {
+            "name": "minBaseFutarchicLiquidity",
+            "type": "u64"
+          },
+          {
+            "name": "baseToStake",
+            "type": "u64"
+          },
+          {
+            "name": "passThresholdBps",
+            "type": "u16"
+          },
+          {
+            "name": "secondsPerProposal",
+            "type": "u32"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "initialSpendingLimit",
+            "type": {
+              "option": {
+                "defined": "InitialSpendingLimit"
+              }
+            }
+          },
+          {
+            "name": "teamSponsoredPassThresholdBps",
+            "type": "i16"
+          },
+          {
+            "name": "teamAddress",
+            "type": "publicKey"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "InitiateVaultSpendOptimisticProposalParams",
+      "type": {
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "ProvideLiquidityParams",
+      "type": {
+        "fields": [
+          {
+            "docs": [
+              "How much quote token you will deposit to the pool"
+            ],
+            "name": "quoteAmount",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "The maximum base token you will deposit to the pool"
+            ],
+            "name": "maxBaseAmount",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "The minimum liquidity you will be assigned"
+            ],
+            "name": "minLiquidity",
+            "type": "u128"
+          },
+          {
+            "docs": [
+              "The account that will own the LP position, usually the same as the",
+              "liquidity provider"
+            ],
+            "name": "positionAuthority",
+            "type": "publicKey"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "SpotSwapParams",
+      "type": {
+        "fields": [
+          {
+            "name": "inputAmount",
+            "type": "u64"
+          },
+          {
+            "name": "swapType",
+            "type": {
+              "defined": "SwapType"
+            }
+          },
+          {
+            "name": "minOutputAmount",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "StakeToProposalParams",
+      "type": {
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "UnstakeFromProposalParams",
+      "type": {
+        "fields": [
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "UpdateDaoParams",
+      "type": {
+        "fields": [
+          {
+            "name": "passThresholdBps",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "secondsPerProposal",
+            "type": {
+              "option": "u32"
+            }
+          },
+          {
+            "name": "twapInitialObservation",
+            "type": {
+              "option": "u128"
+            }
+          },
+          {
+            "name": "twapMaxObservationChangePerUpdate",
+            "type": {
+              "option": "u128"
+            }
+          },
+          {
+            "name": "twapStartDelaySeconds",
+            "type": {
+              "option": "u32"
+            }
+          },
+          {
+            "name": "minQuoteFutarchicLiquidity",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "minBaseFutarchicLiquidity",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "baseToStake",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "teamSponsoredPassThresholdBps",
+            "type": {
+              "option": "i16"
+            }
+          },
+          {
+            "name": "teamAddress",
+            "type": {
+              "option": "publicKey"
+            }
+          },
+          {
+            "name": "isOptimisticGovernanceEnabled",
+            "type": {
+              "option": "bool"
+            }
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "WithdrawLiquidityParams",
+      "type": {
+        "fields": [
+          {
+            "docs": [
+              "How much liquidity to withdraw"
+            ],
+            "name": "liquidityToWithdraw",
+            "type": "u128"
+          },
+          {
+            "docs": [
+              "Minimum base tokens to receive"
+            ],
+            "name": "minBaseAmount",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "Minimum quote tokens to receive"
+            ],
+            "name": "minQuoteAmount",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "OptimisticProposal",
+      "type": {
+        "fields": [
+          {
+            "docs": [
+              "The squads proposal currently enqueued for execution if not challenged by a new proposal."
+            ],
+            "name": "squadsProposal",
+            "type": "publicKey"
+          },
+          {
+            "docs": [
+              "The timestamp when the active optimistic squads proposal was enqueued."
+            ],
+            "name": "enqueuedTimestamp",
+            "type": "i64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "InitialSpendingLimit",
+      "type": {
+        "fields": [
+          {
+            "name": "amountPerMonth",
+            "type": "u64"
+          },
+          {
+            "name": "members",
+            "type": {
+              "vec": "publicKey"
+            }
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "FutarchyAmm",
+      "type": {
+        "fields": [
+          {
+            "name": "state",
+            "type": {
+              "defined": "PoolState"
+            }
+          },
+          {
+            "name": "totalLiquidity",
+            "type": "u128"
+          },
+          {
+            "name": "baseMint",
+            "type": "publicKey"
+          },
+          {
+            "name": "quoteMint",
+            "type": "publicKey"
+          },
+          {
+            "name": "ammBaseVault",
+            "type": "publicKey"
+          },
+          {
+            "name": "ammQuoteVault",
+            "type": "publicKey"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "TwapOracle",
+      "type": {
+        "fields": [
+          {
+            "docs": [
+              "Running sum of seconds_since_last_update * last_observation.",
+              "",
+              "Assuming latest observations are as big as possible (u64::MAX * 1e12),",
+              "we can store 18 million seconds worth of observations, which turns out to",
+              "be ~213 days.",
+              "",
+              "Assuming that latest observations are 100x smaller than they could theoretically",
+              "be, we can store ~57 years worth of them. Even this is a very",
+              "very conservative assumption - META/USDC prices should be between 1e9 and",
+              "1e15, which would overflow after 1e15 years.",
+              "",
+              "So in the case of an overflow, the aggregator rolls back to 0. It's the",
+              "client's responsibility to sanity check the assets or to handle an",
+              "aggregator at T2 being smaller than an aggregator at T1."
+            ],
+            "name": "aggregator",
+            "type": "u128"
+          },
+          {
+            "name": "lastUpdatedTimestamp",
+            "type": "i64"
+          },
+          {
+            "name": "createdAtTimestamp",
+            "type": "i64"
+          },
+          {
+            "docs": [
+              "A price is the number of quote units per base unit multiplied by 1e12.",
+              "You cannot simply divide by 1e12 to get a price you can display in the UI",
+              "because the base and quote decimals may be different. Instead, do:",
+              "ui_price = (price * (10**(base_decimals - quote_decimals))) / 1e12"
+            ],
+            "name": "lastPrice",
+            "type": "u128"
+          },
+          {
+            "docs": [
+              "If we did a raw TWAP over prices, someone could push the TWAP heavily with",
+              "a few extremely large outliers. So we use observations, which can only move",
+              "by `max_observation_change_per_update` per update."
+            ],
+            "name": "lastObservation",
+            "type": "u128"
+          },
+          {
+            "docs": [
+              "The most that an observation can change per update."
+            ],
+            "name": "maxObservationChangePerUpdate",
+            "type": "u128"
+          },
+          {
+            "docs": [
+              "What the initial `latest_observation` is set to."
+            ],
+            "name": "initialObservation",
+            "type": "u128"
+          },
+          {
+            "docs": [
+              "Number of seconds after amm.created_at_slot to start recording TWAP"
+            ],
+            "name": "startDelaySeconds",
+            "type": "u32"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "Pool",
+      "type": {
+        "fields": [
+          {
+            "name": "oracle",
+            "type": {
+              "defined": "TwapOracle"
+            }
+          },
+          {
+            "name": "quoteReserves",
+            "type": "u64"
+          },
+          {
+            "name": "baseReserves",
+            "type": "u64"
+          },
+          {
+            "name": "quoteProtocolFeeBalance",
+            "type": "u64"
+          },
+          {
+            "name": "baseProtocolFeeBalance",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "PoolState",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "fields": [
+              {
+                "name": "spot",
+                "type": {
+                  "defined": "Pool"
+                }
+              }
+            ],
+            "name": "Spot"
+          },
+          {
+            "fields": [
+              {
+                "name": "spot",
+                "type": {
+                  "defined": "Pool"
+                }
+              },
+              {
+                "name": "pass",
+                "type": {
+                  "defined": "Pool"
+                }
+              },
+              {
+                "name": "fail",
+                "type": {
+                  "defined": "Pool"
+                }
+              }
+            ],
+            "name": "Futarchy"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Market",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Spot"
+          },
+          {
+            "name": "Pass"
+          },
+          {
+            "name": "Fail"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SwapType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Buy"
+          },
+          {
+            "name": "Sell"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Token",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Base"
+          },
+          {
+            "name": "Quote"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalState",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "fields": [
+              {
+                "name": "amountStaked",
+                "type": "u64"
+              }
+            ],
+            "name": "Draft"
+          },
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "Passed"
+          },
+          {
+            "name": "Failed"
+          },
+          {
+            "name": "Removed"
+          }
+        ]
+      }
+    }
+  ],
+  "version": "0.6.1"
+}
