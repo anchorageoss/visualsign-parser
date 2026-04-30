@@ -1,5 +1,5 @@
 use crate::chains::parse_chain;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use visualsign::registry::{Chain, TransactionConverterRegistry};
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
@@ -9,6 +9,21 @@ use visualsign::{SignablePayload, SignablePayloadField};
 #[command(version = "1.0")]
 #[command(about = "Converts raw transactions to visual signing properties")]
 pub(crate) struct Args {
+    #[command(subcommand)]
+    pub(crate) command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum Command {
+    /// Decode a single transaction and print it.
+    Decode(DecodeArgs),
+    /// Serve a directory of raw-transaction files via a local web UI.
+    #[cfg(feature = "serve")]
+    Serve(crate::serve::ServeArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct DecodeArgs {
     #[arg(short, long, help = "Chain type")]
     pub(crate) chain: String,
 
@@ -19,16 +34,16 @@ pub(crate) struct Args {
         help = "Raw transaction string. Prefix with '@' to read from a file \
                 (e.g. '@/path/to/tx.hex'), or use '@-' to read from stdin."
     )]
-    transaction: String,
+    pub(crate) transaction: String,
 
     #[arg(short, long, default_value = "text", help = "Output format")]
-    output: OutputFormat,
+    pub(crate) output: OutputFormat,
 
     #[arg(
         long,
         help = "Show only condensed view (what hardware wallets display)"
     )]
-    condensed_only: bool,
+    pub(crate) condensed_only: bool,
 
     #[arg(
         long,
@@ -49,8 +64,19 @@ pub(crate) struct Args {
     pub(crate) solana: crate::solana::SolanaArgs,
 }
 
+impl DecodeArgs {
+    pub(crate) fn plugin_args(&self) -> crate::PluginArgs {
+        crate::PluginArgs {
+            #[cfg(feature = "ethereum")]
+            ethereum: self.ethereum.clone(),
+            #[cfg(feature = "solana")]
+            solana: self.solana.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
-enum OutputFormat {
+pub(crate) enum OutputFormat {
     Text,
     Json,
     Human,
@@ -261,6 +287,93 @@ fn parse_and_display(
     }
 }
 
+/// Resolves chain + plugins + per-chain metadata, returning a ready-to-use registry.
+///
+/// Shared by `decode` and `serve`. On invalid chain or metadata error, returns
+/// an `Err(String)` with a user-facing message — the caller is responsible for
+/// printing it and exiting non-zero.
+pub(crate) struct Runtime {
+    pub registry: TransactionConverterRegistry,
+    pub options: VisualSignOptions,
+}
+
+pub(crate) fn prepare_runtime(
+    chain_str: &str,
+    network: Option<String>,
+    plugin_args: &crate::PluginArgs,
+) -> Result<Runtime, String> {
+    let chain = parse_chain(chain_str);
+    let plugins = crate::build_plugins(plugin_args);
+
+    let mut registry = TransactionConverterRegistry::new();
+    for plugin in &plugins {
+        plugin.register(&mut registry);
+    }
+
+    let plugin = plugins.iter().find(|p| p.chain() == chain);
+
+    let Some(plugin) = plugin else {
+        let supported: Vec<String> = plugins
+            .iter()
+            .map(|p| p.chain().as_str().to_lowercase())
+            .collect();
+        let supported_str = if supported.is_empty() {
+            "none".to_string()
+        } else {
+            supported.join(", ")
+        };
+        if chain == Chain::Unspecified {
+            return Err(format!(
+                "unrecognized chain '{chain_str}'.\nSupported chains: {supported_str}"
+            ));
+        }
+        return Err(format!(
+            "chain '{chain_str}' is not supported by this CLI build.\nSupported chains: {supported_str}"
+        ));
+    };
+
+    let chain_metadata = plugin.create_metadata(network)?;
+
+    let options = VisualSignOptions {
+        decode_transfers: true,
+        transaction_name: None,
+        metadata: chain_metadata,
+        developer_config: Some(DeveloperConfig {
+            allow_signed_transactions: true,
+        }),
+    };
+
+    Ok(Runtime { registry, options })
+}
+
+fn execute_decode(args: &DecodeArgs) {
+    let plugin_args = args.plugin_args();
+    let runtime = match prepare_runtime(&args.chain, args.network.clone(), &plugin_args) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let raw_tx = match crate::tx_input::resolve_transaction_input(&args.transaction) {
+        Ok(tx) => tx,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    parse_and_display(
+        &args.chain,
+        &raw_tx,
+        &runtime.registry,
+        runtime.options,
+        args.output,
+        args.condensed_only,
+    );
+}
+
 /// app cli
 pub struct Cli;
 impl Cli {
@@ -271,77 +384,10 @@ impl Cli {
     /// Executes the CLI application, parsing command line arguments and processing the transaction
     pub fn execute() {
         let args = Args::parse();
-        let chain = parse_chain(&args.chain);
-        let plugins = crate::build_plugins(&args);
-
-        let mut registry = TransactionConverterRegistry::new();
-        for plugin in &plugins {
-            plugin.register(&mut registry);
+        match &args.command {
+            Command::Decode(a) => execute_decode(a),
+            #[cfg(feature = "serve")]
+            Command::Serve(a) => crate::serve::execute_serve(a),
         }
-
-        let plugin = plugins.iter().find(|p| p.chain() == chain);
-
-        if plugin.is_none() {
-            let supported: Vec<String> = plugins
-                .iter()
-                .map(|p| p.chain().as_str().to_lowercase())
-                .collect();
-            let supported_str = if supported.is_empty() {
-                "none".to_string()
-            } else {
-                supported.join(", ")
-            };
-            if chain == Chain::Unspecified {
-                eprintln!(
-                    "Error: unrecognized chain '{}'.\nSupported chains: {supported_str}",
-                    args.chain,
-                );
-            } else {
-                eprintln!(
-                    "Error: chain '{}' is not supported by this CLI build.\n\
-                     Supported chains: {supported_str}",
-                    args.chain,
-                );
-            }
-            std::process::exit(1);
-        }
-
-        let Some(plugin) = plugin else {
-            unreachable!("exit guard above ensures plugin is Some");
-        };
-
-        let chain_metadata = match plugin.create_metadata(args.network.clone()) {
-            Ok(meta) => meta,
-            Err(e) => {
-                eprintln!("Error: {e}");
-                std::process::exit(1);
-            }
-        };
-
-        let options = VisualSignOptions {
-            decode_transfers: true,
-            transaction_name: None,
-            metadata: chain_metadata,
-            developer_config: Some(DeveloperConfig {
-                allow_signed_transactions: true,
-            }),
-        };
-
-        let raw_tx = match crate::tx_input::resolve_transaction_input(&args.transaction) {
-            Ok(tx) => tx,
-            Err(e) => {
-                eprintln!("Error: {e}");
-                std::process::exit(1);
-            }
-        };
-
-        parse_and_display(
-            &args.chain,
-            &raw_tx,
-            &registry,
-            options,
-            args.output,
-            args.condensed_only,
-        );
     }
 }

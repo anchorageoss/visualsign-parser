@@ -22,7 +22,10 @@ cargo test -p visualsign-ethereum test_name
 
 Parse a transaction locally:
 ```bash
-cargo run --bin parser_cli -- --chain ethereum --network ETHEREUM_MAINNET --output human -t <hex>
+cargo run --bin parser_cli -- decode --chain ethereum --network ETHEREUM_MAINNET --output human -t <hex>
+
+# Browse a directory of raw-tx files in a local web UI (feature-gated):
+cargo run --bin parser_cli --features serve -- serve --chain ethereum --network ETHEREUM_MAINNET --dir ./txs
 ```
 
 CI requires: codegen produces no diff, clippy passes with `-D warnings`, all tests pass. Protoc v21.4.

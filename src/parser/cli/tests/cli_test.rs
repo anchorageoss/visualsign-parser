@@ -152,6 +152,7 @@ fn test_cli_transaction_from_stdin() {
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_parser_cli"))
         .args([
+            "decode",
             "--chain",
             "ethereum",
             "--network",
@@ -192,6 +193,7 @@ fn test_cli_transaction_from_stdin() {
 fn test_cli_transaction_at_missing_file_errors() {
     let output = Command::new(env!("CARGO_BIN_EXE_parser_cli"))
         .args([
+            "decode",
             "--chain",
             "ethereum",
             "--network",
@@ -237,6 +239,7 @@ fn test_cli_ethereum_abi_json_mappings() {
     );
 
     let output = run_cli(&[
+        "decode",
         "--chain",
         "ethereum",
         "--network",
@@ -283,6 +286,7 @@ fn test_cli_ethereum_abi_json_mappings() {
 #[cfg(feature = "ethereum")]
 fn test_cli_ethereum_without_abi_uses_builtin_visualizer() {
     let output = run_cli(&[
+        "decode",
         "--chain",
         "ethereum",
         "--network",
@@ -318,6 +322,7 @@ fn test_cli_ethereum_abi_invalid_file_still_parses() {
     let mapping = "Bad:/nonexistent/abi.json:0x1111111111111111111111111111111111111111";
 
     let output = run_cli(&[
+        "decode",
         "--chain",
         "ethereum",
         "--network",
@@ -384,6 +389,224 @@ fn test_cli_solana_idl_json_mappings() {
         serde_json::from_str(&stdout).expect("CLI output should be valid JSON");
     assert_eq!(json["Title"], "Solana Transaction");
     assert!(json["Fields"].as_array().is_some_and(|f| !f.is_empty()));
+}
+
+#[test]
+#[cfg(all(feature = "ethereum", feature = "serve"))]
+fn test_cli_serve_renders_directory() {
+    use std::io::{BufRead, BufReader, Read as _};
+    use std::net::TcpStream;
+    use std::time::{Duration, Instant};
+
+    // Use the existing ethereum-from-file.hex as a one-file fixture directory.
+    let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures");
+
+    // Ask the OS for a free port: bind ephemeral, drop, race-tolerable since
+    // the server immediately re-binds.
+    let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("probe bind");
+    let port = probe.local_addr().expect("local_addr").port();
+    drop(probe);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_parser_cli"))
+        .args([
+            "serve",
+            "--chain",
+            "ethereum",
+            "--network",
+            "ETHEREUM_MAINNET",
+            "--dir",
+            fixture_dir.to_str().unwrap(),
+            "--port",
+            &port.to_string(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn parser_cli serve");
+
+    // Wait for the "Serving on" line on stdout, with a hard timeout.
+    let stdout = child.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut ready = false;
+    let mut greeting = String::new();
+    while Instant::now() < deadline {
+        let mut line = String::new();
+        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+            std::thread::sleep(Duration::from_millis(50));
+            continue;
+        }
+        greeting.push_str(&line);
+        if line.contains("Serving on") {
+            ready = true;
+            break;
+        }
+    }
+    assert!(ready, "server never printed ready line. got: {greeting}");
+
+    // Hit `/` over a raw TCP socket — keep the test free of new HTTP-client deps.
+    let body = http_get(port, "/");
+    assert!(
+        body.contains("<title>parser_cli serve</title>"),
+        "got: {body}"
+    );
+    assert!(body.contains("ethereum-from-file.hex"));
+    assert!(body.contains("Ethereum Transaction"));
+
+    // JSON endpoint round-trip.
+    let api = http_get(port, "/api/file?path=ethereum-from-file.hex");
+    let parsed: serde_json::Value = {
+        // body is "headers\r\n\r\nbody"
+        let payload = api.split("\r\n\r\n").nth(1).unwrap_or("");
+        serde_json::from_str(payload).expect("api response should be JSON")
+    };
+    assert_eq!(parsed["ok"], true);
+    assert_eq!(parsed["payload"]["Title"], "Ethereum Transaction");
+
+    // Cleanup.
+    let _ = child.kill();
+    let _ = child.wait();
+
+    fn http_get(port: u16, path: &str) -> String {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).expect("tcp connect");
+        s.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        let req = format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+        std::io::Write::write_all(&mut s, req.as_bytes()).expect("write req");
+        let mut buf = String::new();
+        s.read_to_string(&mut buf).expect("read response");
+        buf
+    }
+}
+
+#[test]
+#[cfg(all(feature = "ethereum", feature = "serve"))]
+fn test_cli_serve_live_reload_and_json_passthrough() {
+    use std::io::{BufRead, BufReader, Read as _};
+    use std::net::TcpStream;
+    use std::time::{Duration, Instant};
+
+    // Working directory we can mutate between requests.
+    let work = std::env::temp_dir().join(format!(
+        "vsp_serve_live_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&work).unwrap();
+
+    let valid_hex = "02f86c0180830f4240843b9aca00830186a094111111111111111111111111111111111111111180b844a9059cbb000000000000000000000000000000000000000000000000000000000000dead00000000000000000000000000000000000000000000000000000000000f4240c0";
+    fs::write(work.join("tx.hex"), valid_hex).unwrap();
+    fs::write(work.join("expected.json"), r#"{"sentinel":"first"}"#).unwrap();
+
+    let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("probe bind");
+    let port = probe.local_addr().expect("local_addr").port();
+    drop(probe);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_parser_cli"))
+        .args([
+            "serve",
+            "--chain",
+            "ethereum",
+            "--network",
+            "ETHEREUM_MAINNET",
+            "--dir",
+            work.to_str().unwrap(),
+            "--port",
+            &port.to_string(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn parser_cli serve");
+
+    let stdout = child.stdout.take().expect("stdout");
+    let mut reader = BufReader::new(stdout);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut ready = false;
+    let mut greeting = String::new();
+    while Instant::now() < deadline {
+        let mut line = String::new();
+        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+            std::thread::sleep(Duration::from_millis(50));
+            continue;
+        }
+        greeting.push_str(&line);
+        if line.contains("Serving on") {
+            ready = true;
+            break;
+        }
+    }
+    assert!(ready, "server never printed ready line. got: {greeting}");
+
+    fn http_get(port: u16, path: &str) -> String {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).expect("tcp connect");
+        s.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        let req = format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+        std::io::Write::write_all(&mut s, req.as_bytes()).expect("write req");
+        let mut buf = String::new();
+        s.read_to_string(&mut buf).expect("read response");
+        buf
+    }
+
+    fn parse_json_body(api: &str) -> serde_json::Value {
+        let payload = api.split("\r\n\r\n").nth(1).unwrap_or("");
+        serde_json::from_str(payload).expect("api response should be JSON")
+    }
+
+    // 1. Initial: hex decodes, json passes through verbatim.
+    let hex_resp = parse_json_body(&http_get(port, "/api/file?path=tx.hex"));
+    assert_eq!(hex_resp["ok"], true);
+    assert_eq!(hex_resp["payload"]["Title"], "Ethereum Transaction");
+
+    let json_resp = parse_json_body(&http_get(port, "/api/file?path=expected.json"));
+    assert_eq!(json_resp["ok"], true);
+    assert_eq!(json_resp["payload"]["sentinel"], "first");
+
+    // 1b. Standalone payload route: the rel-path itself is browseable and
+    //     returns the bare payload (no envelope).
+    let standalone_hex = parse_json_body(&http_get(port, "/tx.hex"));
+    assert_eq!(standalone_hex["Title"], "Ethereum Transaction");
+    let standalone_json = parse_json_body(&http_get(port, "/expected.json"));
+    assert_eq!(standalone_json["sentinel"], "first");
+
+    // Unknown path 404s on the standalone route.
+    let missing = http_get(port, "/no-such-file.hex");
+    assert!(
+        missing.contains(" 404 "),
+        "expected 404 status line, got: {missing}"
+    );
+
+    // 2. Mutate the JSON file on disk and verify the next GET reflects it
+    //    without restarting the server.
+    fs::write(work.join("expected.json"), r#"{"sentinel":"second"}"#).unwrap();
+    let json_resp2 = parse_json_body(&http_get(port, "/api/file?path=expected.json"));
+    assert_eq!(json_resp2["payload"]["sentinel"], "second");
+
+    // 3. Drop in a brand-new file and verify it shows up in /.
+    fs::write(
+        work.join("late.json"),
+        r#"{"created":"after-server-start"}"#,
+    )
+    .unwrap();
+    let body = http_get(port, "/");
+    assert!(
+        body.contains("late.json"),
+        "new file missing from /. got: {body}"
+    );
+
+    // 4. Truncate the hex file and verify it flips to error state.
+    fs::write(work.join("tx.hex"), "").unwrap();
+    let hex_resp2 = parse_json_body(&http_get(port, "/api/file?path=tx.hex"));
+    assert_eq!(hex_resp2["ok"], false);
+
+    // Cleanup.
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(&work);
 }
 
 #[test]
