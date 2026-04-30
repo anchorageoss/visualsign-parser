@@ -7,6 +7,10 @@ ENV CARGOFLAGS='--target x86_64-unknown-linux-musl --no-default-features --locke
 # Directory for Rust artifacts
 ENV RELEASE_DIR=/src/target/x86_64-unknown-linux-musl/release
 
+# Version injected at build time via --build-arg (set by make VERSION=...)
+ARG VERSION
+ENV VERSION=$VERSION
+
 # Load Rust sources
 ADD src /src
 WORKDIR /src/

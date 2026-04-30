@@ -51,8 +51,16 @@ jobs:
 
       - name: Build ${{ matrix.target.name }}
         shell: bash
+        env:
+          GH_REF_TYPE: ${{ github.ref_type }}
+          GH_REF_NAME: ${{ github.ref_name }}
         run: |
-          make -j$(nproc) out/${{ matrix.target.name }}/index.json
+          if [[ "$GH_REF_TYPE" == "tag" && "$GH_REF_NAME" == v*.*.* ]]; then
+            VERSION="${GH_REF_NAME#v}"
+          else
+            VERSION=""
+          fi
+          make VERSION="$VERSION" -j$(nproc) out/${{ matrix.target.name }}/index.json
 
       - name: Load artifact to Docker
         run: |

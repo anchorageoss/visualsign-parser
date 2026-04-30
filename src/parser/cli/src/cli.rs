@@ -6,7 +6,7 @@ use visualsign::{SignablePayload, SignablePayloadField};
 
 #[derive(Parser, Debug)]
 #[command(name = "visualsign-parser")]
-#[command(version = "1.0")]
+#[command(version = env!("VERSION"))]
 #[command(about = "Converts raw transactions to visual signing properties")]
 pub(crate) struct Args {
     #[arg(short, long, help = "Chain type")]
