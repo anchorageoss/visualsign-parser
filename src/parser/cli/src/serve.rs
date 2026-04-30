@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::{Path as AxumPath, Query, State},
     http::StatusCode,
     response::Html,
     routing::get,
@@ -142,6 +142,7 @@ pub fn execute_serve(args: &ServeArgs) {
     let app = Router::new()
         .route("/", get(handle_index))
         .route("/api/file", get(handle_file))
+        .route("/{*path}", get(handle_payload))
         .with_state(state);
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -289,6 +290,28 @@ async fn handle_index(State(state): State<AppState>) -> Result<Html<String>, Sta
     Ok(Html(render_html(&entries)))
 }
 
+/// Serve the decoded payload for a single file by its rel-path. Lets each
+/// entry have its own bookmarkable / shareable URL — e.g.
+/// `/token_2022/transfer_checked.json` returns just that file's payload as
+/// JSON. Wraps no envelope around it so browsers and `curl` see the raw
+/// `SignablePayload` (or the verbatim file content for `.json` passthrough).
+async fn handle_payload(
+    State(state): State<AppState>,
+    AxumPath(path): AxumPath<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let entries = load_entries(&state)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let entry = entries
+        .iter()
+        .find(|e| e.rel_path == path)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("not found: {path}\n")))?;
+    match &entry.result {
+        Ok(value) => Ok(Json(value.clone())),
+        Err(err) => Err((StatusCode::UNPROCESSABLE_ENTITY, format!("{err}\n"))),
+    }
+}
+
 async fn handle_file(
     State(state): State<AppState>,
     Query(q): Query<FileQuery>,
@@ -320,6 +343,27 @@ async fn handle_file(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
+/// Percent-encode the segments that need it so a rel path becomes a URL.
+/// Segment separators (`/`) are preserved. Common safe filename characters
+/// (alphanumerics, `-`, `_`, `.`) are left alone; everything else is
+/// escaped. Sufficient for filesystem rel paths; not a general-purpose
+/// URL encoder.
+fn url_encode_path(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(b as char);
+            }
+            _ => {
+                use std::fmt::Write as _;
+                let _ = write!(out, "%{b:02X}");
+            }
+        }
+    }
+    out
+}
+
 fn html_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -341,6 +385,8 @@ details{margin:0.4em 0;border-left:3px solid #ccc;padding:0.4em 0.8em;background
 details[open]{background:#fff;border-left-color:#456}\
 summary{font-family:ui-monospace,Menlo,Consolas,monospace;cursor:pointer;font-weight:600}\
 summary.err{color:#b00}\
+summary a.open{font-weight:400;color:#456;text-decoration:none;margin-left:0.5em;font-size:0.85em}\
+summary a.open:hover{text-decoration:underline}\
 pre{background:#f5f5f5;padding:0.8em;overflow:auto;font-size:12.5px;border-radius:3px;margin-top:0.6em}\
 footer{margin-top:1.5em;color:#888;font-size:0.85em}";
 
@@ -362,22 +408,22 @@ fn render_html(entries: &[DecodedEntry]) -> String {
     }
 
     for entry in entries {
+        let escaped_path = html_escape(&entry.rel_path);
+        let url_path = url_encode_path(&entry.rel_path);
         match &entry.result {
             Ok(value) => {
                 let json = serde_json::to_string_pretty(value)
                     .unwrap_or_else(|e| format!("(serialization error: {e})"));
                 let _ = write!(
                     body,
-                    "<details><summary>{}</summary><pre>{}</pre></details>",
-                    html_escape(&entry.rel_path),
+                    "<details><summary>{escaped_path} <a class=open href=\"/{url_path}\">[json]</a></summary><pre>{}</pre></details>",
                     html_escape(&json),
                 );
             }
             Err(err) => {
                 let _ = write!(
                     body,
-                    "<details><summary class=err>{} &mdash; error</summary><pre>{}</pre></details>",
-                    html_escape(&entry.rel_path),
+                    "<details><summary class=err>{escaped_path} &mdash; error <a class=open href=\"/{url_path}\">[json]</a></summary><pre>{}</pre></details>",
                     html_escape(err),
                 );
             }
@@ -515,6 +561,16 @@ mod tests {
     }
 
     #[test]
+    fn url_encode_path_preserves_separators_and_safe_chars() {
+        assert_eq!(
+            url_encode_path("token_2022/transfer_checked.json"),
+            "token_2022/transfer_checked.json"
+        );
+        assert_eq!(url_encode_path("a b/c.hex"), "a%20b/c.hex");
+        assert_eq!(url_encode_path("dir/file?weird"), "dir/file%3Fweird");
+    }
+
+    #[test]
     fn html_escape_handles_all_specials() {
         assert_eq!(
             html_escape("<a href=\"x\">&'</a>"),
@@ -534,5 +590,8 @@ mod tests {
         assert!(html.contains("Ethereum Transaction"));
         assert!(html.contains("class=err"));
         assert!(html.contains("Refresh to re-decode"));
+        // Each entry exposes a standalone-link to its rel-path.
+        assert!(html.contains("href=\"/good.hex\""), "got: {html}");
+        assert!(html.contains("href=\"/bad.hex\""), "got: {html}");
     }
 }

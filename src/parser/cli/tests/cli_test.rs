@@ -566,6 +566,20 @@ fn test_cli_serve_live_reload_and_json_passthrough() {
     assert_eq!(json_resp["ok"], true);
     assert_eq!(json_resp["payload"]["sentinel"], "first");
 
+    // 1b. Standalone payload route: the rel-path itself is browseable and
+    //     returns the bare payload (no envelope).
+    let standalone_hex = parse_json_body(&http_get(port, "/tx.hex"));
+    assert_eq!(standalone_hex["Title"], "Ethereum Transaction");
+    let standalone_json = parse_json_body(&http_get(port, "/expected.json"));
+    assert_eq!(standalone_json["sentinel"], "first");
+
+    // Unknown path 404s on the standalone route.
+    let missing = http_get(port, "/no-such-file.hex");
+    assert!(
+        missing.contains(" 404 "),
+        "expected 404 status line, got: {missing}"
+    );
+
     // 2. Mutate the JSON file on disk and verify the next GET reflects it
     //    without restarting the server.
     fs::write(work.join("expected.json"), r#"{"sentinel":"second"}"#).unwrap();
