@@ -26,7 +26,7 @@
     },
     {
       "FallbackText": "Program ID: 11111111111111111111111111111111\nData: 0200000000e40b5402000000",
-      "Label": "Instruction 1",
+      "Label": "Transfer: 10000000000 lamports",
       "PreviewLayout": {
         "Condensed": {
           "Fields": [
@@ -80,7 +80,7 @@
     },
     {
       "FallbackText": "Program ID: ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL\nData: 01",
-      "Label": "Instruction 2",
+      "Label": "Create Associated Token Account (Idempotent)",
       "PreviewLayout": {
         "Condensed": {
           "Fields": [
@@ -125,7 +125,7 @@
     },
     {
       "FallbackText": "Program ID: SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy\nData: 0e00e40b5402000000",
-      "Label": "Instruction 3",
+      "Label": "Stake Pool Instruction: Deposit SOL",
       "PreviewLayout": {
         "Condensed": {
           "Fields": [
@@ -162,7 +162,7 @@
     },
     {
       "FallbackText": "Program ID: ComputeBudget111111111111111111111111111111\nData: 02801a0600",
-      "Label": "Instruction 4",
+      "Label": "Set Compute Unit Limit: 400000 units",
       "PreviewLayout": {
         "Condensed": {
           "Fields": [
@@ -215,7 +215,7 @@
     },
     {
       "FallbackText": "Program ID: ComputeBudget111111111111111111111111111111\nData: 0350c3000000000000",
-      "Label": "Instruction 5",
+      "Label": "Set Compute Unit Price: 50000 micro-lamports per compute unit",
       "PreviewLayout": {
         "Condensed": {
           "Fields": [
@@ -268,7 +268,7 @@
     },
     {
       "FallbackText": "Program ID: 11111111111111111111111111111111\nData: 020000001027000000000000",
-      "Label": "Instruction 6",
+      "Label": "Transfer: 10000 lamports",
       "PreviewLayout": {
         "Condensed": {
           "Fields": [

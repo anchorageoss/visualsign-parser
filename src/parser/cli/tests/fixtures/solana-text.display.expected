@@ -30,7 +30,7 @@ SignablePayload {
         PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Program ID: 11111111111111111111111111111111\nData: 0200000000e40b5402000000",
-                label: "Instruction 1",
+                label: "Transfer: 10000000000 lamports",
             },
             preview_layout: SignablePayloadFieldPreviewLayout {
                 title: Some(
@@ -115,7 +115,7 @@ SignablePayload {
         PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Program ID: ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL\nData: 01",
-                label: "Instruction 2",
+                label: "Create Associated Token Account (Idempotent)",
             },
             preview_layout: SignablePayloadFieldPreviewLayout {
                 title: Some(
@@ -184,7 +184,7 @@ SignablePayload {
         PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Program ID: SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy\nData: 0e00e40b5402000000",
-                label: "Instruction 3",
+                label: "Stake Pool Instruction: Deposit SOL",
             },
             preview_layout: SignablePayloadFieldPreviewLayout {
                 title: Some(
@@ -240,7 +240,7 @@ SignablePayload {
         PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Program ID: ComputeBudget111111111111111111111111111111\nData: 02801a0600",
-                label: "Instruction 4",
+                label: "Set Compute Unit Limit: 400000 units",
             },
             preview_layout: SignablePayloadFieldPreviewLayout {
                 title: Some(
@@ -322,7 +322,7 @@ SignablePayload {
         PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Program ID: ComputeBudget111111111111111111111111111111\nData: 0350c3000000000000",
-                label: "Instruction 5",
+                label: "Set Compute Unit Price: 50000 micro-lamports per compute unit",
             },
             preview_layout: SignablePayloadFieldPreviewLayout {
                 title: Some(
@@ -404,7 +404,7 @@ SignablePayload {
         PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Program ID: 11111111111111111111111111111111\nData: 020000001027000000000000",
-                label: "Instruction 6",
+                label: "Transfer: 10000 lamports",
             },
             preview_layout: SignablePayloadFieldPreviewLayout {
                 title: Some(
@@ -735,6 +735,32 @@ SignablePayload {
                         ],
                     },
                 ),
+            },
+        },
+        Diagnostic {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "ok: all 6 instructions have valid program_id_index",
+                label: "transaction::oob_program_id",
+            },
+            diagnostic: SignablePayloadFieldDiagnostic {
+                rule: "transaction::oob_program_id",
+                domain: "transaction",
+                level: "ok",
+                message: "all 6 instructions have valid program_id_index",
+                instruction_index: None,
+            },
+        },
+        Diagnostic {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "ok: all 6 instructions have valid account indices",
+                label: "transaction::oob_account_index",
+            },
+            diagnostic: SignablePayloadFieldDiagnostic {
+                rule: "transaction::oob_account_index",
+                domain: "transaction",
+                level: "ok",
+                message: "all 6 instructions have valid account indices",
+                instruction_index: None,
             },
         },
     ],

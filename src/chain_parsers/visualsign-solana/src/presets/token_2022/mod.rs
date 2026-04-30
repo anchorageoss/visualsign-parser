@@ -3,7 +3,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use crate::utils::format_token_amount;
 use config::Token2022Config;
@@ -17,6 +18,13 @@ use visualsign::{
 };
 
 static TOKEN_2022_CONFIG: Token2022Config = Token2022Config;
+
+fn resolve_program_id(context: &VisualizerContext) -> String {
+    match context.program_id() {
+        ProgramRef::Resolved(pk) => pk.to_string(),
+        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
+    }
+}
 
 // Token 2022 extension instruction discriminators
 const PAUSABLE_EXTENSION_DISCRIMINATOR: u8 = 44;
@@ -33,17 +41,27 @@ impl InstructionVisualizer for Token2022Visualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
+        // Build AccountMeta shim for the parser (which expects &[AccountMeta]).
+        // Unresolved accounts are rejected rather than substituted with
+        // Pubkey::default(), which would render as a valid-looking address.
+        let accounts: Vec<AccountMeta> = (0..context.num_accounts())
+            .map(|i| match context.account(i) {
+                Some(AccountRef::Resolved(pk)) => Ok(AccountMeta::new_readonly(*pk, false)),
+                Some(AccountRef::Unresolved { raw_index }) => Err(VisualSignError::DecodeError(
+                    format!("token_2022: unresolved account index {raw_index} at position {i}"),
+                )),
+                None => Err(VisualSignError::DecodeError(format!(
+                    "token_2022: missing account at position {i}"
+                ))),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Parse the Token 2022 instruction
-        let token_2022_instruction =
-            parse_token_2022_instruction(&instruction.data, &instruction.accounts)
-                .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
+        let token_2022_instruction = parse_token_2022_instruction(context.data(), &accounts)
+            .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
         // Generate proper preview layout
-        create_token_2022_preview_layout(&token_2022_instruction, instruction, context)
+        create_token_2022_preview_layout(&token_2022_instruction, context)
     }
 
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
@@ -309,7 +327,6 @@ fn get_authority_type_name(authority_type: u8) -> String {
 
 fn create_token_2022_preview_layout(
     parsed: &Token2022Instruction,
-    instruction: &solana_sdk::instruction::Instruction,
     context: &VisualizerContext,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     let (title, condensed_fields, expanded_fields) = match parsed {
@@ -336,8 +353,8 @@ fn create_token_2022_preview_layout(
                 create_text_field("Mint", mint)?,
                 create_text_field("Destination Account", account)?,
                 create_text_field("Mint Authority", mint_authority)?,
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
-                create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
+                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
             ];
 
             (title, condensed, expanded)
@@ -365,8 +382,8 @@ fn create_token_2022_preview_layout(
                 create_text_field("Token Account", account)?,
                 create_text_field("Mint", mint)?,
                 create_text_field("Authority", authority)?,
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
-                create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
+                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
             ];
 
             (title, condensed, expanded)
@@ -383,8 +400,8 @@ fn create_token_2022_preview_layout(
                 create_text_field("Instruction", "Pause")?,
                 create_text_field("Mint", mint)?,
                 create_text_field("Pause Authority", pause_authority)?,
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
-                create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
+                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
             ];
 
             (title, condensed, expanded)
@@ -401,8 +418,8 @@ fn create_token_2022_preview_layout(
                 create_text_field("Instruction", "Resume")?,
                 create_text_field("Mint", mint)?,
                 create_text_field("Pause Authority", pause_authority)?,
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
-                create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
+                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
             ];
 
             (title, condensed, expanded)
@@ -432,8 +449,8 @@ fn create_token_2022_preview_layout(
                 create_number_field("Authority Type ID", &authority_type.to_string(), "")?,
                 create_text_field("Current Authority", current_authority)?,
                 create_text_field("New Authority", &new_authority_display)?,
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
-                create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
+                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
             ];
 
             (title, condensed, expanded)
@@ -452,8 +469,8 @@ fn create_token_2022_preview_layout(
                 create_text_field("Token Account", account)?,
                 create_text_field("Mint", mint)?,
                 create_text_field("Freeze Authority", freeze_authority)?,
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
-                create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
+                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
             ];
 
             (title, condensed, expanded)
@@ -472,8 +489,8 @@ fn create_token_2022_preview_layout(
                 create_text_field("Token Account", account)?,
                 create_text_field("Mint", mint)?,
                 create_text_field("Freeze Authority", freeze_authority)?,
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
-                create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
+                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
             ];
 
             (title, condensed, expanded)
@@ -492,8 +509,8 @@ fn create_token_2022_preview_layout(
                 create_text_field("Token Account", account)?,
                 create_text_field("Destination", destination)?,
                 create_text_field("Owner", owner)?,
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
-                create_raw_data_field(&instruction.data, Some(hex::encode(&instruction.data)))?,
+                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
             ];
 
             (title, condensed, expanded)
@@ -520,14 +537,11 @@ fn create_token_2022_preview_layout(
         dynamic_annotation: None,
         signable_payload_field: SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
-                label: {
-                    let instruction_num = context.instruction_index() + 1;
-                    format!("Instruction {instruction_num}")
-                },
-                fallback_text: {
-                    let program_id = instruction.program_id;
-                    format!("Token 2022: {title}\nProgram ID: {program_id}")
-                },
+                label: format!("Token 2022: {title}"),
+                fallback_text: format!(
+                    "Token 2022: {title}\nProgram ID: {}",
+                    resolve_program_id(context)
+                ),
             },
             preview_layout,
         },

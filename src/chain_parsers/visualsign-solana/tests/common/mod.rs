@@ -114,7 +114,10 @@ pub fn options_no_idl() -> VisualSignOptions {
 // ── Field inspection helpers ──────────────────────────────────────────────────
 
 /// Returns the PreviewLayout for every instruction field in the payload.
+/// Instruction fields are PreviewLayouts that are not "Network", "Accounts",
+/// "Address Lookup Tables", or diagnostic fields.
 pub fn instruction_fields(payload: &SignablePayload) -> Vec<&SignablePayloadFieldPreviewLayout> {
+    let non_instruction_labels = ["Network", "Accounts", "Address Lookup Tables"];
     payload
         .fields
         .iter()
@@ -124,7 +127,7 @@ pub fn instruction_fields(payload: &SignablePayload) -> Vec<&SignablePayloadFiel
                 preview_layout,
             } = f
             {
-                if common.label.starts_with("Instruction") {
+                if !non_instruction_labels.contains(&common.label.as_str()) {
                     return Some(preview_layout);
                 }
             }

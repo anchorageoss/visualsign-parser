@@ -1,13 +1,12 @@
 use crate::core::{
-    InstructionVisualizer, SolanaAccount, VisualizerContext, available_visualizers,
-    visualize_with_any,
+    DecodeInstructionsResult, InstructionVisualizer, SolanaAccount, VisualizerContext,
+    available_visualizers, visualize_with_any,
 };
-use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::transaction::VersionedTransaction;
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
-    vsptrait::VisualSignError,
+    field_builders::create_diagnostic_field, vsptrait::VisualSignError,
 };
 
 /// Decode V0 transaction transfers using solana-parser
@@ -113,85 +112,82 @@ pub fn decode_v0_transfers(
     Ok(fields)
 }
 
-/// Decode V0 transaction instructions using the visualizer framework
-/// This works for all V0 transactions, including those with lookup tables
+/// Decode V0 transaction instructions using the visualizer framework.
+/// This works for all V0 transactions, including those with lookup tables.
+/// Always succeeds -- data quality issues become diagnostics, per-instruction
+/// failures are collected in errors.
 pub fn decode_v0_instructions(
     v0_message: &solana_sdk::message::v0::Message,
     idl_registry: &crate::idl::IdlRegistry,
-) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
-    // Get visualizers
+    lint_config: &visualsign::lint::LintConfig,
+) -> DecodeInstructionsResult {
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
     let visualizers_refs: Vec<&dyn InstructionVisualizer> =
         visualizers.iter().map(|v| v.as_ref()).collect::<Vec<_>>();
 
-    // For V0 transactions, we need to resolve account keys from both static keys and lookup tables
-    // For now, we'll work with just the static account keys for instruction processing
-    // since lookup table accounts would require on-chain resolution
     let account_keys = &v0_message.account_keys;
 
-    // Convert compiled instructions to full instructions using static account keys only
-    // Instructions that reference lookup table accounts will be processed with limited info
-    let instructions: Vec<Instruction> = v0_message
-        .instructions
-        .iter()
-        .filter_map(|ci| {
-            // Only process instructions where program_id is in static account keys
-            if (ci.program_id_index as usize) < account_keys.len() {
-                let program_id = account_keys[ci.program_id_index as usize];
-
-                let accounts: Vec<AccountMeta> = ci
-                    .accounts
-                    .iter()
-                    .filter_map(|&i| {
-                        // Only include accounts that are in static account keys
-                        if (i as usize) < account_keys.len() {
-                            Some(AccountMeta::new_readonly(account_keys[i as usize], false))
-                        } else {
-                            // Account is in lookup table - we can't resolve it without on-chain data
-                            None
-                        }
-                    })
-                    .collect();
-
-                Some(Instruction {
-                    program_id,
-                    accounts,
-                    data: ci.data.clone(),
-                })
-            } else {
-                // Program ID is in lookup table - skip this instruction
-                None
-            }
-        })
-        .collect();
-
-    // Process each instruction with the visualizer framework
     if account_keys.is_empty() {
-        return Err(VisualSignError::ParseError(
-            visualsign::vsptrait::TransactionParseError::DecodeError(
-                "V0 transaction has no account keys".to_string(),
-            ),
-        ));
+        let severity = lint_config.severity_for(
+            "transaction::empty_account_keys",
+            visualsign::lint::Severity::Error,
+        );
+        let diagnostics = if matches!(severity, visualsign::lint::Severity::Allow) {
+            Vec::new()
+        } else {
+            vec![create_diagnostic_field(
+                "transaction::empty_account_keys",
+                "transaction",
+                severity,
+                "v0 transaction has no account keys",
+                None,
+            )]
+        };
+        return DecodeInstructionsResult {
+            fields: Vec::new(),
+            errors: Vec::new(),
+            diagnostics,
+        };
     }
 
-    instructions
-        .iter()
-        .enumerate()
-        .filter_map(|(instruction_index, _)| {
-            // Create sender account from first account key (typically the fee payer)
-            let sender = SolanaAccount {
-                account_key: account_keys[0].to_string(),
-                signer: false,
-                writable: false,
-            };
+    // Diagnostic scan: check all indices, emit diagnostics for inaccessible ones.
+    // Uses the shared scan function from instructions.rs.
+    let diagnostics = super::super::instructions::scan_instruction_diagnostics(
+        &v0_message.instructions,
+        account_keys,
+        lint_config,
+    );
 
-            visualize_with_any(
-                &visualizers_refs,
-                &VisualizerContext::new(&sender, instruction_index, &instructions, idl_registry),
-            )
-        })
-        .map(|res| res.map(|viz_result| viz_result.field))
-        .collect()
+    // Visualization: process every instruction (no skipping)
+    let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
+    let mut errors: Vec<(usize, VisualSignError)> = Vec::new();
+
+    for (i, ci) in v0_message.instructions.iter().enumerate() {
+        let sender = SolanaAccount {
+            account_key: account_keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
+
+        let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry);
+
+        match visualize_with_any(&visualizers_refs, &context) {
+            Some(Ok(viz_result)) => fields.push(viz_result.field),
+            Some(Err(e)) => errors.push((i, e)),
+            None => errors.push((
+                i,
+                VisualSignError::DecodeError(format!(
+                    "No visualizer available for instruction at index {i}"
+                )),
+            )),
+        }
+    }
+
+    DecodeInstructionsResult {
+        fields,
+        errors,
+        diagnostics,
+    }
 }
 
 /// Create a rich address lookup table field with detailed information
@@ -359,4 +355,195 @@ pub fn create_address_lookup_table_field(
             expanded: Some(expanded_list),
         },
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use solana_sdk::pubkey::Pubkey;
+    use visualsign::SignablePayloadField;
+    use visualsign::lint::LintConfig;
+
+    fn v0_message_with_oob_program_id() -> solana_sdk::message::v0::Message {
+        let key0 = Pubkey::new_unique();
+        let key1 = Pubkey::new_unique();
+        solana_sdk::message::v0::Message {
+            header: solana_sdk::message::MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys: vec![key0, key1],
+            recent_blockhash: solana_sdk::hash::Hash::default(),
+            instructions: vec![
+                solana_sdk::instruction::CompiledInstruction {
+                    program_id_index: 1,
+                    accounts: vec![0],
+                    data: vec![0xAA],
+                },
+                solana_sdk::instruction::CompiledInstruction {
+                    program_id_index: 99, // OOB: only 2 static keys
+                    accounts: vec![0],
+                    data: vec![0xBB],
+                },
+            ],
+            address_table_lookups: vec![],
+        }
+    }
+
+    fn v0_message_with_oob_program_id_and_oob_account() -> solana_sdk::message::v0::Message {
+        let key0 = Pubkey::new_unique();
+        let key1 = Pubkey::new_unique();
+        solana_sdk::message::v0::Message {
+            header: solana_sdk::message::MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys: vec![key0, key1],
+            recent_blockhash: solana_sdk::hash::Hash::default(),
+            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 99,  // OOB
+                accounts: vec![0, 88], // 88 is also OOB
+                data: vec![0xCC],
+            }],
+            address_table_lookups: vec![],
+        }
+    }
+
+    #[test]
+    fn test_v0_oob_program_id_emits_diagnostic() {
+        let msg = v0_message_with_oob_program_id();
+        let registry = crate::idl::IdlRegistry::new();
+        let config = LintConfig::default();
+        let result = decode_v0_instructions(&msg, &registry, &config);
+        let fields = [result.fields, result.diagnostics].concat();
+
+        let warns: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. }
+                    if diagnostic.level == "warn" =>
+                {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(warns.len(), 1);
+        assert_eq!(warns[0].rule, "transaction::oob_program_id");
+        assert_eq!(warns[0].instruction_index, Some(1));
+
+        let passes: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. } if diagnostic.level == "ok" => {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_account_index")
+        );
+    }
+
+    #[test]
+    fn test_v0_oob_program_id_and_oob_account_index_emits_both_diagnostics() {
+        let msg = v0_message_with_oob_program_id_and_oob_account();
+        let registry = crate::idl::IdlRegistry::new();
+        let config = LintConfig::default();
+        let result = decode_v0_instructions(&msg, &registry, &config);
+        let fields = [result.fields, result.diagnostics].concat();
+
+        let warns: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. }
+                    if diagnostic.level == "warn" =>
+                {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(warns.len(), 2);
+        assert!(
+            warns
+                .iter()
+                .any(|d| d.rule == "transaction::oob_program_id")
+        );
+        assert!(
+            warns
+                .iter()
+                .any(|d| d.rule == "transaction::oob_account_index")
+        );
+        let acct_warn = warns
+            .iter()
+            .find(|d| d.rule == "transaction::oob_account_index")
+            .unwrap();
+        assert_eq!(acct_warn.instruction_index, Some(0));
+        assert!(acct_warn.message.contains("88"));
+
+        // No ok-diagnostics when both rules fire
+        let passes: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. } if diagnostic.level == "ok" => {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(passes.is_empty(), "no ok-diagnostics when both rules fire");
+    }
+
+    #[test]
+    fn test_v0_valid_transaction_emits_two_ok_diagnostics() {
+        let key0 = Pubkey::new_unique();
+        let key1 = Pubkey::new_unique();
+        let msg = solana_sdk::message::v0::Message {
+            header: solana_sdk::message::MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys: vec![key0, key1],
+            recent_blockhash: solana_sdk::hash::Hash::default(),
+            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0],
+                data: vec![0xDD],
+            }],
+            address_table_lookups: vec![],
+        };
+        let registry = crate::idl::IdlRegistry::new();
+        let config = LintConfig::default();
+        let result = decode_v0_instructions(&msg, &registry, &config);
+        let fields = [result.fields, result.diagnostics].concat();
+
+        let passes: Vec<_> = fields
+            .iter()
+            .filter_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::Diagnostic { diagnostic, .. } if diagnostic.level == "ok" => {
+                    Some(diagnostic)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(passes.len(), 2);
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_program_id")
+        );
+        assert!(
+            passes
+                .iter()
+                .any(|d| d.rule == "transaction::oob_account_index")
+        );
+    }
 }

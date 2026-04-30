@@ -3,7 +3,7 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
 };
 use config::StakepoolConfig;
 use spl_stake_pool::instruction::StakePoolInstruction;
@@ -21,15 +21,8 @@ impl InstructionVisualizer for StakepoolVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
-
-        // Try to parse as stakepool instruction
-        let stakepool_instruction = parse_stake_pool_instruction(&instruction.data)?;
-
-        // Generate proper preview layout
-        create_stakepool_preview_layout(&stakepool_instruction, instruction, context)
+        let stakepool_instruction = parse_stake_pool_instruction(context.data())?;
+        create_stakepool_preview_layout(&stakepool_instruction, context)
     }
 
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
@@ -43,9 +36,12 @@ impl InstructionVisualizer for StakepoolVisualizer {
 
 fn create_stakepool_preview_layout(
     instruction: &StakePoolInstruction,
-    solana_instruction: &solana_sdk::instruction::Instruction,
     context: &VisualizerContext,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
+    let program_id_str = match context.program_id() {
+        ProgramRef::Resolved(pk) => pk.to_string(),
+        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
+    };
     let instruction_name = format_stake_pool_instruction(instruction);
 
     let condensed_fields = vec![create_text_field("Instruction", &instruction_name)?];
@@ -78,11 +74,11 @@ fn create_stakepool_preview_layout(
         dynamic_annotation: None,
         signable_payload_field: SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
-                label: format!("Instruction {}", context.instruction_index() + 1),
+                label: instruction_name,
                 fallback_text: format!(
                     "Program ID: {}\nData: {}",
-                    solana_instruction.program_id,
-                    hex::encode(&solana_instruction.data)
+                    program_id_str,
+                    hex::encode(context.data())
                 ),
             },
             preview_layout,
