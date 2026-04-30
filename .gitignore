@@ -1,2 +1,7 @@
 **/target
 out
+
+# Coverage artifacts (see TESTING.md)
+lcov.info
+*.profraw
+*.profdata

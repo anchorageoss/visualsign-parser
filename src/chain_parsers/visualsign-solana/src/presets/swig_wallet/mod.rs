@@ -862,7 +862,11 @@ fn visualize_inner_instruction(instruction: Instruction) -> Option<String> {
     visualize_with_any(&visualizer_refs, &context)
         .and_then(|result| result.ok())
         .and_then(|viz_result| match viz_result.kind {
-            VisualizerKind::Payments("UnknownProgram") => None,
+            // Skip catch-all and SPL Token; both produce summaries that are less informative
+            // than swig's own format_token_instruction_summary for inner instructions.
+            VisualizerKind::Payments("UnknownProgram") | VisualizerKind::Payments("SplToken") => {
+                None
+            }
             _ => summarize_visualized_field(&viz_result.field),
         })
 }
