@@ -9,7 +9,7 @@ use config::MetadaoFutarchyConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -70,8 +70,8 @@ fn build_named_accounts(
     idl: &Idl,
     instruction_data: &[u8],
     accounts: &[solana_sdk::instruction::AccountMeta],
-) -> HashMap<String, String> {
-    let mut named = HashMap::new();
+) -> BTreeMap<String, String> {
+    let mut named = BTreeMap::new();
     if instruction_data.len() < 8 {
         return named;
     }
@@ -102,7 +102,7 @@ fn build_visualization(
     context: &VisualizerContext,
     instruction: &solana_sdk::instruction::Instruction,
     parsed: &SolanaParsedInstructionData,
-    named_accounts: &HashMap<String, String>,
+    named_accounts: &BTreeMap<String, String>,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     let program_id = instruction.program_id.to_string();
     let title = format!("{DISPLAY_NAME}: {}", parsed.instruction_name);
