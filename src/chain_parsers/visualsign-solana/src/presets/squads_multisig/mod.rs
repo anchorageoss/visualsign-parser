@@ -513,24 +513,27 @@ fn format_arg_value(value: &serde_json::Value) -> String {
 mod tests {
     use super::*;
 
+    /// Test-helper error type. Boxed dyn-error so `?` accepts both `hex::FromHexError` and
+    /// the `Box<dyn std::error::Error>` returned by `VaultTransactionMessage::deserialize`.
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
     #[test]
-    fn test_squads_idl_loads() {
-        let idl = get_squads_idl();
-        assert!(idl.is_some(), "Squads IDL should load successfully");
-        let idl = idl.unwrap();
+    fn test_squads_idl_loads() -> TestResult {
+        let idl = get_squads_idl().ok_or("Squads IDL should load successfully")?;
         assert!(!idl.instructions.is_empty(), "IDL should have instructions");
+        Ok(())
     }
 
     #[test]
-    fn test_squads_idl_has_discriminators() {
-        let idl = get_squads_idl().unwrap();
+    fn test_squads_idl_has_discriminators() -> TestResult {
+        let idl = get_squads_idl().ok_or("Squads IDL should load successfully")?;
         for instruction in &idl.instructions {
-            assert!(
-                instruction.discriminator.is_some(),
-                "Instruction '{}' should have a computed discriminator",
-                instruction.name
-            );
-            let disc = instruction.discriminator.as_ref().unwrap();
+            let disc = instruction.discriminator.as_ref().ok_or_else(|| {
+                format!(
+                    "Instruction '{}' should have a computed discriminator",
+                    instruction.name
+                )
+            })?;
             assert_eq!(
                 disc.len(),
                 8,
@@ -538,6 +541,7 @@ mod tests {
                 instruction.name
             );
         }
+        Ok(())
     }
 
     #[test]
@@ -557,11 +561,11 @@ mod tests {
     }
 
     #[test]
-    fn test_vault_transaction_message_deserialization() {
+    fn test_vault_transaction_message_deserialization() -> TestResult {
         // The transactionMessage hex from the sample transaction
         let tx_msg_hex = "01010103904fc8953dcfc9f3b5179893ee12fc9c445cad889a957d61cfb8dbcc172f6a4f4a3eef4b03c82a71599ea07a16ee4bcf6dce31357d8460b2ac1bd4c3a9860c9d0954dbbe9ec960c98a7a293fe21336966fe180d151ae4b8179561f89854a53f601020200012800a1b028d53cb8b3e4ef5e27e0961546aad46749acc092e03c1a8c7c1187e887cc245db9cf2bca9a9900";
-        let tx_msg_bytes = hex::decode(tx_msg_hex).unwrap();
-        let vault_msg = VaultTransactionMessage::deserialize(&tx_msg_bytes).unwrap();
+        let tx_msg_bytes = hex::decode(tx_msg_hex)?;
+        let vault_msg = VaultTransactionMessage::deserialize(&tx_msg_bytes)?;
 
         assert_eq!(
             vault_msg.account_keys.len(),
@@ -574,7 +578,10 @@ mod tests {
             "Should have 1 inner instruction"
         );
 
-        let inner = &vault_msg.instructions[0];
+        let inner = vault_msg
+            .instructions
+            .first()
+            .ok_or("expected at least one instruction")?;
         assert!(
             (inner.program_id_index as usize) < vault_msg.account_keys.len(),
             "program_id_index should be valid"
@@ -582,10 +589,14 @@ mod tests {
 
         let instructions = reconstruct_instructions(&vault_msg);
         assert_eq!(instructions.len(), 1, "Should reconstruct 1 instruction");
+        let first_inner = instructions
+            .first()
+            .ok_or("expected at least one reconstructed instruction")?;
         // The inner instruction's program_id should be one of the account keys
         assert!(
-            vault_msg.account_keys.contains(&instructions[0].program_id),
+            vault_msg.account_keys.contains(&first_inner.program_id),
             "Inner instruction program_id should be in account_keys"
         );
+        Ok(())
     }
 }
