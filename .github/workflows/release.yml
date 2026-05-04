@@ -38,8 +38,8 @@ jobs:
             exit 1
           fi
           TAG="v${SEMVER}"
-          echo "full_version=$FULL_VERSION" >> $GITHUB_OUTPUT
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "full_version=$FULL_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Version: $FULL_VERSION  Tag: $TAG"
 
       - name: Check if tag/release already exist
@@ -50,16 +50,16 @@ jobs:
         run: |
           git fetch --tags origin
           if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "tag_exists=true" >> $GITHUB_OUTPUT
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "tag_exists=false" >> $GITHUB_OUTPUT
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
           fi
           RELEASE_ERR=$(mktemp)
           if gh release view "$TAG" >/dev/null 2>"$RELEASE_ERR"; then
-            echo "release_exists=true" >> $GITHUB_OUTPUT
+            echo "release_exists=true" >> "$GITHUB_OUTPUT"
             echo "Tag $TAG and its release both exist, skipping."
           elif grep -qiE 'release not found|not found|HTTP 404' "$RELEASE_ERR"; then
-            echo "release_exists=false" >> $GITHUB_OUTPUT
+            echo "release_exists=false" >> "$GITHUB_OUTPUT"
           else
             echo "ERROR: gh release view failed unexpectedly:" >&2
             cat "$RELEASE_ERR" >&2
