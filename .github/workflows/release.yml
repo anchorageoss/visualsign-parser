@@ -100,7 +100,9 @@ jobs:
       - name: Trigger stagex build
         # GITHUB_TOKEN tag pushes don't re-trigger other workflows, so we dispatch
         # stagex explicitly so released images get the semver baked in.
-        if: steps.check_tag.outputs.tag_exists == 'false' && inputs.dry_run != 'true'
+        # Gate on release_exists == false (not tag_exists) so that a retry after a
+        # partial failure (tag pushed, release creation failed) still dispatches stagex.
+        if: steps.check_tag.outputs.release_exists == 'false' && inputs.dry_run != 'true'
         env:
           TAG: ${{ steps.version.outputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -47,14 +47,11 @@ if ! git rev-parse --verify "$REMOTE/$DEFAULT_BRANCH" > /dev/null 2>&1; then
 fi
 
 MERGE_BASE=$(git merge-base "$REMOTE/$DEFAULT_BRANCH" HEAD)
-if [ "$MERGE_BASE" = "$(git rev-parse "$REMOTE/$DEFAULT_BRANCH")" ]; then
-  # Local remote-tracking ref may be stale -- fetch to get the real merge base
+if [ "$MERGE_BASE" = "$(git rev-parse "$REMOTE/$DEFAULT_BRANCH")" ] && [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  # On CI, the remote-tracking ref may be stale (shallow clone) -- fetch to get the real merge base.
+  # Skipped on local builds; run `git fetch` manually if the version number looks wrong.
   echo "Fetching $REMOTE..." >&2
-  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
-    git fetch "$REMOTE" >&2
-  else
-    git fetch "$REMOTE" > /dev/null 2>&1 || echo "Warning: fetch from $REMOTE failed, continuing with local ref" >&2
-  fi
+  git fetch "$REMOTE" >&2
   MERGE_BASE=$(git merge-base "$REMOTE/$DEFAULT_BRANCH" HEAD)
 fi
 MERGE_HEIGHT=$(git rev-list --count "$MERGE_BASE")
