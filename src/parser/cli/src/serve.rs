@@ -385,10 +385,28 @@ details{margin:0.4em 0;border-left:3px solid #ccc;padding:0.4em 0.8em;background
 details[open]{background:#fff;border-left-color:#456}\
 summary{font-family:ui-monospace,Menlo,Consolas,monospace;cursor:pointer;font-weight:600}\
 summary.err{color:#b00}\
-summary a.open{font-weight:400;color:#456;text-decoration:none;margin-left:0.5em;font-size:0.85em}\
+summary .path{word-break:break-all}\
+summary a.open,summary button.copy{font-weight:400;color:#456;text-decoration:none;margin-left:0.5em;font-size:0.85em;display:inline-block;padding:0.25em 0.5em;font-family:inherit}\
+summary button.copy{background:#eef;border:1px solid #cce;border-radius:3px;cursor:pointer}\
+summary button.copy:hover{background:#dde}\
+summary button.copy.copied{background:#dfd;border-color:#9c9}\
 summary a.open:hover{text-decoration:underline}\
-pre{background:#f5f5f5;padding:0.8em;overflow:auto;font-size:12.5px;border-radius:3px;margin-top:0.6em}\
-footer{margin-top:1.5em;color:#888;font-size:0.85em}";
+pre{background:#f5f5f5;padding:0.8em;overflow:auto;font-size:12px;border-radius:3px;margin-top:0.6em;white-space:pre}\
+footer{margin-top:1.5em;color:#888;font-size:0.85em}\
+@media (max-width:600px){body{margin:0.5em auto;padding:0 0.5em}h1{font-size:1.05em}}";
+
+const COPY_SCRIPT: &str = "document.addEventListener('click',function(e){\
+var btn=e.target.closest('button.copy');\
+if(!btn)return;\
+e.preventDefault();e.stopPropagation();\
+var pre=btn.closest('details').querySelector('pre');\
+if(!pre||!navigator.clipboard)return;\
+navigator.clipboard.writeText(pre.textContent).then(function(){\
+var orig=btn.textContent;\
+btn.textContent='copied!';btn.classList.add('copied');\
+setTimeout(function(){btn.textContent=orig;btn.classList.remove('copied');},1200);\
+});\
+});";
 
 fn render_html(entries: &[DecodedEntry]) -> String {
     use std::fmt::Write as _;
@@ -416,14 +434,14 @@ fn render_html(entries: &[DecodedEntry]) -> String {
                     .unwrap_or_else(|e| format!("(serialization error: {e})"));
                 let _ = write!(
                     body,
-                    "<details><summary>{escaped_path} <a class=open href=\"/{url_path}\">[json]</a></summary><pre>{}</pre></details>",
+                    "<details><summary><span class=path>{escaped_path}</span> <a class=open href=\"/{url_path}\">[json]</a><button class=copy type=button>copy</button></summary><pre>{}</pre></details>",
                     html_escape(&json),
                 );
             }
             Err(err) => {
                 let _ = write!(
                     body,
-                    "<details><summary class=err>{escaped_path} &mdash; error <a class=open href=\"/{url_path}\">[json]</a></summary><pre>{}</pre></details>",
+                    "<details><summary class=err><span class=path>{escaped_path}</span> &mdash; error <a class=open href=\"/{url_path}\">[json]</a><button class=copy type=button>copy</button></summary><pre>{}</pre></details>",
                     html_escape(err),
                 );
             }
@@ -433,13 +451,13 @@ fn render_html(entries: &[DecodedEntry]) -> String {
     body.push_str("<footer>Refresh to re-decode from disk. <code>.json</code> files are served as-is; everything else is decoded through the chain registry.</footer>");
 
     format!(
-        "<!DOCTYPE html><html lang=en><head><meta charset=utf-8><title>parser_cli serve</title><style>{STYLE}</style></head><body>{body}</body></html>"
+        "<!DOCTYPE html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width, initial-scale=1\"><title>parser_cli serve</title><style>{STYLE}</style></head><body>{body}<script>{COPY_SCRIPT}</script></body></html>"
     )
 }
 
 fn render_error_page(msg: &str) -> String {
     format!(
-        "<!DOCTYPE html><html lang=en><head><meta charset=utf-8><title>parser_cli serve</title><style>{STYLE}</style></head><body><h1>parser_cli &mdash; error</h1><pre>{}</pre><footer>Refresh once the underlying issue is fixed.</footer></body></html>",
+        "<!DOCTYPE html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width, initial-scale=1\"><title>parser_cli serve</title><style>{STYLE}</style></head><body><h1>parser_cli &mdash; error</h1><pre>{}</pre><footer>Refresh once the underlying issue is fixed.</footer></body></html>",
         html_escape(msg)
     )
 }
@@ -593,5 +611,21 @@ mod tests {
         // Each entry exposes a standalone-link to its rel-path.
         assert!(html.contains("href=\"/good.hex\""), "got: {html}");
         assert!(html.contains("href=\"/bad.hex\""), "got: {html}");
+        // Mobile-friendly: viewport meta tag present.
+        assert!(
+            html.contains("name=viewport") && html.contains("width=device-width"),
+            "got: {html}"
+        );
+        // Each entry has a copy button + the inline script that wires it up.
+        let copy_buttons = html.matches("<button class=copy").count();
+        assert_eq!(copy_buttons, entries.len(), "got: {html}");
+        assert!(html.contains("navigator.clipboard"), "got: {html}");
+    }
+
+    #[test]
+    fn render_error_page_is_mobile_friendly() {
+        let html = render_error_page("boom");
+        assert!(html.contains("name=viewport") && html.contains("width=device-width"));
+        assert!(html.contains("boom"));
     }
 }
