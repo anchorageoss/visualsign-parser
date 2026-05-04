@@ -234,7 +234,10 @@ fn push_arg_fields(
             }
         }
         serde_json::Value::Array(items) => {
-            fields.push(create_text_field(key, &format!("[{} items]", items.len()))?);
+            for (i, item) in items.iter().enumerate() {
+                let label = format!("{key}[{i}]");
+                push_arg_fields(fields, &label, item)?;
+            }
         }
         serde_json::Value::String(s) => {
             fields.push(create_text_field(key, s)?);

@@ -18,6 +18,10 @@ concurrency:
 jobs:
   release:
     name: Release
+    # Restrict releases to main: workflow_dispatch is allowed from any ref by
+    # GitHub, so we gate on the actual checked-out ref to prevent feature
+    # branches from minting tags/releases against non-main commits.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -50,6 +54,16 @@ jobs:
         run: |
           git fetch --tags origin
           if git rev-parse "$TAG" >/dev/null 2>&1; then
+            # Fail fast if the tag already exists at a different commit (e.g.
+            # left over from a force-push or a manually created conflicting
+            # tag). Otherwise we'd publish a release pointing at the wrong
+            # commit and dispatch stagex against it.
+            TAG_COMMIT=$(git rev-parse "$TAG^{commit}")
+            HEAD_COMMIT=$(git rev-parse HEAD)
+            if [ "$TAG_COMMIT" != "$HEAD_COMMIT" ]; then
+              echo "ERROR: Tag $TAG already exists at $TAG_COMMIT, but HEAD is $HEAD_COMMIT" >&2
+              exit 1
+            fi
             echo "tag_exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "tag_exists=false" >> "$GITHUB_OUTPUT"

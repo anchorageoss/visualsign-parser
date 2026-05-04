@@ -4,6 +4,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-env-changed=VERSION");
     println!("cargo:rerun-if-changed=../../../.git/HEAD");
     println!("cargo:rerun-if-changed=../../../.git/logs/HEAD");
+    println!("cargo:rerun-if-changed=../../../.git/packed-refs");
+    println!("cargo:rerun-if-changed=../../../.git/refs/remotes/origin/main");
+    println!("cargo:rerun-if-changed=../../../.git/refs/remotes/origin/master");
     println!("cargo:rerun-if-changed=../../../scripts/auto-version.sh");
 
     if let Some(version) = std::env::var("VERSION").ok().filter(|v| !v.is_empty()) {
