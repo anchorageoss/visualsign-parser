@@ -108,8 +108,26 @@ impl VaultTransactionMessage {
             });
         }
 
-        // Address table lookups: u8 count (we skip parsing the contents)
-        // They're not needed for instruction reconstruction without ALT resolution
+        // Address table lookups: u8 count + N × { 32-byte pubkey, u8 count + writable
+        // indexes, u8 count + readonly indexes }. We don't need the lookup contents to
+        // reconstruct top-level instructions, but we still consume them so a malformed
+        // (truncated or padded) message is rejected rather than silently accepted.
+        let num_lookups = read_u8(&mut pos)? as usize;
+        for _ in 0..num_lookups {
+            let _account_key = read_bytes(&mut pos, 32)?;
+            let num_writable = read_u8(&mut pos)? as usize;
+            let _writable_indexes = read_bytes(&mut pos, num_writable)?;
+            let num_readonly = read_u8(&mut pos)? as usize;
+            let _readonly_indexes = read_bytes(&mut pos, num_readonly)?;
+        }
+
+        if pos != data.len() {
+            return Err(format!(
+                "trailing bytes after VaultTransactionMessage: pos={pos}, len={}",
+                data.len()
+            )
+            .into());
+        }
 
         Ok(Self {
             account_keys,
@@ -139,16 +157,16 @@ impl InstructionVisualizer for SquadsMultisigVisualizer {
 
         let (title, condensed_fields, expanded_fields) = match parsed {
             Ok(parsed) => {
-                build_parsed_fields(&parsed, &instruction.program_id.to_string(), context)
+                build_parsed_fields(&parsed, &instruction.program_id.to_string(), context)?
             }
-            Err(_) => build_fallback_fields(&instruction.program_id.to_string()),
+            Err(_) => build_fallback_fields(&instruction.program_id.to_string())?,
         };
 
         let condensed = SignablePayloadFieldListLayout {
             fields: condensed_fields,
         };
         let expanded_with_raw =
-            append_raw_data(expanded_fields, &instruction.data, &instruction_data_hex);
+            append_raw_data(expanded_fields, &instruction.data, &instruction_data_hex)?;
         let expanded = SignablePayloadFieldListLayout {
             fields: expanded_with_raw,
         };
@@ -238,15 +256,18 @@ struct SquadsParsedInstruction {
     named_accounts: HashMap<String, String>,
 }
 
+/// `(title, condensed_fields, expanded_fields)` returned by the various `build_*` helpers.
+type SquadsPreviewFields = (
+    String,
+    Vec<AnnotatedPayloadField>,
+    Vec<AnnotatedPayloadField>,
+);
+
 fn build_parsed_fields(
     instruction: &SquadsParsedInstruction,
     program_id: &str,
     context: &VisualizerContext,
-) -> (
-    String,
-    Vec<AnnotatedPayloadField>,
-    Vec<AnnotatedPayloadField>,
-) {
+) -> Result<SquadsPreviewFields, VisualSignError> {
     let parsed = &instruction.parsed;
 
     // Special case: decode nested transaction message for vaultTransactionCreate
@@ -256,8 +277,8 @@ fn build_parsed_fields(
             &instruction.named_accounts,
             program_id,
             context,
-        ) {
-            return fields;
+        )? {
+            return Ok(fields);
         }
     }
 
@@ -265,28 +286,41 @@ fn build_parsed_fields(
 }
 
 /// Try to decode the nested transaction message inside vaultTransactionCreate.
-/// Returns None if decoding fails, falling through to generic display.
+///
+/// Returns `Ok(None)` when the embedded transaction message is missing or unparseable
+/// (callers fall through to the generic display). Returns `Err` only when field-builder
+/// or downstream visualization errors occur — those propagate up so the caller can decide
+/// whether to surface them.
 fn try_build_vault_transaction_fields(
     parsed: &SolanaParsedInstructionData,
     named_accounts: &HashMap<String, String>,
     program_id: &str,
     context: &VisualizerContext,
-) -> Option<(
-    String,
-    Vec<AnnotatedPayloadField>,
-    Vec<AnnotatedPayloadField>,
-)> {
-    // Extract transactionMessage hex from the nested args struct
-    let args_value = parsed.program_call_args.get("args")?;
-    let tx_msg_hex = args_value.get("transactionMessage")?.as_str()?;
-    let tx_msg_bytes = hex::decode(tx_msg_hex).ok()?;
-    let vault_msg = VaultTransactionMessage::deserialize(&tx_msg_bytes).ok()?;
+) -> Result<Option<SquadsPreviewFields>, VisualSignError> {
+    // Extract transactionMessage hex from the nested args struct.
+    // Missing/malformed embedded data is "graceful degradation" — the outer caller falls
+    // back to the generic display, NOT an error.
+    let Some(args_value) = parsed.program_call_args.get("args") else {
+        return Ok(None);
+    };
+    let Some(tx_msg_hex) = args_value
+        .get("transactionMessage")
+        .and_then(|v| v.as_str())
+    else {
+        return Ok(None);
+    };
+    let Ok(tx_msg_bytes) = hex::decode(tx_msg_hex) else {
+        return Ok(None);
+    };
+    let Ok(vault_msg) = VaultTransactionMessage::deserialize(&tx_msg_bytes) else {
+        return Ok(None);
+    };
 
     // Reconstruct full Instructions from the compiled instructions
     let inner_instructions = reconstruct_instructions(&vault_msg);
 
     // Visualize inner instructions using the full visualizer framework
-    let inner_fields = visualize_inner_instructions(&inner_instructions, context);
+    let inner_fields = visualize_inner_instructions(&inner_instructions, context)?;
 
     let vault_index = args_value
         .get("vaultIndex")
@@ -301,52 +335,34 @@ fn try_build_vault_transaction_fields(
     let title = format!("Squads Multisig: Vault Transaction ({inner_count} inner instruction(s))");
 
     // Condensed: program, instruction, vault index, inner instruction count
-    let mut condensed_fields = vec![];
-    if let Ok(f) = create_text_field("Program", "Squads Multisig") {
-        condensed_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Instruction", "vaultTransactionCreate") {
-        condensed_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Vault Index", &vault_index.to_string()) {
-        condensed_fields.push(f);
-    }
-    if let Ok(f) = create_text_field(
-        "Inner Instructions",
-        &format!("{inner_count} instruction(s)"),
-    ) {
-        condensed_fields.push(f);
-    }
+    let condensed_fields = vec![
+        create_text_field("Program", "Squads Multisig")?,
+        create_text_field("Instruction", "vaultTransactionCreate")?,
+        create_text_field("Vault Index", &vault_index.to_string())?,
+        create_text_field(
+            "Inner Instructions",
+            &format!("{inner_count} instruction(s)"),
+        )?,
+    ];
 
     // Expanded: full details + decoded inner instructions
-    let mut expanded_fields = vec![];
-    if let Ok(f) = create_text_field("Program ID", program_id) {
-        expanded_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Instruction", "vaultTransactionCreate") {
-        expanded_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Discriminator", &parsed.discriminator) {
-        expanded_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Vault Index", &vault_index.to_string()) {
-        expanded_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Memo", memo) {
-        expanded_fields.push(f);
-    }
+    let mut expanded_fields = vec![
+        create_text_field("Program ID", program_id)?,
+        create_text_field("Instruction", "vaultTransactionCreate")?,
+        create_text_field("Discriminator", &parsed.discriminator)?,
+        create_text_field("Vault Index", &vault_index.to_string())?,
+        create_text_field("Memo", memo)?,
+    ];
 
     // Named accounts from the outer instruction
     for (account_name, account_address) in named_accounts {
-        if let Ok(f) = create_text_field(account_name, account_address) {
-            expanded_fields.push(f);
-        }
+        expanded_fields.push(create_text_field(account_name, account_address)?);
     }
 
     // Decoded inner instructions
     expanded_fields.extend(inner_fields);
 
-    Some((title, condensed_fields, expanded_fields))
+    Ok(Some((title, condensed_fields, expanded_fields)))
 }
 
 /// Reconstruct Instruction objects from VaultTransactionMessage compiled instructions.
@@ -386,10 +402,16 @@ fn reconstruct_instructions(vault_msg: &VaultTransactionMessage) -> Vec<Instruct
 }
 
 /// Visualize reconstructed inner instructions using the full visualizer framework.
+///
+/// `visualize_with_any` selects the first visualizer whose `can_handle` returns true and
+/// invokes it. If that visualizer's `visualize_tx_commands` then fails — or no visualizer
+/// matches — we explicitly fall back to `UnknownProgramVisualizer` (a catch-all). This
+/// guarantees every inner instruction produces *some* output: a failure in a specific
+/// program's visualizer never silently drops the field.
 fn visualize_inner_instructions(
     inner_instructions: &[Instruction],
     context: &VisualizerContext,
-) -> Vec<AnnotatedPayloadField> {
+) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
     let visualizers_refs: Vec<&dyn InstructionVisualizer> =
         visualizers.iter().map(|v| v.as_ref()).collect();
@@ -402,112 +424,79 @@ fn visualize_inner_instructions(
     };
 
     let instructions_vec: Vec<Instruction> = inner_instructions.to_vec();
+    let mut fields = Vec::with_capacity(instructions_vec.len());
 
-    instructions_vec
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, _)| {
-            let inner_context =
-                VisualizerContext::new(&sender, idx, &instructions_vec, &idl_registry);
+    for (idx, _) in instructions_vec.iter().enumerate() {
+        let inner_context = VisualizerContext::new(&sender, idx, &instructions_vec, &idl_registry);
 
-            visualize_with_any(&visualizers_refs, &inner_context)
-                .and_then(|result| result.ok())
-                .map(|viz_result| viz_result.field)
-        })
-        .collect()
+        let field = match visualize_with_any(&visualizers_refs, &inner_context) {
+            Some(Ok(result)) => result.field,
+            Some(Err(_)) | None => crate::presets::unknown_program::UnknownProgramVisualizer
+                .visualize_tx_commands(&inner_context)?,
+        };
+        fields.push(field);
+    }
+
+    Ok(fields)
 }
 
 fn build_generic_fields(
     parsed: &SolanaParsedInstructionData,
     named_accounts: &HashMap<String, String>,
     program_id: &str,
-) -> (
-    String,
-    Vec<AnnotatedPayloadField>,
-    Vec<AnnotatedPayloadField>,
-) {
+) -> Result<SquadsPreviewFields, VisualSignError> {
     let title = format!("Squads Multisig: {}", parsed.instruction_name);
 
-    let mut condensed_fields = vec![];
-    let mut expanded_fields = vec![];
-
     // Condensed: program name + instruction name + key args
-    if let Ok(f) = create_text_field("Program", "Squads Multisig") {
-        condensed_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Instruction", &parsed.instruction_name) {
-        condensed_fields.push(f);
-    }
+    let mut condensed_fields = vec![
+        create_text_field("Program", "Squads Multisig")?,
+        create_text_field("Instruction", &parsed.instruction_name)?,
+    ];
     for (key, value) in &parsed.program_call_args {
-        if let Ok(f) = create_text_field(key, &format_arg_value(value)) {
-            condensed_fields.push(f);
-        }
+        condensed_fields.push(create_text_field(key, &format_arg_value(value))?);
     }
 
     // Expanded: full details
-    if let Ok(f) = create_text_field("Program ID", program_id) {
-        expanded_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Instruction", &parsed.instruction_name) {
-        expanded_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Discriminator", &parsed.discriminator) {
-        expanded_fields.push(f);
-    }
+    let mut expanded_fields = vec![
+        create_text_field("Program ID", program_id)?,
+        create_text_field("Instruction", &parsed.instruction_name)?,
+        create_text_field("Discriminator", &parsed.discriminator)?,
+    ];
 
     for (account_name, account_address) in named_accounts {
-        if let Ok(f) = create_text_field(account_name, account_address) {
-            expanded_fields.push(f);
-        }
+        expanded_fields.push(create_text_field(account_name, account_address)?);
     }
 
     for (key, value) in &parsed.program_call_args {
-        if let Ok(f) = create_text_field(key, &format_arg_value(value)) {
-            expanded_fields.push(f);
-        }
+        expanded_fields.push(create_text_field(key, &format_arg_value(value))?);
     }
 
-    (title, condensed_fields, expanded_fields)
+    Ok((title, condensed_fields, expanded_fields))
 }
 
-fn build_fallback_fields(
-    program_id: &str,
-) -> (
-    String,
-    Vec<AnnotatedPayloadField>,
-    Vec<AnnotatedPayloadField>,
-) {
+fn build_fallback_fields(program_id: &str) -> Result<SquadsPreviewFields, VisualSignError> {
     let title = "Squads Multisig: Unknown Instruction".to_string();
 
-    let mut condensed_fields = vec![];
-    let mut expanded_fields = vec![];
+    let condensed_fields = vec![
+        create_text_field("Program", "Squads Multisig")?,
+        create_text_field("Status", "Unknown instruction type")?,
+    ];
 
-    if let Ok(f) = create_text_field("Program", "Squads Multisig") {
-        condensed_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Status", "Unknown instruction type") {
-        condensed_fields.push(f);
-    }
+    let expanded_fields = vec![
+        create_text_field("Program ID", program_id)?,
+        create_text_field("Status", "Unknown instruction type")?,
+    ];
 
-    if let Ok(f) = create_text_field("Program ID", program_id) {
-        expanded_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Status", "Unknown instruction type") {
-        expanded_fields.push(f);
-    }
-
-    (title, condensed_fields, expanded_fields)
+    Ok((title, condensed_fields, expanded_fields))
 }
 
 fn append_raw_data(
     mut fields: Vec<AnnotatedPayloadField>,
     data: &[u8],
     hex_str: &str,
-) -> Vec<AnnotatedPayloadField> {
-    if let Ok(f) = create_raw_data_field(data, Some(hex_str.to_string())) {
-        fields.push(f);
-    }
-    fields
+) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    fields.push(create_raw_data_field(data, Some(hex_str.to_string()))?);
+    Ok(fields)
 }
 
 fn format_arg_value(value: &serde_json::Value) -> String {
