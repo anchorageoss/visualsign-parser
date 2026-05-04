@@ -42,25 +42,28 @@ impl InstructionVisualizer for DflowAggregatorVisualizer {
 
         let parsed = parse_dflow_aggregator_instruction(&instruction.data, &instruction.accounts);
 
-        let (title, condensed_fields, expanded_fields) = match parsed {
+        let (title, condensed_fields, mut expanded_fields) = match parsed {
             Ok(parsed) => build_parsed_fields(&parsed, &program_id)?,
-            Err(_) => build_fallback_fields(&program_id)?,
+            Err(e) => {
+                tracing::warn!("Failed to parse DFlow Aggregator instruction with IDL: {e}");
+                build_fallback_fields(&program_id)?
+            }
         };
 
         let condensed = SignablePayloadFieldListLayout {
             fields: condensed_fields,
         };
-        let expanded_with_raw =
-            append_raw_data(expanded_fields, &instruction.data, &instruction_data_hex)?;
+        expanded_fields.push(create_raw_data_field(
+            &instruction.data,
+            Some(instruction_data_hex),
+        )?);
         let expanded = SignablePayloadFieldListLayout {
-            fields: expanded_with_raw,
+            fields: expanded_fields,
         };
 
         let preview_layout = SignablePayloadFieldPreviewLayout {
             title: Some(SignablePayloadFieldTextV2 { text: title }),
-            subtitle: Some(SignablePayloadFieldTextV2 {
-                text: String::new(),
-            }),
+            subtitle: None,
             condensed: Some(condensed),
             expanded: Some(expanded),
         };
@@ -105,11 +108,12 @@ fn parse_dflow_aggregator_instruction(
     let idl = get_dflow_aggregator_idl().ok_or("DFlow Aggregator IDL not available")?;
     let parsed = parse_instruction_with_idl(data, DFLOW_AGGREGATOR_PROGRAM_ID, idl)?;
 
-    let named_accounts = build_named_accounts(data, idl, accounts);
+    let (named_accounts, extra_accounts) = build_named_accounts(data, idl, accounts);
 
     Ok(DflowAggregatorParsedInstruction {
         parsed,
         named_accounts,
+        extra_accounts,
     })
 }
 
@@ -117,8 +121,9 @@ fn build_named_accounts(
     data: &[u8],
     idl: &Idl,
     accounts: &[AccountMeta],
-) -> BTreeMap<String, String> {
+) -> (BTreeMap<String, String>, Vec<String>) {
     let mut named_accounts = BTreeMap::new();
+    let mut extra_accounts = Vec::new();
 
     let idl_instruction = idl.instructions.iter().find(|inst| {
         inst.discriminator
@@ -127,19 +132,23 @@ fn build_named_accounts(
     });
 
     if let Some(idl_instruction) = idl_instruction {
+        let named_count = idl_instruction.accounts.len();
         for (index, account_meta) in accounts.iter().enumerate() {
             if let Some(idl_account) = idl_instruction.accounts.get(index) {
                 named_accounts.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
+            } else if index >= named_count {
+                extra_accounts.push(account_meta.pubkey.to_string());
             }
         }
     }
 
-    named_accounts
+    (named_accounts, extra_accounts)
 }
 
 struct DflowAggregatorParsedInstruction {
     parsed: SolanaParsedInstructionData,
     named_accounts: BTreeMap<String, String>,
+    extra_accounts: Vec<String>,
 }
 
 fn build_parsed_fields(
@@ -163,7 +172,7 @@ fn build_parsed_fields(
     condensed_fields.push(create_text_field("Program", "DFlow Aggregator")?);
     condensed_fields.push(create_text_field("Instruction", instruction_name)?);
     for (key, value) in &parsed.program_call_args {
-        condensed_fields.push(create_text_field(key, &format_arg_value(value))?);
+        push_arg_fields(&mut condensed_fields, key, value)?;
     }
 
     expanded_fields.push(create_text_field("Program ID", program_id)?);
@@ -174,8 +183,15 @@ fn build_parsed_fields(
         expanded_fields.push(create_text_field(account_name, account_address)?);
     }
 
+    for (index, pubkey) in instruction.extra_accounts.iter().enumerate() {
+        expanded_fields.push(create_text_field(
+            &format!("remaining_account_{index}"),
+            pubkey,
+        )?);
+    }
+
     for (key, value) in &parsed.program_call_args {
-        expanded_fields.push(create_text_field(key, &format_arg_value(value))?);
+        push_arg_fields(&mut expanded_fields, key, value)?;
     }
 
     Ok((title, condensed_fields, expanded_fields))
@@ -205,23 +221,35 @@ fn build_fallback_fields(
     Ok((title, condensed_fields, expanded_fields))
 }
 
-fn append_raw_data(
-    mut fields: Vec<AnnotatedPayloadField>,
-    data: &[u8],
-    hex_str: &str,
-) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
-    fields.push(create_raw_data_field(data, Some(hex_str.to_string()))?);
-    Ok(fields)
-}
-
-fn format_arg_value(value: &serde_json::Value) -> String {
+fn push_arg_fields(
+    fields: &mut Vec<AnnotatedPayloadField>,
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<(), VisualSignError> {
     match value {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Null => "null".to_string(),
-        other => other.to_string(),
+        serde_json::Value::Object(map) => {
+            for (sub_key, sub_value) in map {
+                let label = format!("{key}.{sub_key}");
+                push_arg_fields(fields, &label, sub_value)?;
+            }
+        }
+        serde_json::Value::Array(items) => {
+            fields.push(create_text_field(key, &format!("[{} items]", items.len()))?);
+        }
+        serde_json::Value::String(s) => {
+            fields.push(create_text_field(key, s)?);
+        }
+        serde_json::Value::Number(n) => {
+            fields.push(create_text_field(key, &n.to_string())?);
+        }
+        serde_json::Value::Bool(b) => {
+            fields.push(create_text_field(key, &b.to_string())?);
+        }
+        serde_json::Value::Null => {
+            fields.push(create_text_field(key, "null")?);
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]
