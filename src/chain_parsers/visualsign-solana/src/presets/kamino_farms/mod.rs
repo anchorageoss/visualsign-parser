@@ -9,7 +9,7 @@ use config::KaminoFarmsConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -45,7 +45,7 @@ impl InstructionVisualizer for KaminoFarmsVisualizer {
                     Some(idl) => {
                         build_named_accounts(idl, &instruction.data, &instruction.accounts)
                     }
-                    None => HashMap::new(),
+                    None => BTreeMap::new(),
                 };
                 (
                     build_condensed_fields(&parsed.instruction_name)?,
@@ -134,8 +134,8 @@ fn build_named_accounts(
     idl: &Idl,
     instruction_data: &[u8],
     instruction_accounts: &[solana_sdk::instruction::AccountMeta],
-) -> HashMap<String, String> {
-    let mut named = HashMap::new();
+) -> BTreeMap<String, String> {
+    let mut named = BTreeMap::new();
 
     let Some(idl_instruction) = idl.instructions.iter().find(|inst| {
         inst.discriminator
@@ -159,7 +159,7 @@ fn build_named_accounts(
 fn build_parsed_fields(
     program_id: &str,
     parsed: &SolanaParsedInstructionData,
-    named_accounts: &HashMap<String, String>,
+    named_accounts: &BTreeMap<String, String>,
     data: &[u8],
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     let mut fields = vec![
