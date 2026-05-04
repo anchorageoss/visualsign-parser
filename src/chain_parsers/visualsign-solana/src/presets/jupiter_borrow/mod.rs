@@ -9,7 +9,7 @@ use config::JupiterBorrowConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -114,8 +114,8 @@ fn build_named_accounts(
     data: &[u8],
     idl: &Idl,
     accounts: &[solana_sdk::instruction::AccountMeta],
-) -> HashMap<String, String> {
-    let mut named_accounts = HashMap::new();
+) -> BTreeMap<String, String> {
+    let mut named_accounts = BTreeMap::new();
 
     let idl_instruction = idl.instructions.iter().find(|inst| {
         inst.discriminator
@@ -136,7 +136,7 @@ fn build_named_accounts(
 
 struct JupiterBorrowParsedInstruction {
     parsed: SolanaParsedInstructionData,
-    named_accounts: HashMap<String, String>,
+    named_accounts: BTreeMap<String, String>,
 }
 
 fn build_parsed_fields(
