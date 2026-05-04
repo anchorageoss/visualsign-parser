@@ -11,7 +11,7 @@ use config::NeutralTradeConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -110,8 +110,8 @@ fn load_idl() -> Result<Idl, VisualSignError> {
 fn build_named_accounts(
     instruction: &solana_sdk::instruction::Instruction,
     idl: &Idl,
-) -> HashMap<String, String> {
-    let mut named_accounts = HashMap::new();
+) -> BTreeMap<String, String> {
+    let mut named_accounts = BTreeMap::new();
 
     let matching_idl_instruction = idl.instructions.iter().find(|inst| {
         if let Some(disc) = inst.discriminator.as_ref() {
@@ -146,7 +146,7 @@ fn build_condensed_fields(
 fn build_parsed_fields(
     program_id: &str,
     parsed: &SolanaParsedInstructionData,
-    named_accounts: &HashMap<String, String>,
+    named_accounts: &BTreeMap<String, String>,
     data: &[u8],
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     let mut fields = vec![
