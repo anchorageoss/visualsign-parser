@@ -68,3 +68,48 @@ jobs:
               docker tag "anchorageoss-visualsign-parser/${{ matrix.target.name }}:latest" "ghcr.io/anchorageoss/${{ matrix.target.name }}:${tag}"
           done
           docker image push --all-tags "ghcr.io/anchorageoss/${{ matrix.target.name }}"
+
+      - name: TVC deployment details
+        if: matrix.target.name == 'parser_app'
+        shell: bash
+        run: |
+          first_tag=$(echo "${tags}" | awk '{print $1}')
+          container_url="ghcr.io/anchorageoss/parser_app:${first_tag}"
+          container_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${container_url}" | cut -d '@' -f 2)
+          docker create --name tmp-extract "${container_url}" /bin/true
+          docker cp tmp-extract:/parser_app /tmp/binary
+          docker rm tmp-extract
+          digest=$(sha256sum /tmp/binary | awk '{print $1}')
+          pinned_url="${container_url}@${container_digest}"
+
+          {
+            echo "## TVC Deployment Details"
+            echo ""
+            echo "- **Container Image URL**: \`${pinned_url}\`"
+            echo "- **Executable path**: \`/parser_app\`"
+            echo "- **Expected Executable Digest**: \`sha256:${digest}\`"
+            echo ""
+            echo "### Verify the executable digest"
+            echo ""
+            echo '```bash'
+            echo "export CONTAINER_URL=\"${pinned_url}\""
+            echo 'docker create --name tmp-extract "$CONTAINER_URL" /bin/true'
+            echo 'docker cp tmp-extract:/parser_app /tmp/binary'
+            echo 'docker rm tmp-extract'
+            echo 'sha256sum /tmp/binary'
+            echo '```'
+            echo ""
+            echo "### Kick off deployment with \`tvc\`"
+            echo ""
+            echo "Generate a config template, paste these values into the matching keys, then create the deployment:"
+            echo ""
+            echo '```bash'
+            echo 'tvc deploy init -o tvc-deploy.json'
+            echo '# Edit tvc-deploy.json to set:'
+            echo "#   \"pivotContainerImageUrl\": \"${pinned_url}\""
+            echo '#   "pivotPath": "/parser_app"'
+            echo "#   \"expectedPivotDigest\": \"sha256:${digest}\""
+            echo '# (also fill in appId, qosVersion, and any pull-secret fields)'
+            echo 'tvc deploy create tvc-deploy.json'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
