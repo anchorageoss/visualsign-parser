@@ -49,6 +49,9 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Full history so auto-version.sh can compute commit heights and
+          # merge-bases for non-tag builds (latest, pr-*).
+          fetch-depth: 0
       - name: Docker setup
         uses: ./.github/actions/docker-setup
         with:

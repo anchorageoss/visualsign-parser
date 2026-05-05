@@ -404,11 +404,21 @@ mod tests {
 
     #[test]
     fn test_build_named_accounts_surfaces_extra_accounts() {
-        // close_empty_token_account is the first instruction in the bundled IDL and has
-        // exactly 4 named accounts. Provide 6 AccountMeta entries so the last 2 land in
-        // extra_accounts.
+        // Look up the discriminator from the IDL rather than hard-coding the
+        // bytes, so the test stays correct across IDL regenerations.
+        // close_empty_token_account has 4 named accounts; provide 6 entries so
+        // the last 2 land in extra_accounts.
         let idl = get_dflow_aggregator_idl().unwrap();
-        let close_disc: [u8; 8] = [232, 75, 140, 136, 250, 78, 224, 188];
+        let close_ix = idl
+            .instructions
+            .iter()
+            .find(|ix| ix.name == "close_empty_token_account")
+            .expect("close_empty_token_account exists in the bundled IDL");
+        let close_disc = close_ix
+            .discriminator
+            .as_ref()
+            .expect("instruction has a computed discriminator")
+            .clone();
         let pubkeys: Vec<Pubkey> = (0..6).map(|_| Pubkey::new_unique()).collect();
         let accounts: Vec<AccountMeta> = pubkeys
             .iter()
