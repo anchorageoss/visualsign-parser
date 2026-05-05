@@ -11,6 +11,7 @@ pub mod meteora_damm_v2;
 pub mod meteora_dlmm;
 pub mod neutral_trade;
 pub mod onre_app;
+pub mod orca_whirlpool;
 pub mod stakepool;
 pub mod swig_wallet;
 pub mod system;
