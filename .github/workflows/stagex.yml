@@ -81,6 +81,7 @@ jobs:
           docker rm tmp-extract
           digest=$(sha256sum /tmp/binary | awk '{print $1}')
           pinned_url="${container_url}@${container_digest}"
+          qos_version=$(grep -m1 -E 'git\+https://github.com/tkhq/qos\.git\?rev=[a-f0-9]{40}' src/Cargo.lock | sed -E 's/.*rev=([a-f0-9]{40}).*/\1/')
 
           {
             echo "## TVC Deployment Details"
@@ -88,6 +89,7 @@ jobs:
             echo "- **Container Image URL**: \`${pinned_url}\`"
             echo "- **Executable path**: \`/parser_app\`"
             echo "- **Expected Executable Digest**: \`sha256:${digest}\`"
+            echo "- **QOS Version**: \`${qos_version}\`"
             echo ""
             echo "### Verify the executable digest"
             echo ""
@@ -101,7 +103,7 @@ jobs:
             echo ""
             echo "### Kick off deployment with \`tvc\`"
             echo ""
-            echo "Generate a config template, paste these values into the matching keys, then create the deployment:"
+            echo "Generate a config template, paste these values into the matching keys, then create the deployment. \`appId\` and any pull-secret fields are environment-specific and must be filled in by the operator."
             echo ""
             echo '```bash'
             echo 'tvc deploy init -o tvc-deploy.json'
@@ -109,7 +111,8 @@ jobs:
             echo "#   \"pivotContainerImageUrl\": \"${pinned_url}\""
             echo '#   "pivotPath": "/parser_app"'
             echo "#   \"expectedPivotDigest\": \"sha256:${digest}\""
-            echo '# (also fill in appId, qosVersion, and any pull-secret fields)'
+            echo "#   \"qosVersion\": \"${qos_version}\""
+            echo '#   "appId": "<env-specific>"'
             echo 'tvc deploy create tvc-deploy.json'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
