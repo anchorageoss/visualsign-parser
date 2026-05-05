@@ -1,0 +1,8 @@
+--chain
+ethereum
+--network
+ETHEREUM_MAINNET
+-o
+json
+-t
+@tests/fixtures/ethereum-from-file.hex
