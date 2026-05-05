@@ -3,6 +3,8 @@ pub mod compute_budget;
 pub mod dflow_aggregator;
 pub mod jupiter_earn;
 pub mod jupiter_swap;
+pub mod kamino_farms;
+pub mod kamino_vault;
 pub mod stakepool;
 pub mod swig_wallet;
 pub mod system;
