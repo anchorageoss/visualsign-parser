@@ -10,6 +10,7 @@ on:
       - ".github/**"
       - "src/**"
       - "images/**"
+      - "scripts/**"
       - "Makefile"
   pull_request:
     types: [labeled]
