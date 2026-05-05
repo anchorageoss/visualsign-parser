@@ -7,7 +7,7 @@ use crate::core::{
 };
 use crate::utils::{SwapTokenInfo, get_token_info};
 use config::JupiterSwapConfig;
-use solana_parser::{Idl, ProgramType, decode_idl_data, parse_instruction_with_idl};
+use solana_parser::{Idl, decode_idl_data, parse_instruction_with_idl};
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{
     create_amount_field, create_number_field, create_raw_data_field, create_text_field,
@@ -39,6 +39,34 @@ pub enum JupiterSwapInstruction {
         out_token: Option<SwapTokenInfo>,
         slippage_bps: u16,
         platform_fee_bps: u8,
+    },
+    RouteV2 {
+        in_token: Option<SwapTokenInfo>,
+        out_token: Option<SwapTokenInfo>,
+        slippage_bps: u16,
+        platform_fee_bps: u16,
+        positive_slippage_bps: u16,
+    },
+    ExactOutRouteV2 {
+        in_token: Option<SwapTokenInfo>,
+        out_token: Option<SwapTokenInfo>,
+        slippage_bps: u16,
+        platform_fee_bps: u16,
+        positive_slippage_bps: u16,
+    },
+    SharedAccountsRouteV2 {
+        in_token: Option<SwapTokenInfo>,
+        out_token: Option<SwapTokenInfo>,
+        slippage_bps: u16,
+        platform_fee_bps: u16,
+        positive_slippage_bps: u16,
+    },
+    SharedAccountsExactOutRouteV2 {
+        in_token: Option<SwapTokenInfo>,
+        out_token: Option<SwapTokenInfo>,
+        slippage_bps: u16,
+        platform_fee_bps: u16,
+        positive_slippage_bps: u16,
     },
     Unknown {
         /// Optional instruction name from IDL if available
@@ -126,10 +154,15 @@ impl InstructionVisualizer for JupiterSwapVisualizer {
     }
 }
 
-/// Get Jupiter v6 IDL from built-in IDLs in solana-parser
+/// Jupiter v6 IDL refreshed from mainnet.
+/// Kept locally (not sourced from `solana_parser::ProgramType`) so we can pick up
+/// newer instructions like `route_v2` without bumping the upstream rev.
+/// Also used to override the stale IDL bundled inside `solana_parser` when that
+/// crate parses a full transaction (see `decode_v0_transfers`).
+pub(crate) const JUPITER_IDL_JSON: &str = include_str!("jupiter_agg_v6.json");
+
 fn get_jupiter_idl() -> Option<Idl> {
-    ProgramType::from_program_id(JUPITER_PROGRAM_ID)
-        .and_then(|pt| decode_idl_data(pt.idl_json()).ok())
+    decode_idl_data(JUPITER_IDL_JSON).ok()
 }
 
 /// Helper to extract u64 argument from parsed IDL args
@@ -224,10 +257,83 @@ fn parse_jupiter_instruction_with_idl(
                 platform_fee_bps,
             })
         }
+        "route_v2" => parse_route_v2(&parsed.program_call_args, accounts, false, false),
+        "exact_out_route_v2" => parse_route_v2(&parsed.program_call_args, accounts, true, false),
+        "shared_accounts_route_v2" => {
+            parse_route_v2(&parsed.program_call_args, accounts, false, true)
+        }
+        "shared_accounts_exact_out_route_v2" => {
+            parse_route_v2(&parsed.program_call_args, accounts, true, true)
+        }
         _ => Ok(JupiterSwapInstruction::Unknown {
             instruction_name: Some(parsed.instruction_name.clone()),
         }),
     }
+}
+
+/// Parse any of the four v2 route variants. `exact_out` toggles amount field
+/// names and in/out token assignment; `shared` shifts mint account indices.
+fn parse_route_v2(
+    args: &serde_json::Map<String, serde_json::Value>,
+    accounts: &[String],
+    exact_out: bool,
+    shared: bool,
+) -> Result<JupiterSwapInstruction, Box<dyn std::error::Error>> {
+    let slippage_bps = u16::try_from(extract_u64_arg(args, "slippage_bps")?)?;
+    let platform_fee_bps = u16::try_from(extract_u64_arg(args, "platform_fee_bps")?)?;
+    let positive_slippage_bps = u16::try_from(extract_u64_arg(args, "positive_slippage_bps")?)?;
+
+    // Mint indices differ between shared and non-shared v2 variants (see IDL).
+    let (source_mint_idx, destination_mint_idx) = if shared { (6, 7) } else { (3, 4) };
+
+    // exact_out uses out_amount / quoted_in_amount; non-exact_out uses in_amount / quoted_out_amount.
+    let (in_amount, out_amount) = if exact_out {
+        let quoted_in_amount = extract_u64_arg(args, "quoted_in_amount")?;
+        let out_amount = extract_u64_arg(args, "out_amount")?;
+        (quoted_in_amount, out_amount)
+    } else {
+        let in_amount = extract_u64_arg(args, "in_amount")?;
+        let quoted_out_amount = extract_u64_arg(args, "quoted_out_amount")?;
+        (in_amount, quoted_out_amount)
+    };
+
+    let in_token = accounts
+        .get(source_mint_idx)
+        .map(|addr| get_token_info(addr, in_amount));
+    let out_token = accounts
+        .get(destination_mint_idx)
+        .map(|addr| get_token_info(addr, out_amount));
+
+    Ok(match (exact_out, shared) {
+        (false, false) => JupiterSwapInstruction::RouteV2 {
+            in_token,
+            out_token,
+            slippage_bps,
+            platform_fee_bps,
+            positive_slippage_bps,
+        },
+        (true, false) => JupiterSwapInstruction::ExactOutRouteV2 {
+            in_token,
+            out_token,
+            slippage_bps,
+            platform_fee_bps,
+            positive_slippage_bps,
+        },
+        (false, true) => JupiterSwapInstruction::SharedAccountsRouteV2 {
+            in_token,
+            out_token,
+            slippage_bps,
+            platform_fee_bps,
+            positive_slippage_bps,
+        },
+        (true, true) => JupiterSwapInstruction::SharedAccountsExactOutRouteV2 {
+            in_token,
+            out_token,
+            slippage_bps,
+            platform_fee_bps,
+            positive_slippage_bps,
+        },
+    })
 }
 
 fn parse_jupiter_swap_instruction(
@@ -290,6 +396,66 @@ fn format_jupiter_swap_instruction(instruction: &JupiterSwapInstruction) -> Stri
 
             if *platform_fee_bps > 0 {
                 result.push_str(&format!(", platform fee: {platform_fee_bps}bps"));
+            }
+
+            result.push(')');
+            result
+        }
+        JupiterSwapInstruction::RouteV2 {
+            in_token,
+            out_token,
+            slippage_bps,
+            platform_fee_bps,
+            positive_slippage_bps,
+        }
+        | JupiterSwapInstruction::ExactOutRouteV2 {
+            in_token,
+            out_token,
+            slippage_bps,
+            platform_fee_bps,
+            positive_slippage_bps,
+        }
+        | JupiterSwapInstruction::SharedAccountsRouteV2 {
+            in_token,
+            out_token,
+            slippage_bps,
+            platform_fee_bps,
+            positive_slippage_bps,
+        }
+        | JupiterSwapInstruction::SharedAccountsExactOutRouteV2 {
+            in_token,
+            out_token,
+            slippage_bps,
+            platform_fee_bps,
+            positive_slippage_bps,
+        } => {
+            let instruction_type = match instruction {
+                JupiterSwapInstruction::RouteV2 { .. } => "Jupiter Swap V2",
+                JupiterSwapInstruction::ExactOutRouteV2 { .. } => "Jupiter Exact Out Route V2",
+                JupiterSwapInstruction::SharedAccountsRouteV2 { .. } => {
+                    "Jupiter Shared Accounts Route V2"
+                }
+                JupiterSwapInstruction::SharedAccountsExactOutRouteV2 { .. } => {
+                    "Jupiter Shared Accounts Exact Out Route V2"
+                }
+                _ => unreachable!(),
+            };
+
+            let mut result = format!(
+                "{}: From {} {} To {} {} (slippage: {}bps",
+                instruction_type,
+                format_token_amount(in_token),
+                format_token_symbol(in_token),
+                format_token_amount(out_token),
+                format_token_symbol(out_token),
+                slippage_bps
+            );
+
+            if *platform_fee_bps > 0 {
+                result.push_str(&format!(", platform fee: {platform_fee_bps}bps"));
+            }
+            if *positive_slippage_bps > 0 {
+                result.push_str(&format!(", positive slippage: {positive_slippage_bps}bps"));
             }
 
             result.push(')');
@@ -390,6 +556,87 @@ fn create_jupiter_swap_expanded_fields(
                 fields.push(
                     create_number_field("Platform Fee", &platform_fee_bps.to_string(), "bps")
                         .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
+                );
+            }
+        }
+        JupiterSwapInstruction::RouteV2 {
+            in_token,
+            out_token,
+            slippage_bps,
+            platform_fee_bps,
+            positive_slippage_bps,
+        }
+        | JupiterSwapInstruction::ExactOutRouteV2 {
+            in_token,
+            out_token,
+            slippage_bps,
+            platform_fee_bps,
+            positive_slippage_bps,
+        }
+        | JupiterSwapInstruction::SharedAccountsRouteV2 {
+            in_token,
+            out_token,
+            slippage_bps,
+            platform_fee_bps,
+            positive_slippage_bps,
+        }
+        | JupiterSwapInstruction::SharedAccountsExactOutRouteV2 {
+            in_token,
+            out_token,
+            slippage_bps,
+            platform_fee_bps,
+            positive_slippage_bps,
+        } => {
+            if let Some(token) = in_token {
+                fields.extend([
+                    create_text_field("Input Token", &token.symbol)
+                        .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
+                    create_amount_field("Input Amount", &token.amount.to_string(), &token.symbol)
+                        .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
+                    create_text_field("Input Token Name", &token.name)
+                        .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
+                    create_text_field("Input Token Address", &token.address)
+                        .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
+                ]);
+            }
+
+            if let Some(token) = out_token {
+                fields.extend([
+                    create_text_field("Output Token", &token.symbol)
+                        .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
+                    create_amount_field(
+                        "Quoted Output Amount",
+                        &token.amount.to_string(),
+                        &token.symbol,
+                    )
+                    .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
+                    create_text_field("Output Token Name", &token.name)
+                        .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
+                    create_text_field("Output Token Address", &token.address)
+                        .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
+                ]);
+            }
+
+            fields.push(
+                create_number_field("Slippage", &slippage_bps.to_string(), "bps")
+                    .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
+            );
+
+            if *platform_fee_bps > 0 {
+                fields.push(
+                    create_number_field("Platform Fee", &platform_fee_bps.to_string(), "bps")
+                        .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
+                );
+            }
+
+            if *positive_slippage_bps > 0 {
+                fields.push(
+                    create_number_field(
+                        "Positive Slippage",
+                        &positive_slippage_bps.to_string(),
+                        "bps",
+                    )
+                    .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
                 );
             }
         }
@@ -844,5 +1091,192 @@ mod tests {
             }
         });
         assert!(has_slippage, "Should have Slippage field");
+    }
+
+    /// Build a minimal v2 route body (after discriminator + any leading `id` byte).
+    /// Layout: amount_a, amount_b, slippage_bps, platform_fee_bps, positive_slippage_bps,
+    /// then an empty route_plan vec. Semantic meaning of amount_a/amount_b differs
+    /// per variant (in/out vs. out/in) but byte layout is identical.
+    fn build_route_v2_body(
+        amount_a: u64,
+        amount_b: u64,
+        slippage_bps: u16,
+        platform_fee_bps: u16,
+        positive_slippage_bps: u16,
+    ) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(&amount_a.to_le_bytes());
+        body.extend_from_slice(&amount_b.to_le_bytes());
+        body.extend_from_slice(&slippage_bps.to_le_bytes());
+        body.extend_from_slice(&platform_fee_bps.to_le_bytes());
+        body.extend_from_slice(&positive_slippage_bps.to_le_bytes());
+        body.extend_from_slice(&0u32.to_le_bytes()); // empty route_plan
+        body
+    }
+
+    /// 8 accounts — enough for shared v2 variants (source_mint at index 6, destination_mint at 7).
+    fn fixture_accounts_shared_v2() -> Vec<String> {
+        vec![
+            "11111111111111111111111111111111".to_string(),
+            "22222222222222222222222222222222".to_string(),
+            "33333333333333333333333333333333".to_string(),
+            "44444444444444444444444444444444".to_string(),
+            "55555555555555555555555555555555".to_string(),
+            "66666666666666666666666666666666".to_string(),
+            "So11111111111111111111111111111111111111112".to_string(),
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(),
+        ]
+    }
+
+    #[test]
+    fn test_jupiter_route_v2_parsing() {
+        // route_v2 discriminator: [187, 100, 250, 204, 49, 196, 175, 20]
+        let discriminator = hex::decode("bb64facc31c4af14").expect("valid hex");
+        let body = build_route_v2_body(2_000_000, 1_550_653, 50, 0, 25);
+        let data: Vec<u8> = [discriminator, body].concat();
+        let accounts = fixture_accounts();
+
+        let parsed = parse_jupiter_swap_instruction(&data, &accounts).unwrap();
+
+        match &parsed {
+            JupiterSwapInstruction::RouteV2 {
+                in_token,
+                out_token,
+                slippage_bps,
+                platform_fee_bps,
+                positive_slippage_bps,
+            } => {
+                assert_eq!(*slippage_bps, 50);
+                assert_eq!(*platform_fee_bps, 0);
+                assert_eq!(*positive_slippage_bps, 25);
+                // source_mint at accounts[3] -> in_amount
+                assert_eq!(in_token.as_ref().unwrap().amount, 2_000_000);
+                // destination_mint at accounts[4] -> quoted_out_amount
+                assert_eq!(out_token.as_ref().unwrap().amount, 1_550_653);
+            }
+            _ => panic!("Expected RouteV2, got {parsed:?}"),
+        }
+
+        let formatted = format_jupiter_swap_instruction(&parsed);
+        assert!(formatted.contains("Jupiter Swap V2"));
+        assert!(formatted.contains("positive slippage: 25bps"));
+
+        let fields = create_jupiter_swap_expanded_fields(
+            &parsed,
+            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+            &data,
+        )
+        .unwrap();
+
+        let has_positive_slippage = fields.iter().any(|f| {
+            if let SignablePayloadField::Number { common, .. } = &f.signable_payload_field {
+                common.label == "Positive Slippage"
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_positive_slippage,
+            "Should have Positive Slippage field when positive_slippage_bps > 0"
+        );
+    }
+
+    #[test]
+    fn test_jupiter_exact_out_route_v2_parsing() {
+        // exact_out_route_v2 discriminator: [157, 138, 184, 82, 21, 244, 243, 36]
+        let discriminator = hex::decode("9d8ab85215f4f324").expect("valid hex");
+        // For exact_out: first u64 is out_amount, second is quoted_in_amount.
+        let body = build_route_v2_body(2_000_000, 1_550_653, 50, 0, 0);
+        let data: Vec<u8> = [discriminator, body].concat();
+        let accounts = fixture_accounts();
+
+        let parsed = parse_jupiter_swap_instruction(&data, &accounts).unwrap();
+
+        match &parsed {
+            JupiterSwapInstruction::ExactOutRouteV2 {
+                in_token,
+                out_token,
+                slippage_bps,
+                platform_fee_bps,
+                positive_slippage_bps,
+            } => {
+                assert_eq!(*slippage_bps, 50);
+                assert_eq!(*platform_fee_bps, 0);
+                assert_eq!(*positive_slippage_bps, 0);
+                // in_token gets quoted_in_amount (second u64), out_token gets out_amount (first)
+                assert_eq!(in_token.as_ref().unwrap().amount, 1_550_653);
+                assert_eq!(out_token.as_ref().unwrap().amount, 2_000_000);
+            }
+            _ => panic!("Expected ExactOutRouteV2, got {parsed:?}"),
+        }
+
+        let formatted = format_jupiter_swap_instruction(&parsed);
+        assert!(formatted.contains("Jupiter Exact Out Route V2"));
+        // positive_slippage == 0 should NOT appear in the formatted line
+        assert!(!formatted.contains("positive slippage"));
+    }
+
+    #[test]
+    fn test_jupiter_shared_accounts_route_v2_parsing() {
+        // shared_accounts_route_v2 discriminator: [209, 152, 83, 147, 124, 254, 216, 233]
+        let discriminator = hex::decode("d19853937cfed8e9").expect("valid hex");
+        let id_byte = vec![0x00u8];
+        let body = build_route_v2_body(2_000_000, 1_550_653, 50, 10, 5);
+        let data: Vec<u8> = [discriminator, id_byte, body].concat();
+        let accounts = fixture_accounts_shared_v2();
+
+        let parsed = parse_jupiter_swap_instruction(&data, &accounts).unwrap();
+
+        match &parsed {
+            JupiterSwapInstruction::SharedAccountsRouteV2 {
+                in_token,
+                out_token,
+                slippage_bps,
+                platform_fee_bps,
+                positive_slippage_bps,
+            } => {
+                assert_eq!(*slippage_bps, 50);
+                assert_eq!(*platform_fee_bps, 10);
+                assert_eq!(*positive_slippage_bps, 5);
+                // source_mint at accounts[6], destination_mint at accounts[7]
+                assert_eq!(in_token.as_ref().unwrap().amount, 2_000_000);
+                assert_eq!(out_token.as_ref().unwrap().amount, 1_550_653);
+            }
+            _ => panic!("Expected SharedAccountsRouteV2, got {parsed:?}"),
+        }
+
+        let formatted = format_jupiter_swap_instruction(&parsed);
+        assert!(formatted.contains("Jupiter Shared Accounts Route V2"));
+        assert!(formatted.contains("platform fee: 10bps"));
+        assert!(formatted.contains("positive slippage: 5bps"));
+    }
+
+    #[test]
+    fn test_jupiter_shared_accounts_exact_out_route_v2_parsing() {
+        // shared_accounts_exact_out_route_v2 discriminator: [53, 96, 229, 202, 216, 187, 250, 24]
+        let discriminator = hex::decode("3560e5cad8bbfa18").expect("valid hex");
+        let id_byte = vec![0x00u8];
+        // For exact_out: first u64 is out_amount, second is quoted_in_amount.
+        let body = build_route_v2_body(2_000_000, 1_550_653, 50, 0, 0);
+        let data: Vec<u8> = [discriminator, id_byte, body].concat();
+        let accounts = fixture_accounts_shared_v2();
+
+        let parsed = parse_jupiter_swap_instruction(&data, &accounts).unwrap();
+
+        match &parsed {
+            JupiterSwapInstruction::SharedAccountsExactOutRouteV2 {
+                in_token,
+                out_token,
+                ..
+            } => {
+                // in_token gets quoted_in_amount, out_token gets out_amount
+                assert_eq!(in_token.as_ref().unwrap().amount, 1_550_653);
+                assert_eq!(out_token.as_ref().unwrap().amount, 2_000_000);
+            }
+            _ => panic!("Expected SharedAccountsExactOutRouteV2, got {parsed:?}"),
+        }
+
+        let formatted = format_jupiter_swap_instruction(&parsed);
+        assert!(formatted.contains("Jupiter Shared Accounts Exact Out Route V2"));
     }
 }
