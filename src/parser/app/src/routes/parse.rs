@@ -96,7 +96,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     /// Verify that `metadata_digest` is deterministic for identical metadata,
-    /// including non-empty `abi_mappings` (exercises `HashMap` key ordering through borsh).
+    /// including non-empty `abi_mappings` — the proto map field is now a `BTreeMap`
+    /// (after the tonic 0.10 / `tonic_build::Builder::btree_map(["."])` config), so
+    /// borsh serialization sees keys in a consistent order regardless of insertion
+    /// order. This test exercises that contract.
     #[test]
     fn metadata_digest_is_deterministic() {
         let mut abi_mappings = BTreeMap::new();

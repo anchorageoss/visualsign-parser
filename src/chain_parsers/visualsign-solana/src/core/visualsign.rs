@@ -87,9 +87,12 @@ impl SolanaTransactionWrapper {
     }
 }
 
-/// Extract IDL mappings from VisualSignOptions metadata
+/// Extract IDL mappings from VisualSignOptions metadata.
 ///
-/// Returns a HashMap of program_id (base58 string) -> (IDL JSON string, program name)
+/// Returns a `BTreeMap` of program_id (base58 string) -> (IDL JSON string, program name).
+/// Determinism note: `BTreeMap` is required (not `HashMap`) because downstream code
+/// iterates this map to build the IDL registry, and iteration order would otherwise
+/// leak into rendered SignablePayload output.
 fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String, String)> {
     options
         .metadata
