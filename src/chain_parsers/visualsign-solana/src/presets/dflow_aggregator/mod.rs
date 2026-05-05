@@ -132,11 +132,10 @@ fn build_named_accounts(
     });
 
     if let Some(idl_instruction) = idl_instruction {
-        let named_count = idl_instruction.accounts.len();
         for (index, account_meta) in accounts.iter().enumerate() {
             if let Some(idl_account) = idl_instruction.accounts.get(index) {
                 named_accounts.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
-            } else if index >= named_count {
+            } else {
                 extra_accounts.push(account_meta.pubkey.to_string());
             }
         }

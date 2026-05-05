@@ -82,30 +82,32 @@ jobs:
           rm -f "$RELEASE_ERR"
 
       - name: Create tag
-        if: steps.check_tag.outputs.tag_exists == 'false' && inputs.dry_run != 'true'
+        if: steps.check_tag.outputs.tag_exists == 'false' && !inputs.dry_run
         env:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           git tag "$TAG"
           git push origin "$TAG" 2>&1 || {
-            # If push fails, check if a concurrent run already pushed the same tag
-            git fetch --tags origin
-            if git rev-parse "$TAG" >/dev/null 2>&1; then
-              TAG_COMMIT=$(git rev-parse "$TAG^{commit}")
-              HEAD_COMMIT=$(git rev-parse HEAD)
-              if [ "$TAG_COMMIT" != "$HEAD_COMMIT" ]; then
-                echo "ERROR: Tag $TAG points to $TAG_COMMIT, not HEAD ($HEAD_COMMIT)"
-                exit 1
-              fi
-              echo "Tag already pushed by a concurrent run at the same commit, continuing."
-            else
-              echo "ERROR: Failed to push tag $TAG"
+            # Push failed; query the remote directly to distinguish "concurrent
+            # run pushed the same tag at HEAD" (continue) from any other failure
+            # (abort). `git fetch --tags` would NOT overwrite our local tag, so
+            # `git rev-parse $TAG` would always match HEAD locally and tell us
+            # nothing about the remote.
+            REMOTE_SHA=$(git ls-remote origin "refs/tags/$TAG" | awk '{print $1}')
+            if [ -z "$REMOTE_SHA" ]; then
+              echo "ERROR: Failed to push tag $TAG and it's not on origin"
               exit 1
             fi
+            HEAD_COMMIT=$(git rev-parse HEAD)
+            if [ "$REMOTE_SHA" != "$HEAD_COMMIT" ]; then
+              echo "ERROR: Remote tag $TAG points to $REMOTE_SHA, not HEAD ($HEAD_COMMIT)"
+              exit 1
+            fi
+            echo "Tag already pushed by a concurrent run at the same commit, continuing."
           }
 
       - name: Create GitHub release
-        if: steps.check_tag.outputs.release_exists == 'false' && inputs.dry_run != 'true'
+        if: steps.check_tag.outputs.release_exists == 'false' && !inputs.dry_run
         env:
           TAG: ${{ steps.version.outputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -116,13 +118,13 @@ jobs:
         # stagex explicitly so released images get the semver baked in.
         # Gate on release_exists == false (not tag_exists) so that a retry after a
         # partial failure (tag pushed, release creation failed) still dispatches stagex.
-        if: steps.check_tag.outputs.release_exists == 'false' && inputs.dry_run != 'true'
+        if: steps.check_tag.outputs.release_exists == 'false' && !inputs.dry_run
         env:
           TAG: ${{ steps.version.outputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh workflow run stagex.yml --ref "$TAG"
 
       - name: Dry run summary
-        if: inputs.dry_run == 'true'
+        if: inputs.dry_run
         run: |
           echo "DRY RUN: would have created tag ${{ steps.version.outputs.tag }} (version: ${{ steps.version.outputs.full_version }})"
