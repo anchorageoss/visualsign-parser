@@ -4,7 +4,7 @@ use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use alloy_sol_types::{SolCall, sol};
 use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use visualsign::vsptrait::{VisualSignConverterFromString, VisualSignOptions};
@@ -221,7 +221,7 @@ fn test_abi_from_metadata_decodes_function() {
         "stateMutability": "nonpayable"
     }]"#;
 
-    let mut abi_mappings = HashMap::new();
+    let mut abi_mappings = BTreeMap::new();
     abi_mappings.insert(
         unknown_contract.to_string(),
         Abi {

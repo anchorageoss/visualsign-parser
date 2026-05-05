@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 // Constants
 const ADDRESS_TRUNCATION_LENGTH: usize = 8;
@@ -33,8 +33,8 @@ pub struct TokenInfo {
 }
 
 /// Static lookup table for common Solana token addresses
-pub fn get_token_lookup_table() -> HashMap<&'static str, TokenInfo> {
-    let mut tokens = HashMap::new();
+pub fn get_token_lookup_table() -> BTreeMap<&'static str, TokenInfo> {
+    let mut tokens = BTreeMap::new();
 
     // SOL (native)
     tokens.insert(

@@ -12,7 +12,7 @@ mod helper;
 mod transaction;
 mod visualsign;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use sui_json_rpc_types::{SuiCallArg, SuiCommand};
 use sui_types::base_types::SuiAddress;
@@ -39,7 +39,7 @@ pub enum VisualizerKind {
 }
 
 pub struct SuiIntegrationConfigData {
-    pub packages: HashMap<&'static str, HashMap<&'static str, Vec<&'static str>>>,
+    pub packages: BTreeMap<&'static str, BTreeMap<&'static str, Vec<&'static str>>>,
 }
 
 /// Data source that tells a visualizer whether it can handle a call

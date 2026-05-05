@@ -53,7 +53,7 @@
 use crate::core::{CommandVisualizer, SuiModuleResolver, VisualizerContext};
 use crate::{SuiTransactionWrapper, transaction_string_to_visual_sign};
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use move_bytecode_utils::module_cache::SyncModuleCache;
 
@@ -107,20 +107,20 @@ pub struct Operation {
     pub data: String,
     pub command_index: usize,
     pub visualize_result_index: usize,
-    pub asserts: HashMap<String, OneOrMany>,
+    pub asserts: BTreeMap<String, OneOrMany>,
 }
 
 #[derive(Debug, serde::Deserialize)]
 pub struct Category {
     pub label: String,
-    pub operations: HashMap<String, Operation>,
+    pub operations: BTreeMap<String, Operation>,
 }
 
 #[derive(Debug, serde::Deserialize)]
 pub struct AggregatedTestData {
     pub explorer_tx_prefix: String,
     #[serde(flatten)]
-    pub modules: HashMap<String, HashMap<String, Category>>,
+    pub modules: BTreeMap<String, BTreeMap<String, Category>>,
 }
 
 /// Runs a standard aggregated test over protocol JSON fixtures.

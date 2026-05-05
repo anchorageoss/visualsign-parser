@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use visualsign::registry::Chain;
 
-fn chain_string_mapping() -> HashMap<&'static str, Chain> {
-    let mut mapping = HashMap::new();
+fn chain_string_mapping() -> BTreeMap<&'static str, Chain> {
+    let mut mapping = BTreeMap::new();
     mapping.insert("solana", Chain::Solana);
     mapping.insert("ethereum", Chain::Ethereum);
     mapping.insert("bitcoin", Chain::Bitcoin);

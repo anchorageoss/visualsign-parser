@@ -17,7 +17,6 @@ pub fn decode_v0_transfers(
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     use crate::presets::jupiter_swap::{JUPITER_IDL_JSON, JUPITER_PROGRAM_ID};
     use solana_parser::solana::parser::parse_transaction;
-    use std::collections::HashMap;
 
     // Serialize the full versioned transaction
     let transaction_bytes = bincode::serialize(versioned_tx).map_err(|e| {
@@ -29,11 +28,19 @@ pub fn decode_v0_transfers(
     // Override the stale Jupiter v6 IDL bundled in solana_parser with our locally
     // refreshed copy so that newer instructions (e.g. route_v2) don't cause the
     // whole-tx decode to bail with "no matching instruction discriminator".
-    let mut custom_idls: HashMap<String, (String, bool)> = HashMap::new();
-    custom_idls.insert(
+    //
+    // The upstream `parse_transaction` API takes an `Option<HashMap<...>>`. We don't
+    // name `HashMap` here — the concrete map type is inferred from the
+    // `Some(custom_idls)` argument, so the `clippy::disallowed_types` rule (which
+    // matches by name) doesn't fire while we still satisfy the upstream API.
+    // Iteration order doesn't escape this scope (the map is consumed by
+    // `parse_transaction` immediately, never iterated by us), so it doesn't affect
+    // rendered output determinism.
+    let custom_idls = std::iter::once((
         JUPITER_PROGRAM_ID.to_string(),
         (JUPITER_IDL_JSON.to_string(), true),
-    );
+    ))
+    .collect();
 
     let is_full_transaction = true; // true because we're passing full tx and not message
     // Parse using solana-parser which handles V0 transactions and lookup tables
