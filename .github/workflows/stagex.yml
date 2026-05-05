@@ -81,7 +81,8 @@ jobs:
           docker rm tmp-extract
           digest=$(sha256sum /tmp/binary | awk '{print $1}')
           pinned_url="${container_url}@${container_digest}"
-          qos_version=$(grep -m1 -E 'git\+https://github.com/tkhq/qos\.git\?rev=[a-f0-9]{40}' src/Cargo.lock | sed -E 's/.*rev=([a-f0-9]{40}).*/\1/')
+          # Hardcoded: TVC currently only supports this QOS version.
+          qos_version="v2026.2.6"
 
           {
             echo "## TVC Deployment Details"
