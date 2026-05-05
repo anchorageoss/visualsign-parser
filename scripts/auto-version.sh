@@ -30,7 +30,13 @@ else
   BRANCH_META=
 fi
 
-if [ "$RAW_BRANCH" = "main" ] || [ "$RAW_BRANCH" = "master" ]; then
+# Treat the build as a default-branch build only when we know the ref is
+# actually the canonical default branch. `pull_request` events always
+# represent a non-default ref by definition, so even a fork PR opened from
+# a branch literally named `main`/`master` falls through to the merge-base
+# path below.
+if { [ "$RAW_BRANCH" = "main" ] || [ "$RAW_BRANCH" = "master" ]; } \
+   && [ "${GITHUB_EVENT_NAME:-}" != "pull_request" ]; then
   HEIGHT=$(git rev-list --count HEAD)
   echo "0.$HEIGHT.0+${BRANCH_META}$SHORT_HASH"
   exit 0

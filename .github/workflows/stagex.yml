@@ -30,14 +30,16 @@ jobs:
       packages: write
     env:
       # release.yml dispatches stagex via `gh workflow run --ref $TAG`, which
-      # arrives as `workflow_dispatch` (not `push`), so the push branch below
-      # would not emit any tag. Cover the dispatched-tag case explicitly so
-      # release flows actually publish v0.N.0 images.
+      # arrives as `workflow_dispatch` (not `push`). Emit `ref_name` for any
+      # `workflow_dispatch` so both tag dispatches (release flow) and branch
+      # dispatches (manual testing on a branch) produce a real tag. Without
+      # this, `docker push --all-tags` runs against an empty tag list and
+      # silently publishes nothing.
       tags: >-
         ${{ github.ref == format('refs/heads/{0}', 'main') && 'latest' || '' }}
         ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || '' }}
         ${{ github.event_name == 'push' && github.ref_name || '' }}
-        ${{ github.event_name == 'workflow_dispatch' && github.ref_type == 'tag' && github.ref_name || '' }}
+        ${{ github.event_name == 'workflow_dispatch' && github.ref_name || '' }}
     strategy:
       matrix:
         target:
