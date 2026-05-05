@@ -371,8 +371,9 @@ mod tests {
             &json!({"amount": 100, "side": "buy"}),
         )
         .unwrap();
-        // BTreeMap-like iteration order: serde_json preserves insertion order with the
-        // `preserve_order` feature off, but assert as a set to stay robust.
+        // Without the `preserve_order` feature, serde_json::Map is a BTreeMap
+        // (sorted by key, not insertion-ordered). Assert as a set to stay
+        // robust against either backing map.
         let pairs: std::collections::BTreeSet<(String, String)> =
             fields.iter().map(field_label_value).collect();
         let expected: std::collections::BTreeSet<(String, String)> = [

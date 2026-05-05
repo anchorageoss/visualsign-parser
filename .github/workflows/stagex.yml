@@ -63,7 +63,11 @@ jobs:
           if [[ "$GH_REF_TYPE" == "tag" && "$GH_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             VERSION="${GH_REF_NAME#v}"
           else
-            VERSION=""
+            # Compute on the runner: auto-version.sh isn't COPY'd into the
+            # Docker build context, so the in-container build.rs would fall
+            # back to "dev" and silently lose the git-derived version on
+            # latest/pr-* images.
+            VERSION=$(scripts/auto-version.sh)
           fi
           make VERSION="$VERSION" -j$(nproc) out/${{ matrix.target.name }}/index.json
 
