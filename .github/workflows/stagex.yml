@@ -96,9 +96,9 @@ jobs:
             echo ""
             echo '```bash'
             echo "export CONTAINER_URL=\"${pinned_url}\""
-            echo 'docker create --name tmp-extract "$CONTAINER_URL" /bin/true'
-            echo 'docker cp tmp-extract:/parser_app /tmp/binary'
-            echo 'docker rm tmp-extract'
+            echo 'cid=$(docker create "$CONTAINER_URL" /bin/true)'
+            echo 'docker cp "$cid:/parser_app" /tmp/binary'
+            echo 'docker rm "$cid"'
             echo 'sha256sum /tmp/binary'
             echo '```'
             echo ""
