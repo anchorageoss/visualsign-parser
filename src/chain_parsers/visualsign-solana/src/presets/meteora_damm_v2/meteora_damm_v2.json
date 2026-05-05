@@ -1,0 +1,887 @@
+{
+  "address": "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG",
+  "metadata": {
+    "name": "cp_amm",
+    "version": "0.2.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "add_liquidity",
+      "discriminator": [181, 157, 89, 67, 143, 182, 52, 72],
+      "accounts": [
+        {"name": "pool", "writable": true, "relations": ["position"]},
+        {"name": "position", "writable": true},
+        {"name": "token_a_account", "writable": true},
+        {"name": "token_b_account", "writable": true},
+        {"name": "token_a_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_b_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_a_mint", "relations": ["pool"]},
+        {"name": "token_b_mint", "relations": ["pool"]},
+        {"name": "position_nft_account"},
+        {"name": "owner", "signer": true},
+        {"name": "token_a_program"},
+        {"name": "token_b_program"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "params", "type": {"defined": {"name": "AddLiquidityParameters"}}}]
+    },
+    {
+      "name": "claim_position_fee",
+      "discriminator": [180, 38, 154, 17, 133, 33, 162, 211],
+      "accounts": [
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "pool", "relations": ["position"]},
+        {"name": "position", "writable": true},
+        {"name": "token_a_account", "writable": true},
+        {"name": "token_b_account", "writable": true},
+        {"name": "token_a_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_b_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_a_mint", "relations": ["pool"]},
+        {"name": "token_b_mint", "relations": ["pool"]},
+        {"name": "position_nft_account"},
+        {"name": "owner", "signer": true},
+        {"name": "token_a_program"},
+        {"name": "token_b_program"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_protocol_fee",
+      "discriminator": [165, 228, 133, 48, 99, 249, 255, 33],
+      "accounts": [
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "pool", "writable": true},
+        {"name": "token_a_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_b_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_a_mint", "relations": ["pool"]},
+        {"name": "token_b_mint", "relations": ["pool"]},
+        {"name": "token_a_account", "writable": true},
+        {"name": "token_b_account", "writable": true},
+        {"name": "operator"},
+        {"name": "signer", "signer": true},
+        {"name": "token_a_program"},
+        {"name": "token_b_program"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "max_amount_a", "type": "u64"},
+        {"name": "max_amount_b", "type": "u64"}
+      ]
+    },
+    {
+      "name": "claim_reward",
+      "discriminator": [149, 95, 181, 242, 94, 90, 158, 162],
+      "accounts": [
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "pool", "writable": true, "relations": ["position"]},
+        {"name": "position", "writable": true},
+        {"name": "reward_vault", "writable": true},
+        {"name": "reward_mint"},
+        {"name": "user_token_account", "writable": true},
+        {"name": "position_nft_account"},
+        {"name": "owner", "signer": true},
+        {"name": "token_program"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "reward_index", "type": "u8"},
+        {"name": "skip_reward", "type": "u8"}
+      ]
+    },
+    {
+      "name": "close_config",
+      "discriminator": [145, 9, 72, 157, 95, 125, 61, 85],
+      "accounts": [
+        {"name": "config", "writable": true},
+        {"name": "operator"},
+        {"name": "signer", "signer": true},
+        {"name": "rent_receiver", "writable": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": []
+    },
+    {
+      "name": "close_operator_account",
+      "discriminator": [171, 9, 213, 74, 120, 23, 3, 29],
+      "accounts": [
+        {"name": "operator", "writable": true},
+        {"name": "signer", "signer": true},
+        {"name": "rent_receiver", "writable": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": []
+    },
+    {
+      "name": "close_position",
+      "discriminator": [123, 134, 81, 0, 49, 68, 98, 98],
+      "accounts": [
+        {"name": "position_nft_mint", "writable": true},
+        {"name": "position_nft_account", "writable": true},
+        {"name": "pool", "writable": true, "relations": ["position"]},
+        {"name": "position", "writable": true},
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "rent_receiver", "writable": true},
+        {"name": "owner", "signer": true},
+        {"name": "token_program", "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": []
+    },
+    {
+      "name": "close_token_badge",
+      "discriminator": [108, 146, 86, 110, 179, 254, 10, 104],
+      "accounts": [
+        {"name": "token_badge", "writable": true},
+        {"name": "operator"},
+        {"name": "signer", "signer": true},
+        {"name": "rent_receiver", "writable": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": []
+    },
+    {
+      "name": "create_config",
+      "discriminator": [201, 207, 243, 114, 75, 111, 47, 189],
+      "accounts": [
+        {"name": "config", "writable": true},
+        {"name": "operator"},
+        {"name": "signer", "signer": true},
+        {"name": "payer", "writable": true, "signer": true},
+        {"name": "system_program", "address": "11111111111111111111111111111111"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "index", "type": "u64"},
+        {"name": "config_parameters", "type": {"defined": {"name": "StaticConfigParameters"}}}
+      ]
+    },
+    {
+      "name": "create_dynamic_config",
+      "discriminator": [81, 251, 122, 78, 66, 57, 208, 82],
+      "accounts": [
+        {"name": "config", "writable": true},
+        {"name": "operator"},
+        {"name": "signer", "signer": true},
+        {"name": "payer", "writable": true, "signer": true},
+        {"name": "system_program", "address": "11111111111111111111111111111111"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "index", "type": "u64"},
+        {"name": "config_parameters", "type": {"defined": {"name": "DynamicConfigParameters"}}}
+      ]
+    },
+    {
+      "name": "create_operator_account",
+      "discriminator": [221, 64, 246, 149, 240, 153, 229, 163],
+      "accounts": [
+        {"name": "operator", "writable": true},
+        {"name": "whitelisted_address"},
+        {"name": "signer", "signer": true},
+        {"name": "payer", "writable": true, "signer": true},
+        {"name": "system_program", "address": "11111111111111111111111111111111"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "permission", "type": "u128"}]
+    },
+    {
+      "name": "create_position",
+      "discriminator": [48, 215, 197, 153, 96, 203, 180, 133],
+      "accounts": [
+        {"name": "owner"},
+        {"name": "position_nft_mint", "writable": true, "signer": true},
+        {"name": "position_nft_account", "writable": true},
+        {"name": "pool", "writable": true},
+        {"name": "position", "writable": true},
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "payer", "writable": true, "signer": true},
+        {"name": "token_program", "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"},
+        {"name": "system_program", "address": "11111111111111111111111111111111"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": []
+    },
+    {
+      "name": "create_token_badge",
+      "discriminator": [88, 206, 0, 91, 60, 175, 151, 118],
+      "accounts": [
+        {"name": "token_badge", "writable": true},
+        {"name": "token_mint"},
+        {"name": "operator"},
+        {"name": "signer", "signer": true},
+        {"name": "payer", "writable": true, "signer": true},
+        {"name": "system_program", "address": "11111111111111111111111111111111"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": []
+    },
+    {
+      "name": "dummy_ix",
+      "discriminator": [234, 95, 176, 185, 7, 42, 35, 159],
+      "accounts": [
+        {"name": "pod_aligned_fee_time_scheduler"},
+        {"name": "pod_aligned_fee_rate_limiter"},
+        {"name": "pod_aligned_fee_market_cap_scheduler"}
+      ],
+      "args": [{"name": "_ixs", "type": {"defined": {"name": "DummyParams"}}}]
+    },
+    {
+      "name": "fix_config_fee_params",
+      "discriminator": [38, 30, 216, 81, 250, 177, 243, 254],
+      "accounts": [
+        {"name": "config", "writable": true},
+        {"name": "operator"},
+        {"name": "signer", "signer": true}
+      ],
+      "args": [{"name": "params", "type": {"defined": {"name": "BaseFeeParameters"}}}]
+    },
+    {
+      "name": "fix_pool_fee_params",
+      "discriminator": [132, 98, 81, 196, 44, 58, 120, 193],
+      "accounts": [
+        {"name": "pool", "writable": true},
+        {"name": "operator"},
+        {"name": "signer", "signer": true}
+      ],
+      "args": [{"name": "params", "type": {"defined": {"name": "BaseFeeParameters"}}}]
+    },
+    {
+      "name": "fix_pool_layout_version",
+      "discriminator": [166, 158, 69, 35, 81, 167, 200, 215],
+      "accounts": [
+        {"name": "pool", "writable": true},
+        {"name": "operator"},
+        {"name": "signer", "signer": true}
+      ],
+      "args": []
+    },
+    {
+      "name": "fund_reward",
+      "discriminator": [188, 50, 249, 165, 93, 151, 38, 63],
+      "accounts": [
+        {"name": "pool", "writable": true},
+        {"name": "reward_vault", "writable": true},
+        {"name": "reward_mint"},
+        {"name": "funder_token_account", "writable": true},
+        {"name": "funder", "signer": true},
+        {"name": "token_program"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "reward_index", "type": "u8"},
+        {"name": "amount", "type": "u64"},
+        {"name": "carry_forward", "type": "bool"}
+      ]
+    },
+    {
+      "name": "initialize_customizable_pool",
+      "discriminator": [20, 161, 241, 24, 189, 221, 180, 2],
+      "accounts": [
+        {"name": "creator"},
+        {"name": "position_nft_mint", "writable": true, "signer": true},
+        {"name": "position_nft_account", "writable": true},
+        {"name": "payer", "writable": true, "signer": true},
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "pool", "writable": true},
+        {"name": "position", "writable": true},
+        {"name": "token_a_mint"},
+        {"name": "token_b_mint"},
+        {"name": "token_a_vault", "writable": true},
+        {"name": "token_b_vault", "writable": true},
+        {"name": "payer_token_a", "writable": true},
+        {"name": "payer_token_b", "writable": true},
+        {"name": "token_a_program"},
+        {"name": "token_b_program"},
+        {"name": "token_2022_program", "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"},
+        {"name": "system_program", "address": "11111111111111111111111111111111"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "params", "type": {"defined": {"name": "InitializeCustomizablePoolParameters"}}}]
+    },
+    {
+      "name": "initialize_pool",
+      "discriminator": [95, 180, 10, 172, 84, 174, 232, 40],
+      "accounts": [
+        {"name": "creator"},
+        {"name": "position_nft_mint", "writable": true, "signer": true},
+        {"name": "position_nft_account", "writable": true},
+        {"name": "payer", "writable": true, "signer": true},
+        {"name": "config"},
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "pool", "writable": true},
+        {"name": "position", "writable": true},
+        {"name": "token_a_mint"},
+        {"name": "token_b_mint"},
+        {"name": "token_a_vault", "writable": true},
+        {"name": "token_b_vault", "writable": true},
+        {"name": "payer_token_a", "writable": true},
+        {"name": "payer_token_b", "writable": true},
+        {"name": "token_a_program"},
+        {"name": "token_b_program"},
+        {"name": "token_2022_program", "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"},
+        {"name": "system_program", "address": "11111111111111111111111111111111"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "params", "type": {"defined": {"name": "InitializePoolParameters"}}}]
+    },
+    {
+      "name": "initialize_pool_with_dynamic_config",
+      "discriminator": [149, 82, 72, 197, 253, 252, 68, 15],
+      "accounts": [
+        {"name": "creator"},
+        {"name": "position_nft_mint", "writable": true, "signer": true},
+        {"name": "position_nft_account", "writable": true},
+        {"name": "payer", "writable": true, "signer": true},
+        {"name": "pool_creator_authority", "signer": true, "relations": ["config"]},
+        {"name": "config"},
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "pool", "writable": true},
+        {"name": "position", "writable": true},
+        {"name": "token_a_mint"},
+        {"name": "token_b_mint"},
+        {"name": "token_a_vault", "writable": true},
+        {"name": "token_b_vault", "writable": true},
+        {"name": "payer_token_a", "writable": true},
+        {"name": "payer_token_b", "writable": true},
+        {"name": "token_a_program"},
+        {"name": "token_b_program"},
+        {"name": "token_2022_program", "address": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"},
+        {"name": "system_program", "address": "11111111111111111111111111111111"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "params", "type": {"defined": {"name": "InitializeCustomizablePoolParameters"}}}]
+    },
+    {
+      "name": "initialize_reward",
+      "discriminator": [95, 135, 192, 196, 242, 129, 230, 68],
+      "accounts": [
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "pool", "writable": true},
+        {"name": "reward_vault", "writable": true},
+        {"name": "reward_mint"},
+        {"name": "signer", "signer": true},
+        {"name": "payer", "writable": true, "signer": true},
+        {"name": "token_program"},
+        {"name": "system_program", "address": "11111111111111111111111111111111"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "reward_index", "type": "u8"},
+        {"name": "reward_duration", "type": "u64"},
+        {"name": "funder", "type": "pubkey"}
+      ]
+    },
+    {
+      "name": "lock_inner_position",
+      "discriminator": [72, 19, 49, 204, 18, 122, 23, 90],
+      "accounts": [
+        {"name": "pool", "relations": ["position"]},
+        {"name": "position", "writable": true},
+        {"name": "position_nft_account"},
+        {"name": "owner", "signer": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "params", "type": {"defined": {"name": "VestingParameters"}}}]
+    },
+    {
+      "name": "lock_position",
+      "discriminator": [227, 62, 2, 252, 247, 10, 171, 185],
+      "accounts": [
+        {"name": "pool", "relations": ["position"]},
+        {"name": "position", "writable": true},
+        {"name": "vesting", "writable": true, "signer": true},
+        {"name": "position_nft_account"},
+        {"name": "owner", "signer": true},
+        {"name": "payer", "writable": true, "signer": true},
+        {"name": "system_program", "address": "11111111111111111111111111111111"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "params", "type": {"defined": {"name": "VestingParameters"}}}]
+    },
+    {
+      "name": "permanent_lock_position",
+      "discriminator": [165, 176, 125, 6, 231, 171, 186, 213],
+      "accounts": [
+        {"name": "pool", "writable": true, "relations": ["position"]},
+        {"name": "position", "writable": true},
+        {"name": "position_nft_account"},
+        {"name": "owner", "signer": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "permanent_lock_liquidity", "type": "u128"}]
+    },
+    {
+      "name": "refresh_vesting",
+      "discriminator": [9, 94, 216, 14, 116, 204, 247, 0],
+      "accounts": [
+        {"name": "pool", "relations": ["position"]},
+        {"name": "position", "writable": true},
+        {"name": "position_nft_account"},
+        {"name": "owner"}
+      ],
+      "args": []
+    },
+    {
+      "name": "remove_all_liquidity",
+      "discriminator": [10, 51, 61, 35, 112, 105, 24, 85],
+      "accounts": [
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "pool", "writable": true, "relations": ["position"]},
+        {"name": "position", "writable": true},
+        {"name": "token_a_account", "writable": true},
+        {"name": "token_b_account", "writable": true},
+        {"name": "token_a_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_b_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_a_mint", "relations": ["pool"]},
+        {"name": "token_b_mint", "relations": ["pool"]},
+        {"name": "position_nft_account"},
+        {"name": "owner", "signer": true},
+        {"name": "token_a_program"},
+        {"name": "token_b_program"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "token_a_amount_threshold", "type": "u64"},
+        {"name": "token_b_amount_threshold", "type": "u64"}
+      ]
+    },
+    {
+      "name": "remove_liquidity",
+      "discriminator": [80, 85, 209, 72, 24, 206, 177, 108],
+      "accounts": [
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "pool", "writable": true, "relations": ["position"]},
+        {"name": "position", "writable": true},
+        {"name": "token_a_account", "writable": true},
+        {"name": "token_b_account", "writable": true},
+        {"name": "token_a_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_b_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_a_mint", "relations": ["pool"]},
+        {"name": "token_b_mint", "relations": ["pool"]},
+        {"name": "position_nft_account"},
+        {"name": "owner", "signer": true},
+        {"name": "token_a_program"},
+        {"name": "token_b_program"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "params", "type": {"defined": {"name": "RemoveLiquidityParameters"}}}]
+    },
+    {
+      "name": "set_pool_status",
+      "discriminator": [112, 87, 135, 223, 83, 204, 132, 53],
+      "accounts": [
+        {"name": "pool", "writable": true},
+        {"name": "operator"},
+        {"name": "signer", "signer": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "status", "type": "u8"}]
+    },
+    {
+      "name": "split_position",
+      "discriminator": [172, 241, 221, 138, 161, 29, 253, 42],
+      "accounts": [
+        {"name": "pool", "writable": true, "relations": ["first_position", "second_position"]},
+        {"name": "first_position", "writable": true},
+        {"name": "first_position_nft_account"},
+        {"name": "second_position", "writable": true},
+        {"name": "second_position_nft_account"},
+        {"name": "first_owner", "signer": true},
+        {"name": "second_owner", "signer": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "params", "type": {"defined": {"name": "SplitPositionParameters"}}}]
+    },
+    {
+      "name": "split_position2",
+      "discriminator": [221, 147, 228, 207, 140, 212, 17, 119],
+      "accounts": [
+        {"name": "pool", "writable": true, "relations": ["first_position", "second_position"]},
+        {"name": "first_position", "writable": true},
+        {"name": "first_position_nft_account"},
+        {"name": "second_position", "writable": true},
+        {"name": "second_position_nft_account"},
+        {"name": "first_owner", "signer": true},
+        {"name": "second_owner", "signer": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "numerator", "type": "u32"}]
+    },
+    {
+      "name": "swap",
+      "discriminator": [248, 198, 158, 145, 225, 117, 135, 200],
+      "accounts": [
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "pool", "writable": true},
+        {"name": "input_token_account", "writable": true},
+        {"name": "output_token_account", "writable": true},
+        {"name": "token_a_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_b_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_a_mint"},
+        {"name": "token_b_mint"},
+        {"name": "payer", "signer": true},
+        {"name": "token_a_program"},
+        {"name": "token_b_program"},
+        {"name": "referral_token_account", "writable": true, "optional": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "_params", "type": {"defined": {"name": "SwapParameters"}}}]
+    },
+    {
+      "name": "swap2",
+      "discriminator": [65, 75, 63, 76, 235, 91, 91, 136],
+      "accounts": [
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "pool", "writable": true},
+        {"name": "input_token_account", "writable": true},
+        {"name": "output_token_account", "writable": true},
+        {"name": "token_a_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_b_vault", "writable": true, "relations": ["pool"]},
+        {"name": "token_a_mint"},
+        {"name": "token_b_mint"},
+        {"name": "payer", "signer": true},
+        {"name": "token_a_program"},
+        {"name": "token_b_program"},
+        {"name": "referral_token_account", "writable": true, "optional": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "_params", "type": {"defined": {"name": "SwapParameters2"}}}]
+    },
+    {
+      "name": "update_pool_fees",
+      "discriminator": [118, 217, 203, 179, 60, 8, 70, 89],
+      "accounts": [
+        {"name": "pool", "writable": true},
+        {"name": "operator"},
+        {"name": "signer", "signer": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "params", "type": {"defined": {"name": "UpdatePoolFeesParameters"}}}]
+    },
+    {
+      "name": "update_reward_duration",
+      "discriminator": [138, 174, 196, 169, 213, 235, 254, 107],
+      "accounts": [
+        {"name": "pool", "writable": true},
+        {"name": "signer", "signer": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "reward_index", "type": "u8"},
+        {"name": "new_duration", "type": "u64"}
+      ]
+    },
+    {
+      "name": "update_reward_funder",
+      "discriminator": [211, 28, 48, 32, 215, 160, 35, 23],
+      "accounts": [
+        {"name": "pool", "writable": true},
+        {"name": "signer", "signer": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "reward_index", "type": "u8"},
+        {"name": "new_funder", "type": "pubkey"}
+      ]
+    },
+    {
+      "name": "withdraw_ineligible_reward",
+      "discriminator": [148, 206, 42, 195, 247, 49, 103, 8],
+      "accounts": [
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "pool", "writable": true},
+        {"name": "reward_vault", "writable": true},
+        {"name": "reward_mint"},
+        {"name": "funder_token_account", "writable": true},
+        {"name": "funder", "signer": true},
+        {"name": "token_program"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "reward_index", "type": "u8"}]
+    },
+    {
+      "name": "zap_protocol_fee",
+      "discriminator": [213, 155, 187, 34, 56, 182, 91, 240],
+      "accounts": [
+        {"name": "pool_authority", "address": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"},
+        {"name": "pool", "writable": true},
+        {"name": "token_vault", "writable": true},
+        {"name": "token_mint"},
+        {"name": "receiver_token", "writable": true},
+        {"name": "operator"},
+        {"name": "signer", "signer": true},
+        {"name": "token_program"},
+        {"name": "sysvar_instructions", "address": "Sysvar1nstructions1111111111111111111111111"}
+      ],
+      "args": [{"name": "max_amount", "type": "u64"}]
+    }
+  ],
+  "accounts": [
+    {"name": "Config", "discriminator": [155, 12, 170, 224, 30, 250, 204, 130]},
+    {"name": "Operator", "discriminator": [219, 31, 188, 145, 69, 139, 204, 117]},
+    {"name": "PodAlignedFeeMarketCapScheduler", "discriminator": [251, 130, 208, 253, 245, 27, 145, 203]},
+    {"name": "PodAlignedFeeRateLimiter", "discriminator": [160, 219, 8, 251, 179, 7, 16, 117]},
+    {"name": "PodAlignedFeeTimeScheduler", "discriminator": [239, 132, 138, 213, 67, 154, 130, 70]},
+    {"name": "Pool", "discriminator": [241, 154, 109, 4, 17, 177, 109, 188]},
+    {"name": "Position", "discriminator": [170, 188, 143, 228, 122, 64, 247, 208]},
+    {"name": "TokenBadge", "discriminator": [116, 219, 204, 229, 249, 116, 255, 150]},
+    {"name": "Vesting", "discriminator": [100, 149, 66, 138, 95, 200, 128, 241]}
+  ],
+  "events": [],
+  "errors": [],
+  "types": [
+    {
+      "name": "AddLiquidityParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "liquidity_delta", "type": "u128"},
+          {"name": "token_a_amount_threshold", "type": "u64"},
+          {"name": "token_b_amount_threshold", "type": "u64"}
+        ]
+      }
+    },
+    {
+      "name": "BaseFeeParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [{"name": "data", "type": {"array": ["u8", 27]}}]
+      }
+    },
+    {
+      "name": "DynamicConfigParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [{"name": "pool_creator_authority", "type": "pubkey"}]
+      }
+    },
+    {
+      "name": "DynamicFeeParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "bin_step", "type": "u16"},
+          {"name": "bin_step_u128", "type": "u128"},
+          {"name": "filter_period", "type": "u16"},
+          {"name": "decay_period", "type": "u16"},
+          {"name": "reduction_factor", "type": "u16"},
+          {"name": "max_volatility_accumulator", "type": "u32"},
+          {"name": "variable_fee_control", "type": "u32"}
+        ]
+      }
+    },
+    {
+      "name": "BorshFeeMarketCapScheduler",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "cliff_fee_numerator", "type": "u64"},
+          {"name": "number_of_period", "type": "u16"},
+          {"name": "sqrt_price_step_bps", "type": "u32"},
+          {"name": "scheduler_expiration_duration", "type": "u32"},
+          {"name": "reduction_factor", "type": "u64"},
+          {"name": "base_fee_mode", "type": "u8"}
+        ]
+      }
+    },
+    {
+      "name": "BorshFeeRateLimiter",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "cliff_fee_numerator", "type": "u64"},
+          {"name": "fee_increment_bps", "type": "u16"},
+          {"name": "max_limiter_duration", "type": "u32"},
+          {"name": "max_fee_bps", "type": "u32"},
+          {"name": "reference_amount", "type": "u64"},
+          {"name": "base_fee_mode", "type": "u8"}
+        ]
+      }
+    },
+    {
+      "name": "BorshFeeTimeScheduler",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "cliff_fee_numerator", "type": "u64"},
+          {"name": "number_of_period", "type": "u16"},
+          {"name": "period_frequency", "type": "u64"},
+          {"name": "reduction_factor", "type": "u64"},
+          {"name": "base_fee_mode", "type": "u8"}
+        ]
+      }
+    },
+    {
+      "name": "DummyParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "borsh_fee_time_scheduler_params", "type": {"defined": {"name": "BorshFeeTimeScheduler"}}},
+          {"name": "borsh_fee_rate_limiter_params", "type": {"defined": {"name": "BorshFeeRateLimiter"}}},
+          {"name": "borsh_fee_market_cap_scheduler_params", "type": {"defined": {"name": "BorshFeeMarketCapScheduler"}}}
+        ]
+      }
+    },
+    {
+      "name": "InitializeCustomizablePoolParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "pool_fees", "type": {"defined": {"name": "PoolFeeParameters"}}},
+          {"name": "sqrt_min_price", "type": "u128"},
+          {"name": "sqrt_max_price", "type": "u128"},
+          {"name": "has_alpha_vault", "type": "bool"},
+          {"name": "liquidity", "type": "u128"},
+          {"name": "sqrt_price", "type": "u128"},
+          {"name": "activation_type", "type": "u8"},
+          {"name": "collect_fee_mode", "type": "u8"},
+          {"name": "activation_point", "type": {"option": "u64"}}
+        ]
+      }
+    },
+    {
+      "name": "InitializePoolParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "liquidity", "type": "u128"},
+          {"name": "sqrt_price", "type": "u128"},
+          {"name": "activation_point", "type": {"option": "u64"}}
+        ]
+      }
+    },
+    {
+      "name": "PoolFeeParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "base_fee", "type": {"defined": {"name": "BaseFeeParameters"}}},
+          {"name": "compounding_fee_bps", "type": "u16"},
+          {"name": "padding", "type": "u8"},
+          {"name": "dynamic_fee", "type": {"option": {"defined": {"name": "DynamicFeeParameters"}}}}
+        ]
+      }
+    },
+    {
+      "name": "RemoveLiquidityParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "liquidity_delta", "type": "u128"},
+          {"name": "token_a_amount_threshold", "type": "u64"},
+          {"name": "token_b_amount_threshold", "type": "u64"}
+        ]
+      }
+    },
+    {
+      "name": "SplitPositionParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "unlocked_liquidity_percentage", "type": "u8"},
+          {"name": "permanent_locked_liquidity_percentage", "type": "u8"},
+          {"name": "fee_a_percentage", "type": "u8"},
+          {"name": "fee_b_percentage", "type": "u8"},
+          {"name": "reward_0_percentage", "type": "u8"},
+          {"name": "reward_1_percentage", "type": "u8"},
+          {"name": "inner_vesting_liquidity_percentage", "type": "u8"},
+          {"name": "padding", "type": {"array": ["u8", 15]}}
+        ]
+      }
+    },
+    {
+      "name": "StaticConfigParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "pool_fees", "type": {"defined": {"name": "PoolFeeParameters"}}},
+          {"name": "sqrt_min_price", "type": "u128"},
+          {"name": "sqrt_max_price", "type": "u128"},
+          {"name": "vault_config_key", "type": "pubkey"},
+          {"name": "pool_creator_authority", "type": "pubkey"},
+          {"name": "activation_type", "type": "u8"},
+          {"name": "collect_fee_mode", "type": "u8"}
+        ]
+      }
+    },
+    {
+      "name": "SwapParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "amount_in", "type": "u64"},
+          {"name": "minimum_amount_out", "type": "u64"}
+        ]
+      }
+    },
+    {
+      "name": "SwapParameters2",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "amount_0", "type": "u64"},
+          {"name": "amount_1", "type": "u64"},
+          {"name": "swap_mode", "type": "u8"}
+        ]
+      }
+    },
+    {
+      "name": "UpdatePoolFeesParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "cliff_fee_numerator", "type": {"option": "u64"}},
+          {"name": "dynamic_fee", "type": {"option": {"defined": {"name": "DynamicFeeParameters"}}}}
+        ]
+      }
+    },
+    {
+      "name": "VestingParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "cliff_point", "type": {"option": "u64"}},
+          {"name": "period_frequency", "type": "u64"},
+          {"name": "cliff_unlock_liquidity", "type": "u128"},
+          {"name": "liquidity_per_period", "type": "u128"},
+          {"name": "number_of_period", "type": "u16"}
+        ]
+      }
+    }
+  ]
+}
