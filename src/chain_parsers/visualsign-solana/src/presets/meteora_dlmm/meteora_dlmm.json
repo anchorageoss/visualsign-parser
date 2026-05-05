@@ -1,0 +1,856 @@
+{
+  "address": "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+  "metadata": {
+    "name": "lb_clmm",
+    "version": "0.11.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "add_liquidity",
+      "discriminator": [181, 157, 89, 67, 143, 182, 52, 72],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token_x", "writable": true},
+        {"name": "user_token_y", "writable": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "bin_array_lower", "writable": true},
+        {"name": "bin_array_upper", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "token_x_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "token_y_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "liquidity_parameter", "type": {"defined": {"name": "LiquidityParameter"}}}]
+    },
+    {
+      "name": "add_liquidity2",
+      "discriminator": [228, 162, 78, 28, 70, 219, 116, 115],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token_x", "writable": true},
+        {"name": "user_token_y", "writable": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "sender", "signer": true},
+        {"name": "token_x_program"},
+        {"name": "token_y_program"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "liquidity_parameter", "type": {"defined": {"name": "LiquidityParameter"}}},
+        {"name": "remaining_accounts_info", "type": {"defined": {"name": "RemainingAccountsInfo"}}}
+      ]
+    },
+    {
+      "name": "add_liquidity_by_strategy",
+      "discriminator": [7, 3, 150, 127, 148, 40, 61, 200],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token_x", "writable": true},
+        {"name": "user_token_y", "writable": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "bin_array_lower", "writable": true},
+        {"name": "bin_array_upper", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "token_x_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "token_y_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "liquidity_parameter", "type": {"defined": {"name": "LiquidityParameterByStrategy"}}}]
+    },
+    {
+      "name": "add_liquidity_by_strategy2",
+      "discriminator": [3, 221, 149, 218, 111, 141, 118, 213],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token_x", "writable": true},
+        {"name": "user_token_y", "writable": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "sender", "signer": true},
+        {"name": "token_x_program"},
+        {"name": "token_y_program"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "liquidity_parameter", "type": {"defined": {"name": "LiquidityParameterByStrategy"}}},
+        {"name": "remaining_accounts_info", "type": {"defined": {"name": "RemainingAccountsInfo"}}}
+      ]
+    },
+    {
+      "name": "add_liquidity_by_strategy_one_side",
+      "discriminator": [41, 5, 238, 175, 100, 225, 6, 205],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token", "writable": true},
+        {"name": "reserve", "writable": true},
+        {"name": "token_mint"},
+        {"name": "bin_array_lower", "writable": true},
+        {"name": "bin_array_upper", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "token_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "liquidity_parameter", "type": {"defined": {"name": "LiquidityParameterByStrategyOneSide"}}}]
+    },
+    {
+      "name": "add_liquidity_by_weight",
+      "discriminator": [28, 140, 238, 99, 231, 162, 21, 149],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token_x", "writable": true},
+        {"name": "user_token_y", "writable": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "bin_array_lower", "writable": true},
+        {"name": "bin_array_upper", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "token_x_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "token_y_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "liquidity_parameter", "type": {"defined": {"name": "LiquidityParameterByWeight"}}}]
+    },
+    {
+      "name": "add_liquidity_one_side",
+      "discriminator": [94, 155, 103, 151, 70, 95, 220, 165],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token", "writable": true},
+        {"name": "reserve", "writable": true},
+        {"name": "token_mint"},
+        {"name": "bin_array_lower", "writable": true},
+        {"name": "bin_array_upper", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "token_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "liquidity_parameter", "type": {"defined": {"name": "LiquidityOneSideParameter"}}}]
+    },
+    {
+      "name": "add_liquidity_one_side_precise",
+      "discriminator": [161, 194, 103, 84, 171, 71, 250, 154],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token", "writable": true},
+        {"name": "reserve", "writable": true},
+        {"name": "token_mint"},
+        {"name": "bin_array_lower", "writable": true},
+        {"name": "bin_array_upper", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "token_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "parameter", "type": {"defined": {"name": "AddLiquiditySingleSidePreciseParameter"}}}]
+    },
+    {
+      "name": "add_liquidity_one_side_precise2",
+      "discriminator": [33, 51, 163, 201, 117, 98, 125, 231],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token", "writable": true},
+        {"name": "reserve", "writable": true},
+        {"name": "token_mint"},
+        {"name": "sender", "signer": true},
+        {"name": "token_program"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "liquidity_parameter", "type": {"defined": {"name": "AddLiquiditySingleSidePreciseParameter2"}}},
+        {"name": "remaining_accounts_info", "type": {"defined": {"name": "RemainingAccountsInfo"}}}
+      ]
+    },
+    {
+      "name": "claim_fee",
+      "discriminator": [169, 32, 79, 137, 136, 232, 70, 137],
+      "accounts": [
+        {"name": "lb_pair", "writable": true},
+        {"name": "position", "writable": true},
+        {"name": "bin_array_lower", "writable": true},
+        {"name": "bin_array_upper", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "user_token_x", "writable": true},
+        {"name": "user_token_y", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "token_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_fee2",
+      "discriminator": [112, 191, 101, 171, 28, 144, 127, 187],
+      "accounts": [
+        {"name": "lb_pair", "writable": true},
+        {"name": "position", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "user_token_x", "writable": true},
+        {"name": "user_token_y", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "token_program_x"},
+        {"name": "token_program_y"},
+        {"name": "memo_program", "address": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "min_bin_id", "type": "i32"},
+        {"name": "max_bin_id", "type": "i32"},
+        {"name": "remaining_accounts_info", "type": {"defined": {"name": "RemainingAccountsInfo"}}}
+      ]
+    },
+    {
+      "name": "claim_reward",
+      "discriminator": [149, 95, 181, 242, 94, 90, 158, 162],
+      "accounts": [
+        {"name": "lb_pair", "writable": true},
+        {"name": "position", "writable": true},
+        {"name": "bin_array_lower", "writable": true},
+        {"name": "bin_array_upper", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "reward_vault", "writable": true},
+        {"name": "reward_mint"},
+        {"name": "user_token_account", "writable": true},
+        {"name": "token_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "reward_index", "type": "u64"}]
+    },
+    {
+      "name": "claim_reward2",
+      "discriminator": [190, 3, 127, 119, 178, 87, 157, 183],
+      "accounts": [
+        {"name": "lb_pair", "writable": true},
+        {"name": "position", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "reward_vault", "writable": true},
+        {"name": "reward_mint"},
+        {"name": "user_token_account", "writable": true},
+        {"name": "token_program"},
+        {"name": "memo_program", "address": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "reward_index", "type": "u64"},
+        {"name": "min_bin_id", "type": "i32"},
+        {"name": "max_bin_id", "type": "i32"},
+        {"name": "remaining_accounts_info", "type": {"defined": {"name": "RemainingAccountsInfo"}}}
+      ]
+    },
+    {
+      "name": "close_position",
+      "discriminator": [123, 134, 81, 0, 49, 68, 98, 98],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_lower", "writable": true},
+        {"name": "bin_array_upper", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "rent_receiver", "writable": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": []
+    },
+    {
+      "name": "close_position2",
+      "discriminator": [174, 90, 35, 115, 186, 40, 147, 226],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "rent_receiver", "writable": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": []
+    },
+    {
+      "name": "close_position_if_empty",
+      "discriminator": [59, 124, 212, 118, 91, 152, 110, 157],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "rent_receiver", "writable": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_position",
+      "discriminator": [219, 192, 234, 71, 190, 191, 102, 80],
+      "accounts": [
+        {"name": "payer", "writable": true, "signer": true},
+        {"name": "position", "writable": true, "signer": true},
+        {"name": "lb_pair"},
+        {"name": "owner", "signer": true},
+        {"name": "system_program", "address": "11111111111111111111111111111111"},
+        {"name": "rent"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "lower_bin_id", "type": "i32"},
+        {"name": "width", "type": "i32"}
+      ]
+    },
+    {
+      "name": "initialize_position2",
+      "discriminator": [143, 19, 242, 145, 213, 15, 104, 115],
+      "accounts": [
+        {"name": "payer", "writable": true, "signer": true},
+        {"name": "position", "writable": true, "signer": true},
+        {"name": "lb_pair"},
+        {"name": "owner", "signer": true},
+        {"name": "system_program", "address": "11111111111111111111111111111111"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "lower_bin_id", "type": "i32"},
+        {"name": "width", "type": "i32"}
+      ]
+    },
+    {
+      "name": "remove_all_liquidity",
+      "discriminator": [10, 51, 61, 35, 112, 105, 24, 85],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token_x", "writable": true},
+        {"name": "user_token_y", "writable": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "bin_array_lower", "writable": true},
+        {"name": "bin_array_upper", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "token_x_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "token_y_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": []
+    },
+    {
+      "name": "remove_liquidity",
+      "discriminator": [80, 85, 209, 72, 24, 206, 177, 108],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token_x", "writable": true},
+        {"name": "user_token_y", "writable": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "bin_array_lower", "writable": true},
+        {"name": "bin_array_upper", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "token_x_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "token_y_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "bin_liquidity_removal", "type": {"vec": {"defined": {"name": "BinLiquidityReduction"}}}}]
+    },
+    {
+      "name": "remove_liquidity2",
+      "discriminator": [230, 215, 82, 127, 241, 101, 227, 146],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token_x", "writable": true},
+        {"name": "user_token_y", "writable": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "sender", "signer": true},
+        {"name": "token_x_program"},
+        {"name": "token_y_program"},
+        {"name": "memo_program", "address": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "bin_liquidity_removal", "type": {"vec": {"defined": {"name": "BinLiquidityReduction"}}}},
+        {"name": "remaining_accounts_info", "type": {"defined": {"name": "RemainingAccountsInfo"}}}
+      ]
+    },
+    {
+      "name": "remove_liquidity_by_range",
+      "discriminator": [26, 82, 102, 152, 240, 74, 105, 26],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token_x", "writable": true},
+        {"name": "user_token_y", "writable": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "bin_array_lower", "writable": true},
+        {"name": "bin_array_upper", "writable": true},
+        {"name": "sender", "signer": true},
+        {"name": "token_x_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "token_y_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "from_bin_id", "type": "i32"},
+        {"name": "to_bin_id", "type": "i32"},
+        {"name": "bps_to_remove", "type": "u16"}
+      ]
+    },
+    {
+      "name": "remove_liquidity_by_range2",
+      "discriminator": [204, 2, 195, 145, 53, 145, 145, 205],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "writable": true, "optional": true},
+        {"name": "user_token_x", "writable": true},
+        {"name": "user_token_y", "writable": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "sender", "signer": true},
+        {"name": "token_x_program"},
+        {"name": "token_y_program"},
+        {"name": "memo_program", "address": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "from_bin_id", "type": "i32"},
+        {"name": "to_bin_id", "type": "i32"},
+        {"name": "bps_to_remove", "type": "u16"},
+        {"name": "remaining_accounts_info", "type": {"defined": {"name": "RemainingAccountsInfo"}}}
+      ]
+    },
+    {
+      "name": "swap",
+      "discriminator": [248, 198, 158, 145, 225, 117, 135, 200],
+      "accounts": [
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "optional": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "user_token_in", "writable": true},
+        {"name": "user_token_out", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "oracle", "writable": true},
+        {"name": "host_fee_in", "writable": true, "optional": true},
+        {"name": "user", "signer": true},
+        {"name": "token_x_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "token_y_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "amount_in", "type": "u64"},
+        {"name": "min_amount_out", "type": "u64"}
+      ]
+    },
+    {
+      "name": "swap2",
+      "discriminator": [65, 75, 63, 76, 235, 91, 91, 136],
+      "accounts": [
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "optional": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "user_token_in", "writable": true},
+        {"name": "user_token_out", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "oracle", "writable": true},
+        {"name": "host_fee_in", "writable": true, "optional": true},
+        {"name": "user", "signer": true},
+        {"name": "token_x_program"},
+        {"name": "token_y_program"},
+        {"name": "memo_program", "address": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "amount_in", "type": "u64"},
+        {"name": "min_amount_out", "type": "u64"},
+        {"name": "remaining_accounts_info", "type": {"defined": {"name": "RemainingAccountsInfo"}}}
+      ]
+    },
+    {
+      "name": "swap_exact_out",
+      "discriminator": [250, 73, 101, 33, 38, 207, 75, 184],
+      "accounts": [
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "optional": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "user_token_in", "writable": true},
+        {"name": "user_token_out", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "oracle", "writable": true},
+        {"name": "host_fee_in", "writable": true, "optional": true},
+        {"name": "user", "signer": true},
+        {"name": "token_x_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "token_y_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "max_in_amount", "type": "u64"},
+        {"name": "out_amount", "type": "u64"}
+      ]
+    },
+    {
+      "name": "swap_exact_out2",
+      "discriminator": [43, 215, 247, 132, 137, 60, 243, 81],
+      "accounts": [
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "optional": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "user_token_in", "writable": true},
+        {"name": "user_token_out", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "oracle", "writable": true},
+        {"name": "host_fee_in", "writable": true, "optional": true},
+        {"name": "user", "signer": true},
+        {"name": "token_x_program"},
+        {"name": "token_y_program"},
+        {"name": "memo_program", "address": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "max_in_amount", "type": "u64"},
+        {"name": "out_amount", "type": "u64"},
+        {"name": "remaining_accounts_info", "type": {"defined": {"name": "RemainingAccountsInfo"}}}
+      ]
+    },
+    {
+      "name": "swap_with_price_impact",
+      "discriminator": [56, 173, 230, 208, 173, 228, 156, 205],
+      "accounts": [
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "optional": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "user_token_in", "writable": true},
+        {"name": "user_token_out", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "oracle", "writable": true},
+        {"name": "host_fee_in", "writable": true, "optional": true},
+        {"name": "user", "signer": true},
+        {"name": "token_x_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "token_y_program", "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "amount_in", "type": "u64"},
+        {"name": "active_id", "type": {"option": "i32"}},
+        {"name": "max_price_impact_bps", "type": "u16"}
+      ]
+    },
+    {
+      "name": "swap_with_price_impact2",
+      "discriminator": [74, 98, 192, 214, 177, 51, 75, 51],
+      "accounts": [
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_bitmap_extension", "optional": true},
+        {"name": "reserve_x", "writable": true},
+        {"name": "reserve_y", "writable": true},
+        {"name": "user_token_in", "writable": true},
+        {"name": "user_token_out", "writable": true},
+        {"name": "token_x_mint"},
+        {"name": "token_y_mint"},
+        {"name": "oracle", "writable": true},
+        {"name": "host_fee_in", "writable": true, "optional": true},
+        {"name": "user", "signer": true},
+        {"name": "token_x_program"},
+        {"name": "token_y_program"},
+        {"name": "memo_program", "address": "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [
+        {"name": "amount_in", "type": "u64"},
+        {"name": "active_id", "type": {"option": "i32"}},
+        {"name": "max_price_impact_bps", "type": "u16"},
+        {"name": "remaining_accounts_info", "type": {"defined": {"name": "RemainingAccountsInfo"}}}
+      ]
+    },
+    {
+      "name": "update_fees_and_rewards",
+      "discriminator": [154, 230, 250, 13, 236, 209, 75, 223],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "lb_pair", "writable": true},
+        {"name": "bin_array_lower", "writable": true},
+        {"name": "bin_array_upper", "writable": true},
+        {"name": "owner", "signer": true}
+      ],
+      "args": []
+    },
+    {
+      "name": "update_position_operator",
+      "discriminator": [202, 184, 103, 143, 180, 191, 116, 217],
+      "accounts": [
+        {"name": "position", "writable": true},
+        {"name": "owner", "signer": true},
+        {"name": "event_authority"},
+        {"name": "program"}
+      ],
+      "args": [{"name": "operator", "type": "pubkey"}]
+    }
+  ],
+  "types": [
+    {
+      "name": "BinLiquidityDistribution",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "bin_id", "type": "i32"},
+          {"name": "distribution_x", "type": "u16"},
+          {"name": "distribution_y", "type": "u16"}
+        ]
+      }
+    },
+    {
+      "name": "BinLiquidityReduction",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "bin_id", "type": "i32"},
+          {"name": "bps_to_remove", "type": "u16"}
+        ]
+      }
+    },
+    {
+      "name": "BinLiquidityDistributionByWeight",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "bin_id", "type": "i32"},
+          {"name": "weight", "type": "u16"}
+        ]
+      }
+    },
+    {
+      "name": "CompressedBinDepositAmount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "bin_id", "type": "i32"},
+          {"name": "amount", "type": "u32"}
+        ]
+      }
+    },
+    {
+      "name": "StrategyType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {"name": "SpotOneSide"},
+          {"name": "CurveOneSide"},
+          {"name": "BidAskOneSide"},
+          {"name": "SpotBalanced"},
+          {"name": "CurveBalanced"},
+          {"name": "BidAskBalanced"},
+          {"name": "SpotImBalanced"},
+          {"name": "CurveImBalanced"},
+          {"name": "BidAskImBalanced"}
+        ]
+      }
+    },
+    {
+      "name": "StrategyParameters",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "min_bin_id", "type": "i32"},
+          {"name": "max_bin_id", "type": "i32"},
+          {"name": "strategy_type", "type": {"defined": {"name": "StrategyType"}}},
+          {"name": "parameteres", "type": {"array": ["u8", 64]}}
+        ]
+      }
+    },
+    {
+      "name": "LiquidityParameter",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "amount_x", "type": "u64"},
+          {"name": "amount_y", "type": "u64"},
+          {"name": "bin_liquidity_dist", "type": {"vec": {"defined": {"name": "BinLiquidityDistribution"}}}}
+        ]
+      }
+    },
+    {
+      "name": "LiquidityParameterByStrategy",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "amount_x", "type": "u64"},
+          {"name": "amount_y", "type": "u64"},
+          {"name": "active_id", "type": "i32"},
+          {"name": "max_active_bin_slippage", "type": "i32"},
+          {"name": "strategy_parameters", "type": {"defined": {"name": "StrategyParameters"}}}
+        ]
+      }
+    },
+    {
+      "name": "LiquidityParameterByStrategyOneSide",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "amount", "type": "u64"},
+          {"name": "active_id", "type": "i32"},
+          {"name": "max_active_bin_slippage", "type": "i32"},
+          {"name": "strategy_parameters", "type": {"defined": {"name": "StrategyParameters"}}}
+        ]
+      }
+    },
+    {
+      "name": "LiquidityParameterByWeight",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "amount_x", "type": "u64"},
+          {"name": "amount_y", "type": "u64"},
+          {"name": "active_id", "type": "i32"},
+          {"name": "max_active_bin_slippage", "type": "i32"},
+          {"name": "bin_liquidity_dist", "type": {"vec": {"defined": {"name": "BinLiquidityDistributionByWeight"}}}}
+        ]
+      }
+    },
+    {
+      "name": "LiquidityOneSideParameter",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "amount", "type": "u64"},
+          {"name": "active_id", "type": "i32"},
+          {"name": "max_active_bin_slippage", "type": "i32"},
+          {"name": "bin_liquidity_dist", "type": {"vec": {"defined": {"name": "BinLiquidityDistributionByWeight"}}}}
+        ]
+      }
+    },
+    {
+      "name": "AddLiquiditySingleSidePreciseParameter",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "bins", "type": {"vec": {"defined": {"name": "CompressedBinDepositAmount"}}}},
+          {"name": "decompress_multiplier", "type": "u64"}
+        ]
+      }
+    },
+    {
+      "name": "AddLiquiditySingleSidePreciseParameter2",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "bins", "type": {"vec": {"defined": {"name": "CompressedBinDepositAmount"}}}},
+          {"name": "decompress_multiplier", "type": "u64"},
+          {"name": "max_amount", "type": "u64"}
+        ]
+      }
+    },
+    {
+      "name": "AccountsType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {"name": "TransferHookX"},
+          {"name": "TransferHookY"},
+          {"name": "TransferHookReward"},
+          {"name": "TransferHookMultiReward", "fields": ["u8"]}
+        ]
+      }
+    },
+    {
+      "name": "RemainingAccountsSlice",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "accounts_type", "type": {"defined": {"name": "AccountsType"}}},
+          {"name": "length", "type": "u8"}
+        ]
+      }
+    },
+    {
+      "name": "RemainingAccountsInfo",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {"name": "slices", "type": {"vec": {"defined": {"name": "RemainingAccountsSlice"}}}}
+        ]
+      }
+    }
+  ]
+}
