@@ -27,6 +27,8 @@ pub mod solana;
 /// Shared test helpers (temp file creation, etc.).
 #[cfg(test)]
 pub(crate) mod test_utils;
+/// Resolution of the `--transaction` argument, including curl-style `@` references.
+pub mod tx_input;
 
 /// Trait for integrating a chain into the CLI.
 ///
