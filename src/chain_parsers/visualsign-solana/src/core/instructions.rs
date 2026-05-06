@@ -5,7 +5,9 @@ use solana_parser::solana::structs::SolanaAccount;
 use solana_sdk::transaction::Transaction as SolanaTransaction;
 use visualsign::AnnotatedPayloadField;
 use visualsign::errors::{TransactionParseError, VisualSignError};
+#[cfg(feature = "diagnostics")]
 use visualsign::field_builders::create_diagnostic_field;
+#[cfg(feature = "diagnostics")]
 use visualsign::lint::LintConfig;
 
 // The following include! macro pulls in visualizer implementations generated at build time.
@@ -16,6 +18,7 @@ include!(concat!(env!("OUT_DIR"), "/generated_visualizers.rs"));
 /// Result of decoding instructions: display fields, per-instruction errors,
 /// and lint diagnostics separately. The function always succeeds — individual
 /// instruction failures are captured in `errors` rather than aborting the parse.
+#[cfg(feature = "diagnostics")]
 pub struct DecodeInstructionsResult {
     pub fields: Vec<AnnotatedPayloadField>,
     pub errors: Vec<(usize, VisualSignError)>,
@@ -25,6 +28,7 @@ pub struct DecodeInstructionsResult {
 /// Visualizes all the instructions and related fields in a transaction/message.
 /// Always succeeds — data quality issues become diagnostics, per-instruction
 /// failures are collected in errors.
+#[cfg(feature = "diagnostics")]
 pub fn decode_instructions(
     transaction: &SolanaTransaction,
     idl_registry: &IdlRegistry,
@@ -98,8 +102,60 @@ pub fn decode_instructions(
     }
 }
 
+/// Diagnostics-off variant: returns the visualized fields directly, propagating
+/// the first hard failure as `Err`. Empty account keys and visualizer errors
+/// abort the decode (matching pre-diagnostics behavior). Out-of-bounds program
+/// IDs and account indices flow through to `unknown_program`/visualizers as
+/// unresolved references with no separate diagnostic emission.
+#[cfg(not(feature = "diagnostics"))]
+pub fn decode_instructions(
+    transaction: &SolanaTransaction,
+    idl_registry: &IdlRegistry,
+) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
+    let visualizers_refs: Vec<&dyn InstructionVisualizer> =
+        visualizers.iter().map(|v| v.as_ref()).collect::<Vec<_>>();
+
+    let message = &transaction.message;
+    let account_keys = &message.account_keys;
+
+    if account_keys.is_empty() {
+        return Err(VisualSignError::DecodeError(
+            "legacy transaction has no account keys".to_string(),
+        ));
+    }
+
+    let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
+    for (i, ci) in message.instructions.iter().enumerate() {
+        let sender = SolanaAccount {
+            account_key: account_keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
+
+        let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry);
+
+        match visualize_with_any(&visualizers_refs, &context) {
+            Some(Ok(viz_result)) => fields.push(viz_result.field),
+            Some(Err(e)) => {
+                return Err(VisualSignError::DecodeError(format!(
+                    "instruction {i}: {e}"
+                )));
+            }
+            None => {
+                return Err(VisualSignError::DecodeError(format!(
+                    "No visualizer available for instruction at index {i}"
+                )));
+            }
+        }
+    }
+
+    Ok(fields)
+}
+
 /// Scan compiled instructions for inaccessible indices and emit diagnostics.
 /// Does not modify or filter instructions — purely informational.
+#[cfg(feature = "diagnostics")]
 pub fn scan_instruction_diagnostics(
     instructions: &[solana_sdk::instruction::CompiledInstruction],
     account_keys: &[solana_sdk::pubkey::Pubkey],
@@ -286,7 +342,7 @@ pub fn decode_transfers(
     Ok(fields)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "diagnostics"))]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;

@@ -21,5 +21,8 @@ generated = { path = "../generated" }
 base64 = "0.22.1"
 hex = "0.4.3"
 
+[features]
+diagnostics = []
+
 [lints]
 workspace = true

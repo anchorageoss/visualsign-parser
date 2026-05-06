@@ -1,9 +1,10 @@
 use crate::errors;
+#[cfg(feature = "diagnostics")]
+use crate::SignablePayloadFieldDiagnostic;
 use crate::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldAddressV2,
-    SignablePayloadFieldAmountV2, SignablePayloadFieldCommon, SignablePayloadFieldDiagnostic,
-    SignablePayloadFieldListLayout, SignablePayloadFieldNumber, SignablePayloadFieldPreviewLayout,
-    SignablePayloadFieldTextV2,
+    SignablePayloadFieldAmountV2, SignablePayloadFieldCommon, SignablePayloadFieldListLayout,
+    SignablePayloadFieldNumber, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
 };
 
 use regex::Regex;
@@ -214,6 +215,7 @@ pub fn create_preview_layout(
     }
 }
 
+#[cfg(feature = "diagnostics")]
 pub fn create_diagnostic_field(
     rule: &str,
     domain: &str,

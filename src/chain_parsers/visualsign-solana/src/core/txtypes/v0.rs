@@ -1,12 +1,16 @@
+#[cfg(feature = "diagnostics")]
+use crate::core::DecodeInstructionsResult;
 use crate::core::{
-    DecodeInstructionsResult, InstructionVisualizer, SolanaAccount, VisualizerContext,
-    available_visualizers, visualize_with_any,
+    InstructionVisualizer, SolanaAccount, VisualizerContext, available_visualizers,
+    visualize_with_any,
 };
 use solana_sdk::transaction::VersionedTransaction;
+#[cfg(feature = "diagnostics")]
+use visualsign::field_builders::create_diagnostic_field;
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
-    field_builders::create_diagnostic_field, vsptrait::VisualSignError,
+    vsptrait::VisualSignError,
 };
 
 /// Decode V0 transaction transfers using solana-parser
@@ -116,6 +120,7 @@ pub fn decode_v0_transfers(
 /// This works for all V0 transactions, including those with lookup tables.
 /// Always succeeds -- data quality issues become diagnostics, per-instruction
 /// failures are collected in errors.
+#[cfg(feature = "diagnostics")]
 pub fn decode_v0_instructions(
     v0_message: &solana_sdk::message::v0::Message,
     idl_registry: &crate::idl::IdlRegistry,
@@ -188,6 +193,54 @@ pub fn decode_v0_instructions(
         errors,
         diagnostics,
     }
+}
+
+/// Diagnostics-off variant of `decode_v0_instructions`. Same semantics as the
+/// legacy variant: empty account keys and visualizer errors abort with `Err`;
+/// out-of-bounds indices flow through to the visualizer pipeline.
+#[cfg(not(feature = "diagnostics"))]
+pub fn decode_v0_instructions(
+    v0_message: &solana_sdk::message::v0::Message,
+    idl_registry: &crate::idl::IdlRegistry,
+) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
+    let visualizers_refs: Vec<&dyn InstructionVisualizer> =
+        visualizers.iter().map(|v| v.as_ref()).collect::<Vec<_>>();
+
+    let account_keys = &v0_message.account_keys;
+
+    if account_keys.is_empty() {
+        return Err(VisualSignError::DecodeError(
+            "v0 transaction has no account keys".to_string(),
+        ));
+    }
+
+    let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
+    for (i, ci) in v0_message.instructions.iter().enumerate() {
+        let sender = SolanaAccount {
+            account_key: account_keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
+
+        let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry);
+
+        match visualize_with_any(&visualizers_refs, &context) {
+            Some(Ok(viz_result)) => fields.push(viz_result.field),
+            Some(Err(e)) => {
+                return Err(VisualSignError::DecodeError(format!(
+                    "instruction {i}: {e}"
+                )));
+            }
+            None => {
+                return Err(VisualSignError::DecodeError(format!(
+                    "No visualizer available for instruction at index {i}"
+                )));
+            }
+        }
+    }
+
+    Ok(fields)
 }
 
 /// Create a rich address lookup table field with detailed information
@@ -357,7 +410,7 @@ pub fn create_address_lookup_table_field(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "diagnostics"))]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;

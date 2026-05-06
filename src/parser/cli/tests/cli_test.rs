@@ -119,7 +119,9 @@ fn test_cli_with_fixtures() {
         match serde_json::from_str::<serde_json::Value>(actual_output.trim()) {
             Ok(actual_json) => {
                 // JSON output: filter diagnostics and check membership
+                #[cfg_attr(not(feature = "diagnostics"), allow(unused_mut))]
                 let mut display_payload = actual_json.clone();
+                #[cfg(feature = "diagnostics")]
                 if let Some(fields) = display_payload
                     .get_mut("Fields")
                     .and_then(|f| f.as_array_mut())
@@ -135,8 +137,10 @@ fn test_cli_with_fixtures() {
                 assert_json_contains(test_name, &expected_json, &display_payload, "");
 
                 // Diagnostics fixture: compare rule, level, and instruction_index
+                #[cfg(feature = "diagnostics")]
                 let diagnostics_path =
                     fixtures_dir.join(format!("{test_name}.diagnostics.expected"));
+                #[cfg(feature = "diagnostics")]
                 if diagnostics_path.exists() {
                     let expected_diags: Vec<serde_json::Value> = serde_json::from_str(
                         &fs::read_to_string(&diagnostics_path)

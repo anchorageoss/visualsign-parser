@@ -5,6 +5,7 @@ use serde_json::Value;
 pub mod encodings;
 pub mod errors;
 pub mod field_builders;
+#[cfg(feature = "diagnostics")]
 pub mod lint;
 pub mod registry;
 pub mod test_utils;
@@ -207,6 +208,7 @@ pub enum SignablePayloadField {
         unknown: SignablePayloadFieldUnknown,
     },
 
+    #[cfg(feature = "diagnostics")]
     #[serde(rename = "diagnostic")]
     Diagnostic {
         #[serde(flatten)]
@@ -297,6 +299,7 @@ impl FieldSerializer for SignablePayloadField {
             SignablePayloadField::Unknown { common, unknown } => {
                 serialize_field_variant!(fields, "unknown", common, ("Unknown", unknown));
             }
+            #[cfg(feature = "diagnostics")]
             SignablePayloadField::Diagnostic { common, diagnostic } => {
                 serialize_field_variant!(fields, "diagnostic", common, ("Diagnostic", diagnostic));
             }
@@ -321,6 +324,7 @@ impl FieldSerializer for SignablePayloadField {
             SignablePayloadField::PreviewLayout { .. } => base_fields.push("PreviewLayout"),
             SignablePayloadField::ListLayout { .. } => base_fields.push("ListLayout"),
             SignablePayloadField::Unknown { .. } => base_fields.push("Unknown"),
+            #[cfg(feature = "diagnostics")]
             SignablePayloadField::Diagnostic { .. } => base_fields.push("Diagnostic"),
         }
 
@@ -394,6 +398,7 @@ impl SignablePayloadField {
             SignablePayloadField::PreviewLayout { common, .. } => &common.fallback_text,
             SignablePayloadField::ListLayout { common, .. } => &common.fallback_text,
             SignablePayloadField::Unknown { common, .. } => &common.fallback_text,
+            #[cfg(feature = "diagnostics")]
             SignablePayloadField::Diagnostic { common, .. } => &common.fallback_text,
         }
     }
@@ -411,6 +416,7 @@ impl SignablePayloadField {
             SignablePayloadField::PreviewLayout { common, .. } => &common.label,
             SignablePayloadField::ListLayout { common, .. } => &common.label,
             SignablePayloadField::Unknown { common, .. } => &common.label,
+            #[cfg(feature = "diagnostics")]
             SignablePayloadField::Diagnostic { common, .. } => &common.label,
         }
     }
@@ -428,6 +434,7 @@ impl SignablePayloadField {
             SignablePayloadField::PreviewLayout { .. } => "preview_layout",
             SignablePayloadField::ListLayout { .. } => "list_layout",
             SignablePayloadField::Unknown { .. } => "unknown",
+            #[cfg(feature = "diagnostics")]
             SignablePayloadField::Diagnostic { .. } => "diagnostic",
         }
     }
@@ -616,6 +623,7 @@ pub struct SignablePayloadFieldUnknown {
 // Implement DeterministicOrdering for SignablePayloadFieldUnknown
 impl DeterministicOrdering for SignablePayloadFieldUnknown {}
 
+#[cfg(feature = "diagnostics")]
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SignablePayloadFieldDiagnostic {
     #[serde(rename = "Rule")]
@@ -630,6 +638,7 @@ pub struct SignablePayloadFieldDiagnostic {
     pub instruction_index: Option<u32>,
 }
 
+#[cfg(feature = "diagnostics")]
 impl Serialize for SignablePayloadFieldDiagnostic {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -655,6 +664,7 @@ impl Serialize for SignablePayloadFieldDiagnostic {
     }
 }
 
+#[cfg(feature = "diagnostics")]
 impl DeterministicOrdering for SignablePayloadFieldDiagnostic {}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -2001,14 +2011,17 @@ mod tests {
         };
         assert_deterministic_ordering(&amount_v2);
 
-        let diagnostic = SignablePayloadFieldDiagnostic {
-            rule: "transaction::oob_program_id".to_string(),
-            domain: "transaction".to_string(),
-            level: "warn".to_string(),
-            message: "instruction 0: program_id_index 5 out of bounds".to_string(),
-            instruction_index: Some(0),
-        };
-        assert_deterministic_ordering(&diagnostic);
+        #[cfg(feature = "diagnostics")]
+        {
+            let diagnostic = SignablePayloadFieldDiagnostic {
+                rule: "transaction::oob_program_id".to_string(),
+                domain: "transaction".to_string(),
+                level: "warn".to_string(),
+                message: "instruction 0: program_id_index 5 out of bounds".to_string(),
+                instruction_index: Some(0),
+            };
+            assert_deterministic_ordering(&diagnostic);
+        }
 
         // Test layout types
         let preview_layout = SignablePayloadFieldPreviewLayout {
@@ -2506,6 +2519,7 @@ mod tests {
         assert!(pos_title < pos_version, "Title should come before Version");
     }
 
+    #[cfg(feature = "diagnostics")]
     #[test]
     fn test_diagnostic_field_serialization_alphabetical() {
         let field = SignablePayloadField::Diagnostic {
@@ -2545,6 +2559,7 @@ mod tests {
         assert_eq!(obj.get("Type").unwrap(), "diagnostic");
     }
 
+    #[cfg(feature = "diagnostics")]
     #[test]
     fn test_diagnostic_field_without_instruction_index() {
         let field = SignablePayloadField::Diagnostic {
@@ -2575,6 +2590,7 @@ mod tests {
         assert_eq!(diag_keys, vec!["Domain", "Level", "Message", "Rule"]);
     }
 
+    #[cfg(feature = "diagnostics")]
     #[test]
     fn test_diagnostic_field_roundtrip() {
         let original = SignablePayloadField::Diagnostic {
@@ -2596,6 +2612,7 @@ mod tests {
         assert_eq!(original, deserialized);
     }
 
+    #[cfg(feature = "diagnostics")]
     #[test]
     fn test_diagnostic_in_signable_payload() {
         let payload = SignablePayload::new(
