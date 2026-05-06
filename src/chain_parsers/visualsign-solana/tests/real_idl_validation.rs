@@ -42,7 +42,7 @@ fn real_idl_discriminators_are_unique() {
     let Some((_, idl)) = load_idl_from_env() else {
         return;
     };
-    let mut seen: std::collections::HashMap<Vec<u8>, &str> = std::collections::HashMap::new();
+    let mut seen: std::collections::BTreeMap<Vec<u8>, &str> = std::collections::BTreeMap::new();
     for inst in &idl.instructions {
         if let Some(disc) = &inst.discriminator {
             if let Some(existing) = seen.get(disc) {
@@ -63,7 +63,7 @@ fn real_idl_instruction_names_are_unique() {
     let Some((_, idl)) = load_idl_from_env() else {
         return;
     };
-    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
     for inst in &idl.instructions {
         assert!(
             seen.insert(inst.name.as_str()),

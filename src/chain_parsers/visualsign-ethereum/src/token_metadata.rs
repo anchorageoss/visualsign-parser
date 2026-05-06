@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Standard for ERC token types
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -56,7 +56,7 @@ pub struct ChainMetadata {
     /// Network identifier as string (e.g., "ETHEREUM_MAINNET")
     pub network_id: String,
     /// Map of token symbol to token metadata
-    pub assets: HashMap<String, TokenMetadata>,
+    pub assets: BTreeMap<String, TokenMetadata>,
 }
 
 /// Error type for token metadata operations
@@ -248,7 +248,7 @@ mod tests {
     fn test_chain_metadata_serialization() {
         let mut metadata = ChainMetadata {
             network_id: "ETHEREUM_MAINNET".to_string(),
-            assets: HashMap::new(),
+            assets: BTreeMap::new(),
         };
 
         let usdc = TokenMetadata {

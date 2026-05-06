@@ -2,7 +2,7 @@
 //! This is a catch-all visualizer that handles any program not supported by other visualizers
 
 use crate::core::{SolanaIntegrationConfig, SolanaIntegrationConfigData};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub struct UnknownProgramConfig;
 
@@ -16,7 +16,7 @@ impl SolanaIntegrationConfig for UnknownProgramConfig {
         DATA.get_or_init(|| {
             // This is a catch-all - it doesn't match specific programs
             // Instead, can_handle is overridden to always return true
-            let programs = HashMap::new();
+            let programs = BTreeMap::new();
             SolanaIntegrationConfigData { programs }
         })
     }

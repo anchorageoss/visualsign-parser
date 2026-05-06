@@ -10,7 +10,7 @@ use solana_sdk::{
     message::VersionedMessage,
     transaction::{Transaction as SolanaTransaction, VersionedTransaction},
 };
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
     encodings::SupportedEncodings,
@@ -87,10 +87,13 @@ impl SolanaTransactionWrapper {
     }
 }
 
-/// Extract IDL mappings from VisualSignOptions metadata
+/// Extract IDL mappings from VisualSignOptions metadata.
 ///
-/// Returns a HashMap of program_id (base58 string) -> (IDL JSON string, program name)
-fn extract_idl_mappings(options: &VisualSignOptions) -> HashMap<String, (String, String)> {
+/// Returns a `BTreeMap` of program_id (base58 string) -> (IDL JSON string, program name).
+/// Determinism note: `BTreeMap` is required (not `HashMap`) because downstream code
+/// iterates this map to build the IDL registry, and iteration order would otherwise
+/// leak into rendered SignablePayload output.
+fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String, String)> {
     options
         .metadata
         .as_ref()

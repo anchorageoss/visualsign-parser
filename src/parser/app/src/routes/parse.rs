@@ -40,8 +40,8 @@ pub fn parse(
         developer_config: None, // Production API: only accept unsigned transactions
     };
     let registry = create_registry();
-    let proto_chain = ProtoChain::from_i32(parse_request.chain)
-        .ok_or_else(|| GrpcError::new(Code::InvalidArgument, "invalid chain"))?;
+    let proto_chain = ProtoChain::try_from(parse_request.chain)
+        .map_err(|_| GrpcError::new(Code::InvalidArgument, "invalid chain"))?;
     let registry_chain: VisualSignRegistryChain = chain_conversion::proto_to_registry(proto_chain);
 
     let signable_payload_str = registry
@@ -93,13 +93,16 @@ pub fn parse(
 mod tests {
     use super::*;
     use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata};
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     /// Verify that `metadata_digest` is deterministic for identical metadata,
-    /// including non-empty `abi_mappings` (exercises `HashMap` key ordering through borsh).
+    /// including non-empty `abi_mappings` — the proto map field is now a `BTreeMap`
+    /// (after the tonic 0.10 / `tonic_build::Builder::btree_map(["."])` config), so
+    /// borsh serialization sees keys in a consistent order regardless of insertion
+    /// order. This test exercises that contract.
     #[test]
     fn metadata_digest_is_deterministic() {
-        let mut abi_mappings = HashMap::new();
+        let mut abi_mappings = BTreeMap::new();
         abi_mappings.insert(
             "0xaaaa".to_string(),
             Abi {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use clap::Args as ClapArgs;
 use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
@@ -50,7 +50,7 @@ impl crate::ChainPlugin for EthereumPlugin {
 }
 
 /// Load ABI JSON files and build mappings for `EthereumMetadata.abi_mappings`.
-fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<String, Abi>, usize) {
+fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (BTreeMap<String, Abi>, usize) {
     mapping_parser::load_mappings(
         abi_json_mappings,
         "ABI",
@@ -107,7 +107,7 @@ pub(crate) fn create_chain_metadata(
     };
 
     let abi_mappings = if abi_json_mappings.is_empty() {
-        HashMap::new()
+        BTreeMap::new()
     } else {
         eprintln!("Loading custom ABIs:");
         let (mappings, valid_count) = build_abi_mappings_from_files(abi_json_mappings);

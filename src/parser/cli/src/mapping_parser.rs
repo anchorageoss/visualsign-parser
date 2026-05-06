@@ -40,7 +40,7 @@ pub(crate) fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, Stri
     })
 }
 
-/// Load JSON files from CLI mapping strings and build a `HashMap`.
+/// Load JSON files from CLI mapping strings and build a `BTreeMap`.
 ///
 /// Each mapping string is parsed, the JSON file is loaded, and `build_value` converts
 /// the loaded JSON + components into the target value type. The identifier from the
@@ -54,8 +54,8 @@ pub(crate) fn load_mappings<V>(
     identifier_label: &str,
     validate_identifier: impl Fn(&str) -> Result<(), String>,
     build_value: impl Fn(&MappingComponents, String) -> V,
-) -> (std::collections::HashMap<String, V>, usize) {
-    let mut map = std::collections::HashMap::new();
+) -> (std::collections::BTreeMap<String, V>, usize) {
+    let mut map = std::collections::BTreeMap::new();
     let mut valid_count = 0;
 
     for mapping in mappings {

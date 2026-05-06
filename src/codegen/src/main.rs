@@ -21,6 +21,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tonic_build::configure()
         .out_dir(GEN_DIR)
+        // Force `BTreeMap` for every proto `map<…, …>` field so iteration order
+        // over these maps cannot affect rendered SignablePayload output. Aligns
+        // with the project's determinism invariant ("BTreeMap for proto maps" —
+        // CLAUDE.md / visualsign-solana clippy.toml). `.btree_map` is exposed on
+        // tonic-build 0.10+.
+        .btree_map(["."])
         // JSON - Used for user requests -- TODO: needed?
         .type_attribute(".parser", SERDE_DERIVE)
         .enum_attribute(".", SERDE_ENUM_DERIVE)

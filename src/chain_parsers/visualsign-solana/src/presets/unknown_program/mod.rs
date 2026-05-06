@@ -8,7 +8,7 @@ use crate::core::{
 };
 use config::UnknownProgramConfig;
 use solana_parser::{SolanaParsedInstructionData, parse_instruction_with_idl};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
@@ -120,7 +120,7 @@ fn try_idl_parsing(
 
     // Add parsed instruction fields if IDL parsing succeeded
     match parsed_result {
-        Ok(parsed) => {
+        Ok((parsed, named_accounts)) => {
             // Add instruction name to condensed view
             condensed_fields.push(AnnotatedPayloadField {
                 signable_payload_field: SignablePayloadField::TextV2 {
@@ -167,7 +167,10 @@ fn try_idl_parsing(
             });
 
             // Add named accounts (e.g., mint, depositor_token_account, etc.)
-            for (account_name, account_address) in &parsed.named_accounts {
+            // Iterate the local BTreeMap so the rendered field order is
+            // deterministic. (`parsed.named_accounts` from solana_parser is
+            // `HashMap`, so iteration there is non-deterministic.)
+            for (account_name, account_address) in &named_accounts {
                 expanded_fields.push(AnnotatedPayloadField {
                     signable_payload_field: SignablePayloadField::TextV2 {
                         common: SignablePayloadFieldCommon {
@@ -297,11 +300,24 @@ fn create_unknown_program_preview_layout(
     })
 }
 
-/// Try to parse instruction using the new parse_instruction_with_idl function
+/// Try to parse the instruction with an IDL.
+///
+/// Returns the parsed data PLUS a separate `BTreeMap` of named accounts. We don't
+/// write the named accounts back into `parsed.named_accounts` because that field on
+/// the upstream `solana_parser::SolanaParsedInstructionData` is a `HashMap`, and
+/// iterating it produces non-deterministic field order in our rendered output.
+/// Callers should iterate the returned `BTreeMap` instead of touching
+/// `parsed.named_accounts`.
 fn try_parse_with_idl(
     instruction: &solana_sdk::instruction::Instruction,
     idl_registry: &crate::idl::IdlRegistry,
-) -> Result<solana_parser::SolanaParsedInstructionData, Box<dyn std::error::Error>> {
+) -> Result<
+    (
+        solana_parser::SolanaParsedInstructionData,
+        BTreeMap<String, String>,
+    ),
+    Box<dyn std::error::Error>,
+> {
     let program_id_str = instruction.program_id.to_string();
     let instruction_data = &instruction.data;
 
@@ -311,11 +327,11 @@ fn try_parse_with_idl(
         .ok_or("No IDL found for program")?;
 
     // Parse the instruction with the IDL
-    let mut parsed: SolanaParsedInstructionData =
+    let parsed: SolanaParsedInstructionData =
         parse_instruction_with_idl(instruction_data, &program_id_str, &idl)?;
 
     // Manually create the named_accounts map by matching instruction accounts with IDL
-    let mut named_accounts = HashMap::new();
+    let mut named_accounts = BTreeMap::new();
 
     // Find the matching instruction in the IDL to get account names
     if let Some(idl_instruction) = idl.instructions.iter().find(|inst| {
@@ -333,7 +349,5 @@ fn try_parse_with_idl(
         }
     }
 
-    parsed.named_accounts = named_accounts;
-
-    Ok(parsed)
+    Ok((parsed, named_accounts))
 }

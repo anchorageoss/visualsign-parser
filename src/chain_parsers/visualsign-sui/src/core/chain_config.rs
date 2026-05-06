@@ -177,11 +177,11 @@ macro_rules! chain_config {
       /// Builds the config map. Package ids are stored as string keys using
       /// `stringify!(0x...)`. Keep these in sync with on-chain deployments.
       fn new() -> Self {
-        let mut packages = std::collections::HashMap::new();
+        let mut packages = std::collections::BTreeMap::new();
 
         $(
           {
-            let mut modules = std::collections::HashMap::new();
+            let mut modules = std::collections::BTreeMap::new();
 
             $(
               modules.insert(

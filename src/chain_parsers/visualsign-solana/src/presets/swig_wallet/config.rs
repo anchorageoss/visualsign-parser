@@ -8,13 +8,13 @@ impl SolanaIntegrationConfig for SwigWalletConfig {
     }
 
     fn data(&self) -> &SolanaIntegrationConfigData {
-        use std::collections::HashMap;
+        use std::collections::BTreeMap;
 
         static DATA: std::sync::OnceLock<SolanaIntegrationConfigData> = std::sync::OnceLock::new();
         DATA.get_or_init(|| {
-            let mut programs: HashMap<&'static str, HashMap<&'static str, Vec<&'static str>>> =
-                HashMap::new();
-            let mut instructions = HashMap::new();
+            let mut programs: BTreeMap<&'static str, BTreeMap<&'static str, Vec<&'static str>>> =
+                BTreeMap::new();
+            let mut instructions = BTreeMap::new();
             instructions.insert("*", vec!["*"]);
             programs.insert("swigypWHEksbC64pWKwah1WTeh9JXwx8H1rJHLdbQMB", instructions);
             SolanaIntegrationConfigData { programs }

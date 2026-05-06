@@ -1,6 +1,6 @@
 use super::METEORA_DLMM_PROGRAM_ID;
 use crate::core::{SolanaIntegrationConfig, SolanaIntegrationConfigData};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub struct MeteoraDlmmConfig;
 
@@ -12,8 +12,8 @@ impl SolanaIntegrationConfig for MeteoraDlmmConfig {
     fn data(&self) -> &SolanaIntegrationConfigData {
         static DATA: std::sync::OnceLock<SolanaIntegrationConfigData> = std::sync::OnceLock::new();
         DATA.get_or_init(|| {
-            let mut programs = HashMap::new();
-            let mut instructions = HashMap::new();
+            let mut programs = BTreeMap::new();
+            let mut instructions = BTreeMap::new();
             instructions.insert("*", vec!["*"]);
             programs.insert(METEORA_DLMM_PROGRAM_ID, instructions);
             SolanaIntegrationConfigData { programs }
