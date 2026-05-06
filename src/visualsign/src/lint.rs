@@ -1,5 +1,9 @@
 use std::collections::BTreeMap;
 
+// TODO(#228): when LintConfig is included in metadata_digest, implement
+// `DeterministicOrdering` and a deterministic `Serialize` for both `Severity`
+// and `LintConfig` (BTreeMap already gives stable key order; the wrapper
+// struct still needs explicit alphabetical field emission).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     Ok,

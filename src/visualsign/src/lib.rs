@@ -2001,6 +2001,15 @@ mod tests {
         };
         assert_deterministic_ordering(&amount_v2);
 
+        let diagnostic = SignablePayloadFieldDiagnostic {
+            rule: "transaction::oob_program_id".to_string(),
+            domain: "transaction".to_string(),
+            level: "warn".to_string(),
+            message: "instruction 0: program_id_index 5 out of bounds".to_string(),
+            instruction_index: Some(0),
+        };
+        assert_deterministic_ordering(&diagnostic);
+
         // Test layout types
         let preview_layout = SignablePayloadFieldPreviewLayout {
             title: Some(text_v2.clone()),
