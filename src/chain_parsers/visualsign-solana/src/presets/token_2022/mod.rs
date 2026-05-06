@@ -354,7 +354,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Destination Account", account)?,
                 create_text_field("Mint Authority", mint_authority)?,
                 create_text_field("Program ID", &resolve_program_id(context))?,
-                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
+                create_raw_data_field(context.data(), None)?,
             ];
 
             (title, condensed, expanded)
@@ -383,7 +383,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Mint", mint)?,
                 create_text_field("Authority", authority)?,
                 create_text_field("Program ID", &resolve_program_id(context))?,
-                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
+                create_raw_data_field(context.data(), None)?,
             ];
 
             (title, condensed, expanded)
@@ -401,7 +401,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Mint", mint)?,
                 create_text_field("Pause Authority", pause_authority)?,
                 create_text_field("Program ID", &resolve_program_id(context))?,
-                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
+                create_raw_data_field(context.data(), None)?,
             ];
 
             (title, condensed, expanded)
@@ -419,7 +419,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Mint", mint)?,
                 create_text_field("Pause Authority", pause_authority)?,
                 create_text_field("Program ID", &resolve_program_id(context))?,
-                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
+                create_raw_data_field(context.data(), None)?,
             ];
 
             (title, condensed, expanded)
@@ -450,7 +450,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Current Authority", current_authority)?,
                 create_text_field("New Authority", &new_authority_display)?,
                 create_text_field("Program ID", &resolve_program_id(context))?,
-                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
+                create_raw_data_field(context.data(), None)?,
             ];
 
             (title, condensed, expanded)
@@ -470,7 +470,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Mint", mint)?,
                 create_text_field("Freeze Authority", freeze_authority)?,
                 create_text_field("Program ID", &resolve_program_id(context))?,
-                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
+                create_raw_data_field(context.data(), None)?,
             ];
 
             (title, condensed, expanded)
@@ -490,7 +490,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Mint", mint)?,
                 create_text_field("Freeze Authority", freeze_authority)?,
                 create_text_field("Program ID", &resolve_program_id(context))?,
-                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
+                create_raw_data_field(context.data(), None)?,
             ];
 
             (title, condensed, expanded)
@@ -510,7 +510,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Destination", destination)?,
                 create_text_field("Owner", owner)?,
                 create_text_field("Program ID", &resolve_program_id(context))?,
-                create_raw_data_field(context.data(), Some(hex::encode(context.data())))?,
+                create_raw_data_field(context.data(), None)?,
             ];
 
             (title, condensed, expanded)

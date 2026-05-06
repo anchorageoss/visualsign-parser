@@ -47,12 +47,32 @@ pub enum AccountRef<'a> {
 /// Holds references to the transaction's wire data -- no copies.
 /// Resolution of compiled instruction indices to pubkeys happens
 /// lazily via helper methods.
+///
+/// # Resolution patterns
+///
+/// Two ways for a visualizer to handle indices that don't resolve against
+/// `account_keys` (out-of-bounds, or v0 lookup-table entries that haven't
+/// been resolved):
+///
+/// **All-or-nothing (most IDL-based presets).**
+/// Use `resolve_program_id()` / `resolve_accounts()`. The first unresolved
+/// index aborts visualization with a precise `Err` naming the bad index.
+/// Suitable when downstream parsing requires every account to be a real
+/// pubkey -- e.g. an Anchor IDL parser building a `named_accounts` map.
+///
+/// **Partial rendering (catch-all visualizers).**
+/// Pattern-match on `program_id()` and `account(n)` directly and substitute
+/// a placeholder for unresolved indices instead of erroring. The
+/// `unknown_program` preset is the canonical example: it renders
+/// `unresolved(N)` strings so the user still sees *something* for an
+/// instruction no specific visualizer could handle.
 #[derive(Debug, Clone)]
 pub struct VisualizerContext<'a> {
     sender: &'a SolanaAccount,
     compiled_instruction: &'a solana_sdk::instruction::CompiledInstruction,
     account_keys: &'a [Pubkey],
     idl_registry: &'a crate::idl::IdlRegistry,
+    instruction_index: usize,
 }
 
 impl<'a> VisualizerContext<'a> {
@@ -61,12 +81,14 @@ impl<'a> VisualizerContext<'a> {
         compiled_instruction: &'a solana_sdk::instruction::CompiledInstruction,
         account_keys: &'a [Pubkey],
         idl_registry: &'a crate::idl::IdlRegistry,
+        instruction_index: usize,
     ) -> Self {
         Self {
             sender,
             compiled_instruction,
             account_keys,
             idl_registry,
+            instruction_index,
         }
     }
 
@@ -76,6 +98,11 @@ impl<'a> VisualizerContext<'a> {
 
     pub fn sender(&self) -> &SolanaAccount {
         self.sender
+    }
+
+    /// Position of this instruction in the transaction's instruction list.
+    pub fn instruction_index(&self) -> usize {
+        self.instruction_index
     }
 
     /// Resolves the program_id_index. Every compiled instruction has one,
@@ -117,6 +144,38 @@ impl<'a> VisualizerContext<'a> {
     /// Reference to the account keys array.
     pub fn account_keys(&self) -> &'a [Pubkey] {
         self.account_keys
+    }
+
+    /// Resolve the program_id, returning Err if the index is out of bounds.
+    /// For visualizers that can't proceed without a known program.
+    pub fn resolve_program_id(&self) -> Result<Pubkey, VisualSignError> {
+        match self.program_id() {
+            ProgramRef::Resolved(pk) => Ok(*pk),
+            ProgramRef::Unresolved { raw_index } => Err(VisualSignError::DecodeError(format!(
+                "unresolved program at index {raw_index}"
+            ))),
+        }
+    }
+
+    /// Resolve every account index in the instruction to an AccountMeta,
+    /// returning Err on the first unresolved index. Writable/signer bits are
+    /// not currently surfaced (set to false); IDL-based presets only need pubkeys.
+    pub fn resolve_accounts(
+        &self,
+    ) -> Result<Vec<solana_sdk::instruction::AccountMeta>, VisualSignError> {
+        (0..self.num_accounts())
+            .map(|i| match self.account(i) {
+                Some(AccountRef::Resolved(pk)) => Ok(
+                    solana_sdk::instruction::AccountMeta::new_readonly(*pk, false),
+                ),
+                Some(AccountRef::Unresolved { raw_index }) => Err(VisualSignError::DecodeError(
+                    format!("unresolved account index {raw_index} at position {i}"),
+                )),
+                None => Err(VisualSignError::DecodeError(format!(
+                    "missing account at position {i}"
+                ))),
+            })
+            .collect()
     }
 }
 
@@ -209,7 +268,7 @@ mod tests {
             writable: false,
         };
         let registry = crate::idl::IdlRegistry::new();
-        let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry);
+        let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry, 0);
         assert_eq!(ctx.program_id(), ProgramRef::Resolved(&keys[1]));
     }
 
@@ -227,7 +286,7 @@ mod tests {
             writable: false,
         };
         let registry = crate::idl::IdlRegistry::new();
-        let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry);
+        let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry, 0);
         assert_eq!(ctx.program_id(), ProgramRef::Unresolved { raw_index: 99 });
     }
 
@@ -245,7 +304,7 @@ mod tests {
             writable: false,
         };
         let registry = crate::idl::IdlRegistry::new();
-        let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry);
+        let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry, 0);
         assert_eq!(ctx.account(0), Some(AccountRef::Resolved(&keys[0])));
         assert_eq!(
             ctx.account(1),
@@ -268,7 +327,7 @@ mod tests {
             writable: false,
         };
         let registry = crate::idl::IdlRegistry::new();
-        let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry);
+        let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry, 0);
         assert_eq!(ctx.data(), &[0xDE, 0xAD]);
         assert_eq!(ctx.num_accounts(), 3);
     }

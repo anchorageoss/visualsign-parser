@@ -115,7 +115,7 @@ fn test_route_real_transaction() {
         writable: false,
     };
     let idl_registry = crate::idl::IdlRegistry::new();
-    let context = VisualizerContext::new(&sender, &compiled, &account_keys, &idl_registry);
+    let context = VisualizerContext::new(&sender, &compiled, &account_keys, &idl_registry, 0);
 
     // Visualize
     let visualizer = super::JupiterSwapVisualizer;

@@ -123,7 +123,7 @@ fn test_real_transaction(fixture_name: &str, test_name: &str) {
         writable: false,
     };
     let idl_registry = crate::idl::IdlRegistry::new();
-    let context = VisualizerContext::new(&sender, &compiled, &account_keys, &idl_registry);
+    let context = VisualizerContext::new(&sender, &compiled, &account_keys, &idl_registry, 0);
 
     // Visualize
     let visualizer = Token2022Visualizer;

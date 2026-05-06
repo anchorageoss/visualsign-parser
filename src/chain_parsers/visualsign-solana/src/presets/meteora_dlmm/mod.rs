@@ -39,11 +39,10 @@ impl InstructionVisualizer for MeteoraDlmmVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
+        let program_id = context.resolve_program_id()?;
+        let accounts = context.resolve_accounts()?;
+        let data = context.data();
 
-        let data = &instruction.data;
         if data.len() < 8 {
             return Err(VisualSignError::DecodeError(
                 "Instruction data shorter than 8-byte discriminator".into(),
@@ -56,7 +55,7 @@ impl InstructionVisualizer for MeteoraDlmmVisualizer {
         let parsed = parse_instruction_with_idl(data, METEORA_DLMM_PROGRAM_ID, idl)
             .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
-        let named_accounts = build_named_accounts(idl, instruction);
+        let named_accounts = build_named_accounts(idl, data, &accounts);
 
         let parsed_instruction = MeteoraDlmmParsedInstruction {
             parsed,
@@ -73,11 +72,7 @@ impl InstructionVisualizer for MeteoraDlmmVisualizer {
         };
 
         let expanded = SignablePayloadFieldListLayout {
-            fields: build_expanded_fields(
-                &parsed_instruction,
-                &instruction.program_id.to_string(),
-                data,
-            )?,
+            fields: build_expanded_fields(&parsed_instruction, &program_id.to_string(), data)?,
         };
 
         let preview_layout = SignablePayloadFieldPreviewLayout {
@@ -91,11 +86,7 @@ impl InstructionVisualizer for MeteoraDlmmVisualizer {
             expanded: Some(expanded),
         };
 
-        let fallback_text = format!(
-            "Program ID: {}\nData: {}",
-            instruction.program_id,
-            hex::encode(data)
-        );
+        let fallback_text = format!("Program ID: {program_id}\nData: {}", hex::encode(data));
 
         Ok(AnnotatedPayloadField {
             static_annotation: None,
@@ -127,9 +118,9 @@ fn get_meteora_dlmm_idl() -> Option<&'static Idl> {
 
 fn build_named_accounts(
     idl: &Idl,
-    instruction: &solana_sdk::instruction::Instruction,
+    data: &[u8],
+    accounts: &[solana_sdk::instruction::AccountMeta],
 ) -> Vec<(String, String)> {
-    let data = &instruction.data;
     if data.len() < 8 {
         return Vec::new();
     }
@@ -142,8 +133,7 @@ fn build_named_accounts(
         return Vec::new();
     };
 
-    instruction
-        .accounts
+    accounts
         .iter()
         .zip(idl_instruction.accounts.iter())
         .map(|(meta, idl_account)| (idl_account.name.clone(), meta.pubkey.to_string()))
@@ -198,7 +188,7 @@ fn build_expanded_fields(
     }
 
     fields.push(
-        create_raw_data_field(data, Some(hex::encode(data)))
+        create_raw_data_field(data, None)
             .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
     );
 
@@ -292,7 +282,7 @@ mod tests {
 
     #[test]
     fn test_build_named_accounts_pairs_ordered_accounts() {
-        use solana_sdk::instruction::{AccountMeta, Instruction};
+        use solana_sdk::instruction::AccountMeta;
         use solana_sdk::pubkey::Pubkey;
 
         let idl = get_meteora_dlmm_idl().expect("IDL must load");
@@ -306,19 +296,15 @@ mod tests {
         let program = Pubkey::new_unique();
         data.extend([] as [u8; 0]);
 
-        let instruction = Instruction {
-            program_id: METEORA_DLMM_PROGRAM_ID.parse().unwrap(),
-            accounts: vec![
-                AccountMeta::new(position, false),
-                AccountMeta::new_readonly(sender, true),
-                AccountMeta::new(rent_receiver, false),
-                AccountMeta::new_readonly(event_authority, false),
-                AccountMeta::new_readonly(program, false),
-            ],
-            data,
-        };
+        let accounts = vec![
+            AccountMeta::new(position, false),
+            AccountMeta::new_readonly(sender, true),
+            AccountMeta::new(rent_receiver, false),
+            AccountMeta::new_readonly(event_authority, false),
+            AccountMeta::new_readonly(program, false),
+        ];
 
-        let named = build_named_accounts(idl, &instruction);
+        let named = build_named_accounts(idl, &data, &accounts);
         let lookup: BTreeMap<_, _> = named.into_iter().collect();
         assert_eq!(lookup.get("position"), Some(&position.to_string()));
         assert_eq!(lookup.get("sender"), Some(&sender.to_string()));

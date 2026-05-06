@@ -664,7 +664,7 @@ fn create_jupiter_swap_expanded_fields(
 
     // Add raw data field
     fields.push(
-        create_raw_data_field(context.data(), Some(hex::encode(context.data())))
+        create_raw_data_field(context.data(), None)
             .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
     );
 
@@ -709,7 +709,13 @@ mod tests {
         }
 
         fn context(&self) -> VisualizerContext<'_> {
-            VisualizerContext::new(&self.sender, &self.ci, &self.account_keys, &self.registry)
+            VisualizerContext::new(
+                &self.sender,
+                &self.ci,
+                &self.account_keys,
+                &self.registry,
+                0,
+            )
         }
     }
 
@@ -1178,12 +1184,8 @@ mod tests {
         assert!(formatted.contains("Jupiter Swap V2"));
         assert!(formatted.contains("positive slippage: 25bps"));
 
-        let fields = create_jupiter_swap_expanded_fields(
-            &parsed,
-            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
-            &data,
-        )
-        .unwrap();
+        let tcd = TestContextData::new(&data);
+        let fields = create_jupiter_swap_expanded_fields(&parsed, &tcd.context()).unwrap();
 
         let has_positive_slippage = fields.iter().any(|f| {
             if let SignablePayloadField::Number { common, .. } = &f.signable_payload_field {

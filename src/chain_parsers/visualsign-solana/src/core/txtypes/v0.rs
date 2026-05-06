@@ -185,7 +185,7 @@ pub fn decode_v0_instructions(
             writable: false,
         };
 
-        let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry);
+        let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry, i);
 
         match visualize_with_any(&visualizers_refs, &context) {
             Some(Ok(viz_result)) => fields.push(viz_result.field),
@@ -234,7 +234,7 @@ pub fn decode_v0_instructions(
             writable: false,
         };
 
-        let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry);
+        let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry, i);
 
         match visualize_with_any(&visualizers_refs, &context) {
             Some(Ok(viz_result)) => fields.push(viz_result.field),

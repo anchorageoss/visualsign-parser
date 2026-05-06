@@ -35,15 +35,14 @@ impl InstructionVisualizer for OnreAppVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
+        let program_id_str = context.resolve_program_id()?.to_string();
+        let accounts = context.resolve_accounts()?;
+        let data = context.data();
 
         let instruction_number = context.instruction_index() + 1;
-        let program_id_str = instruction.program_id.to_string();
-        let instruction_data_hex = hex::encode(&instruction.data);
+        let instruction_data_hex = hex::encode(data);
 
-        let decoded = parse_onre_app_instruction(&instruction.data, &instruction.accounts)
+        let decoded = parse_onre_app_instruction(data, &accounts)
             .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
         let instruction_name = decoded.parsed.instruction_name.clone();
@@ -81,7 +80,7 @@ impl InstructionVisualizer for OnreAppVisualizer {
             );
         }
         expanded_fields.push(
-            create_raw_data_field(&instruction.data, Some(instruction_data_hex.clone()))
+            create_raw_data_field(data, None)
                 .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
         );
 
