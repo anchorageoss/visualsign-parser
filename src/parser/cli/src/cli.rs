@@ -40,6 +40,18 @@ pub(crate) struct Args {
 
     #[arg(
         long,
+        value_name = "EXPR",
+        help = "Evaluate a Google CEL policy expression against the parsed \
+                intermediate output and print PASS/DENY. The intermediate \
+                output is bound to `solana` (so you write \
+                `solana.tx.transfers.exists(...)`). Currently Solana-only. \
+                Note: Turnkey docs use `.any` / `.count`; canonical CEL is \
+                `.exists` / `size(...)`. Same semantics. May be repeated."
+    )]
+    policy: Vec<String>,
+
+    #[arg(
+        long,
         short = 'n',
         value_name = "NETWORK",
         help = "Network identifier - supports:\n\
@@ -231,15 +243,27 @@ fn common_label(field: &SignablePayloadField) -> String {
     }
 }
 
+#[derive(Clone, Copy)]
+struct DisplayOptions<'a> {
+    output_format: OutputFormat,
+    condensed_only: bool,
+    with_intermediate: bool,
+    policies: &'a [String],
+}
+
 fn parse_and_display(
     chain: &str,
     raw_tx: &str,
     registry: &TransactionConverterRegistry,
     options: VisualSignOptions,
-    output_format: OutputFormat,
-    condensed_only: bool,
-    with_intermediate: bool,
+    display: &DisplayOptions<'_>,
 ) -> Result<(), String> {
+    let DisplayOptions {
+        output_format,
+        condensed_only,
+        with_intermediate,
+        policies,
+    } = *display;
     let registry_chain = parse_chain(chain);
     let conversion = registry
         .convert_transaction(&registry_chain, raw_tx, options)
@@ -271,6 +295,65 @@ fn parse_and_display(
             intermediate_bytes.as_deref(),
             output_format,
         )?;
+    }
+    if !policies.is_empty() {
+        evaluate_policies(&registry_chain, intermediate_bytes.as_deref(), policies)?;
+    }
+    Ok(())
+}
+
+fn evaluate_policies(
+    chain: &Chain,
+    bytes: Option<&[u8]>,
+    policies: &[String],
+) -> Result<(), String> {
+    let solana_value = match (chain, bytes) {
+        #[cfg(feature = "solana")]
+        (Chain::Solana, Some(bytes)) => {
+            use visualsign_solana::intermediate::SolanaIntermediateOutput;
+            let parsed: SolanaIntermediateOutput = borsh::from_slice(bytes)
+                .map_err(|err| format!("Failed to borsh-decode SolanaIntermediateOutput: {err}"))?;
+            serde_json::json!({ "tx": serialize_solana_intermediate(&parsed) })
+        }
+        _ => {
+            return Err(format!(
+                "--policy is currently only supported for Solana \
+                 (and requires intermediate output to be present); chain={}",
+                chain.as_str()
+            ));
+        }
+    };
+
+    let cel_value = cel_interpreter::to_value(&solana_value)
+        .map_err(|err| format!("Failed to inject intermediate output into CEL context: {err}"))?;
+
+    println!("\n=== Policy evaluation ===");
+    let mut all_passed = true;
+    for (i, expr) in policies.iter().enumerate() {
+        let program = cel_interpreter::Program::compile(expr)
+            .map_err(|err| format!("policy #{} failed to parse: {err}", i + 1))?;
+        let mut ctx = cel_interpreter::Context::default();
+        ctx.add_variable_from_value("solana", cel_value.clone());
+        let value = program
+            .execute(&ctx)
+            .map_err(|err| format!("policy #{} failed at runtime: {err:?}", i + 1))?;
+        let verdict = match value {
+            cel_interpreter::Value::Bool(true) => "PASS",
+            cel_interpreter::Value::Bool(false) => {
+                all_passed = false;
+                "DENY"
+            }
+            other => {
+                return Err(format!(
+                    "policy #{} did not return a bool: {other:?}",
+                    i + 1
+                ));
+            }
+        };
+        println!("[{verdict}] {expr}");
+    }
+    if !all_passed {
+        std::process::exit(2);
     }
     Ok(())
 }
@@ -467,9 +550,12 @@ impl Cli {
             &raw_tx,
             &registry,
             options,
-            args.output,
-            args.condensed_only,
-            args.with_intermediate,
+            &DisplayOptions {
+                output_format: args.output,
+                condensed_only: args.condensed_only,
+                with_intermediate: args.with_intermediate,
+                policies: &args.policy,
+            },
         )
     }
 }

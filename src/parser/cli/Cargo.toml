@@ -16,6 +16,7 @@ tracing-bunyan-formatter = "0.3.10"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 borsh = { version = "1.5.7", features = ["std"], default-features = false }
+cel-interpreter = { version = "0.10.0", features = ["json"] }
 generated = { path = "../../generated" }
 visualsign = { workspace = true }
 visualsign-ethereum = { path = "../../chain_parsers/visualsign-ethereum", optional = true }
