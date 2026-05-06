@@ -26,6 +26,17 @@ Three categories of issues:
 | **Diagnostics** | `SignablePayload.Fields` (as `Diagnostic` variant) | Attested -- HSM/auditor can verify | OOB indices, empty account keys |
 | **Errors** | `DecodeInstructionsResult.errors` | Consumer decides | No visualizer found |
 
+## The `diagnostics` Cargo feature
+
+Diagnostic emission is gated behind a `diagnostics` Cargo feature on `visualsign`, `visualsign-solana`, and `parser_cli`. The default builds:
+
+- `parser_cli` enables `diagnostics` (default-on); CLI users see the full diagnostic detail.
+- `parser_app` and `parser_grpc_server` do **not** enable it. Their `SignablePayload` shape is stable for HSMs and wallets that derive a metadata digest from it.
+
+When the feature is off, `decode_instructions` returns `Result<Vec<AnnotatedPayloadField>, VisualSignError>` instead of a struct with separate diagnostic and error vectors. Empty `account_keys` and per-instruction visualizer errors abort the decode with `Err`; out-of-bounds indices flow through to the catch-all `unknown_program` visualizer with no diagnostic emission.
+
+Paired `*.diagnostics.expected` fixtures only matter when the feature is on. The CI Makefile splits invocations to defeat Cargo feature unification: `cargo {build,test,clippy} --workspace --exclude parser_cli` covers the OFF path; `-p parser_cli` and `-p visualsign-solana --features diagnostics --lib` cover the ON path.
+
 ## Adding a diagnostic to a chain parser
 
 ### 1. Import the builder

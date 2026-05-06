@@ -234,7 +234,7 @@ pub fn create_diagnostic_field(
                 "{message}"
             );
         }
-        _ => {}
+        crate::lint::Severity::Ok | crate::lint::Severity::Allow => {}
     }
     AnnotatedPayloadField {
         static_annotation: None,

@@ -26,6 +26,7 @@ test: build
 	make build
 	@# diagnostics OFF: production payload shape (parser_app, integration, others).
 	cargo test --workspace --exclude parser_cli --all-targets
+	cargo test -p visualsign-solana --no-default-features --lib
 	@# diagnostics ON: parser_cli + lib tests gated behind the feature.
 	cargo test -p parser_cli --all-targets
 	cargo test -p visualsign --features diagnostics --lib

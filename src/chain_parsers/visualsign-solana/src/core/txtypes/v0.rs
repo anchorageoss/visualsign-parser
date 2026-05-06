@@ -421,6 +421,57 @@ pub fn create_address_lookup_table_field(
     })
 }
 
+#[cfg(all(test, not(feature = "diagnostics")))]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod off_tests {
+    use super::*;
+    use solana_sdk::pubkey::Pubkey;
+
+    fn v0_message(
+        account_keys: Vec<Pubkey>,
+        instructions: Vec<solana_sdk::instruction::CompiledInstruction>,
+    ) -> solana_sdk::message::v0::Message {
+        solana_sdk::message::v0::Message {
+            header: solana_sdk::message::MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys,
+            recent_blockhash: solana_sdk::hash::Hash::default(),
+            instructions,
+            address_table_lookups: vec![],
+        }
+    }
+
+    #[test]
+    fn test_empty_account_keys_returns_err() {
+        let msg = v0_message(vec![], vec![]);
+        let registry = crate::idl::IdlRegistry::new();
+        let result = decode_v0_instructions(&msg, &registry);
+        let Err(VisualSignError::DecodeError(text)) = result else {
+            panic!("expected DecodeError, got {result:?}");
+        };
+        assert!(text.contains("no account keys"), "msg was: {text}");
+    }
+
+    #[test]
+    fn test_oob_indices_flow_through_as_ok() {
+        let key0 = Pubkey::new_unique();
+        let msg = v0_message(
+            vec![key0],
+            vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 99,  // OOB
+                accounts: vec![0, 50], // 50 also OOB
+                data: vec![0xDD],
+            }],
+        );
+        let registry = crate::idl::IdlRegistry::new();
+        let fields = decode_v0_instructions(&msg, &registry).expect("OOB should not abort");
+        assert_eq!(fields.len(), 1);
+    }
+}
+
 #[cfg(all(test, feature = "diagnostics"))]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {

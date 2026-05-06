@@ -342,6 +342,85 @@ pub fn decode_transfers(
     Ok(fields)
 }
 
+#[cfg(all(test, not(feature = "diagnostics")))]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod off_tests {
+    use super::*;
+    use solana_sdk::hash::Hash;
+    use solana_sdk::message::{Message, MessageHeader};
+    use solana_sdk::pubkey::Pubkey;
+
+    fn tx_with(
+        account_keys: Vec<Pubkey>,
+        instructions: Vec<solana_sdk::instruction::CompiledInstruction>,
+    ) -> SolanaTransaction {
+        SolanaTransaction {
+            signatures: vec![],
+            message: Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 0,
+                },
+                account_keys,
+                recent_blockhash: Hash::default(),
+                instructions,
+            },
+        }
+    }
+
+    #[test]
+    fn test_empty_account_keys_returns_err() {
+        let tx = tx_with(vec![], vec![]);
+        let registry = IdlRegistry::new();
+        let result = decode_instructions(&tx, &registry);
+        let Err(VisualSignError::DecodeError(msg)) = result else {
+            panic!("expected DecodeError, got {result:?}");
+        };
+        assert!(msg.contains("no account keys"), "msg was: {msg}");
+    }
+
+    #[test]
+    fn test_oob_program_id_flows_through_as_ok() {
+        // program_id_index=99 is out of bounds. With diagnostics OFF, this is
+        // not a hard error -- unknown_program handles unresolved program_ids
+        // and renders an `unresolved(99)` placeholder.
+        let key0 = Pubkey::new_unique();
+        let tx = tx_with(
+            vec![key0],
+            vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 99,
+                accounts: vec![],
+                data: vec![0xAA],
+            }],
+        );
+        let registry = IdlRegistry::new();
+        let fields = decode_instructions(&tx, &registry).expect("OOB program_id should not abort");
+        assert_eq!(fields.len(), 1, "exactly one rendered instruction");
+    }
+
+    #[test]
+    fn test_oob_account_index_flows_through_as_ok() {
+        // accounts contains index 50 which is out of bounds. With diagnostics
+        // OFF, no diagnostic is emitted and rendering still succeeds via
+        // unknown_program (or whichever visualizer handles the program_id).
+        let key0 = Pubkey::new_unique();
+        let key1 = Pubkey::new_unique();
+        let tx = tx_with(
+            vec![key0, key1],
+            vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0, 50],
+                data: vec![0xCC],
+            }],
+        );
+        let registry = IdlRegistry::new();
+        let fields =
+            decode_instructions(&tx, &registry).expect("OOB account_index should not abort");
+        assert_eq!(fields.len(), 1);
+    }
+}
+
 #[cfg(all(test, feature = "diagnostics"))]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
