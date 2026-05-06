@@ -171,6 +171,12 @@ pub struct ParsedTransactionPayload {
     /// Legacy field. Will be removed, please do not use!
     #[prost(string, tag = "4")]
     pub signable_payload: ::prost::alloc::string::String,
+    /// Chain-specific intermediate output for downstream policy evaluation.
+    /// Borsh-serialized; schema is defined per chain in Rust. Unset for chains
+    /// that do not produce one. Solana uses
+    /// `visualsign_solana::intermediate::SolanaIntermediateOutput`.
+    #[prost(bytes = "vec", optional, tag = "5")]
+    pub intermediate_output: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
 }
 #[cfg_attr(
     feature = "serde_derive",

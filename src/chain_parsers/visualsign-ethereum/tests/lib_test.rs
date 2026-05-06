@@ -245,7 +245,8 @@ fn test_abi_from_metadata_decodes_function() {
     let converter = EthereumVisualSignConverter::new();
     let result = converter
         .to_visual_sign_payload_from_string(&tx_hex, options)
-        .unwrap();
+        .unwrap()
+        .payload;
 
     // The ABI from metadata should decode the function name.
     // Without abi_mappings, this address is unknown and would show raw hex.

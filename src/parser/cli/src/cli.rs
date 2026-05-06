@@ -32,6 +32,14 @@ pub(crate) struct Args {
 
     #[arg(
         long,
+        help = "Also pretty-print the chain-specific intermediate output \
+                (used by Turnkey's Solana policy engine). Currently produced \
+                for Solana only; ignored for other chains."
+    )]
+    with_intermediate: bool,
+
+    #[arg(
+        long,
         short = 'n',
         value_name = "NETWORK",
         help = "Network identifier - supports:\n\
@@ -230,11 +238,14 @@ fn parse_and_display(
     options: VisualSignOptions,
     output_format: OutputFormat,
     condensed_only: bool,
+    with_intermediate: bool,
 ) -> Result<(), String> {
     let registry_chain = parse_chain(chain);
-    let payload = registry
+    let conversion = registry
         .convert_transaction(&registry_chain, raw_tx, options)
         .map_err(|err| err.to_string())?;
+    let intermediate_bytes = conversion.intermediate_output.clone();
+    let payload = conversion.payload;
     match output_format {
         OutputFormat::Json => {
             let json_output = serde_json::to_string_pretty(&payload)
@@ -254,7 +265,144 @@ fn parse_and_display(
             }
         }
     }
+    if with_intermediate {
+        print_intermediate_output(
+            &registry_chain,
+            intermediate_bytes.as_deref(),
+            output_format,
+        )?;
+    }
     Ok(())
+}
+
+fn print_intermediate_output(
+    chain: &Chain,
+    bytes: Option<&[u8]>,
+    output_format: OutputFormat,
+) -> Result<(), String> {
+    let Some(bytes) = bytes else {
+        eprintln!(
+            "\n(no intermediate output produced for chain {})",
+            chain.as_str()
+        );
+        return Ok(());
+    };
+
+    match chain {
+        #[cfg(feature = "solana")]
+        Chain::Solana => {
+            use visualsign_solana::intermediate::SolanaIntermediateOutput;
+            let parsed: SolanaIntermediateOutput = borsh::from_slice(bytes)
+                .map_err(|err| format!("Failed to borsh-decode SolanaIntermediateOutput: {err}"))?;
+            println!("\n=== Intermediate Output (Solana, policy schema) ===");
+            match output_format {
+                OutputFormat::Json => {
+                    let json =
+                        serde_json::to_string_pretty(&serialize_solana_intermediate(&parsed))
+                            .map_err(|err| {
+                                format!("Failed to serialize intermediate output as JSON: {err}")
+                            })?;
+                    println!("{json}");
+                }
+                _ => {
+                    println!("{parsed:#?}");
+                }
+            }
+        }
+        _ => {
+            eprintln!(
+                "\n(intermediate output present ({} bytes) but no decoder for chain {})",
+                bytes.len(),
+                chain.as_str()
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "solana")]
+fn serialize_solana_intermediate(
+    output: &visualsign_solana::intermediate::SolanaIntermediateOutput,
+) -> serde_json::Value {
+    use serde_json::json;
+    use visualsign_solana::intermediate::{
+        SolTransfer, SolanaAccount, SolanaAddressTableLookup, SolanaIntermediateInstruction,
+        SolanaParsedInstructionDataIo, SolanaSingleAddressTableLookup, SplTransfer,
+    };
+
+    fn account(a: &SolanaAccount) -> serde_json::Value {
+        json!({
+            "account_key": a.account_key,
+            "signer": a.signer,
+            "writable": a.writable,
+        })
+    }
+
+    fn single_lookup(lk: &SolanaSingleAddressTableLookup) -> serde_json::Value {
+        json!({
+            "address_table_key": lk.address_table_key,
+            "index": lk.index,
+            "writable": lk.writable,
+        })
+    }
+
+    fn lookup(lk: &SolanaAddressTableLookup) -> serde_json::Value {
+        json!({
+            "address_table_key": lk.address_table_key,
+            "writable_indexes": lk.writable_indexes,
+            "readonly_indexes": lk.readonly_indexes,
+        })
+    }
+
+    fn parsed(pid: &SolanaParsedInstructionDataIo) -> serde_json::Value {
+        let args: serde_json::Value = serde_json::from_str(&pid.program_call_args_json)
+            .unwrap_or_else(|_| json!(pid.program_call_args_json));
+        json!({
+            "instruction_name": pid.instruction_name,
+            "discriminator": pid.discriminator,
+            "named_accounts": pid.named_accounts,
+            "program_call_args": args,
+            "idl_source": pid.idl_source,
+            "idl_hash": pid.idl_hash,
+        })
+    }
+
+    fn instruction(i: &SolanaIntermediateInstruction) -> serde_json::Value {
+        json!({
+            "program_key": i.program_key,
+            "accounts": i.accounts.iter().map(account).collect::<Vec<_>>(),
+            "instruction_data_hex": i.instruction_data_hex,
+            "address_table_lookups": i.address_table_lookups.iter().map(single_lookup).collect::<Vec<_>>(),
+            "parsed_instruction_data": i.parsed_instruction_data.as_ref().map(parsed),
+        })
+    }
+
+    fn sol_transfer(t: &SolTransfer) -> serde_json::Value {
+        json!({"from": t.from, "to": t.to, "amount": t.amount})
+    }
+
+    fn spl_transfer(t: &SplTransfer) -> serde_json::Value {
+        json!({
+            "from": t.from,
+            "to": t.to,
+            "amount": t.amount,
+            "owner": t.owner,
+            "signers": t.signers,
+            "token_mint": t.token_mint,
+            "decimals": t.decimals,
+            "fee": t.fee,
+        })
+    }
+
+    json!({
+        "account_keys": output.account_keys,
+        "program_keys": output.program_keys,
+        "instructions": output.instructions.iter().map(instruction).collect::<Vec<_>>(),
+        "transfers": output.transfers.iter().map(sol_transfer).collect::<Vec<_>>(),
+        "spl_transfers": output.spl_transfers.iter().map(spl_transfer).collect::<Vec<_>>(),
+        "recent_blockhash": output.recent_blockhash,
+        "address_table_lookups": output.address_table_lookups.iter().map(lookup).collect::<Vec<_>>(),
+    })
 }
 
 /// app cli
@@ -321,6 +469,7 @@ impl Cli {
             options,
             args.output,
             args.condensed_only,
+            args.with_intermediate,
         )
     }
 }

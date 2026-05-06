@@ -85,6 +85,11 @@ message ParsedTransactionPayload {
   string metadata_digest = 3;
   // Legacy field. Will be removed, please do not use!
   string signable_payload = 4;
+  // Chain-specific intermediate output for downstream policy evaluation.
+  // Borsh-serialized; schema is defined per chain in Rust. Unset for chains
+  // that do not produce one. Solana uses
+  // `visualsign_solana::intermediate::SolanaIntermediateOutput`.
+  optional bytes intermediate_output = 5;
 }
 
 message ParsedTransaction {

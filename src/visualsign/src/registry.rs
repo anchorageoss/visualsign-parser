@@ -3,12 +3,9 @@ use std::marker::PhantomData;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::{
-    vsptrait::{
-        Transaction, VisualSignConverter, VisualSignConverterFromString, VisualSignError,
-        VisualSignOptions,
-    },
-    SignablePayload,
+use crate::vsptrait::{
+    ConversionResult, Transaction, VisualSignConverter, VisualSignConverterFromString,
+    VisualSignError, VisualSignOptions,
 };
 
 /// Supported blockchain types
@@ -66,7 +63,7 @@ pub trait VisualSignConverterAny: Send + Sync {
         &self,
         transaction_data: &str,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError>;
+    ) -> Result<ConversionResult, VisualSignError>;
 
     fn supports_format(&self, transaction_data: &str) -> bool;
 }
@@ -104,7 +101,7 @@ where
         &self,
         transaction_data: &str,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
+    ) -> Result<ConversionResult, VisualSignError> {
         self.converter
             .to_visual_sign_payload_from_string(transaction_data, options)
     }
@@ -151,7 +148,7 @@ impl TransactionConverterRegistry {
         chain: &Chain,
         transaction_data: &str,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
+    ) -> Result<ConversionResult, VisualSignError> {
         match self.get_converter(chain) {
             Some(converter) => {
                 converter.to_visual_sign_payload_from_string_any(transaction_data, options)
@@ -167,14 +164,14 @@ impl TransactionConverterRegistry {
         &self,
         transaction_data: &str,
         options: VisualSignOptions,
-    ) -> Result<(Chain, SignablePayload), VisualSignError> {
+    ) -> Result<(Chain, ConversionResult), VisualSignError> {
         // Try each converter to see if it can parse the transaction
         for (chain, converter) in &self.converters {
             if converter.supports_format(transaction_data) {
                 match converter
                     .to_visual_sign_payload_from_string_any(transaction_data, options.clone())
                 {
-                    Ok(payload) => return Ok((chain.clone(), payload)),
+                    Ok(result) => return Ok((chain.clone(), result)),
                     Err(_) => continue, // Try next converter
                 }
             }
@@ -319,7 +316,10 @@ impl<R> LayeredRegistry<R> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::{SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2};
+    use crate::{
+        SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
+        SignablePayloadFieldTextV2,
+    };
     // Import TransactionParseError only in tests where it's actually used
     use crate::vsptrait::TransactionParseError;
 
@@ -348,7 +348,7 @@ mod tests {
                     Err(_) => {
                         return Err(TransactionParseError::DecodeError(
                             "Invalid hex".to_string(),
-                        ))
+                        ));
                     }
                 };
 
@@ -378,7 +378,7 @@ mod tests {
                     Err(_) => {
                         return Err(TransactionParseError::DecodeError(
                             "Invalid hex".to_string(),
-                        ))
+                        ));
                     }
                 };
 
@@ -435,9 +435,9 @@ mod tests {
             &self,
             _transaction: T,
             _options: VisualSignOptions,
-        ) -> Result<SignablePayload, VisualSignError> {
+        ) -> Result<ConversionResult, VisualSignError> {
             // Create a simple payload using SignablePayload::new
-            Ok(SignablePayload::new(
+            Ok(ConversionResult::new(SignablePayload::new(
                 0,
                 "Test Transaction".to_string(),
                 None,
@@ -451,7 +451,7 @@ mod tests {
                     },
                 }],
                 "Test Source".to_string(),
-            ))
+            )))
         }
     }
 
@@ -474,7 +474,7 @@ mod tests {
             &self,
             _transaction: T,
             _options: VisualSignOptions,
-        ) -> Result<SignablePayload, VisualSignError> {
+        ) -> Result<ConversionResult, VisualSignError> {
             Err(VisualSignError::ConversionError(
                 "Mock conversion failed".to_string(),
             ))

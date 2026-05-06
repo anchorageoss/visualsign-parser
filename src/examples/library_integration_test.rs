@@ -67,9 +67,9 @@ fn main() {
 
     // Parse the transaction
     match registry.convert_transaction(&Chain::Ethereum, raw_tx, options) {
-        Ok(payload) => {
+        Ok(conversion) => {
             println!("=== Parsing successful! ===\n");
-            display_payload(&payload);
+            display_payload(&conversion.payload);
         }
         Err(e) => {
             eprintln!("Parse error: {e:?}");

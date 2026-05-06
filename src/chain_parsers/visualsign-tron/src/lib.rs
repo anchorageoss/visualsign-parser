@@ -2,8 +2,8 @@ use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2,
     encodings::SupportedEncodings,
     vsptrait::{
-        Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
-        VisualSignError, VisualSignOptions,
+        ConversionResult, Transaction, TransactionParseError, VisualSignConverter,
+        VisualSignConverterFromString, VisualSignError, VisualSignOptions,
     },
 };
 
@@ -86,8 +86,9 @@ impl VisualSignConverter<TronTransactionWrapper> for TronVisualSignConverter {
         &self,
         transaction_wrapper: TronTransactionWrapper,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
-        convert_to_visual_sign_payload(transaction_wrapper.inner().clone(), options)
+    ) -> Result<ConversionResult, VisualSignError> {
+        let payload = convert_to_visual_sign_payload(transaction_wrapper.inner().clone(), options)?;
+        Ok(ConversionResult::new(payload))
     }
 }
 
@@ -255,7 +256,9 @@ pub fn transaction_to_visual_sign(
 ) -> Result<SignablePayload, VisualSignError> {
     let wrapper = TronTransactionWrapper::new(transaction);
     let converter = TronVisualSignConverter;
-    converter.to_visual_sign_payload(wrapper, options)
+    converter
+        .to_visual_sign_payload(wrapper, options)
+        .map(|r| r.payload)
 }
 
 pub fn transaction_string_to_visual_sign(
@@ -263,7 +266,9 @@ pub fn transaction_string_to_visual_sign(
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     let converter = TronVisualSignConverter;
-    converter.to_visual_sign_payload_from_string(transaction_data, options)
+    converter
+        .to_visual_sign_payload_from_string(transaction_data, options)
+        .map(|r| r.payload)
 }
 
 // Helper function to convert Tron address bytes to base58 format

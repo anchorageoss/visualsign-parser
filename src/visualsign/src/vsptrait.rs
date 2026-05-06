@@ -22,12 +22,41 @@ pub struct VisualSignOptions {
     pub developer_config: Option<DeveloperConfig>,
 }
 
+/// Converter output: the human-readable `SignablePayload` plus an optional
+/// chain-specific borsh-serialized blob used by downstream policy engines.
+///
+/// Each chain is responsible for defining the schema of `intermediate_output`
+/// and publishing it (e.g. as a `pub` Rust module) so that consumers can
+/// `borsh::from_slice` into the typed schema. Chains that have no
+/// intermediate output simply leave it `None`.
+#[derive(Debug, Clone)]
+pub struct ConversionResult {
+    pub payload: SignablePayload,
+    pub intermediate_output: Option<Vec<u8>>,
+}
+
+impl ConversionResult {
+    pub fn new(payload: SignablePayload) -> Self {
+        Self {
+            payload,
+            intermediate_output: None,
+        }
+    }
+
+    pub fn with_intermediate(payload: SignablePayload, intermediate_output: Vec<u8>) -> Self {
+        Self {
+            payload,
+            intermediate_output: Some(intermediate_output),
+        }
+    }
+}
+
 pub trait VisualSignConverter<T: Transaction> {
     fn to_visual_sign_payload(
         &self,
         transaction: T,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError>;
+    ) -> Result<ConversionResult, VisualSignError>;
 
     /// Convert to VisualSign payload with automatic charset validation
     /// This method should be used instead of to_visual_sign_payload to ensure charset safety
@@ -35,10 +64,10 @@ pub trait VisualSignConverter<T: Transaction> {
         &self,
         transaction: T,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
-        let payload = self.to_visual_sign_payload(transaction, options)?;
-        payload.validate_charset()?;
-        Ok(payload)
+    ) -> Result<ConversionResult, VisualSignError> {
+        let result = self.to_visual_sign_payload(transaction, options)?;
+        result.payload.validate_charset()?;
+        Ok(result)
     }
 }
 
@@ -80,7 +109,7 @@ pub trait VisualSignConverterFromString<T: Transaction>: VisualSignConverter<T> 
         &self,
         transaction_data: &str,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
+    ) -> Result<ConversionResult, VisualSignError> {
         let transaction = T::from_string(transaction_data).map_err(VisualSignError::ParseError)?;
         self.to_validated_visual_sign_payload(transaction, options)
     }
@@ -142,7 +171,7 @@ mod tests {
             &self,
             transaction: MockTransaction,
             options: VisualSignOptions,
-        ) -> Result<SignablePayload, VisualSignError> {
+        ) -> Result<ConversionResult, VisualSignError> {
             if transaction.data.contains("error") {
                 return Err(VisualSignError::ConversionError(
                     "Conversion failed".to_string(),
@@ -186,13 +215,13 @@ mod tests {
                 });
             }
 
-            Ok(SignablePayload::new(
+            Ok(ConversionResult::new(SignablePayload::new(
                 0,
                 title,
                 None,
                 fields,
                 "Test".to_string(),
-            ))
+            )))
         }
     }
 
@@ -201,7 +230,7 @@ mod tests {
             &self,
             transaction_data: &str,
             options: VisualSignOptions,
-        ) -> Result<SignablePayload, VisualSignError> {
+        ) -> Result<ConversionResult, VisualSignError> {
             let transaction = MockTransaction::from_string(transaction_data)?;
             self.to_visual_sign_payload(transaction, options)
         }
@@ -260,7 +289,7 @@ mod tests {
         let result =
             converter.to_visual_sign_payload(transaction.clone(), VisualSignOptions::default());
         assert!(result.is_ok());
-        let payload = result.unwrap();
+        let payload = result.unwrap().payload;
         assert_eq!(payload.title, "Transaction");
         assert_eq!(payload.fields.len(), 1); // Only network field
 
@@ -274,7 +303,7 @@ mod tests {
 
         let result = converter.to_visual_sign_payload(transaction, options);
         assert!(result.is_ok());
-        let payload = result.unwrap();
+        let payload = result.unwrap().payload;
         assert_eq!(payload.title, "Custom Transaction");
         assert_eq!(payload.fields.len(), 2); // Network and transfer fields
     }

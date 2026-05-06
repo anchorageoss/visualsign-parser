@@ -2242,6 +2242,7 @@ mod tests {
                 },
             )
             .expect("visualization should succeed")
+            .payload
     }
 
     fn assert_text_field(fields: &[AnnotatedPayloadField], label: &str, expected: &str) {
