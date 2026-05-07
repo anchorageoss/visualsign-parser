@@ -56,6 +56,8 @@ jobs:
             git --no-pager diff
             exit 1
           fi
+      - name: Check build.rs files are in sync
+        run: make check-build-scripts
       - name: Run linters
         run: make -C src lint
       - name: Run tests

@@ -10,6 +10,14 @@ out/parser_gateway/index.json: \
 	$(shell git ls-files images/parser_gateway src)
 	$(call build,parser_gateway)
 
+.PHONY: check-build-scripts
+check-build-scripts:
+	@diff src/parser/app/build.rs src/parser/cli/build.rs \
+	  && diff src/parser/app/build.rs src/parser/gateway/build.rs \
+	  && diff src/parser/app/build.rs src/parser/grpc-server/build.rs \
+	  || (echo "ERROR: build.rs files have diverged — keep them in sync"; exit 1)
+	@echo "build.rs files are in sync."
+
 .PHONY: non-oci-docker-images
 non-oci-docker-images:
 	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_app -f images/parser_app/Containerfile .

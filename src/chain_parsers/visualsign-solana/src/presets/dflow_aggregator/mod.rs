@@ -7,7 +7,7 @@ use crate::core::{
 };
 use config::DflowAggregatorConfig;
 use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
+    decode_idl_data, parse_instruction_with_idl, Idl, SolanaParsedInstructionData,
 };
 use solana_sdk::instruction::AccountMeta;
 use std::collections::BTreeMap;
@@ -171,7 +171,7 @@ fn build_parsed_fields(
     condensed_fields.push(create_text_field("Program", "DFlow Aggregator")?);
     condensed_fields.push(create_text_field("Instruction", instruction_name)?);
     for (key, value) in &parsed.program_call_args {
-        push_arg_fields(&mut condensed_fields, key, value)?;
+        condensed_fields.push(create_text_field(key, &format_arg_value_compact(value))?);
     }
 
     expanded_fields.push(create_text_field("Program ID", program_id)?);
@@ -218,6 +218,18 @@ fn build_fallback_fields(
     expanded_fields.push(create_text_field("Status", "Unknown instruction type")?);
 
     Ok((title, condensed_fields, expanded_fields))
+}
+
+// Compact single-field representation for condensed view. Objects and arrays
+// are serialized as JSON rather than flattened, keeping the condensed layout brief.
+fn format_arg_value_compact(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => "null".to_string(),
+        other => other.to_string(),
+    }
 }
 
 fn push_arg_fields(

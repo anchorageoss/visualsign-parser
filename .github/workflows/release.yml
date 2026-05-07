@@ -10,6 +10,11 @@ on:
         type: boolean
         required: false
         default: false
+      force_stagex:
+        description: 'Force-dispatch stagex even if the release already exists (use when a prior stagex dispatch failed)'
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: release
@@ -118,7 +123,10 @@ jobs:
         # stagex explicitly so released images get the semver baked in.
         # Gate on release_exists == false (not tag_exists) so that a retry after a
         # partial failure (tag pushed, release creation failed) still dispatches stagex.
-        if: steps.check_tag.outputs.release_exists == 'false' && !inputs.dry_run
+        # If this step fails after the release is created, re-running the workflow
+        # will skip it (release_exists=true). Use force_stagex=true on the next
+        # manual dispatch to re-trigger, or run: gh workflow run stagex.yml --ref $TAG
+        if: (steps.check_tag.outputs.release_exists == 'false' || inputs.force_stagex) && !inputs.dry_run
         env:
           TAG: ${{ steps.version.outputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -126,5 +134,8 @@ jobs:
 
       - name: Dry run summary
         if: inputs.dry_run
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          FULL_VERSION: ${{ steps.version.outputs.full_version }}
         run: |
-          echo "DRY RUN: would have created tag ${{ steps.version.outputs.tag }} (version: ${{ steps.version.outputs.full_version }})"
+          echo "DRY RUN: would have created tag $TAG (version: $FULL_VERSION)"
