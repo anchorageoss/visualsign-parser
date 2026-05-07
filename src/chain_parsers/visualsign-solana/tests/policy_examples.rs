@@ -20,6 +20,39 @@
 //! Same semantics; if you need byte-identical Turnkey syntax for a fixture
 //! capture, register `any` as a thin alias on top of `exists` in the
 //! evaluator (out of scope here).
+//!
+//! ## Combining rules
+//!
+//! A CEL expression is *one* boolean. Combine rules within a single
+//! expression using the standard grammar:
+//!
+//! - `&&` (AND, short-circuit), `||` (OR, short-circuit), `!` (NOT)
+//! - ternary `cond ? a : b`
+//! - comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, `in`
+//! - list comprehensions `.exists`, `.all`, `.exists_one`, `.filter`
+//! - `size(list_or_string_or_map)`, `x in list`
+//!
+//! Across multiple `--policy` CLI flags we apply an implicit **AND** —
+//! every rule must PASS for the process to exit zero. There is no `||`
+//! between flags; if you want OR semantics, write one expression with
+//! `||`. This matches the wallet/policy mental model of "every rule
+//! must hold", but it is a CLI convention, not part of CEL.
+//!
+//! ## Out of scope: engine-level policy structure
+//!
+//! Real policy engines (Turnkey's included) layer additional structure on
+//! top of CEL that this PoC does not model:
+//!
+//! - **Effect**: each rule is `EFFECT_ALLOW` or `EFFECT_DENY`, and the
+//!   engine combines them with documented precedence (typically: explicit
+//!   `DENY` wins; absence of a matching `ALLOW` is treated as deny).
+//! - **Consensus**: a separate CEL expression evaluated against an
+//!   approvers / users root determines *who* must sign off (e.g.
+//!   `approvers.count >= 2 && approvers.any(u, u.tags.contains('admin'))`).
+//!
+//! These tests assert only that the structured intermediate output is
+//! expressive enough to encode the *condition* half of those rules —
+//! not that we faithfully simulate the surrounding engine.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use cel_interpreter::{Context, Program};

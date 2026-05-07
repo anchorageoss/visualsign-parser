@@ -44,9 +44,19 @@ pub(crate) struct Args {
         help = "Evaluate a Google CEL policy expression against the parsed \
                 intermediate output and print PASS/DENY. The intermediate \
                 output is bound to `solana` (so you write \
-                `solana.tx.transfers.exists(...)`). Currently Solana-only. \
-                Note: Turnkey docs use `.any` / `.count`; canonical CEL is \
-                `.exists` / `size(...)`. Same semantics. May be repeated."
+                `solana.tx.transfers.exists(...)`). Currently Solana-only.\n\
+                \n\
+                Combining rules: a single CEL expression supports the full \
+                boolean grammar — `&&`, `||`, `!`, ternary `?:`, plus \
+                `.exists`, `.all`, `.exists_one`, `.filter`, `size(...)`. \
+                Compose within one expression for OR / mixed semantics. \
+                Across multiple `--policy` flags this CLI applies an \
+                implicit AND: every flag must PASS for the process to exit \
+                successfully. The flag exits with code 2 on any DENY.\n\
+                \n\
+                Surface aliases: Turnkey docs use `.any` / `.count`; \
+                canonical CEL is `.exists` / `size(...)`. Same semantics. \
+                May be repeated."
     )]
     policy: Vec<String>,
 
