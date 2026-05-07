@@ -4,7 +4,6 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature};
 use std::net::TcpListener;
 use std::process::{Child, Command};
-use std::thread;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
@@ -75,17 +74,30 @@ impl SurfpoolManager {
     }
 
     /// Poll the RPC server until it responds (up to 30 attempts, 500ms apart).
+    ///
+    /// `RpcClient::get_version` is synchronous and blocks for up to its HTTP
+    /// timeout. Running it on a Tokio worker thread would stall other tasks,
+    /// so each probe is dispatched via `spawn_blocking` and the inter-attempt
+    /// delay uses `tokio::time::sleep`.
     pub async fn wait_ready(&self) -> Result<()> {
-        let client = self.rpc_client();
         let max_attempts = 30;
         let delay = Duration::from_millis(500);
+        let rpc_url = self.rpc_url.clone();
 
         for attempt in 1..=max_attempts {
             debug!(
                 "Checking if Surfpool is ready (attempt {}/{})",
                 attempt, max_attempts
             );
-            match client.get_version() {
+
+            let url = rpc_url.clone();
+            let probe = tokio::task::spawn_blocking(move || {
+                RpcClient::new_with_commitment(url, CommitmentConfig::confirmed()).get_version()
+            })
+            .await
+            .context("Surfpool readiness probe task panicked")?;
+
+            match probe {
                 Ok(version) => {
                     info!("Surfpool is ready! Version: {:?}", version);
                     return Ok(());
@@ -97,7 +109,7 @@ impl SurfpoolManager {
                         ));
                     }
                     warn!("Surfpool not ready yet (attempt {}): {}", attempt, e);
-                    thread::sleep(delay);
+                    tokio::time::sleep(delay).await;
                 }
             }
         }

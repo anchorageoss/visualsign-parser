@@ -57,12 +57,14 @@ for idl_file in "${IDL_FILES[@]}"; do
 
     if [ -z "$summary" ]; then
         echo "FAIL (no test result)"
+        printf '%s\n' "$output"
         FAIL=$(( FAIL + 1 ))
         FAILED_IDLS+=("$name ($idl_file)")
     else
         failed_count=$(echo "$summary" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+")
         if [ "${failed_count:-0}" -gt 0 ]; then
             echo "FAIL ($summary)"
+            printf '%s\n' "$output"
             FAIL=$(( FAIL + 1 ))
             FAILED_IDLS+=("$name ($idl_file)")
         else

@@ -59,8 +59,13 @@ jobs:
           # `surfpool --version` is a stronger gate than `command -v`: a
           # corrupted cached binary (interrupted previous install, ABI mismatch
           # with new toolchain) will fail this check and trigger a rebuild.
+          #
+          # No package name is passed: cargo uses the workspace's
+          # `default-members` (currently `crates/cli`, package `surfpool-cli`,
+          # which produces the `surfpool` binary). This survives upstream
+          # package renames within the workspace.
           if ! surfpool --version >/dev/null 2>&1; then
-            cargo install surfpool \
+            cargo install \
               --git https://github.com/txtx/surfpool \
               --tag "${SURFPOOL_VERSION}" \
               --locked
