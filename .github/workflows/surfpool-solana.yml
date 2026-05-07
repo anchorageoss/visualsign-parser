@@ -57,6 +57,12 @@ jobs:
           sudo apt clean
           df -h
       - name: Install surfpool
+        # `RUSTFLAGS=--cap-lints=warn` overrides the toolchain action's default
+        # `-D warnings`. That deny-warnings policy is meant for our own code;
+        # applying it to a third-party install is fragile (e.g. v1.1.1 of
+        # surfpool-gql trips a benign `unused_parens` lint on newer rustc).
+        env:
+          RUSTFLAGS: --cap-lints=warn
         run: |
           # `surfpool --version` is a stronger gate than `command -v`: a
           # corrupted cached binary (interrupted previous install, ABI mismatch
