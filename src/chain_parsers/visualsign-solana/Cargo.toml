@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 
 tracing = { workspace = true }
-solana_parser = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "a0c554d" }
+solana_parser = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "2146929" }
 visualsign = { workspace = true }
 generated = { path = "../../generated" }
 serde_json = { workspace = true }
@@ -25,7 +25,7 @@ spl-token-2022 = "10.0.0"
 spl-token-2022-interface = "2.1.0"
 
 [dev-dependencies]
-solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "a0c554d", features = ["proptest"] }
+solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "2146929", features = ["proptest"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 jupiter-swap-api-client = "0.2.0"
