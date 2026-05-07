@@ -1,28 +1,41 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Surfpool-backed integration tests for the Solana visual-sign parser.
 //!
-//! These tests start a **surfpool** mainnet fork (requires the `surfpool`
-//! binary on `$PATH` and network access) and exercise the parser against
-//! transactions built from real on-chain state.
+//! Tests are network-bound (start a `surfpool` mainnet fork; require the
+//! `surfpool` binary on `$PATH`) and are therefore `#[ignore]`. The IDL
+//! directory is resolved at build time via the `SOLANA_IDL_DIR` env var
+//! emitted by `build.rs`, so the test binary needs no runtime cargo lookup.
 //!
-//! All tests are `#[ignore]` — run them explicitly:
+//! Run all surfpool tests:
 //!
 //! ```bash
-//! cargo test -p visualsign-solana --test surfpool_fuzz -- --ignored
+//! HELIUS_API_KEY=<key> cargo test \
+//!     --manifest-path src/Cargo.toml -p visualsign-solana \
+//!     --test surfpool_fuzz -- --ignored --test-threads=1
 //! ```
+//!
+//! Run a single IDL:
+//!
+//! ```bash
+//! cargo test ... --test surfpool_fuzz surfpool_idl_jupiter -- --ignored
+//! ```
+//!
+//! Adding a new IDL: drop the `.json` file into `solana_parser/src/solana/idls`
+//! and add an `idl_test!(...)` line below; cargo's harness picks it up.
 
 mod common;
 
-use common::{build_disc_data, build_transaction, load_idl_from_env, options_with_idl};
+use common::{build_transaction, options_with_idl};
+use solana_parser::decode_idl_data;
 use solana_sdk::pubkey::Pubkey;
 use solana_test_utils::{SurfpoolConfig, SurfpoolManager};
+use std::path::PathBuf;
 use visualsign::vsptrait::{Transaction, VisualSignConverter};
 use visualsign_solana::{SolanaTransactionWrapper, SolanaVisualSignConverter};
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+const IDL_DIR: &str = env!("SOLANA_IDL_DIR");
 
-/// Smoke-test: start surfpool, verify the RPC endpoint responds with a
-/// version string, then let `SurfpoolManager` tear it down on drop.
+/// Smoke test: start surfpool, verify the RPC responds, let `Drop` tear it down.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn surfpool_lifecycle() {
@@ -41,48 +54,43 @@ async fn surfpool_lifecycle() {
     );
 }
 
-/// End-to-end: load a real IDL from `IDL_FILE`, extract the first
-/// instruction's discriminator, build a transaction containing those bytes,
-/// and run it through the visual-sign converter. The converter must return
-/// `Ok` with at least one field (the instruction line).
-#[tokio::test(flavor = "multi_thread")]
-#[ignore]
-async fn surfpool_jupiter_swap_roundtrip() {
-    // Skip gracefully when IDL_FILE is not set.
-    let (idl_json, _idl) = match load_idl_from_env() {
-        Some(pair) => pair,
-        None => {
-            eprintln!("IDL_FILE not set or invalid -- skipping surfpool_jupiter_swap_roundtrip");
-            return;
-        }
-    };
+/// Per-IDL roundtrip: load the IDL, build a synthetic transaction whose data
+/// starts with the first instruction's discriminator, run it through the
+/// visual-sign converter, and assert the payload is non-empty.
+async fn run_idl_roundtrip(idl_filename: &str) {
+    let idl_path = PathBuf::from(IDL_DIR).join(idl_filename);
+    let idl_json = std::fs::read_to_string(&idl_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", idl_path.display()));
 
-    // Start surfpool (validates that a local fork is healthy).
+    // Distinguish the three failure modes explicitly so a red test names the
+    // IDL file and the actual cause (decode rejection from a malformed IDL,
+    // empty instruction list, or a missing discriminator).
+    let idl = decode_idl_data(&idl_json)
+        .unwrap_or_else(|e| panic!("{idl_filename}: decode_idl_data rejected the IDL: {e}"));
+    assert!(
+        !idl.instructions.is_empty(),
+        "{idl_filename}: IDL has no instructions"
+    );
+    let disc = idl.instructions[0]
+        .discriminator
+        .as_ref()
+        .unwrap_or_else(|| panic!("{idl_filename}: instructions[0] has no discriminator"));
+    let mut data = disc.clone();
+    data.extend_from_slice(&[0u8; 32]);
+
     let _manager = SurfpoolManager::start(SurfpoolConfig::default())
         .await
         .expect("surfpool should start");
 
-    // Build instruction data using the first instruction's discriminator.
-    let inst_idx = 0;
-    let arg_bytes: &[u8] = &[0u8; 32]; // arbitrary argument padding
-    let (_parsed_idl, data) = build_disc_data(&idl_json, inst_idx, arg_bytes)
-        .expect("IDL should have at least one instruction with a discriminator");
-
-    // Use a unique program ID for the synthetic transaction.
-    let program_name = "test_program";
     let program_id = Pubkey::new_unique();
-
     let tx = build_transaction(program_id, vec![Pubkey::new_unique()], data);
-
-    // Serialize the transaction to base64 so we can round-trip through from_string.
-    let tx_bytes = bincode::serialize(&tx).expect("transaction should serialize");
+    let tx_bytes = bincode::serialize(&tx).expect("tx should serialize");
     let tx_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &tx_bytes);
 
     let wrapper = SolanaTransactionWrapper::from_string(&tx_b64)
         .expect("from_string should succeed for a valid base64 transaction");
 
-    let options = options_with_idl(&program_id, &idl_json, program_name);
-
+    let options = options_with_idl(&program_id, &idl_json, "test_program");
     let payload = SolanaVisualSignConverter
         .to_visual_sign_payload(wrapper, options)
         .expect("converter should succeed");
@@ -92,3 +100,31 @@ async fn surfpool_jupiter_swap_roundtrip() {
         "payload must contain at least one field"
     );
 }
+
+macro_rules! idl_test {
+    ($name:ident, $file:literal) => {
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore]
+        async fn $name() {
+            run_idl_roundtrip($file).await;
+        }
+    };
+}
+
+// `collision.json` and `cyclic.json` are solana_parser's negative test fixtures
+// (duplicate type names / cyclic type refs); they're rejected by
+// `decode_idl_data` and therefore excluded from this positive-path suite.
+
+idl_test!(surfpool_idl_ape_pro, "ape_pro.json");
+idl_test!(surfpool_idl_cndy, "cndy.json");
+idl_test!(surfpool_idl_drift, "drift.json");
+idl_test!(surfpool_idl_jupiter, "jupiter.json");
+idl_test!(surfpool_idl_jupiter_agg_v6, "jupiter_agg_v6.json");
+idl_test!(surfpool_idl_jupiter_limit, "jupiter_limit.json");
+idl_test!(surfpool_idl_kamino, "kamino.json");
+idl_test!(surfpool_idl_lifinity, "lifinity.json");
+idl_test!(surfpool_idl_meteora, "meteora.json");
+idl_test!(surfpool_idl_openbook, "openbook.json");
+idl_test!(surfpool_idl_orca, "orca.json");
+idl_test!(surfpool_idl_raydium, "raydium.json");
+idl_test!(surfpool_idl_stabble, "stabble.json");
