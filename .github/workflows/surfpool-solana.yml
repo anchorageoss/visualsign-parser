@@ -5,9 +5,11 @@ on:
     types: [opened, synchronize, reopened, labeled]
 
 env:
-  # Pin to an immutable commit SHA, not a tag — git tags can be force-pushed.
-  # This is the commit `v1.1.1` pointed to at time of pinning.
-  SURFPOOL_REV: d58df4cd7c3188561e671d8da0401487e3a60762
+  # Use the upstream prebuilt binary instead of `cargo install` (which is a
+  # ~10 minute compile). Pin the tarball's SHA256 so a force-pushed release
+  # asset can't silently change what we install.
+  SURFPOOL_VERSION: v1.1.1
+  SURFPOOL_SHA256: e17b44331ce3baa58fe530a061d6dc6df0e288521fec0bd5892333854ffeecf5
 
 jobs:
   surfpool:
@@ -32,8 +34,8 @@ jobs:
       - name: Cache surfpool binary
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
-          path: ~/.cargo/bin/surfpool
-          key: ${{ runner.os }}-surfpool-bin-${{ env.SURFPOOL_REV }}
+          path: ~/.local/bin/surfpool
+          key: ${{ runner.os }}-surfpool-bin-${{ env.SURFPOOL_VERSION }}-${{ env.SURFPOOL_SHA256 }}
       - name: Cache Rust dependencies
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
@@ -57,27 +59,21 @@ jobs:
           sudo apt clean
           df -h
       - name: Install surfpool
-        # `RUSTFLAGS=--cap-lints=warn` overrides the toolchain action's default
-        # `-D warnings`. That deny-warnings policy is meant for our own code;
-        # applying it to a third-party install is fragile (e.g. v1.1.1 of
-        # surfpool-gql trips a benign `unused_parens` lint on newer rustc).
-        env:
-          RUSTFLAGS: --cap-lints=warn
         run: |
+          mkdir -p "${HOME}/.local/bin"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
           # `surfpool --version` is a stronger gate than `command -v`: a
-          # corrupted cached binary (interrupted previous install, ABI mismatch
-          # with new toolchain) will fail this check and trigger a rebuild.
-          #
-          # No package name is passed: cargo uses the workspace's
-          # `default-members` (currently `crates/cli`, package `surfpool-cli`,
-          # which produces the `surfpool` binary). This survives upstream
-          # package renames within the workspace.
-          if ! surfpool --version >/dev/null 2>&1; then
-            cargo install \
-              --git https://github.com/txtx/surfpool \
-              --rev "${SURFPOOL_REV}" \
-              --locked
+          # corrupted cached binary will fail this check and trigger redownload.
+          if "${HOME}/.local/bin/surfpool" --version >/dev/null 2>&1; then
+            exit 0
           fi
+          tarball="$(mktemp)"
+          curl -fsSL -o "${tarball}" \
+            "https://github.com/txtx/surfpool/releases/download/${SURFPOOL_VERSION}/surfpool-linux-x64.tar.gz"
+          echo "${SURFPOOL_SHA256}  ${tarball}" | sha256sum -c -
+          tar xzf "${tarball}" -C "${HOME}/.local/bin"
+          rm -f "${tarball}"
+          "${HOME}/.local/bin/surfpool" --version
       - name: Run codegen
         run: make -C src generated
       - name: Run surfpool fuzz against all embedded IDLs
