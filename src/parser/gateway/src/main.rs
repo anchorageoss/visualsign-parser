@@ -31,7 +31,7 @@ struct TurnkeyRequestWrapper {
 /// Tagged representation of chain metadata for unambiguous JSON deserialization.
 ///
 /// The generated `ChainMetadata` uses `serde(untagged)` on the inner oneof enum, which means
-/// serde tries Ethereum first. A Solana payload with only `network_id` would be silently
+/// serde tries Ethereum first. A Solana payload with only `networkId` would be silently
 /// decoded as `EthereumMetadata`. This wrapper uses an explicit `chain` discriminator.
 #[derive(Deserialize)]
 #[serde(tag = "chain", rename_all = "camelCase")]
