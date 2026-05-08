@@ -334,3 +334,47 @@ async fn shutdown_signal() {
 
     println!("Shutting down gateway");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use generated::parser::{EthereumMetadata, SolanaMetadata};
+
+    #[test]
+    fn error_response_has_empty_sha256_digests() {
+        let resp = error_response("something broke".to_string());
+        let payload = &resp.response.parsed_transaction.payload;
+        assert_eq!(payload.metadata_digest, EMPTY_SHA256);
+        assert_eq!(payload.input_payload_digest, EMPTY_SHA256);
+        assert!(payload.signable_payload.is_empty());
+        assert_eq!(resp.error.as_deref(), Some("something broke"));
+    }
+
+    #[test]
+    fn chain_metadata_input_solana_not_misread_as_ethereum() {
+        let json = r#"{"chain":"CHAIN_SOLANA","networkId":"solana-mainnet"}"#;
+        let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
+        assert!(matches!(parsed, ChainMetadataInput::Solana(_)));
+    }
+
+    #[test]
+    fn chain_metadata_input_ethereum_deserializes() {
+        let json = r#"{"chain":"CHAIN_ETHEREUM","networkId":"ETHEREUM_MAINNET"}"#;
+        let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
+        assert!(matches!(parsed, ChainMetadataInput::Ethereum(_)));
+    }
+
+    #[test]
+    fn ethereum_metadata_abi_mappings_defaults_when_omitted() {
+        let json = r#"{"networkId":"ETHEREUM_MAINNET"}"#;
+        let parsed: EthereumMetadata = serde_json::from_str(json).unwrap();
+        assert!(parsed.abi_mappings.is_empty());
+    }
+
+    #[test]
+    fn solana_metadata_idl_mappings_defaults_when_omitted() {
+        let json = r#"{"networkId":"SOLANA_MAINNET"}"#;
+        let parsed: SolanaMetadata = serde_json::from_str(json).unwrap();
+        assert!(parsed.idl_mappings.is_empty());
+    }
+}
