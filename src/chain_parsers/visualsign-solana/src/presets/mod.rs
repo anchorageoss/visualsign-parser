@@ -13,6 +13,7 @@ pub mod metadao_futarchy;
 pub mod meteora_damm_v2;
 pub mod meteora_dlmm;
 pub mod neutral_trade;
+pub mod okx_router;
 pub mod onre_app;
 pub mod orca_whirlpool;
 pub mod stakepool;
