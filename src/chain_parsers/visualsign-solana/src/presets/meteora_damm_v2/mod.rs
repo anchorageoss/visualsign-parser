@@ -57,7 +57,7 @@ impl InstructionVisualizer for MeteoraDammV2Visualizer {
             create_text_field("Discriminator", &parsed.discriminator)?,
         ];
         // Iterate the local BTreeMap so the rendered field order is deterministic.
-        // (`parsed.named_accounts` from solana_parser is `HashMap`, so iteration there
+        // (`parsed.named_accounts` from solana_parser is `BTreeMap`, so iteration there
         // is non-deterministic.)
         for (account_name, account_address) in &named_accounts {
             expanded_fields.push(create_text_field(account_name, account_address)?);

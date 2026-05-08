@@ -2,7 +2,7 @@
 //! Shared test helpers for IDL-based fuzz and integration tests.
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use generated::parser::{ChainMetadata, Idl as ProtoIdl, SolanaMetadata, chain_metadata};
 use solana_parser::decode_idl_data;
@@ -84,7 +84,7 @@ pub fn build_multi_instruction_transaction(pairs: Vec<(Pubkey, Vec<u8>)>) -> Sol
 // ── VisualSignOptions builders ────────────────────────────────────────────────
 
 pub fn options_with_idl(program_id: &Pubkey, idl_json: &str, name: &str) -> VisualSignOptions {
-    let mut idl_mappings = HashMap::new();
+    let mut idl_mappings = BTreeMap::new();
     idl_mappings.insert(
         program_id.to_string(),
         ProtoIdl {
@@ -98,7 +98,9 @@ pub fn options_with_idl(program_id: &Pubkey, idl_json: &str, name: &str) -> Visu
     VisualSignOptions {
         metadata: Some(ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Solana(SolanaMetadata {
-                idl_mappings,
+                // Boundary conversion: generated proto type uses HashMap; we keep
+                // BTreeMap locally per crate-wide determinism rule.
+                idl_mappings: idl_mappings.into_iter().collect(),
                 network_id: None,
                 idl: None,
             })),

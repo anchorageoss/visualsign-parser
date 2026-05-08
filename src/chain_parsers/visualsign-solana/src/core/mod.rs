@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use ::visualsign::AnnotatedPayloadField;
 use ::visualsign::errors::VisualSignError;
@@ -88,7 +88,7 @@ impl<'a> VisualizerContext<'a> {
 }
 
 pub struct SolanaIntegrationConfigData {
-    pub programs: HashMap<&'static str, HashMap<&'static str, Vec<&'static str>>>,
+    pub programs: BTreeMap<&'static str, BTreeMap<&'static str, Vec<&'static str>>>,
 }
 pub trait SolanaIntegrationConfig {
     fn new() -> Self

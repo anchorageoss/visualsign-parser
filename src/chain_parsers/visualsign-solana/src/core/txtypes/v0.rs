@@ -17,7 +17,7 @@ pub fn decode_v0_transfers(
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     use crate::presets::jupiter_swap::{JUPITER_IDL_JSON, JUPITER_PROGRAM_ID};
     use solana_parser::solana::parser::parse_transaction;
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     // Serialize the full versioned transaction
     let transaction_bytes = bincode::serialize(versioned_tx).map_err(|e| {
@@ -29,18 +29,21 @@ pub fn decode_v0_transfers(
     // Override the stale Jupiter v6 IDL bundled in solana_parser with our locally
     // refreshed copy so that newer instructions (e.g. route_v2) don't cause the
     // whole-tx decode to bail with "no matching instruction discriminator".
-    let mut custom_idls: HashMap<String, (String, bool)> = HashMap::new();
+    let mut custom_idls: BTreeMap<String, (String, bool)> = BTreeMap::new();
     custom_idls.insert(
         JUPITER_PROGRAM_ID.to_string(),
         (JUPITER_IDL_JSON.to_string(), true),
     );
 
     let is_full_transaction = true; // true because we're passing full tx and not message
-    // Parse using solana-parser which handles V0 transactions and lookup tables
+    // Parse using solana-parser which handles V0 transactions and lookup tables.
+    // Boundary conversion: solana_parser's `parse_transaction` API takes a HashMap;
+    // we collect into the inferred parameter type so our local code keeps working
+    // with BTreeMap (per crate-wide determinism rule in clippy.toml).
     let parsed_transaction = parse_transaction(
         hex::encode(transaction_bytes),
         is_full_transaction,
-        Some(custom_idls),
+        Some(custom_idls.into_iter().collect()),
     )
     .map_err(|e| {
         VisualSignError::ParseError(visualsign::vsptrait::TransactionParseError::DecodeError(

@@ -8,7 +8,7 @@ use crate::core::{
 };
 use config::UnknownProgramConfig;
 use solana_parser::{SolanaParsedInstructionData, parse_instruction_with_idl};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
@@ -315,7 +315,7 @@ fn try_parse_with_idl(
         parse_instruction_with_idl(instruction_data, &program_id_str, &idl)?;
 
     // Manually create the named_accounts map by matching instruction accounts with IDL
-    let mut named_accounts = HashMap::new();
+    let mut named_accounts = BTreeMap::new();
 
     // Find the matching instruction in the IDL to get account names
     if let Some(idl_instruction) = idl.instructions.iter().find(|inst| {
@@ -333,7 +333,11 @@ fn try_parse_with_idl(
         }
     }
 
-    parsed.named_accounts = named_accounts;
+    // Boundary conversion: `SolanaParsedInstructionData.named_accounts` is the upstream
+    // solana_parser HashMap type; collecting into the inferred field type lets us
+    // build the local map as a BTreeMap (per crate-wide determinism rule in clippy.toml)
+    // and convert only at the assignment boundary.
+    parsed.named_accounts = named_accounts.into_iter().collect();
 
     Ok(parsed)
 }
