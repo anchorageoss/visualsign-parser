@@ -21,9 +21,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tonic_build::configure()
         .out_dir(GEN_DIR)
-        // JSON - Used for user requests -- TODO: needed?
-        .type_attribute(".parser", SERDE_DERIVE)
-        .enum_attribute(".", SERDE_ENUM_DERIVE)
+        // JSON - serde for types used in HTTP API requests/responses.
+        // QOSParserRequest/QOSParserResponse are excluded: they embed health and
+        // google.rpc types that don't implement serde.
+        .type_attribute(".parser.ParseRequest", SERDE_DERIVE)
+        .type_attribute(".parser.ParseResponse", SERDE_DERIVE)
+        .type_attribute(".parser.ParsedTransaction", SERDE_DERIVE)
+        .type_attribute(".parser.ParsedTransactionPayload", SERDE_DERIVE)
+        .type_attribute(".parser.Signature", SERDE_DERIVE)
+        .type_attribute(".parser.ChainMetadata", SERDE_DERIVE)
+        .type_attribute(".parser.EthereumMetadata", SERDE_DERIVE)
+        .type_attribute(".parser.SolanaMetadata", SERDE_DERIVE)
+        .type_attribute(".parser.Abi", SERDE_DERIVE)
+        .type_attribute(".parser.Idl", SERDE_DERIVE)
+        .type_attribute(".parser.SignatureMetadata", SERDE_DERIVE)
+        .type_attribute(".parser.Metadata", SERDE_DERIVE)
+        // untagged for the ChainMetadata oneof so JSON doesn't include a variant tag
+        // The path is message.oneof_field_name per prost-build enum_attribute docs
+        .enum_attribute(".parser.ChainMetadata.metadata", SERDE_ENUM_DERIVE)
         // BORSH - Used for QOS sha256 checks
         .type_attribute(".parser.ParsedTransactionPayload", BORSH_DERIVE)
         .enum_attribute(".parser.ParsedTransactionPayload", BORSH_ENUM_DISC_ATTR)
