@@ -42,7 +42,7 @@ impl InstructionVisualizer for SwigWalletVisualizer {
         // Convert 0-based index to 1-based instruction number for user-facing labels
         // (e.g., "Instruction 1" instead of "Instruction 0")
         let instruction_number = context.instruction_index() + 1;
-        let decoded = parse_swig_instruction(&instruction.data, &instruction.accounts)
+        let decoded = parse_swig_instruction(&instruction.data, &instruction.accounts, context)
             .map_err(|err| VisualSignError::DecodeError(err.to_string()))?;
 
         let summary = decoded.summary();
@@ -359,6 +359,7 @@ impl std::error::Error for SwigParseError {}
 fn parse_swig_instruction(
     data: &[u8],
     accounts: &[AccountMeta],
+    parent: &VisualizerContext,
 ) -> Result<SwigInstructionDecoded, SwigParseError> {
     if data.len() < 2 {
         return Err(SwigParseError::DataTooShort("missing discriminator"));
@@ -382,18 +383,18 @@ fn parse_swig_instruction(
         SwigInstructionKind::RemoveAuthorityV1 => parse_remove_authority_v1(data),
         SwigInstructionKind::UpdateAuthorityV1 => parse_update_authority_v1(data),
         SwigInstructionKind::SignV1 => {
-            let sign = parse_sign_instruction(data, 8, accounts)?;
+            let sign = parse_sign_instruction(data, 8, accounts, parent)?;
             Ok(SwigInstructionDecoded::SignV1(sign))
         }
         SwigInstructionKind::SignV2 => {
-            let sign = parse_sign_instruction(data, 8, accounts)?;
+            let sign = parse_sign_instruction(data, 8, accounts, parent)?;
             Ok(SwigInstructionDecoded::SignV2(sign))
         }
         SwigInstructionKind::CreateSessionV1 => parse_create_session_v1(data),
         SwigInstructionKind::CreateSubAccountV1 => parse_create_sub_account_v1(data),
         SwigInstructionKind::WithdrawFromSubAccountV1 => parse_withdraw_from_sub_account(data),
         SwigInstructionKind::SubAccountSignV1 => {
-            let sign = parse_sign_instruction(data, 16, accounts)?;
+            let sign = parse_sign_instruction(data, 16, accounts, parent)?;
             Ok(SwigInstructionDecoded::SubAccountSignV1(sign))
         }
         SwigInstructionKind::ToggleSubAccountV1 => parse_toggle_sub_account(data),
@@ -546,6 +547,7 @@ fn parse_sign_instruction(
     data: &[u8],
     header_len: usize,
     accounts: &[AccountMeta],
+    parent: &VisualizerContext,
 ) -> Result<SignInstructionDecoded, SwigParseError> {
     if data.len() < header_len {
         return Err(SwigParseError::DataTooShort("sign header"));
@@ -562,7 +564,7 @@ fn parse_sign_instruction(
     let payload_end = payload_start + instruction_payload_len;
     let instruction_payload = &data[payload_start..payload_end];
     let authority_payload = data[payload_end..].to_vec();
-    let inner_instructions = decode_compact_instructions(instruction_payload, accounts)?;
+    let inner_instructions = decode_compact_instructions(instruction_payload, accounts, parent)?;
 
     Ok(SignInstructionDecoded {
         role_id,
@@ -679,6 +681,7 @@ fn parse_transfer_assets(data: &[u8]) -> Result<SwigInstructionDecoded, SwigPars
 fn decode_compact_instructions(
     payload: &[u8],
     accounts: &[AccountMeta],
+    parent: &VisualizerContext,
 ) -> Result<Vec<DecodedInnerInstruction>, SwigParseError> {
     if payload.is_empty() {
         return Ok(Vec::new());
@@ -740,6 +743,7 @@ fn decode_compact_instructions(
             &program_meta.display,
             &data_slice,
             &inner_accounts,
+            parent,
         );
         instructions.push(DecodedInnerInstruction {
             program_id: program_meta.pubkey,
@@ -783,6 +787,7 @@ fn describe_inner_instruction(
     program_display: &str,
     data: &[u8],
     accounts: &[InnerAccountMeta],
+    parent: &VisualizerContext,
 ) -> String {
     let fallback = || {
         let byte_len = data.len();
@@ -794,8 +799,13 @@ fn describe_inner_instruction(
     };
 
     if let Some(instruction) = build_inner_instruction(program_id, accounts, data) {
-        if let Some(summary) = visualize_inner_instruction(instruction) {
-            return summary;
+        match visualize_inner_instruction(instruction, parent) {
+            InnerInstructionSummary::Visualized(summary) => return summary,
+            InnerInstructionSummary::DepthExceeded => {
+                return "<truncated: maximum nested-instruction visualization depth reached>"
+                    .to_string();
+            }
+            InnerInstructionSummary::NotVisualized => {}
         }
     }
 
@@ -841,11 +851,20 @@ fn build_inner_instruction(
     })
 }
 
-fn visualize_inner_instruction(instruction: Instruction) -> Option<String> {
-    let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
-    let visualizer_refs: Vec<&dyn InstructionVisualizer> =
-        visualizers.iter().map(|viz| viz.as_ref()).collect();
+/// Outcome of attempting to visualize a swig inner instruction with the full visualizer
+/// framework. The variants are distinct so the caller can render an explicit
+/// "max depth exceeded" string instead of a generic byte-count fallback.
+#[derive(Debug)]
+enum InnerInstructionSummary {
+    Visualized(String),
+    DepthExceeded,
+    NotVisualized,
+}
 
+fn visualize_inner_instruction(
+    instruction: Instruction,
+    parent: &VisualizerContext,
+) -> InnerInstructionSummary {
     let sender = SolanaAccount {
         account_key: instruction
             .accounts
@@ -856,8 +875,17 @@ fn visualize_inner_instruction(instruction: Instruction) -> Option<String> {
         writable: false,
     };
     let instructions = vec![instruction];
-    let idl_registry = crate::idl::IdlRegistry::new();
-    let context = VisualizerContext::new(&sender, 0, &instructions, &idl_registry);
+
+    // for_nested_call increments depth and short-circuits when MAX_CALL_DEPTH is reached,
+    // protecting against unbounded recursion via swig instructions whose inner compact
+    // payloads themselves target swig.
+    let Some(context) = parent.for_nested_call(&sender, 0, &instructions) else {
+        return InnerInstructionSummary::DepthExceeded;
+    };
+
+    let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
+    let visualizer_refs: Vec<&dyn InstructionVisualizer> =
+        visualizers.iter().map(|viz| viz.as_ref()).collect();
 
     visualize_with_any(&visualizer_refs, &context)
         .and_then(|result| result.ok())
@@ -865,6 +893,8 @@ fn visualize_inner_instruction(instruction: Instruction) -> Option<String> {
             VisualizerKind::Payments("UnknownProgram") => None,
             _ => summarize_visualized_field(&viz_result.field),
         })
+        .map(InnerInstructionSummary::Visualized)
+        .unwrap_or(InnerInstructionSummary::NotVisualized)
 }
 
 fn summarize_visualized_field(field: &AnnotatedPayloadField) -> Option<String> {
@@ -2617,5 +2647,38 @@ mod tests {
         assert!(rows.iter().any(|(label, value)| {
             label == "Updated Actions (hex)" && *value == hex::encode(&action_bytes)
         }));
+    }
+
+    #[test]
+    fn test_visualize_inner_instruction_returns_depth_exceeded_at_cap() {
+        use crate::core::{MAX_CALL_DEPTH, VisualizerContext};
+        use solana_parser::solana::structs::SolanaAccount;
+        use solana_sdk::instruction::Instruction;
+
+        let sender = SolanaAccount {
+            account_key: Pubkey::new_from_array([9; 32]).to_string(),
+            signer: false,
+            writable: false,
+        };
+        let outer_instructions: Vec<Instruction> = vec![];
+        let registry = crate::idl::IdlRegistry::new();
+        let mut current = VisualizerContext::new(&sender, 0, &outer_instructions, &registry);
+        for _ in 0..MAX_CALL_DEPTH {
+            current = current
+                .for_nested_call(&sender, 0, &outer_instructions)
+                .expect("for_nested_call should succeed under cap");
+        }
+
+        let inner = Instruction {
+            program_id: Pubkey::new_from_array([1; 32]),
+            accounts: vec![],
+            data: vec![],
+        };
+        match super::visualize_inner_instruction(inner, &current) {
+            super::InnerInstructionSummary::DepthExceeded => {}
+            other => panic!(
+                "expected DepthExceeded once parent context is at MAX_CALL_DEPTH, got {other:?}"
+            ),
+        }
     }
 }

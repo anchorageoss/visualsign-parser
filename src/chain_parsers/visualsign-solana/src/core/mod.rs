@@ -28,6 +28,15 @@ pub enum VisualizerKind {
     Payments(&'static str),
 }
 
+/// Maximum nesting depth for visualizing inner instructions.
+///
+/// Solana's runtime CPI cap is 4, so any visualization that hits this depth is
+/// either malformed or adversarial input. The cap prevents stack-overflow DoS
+/// through nested-instruction encodings (e.g., a `vaultTransactionCreate`
+/// containing another `vaultTransactionCreate`, or a swig instruction wrapping
+/// another swig instruction).
+pub const MAX_CALL_DEPTH: u8 = 4;
+
 /// Context for visualizing a Solana instruction.
 ///
 /// Holds all necessary information to visualize a specific command
@@ -43,10 +52,12 @@ pub struct VisualizerContext<'a> {
     instructions: &'a Vec<Instruction>,
     /// IDL registry for parsing unknown programs with Anchor IDLs
     idl_registry: &'a crate::idl::IdlRegistry,
+    /// Depth of nested inner-instruction visualization (0 for top-level).
+    call_depth: u8,
 }
 
 impl<'a> VisualizerContext<'a> {
-    /// Creates a new `VisualizerContext`.
+    /// Creates a new top-level `VisualizerContext` with `call_depth = 0`.
     pub fn new(
         sender: &'a SolanaAccount,
         instruction_index: usize,
@@ -58,7 +69,34 @@ impl<'a> VisualizerContext<'a> {
             instruction_index,
             instructions,
             idl_registry,
+            call_depth: 0,
         }
+    }
+
+    /// Creates a child context for visualizing a nested inner instruction.
+    ///
+    /// Returns `None` when incrementing would exceed [`MAX_CALL_DEPTH`]. Callers
+    /// should treat `None` as a signal to emit a "max depth exceeded" fallback
+    /// rather than recursing further.
+    pub fn for_nested_call<'b>(
+        &self,
+        sender: &'b SolanaAccount,
+        instruction_index: usize,
+        instructions: &'b Vec<Instruction>,
+    ) -> Option<VisualizerContext<'b>>
+    where
+        'a: 'b,
+    {
+        if self.call_depth >= MAX_CALL_DEPTH {
+            return None;
+        }
+        Some(VisualizerContext {
+            sender,
+            instruction_index,
+            instructions,
+            idl_registry: self.idl_registry,
+            call_depth: self.call_depth + 1,
+        })
     }
 
     /// Returns a reference to the IDL registry
@@ -84,6 +122,11 @@ impl<'a> VisualizerContext<'a> {
     /// Returns the current instruction being visualized.
     pub fn current_instruction(&self) -> Option<&Instruction> {
         self.instructions.get(self.instruction_index)
+    }
+
+    /// Returns the nesting depth of this context (0 at the top level).
+    pub fn call_depth(&self) -> u8 {
+        self.call_depth
     }
 }
 
@@ -180,4 +223,40 @@ pub fn visualize_with_any(
                 }),
         )
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use crate::idl::IdlRegistry;
+
+    #[test]
+    fn for_nested_call_caps_at_max_call_depth() {
+        let sender = SolanaAccount {
+            account_key: "11111111111111111111111111111111".to_string(),
+            signer: false,
+            writable: false,
+        };
+        let instructions: Vec<Instruction> = vec![];
+        let registry = IdlRegistry::new();
+        let root = VisualizerContext::new(&sender, 0, &instructions, &registry);
+        assert_eq!(root.call_depth(), 0);
+
+        let mut current = root;
+        for expected_depth in 1..=u32::from(MAX_CALL_DEPTH) {
+            let next = current
+                .for_nested_call(&sender, 0, &instructions)
+                .unwrap_or_else(|| {
+                    panic!("for_nested_call refused before reaching cap at depth {expected_depth}")
+                });
+            assert_eq!(u32::from(next.call_depth()), expected_depth);
+            current = next;
+        }
+
+        assert!(
+            current.for_nested_call(&sender, 0, &instructions).is_none(),
+            "for_nested_call must return None once MAX_CALL_DEPTH is reached"
+        );
+    }
 }

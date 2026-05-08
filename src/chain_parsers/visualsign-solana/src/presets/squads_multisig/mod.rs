@@ -6,7 +6,6 @@ use crate::core::{
     InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
     available_visualizers, visualize_with_any,
 };
-use crate::idl::IdlRegistry;
 use config::SquadsMultisigConfig;
 use solana_parser::solana::structs::SolanaAccount;
 use solana_parser::{
@@ -14,7 +13,8 @@ use solana_parser::{
 };
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::pubkey::Pubkey;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
+use std::str::FromStr;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -31,6 +31,14 @@ static SQUADS_MULTISIG_CONFIG: SquadsMultisigConfig = SquadsMultisigConfig;
 // -- VaultTransactionMessage uses Solana's compact wire format (u8 lengths), not borsh --
 
 struct VaultTransactionMessage {
+    /// Total number of signer accounts (the first `num_signers` entries of `account_keys`).
+    num_signers: u8,
+    /// Number of writable signer accounts (the first `num_writable_signers`
+    /// entries of `account_keys`).
+    num_writable_signers: u8,
+    /// Number of writable non-signer accounts (immediately following the signer
+    /// block in `account_keys`).
+    num_writable_non_signers: u8,
     account_keys: Vec<Pubkey>,
     instructions: Vec<MultisigCompiledInstruction>,
 }
@@ -80,9 +88,9 @@ impl VaultTransactionMessage {
             };
 
         // Header: 3 u8s (numSigners, numWritableSigners, numWritableNonSigners)
-        let _num_signers = read_u8(&mut pos)?;
-        let _num_writable_signers = read_u8(&mut pos)?;
-        let _num_writable_non_signers = read_u8(&mut pos)?;
+        let num_signers = read_u8(&mut pos)?;
+        let num_writable_signers = read_u8(&mut pos)?;
+        let num_writable_non_signers = read_u8(&mut pos)?;
 
         // Account keys: u8 count + N × 32-byte pubkeys
         let num_keys = read_u8(&mut pos)? as usize;
@@ -130,6 +138,9 @@ impl VaultTransactionMessage {
         }
 
         Ok(Self {
+            num_signers,
+            num_writable_signers,
+            num_writable_non_signers,
             account_keys,
             instructions,
         })
@@ -231,8 +242,8 @@ fn build_named_accounts(
     data: &[u8],
     idl: &Idl,
     accounts: &[AccountMeta],
-) -> HashMap<String, String> {
-    let mut named_accounts = HashMap::new();
+) -> BTreeMap<String, String> {
+    let mut named_accounts = BTreeMap::new();
 
     let idl_instruction = idl.instructions.iter().find(|inst| {
         inst.discriminator
@@ -253,7 +264,7 @@ fn build_named_accounts(
 
 struct SquadsParsedInstruction {
     parsed: SolanaParsedInstructionData,
-    named_accounts: HashMap<String, String>,
+    named_accounts: BTreeMap<String, String>,
 }
 
 /// `(title, condensed_fields, expanded_fields)` returned by the various `build_*` helpers.
@@ -287,13 +298,16 @@ fn build_parsed_fields(
 
 /// Try to decode the nested transaction message inside vaultTransactionCreate.
 ///
-/// Returns `Ok(None)` when the embedded transaction message is missing or unparseable
-/// (callers fall through to the generic display). Returns `Err` only when field-builder
-/// or downstream visualization errors occur — those propagate up so the caller can decide
-/// whether to surface them.
+/// Returns `Ok(None)` when the embedded transaction message is missing, unparseable,
+/// references accounts via an Address Lookup Table, or otherwise fails to satisfy the
+/// invariants required for safe nested visualization (callers fall through to the
+/// generic display, where the user can still see the raw decoded args).
+///
+/// Returns `Err` only when field-builder or downstream visualization errors occur —
+/// those propagate up so the caller can decide whether to surface them.
 fn try_build_vault_transaction_fields(
     parsed: &SolanaParsedInstructionData,
-    named_accounts: &HashMap<String, String>,
+    named_accounts: &BTreeMap<String, String>,
     program_id: &str,
     context: &VisualizerContext,
 ) -> Result<Option<SquadsPreviewFields>, VisualSignError> {
@@ -316,16 +330,32 @@ fn try_build_vault_transaction_fields(
         return Ok(None);
     };
 
-    // Reconstruct full Instructions from the compiled instructions
-    let inner_instructions = reconstruct_instructions(&vault_msg);
+    // Vault index must be present and fit a u8 (Squads supports vault indices 0..=255).
+    // Don't default a missing or out-of-range value to 0 — vault 0 is real, so a silent
+    // default is indistinguishable from an explicit selection.
+    let Some(vault_index_u64) = args_value.get("vaultIndex").and_then(|v| v.as_u64()) else {
+        return Ok(None);
+    };
+    let Ok(vault_index) = u8::try_from(vault_index_u64) else {
+        return Ok(None);
+    };
 
-    // Visualize inner instructions using the full visualizer framework
-    let inner_fields = visualize_inner_instructions(&inner_instructions, context)?;
+    // Reconstruct full Instructions from the compiled instructions. An out-of-range
+    // index means an ALT-resolved key the parser doesn't have; fall back to generic
+    // display rather than rendering a truncated account list.
+    let Ok(inner_instructions) = reconstruct_instructions(&vault_msg) else {
+        return Ok(None);
+    };
 
-    let vault_index = args_value
-        .get("vaultIndex")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    // Derive the vault PDA so downstream visualizers that compare `context.sender()`
+    // attribute the inner instruction's signer to the vault, not the outer fee-payer.
+    let inner_sender_account = vault_pda_account(named_accounts, vault_index);
+
+    // Visualize inner instructions using the full visualizer framework, threading
+    // `for_nested_call` so we cap at MAX_CALL_DEPTH.
+    let inner_fields =
+        visualize_inner_instructions(&inner_instructions, context, inner_sender_account.as_ref())?;
+
     let memo = args_value
         .get("memo")
         .and_then(|v| v.as_str())
@@ -365,34 +395,92 @@ fn try_build_vault_transaction_fields(
     Ok(Some((title, condensed_fields, expanded_fields)))
 }
 
+/// Derive the Squads v4 vault PDA from the multisig pubkey + vault index.
+///
+/// Seeds: `[b"multisig", multisig.as_ref(), b"vault", &[vault_index]]`,
+/// program = `SQUADS_MULTISIG_PROGRAM_ID`.
+///
+/// Returns `None` when `multisig` isn't present in `named_accounts`, isn't a parseable
+/// pubkey, or when the program-id constant fails to parse (the last is unreachable in
+/// practice but we don't panic).
+fn vault_pda_account(
+    named_accounts: &BTreeMap<String, String>,
+    vault_index: u8,
+) -> Option<SolanaAccount> {
+    let multisig_str = named_accounts.get("multisig")?;
+    let multisig = Pubkey::from_str(multisig_str).ok()?;
+    let program_id = Pubkey::from_str(SQUADS_MULTISIG_PROGRAM_ID).ok()?;
+    let (vault_pda, _bump) = Pubkey::find_program_address(
+        &[b"multisig", multisig.as_ref(), b"vault", &[vault_index]],
+        &program_id,
+    );
+    Some(SolanaAccount {
+        account_key: vault_pda.to_string(),
+        signer: true,
+        writable: false,
+    })
+}
+
 /// Reconstruct Instruction objects from VaultTransactionMessage compiled instructions.
-/// Same pattern as core/instructions.rs:39-66.
-fn reconstruct_instructions(vault_msg: &VaultTransactionMessage) -> Vec<Instruction> {
+///
+/// Returns `Err` if any program-id index or account index references an out-of-range
+/// position in `account_keys`. The latter is a real signal that the transaction would
+/// resolve missing keys via an Address Lookup Table at execution time; we don't have
+/// the ALT contents here, so we refuse to reconstruct rather than silently dropping
+/// accounts (which can hide a transfer destination from the user).
+///
+/// `is_signer` / `is_writable` are derived from the header counts per Solana's
+/// `MessageHeader` convention:
+///   - `[0, num_writable_signers)` are signer + writable
+///   - `[num_writable_signers, num_signers)` are signer + readonly
+///   - `[num_signers, num_signers + num_writable_non_signers)` are non-signer + writable
+///   - everything else is non-signer + readonly
+fn reconstruct_instructions(
+    vault_msg: &VaultTransactionMessage,
+) -> Result<Vec<Instruction>, &'static str> {
     let account_keys = &vault_msg.account_keys;
+    let num_keys = account_keys.len();
+    let num_signers = vault_msg.num_signers as usize;
+    let num_writable_signers = vault_msg.num_writable_signers as usize;
+    let num_writable_non_signers = vault_msg.num_writable_non_signers as usize;
+
+    let account_meta_for_index = |idx: usize| -> Option<AccountMeta> {
+        let pubkey = *account_keys.get(idx)?;
+        let is_signer = idx < num_signers;
+        let is_writable = if is_signer {
+            idx < num_writable_signers
+        } else {
+            let non_signer_idx = idx - num_signers;
+            non_signer_idx < num_writable_non_signers
+        };
+        Some(if is_writable {
+            AccountMeta::new(pubkey, is_signer)
+        } else {
+            AccountMeta::new_readonly(pubkey, is_signer)
+        })
+    };
 
     vault_msg
         .instructions
         .iter()
-        .filter_map(|ci| {
+        .map(|ci| {
             let program_id_idx = ci.program_id_index as usize;
-            if program_id_idx >= account_keys.len() {
-                return None;
+            if program_id_idx >= num_keys {
+                return Err("program_id index out of range (likely an ALT-resolved key)");
             }
 
             let accounts: Vec<AccountMeta> = ci
                 .account_indexes
                 .iter()
-                .filter_map(|&i| {
-                    let idx = i as usize;
-                    if idx < account_keys.len() {
-                        Some(AccountMeta::new_readonly(account_keys[idx], false))
-                    } else {
-                        None
-                    }
+                .map(|&i| {
+                    account_meta_for_index(i as usize).ok_or(
+                        "inner-instruction account index out of range \
+                         (likely an ALT-resolved key)",
+                    )
                 })
-                .collect();
+                .collect::<Result<_, _>>()?;
 
-            Some(Instruction {
+            Ok(Instruction {
                 program_id: account_keys[program_id_idx],
                 accounts,
                 data: ci.data.clone(),
@@ -408,26 +496,50 @@ fn reconstruct_instructions(vault_msg: &VaultTransactionMessage) -> Vec<Instruct
 /// matches — we explicitly fall back to `UnknownProgramVisualizer` (a catch-all). This
 /// guarantees every inner instruction produces *some* output: a failure in a specific
 /// program's visualizer never silently drops the field.
+///
+/// Recursion is bounded by `VisualizerContext::for_nested_call`; once `MAX_CALL_DEPTH`
+/// is reached, we return a single explicit "max depth exceeded" field rather than
+/// recursing further. This protects against unbounded-recursion DoS via cyclically
+/// nested `vaultTransactionCreate` payloads.
 fn visualize_inner_instructions(
     inner_instructions: &[Instruction],
     context: &VisualizerContext,
+    inner_sender_override: Option<&SolanaAccount>,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    let owned_sender = inner_sender_override
+        .cloned()
+        .unwrap_or_else(|| SolanaAccount {
+            account_key: context.sender().account_key.clone(),
+            signer: false,
+            writable: false,
+        });
+    let instructions_vec: Vec<Instruction> = inner_instructions.to_vec();
+
+    let Some(_probe) = context.for_nested_call(&owned_sender, 0, &instructions_vec) else {
+        return Ok(vec![create_text_field(
+            "Inner Instructions",
+            "<truncated: maximum nested-instruction visualization depth reached>",
+        )?]);
+    };
+
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
     let visualizers_refs: Vec<&dyn InstructionVisualizer> =
         visualizers.iter().map(|v| v.as_ref()).collect();
 
-    let idl_registry = IdlRegistry::new();
-    let sender = SolanaAccount {
-        account_key: context.sender().account_key.clone(),
-        signer: false,
-        writable: false,
-    };
-
-    let instructions_vec: Vec<Instruction> = inner_instructions.to_vec();
     let mut fields = Vec::with_capacity(instructions_vec.len());
 
     for (idx, _) in instructions_vec.iter().enumerate() {
-        let inner_context = VisualizerContext::new(&sender, idx, &instructions_vec, &idl_registry);
+        // Safe to unwrap-equivalent: depth was already checked above (the probe Some-arm
+        // means depth + 1 <= MAX_CALL_DEPTH). We re-call so the index advances per inner.
+        let Some(inner_context) = context.for_nested_call(&owned_sender, idx, &instructions_vec)
+        else {
+            // Should be unreachable given the probe above, but keep the safety net.
+            fields.push(create_text_field(
+                "Inner Instructions",
+                "<truncated: maximum nested-instruction visualization depth reached>",
+            )?);
+            break;
+        };
 
         let field = match visualize_with_any(&visualizers_refs, &inner_context) {
             Some(Ok(result)) => result.field,
@@ -442,7 +554,7 @@ fn visualize_inner_instructions(
 
 fn build_generic_fields(
     parsed: &SolanaParsedInstructionData,
-    named_accounts: &HashMap<String, String>,
+    named_accounts: &BTreeMap<String, String>,
     program_id: &str,
 ) -> Result<SquadsPreviewFields, VisualSignError> {
     let title = format!("Squads Multisig: {}", parsed.instruction_name);
@@ -510,6 +622,7 @@ fn format_arg_value(value: &serde_json::Value) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -587,7 +700,7 @@ mod tests {
             "program_id_index should be valid"
         );
 
-        let instructions = reconstruct_instructions(&vault_msg);
+        let instructions = reconstruct_instructions(&vault_msg)?;
         assert_eq!(instructions.len(), 1, "Should reconstruct 1 instruction");
         let first_inner = instructions
             .first()
@@ -596,6 +709,209 @@ mod tests {
         assert!(
             vault_msg.account_keys.contains(&first_inner.program_id),
             "Inner instruction program_id should be in account_keys"
+        );
+        Ok(())
+    }
+
+    fn make_pubkey(seed: u8) -> Pubkey {
+        Pubkey::new_from_array([seed; 32])
+    }
+
+    fn make_vault_msg(
+        num_signers: u8,
+        num_writable_signers: u8,
+        num_writable_non_signers: u8,
+        account_keys: Vec<Pubkey>,
+        compiled: Vec<MultisigCompiledInstruction>,
+    ) -> VaultTransactionMessage {
+        VaultTransactionMessage {
+            num_signers,
+            num_writable_signers,
+            num_writable_non_signers,
+            account_keys,
+            instructions: compiled,
+        }
+    }
+
+    #[test]
+    fn test_reconstruct_instructions_out_of_range_returns_err() {
+        // Three keys, but the inner instruction references account index 99 (ALT-resolved
+        // at execution time). We must refuse rather than silently dropping the account.
+        let vault_msg = make_vault_msg(
+            1,
+            1,
+            0,
+            vec![make_pubkey(1), make_pubkey(2), make_pubkey(3)],
+            vec![MultisigCompiledInstruction {
+                program_id_index: 2,
+                account_indexes: vec![0, 99],
+                data: vec![],
+            }],
+        );
+        assert!(
+            reconstruct_instructions(&vault_msg).is_err(),
+            "out-of-range account index must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_reconstruct_instructions_writable_flags_match_header() {
+        // Account layout per Solana MessageHeader convention:
+        //   indices [0, num_writable_signers)            -> signer + writable
+        //   indices [num_writable_signers, num_signers)  -> signer + readonly
+        //   indices [num_signers, num_signers + num_writable_non_signers) -> writable non-signer
+        //   indices >=                                    -> readonly non-signer
+        // num_signers=2, num_writable_signers=1, num_writable_non_signers=1 means:
+        //   key[0] writable signer, key[1] readonly signer, key[2] writable non-signer,
+        //   key[3] readonly non-signer (program), key[4] readonly non-signer.
+        let vault_msg = make_vault_msg(
+            2,
+            1,
+            1,
+            vec![
+                make_pubkey(0),
+                make_pubkey(1),
+                make_pubkey(2),
+                make_pubkey(3),
+                make_pubkey(4),
+            ],
+            vec![MultisigCompiledInstruction {
+                program_id_index: 3,
+                account_indexes: vec![0, 1, 2, 4],
+                data: vec![],
+            }],
+        );
+        let reconstructed =
+            reconstruct_instructions(&vault_msg).expect("reconstruction should succeed");
+        let metas = &reconstructed[0].accounts;
+        assert_eq!(metas.len(), 4);
+        // key[0]: writable signer
+        assert!(metas[0].is_writable && metas[0].is_signer);
+        // key[1]: readonly signer
+        assert!(!metas[1].is_writable && metas[1].is_signer);
+        // key[2]: writable non-signer
+        assert!(metas[2].is_writable && !metas[2].is_signer);
+        // key[4]: readonly non-signer
+        assert!(!metas[3].is_writable && !metas[3].is_signer);
+    }
+
+    #[test]
+    fn test_build_named_accounts_returns_btreemap_for_deterministic_order() -> TestResult {
+        // BTreeMap orders by key; verify two calls yield the same iteration sequence.
+        let idl = get_squads_idl().ok_or("Squads IDL should load successfully")?;
+        let create_disc = idl
+            .instructions
+            .iter()
+            .find(|i| i.name == "vaultTransactionCreate")
+            .and_then(|i| i.discriminator.as_ref())
+            .ok_or("vaultTransactionCreate must have a discriminator")?
+            .clone();
+        // Build minimal "data" carrying the discriminator and arbitrary AccountMeta list.
+        let data = create_disc;
+        let metas: Vec<AccountMeta> = (1u8..=8)
+            .map(|i| AccountMeta::new_readonly(make_pubkey(i), false))
+            .collect();
+        let first = build_named_accounts(&data, idl, &metas);
+        let second = build_named_accounts(&data, idl, &metas);
+        let first_keys: Vec<&String> = first.keys().collect();
+        let second_keys: Vec<&String> = second.keys().collect();
+        assert_eq!(first_keys, second_keys, "BTreeMap iteration must be stable");
+        Ok(())
+    }
+
+    #[test]
+    fn test_vault_pda_account_derives_pda() {
+        let multisig = make_pubkey(7);
+        let mut named = BTreeMap::new();
+        named.insert("multisig".to_string(), multisig.to_string());
+        let acct = vault_pda_account(&named, 0).expect("vault PDA should derive");
+        // PDA must differ from the multisig and be a valid pubkey string.
+        assert_ne!(acct.account_key, multisig.to_string());
+        Pubkey::from_str(&acct.account_key).expect("vault PDA should round-trip");
+        assert!(acct.signer, "inner sender should be marked as signer");
+    }
+
+    #[test]
+    fn test_vault_pda_account_missing_multisig_returns_none() {
+        let named: BTreeMap<String, String> = BTreeMap::new();
+        assert!(vault_pda_account(&named, 0).is_none());
+    }
+
+    #[test]
+    fn test_visualize_inner_instructions_truncates_when_at_max_depth() -> TestResult {
+        // Build a context that is already at MAX_CALL_DEPTH so for_nested_call refuses
+        // and visualize_inner_instructions emits the explicit truncation field.
+        use crate::core::MAX_CALL_DEPTH;
+        let sender = SolanaAccount {
+            account_key: make_pubkey(9).to_string(),
+            signer: false,
+            writable: false,
+        };
+        let outer_instructions: Vec<Instruction> = vec![];
+        let registry = crate::idl::IdlRegistry::new();
+        let mut current = VisualizerContext::new(&sender, 0, &outer_instructions, &registry);
+        for _ in 0..MAX_CALL_DEPTH {
+            current = current
+                .for_nested_call(&sender, 0, &outer_instructions)
+                .ok_or("for_nested_call should succeed under cap")?;
+        }
+        // current.call_depth() == MAX_CALL_DEPTH; the next call from inside
+        // visualize_inner_instructions returns None and we emit the truncation message.
+        let inner_instructions = vec![Instruction {
+            program_id: make_pubkey(1),
+            accounts: vec![],
+            data: vec![],
+        }];
+        let fields = visualize_inner_instructions(&inner_instructions, &current, None)?;
+        assert_eq!(fields.len(), 1, "truncation must emit a single field");
+        let serialized = serde_json::to_string(&fields[0])?;
+        assert!(
+            serialized.contains("maximum nested-instruction visualization depth reached"),
+            "field must contain the truncation marker: {serialized}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_try_build_vault_transaction_fields_missing_vault_index_returns_none() -> TestResult {
+        // Construct a minimal SolanaParsedInstructionData that has args but no vaultIndex.
+        // The args.transactionMessage points at our existing fixture so the message itself
+        // parses fine; only vaultIndex is missing.
+        let tx_msg_hex = "01010103904fc8953dcfc9f3b5179893ee12fc9c445cad889a957d61cfb8dbcc172f6a4f4a3eef4b03c82a71599ea07a16ee4bcf6dce31357d8460b2ac1bd4c3a9860c9d0954dbbe9ec960c98a7a293fe21336966fe180d151ae4b8179561f89854a53f601020200012800a1b028d53cb8b3e4ef5e27e0961546aad46749acc092e03c1a8c7c1187e887cc245db9cf2bca9a9900";
+        let mut args_inner = serde_json::Map::new();
+        args_inner.insert(
+            "transactionMessage".to_string(),
+            serde_json::Value::String(tx_msg_hex.to_string()),
+        );
+        // Note: deliberately no "vaultIndex" key.
+        let mut args_outer = serde_json::Map::new();
+        args_outer.insert("args".to_string(), serde_json::Value::Object(args_inner));
+        let parsed = SolanaParsedInstructionData {
+            instruction_name: "vaultTransactionCreate".to_string(),
+            discriminator: "00".to_string(),
+            named_accounts: std::collections::HashMap::new(),
+            program_call_args: args_outer,
+            idl_source: solana_parser::IdlSource::Custom,
+            idl_hash: String::new(),
+        };
+        let named: BTreeMap<String, String> = BTreeMap::new();
+        let sender = SolanaAccount {
+            account_key: make_pubkey(0).to_string(),
+            signer: false,
+            writable: false,
+        };
+        let instructions: Vec<Instruction> = vec![];
+        let registry = crate::idl::IdlRegistry::new();
+        let context = VisualizerContext::new(&sender, 0, &instructions, &registry);
+        let result = try_build_vault_transaction_fields(
+            &parsed,
+            &named,
+            SQUADS_MULTISIG_PROGRAM_ID,
+            &context,
+        )?;
+        assert!(
+            result.is_none(),
+            "missing vaultIndex must signal fall-back to generic display"
         );
         Ok(())
     }
