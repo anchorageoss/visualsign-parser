@@ -11,6 +11,7 @@ const DESCRIPTOR_PATH: &str = "./generated/src/generated/descriptor.bin";
 
 const SERDE_DERIVE: &str = "#[cfg_attr(feature = \"serde_derive\", derive(::serde::Serialize, ::serde::Deserialize), serde(rename_all = \"camelCase\"))]";
 const SERDE_ENUM_DERIVE: &str = "#[cfg_attr(feature = \"serde_derive\", serde(untagged))]";
+const SERDE_DEFAULT: &str = "#[cfg_attr(feature = \"serde_derive\", serde(default))]";
 const BORSH_ENUM_DISC_ATTR: &str = "#[borsh(use_discriminant=true)]";
 const TONIC_FEATURE_GATE: &str = "#[cfg(feature = \"tonic_types\")]";
 const BORSH_DERIVE: &str = "#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]";
@@ -39,6 +40,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // untagged for the ChainMetadata oneof so JSON doesn't include a variant tag
         // The path is message.oneof_field_name per prost-build enum_attribute docs
         .enum_attribute(".parser.ChainMetadata.metadata", SERDE_ENUM_DERIVE)
+        // serde(default) on map fields so callers can omit them when empty
+        .field_attribute(".parser.EthereumMetadata.abi_mappings", SERDE_DEFAULT)
+        .field_attribute(".parser.SolanaMetadata.idl_mappings", SERDE_DEFAULT)
         // BORSH - Used for QOS sha256 checks
         .type_attribute(".parser.ParsedTransactionPayload", BORSH_DERIVE)
         .enum_attribute(".parser.ParsedTransactionPayload", BORSH_ENUM_DISC_ATTR)

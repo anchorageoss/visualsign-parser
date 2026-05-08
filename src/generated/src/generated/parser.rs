@@ -197,6 +197,7 @@ pub struct EthereumMetadata {
     /// Allows wallets to provide multiple ABIs, one per contract. Use a consistent address casing
     /// convention (for example, all lowercase or EIP-55 checksummed) to avoid duplicate/mismatched entries.
     #[prost(map = "string, message", tag = "3")]
+    #[cfg_attr(feature = "serde_derive", serde(default))]
     pub abi_mappings: ::std::collections::HashMap<::prost::alloc::string::String, Abi>,
 }
 #[cfg_attr(
@@ -216,6 +217,7 @@ pub struct SolanaMetadata {
     /// Map of program_id (base58 string) to IDL definitions
     /// Allows wallet to provide multiple IDLs, one per program
     #[prost(map = "string, message", tag = "3")]
+    #[cfg_attr(feature = "serde_derive", serde(default))]
     pub idl_mappings: ::std::collections::HashMap<::prost::alloc::string::String, Idl>,
 }
 #[cfg_attr(
