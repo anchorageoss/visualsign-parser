@@ -74,6 +74,7 @@ Raw tx bytes → ChainPlugin (CLI) or gRPC request
 - Integration tests in `integration/tests/` use gRPC client against built binaries
 - `test_utils` module in `visualsign` provides shared test helpers
 - Place all `use` imports at the top of the test module, not inside individual test functions
+- Surfpool-backed integration tests (`visualsign-solana/tests/surfpool_fuzz.rs`) are `#[ignore]` and require the `surfpool` binary on `$PATH`. Each `idl_test!(...)` invocation references a `pub const` from `solana_parser::solana::embedded_idls`, so IDL contents are baked in at compile time and the macro expands into one `#[tokio::test]` discoverable by cargo. Run with `HELIUS_API_KEY=<key> cargo test -p visualsign-solana --test surfpool_fuzz -- --ignored --test-threads=1`. Adding a new IDL: once it's exposed as a `pub const` upstream in `solana_parser`, add an `idl_test!(name, CONST)` line.
 
 ### Local Dev Container
 
