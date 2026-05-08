@@ -1,14 +1,12 @@
 // Build scripts run at compile time — panicking on failure is acceptable.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used)]
 
-use std::{env, fs, path::PathBuf, process::Command};
+use std::{env, fs, path::PathBuf};
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/presets");
     println!("cargo:rerun-if-changed=src/integrations");
-
-    emit_solana_idl_dir();
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let visualizers = collect_visualizers();
@@ -26,51 +24,6 @@ fn main() {
     );
 
     fs::write(out_dir.join("generated_visualizers.rs"), code).unwrap();
-}
-
-/// Resolve the `solana_parser` package's IDL directory at compile time and
-/// expose it to the test code as `env!("SOLANA_IDL_DIR")`. Runs `cargo
-/// metadata` once per build and pins the path that matches the Cargo.lock'd
-/// revision of `solana_parser`. Avoids forcing tests to invoke `cargo` at
-/// runtime, and keeps the test binary working when its CWD changes.
-fn emit_solana_idl_dir() {
-    let manifest_path = format!("{}/Cargo.toml", env::var("CARGO_MANIFEST_DIR").unwrap());
-    let output = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-        .args([
-            "metadata",
-            "--manifest-path",
-            &manifest_path,
-            "--format-version",
-            "1",
-        ])
-        .output()
-        .expect("failed to run cargo metadata for solana_parser IDL discovery");
-    assert!(
-        output.status.success(),
-        "cargo metadata failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let meta: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("invalid cargo metadata JSON");
-    let pkg = meta["packages"]
-        .as_array()
-        .expect("packages array")
-        .iter()
-        .find(|p| p["name"].as_str() == Some("solana_parser"))
-        .expect("solana_parser package not found");
-    let manifest = pkg["manifest_path"].as_str().expect("manifest_path");
-    let pkg_dir = std::path::Path::new(manifest).parent().expect("pkg dir");
-    let idl_dir = pkg_dir.join("src").join("solana").join("idls");
-    assert!(
-        idl_dir.is_dir(),
-        "solana_parser IDL dir not present: {}",
-        idl_dir.display()
-    );
-    println!("cargo:rustc-env=SOLANA_IDL_DIR={}", idl_dir.display());
-    // Cargo doesn't track git-dep checkout dirs as inputs; tag the manifest as
-    // the rerun trigger (changes whenever solana_parser's rev bumps).
-    println!("cargo:rerun-if-changed={manifest}");
 }
 
 fn collect_visualizers() -> Vec<String> {

@@ -24,9 +24,6 @@ solana-system-interface = "1.0"
 spl-token-2022 = "10.0.0"
 spl-token-2022-interface = "2.1.0"
 
-[build-dependencies]
-serde_json = { workspace = true }
-
 [dev-dependencies]
 solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "a0c554d", features = ["proptest"] }
 solana_test_utils = { path = "../../solana_test_utils" }
