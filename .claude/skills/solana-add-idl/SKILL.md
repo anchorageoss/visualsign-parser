@@ -135,10 +135,10 @@ use visualsign::{
 `BTreeMap` (not `HashMap`) keeps the rendered named-accounts order deterministic.
 
 **Required tests** (in `#[cfg(test)] mod tests`):
-- `test_{snake_name}_idl_loads` — IDL loads and has instructions
-- `test_{snake_name}_idl_has_discriminators` — every instruction has an 8-byte discriminator
-- `test_unknown_discriminator_returns_error` — garbage 9-byte data returns error
-- `test_short_data_returns_error` — 3-byte data returns error
+- `test_{snake_name}_idl_loads` — `decode_idl_data(IDL_JSON)` succeeds and `instructions` is non-empty
+- `test_{snake_name}_idl_has_discriminators` — every instruction in the IDL has an 8-byte discriminator
+
+Crash-safety against unknown discriminators / short data is **already covered**: by `tests/fuzz_idl_parsing.rs` (proptest, generative — exercises arbitrary discriminator/data combinations) and by `tests/surfpool_fuzz.rs::surfpool_preset_idls` (auto-iterates `PRESET_IDLS`). Do not duplicate those assertions in the preset's own test module.
 
 ## Step 4: Register in presets/mod.rs
 
@@ -146,9 +146,24 @@ Add `pub mod {snake_name};` to `src/chain_parsers/visualsign-solana/src/presets/
 
 **Keep entries in alphabetical order.** The existing entries are sorted — insert the new module in the correct position.
 
-No other registration is needed. `build.rs` auto-discovers `{PascalName}Visualizer` from any directory under `src/presets/`.
+No other registration is needed for the visualizer itself. `build.rs` auto-discovers `{PascalName}Visualizer` from any directory under `src/presets/`.
 
-## Step 5: Code Quality
+## Step 5: Test coverage — what's auto-discovered, what isn't
+
+You do **not** need to edit any test file. The harness picks up the new IDL by reflection:
+
+- **`build.rs`** scans `src/presets/<name>/<name>.json` and emits `pub const PRESET_IDLS: &[(&str, &str)]` exposed from the library. The IDL JSON file you saved in Step 2 is the only input.
+- **`tests/surfpool_fuzz.rs::surfpool_preset_idls`** iterates `PRESET_IDLS` and runs each through `run_idl_roundtrip` against a `surfpool` mainnet fork (decode IDL → build synthetic tx with the first instruction's discriminator → convert → assert non-empty payload). The new preset is exercised on every run with no test-file edit.
+- **Proptest (`tests/fuzz_idl_parsing.rs`)** is *generative*. Strategies in `solana_parser_fuzz_core::proptest` synthesize arbitrary IDL shapes and feed them through `decode_idl_data` / `parse_instruction_with_idl`. New IDLs are covered structurally by the existing strategies — no per-IDL registration, ever.
+- **cargo-fuzz (`fuzz/fuzz_targets/`)** runs against random byte streams through `transaction_string_to_visual_sign`. Same story: generative, no per-IDL registration.
+
+Tests that *do* need hand-written assertions (and therefore can't be auto-discovered):
+
+- **`tests/semantic_pipeline.rs`** — correctness assertions on parsed-field shape, label text, amounts, etc. These are program-specific. If the new preset's behavior matters in CI beyond "doesn't crash on a roundtrip," add a fixture-based test here. Otherwise the auto-roundtrip is enough.
+
+CI: `surfpool_preset_idls` is `#[ignore]`. It runs when the PR carries the `surfpool` label (see `.github/workflows/surfpool-solana.yml`); local runs need `HELIUS_API_KEY`.
+
+## Step 6: Code Quality
 
 Follow these rules in all generated code:
 - `use` statements at top of module, never inside functions
@@ -158,7 +173,7 @@ Follow these rules in all generated code:
 - ASCII only in user-visible strings: `>=` not `≥`, `->` not `→`
 - Rust edition 2024 on nightly
 
-## Step 6: Verify
+## Step 7: Verify
 
 Run these commands and fix any issues:
 
@@ -174,3 +189,12 @@ make -C src test
 All must pass before the task is complete. Both feature configurations
 (diagnostics on and off) need to compile and test cleanly because parser_app
 builds without `diagnostics` while parser_cli builds with it.
+
+To confirm the surfpool roundtrip picked up the new preset's IDL via auto-discovery, run:
+
+```bash
+cargo build -p visualsign-solana
+grep -- '"{snake_name}"' src/target/debug/build/visualsign-solana-*/out/preset_idls.rs
+```
+
+The `PRESET_IDLS` slice should contain a `("{snake_name}", include_str!(...))` entry. If it doesn't, the IDL JSON file is at the wrong path — `build.rs` looks for exactly `src/presets/{snake_name}/{snake_name}.json`.
