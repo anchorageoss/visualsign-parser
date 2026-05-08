@@ -10,6 +10,7 @@ on:
       - ".github/**"
       - "src/**"
       - "images/**"
+      - "scripts/**"
       - "Makefile"
   pull_request:
     types: [labeled]
@@ -28,10 +29,17 @@ jobs:
       contents: read
       packages: write
     env:
+      # release.yml dispatches stagex via `gh workflow run --ref $TAG`, which
+      # arrives as `workflow_dispatch` (not `push`). Emit `ref_name` for any
+      # `workflow_dispatch` so both tag dispatches (release flow) and branch
+      # dispatches (manual testing on a branch) produce a real tag. Without
+      # this, `docker push --all-tags` runs against an empty tag list and
+      # silently publishes nothing.
       tags: >-
         ${{ github.ref == format('refs/heads/{0}', 'main') && 'latest' || '' }}
         ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || '' }}
         ${{ github.event_name == 'push' && github.ref_name || '' }}
+        ${{ github.event_name == 'workflow_dispatch' && github.ref_name || '' }}
     strategy:
       matrix:
         target:
@@ -44,6 +52,9 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Full history so auto-version.sh can compute commit heights and
+          # merge-bases for non-tag builds (latest, pr-*).
+          fetch-depth: 0
       - name: Docker setup
         uses: ./.github/actions/docker-setup
         with:
@@ -51,8 +62,20 @@ jobs:
 
       - name: Build ${{ matrix.target.name }}
         shell: bash
+        env:
+          GH_REF_TYPE: ${{ github.ref_type }}
+          GH_REF_NAME: ${{ github.ref_name }}
         run: |
-          make -j$(nproc) out/${{ matrix.target.name }}/index.json
+          if [[ "$GH_REF_TYPE" == "tag" && "$GH_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            VERSION="${GH_REF_NAME#v}"
+          else
+            # Compute on the runner: auto-version.sh isn't COPY'd into the
+            # Docker build context, so the in-container build.rs would fall
+            # back to "dev" and silently lose the git-derived version on
+            # latest/pr-* images.
+            VERSION=$(scripts/auto-version.sh)
+          fi
+          make VERSION="$VERSION" -j$(nproc) out/${{ matrix.target.name }}/index.json
 
       - name: Load artifact to Docker
         run: |

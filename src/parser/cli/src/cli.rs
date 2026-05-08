@@ -6,7 +6,7 @@ use visualsign::{SignablePayload, SignablePayloadField};
 
 #[derive(Parser, Debug)]
 #[command(name = "visualsign-parser")]
-#[command(version = "1.0")]
+#[command(version = env!("VERSION"))]
 #[command(about = "Converts raw transactions to visual signing properties")]
 pub(crate) struct Args {
     #[arg(short, long, help = "Chain type")]
@@ -256,10 +256,10 @@ fn parse_and_display(
     Ok(())
 }
 
-/// app cli
+/// CLI entry point.
 pub struct Cli;
 impl Cli {
-    /// start the parser cli
+    /// Parse arguments and run the transaction visualizer.
     pub fn execute() -> Result<(), String> {
         let args = Args::parse();
         let chain = parse_chain(&args.chain);

@@ -87,7 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .expect("failed to start reflection service");
 
-    println!("gRPC server listening on {addr}");
+    println!("parser_grpc_server {} listening on {addr}", env!("VERSION"));
 
     tonic::transport::Server::builder()
         .add_service(reflection_service)
