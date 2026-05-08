@@ -86,29 +86,30 @@ impl SolanaIntegrationConfig for {PascalName}Config {
 
 ### File: `mod.rs`
 
-Use the squads_multisig preset as a template: `src/chain_parsers/visualsign-solana/src/presets/squads_multisig/mod.rs`
+Use `src/chain_parsers/visualsign-solana/src/presets/unknown_program/mod.rs` as the working reference for the IDL parsing pattern — it is the preset that actually exercises `parse_instruction_with_idl` against a runtime-supplied IDL today. Your preset is the same pattern with the IDL **embedded at compile time** and the program ID hardcoded.
 
-Read that file for the exact structure, then generate a generic version with these substitutions:
-- Replace `SquadsMultisig` / `squads_multisig` / `SQUADS_MULTISIG` with the appropriate casing of the new program name
-- Replace the program ID string with the new program address
-- Replace `"Squads Multisig"` display strings with `{display_name}`
-- Replace IDL file reference: `include_str!("{snake_name}.json")`
-- Keep the `kind()` method returning the user's chosen `VisualizerKind` variant with `display_name` as the `&'static str` argument
+Substitutions to make when adapting it:
+- **Hardcode the program ID const** at the top of `mod.rs`:
+  ```rust
+  pub(crate) const {SCREAMING_SNAKE}_PROGRAM_ID: &str = "{base58_program_id}";
+  ```
+  This is what `config.rs` resolves via `use super::{SCREAMING_SNAKE}_PROGRAM_ID;`. See `presets/jupiter_swap/mod.rs` line ~24 for the canonical placement.
+- **Embed the IDL** via `const IDL_JSON: &str = include_str!("{snake_name}.json");` and replace any runtime `idl_registry.get_idl(...)` lookup with `decode_idl_data(IDL_JSON)?`.
+- **Rename the visualizer/config/static**: `UnknownProgramVisualizer` → `{PascalName}Visualizer`, `UnknownProgramConfig` → `{PascalName}Config`, `UNKNOWN_PROGRAM_CONFIG` → `{SCREAMING_SNAKE}_CONFIG`.
+- **`kind()`** returns your chosen `VisualizerKind` variant: `VisualizerKind::{Kind}("{display_name}")`.
+- **Drop the no-IDL fallback path** (`create_unknown_program_preview_layout`) — for an IDL-driven preset, return `Err(VisualSignError::DecodeError(...))` if parsing fails. Do not display raw bytes as a substitute.
 
-**Important — generic IDL pattern only:**
-- DO NOT copy any squads-specific code (e.g. `VaultTransactionMessage` decoding, inner instruction handling)
-- The generic scaffold uses `build_named_accounts`, `build_parsed_fields`, `build_fallback_fields`, `append_raw_data`, `format_arg_value` — all of which work with any IDL
-- The parse function should: check `data.len() < 8`, load IDL, call `parse_instruction_with_idl`, call `build_named_accounts`, return a struct with parsed data + named accounts
+**Building `named_accounts` — what the IDL gives you and what you build manually**
 
-**Required imports** (at top of module, NOT inside functions):
+`parse_instruction_with_idl` returns a `SolanaParsedInstructionData` whose `named_accounts` field is empty by default. There is no `build_named_accounts` helper in `solana_parser`; you build the map yourself by matching the on-chain instruction's accounts against the IDL instruction's account list, in order. The reference loop is in `unknown_program::try_parse_with_idl` (search for `named_accounts` in that file). Copy that loop verbatim — it is the supported pattern.
+
+**Required imports** (at top of module, NOT inside functions; only symbols that actually exist in the current dependency graph):
 ```rust
 use crate::core::{
     InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
 };
 use config::{PascalName}Config;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl};
 use std::collections::HashMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
@@ -119,10 +120,10 @@ use visualsign::{
 ```
 
 **Required tests** (in `#[cfg(test)] mod tests`):
-- `test_{snake_name}_idl_loads` — IDL loads and has instructions
-- `test_{snake_name}_idl_has_discriminators` — every instruction has an 8-byte discriminator
-- `test_unknown_discriminator_returns_error` — garbage 9-byte data returns error
-- `test_short_data_returns_error` — 3-byte data returns error
+- `test_{snake_name}_idl_loads` — `decode_idl_data(IDL_JSON)` succeeds and `instructions` is non-empty
+- `test_{snake_name}_idl_has_discriminators` — every instruction in the IDL has an 8-byte discriminator
+
+Crash-safety against unknown discriminators / short data is **already covered**: by `tests/fuzz_idl_parsing.rs` (proptest, generative — exercises arbitrary discriminator/data combinations) and by `tests/surfpool_fuzz.rs::surfpool_preset_idls` (auto-iterates `PRESET_IDLS`). Do not duplicate those assertions in the preset's own test module.
 
 ## Step 4: Register in presets/mod.rs
 
@@ -130,9 +131,24 @@ Add `pub mod {snake_name};` to `src/chain_parsers/visualsign-solana/src/presets/
 
 **Keep entries in alphabetical order.** The existing entries are sorted — insert the new module in the correct position.
 
-No other registration is needed. `build.rs` auto-discovers `{PascalName}Visualizer` from any directory under `src/presets/`.
+No other registration is needed for the visualizer itself. `build.rs` auto-discovers `{PascalName}Visualizer` from any directory under `src/presets/`.
 
-## Step 5: Code Quality
+## Step 5: Test coverage — what's auto-discovered, what isn't
+
+You do **not** need to edit any test file. The harness picks up the new IDL by reflection:
+
+- **`build.rs`** scans `src/presets/<name>/<name>.json` and emits `pub const PRESET_IDLS: &[(&str, &str)]` exposed from the library. The IDL JSON file you saved in Step 2 is the only input.
+- **`tests/surfpool_fuzz.rs::surfpool_preset_idls`** iterates `PRESET_IDLS` and runs each through `run_idl_roundtrip` against a `surfpool` mainnet fork (decode IDL → build synthetic tx with the first instruction's discriminator → convert → assert non-empty payload). The new preset is exercised on every run with no test-file edit.
+- **Proptest (`tests/fuzz_idl_parsing.rs`)** is *generative*. Strategies in `solana_parser_fuzz_core::proptest` synthesize arbitrary IDL shapes and feed them through `decode_idl_data` / `parse_instruction_with_idl`. New IDLs are covered structurally by the existing strategies — no per-IDL registration, ever.
+- **cargo-fuzz (`fuzz/fuzz_targets/`)** runs against random byte streams through `transaction_string_to_visual_sign`. Same story: generative, no per-IDL registration.
+
+Tests that *do* need hand-written assertions (and therefore can't be auto-discovered):
+
+- **`tests/semantic_pipeline.rs`** — correctness assertions on parsed-field shape, label text, amounts, etc. These are program-specific. If the new preset's behavior matters in CI beyond "doesn't crash on a roundtrip," add a fixture-based test here. Otherwise the auto-roundtrip is enough.
+
+CI: `surfpool_preset_idls` is `#[ignore]`. It runs when the PR carries the `surfpool` label (see `.github/workflows/surfpool-solana.yml`); local runs need `HELIUS_API_KEY`.
+
+## Step 6: Code Quality
 
 Follow these rules in all generated code:
 - `use` statements at top of module, never inside functions
@@ -141,7 +157,7 @@ Follow these rules in all generated code:
 - ASCII only in user-visible strings: `>=` not `≥`, `->` not `→`
 - Rust edition 2024 on nightly
 
-## Step 6: Verify
+## Step 7: Verify
 
 Run these commands and fix any issues:
 
@@ -153,3 +169,12 @@ make -C src test
 ```
 
 All must pass before the task is complete.
+
+To confirm the surfpool roundtrip picked up the new preset's IDL via auto-discovery, run:
+
+```bash
+cargo build -p visualsign-solana
+grep -- '"{snake_name}"' src/chain_parsers/visualsign-solana/target/debug/build/visualsign-solana-*/out/preset_idls.rs
+```
+
+The `PRESET_IDLS` slice should contain a `("{snake_name}", include_str!(...))` entry. If it doesn't, the IDL JSON file is at the wrong path — `build.rs` looks for exactly `src/presets/{snake_name}/{snake_name}.json`.

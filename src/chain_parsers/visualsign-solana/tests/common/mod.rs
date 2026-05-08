@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use base64::Engine;
 use generated::parser::{ChainMetadata, Idl as ProtoIdl, SolanaMetadata, chain_metadata};
 use solana_parser::decode_idl_data;
 use solana_parser::solana::structs::Idl;
@@ -11,10 +12,12 @@ use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::message::Message;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::transaction::Transaction as SolanaTransaction;
-use visualsign::vsptrait::VisualSignOptions;
+use solana_test_utils::{SurfpoolConfig, SurfpoolManager};
+use visualsign::vsptrait::{Transaction, VisualSignConverter, VisualSignOptions};
 use visualsign::{
     AnnotatedPayloadField, SignablePayload, SignablePayloadField, SignablePayloadFieldPreviewLayout,
 };
+use visualsign_solana::{SolanaTransactionWrapper, SolanaVisualSignConverter};
 
 /// Decode an IDL JSON string, extract the discriminator for the instruction at
 /// `inst_idx`, and return `(idl, data)` where `data` = discriminator ++ `arg_bytes`.
@@ -161,4 +164,70 @@ pub fn load_idl_from_env() -> Option<(String, solana_parser::solana::structs::Id
             None
         }
     }
+}
+
+// ── Surfpool roundtrip ────────────────────────────────────────────────────────
+
+/// Per-IDL roundtrip: decode the IDL, build a synthetic transaction whose data
+/// starts with the first instruction's discriminator, run it through the
+/// visual-sign converter, and assert the payload is non-empty.
+///
+/// Network-bound: starts a `surfpool` mainnet fork and requires the `surfpool`
+/// binary on `$PATH`. Callers are responsible for marking their tests with
+/// `#[ignore]`. Use the `idl_test!` macro for the standard wrapper.
+pub async fn run_idl_roundtrip(idl_label: &str, idl_json: &str) {
+    // Distinguish the three failure modes explicitly so a red test names the
+    // IDL and the actual cause (decode rejection from a malformed IDL, empty
+    // instruction list, or a missing discriminator).
+    let idl = decode_idl_data(idl_json)
+        .unwrap_or_else(|e| panic!("{idl_label}: decode_idl_data rejected the IDL: {e}"));
+    assert!(
+        !idl.instructions.is_empty(),
+        "{idl_label}: IDL has no instructions"
+    );
+    let disc = idl.instructions[0]
+        .discriminator
+        .as_ref()
+        .unwrap_or_else(|| panic!("{idl_label}: instructions[0] has no discriminator"));
+    let mut data = disc.clone();
+    data.extend_from_slice(&[0u8; 32]);
+
+    let _manager = SurfpoolManager::start(SurfpoolConfig::default())
+        .await
+        .expect("surfpool should start");
+
+    let program_id = Pubkey::new_unique();
+    let tx = build_transaction(program_id, vec![Pubkey::new_unique()], data);
+    let tx_bytes = bincode::serialize(&tx).expect("tx should serialize");
+    let tx_b64 = base64::engine::general_purpose::STANDARD.encode(&tx_bytes);
+
+    let wrapper = SolanaTransactionWrapper::from_string(&tx_b64)
+        .expect("from_string should succeed for a valid base64 transaction");
+
+    let options = options_with_idl(&program_id, idl_json, "test_program");
+    let payload = SolanaVisualSignConverter
+        .to_visual_sign_payload(wrapper, options)
+        .expect("converter should succeed");
+
+    assert!(
+        !payload.fields.is_empty(),
+        "payload must contain at least one field"
+    );
+}
+
+/// Generate a `#[tokio::test] #[ignore]` that runs `run_idl_roundtrip` against
+/// the provided IDL string. Works for both upstream `embedded_idls` consts and
+/// vsp-local IDL JSON via `include_str!`.
+///
+/// The macro is hoisted from `common/mod.rs`, so any test file that uses it
+/// must declare the module with `#[macro_use] mod common;`.
+#[macro_export]
+macro_rules! idl_test {
+    ($name:ident, $idl:expr) => {
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore]
+        async fn $name() {
+            $crate::common::run_idl_roundtrip(stringify!($name), $idl).await;
+        }
+    };
 }
