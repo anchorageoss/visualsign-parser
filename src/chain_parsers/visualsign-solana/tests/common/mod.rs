@@ -175,10 +175,23 @@ pub fn load_idl_from_env() -> Option<(String, solana_parser::solana::structs::Id
 /// Network-bound: starts a `surfpool` mainnet fork and requires the `surfpool`
 /// binary on `$PATH`. Callers are responsible for marking their tests with
 /// `#[ignore]`. Use the `idl_test!` macro for the standard wrapper.
+///
+/// To loop over many IDLs without paying the surfpool startup cost per IDL,
+/// start one `SurfpoolManager` yourself and call `run_idl_roundtrip_inner`
+/// in the loop.
 pub async fn run_idl_roundtrip(idl_label: &str, idl_json: &str) {
-    // Distinguish the three failure modes explicitly so a red test names the
-    // IDL and the actual cause (decode rejection from a malformed IDL, empty
-    // instruction list, or a missing discriminator).
+    let _manager = SurfpoolManager::start(SurfpoolConfig::default())
+        .await
+        .expect("surfpool should start");
+    run_idl_roundtrip_inner(idl_label, idl_json);
+}
+
+/// Body of `run_idl_roundtrip` minus the `SurfpoolManager` start. Use when
+/// running many IDLs in sequence under a single shared manager.
+pub fn run_idl_roundtrip_inner(idl_label: &str, idl_json: &str) {
+    // Three failure modes are distinguished explicitly so a red test names
+    // the IDL and the actual cause (decode rejection from a malformed IDL,
+    // empty instruction list, or a missing discriminator).
     let idl = decode_idl_data(idl_json)
         .unwrap_or_else(|e| panic!("{idl_label}: decode_idl_data rejected the IDL: {e}"));
     assert!(
@@ -191,10 +204,6 @@ pub async fn run_idl_roundtrip(idl_label: &str, idl_json: &str) {
         .unwrap_or_else(|| panic!("{idl_label}: instructions[0] has no discriminator"));
     let mut data = disc.clone();
     data.extend_from_slice(&[0u8; 32]);
-
-    let _manager = SurfpoolManager::start(SurfpoolConfig::default())
-        .await
-        .expect("surfpool should start");
 
     let program_id = Pubkey::new_unique();
     let tx = build_transaction(program_id, vec![Pubkey::new_unique()], data);
@@ -219,8 +228,9 @@ pub async fn run_idl_roundtrip(idl_label: &str, idl_json: &str) {
 /// the provided IDL string. Works for both upstream `embedded_idls` consts and
 /// vsp-local IDL JSON via `include_str!`.
 ///
-/// The macro is hoisted from `common/mod.rs`, so any test file that uses it
-/// must declare the module with `#[macro_use] mod common;`.
+/// Any sibling test file can call this macro unqualified after `mod common;` —
+/// `#[macro_export]` puts it at the test binary's crate root, so neither
+/// `#[macro_use]` nor an explicit `use` is required.
 #[macro_export]
 macro_rules! idl_test {
     ($name:ident, $idl:expr) => {

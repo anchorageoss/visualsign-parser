@@ -33,7 +33,7 @@ The skill's output is the equivalent of a typed-decoder dump: correct, but not y
 
 For a **fully semantic** preset to model after, read `src/chain_parsers/visualsign-solana/src/presets/jupiter_swap/mod.rs`. It hand-rolls a `JupiterSwapInstruction` enum, resolves token metadata via `get_token_info`, and uses format strings like `"Swap {amount} {in_token} for {amount} {out_token}"`. That's the destination; this skill produces the starting point.
 
-Semantic refinement is intended as a separate workflow (planned: `solana-refine-idl-preset` skill). Until that exists, contributors who want wallet-readable output extend the generated `mod.rs` by hand using `jupiter_swap` as the reference. See **Step 7: What's next** at the end of this skill.
+Semantic refinement is intended as a separate workflow (planned: `solana-refine-idl-preset` skill). Until that exists, contributors who want wallet-readable output extend the generated `mod.rs` by hand using `jupiter_swap` as the reference. See **Step 8: What's next** at the end of this skill.
 
 ## Step 1: Gather Information
 
@@ -175,7 +175,7 @@ CI: `surfpool_preset_idls` is `#[ignore]`. It runs when the PR carries the `surf
 
 The auto-roundtrip only asserts the converter doesn't crash. It does **not** assert the displayed fields look correct semantically — that's by design (this skill produces a generic decoder, not a semantic one).
 
-If the preset needs CI-level semantic guarantees (specific label text, amount formatting, multi-instruction flows, fixture-based snapshot expectations), add a hand-written test in `tests/semantic_pipeline.rs` modelled after the existing `JUPITER_IDL` / `RAYDIUM_IDL` blocks. Otherwise, ship as-is — semantic refinement is a separate workflow (see Step 8).
+If the preset needs CI-level semantic guarantees (specific label text, amount formatting, multi-instruction flows, fixture-based snapshot expectations), add a hand-written test in `tests/semantic_pipeline.rs` modelled after the existing `RAYDIUM_IDL` / `ORCA_IDL` blocks. Otherwise, ship as-is — semantic refinement is a separate workflow (see Step 8).
 
 ## Step 6: Code Quality
 

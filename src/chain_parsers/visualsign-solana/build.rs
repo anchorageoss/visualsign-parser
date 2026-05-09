@@ -205,4 +205,68 @@ mod tests {
             "Should have at least one visualizer"
         );
     }
+
+    #[test]
+    fn test_collect_preset_mods_emits_path_attribute_per_preset() {
+        // Every preset directory with a mod.rs should produce one
+        // `#[path = ...] pub mod <name>;` line. Without the path
+        // attribute, `include!`'d `pub mod` would resolve relative to
+        // OUT_DIR and break the build.
+        let mods = collect_preset_mods();
+        assert!(!mods.is_empty(), "Should discover at least one preset");
+        for line in &mods {
+            assert!(
+                line.starts_with("#[path = \""),
+                "Each entry must pin the source path: {line}"
+            );
+            assert!(
+                line.contains("pub mod "),
+                "Each entry must declare a module: {line}"
+            );
+        }
+        // Sorted so diffs stay stable as presets are added.
+        let mut sorted = mods.clone();
+        sorted.sort();
+        assert_eq!(mods, sorted, "collect_preset_mods output must be sorted");
+    }
+
+    #[test]
+    fn test_collect_preset_mods_skips_dirs_without_mod_rs() {
+        // The current preset tree has a mod.rs in every directory.
+        // If any future scaffolding leaves a JSON-only directory behind,
+        // this guard prevents it from producing a confusing build break.
+        let mods = collect_preset_mods();
+        for line in &mods {
+            // Extract the path between #[path = "..."]
+            let start = line.find('"').unwrap() + 1;
+            let end = line[start..].find('"').unwrap() + start;
+            let path = &line[start..end];
+            assert!(
+                std::path::Path::new(path).exists(),
+                "Generated #[path] points at a non-existent file: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_collect_preset_idls_returns_only_dirs_with_matching_json() {
+        // Currently no preset ships an embedded IDL JSON, so the slice
+        // is expected to be empty. When the first preset adds one, this
+        // test will need updating -- which is the point: it locks in
+        // the discovery contract.
+        let idls = collect_preset_idls();
+        for entry in &idls {
+            assert!(
+                entry.starts_with('('),
+                "Entries must be tuple-shaped: {entry}"
+            );
+            assert!(
+                entry.contains("include_str!"),
+                "Entries must embed JSON: {entry}"
+            );
+        }
+        let mut sorted = idls.clone();
+        sorted.sort();
+        assert_eq!(idls, sorted, "collect_preset_idls output must be sorted");
+    }
 }
