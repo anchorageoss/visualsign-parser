@@ -2,10 +2,9 @@
 //! Surfpool-backed integration tests for the Solana visual-sign parser.
 //!
 //! Tests are network-bound (start a `surfpool` mainnet fork; require the
-//! `surfpool` binary on `$PATH`) and are therefore `#[ignore]`. Each test
-//! references a `solana_parser::solana::embedded_idls::*` const directly,
-//! so the IDL contents are baked in at compile time -- no filesystem
-//! lookup, no env var, no `cargo metadata`.
+//! `surfpool` binary on `$PATH`) and are therefore `#[ignore]`. The roundtrip
+//! body and the `idl_test!` macro live in `tests/common/mod.rs` so other test
+//! files (e.g. preset-specific surfpool tests) can reuse them.
 //!
 //! Run all surfpool tests:
 //!
@@ -21,22 +20,21 @@
 //! cargo test ... --test surfpool_fuzz surfpool_idl_jupiter -- --ignored
 //! ```
 //!
-//! Adding a new IDL: once it's exposed as a `pub const` in
-//! `solana_parser::solana::embedded_idls`, add an `idl_test!(name, CONST)`
-//! line below; cargo's harness picks it up.
+//! Adding a new IDL:
+//! - Upstream `solana_parser::solana::embedded_idls::*`: add a `use` import and
+//!   an `idl_test!(name, CONST)` line below.
+//! - Vsp-local preset IDL (e.g. one added by the `solana-add-idl` skill):
+//!   drop `<name>/<name>.json` into `src/presets/`. `build.rs` discovers it
+//!   and `surfpool_preset_idls` (below) iterates it on every run -- no test-
+//!   file edit required.
 
 mod common;
 
-use common::{build_transaction, options_with_idl};
-use solana_parser::decode_idl_data;
 use solana_parser::solana::embedded_idls::{
     APE_PRO_IDL, CANDY_MACHINE_IDL, DRIFT_IDL, JUPITER_AGG_V6_IDL, JUPITER_IDL, JUPITER_LIMIT_IDL,
     KAMINO_IDL, LIFINITY_IDL, METEORA_IDL, OPENBOOK_IDL, ORCA_IDL, RAYDIUM_IDL, STABBLE_IDL,
 };
-use solana_sdk::pubkey::Pubkey;
 use solana_test_utils::{SurfpoolConfig, SurfpoolManager};
-use visualsign::vsptrait::{Transaction, VisualSignConverter};
-use visualsign_solana::{SolanaTransactionWrapper, SolanaVisualSignConverter};
 
 /// Smoke test: start surfpool, verify the RPC responds, let `Drop` tear it down.
 #[tokio::test(flavor = "multi_thread")]
@@ -57,59 +55,6 @@ async fn surfpool_lifecycle() {
     );
 }
 
-/// Per-IDL roundtrip: decode the IDL, build a synthetic transaction whose data
-/// starts with the first instruction's discriminator, run it through the
-/// visual-sign converter, and assert the payload is non-empty.
-async fn run_idl_roundtrip(idl_label: &str, idl_json: &str) {
-    // Distinguish the three failure modes explicitly so a red test names the
-    // IDL and the actual cause (decode rejection from a malformed IDL, empty
-    // instruction list, or a missing discriminator).
-    let idl = decode_idl_data(idl_json)
-        .unwrap_or_else(|e| panic!("{idl_label}: decode_idl_data rejected the IDL: {e}"));
-    assert!(
-        !idl.instructions.is_empty(),
-        "{idl_label}: IDL has no instructions"
-    );
-    let disc = idl.instructions[0]
-        .discriminator
-        .as_ref()
-        .unwrap_or_else(|| panic!("{idl_label}: instructions[0] has no discriminator"));
-    let mut data = disc.clone();
-    data.extend_from_slice(&[0u8; 32]);
-
-    let _manager = SurfpoolManager::start(SurfpoolConfig::default())
-        .await
-        .expect("surfpool should start");
-
-    let program_id = Pubkey::new_unique();
-    let tx = build_transaction(program_id, vec![Pubkey::new_unique()], data);
-    let tx_bytes = bincode::serialize(&tx).expect("tx should serialize");
-    let tx_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &tx_bytes);
-
-    let wrapper = SolanaTransactionWrapper::from_string(&tx_b64)
-        .expect("from_string should succeed for a valid base64 transaction");
-
-    let options = options_with_idl(&program_id, idl_json, "test_program");
-    let payload = SolanaVisualSignConverter
-        .to_visual_sign_payload(wrapper, options)
-        .expect("converter should succeed");
-
-    assert!(
-        !payload.fields.is_empty(),
-        "payload must contain at least one field"
-    );
-}
-
-macro_rules! idl_test {
-    ($name:ident, $idl:expr) => {
-        #[tokio::test(flavor = "multi_thread")]
-        #[ignore]
-        async fn $name() {
-            run_idl_roundtrip(stringify!($name), $idl).await;
-        }
-    };
-}
-
 // `collision.json` and `cyclic.json` exist in `solana_parser`'s `idls/`
 // directory but are negative test fixtures (duplicate type names / cyclic
 // type refs); they're rejected by `decode_idl_data` and therefore not
@@ -128,3 +73,28 @@ idl_test!(surfpool_idl_openbook, OPENBOOK_IDL);
 idl_test!(surfpool_idl_orca, ORCA_IDL);
 idl_test!(surfpool_idl_raydium, RAYDIUM_IDL);
 idl_test!(surfpool_idl_stabble, STABBLE_IDL);
+
+/// Auto-discovered preset IDLs: every `src/presets/<name>/<name>.json` file
+/// that `build.rs` finds is exercised here through the same roundtrip used
+/// by the named `idl_test!` invocations above. The skill (and any future
+/// contributor) only needs to drop the JSON file -- this test picks it up
+/// without any code edit. Empty when no presets ship an IDL JSON.
+///
+/// Shares one `SurfpoolManager` across all preset IDLs to avoid paying the
+/// fork-startup cost N times when there are many presets.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn surfpool_preset_idls() {
+    if visualsign_solana::PRESET_IDLS.is_empty() {
+        // Nothing to do: no preset has an embedded IDL JSON yet. Don't fail
+        // the test -- it'd be an unhelpful red whenever the upstream stack
+        // ships before the first preset IDL lands.
+        return;
+    }
+    let _manager = SurfpoolManager::start(SurfpoolConfig::default())
+        .await
+        .expect("surfpool should start");
+    for (name, idl_json) in visualsign_solana::PRESET_IDLS {
+        common::run_idl_roundtrip_inner(&format!("preset_{name}"), idl_json);
+    }
+}
