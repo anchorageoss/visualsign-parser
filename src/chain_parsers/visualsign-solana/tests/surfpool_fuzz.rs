@@ -79,6 +79,9 @@ idl_test!(surfpool_idl_stabble, STABBLE_IDL);
 /// by the named `idl_test!` invocations above. The skill (and any future
 /// contributor) only needs to drop the JSON file -- this test picks it up
 /// without any code edit. Empty when no presets ship an IDL JSON.
+///
+/// Shares one `SurfpoolManager` across all preset IDLs to avoid paying the
+/// fork-startup cost N times when there are many presets.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn surfpool_preset_idls() {
@@ -88,7 +91,10 @@ async fn surfpool_preset_idls() {
         // ships before the first preset IDL lands.
         return;
     }
+    let _manager = SurfpoolManager::start(SurfpoolConfig::default())
+        .await
+        .expect("surfpool should start");
     for (name, idl_json) in visualsign_solana::PRESET_IDLS {
-        common::run_idl_roundtrip(&format!("preset_{name}"), idl_json).await;
+        common::run_idl_roundtrip_inner(&format!("preset_{name}"), idl_json);
     }
 }
