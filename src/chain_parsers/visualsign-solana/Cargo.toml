@@ -32,6 +32,7 @@ jupiter-swap-api-client = "0.2.0"
 base64 = "0.22.1"
 bs58 = "0.5"
 proptest = "1"
+cel-interpreter = { version = "0.10.0", features = ["json"] }
 
 [lints]
 workspace = true

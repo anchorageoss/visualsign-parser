@@ -17,7 +17,7 @@ use visualsign::{
     encodings::SupportedEncodings,
     registry::LayeredRegistry,
     vsptrait::{
-        DeveloperConfig, Transaction, TransactionParseError, VisualSignConverter,
+        ConversionResult, DeveloperConfig, Transaction, TransactionParseError, VisualSignConverter,
         VisualSignConverterFromString, VisualSignError, VisualSignOptions,
     },
 };
@@ -253,8 +253,10 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
         &self,
         transaction_wrapper: EthereumTransactionWrapper,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
-        self.convert_transaction_inner(transaction_wrapper.inner().clone(), options)
+    ) -> Result<ConversionResult, VisualSignError> {
+        let payload =
+            self.convert_transaction_inner(transaction_wrapper.inner().clone(), options)?;
+        Ok(ConversionResult::new(payload))
     }
 }
 
@@ -263,7 +265,7 @@ impl VisualSignConverterFromString<EthereumTransactionWrapper> for EthereumVisua
         &self,
         transaction_data: &str,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
+    ) -> Result<ConversionResult, VisualSignError> {
         let wrapper = EthereumTransactionWrapper::from_string_with_options(
             transaction_data,
             options.developer_config.as_ref(),
@@ -608,7 +610,9 @@ pub fn transaction_to_visual_sign(
 ) -> Result<SignablePayload, VisualSignError> {
     let wrapper = EthereumTransactionWrapper::new(transaction);
     let converter = EthereumVisualSignConverter::new();
-    converter.to_visual_sign_payload(wrapper, options)
+    converter
+        .to_visual_sign_payload(wrapper, options)
+        .map(|r| r.payload)
 }
 
 pub fn transaction_string_to_visual_sign(
@@ -616,7 +620,9 @@ pub fn transaction_string_to_visual_sign(
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     let converter = EthereumVisualSignConverter::new();
-    converter.to_visual_sign_payload_from_string(transaction_data, options)
+    converter
+        .to_visual_sign_payload_from_string(transaction_data, options)
+        .map(|r| r.payload)
 }
 
 #[cfg(test)]

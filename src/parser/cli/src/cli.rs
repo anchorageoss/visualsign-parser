@@ -32,6 +32,36 @@ pub(crate) struct Args {
 
     #[arg(
         long,
+        help = "Also pretty-print the chain-specific intermediate output \
+                (used by Turnkey's Solana policy engine). Currently produced \
+                for Solana only; ignored for other chains."
+    )]
+    with_intermediate: bool,
+
+    #[arg(
+        long,
+        value_name = "EXPR",
+        help = "Evaluate a Google CEL policy expression against the parsed \
+                intermediate output and print PASS/DENY. The intermediate \
+                output is bound to `solana` (so you write \
+                `solana.tx.transfers.exists(...)`). Currently Solana-only.\n\
+                \n\
+                Combining rules: a single CEL expression supports the full \
+                boolean grammar — `&&`, `||`, `!`, ternary `?:`, plus \
+                `.exists`, `.all`, `.exists_one`, `.filter`, `size(...)`. \
+                Compose within one expression for OR / mixed semantics. \
+                Across multiple `--policy` flags this CLI applies an \
+                implicit AND: every flag must PASS for the process to exit \
+                successfully. The flag exits with code 2 on any DENY.\n\
+                \n\
+                Surface aliases: Turnkey docs use `.any` / `.count`; \
+                canonical CEL is `.exists` / `size(...)`. Same semantics. \
+                May be repeated."
+    )]
+    policy: Vec<String>,
+
+    #[arg(
+        long,
         short = 'n',
         value_name = "NETWORK",
         help = "Network identifier - supports:\n\
@@ -223,18 +253,33 @@ fn common_label(field: &SignablePayloadField) -> String {
     }
 }
 
+#[derive(Clone, Copy)]
+struct DisplayOptions<'a> {
+    output_format: OutputFormat,
+    condensed_only: bool,
+    with_intermediate: bool,
+    policies: &'a [String],
+}
+
 fn parse_and_display(
     chain: &str,
     raw_tx: &str,
     registry: &TransactionConverterRegistry,
     options: VisualSignOptions,
-    output_format: OutputFormat,
-    condensed_only: bool,
+    display: &DisplayOptions<'_>,
 ) -> Result<(), String> {
+    let DisplayOptions {
+        output_format,
+        condensed_only,
+        with_intermediate,
+        policies,
+    } = *display;
     let registry_chain = parse_chain(chain);
-    let payload = registry
+    let conversion = registry
         .convert_transaction(&registry_chain, raw_tx, options)
         .map_err(|err| err.to_string())?;
+    let intermediate_bytes = conversion.intermediate_output.clone();
+    let payload = conversion.payload;
     match output_format {
         OutputFormat::Json => {
             let json_output = serde_json::to_string_pretty(&payload)
@@ -254,7 +299,203 @@ fn parse_and_display(
             }
         }
     }
+    if with_intermediate {
+        print_intermediate_output(
+            &registry_chain,
+            intermediate_bytes.as_deref(),
+            output_format,
+        )?;
+    }
+    if !policies.is_empty() {
+        evaluate_policies(&registry_chain, intermediate_bytes.as_deref(), policies)?;
+    }
     Ok(())
+}
+
+fn evaluate_policies(
+    chain: &Chain,
+    bytes: Option<&[u8]>,
+    policies: &[String],
+) -> Result<(), String> {
+    let solana_value = match (chain, bytes) {
+        #[cfg(feature = "solana")]
+        (Chain::Solana, Some(bytes)) => {
+            use visualsign_solana::intermediate::SolanaIntermediateOutput;
+            let parsed: SolanaIntermediateOutput = borsh::from_slice(bytes)
+                .map_err(|err| format!("Failed to borsh-decode SolanaIntermediateOutput: {err}"))?;
+            serde_json::json!({ "tx": serialize_solana_intermediate(&parsed) })
+        }
+        _ => {
+            return Err(format!(
+                "--policy is currently only supported for Solana \
+                 (and requires intermediate output to be present); chain={}",
+                chain.as_str()
+            ));
+        }
+    };
+
+    let cel_value = cel_interpreter::to_value(&solana_value)
+        .map_err(|err| format!("Failed to inject intermediate output into CEL context: {err}"))?;
+
+    println!("\n=== Policy evaluation ===");
+    let mut all_passed = true;
+    for (i, expr) in policies.iter().enumerate() {
+        let program = cel_interpreter::Program::compile(expr)
+            .map_err(|err| format!("policy #{} failed to parse: {err}", i + 1))?;
+        let mut ctx = cel_interpreter::Context::default();
+        ctx.add_variable_from_value("solana", cel_value.clone());
+        let value = program
+            .execute(&ctx)
+            .map_err(|err| format!("policy #{} failed at runtime: {err:?}", i + 1))?;
+        let verdict = match value {
+            cel_interpreter::Value::Bool(true) => "PASS",
+            cel_interpreter::Value::Bool(false) => {
+                all_passed = false;
+                "DENY"
+            }
+            other => {
+                return Err(format!(
+                    "policy #{} did not return a bool: {other:?}",
+                    i + 1
+                ));
+            }
+        };
+        println!("[{verdict}] {expr}");
+    }
+    if !all_passed {
+        std::process::exit(2);
+    }
+    Ok(())
+}
+
+fn print_intermediate_output(
+    chain: &Chain,
+    bytes: Option<&[u8]>,
+    output_format: OutputFormat,
+) -> Result<(), String> {
+    let Some(bytes) = bytes else {
+        eprintln!(
+            "\n(no intermediate output produced for chain {})",
+            chain.as_str()
+        );
+        return Ok(());
+    };
+
+    match chain {
+        #[cfg(feature = "solana")]
+        Chain::Solana => {
+            use visualsign_solana::intermediate::SolanaIntermediateOutput;
+            let parsed: SolanaIntermediateOutput = borsh::from_slice(bytes)
+                .map_err(|err| format!("Failed to borsh-decode SolanaIntermediateOutput: {err}"))?;
+            println!("\n=== Intermediate Output (Solana, policy schema) ===");
+            match output_format {
+                OutputFormat::Json => {
+                    let json =
+                        serde_json::to_string_pretty(&serialize_solana_intermediate(&parsed))
+                            .map_err(|err| {
+                                format!("Failed to serialize intermediate output as JSON: {err}")
+                            })?;
+                    println!("{json}");
+                }
+                _ => {
+                    println!("{parsed:#?}");
+                }
+            }
+        }
+        _ => {
+            eprintln!(
+                "\n(intermediate output present ({} bytes) but no decoder for chain {})",
+                bytes.len(),
+                chain.as_str()
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "solana")]
+fn serialize_solana_intermediate(
+    output: &visualsign_solana::intermediate::SolanaIntermediateOutput,
+) -> serde_json::Value {
+    use serde_json::json;
+    use visualsign_solana::intermediate::{
+        SolTransfer, SolanaAccount, SolanaAddressTableLookup, SolanaIntermediateInstruction,
+        SolanaParsedInstructionDataIo, SolanaSingleAddressTableLookup, SplTransfer,
+    };
+
+    fn account(a: &SolanaAccount) -> serde_json::Value {
+        json!({
+            "account_key": a.account_key,
+            "signer": a.signer,
+            "writable": a.writable,
+        })
+    }
+
+    fn single_lookup(lk: &SolanaSingleAddressTableLookup) -> serde_json::Value {
+        json!({
+            "address_table_key": lk.address_table_key,
+            "index": lk.index,
+            "writable": lk.writable,
+        })
+    }
+
+    fn lookup(lk: &SolanaAddressTableLookup) -> serde_json::Value {
+        json!({
+            "address_table_key": lk.address_table_key,
+            "writable_indexes": lk.writable_indexes,
+            "readonly_indexes": lk.readonly_indexes,
+        })
+    }
+
+    fn parsed(pid: &SolanaParsedInstructionDataIo) -> serde_json::Value {
+        let args: serde_json::Value = serde_json::from_str(&pid.program_call_args_json)
+            .unwrap_or_else(|_| json!(pid.program_call_args_json));
+        json!({
+            "instruction_name": pid.instruction_name,
+            "discriminator": pid.discriminator,
+            "named_accounts": pid.named_accounts,
+            "program_call_args": args,
+            "idl_source": pid.idl_source,
+            "idl_hash": pid.idl_hash,
+        })
+    }
+
+    fn instruction(i: &SolanaIntermediateInstruction) -> serde_json::Value {
+        json!({
+            "program_key": i.program_key,
+            "accounts": i.accounts.iter().map(account).collect::<Vec<_>>(),
+            "instruction_data_hex": i.instruction_data_hex,
+            "address_table_lookups": i.address_table_lookups.iter().map(single_lookup).collect::<Vec<_>>(),
+            "parsed_instruction_data": i.parsed_instruction_data.as_ref().map(parsed),
+        })
+    }
+
+    fn sol_transfer(t: &SolTransfer) -> serde_json::Value {
+        json!({"from": t.from, "to": t.to, "amount": t.amount})
+    }
+
+    fn spl_transfer(t: &SplTransfer) -> serde_json::Value {
+        json!({
+            "from": t.from,
+            "to": t.to,
+            "amount": t.amount,
+            "owner": t.owner,
+            "signers": t.signers,
+            "token_mint": t.token_mint,
+            "decimals": t.decimals,
+            "fee": t.fee,
+        })
+    }
+
+    json!({
+        "account_keys": output.account_keys,
+        "program_keys": output.program_keys,
+        "instructions": output.instructions.iter().map(instruction).collect::<Vec<_>>(),
+        "transfers": output.transfers.iter().map(sol_transfer).collect::<Vec<_>>(),
+        "spl_transfers": output.spl_transfers.iter().map(spl_transfer).collect::<Vec<_>>(),
+        "recent_blockhash": output.recent_blockhash,
+        "address_table_lookups": output.address_table_lookups.iter().map(lookup).collect::<Vec<_>>(),
+    })
 }
 
 /// app cli
@@ -319,8 +560,12 @@ impl Cli {
             &raw_tx,
             &registry,
             options,
-            args.output,
-            args.condensed_only,
+            &DisplayOptions {
+                output_format: args.output,
+                condensed_only: args.condensed_only,
+                with_intermediate: args.with_intermediate,
+                policies: &args.policy,
+            },
         )
     }
 }

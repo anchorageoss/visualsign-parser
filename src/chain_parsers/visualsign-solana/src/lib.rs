@@ -1,6 +1,7 @@
 mod core;
 mod idl;
 mod integrations;
+pub mod intermediate;
 mod presets;
 pub mod utils;
 
@@ -37,7 +38,8 @@ mod tests {
                         developer_config: None,
                     },
                 )
-                .unwrap_or_else(|e| panic!("Failed to convert {description} to payload: {e:?}"));
+                .unwrap_or_else(|e| panic!("Failed to convert {description} to payload: {e:?}"))
+                .payload;
 
             // Test charset validation
             let validation_result = payload.validate_charset();
@@ -94,7 +96,8 @@ mod tests {
                     developer_config: None,
                 },
             )
-            .expect("Should convert to payload successfully");
+            .expect("Should convert to payload successfully")
+            .payload;
 
         // Convert to JSON
         let json_result = payload

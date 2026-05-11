@@ -15,10 +15,12 @@ use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
     encodings::SupportedEncodings,
     vsptrait::{
-        Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
-        VisualSignError, VisualSignOptions,
+        ConversionResult, Transaction, TransactionParseError, VisualSignConverter,
+        VisualSignConverterFromString, VisualSignError, VisualSignOptions,
     },
 };
+
+use crate::intermediate::extract_solana_intermediate_output;
 
 /// Wrapper around Solana's transaction types that implements the Transaction trait
 #[derive(Debug, Clone)]
@@ -158,26 +160,62 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
         &self,
         transaction_wrapper: SolanaTransactionWrapper,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
-        match transaction_wrapper {
+    ) -> Result<ConversionResult, VisualSignError> {
+        let idl_registry = create_idl_registry_from_options(&options)?;
+
+        let (payload, message_hex) = match &transaction_wrapper {
             SolanaTransactionWrapper::Legacy(transaction) => {
-                // Convert the legacy transaction to a VisualSign payload
-                convert_to_visual_sign_payload(
-                    &transaction,
+                let payload = convert_to_visual_sign_payload(
+                    transaction,
                     options.decode_transfers,
                     options.transaction_name.clone(),
                     &options,
-                )
+                )?;
+                let hex = hex::encode(transaction.message.serialize());
+                (payload, hex)
             }
             SolanaTransactionWrapper::Versioned(versioned_tx) => {
-                // Handle versioned transactions
-                convert_versioned_to_visual_sign_payload(
-                    &versioned_tx,
+                let payload = convert_versioned_to_visual_sign_payload(
+                    versioned_tx,
                     options.decode_transfers,
                     options.transaction_name.clone(),
                     &options,
-                )
+                )?;
+                let hex = hex::encode(versioned_tx.message.serialize());
+                (payload, hex)
             }
+        };
+
+        let intermediate_bytes = build_intermediate_bytes(&message_hex, &idl_registry);
+        Ok(match intermediate_bytes {
+            Some(bytes) => ConversionResult::with_intermediate(payload, bytes),
+            None => ConversionResult::new(payload),
+        })
+    }
+}
+
+/// Build the borsh-encoded intermediate output for a Solana transaction.
+///
+/// Best-effort: if `solana_parser::parse_transaction_with_idls` cannot parse
+/// the message (e.g. an obscure variant we still display via fallback paths)
+/// we drop the intermediate output rather than fail the whole conversion. The
+/// SignablePayload is still returned so visual signing keeps working; only
+/// policy-engine evaluation degrades to "no metadata".
+fn build_intermediate_bytes(
+    message_hex: &str,
+    idl_registry: &crate::idl::IdlRegistry,
+) -> Option<Vec<u8>> {
+    match extract_solana_intermediate_output(message_hex, false, idl_registry) {
+        Ok(output) => match borsh::to_vec(&output) {
+            Ok(bytes) => Some(bytes),
+            Err(err) => {
+                tracing::warn!("Failed to borsh-encode Solana intermediate output: {err}");
+                None
+            }
+        },
+        Err(err) => {
+            tracing::warn!("Failed to extract Solana intermediate output: {err}");
+            None
         }
     }
 }
@@ -191,6 +229,7 @@ pub fn transaction_to_visual_sign(
 ) -> Result<SignablePayload, VisualSignError> {
     SolanaVisualSignConverter
         .to_visual_sign_payload(SolanaTransactionWrapper::new_legacy(transaction), options)
+        .map(|r| r.payload)
 }
 
 /// Public API function for versioned transactions
@@ -198,10 +237,12 @@ pub fn versioned_transaction_to_visual_sign(
     transaction: VersionedTransaction,
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
-    SolanaVisualSignConverter.to_visual_sign_payload(
-        SolanaTransactionWrapper::new_versioned(transaction),
-        options,
-    )
+    SolanaVisualSignConverter
+        .to_visual_sign_payload(
+            SolanaTransactionWrapper::new_versioned(transaction),
+            options,
+        )
+        .map(|r| r.payload)
 }
 
 /// Public API function for string-based transactions
@@ -209,7 +250,9 @@ pub fn transaction_string_to_visual_sign(
     transaction_data: &str,
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
-    SolanaVisualSignConverter.to_visual_sign_payload_from_string(transaction_data, options)
+    SolanaVisualSignConverter
+        .to_visual_sign_payload_from_string(transaction_data, options)
+        .map(|r| r.payload)
 }
 
 /// Convert Solana transaction to visual sign payload
@@ -464,7 +507,7 @@ mod tests {
         }
         assert!(payload_result.is_ok());
 
-        let payload = payload_result.unwrap();
+        let payload = payload_result.unwrap().payload;
 
         // Verify basic payload properties
         assert_eq!(payload.title, "Solana Transaction");
@@ -547,7 +590,7 @@ mod tests {
         }
         assert!(payload_result.is_ok());
 
-        let payload = payload_result.unwrap();
+        let payload = payload_result.unwrap().payload;
 
         // Verify basic payload properties
         assert_eq!(payload.title, "V0 Transaction");
@@ -710,7 +753,7 @@ mod tests {
         );
 
         assert!(legacy_payload_result.is_ok());
-        let legacy_payload = legacy_payload_result.unwrap();
+        let legacy_payload = legacy_payload_result.unwrap().payload;
 
         // Check for transfer fields in legacy transaction
         let legacy_has_transfers = legacy_payload
@@ -754,7 +797,7 @@ mod tests {
         );
 
         assert!(v0_payload_result.is_ok());
-        let v0_payload = v0_payload_result.unwrap();
+        let v0_payload = v0_payload_result.unwrap().payload;
 
         // Check for transfer fields in V0 transaction
         let v0_has_transfers = v0_payload
@@ -881,7 +924,8 @@ mod tests {
                 );
 
                 match payload_result {
-                    Ok(payload) => {
+                    Ok(conversion) => {
+                        let payload = conversion.payload;
                         println!(
                             "✅ V0 transaction conversion succeeded with {} fields",
                             payload.fields.len()
@@ -1036,7 +1080,7 @@ mod tests {
             "Should convert TokenKeg transaction to payload"
         );
 
-        let payload = payload_result.unwrap();
+        let payload = payload_result.unwrap().payload;
 
         // Verify we have instruction fields (should not be empty)
         let instruction_fields: Vec<_> = payload

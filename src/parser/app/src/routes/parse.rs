@@ -44,12 +44,12 @@ pub fn parse(
         .ok_or_else(|| GrpcError::new(Code::InvalidArgument, "invalid chain"))?;
     let registry_chain: VisualSignRegistryChain = chain_conversion::proto_to_registry(proto_chain);
 
-    let signable_payload_str = registry
+    let conversion = registry
         .convert_transaction(&registry_chain, request_payload, options)
         .map_err(|e| GrpcError::new(Code::InvalidArgument, &format!("{e}")))?;
 
     // Convert SignablePayload to String (assuming you want JSON)
-    let parsed_payload_str = serde_json::to_string(&signable_payload_str).map_err(|e| {
+    let parsed_payload_str = serde_json::to_string(&conversion.payload).map_err(|e| {
         GrpcError::new(Code::Internal, &format!("Failed to serialize payload: {e}"))
     })?;
 
@@ -67,6 +67,9 @@ pub fn parse(
         metadata_digest: qos_hex::encode(&sha_256(&metadata_bytes)),
         // TODO: remove me once clients have migrated and rely on the fields above
         signable_payload: parsed_payload_str,
+        // `None` for chains that don't produce an intermediate output (vs. an
+        // empty borsh-encoded blob, which is a valid value).
+        intermediate_output: conversion.intermediate_output,
     };
 
     let digest = sha_256(&borsh::to_vec(&payload).expect("payload implements borsh::Serialize"));
