@@ -63,7 +63,9 @@ impl InstructionVisualizer for DflowAggregatorVisualizer {
 
         let preview_layout = SignablePayloadFieldPreviewLayout {
             title: Some(SignablePayloadFieldTextV2 { text: title }),
-            subtitle: None,
+            subtitle: Some(SignablePayloadFieldTextV2 {
+                text: String::new(),
+            }),
             condensed: Some(condensed),
             expanded: Some(expanded),
         };
@@ -267,8 +269,8 @@ fn push_arg_fields(
 mod tests {
     use super::*;
     use serde_json::json;
+    use solana_parser::IdlSource;
     use solana_sdk::pubkey::Pubkey;
-    use std::str::FromStr;
 
     fn field_label_value(field: &AnnotatedPayloadField) -> (String, String) {
         match &field.signable_payload_field {
@@ -436,8 +438,8 @@ mod tests {
     #[test]
     fn test_remaining_account_label_is_human_readable() {
         // Render the parsed-fields path with extra accounts and assert that the labels
-        // are "Remaining Account 1", "Remaining Account 2", etc., not snake_case.
-        use solana_parser::IdlSource;
+        // are "Remaining Account 1", "Remaining Account 2", etc., not snake_case,
+        // and that their text values are the corresponding pubkeys in order.
         let pubkeys: Vec<String> = (0..3).map(|_| Pubkey::new_unique().to_string()).collect();
         let parsed = DflowAggregatorParsedInstruction {
             parsed: SolanaParsedInstructionData {
@@ -453,20 +455,18 @@ mod tests {
         };
 
         let (_title, _condensed, expanded) = build_parsed_fields(&parsed, "PROGRAM_ID").unwrap();
-        let labels: Vec<String> = expanded
+        let entries: Vec<(String, String)> = expanded
             .iter()
-            .map(|f| field_label_value(f).0)
-            .filter(|l| l.starts_with("Remaining Account"))
+            .map(field_label_value)
+            .filter(|(label, _)| label.starts_with("Remaining Account"))
             .collect();
         assert_eq!(
-            labels,
+            entries,
             vec![
-                "Remaining Account 1".to_string(),
-                "Remaining Account 2".to_string(),
-                "Remaining Account 3".to_string(),
+                ("Remaining Account 1".to_string(), pubkeys[0].clone()),
+                ("Remaining Account 2".to_string(), pubkeys[1].clone()),
+                ("Remaining Account 3".to_string(), pubkeys[2].clone()),
             ]
         );
-        // Pubkey::from_str round-trips on test pubkeys.
-        let _ = Pubkey::from_str(&pubkeys[0]).unwrap();
     }
 }
