@@ -445,7 +445,7 @@ mod tests {
             parsed: SolanaParsedInstructionData {
                 instruction_name: "test_ix".to_string(),
                 discriminator: "00".to_string(),
-                named_accounts: std::collections::HashMap::new(),
+                named_accounts: Default::default(),
                 program_call_args: serde_json::Map::new(),
                 idl_source: IdlSource::Custom,
                 idl_hash: String::new(),

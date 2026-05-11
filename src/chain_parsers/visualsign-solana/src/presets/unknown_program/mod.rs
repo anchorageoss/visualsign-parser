@@ -64,7 +64,10 @@ fn try_idl_parsing(
     let program_name = idl_registry.get_program_name(program_id);
     let idl_name = idl_registry.get_idl_name(program_id);
 
-    // Try to parse the instruction with IDL
+    // Try to parse the instruction with IDL.
+    // `parsed_result` carries the upstream parsed payload alongside a locally-built
+    // `BTreeMap` of named accounts so iteration order at render time is deterministic
+    // (the upstream `SolanaParsedInstructionData.named_accounts` is a `HashMap`).
     let parsed_result = try_parse_with_idl(instruction, idl_registry);
     let instruction_data_hex = hex::encode(&instruction.data);
 
@@ -120,7 +123,7 @@ fn try_idl_parsing(
 
     // Add parsed instruction fields if IDL parsing succeeded
     match parsed_result {
-        Ok(parsed) => {
+        Ok((parsed, named_accounts)) => {
             // Add instruction name to condensed view
             condensed_fields.push(AnnotatedPayloadField {
                 signable_payload_field: SignablePayloadField::TextV2 {
@@ -166,8 +169,10 @@ fn try_idl_parsing(
                 dynamic_annotation: None,
             });
 
-            // Add named accounts (e.g., mint, depositor_token_account, etc.)
-            for (account_name, account_address) in &parsed.named_accounts {
+            // Add named accounts (e.g., mint, depositor_token_account, etc.).
+            // Iterate the local BTreeMap rather than `parsed.named_accounts`, which is
+            // the upstream `HashMap` and would render fields in non-deterministic order.
+            for (account_name, account_address) in &named_accounts {
                 expanded_fields.push(AnnotatedPayloadField {
                     signable_payload_field: SignablePayloadField::TextV2 {
                         common: SignablePayloadFieldCommon {
@@ -297,11 +302,16 @@ fn create_unknown_program_preview_layout(
     })
 }
 
-/// Try to parse instruction using the new parse_instruction_with_idl function
+/// Try to parse instruction using the new parse_instruction_with_idl function.
+///
+/// Returns both the upstream parsed payload and a locally-built `BTreeMap` of named
+/// accounts. We deliberately do NOT write the named accounts back into
+/// `parsed.named_accounts` (a `HashMap` at the FFI boundary): the rendering path needs
+/// stable iteration order, so callers should iterate the returned `BTreeMap` instead.
 fn try_parse_with_idl(
     instruction: &solana_sdk::instruction::Instruction,
     idl_registry: &crate::idl::IdlRegistry,
-) -> Result<solana_parser::SolanaParsedInstructionData, Box<dyn std::error::Error>> {
+) -> Result<(SolanaParsedInstructionData, BTreeMap<String, String>), Box<dyn std::error::Error>> {
     let program_id_str = instruction.program_id.to_string();
     let instruction_data = &instruction.data;
 
@@ -311,7 +321,7 @@ fn try_parse_with_idl(
         .ok_or("No IDL found for program")?;
 
     // Parse the instruction with the IDL
-    let mut parsed: SolanaParsedInstructionData =
+    let parsed: SolanaParsedInstructionData =
         parse_instruction_with_idl(instruction_data, &program_id_str, &idl)?;
 
     // Manually create the named_accounts map by matching instruction accounts with IDL
@@ -333,11 +343,5 @@ fn try_parse_with_idl(
         }
     }
 
-    // Boundary conversion: `SolanaParsedInstructionData.named_accounts` is the upstream
-    // solana_parser HashMap type; collecting into the inferred field type lets us
-    // build the local map as a BTreeMap (per crate-wide determinism rule in clippy.toml)
-    // and convert only at the assignment boundary.
-    parsed.named_accounts = named_accounts.into_iter().collect();
-
-    Ok(parsed)
+    Ok((parsed, named_accounts))
 }
