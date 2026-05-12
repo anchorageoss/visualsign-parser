@@ -32,7 +32,7 @@
 #   PROPTEST_CASES=1000 ./scripts/fuzz_all_idls.sh
 #   ./scripts/fuzz_all_idls.sh /path/to/extra.json ...   # append extra IDLs
 #
-# Requirements: cargo, python3
+# Requirements: cargo (builds idl-meta from workspace automatically)
 
 set -euo pipefail
 
@@ -42,25 +42,11 @@ CASES="${PROPTEST_CASES:-256}"
 
 # ── Locate the solana_parser IDL directory via cargo metadata ─────────────────
 
-IDL_DIR="$(python3 - "$WORKSPACE_TOML" <<'PY'
-import json, os, subprocess, sys
+# Build the idl-meta tool once (shares the workspace build cache).
+cargo build --manifest-path "$WORKSPACE_TOML" -p idl-meta --quiet
 
-manifest = sys.argv[1]
-result = subprocess.run(
-    ["cargo", "metadata", "--manifest-path", manifest, "--format-version", "1"],
-    capture_output=True, text=True, check=True,
-)
-data = json.loads(result.stdout)
-for pkg in data["packages"]:
-    if pkg["name"] == "solana_parser":
-        idl_dir = os.path.join(os.path.dirname(pkg["manifest_path"]), "src", "solana", "idls")
-        if os.path.isdir(idl_dir):
-            print(idl_dir)
-            sys.exit(0)
-print("error: solana_parser IDL directory not found", file=sys.stderr)
-sys.exit(1)
-PY
-)"
+IDL_META="cargo run --manifest-path $WORKSPACE_TOML -p idl-meta --quiet --"
+IDL_DIR="$($IDL_META locate-idls --manifest-path "$WORKSPACE_TOML")"
 
 # ── Collect IDL files: embedded + any extras passed as arguments ──────────────
 
@@ -93,14 +79,7 @@ for idl_file in "${IDL_FILES[@]}"; do
     name="$(basename "$idl_file" .json)"
 
     # Get instruction/type counts
-    read -r inst_count type_count < <(python3 -c "
-import json, sys
-try:
-    d = json.load(open(sys.argv[1]))
-    print(len(d.get('instructions', [])), len(d.get('types', [])))
-except Exception:
-    print(0, 0)
-" "$idl_file")
+    read -r inst_count type_count < <($IDL_META counts "$idl_file")
 
     printf "%-30s %13s %7s  " "$name" "$inst_count" "$type_count"
 

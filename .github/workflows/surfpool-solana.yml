@@ -1,0 +1,101 @@
+name: "Surfpool Fuzz: Solana"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+env:
+  # Use the upstream prebuilt binary instead of `cargo install` (which is a
+  # ~10 minute compile). Pin the tarball's SHA256 so a force-pushed release
+  # asset can't silently change what we install.
+  SURFPOOL_VERSION: v1.1.1
+  SURFPOOL_SHA256: e17b44331ce3baa58fe530a061d6dc6df0e288521fec0bd5892333854ffeecf5
+
+jobs:
+  surfpool:
+    # Two guards:
+    # 1. On `labeled` events only run when the label being added is `surfpool`.
+    #    Without this, the workflow's own `surfpool-failure` add (and any other
+    #    label change on a PR that happens to already carry `surfpool`) would
+    #    re-fire the workflow.
+    # 2. Skip fork PRs: secrets aren't passed across forks, so HELIUS_API_KEY
+    #    would be empty and `gh pr edit` would lack write permissions.
+    if: |
+      (
+        (github.event.action == 'labeled' && github.event.label.name == 'surfpool')
+        ||
+        (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'surfpool'))
+      )
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest-4-cores
+    permissions:
+      pull-requests: write
+    env:
+      HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+      PROPTEST_CASES: 32
+    steps:
+      - name: git checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
+      - name: Cache surfpool binary
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ~/.local/bin/surfpool
+          key: ${{ runner.os }}-surfpool-bin-${{ env.SURFPOOL_VERSION }}-${{ env.SURFPOOL_SHA256 }}
+      - name: Cache Rust dependencies
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            src/target/
+          key: ${{ runner.os }}-cargo-surfpool-${{ hashFiles('src/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-surfpool-
+      - name: install protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+        with:
+          version: "21.4"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: free disk space
+        run: |
+          sudo swapoff -a
+          sudo rm -f /swapfile
+          sudo apt clean
+          df -h
+      - name: Install surfpool
+        run: |
+          mkdir -p "${HOME}/.local/bin"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+          # `surfpool --version` is a stronger gate than `command -v`: a
+          # corrupted cached binary will fail this check and trigger redownload.
+          if "${HOME}/.local/bin/surfpool" --version >/dev/null 2>&1; then
+            exit 0
+          fi
+          tarball="$(mktemp)"
+          curl -fsSL -o "${tarball}" \
+            "https://github.com/txtx/surfpool/releases/download/${SURFPOOL_VERSION}/surfpool-linux-x64.tar.gz"
+          echo "${SURFPOOL_SHA256}  ${tarball}" | sha256sum -c -
+          tar xzf "${tarball}" -C "${HOME}/.local/bin"
+          rm -f "${tarball}"
+          "${HOME}/.local/bin/surfpool" --version
+      - name: Run codegen
+        run: make -C src generated
+      - name: Run surfpool fuzz against all embedded IDLs
+        id: surfpool
+        continue-on-error: true
+        run: ./scripts/surfpool_fuzz_all_idls.sh
+      - name: Label PR on surfpool failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "${{ steps.surfpool.outcome }}" = "failure" ]; then
+            gh pr edit "$PR_NUMBER" --add-label surfpool-failure || true
+          else
+            gh pr edit "$PR_NUMBER" --remove-label surfpool-failure || true
+          fi
