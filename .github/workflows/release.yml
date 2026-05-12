@@ -1,0 +1,130 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (skip actual release)'
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    # Restrict releases to main: workflow_dispatch is allowed from any ref by
+    # GitHub, so we gate on the actual checked-out ref to prevent feature
+    # branches from minting tags/releases against non-main commits.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Compute version
+        id: version
+        run: |
+          FULL_VERSION=$(scripts/auto-version.sh)
+          SEMVER="${FULL_VERSION%%+*}"
+          if [[ ! "$SEMVER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: Invalid semver: $SEMVER (from $FULL_VERSION)"
+            exit 1
+          fi
+          TAG="v${SEMVER}"
+          echo "full_version=$FULL_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Version: $FULL_VERSION  Tag: $TAG"
+
+      - name: Check if tag/release already exist
+        id: check_tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch --tags origin
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            # Fail fast if the tag already exists at a different commit (e.g.
+            # left over from a force-push or a manually created conflicting
+            # tag). Otherwise we'd publish a release pointing at the wrong
+            # commit and dispatch stagex against it.
+            TAG_COMMIT=$(git rev-parse "$TAG^{commit}")
+            HEAD_COMMIT=$(git rev-parse HEAD)
+            if [ "$TAG_COMMIT" != "$HEAD_COMMIT" ]; then
+              echo "ERROR: Tag $TAG already exists at $TAG_COMMIT, but HEAD is $HEAD_COMMIT" >&2
+              exit 1
+            fi
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          RELEASE_ERR=$(mktemp)
+          if gh release view "$TAG" >/dev/null 2>"$RELEASE_ERR"; then
+            echo "release_exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG and its release both exist, skipping."
+          elif grep -qiE 'release not found|not found|HTTP 404' "$RELEASE_ERR"; then
+            echo "release_exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ERROR: gh release view failed unexpectedly:" >&2
+            cat "$RELEASE_ERR" >&2
+            exit 1
+          fi
+          rm -f "$RELEASE_ERR"
+
+      - name: Create tag
+        if: steps.check_tag.outputs.tag_exists == 'false' && !inputs.dry_run
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git tag "$TAG"
+          git push origin "$TAG" 2>&1 || {
+            # Push failed; query the remote directly to distinguish "concurrent
+            # run pushed the same tag at HEAD" (continue) from any other failure
+            # (abort). `git fetch --tags` would NOT overwrite our local tag, so
+            # `git rev-parse $TAG` would always match HEAD locally and tell us
+            # nothing about the remote.
+            REMOTE_SHA=$(git ls-remote origin "refs/tags/$TAG" | awk '{print $1}')
+            if [ -z "$REMOTE_SHA" ]; then
+              echo "ERROR: Failed to push tag $TAG and it's not on origin"
+              exit 1
+            fi
+            HEAD_COMMIT=$(git rev-parse HEAD)
+            if [ "$REMOTE_SHA" != "$HEAD_COMMIT" ]; then
+              echo "ERROR: Remote tag $TAG points to $REMOTE_SHA, not HEAD ($HEAD_COMMIT)"
+              exit 1
+            fi
+            echo "Tag already pushed by a concurrent run at the same commit, continuing."
+          }
+
+      - name: Create GitHub release
+        if: steps.check_tag.outputs.release_exists == 'false' && !inputs.dry_run
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$TAG" --generate-notes
+
+      - name: Trigger stagex build
+        # GITHUB_TOKEN tag pushes don't re-trigger other workflows, so we dispatch
+        # stagex explicitly so released images get the semver baked in.
+        # Gate on release_exists == false (not tag_exists) so that a retry after a
+        # partial failure (tag pushed, release creation failed) still dispatches stagex.
+        if: steps.check_tag.outputs.release_exists == 'false' && !inputs.dry_run
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run stagex.yml --ref "$TAG"
+
+      - name: Dry run summary
+        if: inputs.dry_run
+        run: |
+          echo "DRY RUN: would have created tag ${{ steps.version.outputs.tag }} (version: ${{ steps.version.outputs.full_version }})"
