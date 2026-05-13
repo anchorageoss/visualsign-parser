@@ -61,6 +61,7 @@ jobs:
           dockerHub: ${{ secrets.DOCKERHUB_API_KEY }}
 
       - name: Build ${{ matrix.target.name }}
+        id: build
         shell: bash
         env:
           GH_REF_TYPE: ${{ github.ref_type }}
@@ -75,6 +76,16 @@ jobs:
             # latest/pr-* images.
             VERSION=$(scripts/auto-version.sh)
           fi
+          # Strip "+branch-hash" build metadata to get a canonical semver tag
+          # that we can both publish to GHCR and reference in the TVC summary.
+          # Validate the shape so a malformed VERSION fails the build instead
+          # of silently producing an invalid tag like ":v".
+          SEMVER="${VERSION%%+*}"
+          if [[ ! "$SEMVER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: auto-version produced non-semver '$SEMVER' from '$VERSION'" >&2
+            exit 1
+          fi
+          echo "semver_tag=v$SEMVER" >> "$GITHUB_OUTPUT"
           make VERSION="$VERSION" -j$(nproc) out/${{ matrix.target.name }}/index.json
 
       - name: Load artifact to Docker
@@ -86,8 +97,13 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Upload to GHCR
+        env:
+          SEMVER_TAG: ${{ steps.build.outputs.semver_tag }}
         run: |
-          for tag in ${tags}; do
+          # Publish the canonical `v<semver>` tag alongside event-derived tags
+          # (latest, pr-*, ref_name) so push-triggered main builds also get a
+          # reproducible, version-identifying reference, not just `:latest`.
+          for tag in ${tags} "${SEMVER_TAG}"; do
               docker tag "anchorageoss-visualsign-parser/${{ matrix.target.name }}:latest" "ghcr.io/anchorageoss/${{ matrix.target.name }}:${tag}"
           done
           docker image push --all-tags "ghcr.io/anchorageoss/${{ matrix.target.name }}"
@@ -95,9 +111,13 @@ jobs:
       - name: TVC deployment details
         if: matrix.target.name == 'parser_app'
         shell: bash
+        env:
+          SEMVER_TAG: ${{ steps.build.outputs.semver_tag }}
         run: |
-          first_tag=$(echo "${tags}" | awk '{print $1}')
-          container_url="ghcr.io/anchorageoss/parser_app:${first_tag}"
+          # Reference the canonical `v<semver>` tag (not `first_tag`, which
+          # depends on the trigger event: `latest` on main pushes, `v0.<N>.0`
+          # only on release-dispatched workflow_dispatch).
+          container_url="ghcr.io/anchorageoss/parser_app:${SEMVER_TAG}"
           container_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${container_url}" | cut -d '@' -f 2)
           docker create --name tmp-extract "${container_url}" /bin/true
           docker cp tmp-extract:/parser_app /tmp/binary
