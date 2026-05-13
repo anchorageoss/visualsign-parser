@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 60
     permissions:
       id-token: write
-      contents: read
+      contents: write  # `gh release edit` (mirror TVC details onto release notes)
       packages: write
     env:
       # release.yml dispatches stagex via `gh workflow run --ref $TAG`, which
@@ -61,6 +61,7 @@ jobs:
           dockerHub: ${{ secrets.DOCKERHUB_API_KEY }}
 
       - name: Build ${{ matrix.target.name }}
+        id: build
         shell: bash
         env:
           GH_REF_TYPE: ${{ github.ref_type }}
@@ -68,13 +69,42 @@ jobs:
         run: |
           if [[ "$GH_REF_TYPE" == "tag" && "$GH_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             VERSION="${GH_REF_NAME#v}"
+            IS_RELEASE_BUILD=1
           else
             # Compute on the runner: auto-version.sh isn't COPY'd into the
             # Docker build context, so the in-container build.rs would fall
             # back to "dev" and silently lose the git-derived version on
             # latest/pr-* images.
             VERSION=$(scripts/auto-version.sh)
+            # Only push-to-main builds are safe to publish under a bare
+            # `:v<semver>` tag. PR/branch builds on different branches can
+            # produce identical `MAJOR.HEIGHT.MINOR` prefixes (the `+branch-hash`
+            # suffix is what disambiguates them) and would overwrite each
+            # other's `:v<semver>` tag on GHCR. Those builds get only the
+            # event-derived tags (`pr-N` / branch name) plus `:<sha>`.
+            if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+              IS_RELEASE_BUILD=1
+            else
+              IS_RELEASE_BUILD=0
+            fi
           fi
+          # Strip "+branch-hash" build metadata and validate semver shape so a
+          # malformed VERSION fails the build instead of silently producing an
+          # invalid tag like ":v".
+          SEMVER="${VERSION%%+*}"
+          if [[ ! "$SEMVER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: VERSION='$VERSION' produced non-semver SEMVER='$SEMVER'" >&2
+            exit 1
+          fi
+          if [[ "$IS_RELEASE_BUILD" == "1" ]]; then
+            echo "semver_tag=v$SEMVER" >> "$GITHUB_OUTPUT"
+          else
+            echo "semver_tag=" >> "$GITHUB_OUTPUT"
+          fi
+          # Commit-SHA tag (full 40-char hex). Always unique, so it's safe to
+          # publish on every build (PR, branch, release) without risking
+          # cross-branch overwrites.
+          echo "sha_tag=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           make VERSION="$VERSION" -j$(nproc) out/${{ matrix.target.name }}/index.json
 
       - name: Load artifact to Docker
@@ -86,8 +116,20 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Upload to GHCR
+        env:
+          SEMVER_TAG: ${{ steps.build.outputs.semver_tag }}
+          SHA_TAG: ${{ steps.build.outputs.sha_tag }}
         run: |
-          for tag in ${tags}; do
+          # Publish:
+          # - event-derived tags (latest, pr-N, ref_name) — always
+          # - canonical `:v<semver>` — only on release builds; empty otherwise
+          # - full commit `:<sha>` — always (unique per commit)
+          # Build a unified list so empty SEMVER_TAG doesn't produce a bare
+          # ":latest" tag with no tag suffix in the docker tag command.
+          all_tags=( ${tags} )
+          [ -n "$SEMVER_TAG" ] && all_tags+=( "$SEMVER_TAG" )
+          [ -n "$SHA_TAG" ]    && all_tags+=( "$SHA_TAG" )
+          for tag in "${all_tags[@]}"; do
               docker tag "anchorageoss-visualsign-parser/${{ matrix.target.name }}:latest" "ghcr.io/anchorageoss/${{ matrix.target.name }}:${tag}"
           done
           docker image push --all-tags "ghcr.io/anchorageoss/${{ matrix.target.name }}"
@@ -95,9 +137,16 @@ jobs:
       - name: TVC deployment details
         if: matrix.target.name == 'parser_app'
         shell: bash
+        env:
+          SEMVER_TAG: ${{ steps.build.outputs.semver_tag }}
+          SHA_TAG: ${{ steps.build.outputs.sha_tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          first_tag=$(echo "${tags}" | awk '{print $1}')
-          container_url="ghcr.io/anchorageoss/parser_app:${first_tag}"
+          # Prefer the canonical `v<semver>` on release builds; fall back to
+          # the always-unique commit SHA on PR/branch builds where SEMVER
+          # isn't reproducible. Both reference the same digest below.
+          tvc_tag="${SEMVER_TAG:-$SHA_TAG}"
+          container_url="ghcr.io/anchorageoss/parser_app:${tvc_tag}"
           container_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${container_url}" | cut -d '@' -f 2)
           docker create --name tmp-extract "${container_url}" /bin/true
           docker cp tmp-extract:/parser_app /tmp/binary
@@ -107,6 +156,11 @@ jobs:
           # Hardcoded: TVC currently only supports this QOS version.
           qos_version="v2026.2.6"
 
+          # Build the deployment block once, then fan it out to both the run
+          # summary and (when a matching GitHub release exists) the release
+          # body. Operators reading either surface get the same paste-ready
+          # values.
+          deploy_md="${RUNNER_TEMP}/tvc_deploy.md"
           {
             echo "## TVC Deployment Details"
             echo ""
@@ -139,4 +193,37 @@ jobs:
             echo '#   "appId": "<env-specific>"'
             echo 'tvc deploy create tvc-deploy.json'
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } > "$deploy_md"
+
+          cat "$deploy_md" >> "$GITHUB_STEP_SUMMARY"
+
+          # Mirror onto the GitHub release for this semver, when it exists.
+          # PR/branch builds have no SEMVER_TAG and no matching release;
+          # push-triggered stagex on main may race release.yml (which creates
+          # the release for the same commit); in either case just skip — the
+          # release-dispatched stagex run will populate it.
+          #
+          # Re-running stagex for the same release (manual UI re-run) must be
+          # idempotent: strip any existing block bracketed by our sentinel
+          # comments before appending the freshly-built one. The sentinels
+          # render as nothing in the release body.
+          if [ -n "$SEMVER_TAG" ] && gh release view "$SEMVER_TAG" >/dev/null 2>&1; then
+            existing_body=$(gh release view "$SEMVER_TAG" --json body --jq .body)
+            preserved=$(printf '%s\n' "$existing_body" | awk '
+              /<!-- BEGIN_TVC_DEPLOY -->/ { skipping = 1; next }
+              /<!-- END_TVC_DEPLOY -->/   { skipping = 0; next }
+              !skipping
+            ')
+            new_body="${RUNNER_TEMP}/release_notes.md"
+            {
+              printf '%s\n\n' "$preserved"
+              echo "<!-- BEGIN_TVC_DEPLOY -->"
+              cat "$deploy_md"
+              echo "<!-- END_TVC_DEPLOY -->"
+            } > "$new_body"
+            gh release edit "$SEMVER_TAG" --notes-file "$new_body" \
+              --repo "${GITHUB_REPOSITORY}"
+            echo "Updated release $SEMVER_TAG with TVC deployment details."
+          else
+            echo "No release to update (SEMVER_TAG='${SEMVER_TAG:-<unset>}'); skipping release-notes update."
+          fi
