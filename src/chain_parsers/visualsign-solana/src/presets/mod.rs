@@ -1,6 +1,7 @@
 pub mod associated_token_account;
 pub mod compute_budget;
 pub mod dflow_aggregator;
+pub mod exponent_finance;
 pub mod jupiter_borrow;
 pub mod jupiter_earn;
 pub mod jupiter_perps;
