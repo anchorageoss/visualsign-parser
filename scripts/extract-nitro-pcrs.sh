@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Build the tkhq/qos enclave image at the rev pinned in src/Cargo.toml and
-# extract /nitro.pcrs from the resulting OCI image.
+# Build the tkhq/qos enclave image at the deployment rev declared in
+# src/Cargo.toml (the `# qos-deployment-rev = …` marker, not the library
+# `rev = "..."` on each qos crate) and extract /nitro.pcrs from the
+# resulting OCI image.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,27 +10,32 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 CARGO_TOML="$REPO_ROOT/src/Cargo.toml"
 OUTPUT="$REPO_ROOT/out/nitro.pcrs"
-SKOPEO_IMAGE="quay.io/skopeo/stable:latest"
+SKOPEO_IMAGE="quay.io/skopeo/stable@sha256:4d60d6c00b62b463d0a99a7aeedc49358a32c8222540c72d561606e188afb168"
+QOS_REMOTE="https://github.com/tkhq/qos.git"
 QOS_DIR=""
 REV=""
 
 QOS_DIR_AUTO=0
 STAGE_DIR=""
 CID=""
+DOCKER_TAG=""
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [options]
 
-Build the tkhq/qos enclave image at the rev pinned in src/Cargo.toml and
-extract /nitro.pcrs from the resulting OCI image.
+Build the tkhq/qos enclave image at the deployment rev declared in
+src/Cargo.toml (the '# qos-deployment-rev = ...' marker comment) and
+extract /nitro.pcrs from the resulting OCI image. Pass --rev to target
+any other qos rev — useful when auditing a prospective deployment bump
+before updating Cargo.toml.
 
 Options:
-  --cargo-toml PATH    Workspace Cargo.toml          (default: $CARGO_TOML)
-  --qos-dir PATH       Where to clone/reuse qos      (default: mktemp -d, removed on exit)
-  --output PATH        Where to write nitro.pcrs     (default: $OUTPUT)
-  --skopeo-image REF   Pinned skopeo image           (default: $SKOPEO_IMAGE)
-  --rev REV            Override rev (skip Cargo.toml)
+  --cargo-toml PATH    Workspace Cargo.toml                (default: $CARGO_TOML)
+  --qos-dir PATH       Where to clone/reuse qos            (default: mktemp -d, removed on exit)
+  --output PATH        Where to write nitro.pcrs           (default: $OUTPUT)
+  --skopeo-image REF   Skopeo image (pinned by digest)     (default: pinned upstream)
+  --rev REV            Override the rev (skip Cargo.toml marker)
   -h, --help           Show this help and exit
 EOF
 }
@@ -54,15 +61,10 @@ parse_args() {
 
 read_rev() {
   [[ -f "$CARGO_TOML" ]] || die "Cargo.toml not found: $CARGO_TOML"
-  local revs
-  mapfile -t revs < <(
-    grep -oE 'git = "https://github.com/tkhq/qos\.git", rev = "[0-9a-f]{40}"' "$CARGO_TOML" \
-      | grep -oE '[0-9a-f]{40}' \
-      | sort -u
-  )
-  [[ ${#revs[@]} -ge 1 ]] || die "No qos git deps found in $CARGO_TOML"
-  [[ ${#revs[@]} -eq 1 ]] || die "qos revs disagree in $CARGO_TOML: ${revs[*]}"
-  REV="${revs[0]}"
+  local marker
+  marker=$(grep -oE '^#[[:space:]]*qos-deployment-rev[[:space:]]*=[[:space:]]*[0-9a-f]{40}' "$CARGO_TOML" || true)
+  [[ -n "$marker" ]] || die "No '# qos-deployment-rev = ...' marker in $CARGO_TOML"
+  REV=$(echo "$marker" | grep -oE '[0-9a-f]{40}')
 }
 
 ensure_qos_checkout() {
@@ -72,6 +74,10 @@ ensure_qos_checkout() {
   fi
 
   if [[ -d "$QOS_DIR/.git" ]]; then
+    local origin
+    origin="$(git -C "$QOS_DIR" remote get-url origin 2>/dev/null || true)"
+    [[ "$origin" == "$QOS_REMOTE" ]] \
+      || die "qos checkout $QOS_DIR has origin '$origin'; expected '$QOS_REMOTE'. Refusing to mutate."
     local head
     head="$(git -C "$QOS_DIR" rev-parse HEAD)"
     if [[ "$head" == "$REV" ]]; then
@@ -87,7 +93,7 @@ ensure_qos_checkout() {
   fi
 
   echo "Cloning tkhq/qos into $QOS_DIR" >&2
-  git clone --quiet https://github.com/tkhq/qos.git "$QOS_DIR"
+  git clone --quiet "$QOS_REMOTE" "$QOS_DIR"
   git -C "$QOS_DIR" checkout --quiet "$REV"
 }
 
@@ -101,15 +107,17 @@ extract_pcrs() {
   [[ -f "$oci_dir/index.json" ]] || die "qos build did not produce $oci_dir/index.json"
 
   STAGE_DIR="$(mktemp -d -t visualsign-pcrs.XXXXXX)"
+  DOCKER_TAG="qos-enclave:extract-$$-${RANDOM}"
 
   docker run --rm \
+    --user "$(id -u):$(id -g)" \
     -v "$oci_dir:/src:ro" \
     -v "$STAGE_DIR:/dst" \
     "$SKOPEO_IMAGE" \
-    copy oci:/src:latest "docker-archive:/dst/qos_enclave.tar:qos-enclave:latest"
+    copy "oci:/src:latest" "docker-archive:/dst/qos_enclave.tar:$DOCKER_TAG"
 
   docker load -i "$STAGE_DIR/qos_enclave.tar"
-  CID="$(docker create qos-enclave:latest)"
+  CID="$(docker create "$DOCKER_TAG")"
 
   mkdir -p "$(dirname "$OUTPUT")"
   docker cp "$CID:/nitro.pcrs" "$OUTPUT"
@@ -119,6 +127,9 @@ extract_pcrs() {
 cleanup() {
   if [[ -n "$CID" ]]; then
     docker rm "$CID" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$DOCKER_TAG" ]]; then
+    docker rmi "$DOCKER_TAG" >/dev/null 2>&1 || true
   fi
   if [[ -n "$STAGE_DIR" ]]; then
     rm -rf "$STAGE_DIR"

@@ -7,15 +7,28 @@ description: Deploy VisualSign in your own AWS Nitro Enclaves
 End-to-end deployment instructions for running the parser in your own enclaves are still in progress. The piece below covers reproducing the PCR values you need on the verification side — see [Attestation Verification](./attestation) for how to use them.
 </Note>
 
-VisualSign runs inside an AWS Nitro Enclave whose runtime is provided by [tkhq/qos](https://github.com/tkhq/qos), pinned to a specific git rev in this repo's `src/Cargo.toml`. To trust attestation documents from your deployment, you need the PCR measurements of that qos enclave image.
+VisualSign runs inside an AWS Nitro Enclave whose runtime is provided by [tkhq/qos](https://github.com/tkhq/qos). To trust attestation documents from your deployment you need the PCR measurements of that qos enclave image. The `scripts/extract-nitro-pcrs.sh` tool reproduces them locally from a given qos rev.
 
-The `scripts/extract-nitro-pcrs.sh` tool reproduces those PCR values locally from the pinned rev — useful both when you bootstrap your allowlist and when you want to audit a qos rev bump before merging it.
+## Two qos revs
+
+The repo pins qos in two distinct places:
+
+- **Library rev** — the `rev = "..."` on each `qos_*` crate in `src/Cargo.toml`. This is qos compiled into `parser_app` (qos_core, qos_crypto, etc.). It does not affect PCRs.
+- **Deployment rev** — the qos version whose EIF actually boots in the enclave and is measured by PCRs. This is recorded as a marker comment in `src/Cargo.toml`:
+
+  ```toml
+  # qos-deployment-rev = d866f2c6cbc58cc08c24eab4828f0824ad16a226
+  ```
+
+  Currently the deployment rev tracks Turnkey Verifiable Compute (TVC) `v2026.2.6`. The script reads this marker by default.
+
+The two revs are not required to match. The PCRs you put in your attestation allowlist must be reproduced from the **deployment rev**, never from the library rev.
 
 ## Prerequisites
 
 - Docker 26+
-- Git, GNU Make
-- ~10 GB free RAM and disk for the qos build (StageX base images and a clean cargo compile)
+- Git and GNU Make
+- ~8 GB of free RAM and ~15 GB of free disk (StageX base images, a clean cargo compile, and the qos OCI output)
 
 ## Generating PCR values
 
@@ -23,7 +36,7 @@ The `scripts/extract-nitro-pcrs.sh` tool reproduces those PCR values locally fro
 ./scripts/extract-nitro-pcrs.sh
 ```
 
-The default invocation reads the qos rev from `src/Cargo.toml`, builds `qos_enclave` in an ephemeral checkout, writes `out/nitro.pcrs`, and prints the three measurements:
+The default invocation reads the deployment rev from `src/Cargo.toml`, builds `qos_enclave`, writes `out/nitro.pcrs`, and prints the three measurements:
 
 ```
 <pcr0-hex> PCR0
@@ -33,22 +46,28 @@ The default invocation reads the qos rev from `src/Cargo.toml`, builds `qos_encl
 
 These are the values you place in your PCR allowlist (see [Attestation → PCR management](./attestation#pcr-management)).
 
+To audit a prospective rev bump before updating `src/Cargo.toml`, pass `--rev` explicitly:
+
+```bash
+./scripts/extract-nitro-pcrs.sh --rev <40-char-qos-sha>
+```
+
 ### Options
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `--cargo-toml PATH` | `src/Cargo.toml` | Source of the pinned rev. |
-| `--qos-dir PATH` | `mktemp -d` | qos checkout location. The default is ephemeral and removed on exit; pass an explicit path to keep cached cargo and docker layers between runs. |
+| `--cargo-toml PATH` | `src/Cargo.toml` | Source of the deployment-rev marker. |
+| `--qos-dir PATH` | `mktemp -d` | qos checkout location. The default is ephemeral and removed on exit; pass an explicit path to keep cached cargo and docker layers between runs. The script verifies the directory's `origin` URL matches `tkhq/qos` before mutating it. |
 | `--output PATH` | `out/nitro.pcrs` | Where to write the PCRs file. |
-| `--skopeo-image REF` | `quay.io/skopeo/stable:latest` | Container image used to convert the OCI layout to a docker-loadable tar (no host `skopeo` install needed). |
-| `--rev REV` | (from `Cargo.toml`) | Override the rev — useful when auditing a prospective qos bump. |
+| `--skopeo-image REF` | digest-pinned `quay.io/skopeo/stable` | Container image used to convert the OCI layout to a docker-loadable tar (no host `skopeo` install needed). |
+| `--rev REV` | (from `Cargo.toml` marker) | Override the rev. |
 
 ### How it works
 
-1. **Read the rev** — the script greps `src/Cargo.toml` for the `git = "https://github.com/tkhq/qos.git", rev = "..."` pattern across all qos workspace deps and fails if they don't agree.
-2. **Check out qos** — clones `tkhq/qos` into the work dir and checks out the rev. If `--qos-dir` points at an existing clone whose `HEAD` already matches the rev, the script reuses it.
+1. **Read the rev** — the script extracts a 40-character hex from the `# qos-deployment-rev = ...` line in `src/Cargo.toml`. If `--rev` is supplied it bypasses this step.
+2. **Check out qos** — clones `tkhq/qos` into the work dir and checks out the rev. If `--qos-dir` points at an existing clone whose `origin` is the upstream `tkhq/qos` URL and whose `HEAD` already matches the rev, the script reuses it; if the origin differs the script refuses to touch the directory.
 3. **Build `qos_enclave`** — runs `make out/qos_enclave/index.json` inside the qos checkout. This is qos's deterministic [StageX](https://codeberg.org/stagex/stagex)-based build: it produces a `nitro.eif` and `nitro.pcrs` via `eif_build` and bakes them into the OCI image. The full pipeline lives in qos's [`qos_enclave` Containerfile](https://github.com/tkhq/qos/blob/main/src/images/qos_enclave/Containerfile).
-4. **Extract `nitro.pcrs`** — runs `quay.io/skopeo/stable` in a container to convert the OCI directory output to a docker-archive tar, loads it, and copies `/nitro.pcrs` out of a freshly created container.
+4. **Extract `nitro.pcrs`** — runs the pinned skopeo image (as your host user, so the staging files clean up) to convert the OCI directory output to a docker-archive tar, loads it under a unique per-run tag, copies `/nitro.pcrs` out of a freshly created container, and removes both the container and the image on exit.
 
 ### What the PCRs measure
 
@@ -65,6 +84,35 @@ diff /tmp/pcrs.a /tmp/pcrs.b
 ```
 
 If the diff is empty, the build reproduced.
+
+## Cross-check against a live prod attestation
+
+You can confirm the script's PCRs match what the production enclave actually serves by fetching a fresh attestation through [visualsign-turnkeyclient](https://github.com/anchorageoss/visualsign-turnkeyclient).
+
+```bash
+# 1. Build the client (requires GOPRIVATE for the awsnitroverifier dependency)
+git clone https://github.com/anchorageoss/visualsign-turnkeyclient.git
+cd visualsign-turnkeyclient
+GOPRIVATE=github.com/anchorageoss/* go build -o ./bin/visualsign-turnkeyclient .
+
+# 2. Fetch a real prod attestation and print PCRs (any well-formed unsigned
+#    tx works — the parser returns the same enclave attestation regardless).
+./bin/visualsign-turnkeyclient verify \
+  --host https://api.turnkey.com \
+  --organization-id <your-org-id> \
+  --key-name <your-turnkey-api-key> \
+  --chain CHAIN_ETHEREUM \
+  --unsigned-payload <hex-or-base64-tx> \
+  --debug 2>&1 | grep -E '^[[:space:]]+PCR\[[012]\]'
+
+# 3. Compare against the script output (content only — the file lacks a
+#    trailing newline, so use `cmp -n` against the file size minus the newline,
+#    or just visually compare).
+./scripts/extract-nitro-pcrs.sh --output /tmp/local.pcrs
+cat /tmp/local.pcrs
+```
+
+If both sets of PCR0/PCR1/PCR2 hex values match, the build reproduces the deployed runtime byte for byte. (PCR3 in the live attestation measures the AWS IAM role and won't appear in `nitro.pcrs` — that's expected.)
 
 ## Next steps
 
