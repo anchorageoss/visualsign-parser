@@ -10,10 +10,15 @@ out/parser_gateway/index.json: \
 	$(shell git ls-files images/parser_gateway src)
 	$(call build,parser_gateway)
 
+out/mock_facilitator/index.json: \
+	$(shell git ls-files images/mock_facilitator src)
+	$(call build,mock_facilitator)
+
 .PHONY: non-oci-docker-images
 non-oci-docker-images:
 	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_app -f images/parser_app/Containerfile .
 	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_gateway -f images/parser_gateway/Containerfile .
+	docker buildx build --load --tag anchorageoss-visualsign-parser/mock_facilitator -f images/mock_facilitator/Containerfile .
 
 define build_context
 $$( \
