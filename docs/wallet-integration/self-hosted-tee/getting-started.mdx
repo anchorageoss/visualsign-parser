@@ -4,11 +4,70 @@ description: Deploy VisualSign in your own AWS Nitro Enclaves
 ---
 
 <Note>
-Detailed instructions are coming soon. Implementation details are evolving as we finalize the self-hosted deployment architecture.
+End-to-end deployment instructions for running the parser in your own enclaves are still in progress. The piece below covers reproducing the PCR values you need on the verification side — see [Attestation Verification](./attestation) for how to use them.
 </Note>
+
+VisualSign runs inside an AWS Nitro Enclave whose runtime is provided by [tkhq/qos](https://github.com/tkhq/qos), pinned to a specific git rev in this repo's `src/Cargo.toml`. To trust attestation documents from your deployment, you need the PCR measurements of that qos enclave image.
+
+The `scripts/extract-nitro-pcrs.sh` tool reproduces those PCR values locally from the pinned rev — useful both when you bootstrap your allowlist and when you want to audit a qos rev bump before merging it.
+
+## Prerequisites
+
+- Docker 26+
+- Git, GNU Make
+- ~10 GB free RAM and disk for the qos build (StageX base images and a clean cargo compile)
+
+## Generating PCR values
+
+```bash
+./scripts/extract-nitro-pcrs.sh
+```
+
+The default invocation reads the qos rev from `src/Cargo.toml`, builds `qos_enclave` in an ephemeral checkout, writes `out/nitro.pcrs`, and prints the three measurements:
+
+```
+<pcr0-hex> PCR0
+<pcr1-hex> PCR1
+<pcr2-hex> PCR2
+```
+
+These are the values you place in your PCR allowlist (see [Attestation → PCR management](./attestation#pcr-management)).
+
+### Options
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--cargo-toml PATH` | `src/Cargo.toml` | Source of the pinned rev. |
+| `--qos-dir PATH` | `mktemp -d` | qos checkout location. The default is ephemeral and removed on exit; pass an explicit path to keep cached cargo and docker layers between runs. |
+| `--output PATH` | `out/nitro.pcrs` | Where to write the PCRs file. |
+| `--skopeo-image REF` | `quay.io/skopeo/stable:latest` | Container image used to convert the OCI layout to a docker-loadable tar (no host `skopeo` install needed). |
+| `--rev REV` | (from `Cargo.toml`) | Override the rev — useful when auditing a prospective qos bump. |
+
+### How it works
+
+1. **Read the rev** — the script greps `src/Cargo.toml` for the `git = "https://github.com/tkhq/qos.git", rev = "..."` pattern across all qos workspace deps and fails if they don't agree.
+2. **Check out qos** — clones `tkhq/qos` into the work dir and checks out the rev. If `--qos-dir` points at an existing clone whose `HEAD` already matches the rev, the script reuses it.
+3. **Build `qos_enclave`** — runs `make out/qos_enclave/index.json` inside the qos checkout. This is qos's deterministic [StageX](https://codeberg.org/stagex/stagex)-based build: it produces a `nitro.eif` and `nitro.pcrs` via `eif_build` and bakes them into the OCI image. The full pipeline lives in qos's [`qos_enclave` Containerfile](https://github.com/tkhq/qos/blob/main/src/images/qos_enclave/Containerfile).
+4. **Extract `nitro.pcrs`** — runs `quay.io/skopeo/stable` in a container to convert the OCI directory output to a docker-archive tar, loads it, and copies `/nitro.pcrs` out of a freshly created container.
+
+### What the PCRs measure
+
+The PCRs cover the qos enclave runtime: PCR0 and PCR1 measure the Nitro EIF and kernel, and PCR2 measures the boot ramdisk that contains qos's `init` binary. The `parser_app` binary is loaded into qos at runtime over vsock and is **not** part of these PCR measurements — its integrity is established separately via the qos manifest, which is covered at [Level 3 attestation](./attestation#level-3-manifest-verification).
+
+## Reproducibility
+
+The qos build is deterministic. Running the script twice should produce byte-identical `nitro.pcrs` files. Pass `--qos-dir` to the second run so the cargo and docker layer caches are reused — the second build should be a no-op:
+
+```bash
+./scripts/extract-nitro-pcrs.sh --output /tmp/pcrs.a --qos-dir /tmp/qos
+./scripts/extract-nitro-pcrs.sh --output /tmp/pcrs.b --qos-dir /tmp/qos
+diff /tmp/pcrs.a /tmp/pcrs.b
+```
+
+If the diff is empty, the build reproduced.
 
 ## Next steps
 
-- [Security Model](./security-model) — Understand the TEE threat model
+- [Security Model](./security-model) — Threat model and trust architecture
 - [Attestation](./attestation) — Implement attestation verification
 - [gRPC API Reference](/api-reference) — Full API documentation
