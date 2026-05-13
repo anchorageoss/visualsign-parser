@@ -397,15 +397,28 @@ fn convert_v0_to_visual_sign_payload(
     }
 
     #[cfg(not(feature = "diagnostics"))]
-    {
-        let v0_fields = decode_v0_instructions(v0_message, &idl_registry)?;
-        for (index, instruction_field) in v0_fields.iter().enumerate() {
-            tracing::debug!(
-                "Handling instruction {} with visualizer {:?}",
-                index,
-                "V0 Instruction"
-            );
-            fields.push(instruction_field.signable_payload_field.clone());
+    match decode_v0_instructions(v0_message, &idl_registry) {
+        Ok(v0_fields) => {
+            for (index, instruction_field) in v0_fields.iter().enumerate() {
+                tracing::debug!(
+                    "Handling instruction {} with visualizer {:?}",
+                    index,
+                    "V0 Instruction"
+                );
+                fields.push(instruction_field.signable_payload_field.clone());
+            }
+        }
+        Err(e) => {
+            // Add a note about instruction decoding failure
+            fields.push(SignablePayloadField::TextV2 {
+                common: SignablePayloadFieldCommon {
+                    fallback_text: format!("Instruction decoding failed: {e}"),
+                    label: "Instruction Decoding Note".to_string(),
+                },
+                text_v2: visualsign::SignablePayloadFieldTextV2 {
+                    text: format!("Instruction decoding failed: {e}"),
+                },
+            });
         }
     }
 
@@ -1126,5 +1139,68 @@ mod tests {
         println!("✅ TokenKeg transaction parsed successfully");
         println!("Number of instruction fields: {}", instruction_fields.len());
         println!("JSON output:\n{json_str}");
+    }
+
+    // Lock in main's behavior: when v0 instruction decoding fails on the
+    // diagnostics-OFF (production) path, the converter pushes a TextV2
+    // "Instruction Decoding Note" field rather than erroring out the entire
+    // conversion. Wallets render this note instead of seeing a hard failure
+    // for an otherwise-renderable transaction. The empty-account-keys path
+    // is the simplest deterministic trigger; other failure paths
+    // (visualizer Err, etc.) share the same fallback handling.
+    #[cfg(not(feature = "diagnostics"))]
+    #[test]
+    fn test_v0_decode_failure_emits_instruction_decoding_note() {
+        let v0_message = solana_sdk::message::v0::Message {
+            header: solana_sdk::message::MessageHeader {
+                num_required_signatures: 0,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 0,
+            },
+            account_keys: vec![],
+            recent_blockhash: solana_sdk::hash::Hash::default(),
+            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 0,
+                accounts: vec![],
+                data: vec![],
+            }],
+            address_table_lookups: vec![],
+        };
+        let versioned_tx = VersionedTransaction {
+            signatures: vec![],
+            message: VersionedMessage::V0(v0_message.clone()),
+        };
+        let options = VisualSignOptions {
+            metadata: None,
+            decode_transfers: false,
+            transaction_name: None,
+            developer_config: None,
+        };
+
+        let payload =
+            convert_v0_to_visual_sign_payload(&versioned_tx, &v0_message, false, None, &options)
+                .expect("convert should succeed via Instruction Decoding Note fallback");
+
+        let note = payload
+            .fields
+            .iter()
+            .find_map(|f| match f {
+                SignablePayloadField::TextV2 { common, text_v2 }
+                    if common.label == "Instruction Decoding Note" =>
+                {
+                    Some(text_v2.text.clone())
+                }
+                _ => None,
+            })
+            .expect("Instruction Decoding Note field missing from payload");
+
+        assert!(
+            note.contains("Instruction decoding failed"),
+            "unexpected note body: {note}"
+        );
+        assert!(
+            note.contains("no account keys"),
+            "note should propagate underlying error: {note}"
+        );
     }
 }
