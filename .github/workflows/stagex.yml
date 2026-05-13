@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 60
     permissions:
       id-token: write
-      contents: read
+      contents: write  # `gh release edit` (mirror TVC details onto release notes)
       packages: write
     env:
       # release.yml dispatches stagex via `gh workflow run --ref $TAG`, which
@@ -86,6 +86,10 @@ jobs:
             exit 1
           fi
           echo "semver_tag=v$SEMVER" >> "$GITHUB_OUTPUT"
+          # Commit-SHA tag (full 40-char hex). Lets a given image be located
+          # by its source commit without parsing VERSION.
+          SHA_FULL=$(git rev-parse HEAD)
+          echo "sha_tag=$SHA_FULL" >> "$GITHUB_OUTPUT"
           make VERSION="$VERSION" -j$(nproc) out/${{ matrix.target.name }}/index.json
 
       - name: Load artifact to Docker
@@ -99,11 +103,14 @@ jobs:
       - name: Upload to GHCR
         env:
           SEMVER_TAG: ${{ steps.build.outputs.semver_tag }}
+          SHA_TAG: ${{ steps.build.outputs.sha_tag }}
         run: |
-          # Publish the canonical `v<semver>` tag alongside event-derived tags
-          # (latest, pr-*, ref_name) so push-triggered main builds also get a
-          # reproducible, version-identifying reference, not just `:latest`.
-          for tag in ${tags} "${SEMVER_TAG}"; do
+          # Publish:
+          # - event-derived tags (latest, pr-N, ref_name)
+          # - canonical `v<semver>` so push-triggered main builds also get a
+          #   reproducible version reference, not just `:latest`
+          # - full commit SHA so a given image can be located by its source commit
+          for tag in ${tags} "${SEMVER_TAG}" "${SHA_TAG}"; do
               docker tag "anchorageoss-visualsign-parser/${{ matrix.target.name }}:latest" "ghcr.io/anchorageoss/${{ matrix.target.name }}:${tag}"
           done
           docker image push --all-tags "ghcr.io/anchorageoss/${{ matrix.target.name }}"
@@ -113,6 +120,7 @@ jobs:
         shell: bash
         env:
           SEMVER_TAG: ${{ steps.build.outputs.semver_tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Reference the canonical `v<semver>` tag (not `first_tag`, which
           # depends on the trigger event: `latest` on main pushes, `v0.<N>.0`
@@ -127,6 +135,11 @@ jobs:
           # Hardcoded: TVC currently only supports this QOS version.
           qos_version="v2026.2.6"
 
+          # Build the deployment block once, then fan it out to both the run
+          # summary and (when a matching GitHub release exists) the release
+          # body. Operators reading either surface get the same paste-ready
+          # values.
+          deploy_md="${RUNNER_TEMP}/tvc_deploy.md"
           {
             echo "## TVC Deployment Details"
             echo ""
@@ -159,4 +172,36 @@ jobs:
             echo '#   "appId": "<env-specific>"'
             echo 'tvc deploy create tvc-deploy.json'
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } > "$deploy_md"
+
+          cat "$deploy_md" >> "$GITHUB_STEP_SUMMARY"
+
+          # Mirror onto the GitHub release for this semver, when it exists.
+          # Push-triggered stagex may race release.yml (which creates the
+          # release for the same commit); in that case just skip — the
+          # release-dispatched stagex run will populate it.
+          #
+          # Re-running stagex for the same release (manual UI re-run) must be
+          # idempotent: strip any existing block bracketed by our sentinel
+          # comments before appending the freshly-built one. The sentinels
+          # render as nothing in the release body.
+          if gh release view "$SEMVER_TAG" >/dev/null 2>&1; then
+            existing_body=$(gh release view "$SEMVER_TAG" --json body --jq .body)
+            preserved=$(printf '%s\n' "$existing_body" | awk '
+              /<!-- BEGIN_TVC_DEPLOY -->/ { skipping = 1; next }
+              /<!-- END_TVC_DEPLOY -->/   { skipping = 0; next }
+              !skipping
+            ')
+            new_body="${RUNNER_TEMP}/release_notes.md"
+            {
+              printf '%s\n\n' "$preserved"
+              echo "<!-- BEGIN_TVC_DEPLOY -->"
+              cat "$deploy_md"
+              echo "<!-- END_TVC_DEPLOY -->"
+            } > "$new_body"
+            gh release edit "$SEMVER_TAG" --notes-file "$new_body" \
+              --repo "${GITHUB_REPOSITORY}"
+            echo "Updated release $SEMVER_TAG with TVC deployment details."
+          else
+            echo "No release exists yet for $SEMVER_TAG; skipping release-notes update."
+          fi
