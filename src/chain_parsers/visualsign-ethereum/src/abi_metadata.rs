@@ -372,7 +372,9 @@ mod tests {
 
     const TEST_ADDRESS: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 
-    fn make_abi_mappings(entries: Vec<(&str, Abi)>) -> std::collections::HashMap<String, Abi> {
+    /// Builds the test fixture as a `BTreeMap` (crate determinism rule) and lets each
+    /// call site `.into_iter().collect()` into the proto field's `HashMap`.
+    fn make_abi_mappings(entries: Vec<(&str, Abi)>) -> std::collections::BTreeMap<String, Abi> {
         entries
             .into_iter()
             .map(|(addr, abi)| (addr.to_string(), abi))
@@ -418,7 +420,9 @@ mod tests {
                         value: VALID_ABI.to_string(),
                         signature: None,
                     },
-                )]),
+                )])
+                .into_iter()
+                .collect(),
             })),
         };
         let registry =
@@ -475,7 +479,9 @@ mod tests {
                         value: VALID_ABI.to_string(),
                         signature: Some(proto_sig),
                     },
-                )]),
+                )])
+                .into_iter()
+                .collect(),
             })),
         };
         let registry =
@@ -509,7 +515,9 @@ mod tests {
                         value: VALID_ABI.to_string(),
                         signature: None,
                     },
-                )]),
+                )])
+                .into_iter()
+                .collect(),
             })),
         };
         // Invalid entries are skipped; with no valid entries left, result is None
@@ -527,7 +535,9 @@ mod tests {
                         value: "not valid json".to_string(),
                         signature: None,
                     },
-                )]),
+                )])
+                .into_iter()
+                .collect(),
             })),
         };
         // Invalid ABI JSON is skipped; with no valid entries left, result is None
@@ -555,7 +565,9 @@ mod tests {
                             signature: None,
                         },
                     ),
-                ]),
+                ])
+                .into_iter()
+                .collect(),
             })),
         };
         // The valid entry should be registered; the invalid one skipped

@@ -1,6 +1,6 @@
 use crate::token_metadata::{ChainMetadata, TokenMetadata, parse_network_id};
 use alloy_primitives::{Address, utils::format_units};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Type alias for chain ID to avoid depending on external chain types
 pub type ChainId = u64;
@@ -9,7 +9,7 @@ pub type ChainId = u64;
 ///
 /// This enum provides type safety for well-known contract addresses,
 /// preventing typos and enabling compile-time checks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum WellKnownAddress {
     /// Permit2 contract - universal across all chains
     Permit2,
@@ -78,24 +78,24 @@ pub trait ContractType: 'static {
 #[derive(Clone)]
 pub struct ContractRegistry {
     /// Maps (chain_id, address) to contract type
-    address_to_type: HashMap<(ChainId, Address), String>,
+    address_to_type: BTreeMap<(ChainId, Address), String>,
     /// Maps (chain_id, contract_type) to list of addresses
-    type_to_addresses: HashMap<(ChainId, String), Vec<Address>>,
+    type_to_addresses: BTreeMap<(ChainId, String), Vec<Address>>,
     /// Maps (chain_id, token_address) to token metadata
-    token_metadata: HashMap<(ChainId, Address), TokenMetadata>,
+    token_metadata: BTreeMap<(ChainId, Address), TokenMetadata>,
     /// Maps (well_known_address, optional_chain_id) to address
     /// For chain-specific addresses, use Some(chain_id); for universal addresses, use None
-    well_known_addresses: HashMap<(WellKnownAddress, Option<ChainId>), Address>,
+    well_known_addresses: BTreeMap<(WellKnownAddress, Option<ChainId>), Address>,
 }
 
 impl ContractRegistry {
     /// Creates a new empty registry
     pub fn new() -> Self {
         Self {
-            address_to_type: HashMap::new(),
-            type_to_addresses: HashMap::new(),
-            token_metadata: HashMap::new(),
-            well_known_addresses: HashMap::new(),
+            address_to_type: BTreeMap::new(),
+            type_to_addresses: BTreeMap::new(),
+            token_metadata: BTreeMap::new(),
+            well_known_addresses: BTreeMap::new(),
         }
     }
 
@@ -550,7 +550,7 @@ mod tests {
     fn test_load_chain_metadata() {
         let mut registry = ContractRegistry::new();
 
-        let mut assets = HashMap::new();
+        let mut assets = BTreeMap::new();
         assets.insert(
             "USDC".to_string(),
             create_token_metadata(
@@ -715,7 +715,7 @@ mod tests {
     fn test_load_chain_metadata_with_invalid_addresses() {
         let mut registry = ContractRegistry::new();
 
-        let mut assets = HashMap::new();
+        let mut assets = BTreeMap::new();
         // Valid token
         assets.insert(
             "USDC".to_string(),
@@ -779,7 +779,7 @@ mod tests {
 
         let metadata = ChainMetadata {
             network_id: "UNKNOWN_NETWORK".to_string(),
-            assets: HashMap::new(),
+            assets: BTreeMap::new(),
         };
 
         let result = registry.load_chain_metadata(&metadata);
@@ -925,7 +925,7 @@ mod tests {
                 }
                 WellKnownAddress::Weth => {
                     // WETH should be chain-specific - different addresses per chain
-                    let mut addresses = std::collections::HashSet::new();
+                    let mut addresses = std::collections::BTreeSet::new();
 
                     for &chain_id in &test_chains {
                         let addr = registry

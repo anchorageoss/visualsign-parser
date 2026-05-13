@@ -1,5 +1,5 @@
 use crate::context::VisualizerContext;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use visualsign::AnnotatedPayloadField;
 use visualsign::vsptrait::VisualSignError;
 
@@ -62,7 +62,7 @@ pub trait CalldataVisualizer: Send + Sync {
 /// This registry is designed to be built once and shared immutably (e.g., in an Arc).
 /// Use `EthereumVisualizerRegistryBuilder` to construct a registry.
 pub struct EthereumVisualizerRegistry {
-    visualizers: HashMap<String, Box<dyn ContractVisualizer>>,
+    visualizers: BTreeMap<String, Box<dyn ContractVisualizer>>,
 }
 
 impl EthereumVisualizerRegistry {
@@ -92,14 +92,14 @@ impl crate::context::VisualizerRegistry for EthereumVisualizerRegistry {
 /// Once all visualizers are registered, call `build()` to create an immutable registry.
 #[derive(Default)]
 pub struct EthereumVisualizerRegistryBuilder {
-    visualizers: HashMap<String, Box<dyn ContractVisualizer>>,
+    visualizers: BTreeMap<String, Box<dyn ContractVisualizer>>,
 }
 
 impl EthereumVisualizerRegistryBuilder {
     /// Creates a new empty builder
     pub fn new() -> Self {
         Self {
-            visualizers: HashMap::new(),
+            visualizers: BTreeMap::new(),
         }
     }
 
