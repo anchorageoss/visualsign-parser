@@ -5,7 +5,7 @@
 
 use solana_parser::{CustomIdl, CustomIdlConfig, Idl, ProgramType, decode_idl_data};
 use solana_sdk::pubkey::Pubkey;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Registry for managing program IDLs (program_id -> CustomIdlConfig)
 ///
@@ -19,20 +19,20 @@ use std::collections::HashMap;
 pub struct IdlRegistry {
     /// Maps program_id (base58 string) -> CustomIdlConfig
     /// These are user-provided IDLs that override built-ins
-    configs: HashMap<String, CustomIdlConfig>,
+    configs: BTreeMap<String, CustomIdlConfig>,
     /// Maps program_id -> human-readable name (extracted from IDL or provided by user)
-    names: HashMap<String, String>,
+    names: BTreeMap<String, String>,
     /// Maps program_id -> IDL name from metadata.name in JSON
-    idl_names: HashMap<String, String>,
+    idl_names: BTreeMap<String, String>,
 }
 
 impl IdlRegistry {
     /// Create empty registry (built-in IDLs handled by solana_parser directly)
     pub fn new() -> Self {
         Self {
-            configs: HashMap::new(),
-            names: HashMap::new(),
-            idl_names: HashMap::new(),
+            configs: BTreeMap::new(),
+            names: BTreeMap::new(),
+            idl_names: BTreeMap::new(),
         }
     }
 
@@ -45,11 +45,11 @@ impl IdlRegistry {
     /// * `Ok(IdlRegistry)` with the custom IDLs configured to override built-ins
     /// * `Err` if any IDL JSON is invalid
     pub fn from_idl_mappings(
-        idl_mappings: HashMap<String, (String, String)>,
+        idl_mappings: BTreeMap<String, (String, String)>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut configs = HashMap::new();
-        let mut names = HashMap::new();
-        let mut idl_names = HashMap::new();
+        let mut configs = BTreeMap::new();
+        let mut names = BTreeMap::new();
+        let mut idl_names = BTreeMap::new();
 
         for (program_id, (idl_json, program_name)) in idl_mappings {
             // Extract IDL name from JSON metadata
@@ -82,7 +82,7 @@ impl IdlRegistry {
     ///
     /// Reserved for future integration with solana_parser's batch transaction parsing.
     #[allow(dead_code)]
-    pub fn get_all_configs(&self) -> &HashMap<String, CustomIdlConfig> {
+    pub fn get_all_configs(&self) -> &BTreeMap<String, CustomIdlConfig> {
         &self.configs
     }
 

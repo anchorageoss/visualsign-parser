@@ -11,6 +11,7 @@ const DESCRIPTOR_PATH: &str = "./generated/src/generated/descriptor.bin";
 
 const SERDE_DERIVE: &str = "#[cfg_attr(feature = \"serde_derive\", derive(::serde::Serialize, ::serde::Deserialize), serde(rename_all = \"camelCase\"))]";
 const SERDE_ENUM_DERIVE: &str = "#[cfg_attr(feature = \"serde_derive\", serde(untagged))]";
+const SERDE_DEFAULT: &str = "#[cfg_attr(feature = \"serde_derive\", serde(default))]";
 const BORSH_ENUM_DISC_ATTR: &str = "#[borsh(use_discriminant=true)]";
 const TONIC_FEATURE_GATE: &str = "#[cfg(feature = \"tonic_types\")]";
 const BORSH_DERIVE: &str = "#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]";
@@ -21,9 +22,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tonic_build::configure()
         .out_dir(GEN_DIR)
-        // JSON - Used for user requests -- TODO: needed?
-        .type_attribute(".parser", SERDE_DERIVE)
-        .enum_attribute(".", SERDE_ENUM_DERIVE)
+        // JSON - serde for types used in HTTP API requests/responses.
+        // QOSParserRequest/QOSParserResponse are excluded: they embed health and
+        // google.rpc types that don't implement serde.
+        .type_attribute(".parser.ParseRequest", SERDE_DERIVE)
+        .type_attribute(".parser.ParseResponse", SERDE_DERIVE)
+        .type_attribute(".parser.ParsedTransaction", SERDE_DERIVE)
+        .type_attribute(".parser.ParsedTransactionPayload", SERDE_DERIVE)
+        .type_attribute(".parser.Signature", SERDE_DERIVE)
+        .type_attribute(".parser.ChainMetadata", SERDE_DERIVE)
+        .type_attribute(".parser.EthereumMetadata", SERDE_DERIVE)
+        .type_attribute(".parser.SolanaMetadata", SERDE_DERIVE)
+        .type_attribute(".parser.Abi", SERDE_DERIVE)
+        .type_attribute(".parser.Idl", SERDE_DERIVE)
+        .type_attribute(".parser.SignatureMetadata", SERDE_DERIVE)
+        .type_attribute(".parser.Metadata", SERDE_DERIVE)
+        // untagged for the ChainMetadata oneof so JSON doesn't include a variant tag
+        // The path is message.oneof_field_name per prost-build enum_attribute docs
+        .enum_attribute(".parser.ChainMetadata.metadata", SERDE_ENUM_DERIVE)
+        // serde(default) on map fields so callers can omit them when empty
+        .field_attribute(".parser.EthereumMetadata.abi_mappings", SERDE_DEFAULT)
+        .field_attribute(".parser.SolanaMetadata.idl_mappings", SERDE_DEFAULT)
         // BORSH - Used for QOS sha256 checks
         .type_attribute(".parser.ParsedTransactionPayload", BORSH_DERIVE)
         .enum_attribute(".parser.ParsedTransactionPayload", BORSH_ENUM_DISC_ATTR)

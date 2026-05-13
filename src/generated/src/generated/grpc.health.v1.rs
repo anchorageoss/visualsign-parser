@@ -12,7 +12,6 @@ pub struct HealthCheckResponse {
 }
 /// Nested message and enum types in `HealthCheckResponse`.
 pub mod health_check_response {
-    #[cfg_attr(feature = "serde_derive", serde(untagged))]
     #[derive(
         Clone,
         Copy,

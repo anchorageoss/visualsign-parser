@@ -1,12 +1,14 @@
 pub mod associated_token_account;
 pub mod compute_budget;
 pub mod dflow_aggregator;
+pub mod exponent_finance;
 pub mod jupiter_borrow;
 pub mod jupiter_earn;
 pub mod jupiter_perps;
 pub mod jupiter_swap;
 pub mod kamino_borrow;
 pub mod kamino_farms;
+pub mod kamino_limit;
 pub mod kamino_vault;
 pub mod metadao_conditional_vault;
 pub mod metadao_futarchy;

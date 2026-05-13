@@ -100,14 +100,17 @@ impl Cli {
         let opts = ParserOpts::new(&mut args);
 
         if opts.parsed.version() {
-            println!("version: {}", env!("CARGO_PKG_VERSION"));
+            println!("version: {}", env!("VERSION"));
         } else if opts.parsed.help() {
             println!("{}", opts.parsed.info());
         } else {
             let processor =
                 crate::service::Processor::new(EphemeralKeyHandle::new(opts.ephemeral_file()));
 
-            println!("---- Starting Parser server -----");
+            println!(
+                "---- Starting Parser server (version: {}) -----",
+                env!("VERSION")
+            );
             let mut tasks = Vec::new();
             tasks.push(tokio::spawn(async move {
                 crate::host::Host::listen(opts.host_addr(), processor)

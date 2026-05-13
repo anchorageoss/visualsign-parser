@@ -1,3 +1,4 @@
 **/target
 out
 docs/superpowers/
+.surfpool/

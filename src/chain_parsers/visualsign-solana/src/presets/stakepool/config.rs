@@ -1,7 +1,7 @@
 //! Configuration for Stakepool program integration
 
 use crate::core::{SolanaIntegrationConfig, SolanaIntegrationConfigData};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub struct StakepoolConfig;
 
@@ -13,8 +13,8 @@ impl SolanaIntegrationConfig for StakepoolConfig {
     fn data(&self) -> &SolanaIntegrationConfigData {
         static DATA: std::sync::OnceLock<SolanaIntegrationConfigData> = std::sync::OnceLock::new();
         DATA.get_or_init(|| {
-            let mut programs = HashMap::new();
-            let mut stakepool_instructions = HashMap::new();
+            let mut programs = BTreeMap::new();
+            let mut stakepool_instructions = BTreeMap::new();
             stakepool_instructions.insert("*", vec!["*"]);
             // this is a weaker version, we can probably do a prefix match on SPoo1
             programs.insert(
