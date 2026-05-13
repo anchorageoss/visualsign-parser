@@ -1,0 +1,61 @@
+---
+title: "Composable by design: how Solana presets stack"
+description: "Adding a new protocol to VisualSign rarely touches existing code. Here's how the IDL parser, preset overlays, and a build-time registry compose into one signable payload."
+---
+
+In the last few weeks, VisualSign gained decoding for Jupiter (Borrow, Earn, Perpetuals, v6 route_v2), Kamino (Borrow, Vault, Farms, Limit Orders), Meteora (DLMM, DAMM V2), MetaDAO (Futarchy, Conditional Vault), Orca Whirlpool, Onre App, Neutral Trade, DFlow Aggregator, and Exponent Finance. Fourteen protocols. Each PR added a single directory under `src/chain_parsers/visualsign-solana/src/presets/` and a handful of fixtures. None of them changed how any of the other presets decode, and none of them touched the core parser.
+
+That's not luck. It's the consequence of a small, deliberate set of composition primitives.
+
+## The three pieces
+
+VisualSign's Solana decoder is built from three layers you can think about independently:
+
+1. **A built-in IDL parser.** Any Anchor-style program with an IDL gets a typed view of each instruction — discriminator, account list, argument values — produced generically from the IDL alone. This is the `src/idl/` module. It does not know about Jupiter or Kamino.
+
+2. **Protocol-specific preset overlays.** A preset is a small unit that says "for *this* program id, take the typed view and produce these human-readable fields." Presets implement `InstructionVisualizer` and declare which program id they handle via `SolanaIntegrationConfig`. They never parse bytes; they consume the IDL view and call field builders (`create_text_field`, `create_amount_field`, `create_raw_data_field`) to shape output. Each preset lives in its own directory.
+
+3. **A build-time registry.** `build.rs` scans `src/presets/` and emits a generated `available_visualizers()` function — one `Box::new(<Dir>::<Pascal>Visualizer)` per directory. The build comment in the script puts the design intent plainly: "this should allow us to functionally compose instructions at the time of display." There is no central registration site to edit. Adding a directory is the registration.
+
+Field builders sit underneath all three layers. They enforce shape and determinism, so two presets emitting the same logical content produce byte-identical output. That property is what makes the composed payload safe to hash.
+
+## What happens when a transaction lands
+
+A Solana transaction is, in VisualSign's view, a list of instructions. Decoding is a fold:
+
+```text
+for each instruction in the transaction:
+    visualize_with_any(available_visualizers(), context)
+        -> first preset whose can_handle() returns true
+        -> preset emits an AnnotatedPayloadField
+collect fields -> SignablePayload
+```
+
+`available_visualizers()` is the generated slice. `unknown_program` always sorts last, so it catches anything no specific preset claimed. A preset registered for Jupiter's program id has zero knowledge of MetaDAO's preset, and vice versa. The dispatch lookup is the only coupling.
+
+This is why the preset wave required no changes to the core. Each new directory added:
+
+- The IDL JSON (or accepted the built-in IDL path).
+- One preset `mod.rs` implementing `InstructionVisualizer`.
+- One `config.rs` implementing `SolanaIntegrationConfig` with the program id.
+- Fixture tests under `tests/fixtures/`.
+
+Nothing else moved. Reviewers read each preset PR in isolation. CI sees no ripple.
+
+## What composability buys you
+
+If you're **adding a new Solana protocol**, the design pushes you toward a particular shape: one IDL, one visualizer, one config, a handful of fixtures, one new directory. The same shape your reviewer expects, the same shape we expect from ourselves. The `solana-add-idl` skill scaffolds this for you when the protocol exposes an on-chain IDL.
+
+If you're **integrating VisualSign into a wallet**, composability shows up at the data layer too. The Ethereum side uses `LayeredRegistry<T>` to compose wallet-provided overrides on top of compiled-in defaults — wallets can ship their own opinions about token metadata without forking VisualSign. The Solana side currently composes through fixed IDL + preset layers; wallet-side overlays are the natural next step.
+
+If you're **building a policy engine or signing pipeline on top of VisualSign**, the chain metadata + content digests change in the HTTP gateway (PR #287) gives you a stable input contract. The gateway forwards `chain_metadata` end-to-end and exposes payload digests on every response. Your policy logic composes onto our parser output without re-parsing or re-decoding.
+
+If you're **writing tests**, surfpool (PR #202) composes real Solana mainnet state into the local harness. Tests run against forked chain data, which catches drift between IDL assumptions and on-chain reality without a live cluster.
+
+## The seams are the product
+
+"Composable by design" is a phrase. The work is in keeping the seams clean as surface area grows. Build-time discovery of presets means there's no list to drift out of sync. Field builders mean two contributors emitting the same content produce identical bytes. A typed IDL view between the raw instruction and the preset means presets only see well-shaped input.
+
+The preset wave is a useful proof point. The more interesting test will be the next chain we add — and watching whether the same primitives carry across.
+
+To start adding a Solana preset, see [Adding a Solana preset](/chains/solana). To see what shipped recently, see the [Changelog](/changelog).

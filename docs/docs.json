@@ -142,6 +142,29 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Changelog",
+        "groups": [
+          {
+            "group": "Changelog",
+            "pages": [
+              "changelog"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Blog",
+        "groups": [
+          {
+            "group": "Blog",
+            "pages": [
+              "blog",
+              "blog/2026-05-13-composable-solana-presets"
+            ]
+          }
+        ]
       }
     ]
   },
