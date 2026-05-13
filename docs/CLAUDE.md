@@ -47,7 +47,16 @@ npx puppeteer browsers install chrome-headless-shell
 cd /tmp && npm install puppeteer
 ```
 
-The Mintlify dev server must be running on port 3000. Use the screenshot script to capture pages:
+The Mintlify dev server must be running on port 3000. The simplest way is the containerized CLI bundled with this directory:
+
+```bash
+make -C docs dev        # builds the image if needed, serves at :3000
+make -C docs broken-links
+```
+
+Set `ENGINE=podman` if you don't have Docker. To install the CLI on the host instead, see [Mintlify CLI installation](https://www.mintlify.com/docs/installation) — the npm package is `mint` (run `npm i -g mint`, then `mint dev`).
+
+Use the screenshot script to capture pages once the server is up:
 
 ```bash
 # Usage: ./scripts/screenshot.js <page-path> [output-file] [scroll-offset]
