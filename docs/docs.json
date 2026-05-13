@@ -149,9 +149,9 @@
             ]
           },
           {
-            "group": "Fundamentals",
+            "group": "Core",
             "pages": [
-              "changelog/fundamentals"
+              "changelog/core"
             ]
           }
         ]
