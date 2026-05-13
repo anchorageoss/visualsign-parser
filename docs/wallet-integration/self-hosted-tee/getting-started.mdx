@@ -90,10 +90,10 @@ If the diff is empty, the build reproduced.
 You can confirm the script's PCRs match what the production enclave actually serves by fetching a fresh attestation through [visualsign-turnkeyclient](https://github.com/anchorageoss/visualsign-turnkeyclient).
 
 ```bash
-# 1. Build the client (requires GOPRIVATE for the awsnitroverifier dependency)
+# 1. Build the client
 git clone https://github.com/anchorageoss/visualsign-turnkeyclient.git
 cd visualsign-turnkeyclient
-GOPRIVATE=github.com/anchorageoss/* go build -o ./bin/visualsign-turnkeyclient .
+go build -o ./bin/visualsign-turnkeyclient .
 
 # 2. Fetch a real prod attestation and print PCRs (any well-formed unsigned
 #    tx works — the parser returns the same enclave attestation regardless).
