@@ -101,7 +101,7 @@ fn create_system_preview_layout(
                 dynamic_annotation: None,
                 signable_payload_field: SignablePayloadField::PreviewLayout {
                     common: SignablePayloadFieldCommon {
-                        label: format!("Transfer: {lamports} lamports"),
+                        label: format!("Instruction {}", context.instruction_index() + 1),
                         fallback_text: format!(
                             "Program ID: {}\nData: {}",
                             program_id_str,
@@ -174,7 +174,7 @@ fn create_system_preview_layout(
                 dynamic_annotation: None,
                 signable_payload_field: SignablePayloadField::PreviewLayout {
                     common: SignablePayloadFieldCommon {
-                        label: "Create Account".to_string(),
+                        label: format!("Instruction {}", context.instruction_index() + 1),
                         fallback_text: format!(
                             "Program ID: {}\nData: {}",
                             program_id_str,
@@ -222,7 +222,7 @@ fn create_system_preview_layout(
                 dynamic_annotation: None,
                 signable_payload_field: SignablePayloadField::PreviewLayout {
                     common: SignablePayloadFieldCommon {
-                        label: instruction_name,
+                        label: format!("Instruction {}", context.instruction_index() + 1),
                         fallback_text: format!(
                             "Program ID: {}\nData: {}",
                             program_id_str,

@@ -479,7 +479,7 @@ fn create_jupiter_preview_layout(
         dynamic_annotation: None,
         signable_payload_field: SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
-                label: instruction_text,
+                label: format!("Instruction {}", context.instruction_index() + 1),
                 fallback_text: format!(
                     "Program ID: {}\nData: {}",
                     program_id_str,

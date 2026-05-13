@@ -74,7 +74,7 @@ fn create_stakepool_preview_layout(
         dynamic_annotation: None,
         signable_payload_field: SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
-                label: instruction_name,
+                label: format!("Instruction {}", context.instruction_index() + 1),
                 fallback_text: format!(
                     "Program ID: {}\nData: {}",
                     program_id_str,

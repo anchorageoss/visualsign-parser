@@ -261,7 +261,7 @@ fn try_idl_parsing(
         dynamic_annotation: None,
         signable_payload_field: SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
-                label: format!("{program_name} (IDL)"),
+                label: format!("Instruction {}", context.instruction_index() + 1),
                 fallback_text: format!("Program ID: {program_id}\nData: {instruction_data_hex}"),
             },
             preview_layout,
@@ -309,7 +309,7 @@ fn create_unknown_program_preview_layout(
         dynamic_annotation: None,
         signable_payload_field: SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
-                label: program_id_str.clone(),
+                label: format!("Instruction {}", context.instruction_index() + 1),
                 fallback_text: format!(
                     "Program ID: {program_id_str}\nData: {instruction_data_hex}"
                 ),

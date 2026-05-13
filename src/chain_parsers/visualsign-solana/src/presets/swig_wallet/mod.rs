@@ -50,6 +50,9 @@ impl InstructionVisualizer for SwigWalletVisualizer {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        // Convert 0-based index to 1-based instruction number for user-facing labels
+        // (e.g., "Instruction 1" instead of "Instruction 0")
+        let instruction_number = context.instruction_index() + 1;
         let decoded = parse_swig_instruction(context.data(), &accounts)
             .map_err(|err| VisualSignError::DecodeError(err.to_string()))?;
 
@@ -94,7 +97,7 @@ impl InstructionVisualizer for SwigWalletVisualizer {
             dynamic_annotation: None,
             signable_payload_field: SignablePayloadField::PreviewLayout {
                 common: SignablePayloadFieldCommon {
-                    label: summary,
+                    label: format!("Instruction {instruction_number}"),
                     fallback_text,
                 },
                 preview_layout,
@@ -2346,13 +2349,13 @@ mod tests {
             other => panic!("Expected network TextV2 field, got {other:?}"),
         }
 
-        // Instruction field — label is the operation summary
+        // Instruction field
         let instruction_layout = match &payload.fields[1] {
             SignablePayloadField::PreviewLayout {
                 common,
                 preview_layout,
             } => {
-                assert_eq!(common.label, "Swig: Create wallet (Ed25519)");
+                assert_eq!(common.label, "Instruction 1");
                 preview_layout
             }
             other => panic!("Expected PreviewLayout for instruction, got {other:?}"),
@@ -2475,13 +2478,13 @@ mod tests {
             "Expected five display fields (network + 3 instructions + accounts)"
         );
 
-        // Instruction 1 - Compute budget (label is the operation summary)
+        // Instruction 1 - Compute budget
         let compute_layout = match &payload.fields[1] {
             SignablePayloadField::PreviewLayout {
                 common,
                 preview_layout,
             } => {
-                assert_eq!(common.label, "Set Compute Unit Limit: 10000000 units");
+                assert_eq!(common.label, "Instruction 1");
                 preview_layout
             }
             other => panic!("Expected compute budget preview layout, got {other:?}"),
@@ -2516,8 +2519,7 @@ mod tests {
                 common,
                 preview_layout,
             } => {
-                // Label is now the program ID (unknown program catch-all)
-                assert!(!common.label.is_empty());
+                assert_eq!(common.label, "Instruction 2");
                 preview_layout
             }
             other => panic!("Expected secp256r1 preview layout, got {other:?}"),
@@ -2546,10 +2548,7 @@ mod tests {
                 common,
                 preview_layout,
             } => {
-                assert_eq!(
-                    common.label,
-                    "Swig: Sign v2 (1 inner instruction(s), role #1)"
-                );
+                assert_eq!(common.label, "Instruction 3");
                 preview_layout
             }
             other => panic!("Expected swig preview layout, got {other:?}"),

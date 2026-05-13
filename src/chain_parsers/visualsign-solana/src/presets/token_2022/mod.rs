@@ -537,7 +537,10 @@ fn create_token_2022_preview_layout(
         dynamic_annotation: None,
         signable_payload_field: SignablePayloadField::PreviewLayout {
             common: SignablePayloadFieldCommon {
-                label: format!("Token 2022: {title}"),
+                label: {
+                    let instruction_num = context.instruction_index() + 1;
+                    format!("Instruction {instruction_num}")
+                },
                 fallback_text: format!(
                     "Token 2022: {title}\nProgram ID: {}",
                     resolve_program_id(context)
