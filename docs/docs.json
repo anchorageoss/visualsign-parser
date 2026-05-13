@@ -136,7 +136,9 @@
           {
             "group": "Changelog",
             "pages": [
-              "changelog"
+              "changelog",
+              "changelog/chain-parsers",
+              "changelog/fundamentals"
             ]
           }
         ]

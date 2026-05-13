@@ -1,0 +1,16 @@
+---
+title: "Changelog — Chain parsers"
+description: "New chain support, preset additions, IDL handling, and decoder fixes. One entry per meaningful release."
+---
+
+Subscribe via RSS at [`/changelog/chain-parsers/rss.xml`](/changelog/chain-parsers/rss.xml). Filter by tag — `Solana`, `Ethereum`, `Wallet API`, `Contributors`.
+
+<Update label="2026-05-12 — Solana preset wave" description="v0.646.0 — v0.649.0" tags={["Wallet API", "Contributors", "Solana"]}>
+  VisualSign now decodes Jupiter (Borrow, Earn, Perpetuals, v6 route_v2), Kamino (Borrow, Vault, Farms, Limit Orders), Meteora (DLMM, DAMM V2), MetaDAO (Futarchy, Conditional Vault), Orca Whirlpool, Onre App, Neutral Trade, DFlow Aggregator, and Exponent Finance.
+
+  None of these additions required changes to existing decoders or to the core parser. Each preset is a self-contained directory under `src/chain_parsers/visualsign-solana/src/presets/`, auto-registered by `build.rs`. See [Composable by design: how Solana presets stack](/blog/2026-05-13-composable-solana-presets) for the architecture, and [Adding a Solana preset](/chains/solana) for the how-to.
+</Update>
+
+<Update label="2026-05-12 — Surfpool mainnet-fork integration for IDL fuzz testing" description="v0.647.0" tags={["Contributors", "Solana"]}>
+  The built-in Solana IDL parser path is now fuzz-tested against real mainnet state via Surfpool. Composing live chain state into the local test harness catches drift between IDL assumptions and on-chain reality, without requiring a live cluster.
+</Update>

@@ -12,15 +12,23 @@ Example (`2026-05-05-metadao-futarchy.md`):
 
 ```markdown
 ---
+category: chain-parsers           # one of: chain-parsers | fundamentals
 label: "Added MetaDAO Futarchy preset"
-description: "PR #270"
+description: ""                   # filled in at curation time with the release version (e.g. "v0.646.0")
 tags: ["Solana", "Wallet API"]
 ---
 Solana governance transactions now decode conditional vault and market
 interactions. See [Solana presets](/chains/solana).
 ```
 
-The maintainer reads the frontmatter into the corresponding props on `<Update>` and lifts the body into the block.
+The maintainer reads the frontmatter into the corresponding props on `<Update>`, lifts the body into the block, and writes it to whichever of `../chain-parsers.mdx` or `../fundamentals.mdx` matches `category`. `description` is filled in with the first release tag that contains the change — look up via `git tag --contains <sha> --sort=v:refname | head -1`.
+
+## Category choice
+
+- **`chain-parsers`** — anything under `src/chain_parsers/`: new chain, new preset, IDL handling, decoder fix, fixture coverage.
+- **`fundamentals`** — everything else: core types in `src/visualsign`, field builders, the parser binaries (`src/parser/{cli,app,grpc-server}`), the HTTP gateway, attestation, policy, codegen, integration tests, build infrastructure.
+
+If a change spans both (rare), drop two fragments.
 
 ## Controlled tag vocabulary
 
