@@ -1,0 +1,22 @@
+# Determinism enforcement for visualsign-solana.
+#
+# The rendered SignablePayload JSON is consumed downstream for hashing and
+# wallet display, so iteration order over any map that ends up in the output
+# (e.g. `named_accounts` in each preset's `mod.rs`) MUST be stable across
+# runs. HashMap/HashSet's randomized hasher silently breaks this.
+#
+# Use BTreeMap/BTreeSet instead. The performance delta is negligible at the
+# sizes we use these maps (typically <100 entries) and the determinism
+# guarantee is worth the trade.
+#
+# This rule is intentionally crate-wide rather than scoped to `presets/` —
+# even maps that look "lookup-only" (e.g. config.rs routing tables, the IDL
+# registry's internal maps) can leak iteration order via debug formatting,
+# error messages, or future code paths that walk them. Forcing BTreeMap
+# everywhere keeps the determinism story simple and review-friendly: no
+# `#[allow(clippy::disallowed_types)]` escape hatches in the codebase.
+
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "use BTreeMap — iteration order affects rendered SignablePayload output and breaks deterministic hashing. See clippy.toml comment." },
+    { path = "std::collections::HashSet", reason = "use BTreeSet for the same reason as HashMap." },
+]
