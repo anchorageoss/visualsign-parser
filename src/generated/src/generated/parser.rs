@@ -1,11 +1,6 @@
 /// This is a bit odd, but needed for the QOS host.
 /// (the QOS host receives messages which can be either parser responses or QOS-level responses)
 /// TODO: can we remove the need for these?
-#[cfg_attr(
-    feature = "serde_derive",
-    derive(::serde::Serialize, ::serde::Deserialize),
-    serde(rename_all = "camelCase")
-)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct QosParserRequest {
@@ -14,12 +9,6 @@ pub struct QosParserRequest {
 }
 /// Nested message and enum types in `QOSParserRequest`.
 pub mod qos_parser_request {
-    #[cfg_attr(
-        feature = "serde_derive",
-        derive(::serde::Serialize, ::serde::Deserialize),
-        serde(rename_all = "camelCase")
-    )]
-    #[cfg_attr(feature = "serde_derive", serde(untagged))]
     #[allow(clippy::derive_partial_eq_without_eq)]
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Input {
@@ -29,11 +18,6 @@ pub mod qos_parser_request {
         HealthRequest(super::super::health::AppHealthRequest),
     }
 }
-#[cfg_attr(
-    feature = "serde_derive",
-    derive(::serde::Serialize, ::serde::Deserialize),
-    serde(rename_all = "camelCase")
-)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct QosParserResponse {
@@ -42,12 +26,6 @@ pub struct QosParserResponse {
 }
 /// Nested message and enum types in `QOSParserResponse`.
 pub mod qos_parser_response {
-    #[cfg_attr(
-        feature = "serde_derive",
-        derive(::serde::Serialize, ::serde::Deserialize),
-        serde(rename_all = "camelCase")
-    )]
-    #[cfg_attr(feature = "serde_derive", serde(untagged))]
     #[allow(clippy::derive_partial_eq_without_eq)]
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Output {
@@ -219,6 +197,7 @@ pub struct EthereumMetadata {
     /// Allows wallets to provide multiple ABIs, one per contract. Use a consistent address casing
     /// convention (for example, all lowercase or EIP-55 checksummed) to avoid duplicate/mismatched entries.
     #[prost(map = "string, message", tag = "3")]
+    #[cfg_attr(feature = "serde_derive", serde(default))]
     pub abi_mappings: ::std::collections::HashMap<::prost::alloc::string::String, Abi>,
 }
 #[cfg_attr(
@@ -238,6 +217,7 @@ pub struct SolanaMetadata {
     /// Map of program_id (base58 string) to IDL definitions
     /// Allows wallet to provide multiple IDLs, one per program
     #[prost(map = "string, message", tag = "3")]
+    #[cfg_attr(feature = "serde_derive", serde(default))]
     pub idl_mappings: ::std::collections::HashMap<::prost::alloc::string::String, Idl>,
 }
 #[cfg_attr(
@@ -282,12 +262,6 @@ pub struct Idl {
     pub program_name: ::core::option::Option<::prost::alloc::string::String>,
 }
 /// Chain represents supported blockchain networks
-#[cfg_attr(
-    feature = "serde_derive",
-    derive(::serde::Serialize, ::serde::Deserialize),
-    serde(rename_all = "camelCase")
-)]
-#[cfg_attr(feature = "serde_derive", serde(untagged))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum Chain {
@@ -330,12 +304,6 @@ impl Chain {
         }
     }
 }
-#[cfg_attr(
-    feature = "serde_derive",
-    derive(::serde::Serialize, ::serde::Deserialize),
-    serde(rename_all = "camelCase")
-)]
-#[cfg_attr(feature = "serde_derive", serde(untagged))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum SignatureScheme {
@@ -367,12 +335,6 @@ impl SignatureScheme {
         }
     }
 }
-#[cfg_attr(
-    feature = "serde_derive",
-    derive(::serde::Serialize, ::serde::Deserialize),
-    serde(rename_all = "camelCase")
-)]
-#[cfg_attr(feature = "serde_derive", serde(untagged))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum SolanaIdlType {
