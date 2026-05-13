@@ -243,7 +243,7 @@ func verifyPCRs(pcrs map[int][]byte) error {
 
 When the deployed qos enclave runtime is updated, PCR values change. Follow this process:
 
-1. Watch for deployment announcements that change the qos runtime rev (the rev whose EIF boots in the enclave, not the qos library rev parser_app links against — see [Generating PCR values](./getting-started#generating-pcr-values) for the distinction).
+1. Watch for deployment announcements that change the qos runtime rev (the rev whose EIF boots in the enclave, not the qos library rev parser_app links against — see [Generating PCRs from source](../hosted/getting-started#generating-pcrs-from-source) for the distinction).
 2. Reproduce the new PCR values: run `scripts/extract-nitro-pcrs.sh` with the updated deployment rev and confirm the script's output matches the values published with the release.
 3. Add new PCRs to your allowlist.
 4. Deploy to production.
