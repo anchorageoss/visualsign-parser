@@ -12,23 +12,28 @@ Example (`2026-05-05-metadao-futarchy.md`):
 
 ```markdown
 ---
-category: chain-parsers           # one of: chain-parsers | fundamentals
+category: solana                  # one of: solana | ethereum | sui | tron | fundamentals
 label: "Added MetaDAO Futarchy preset"
 description: ""                   # filled in at curation time with the release version (e.g. "v0.646.0")
-tags: ["Solana", "Wallet API"]
+tags: ["Wallet API"]
 ---
 Solana governance transactions now decode conditional vault and market
 interactions. See [Solana presets](/chains/solana).
 ```
 
-The maintainer reads the frontmatter into the corresponding props on `<Update>`, lifts the body into the block, and writes it to whichever of `../chain-parsers.mdx` or `../fundamentals.mdx` matches `category`. `description` is filled in with the first release tag that contains the change — look up via `git tag --contains <sha> --sort=v:refname | head -1`.
+The maintainer reads the frontmatter into the corresponding props on `<Update>`, lifts the body into the block, and writes it to the matching page (`../solana.mdx`, `../ethereum.mdx`, `../sui.mdx`, `../tron.mdx`, or `../fundamentals.mdx`). `description` is filled in with the first release tag that contains the change — look up via `git tag --contains <sha> --sort=v:refname | head -1`.
 
 ## Category choice
 
-- **`chain-parsers`** — anything under `src/chain_parsers/`: new chain, new preset, IDL handling, decoder fix, fixture coverage.
+- **`solana`** — anything under `src/chain_parsers/visualsign-solana/`: presets, IDL handling, decoder fixes, fixture coverage.
+- **`ethereum`** — anything under `src/chain_parsers/visualsign-ethereum/`: protocol decoders, ABI registry, contract additions.
+- **`sui`** — anything under `src/chain_parsers/visualsign-sui/`: Move package decoders, programmable transactions.
+- **`tron`** — anything under `src/chain_parsers/visualsign-tron/`: contract decoders, TRC standards.
 - **`fundamentals`** — everything else: core types in `src/visualsign`, field builders, the parser binaries (`src/parser/{cli,app,grpc-server}`), the HTTP gateway, attestation, policy, codegen, integration tests, build infrastructure.
 
-If a change spans both (rare), drop two fragments.
+Don't put a chain tag in the `tags` array for per-chain entries — the page already conveys the chain. Reserve tags for audience and theme.
+
+If a change spans multiple categories (rare — e.g., a core change that requires per-chain updates), drop one fragment per affected category.
 
 ## Controlled tag vocabulary
 

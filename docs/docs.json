@@ -134,10 +134,23 @@
         "tab": "Changelog",
         "groups": [
           {
-            "group": "Changelog",
+            "group": "Overview",
             "pages": [
-              "changelog",
-              "changelog/chain-parsers",
+              "changelog"
+            ]
+          },
+          {
+            "group": "Chain streams",
+            "pages": [
+              "changelog/solana",
+              "changelog/ethereum",
+              "changelog/sui",
+              "changelog/tron"
+            ]
+          },
+          {
+            "group": "Fundamentals",
+            "pages": [
               "changelog/fundamentals"
             ]
           }

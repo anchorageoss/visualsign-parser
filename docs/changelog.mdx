@@ -1,31 +1,41 @@
 ---
 title: "Changelog"
-description: "Curated release notes for VisualSign — versioned by release, grouped into chain parsers and fundamentals."
+description: "Curated release notes for VisualSign — one stream per chain plus a fundamentals stream, versioned by release."
 ---
 
-Pick the stream that matters to you.
+Pick the stream that matters to you. Each stream has its own RSS feed.
 
 <CardGroup cols={2}>
-  <Card title="Chain parsers" icon="link" href="/changelog/chain-parsers">
-    New chain support, preset additions, IDL handling, decoder fixes. Subscribe at [`/changelog/chain-parsers/rss.xml`](/changelog/chain-parsers/rss.xml).
+  <Card title="Solana" icon="circle-nodes" href="/changelog/solana">
+    Solana preset coverage, IDL handling, decoder fixes. RSS at [`/changelog/solana/rss.xml`](/changelog/solana/rss.xml).
+  </Card>
+  <Card title="Ethereum" icon="ethereum" href="/changelog/ethereum">
+    EVM protocol decoders, ABI registry changes, contract additions. RSS at [`/changelog/ethereum/rss.xml`](/changelog/ethereum/rss.xml).
+  </Card>
+  <Card title="Sui" icon="droplet" href="/changelog/sui">
+    Sui Move package decoders, programmable transactions. RSS at [`/changelog/sui/rss.xml`](/changelog/sui/rss.xml).
+  </Card>
+  <Card title="Tron" icon="bolt" href="/changelog/tron">
+    Tron contract decoders, TRC standards. RSS at [`/changelog/tron/rss.xml`](/changelog/tron/rss.xml).
   </Card>
   <Card title="Fundamentals" icon="cube" href="/changelog/fundamentals">
-    Core types, field builders, HTTP/gRPC API, attestation, policy, build and test infrastructure. Subscribe at [`/changelog/fundamentals/rss.xml`](/changelog/fundamentals/rss.xml).
+    Core types, field builders, HTTP/gRPC API, attestation, policy, build and test infrastructure. RSS at [`/changelog/fundamentals/rss.xml`](/changelog/fundamentals/rss.xml).
   </Card>
 </CardGroup>
 
 ## How releases are tagged
 
-Tags are auto-cut from `main` by the release workflow. The `description` on each `<Update>` block below points to the first release that contains the change. If you pull a tag at or above that version, the change is in.
+Tags are auto-cut from `main` by the release workflow. The `description` on each `<Update>` block points to the first release that contains the change. If you pull a tag at or above that version, the change is in.
 
 ## How entries are authored
 
-Contributors drop a draft fragment in `docs/changelog/_drafts/` on the PR that ships the change. A maintainer batches drafts into one or more `<Update>` blocks at curation time, splits them across the chain-parsers and fundamentals pages by category, and deletes the consumed drafts. See [`docs/changelog/_drafts/README.md`](https://github.com/anchorageoss/visualsign-parser/blob/main/docs/changelog/_drafts/README.md) for the format.
+Contributors drop a draft fragment in `docs/changelog/_drafts/` on the PR that ships the change. A maintainer batches drafts into one or more `<Update>` blocks at curation time, splits them across the per-chain and fundamentals pages by category, and deletes the consumed drafts. See [`docs/changelog/_drafts/README.md`](https://github.com/anchorageoss/visualsign-parser/blob/main/docs/changelog/_drafts/README.md) for the format.
 
 ## Tag vocabulary
 
-Both streams use a shared controlled tag vocabulary so RSS subscribers can filter:
+All streams use a shared controlled tag vocabulary so RSS subscribers can filter:
 
 - **Audience** — `Wallet API`, `Contributors`, `Security`, `Ecosystem`.
-- **Chain** — `Ethereum`, `Solana`, `Sui`, `Tron` (chain parsers only).
 - **Theme** — `Policy`, `Architecture`, `Lints`, `Attestation`, `Performance`.
+
+Chain pages do not use a chain tag (the page already conveys the chain).
