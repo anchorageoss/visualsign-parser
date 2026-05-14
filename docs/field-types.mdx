@@ -197,6 +197,7 @@ Provides expandable/collapsible content with progressive disclosure. Shows essen
 | Multiple values | `list_layout` | List of recipients |
 | Complex data | `preview_layout` | Detailed gas breakdown |
 | Warnings | `text_v2` | "Warning: High slippage" |
+| Parse diagnostics | `diagnostic` | OOB indices, data quality checks |
 
 ## Combining field types
 
@@ -449,6 +450,51 @@ Token names and other content must use ASCII equivalents (e.g., "EUR" instead of
   ]
 }
 ```
+
+## Diagnostic field type
+
+### diagnostic
+
+Reports data quality findings from the parser's lint framework. Diagnostics are attested alongside display fields in the signed payload, so the HSM/attester can verify what the parser checked and what it found.
+
+```json
+{
+  "Type": "diagnostic",
+  "Label": "transaction::oob_program_id",
+  "FallbackText": "warn: instruction 1: program_id_index 8 out of bounds (5 account keys)",
+  "Diagnostic": {
+    "Rule": "transaction::oob_program_id",
+    "Domain": "transaction",
+    "Level": "warn",
+    "Message": "instruction 1: program_id_index 8 out of bounds (5 account keys)",
+    "InstructionIndex": 1
+  }
+}
+```
+
+**Properties:**
+- `Rule`: Rule identifier in `domain::rule_name` format
+- `Domain`: Category of the check (e.g., `transaction`, `decode`, `idl`)
+- `Level`: Severity of the finding
+  - `ok` -- rule ran and found no issues (boot-metric attestation)
+  - `warn` -- data quality issue found, parsing continued
+  - `error` -- serious issue found
+- `Message`: Human-readable description of the finding
+- `InstructionIndex` (optional): Which instruction triggered the diagnostic
+
+**Wallet handling:**
+- Wallets that don't recognize `Type: "diagnostic"` can display the `FallbackText`
+- Diagnostics always appear after all display fields (network, instructions, accounts)
+- When `report_all_rules` is enabled (default), every rule emits a diagnostic -- `ok`, `warn`, or `error` -- so the attester can verify all expected rules ran
+
+**Current rules:**
+
+| Rule | Domain | Description |
+|------|--------|-------------|
+| `transaction::oob_program_id` | `transaction` | Instruction's program_id_index is out of bounds in account_keys |
+| `transaction::oob_account_index` | `transaction` | Instruction references account indices beyond account_keys |
+| `transaction::empty_account_keys` | `transaction` | Transaction has no account keys |
+| `decode::visualizer_error` | `decode` | A visualizer failed to decode an instruction (always-on) |
 
 ## Future field types
 

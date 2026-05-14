@@ -5,9 +5,10 @@ edition = "2024"
 publish = false
 
 [features]
-default = ["solana", "ethereum"]
+default = ["solana", "ethereum", "diagnostics"]
 solana = ["dep:visualsign-solana"]
 ethereum = ["dep:visualsign-ethereum"]
+diagnostics = ["visualsign/diagnostics", "visualsign-solana?/diagnostics"]
 
 [dependencies]
 tracing = { workspace = true }

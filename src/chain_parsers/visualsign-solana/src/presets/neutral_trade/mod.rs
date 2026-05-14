@@ -32,26 +32,25 @@ impl InstructionVisualizer for NeutralTradeVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
+        let program_id_str = context.resolve_program_id()?.to_string();
+        let accounts = context.resolve_accounts()?;
+        let data = context.data();
 
-        if instruction.data.len() < 8 {
+        if data.len() < 8 {
             return Err(VisualSignError::DecodeError(
                 "Instruction data too short for Anchor discriminator".into(),
             ));
         }
 
         let idl = load_idl()?;
-        let parsed = parse_instruction_with_idl(&instruction.data, NEUTRAL_TRADE_PROGRAM_ID, &idl)
-            .map_err(|e| {
+        let parsed =
+            parse_instruction_with_idl(data, NEUTRAL_TRADE_PROGRAM_ID, &idl).map_err(|e| {
                 VisualSignError::DecodeError(format!("Neutral Trade IDL parse failed: {e}"))
             })?;
 
-        let named_accounts = build_named_accounts(instruction, &idl);
+        let named_accounts = build_named_accounts(data, &accounts, &idl);
 
-        let program_id_str = instruction.program_id.to_string();
-        let instruction_data_hex = hex::encode(&instruction.data);
+        let instruction_data_hex = hex::encode(data);
         let instruction_title =
             format!("{NEUTRAL_TRADE_DISPLAY_NAME}: {}", parsed.instruction_name);
 
@@ -59,12 +58,7 @@ impl InstructionVisualizer for NeutralTradeVisualizer {
             fields: build_condensed_fields(&instruction_title, &parsed)?,
         };
         let expanded = SignablePayloadFieldListLayout {
-            fields: build_parsed_fields(
-                &program_id_str,
-                &parsed,
-                &named_accounts,
-                &instruction.data,
-            )?,
+            fields: build_parsed_fields(&program_id_str, &parsed, &named_accounts, data)?,
         };
 
         let preview_layout = SignablePayloadFieldPreviewLayout {
@@ -108,21 +102,22 @@ fn load_idl() -> Result<Idl, VisualSignError> {
 }
 
 fn build_named_accounts(
-    instruction: &solana_sdk::instruction::Instruction,
+    data: &[u8],
+    accounts: &[solana_sdk::instruction::AccountMeta],
     idl: &Idl,
 ) -> BTreeMap<String, String> {
     let mut named_accounts = BTreeMap::new();
 
     let matching_idl_instruction = idl.instructions.iter().find(|inst| {
         if let Some(disc) = inst.discriminator.as_ref() {
-            instruction.data.len() >= 8 && &instruction.data[0..8] == disc.as_slice()
+            data.len() >= 8 && &data[0..8] == disc.as_slice()
         } else {
             false
         }
     });
 
     if let Some(idl_instruction) = matching_idl_instruction {
-        for (index, account_meta) in instruction.accounts.iter().enumerate() {
+        for (index, account_meta) in accounts.iter().enumerate() {
             if let Some(idl_account) = idl_instruction.accounts.get(index) {
                 named_accounts.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
             }
@@ -172,7 +167,7 @@ fn append_raw_data(
     fields: &mut Vec<AnnotatedPayloadField>,
     data: &[u8],
 ) -> Result<(), VisualSignError> {
-    fields.push(create_raw_data_field(data, Some(hex::encode(data)))?);
+    fields.push(create_raw_data_field(data, None)?);
     Ok(())
 }
 

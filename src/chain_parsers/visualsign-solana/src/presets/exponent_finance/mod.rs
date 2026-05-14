@@ -32,17 +32,16 @@ impl InstructionVisualizer for ExponentFinanceVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
+        let program_id = context.resolve_program_id()?.to_string();
+        let accounts = context.resolve_accounts()?;
+        let data = context.data();
 
-        let program_id = instruction.program_id.to_string();
-        let instruction_data_hex = hex::encode(&instruction.data);
+        let instruction_data_hex = hex::encode(data);
         let fallback_text = format!("Program ID: {program_id}\nData: {instruction_data_hex}");
 
-        let parsed = parse_exponent_finance_instruction(&instruction.data, &instruction.accounts);
+        let parsed = parse_exponent_finance_instruction(data, &accounts);
 
-        let (title, condensed_fields, expanded_fields) = match parsed {
+        let (title, condensed_fields, mut expanded_fields) = match parsed {
             Ok(parsed) => build_parsed_fields(&parsed, &program_id)?,
             Err(_) => build_fallback_fields(&program_id)?,
         };
@@ -50,10 +49,9 @@ impl InstructionVisualizer for ExponentFinanceVisualizer {
         let condensed = SignablePayloadFieldListLayout {
             fields: condensed_fields,
         };
-        let expanded_with_raw =
-            append_raw_data(expanded_fields, &instruction.data, &instruction_data_hex)?;
+        expanded_fields.push(create_raw_data_field(data, Some(instruction_data_hex))?);
         let expanded = SignablePayloadFieldListLayout {
-            fields: expanded_with_raw,
+            fields: expanded_fields,
         };
 
         let preview_layout = SignablePayloadFieldPreviewLayout {
@@ -203,15 +201,6 @@ fn build_fallback_fields(
     expanded_fields.push(create_text_field("Status", "Unknown instruction type")?);
 
     Ok((title, condensed_fields, expanded_fields))
-}
-
-fn append_raw_data(
-    mut fields: Vec<AnnotatedPayloadField>,
-    data: &[u8],
-    hex_str: &str,
-) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
-    fields.push(create_raw_data_field(data, Some(hex_str.to_string()))?);
-    Ok(fields)
 }
 
 fn format_arg_value(value: &serde_json::Value) -> String {

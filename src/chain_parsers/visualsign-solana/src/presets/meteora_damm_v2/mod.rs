@@ -32,17 +32,13 @@ impl InstructionVisualizer for MeteoraDammV2Visualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
-
-        let data = &instruction.data;
-        let program_id = instruction.program_id.to_string();
+        let program_id = context.resolve_program_id()?.to_string();
+        let accounts = context.resolve_accounts()?;
+        let data = context.data();
         let instruction_data_hex = hex::encode(data);
 
-        let (parsed, named_accounts) =
-            parse_meteora_damm_v2_instruction(data, &instruction.accounts)
-                .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
+        let (parsed, named_accounts) = parse_meteora_damm_v2_instruction(data, &accounts)
+            .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
         let instruction_title = format!("{DISPLAY_NAME}: {}", parsed.instruction_name);
 
@@ -65,10 +61,7 @@ impl InstructionVisualizer for MeteoraDammV2Visualizer {
         for (key, value) in &parsed.program_call_args {
             expanded_fields.push(create_text_field(key, &format_arg_value(value))?);
         }
-        expanded_fields.push(create_raw_data_field(
-            data,
-            Some(instruction_data_hex.clone()),
-        )?);
+        expanded_fields.push(create_raw_data_field(data, None)?);
 
         let preview_layout = SignablePayloadFieldPreviewLayout {
             title: Some(SignablePayloadFieldTextV2 {

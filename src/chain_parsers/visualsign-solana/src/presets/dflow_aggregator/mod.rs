@@ -32,15 +32,14 @@ impl InstructionVisualizer for DflowAggregatorVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
+        let program_id = context.resolve_program_id()?.to_string();
+        let accounts = context.resolve_accounts()?;
+        let data = context.data();
 
-        let program_id = instruction.program_id.to_string();
-        let instruction_data_hex = hex::encode(&instruction.data);
+        let instruction_data_hex = hex::encode(data);
         let fallback_text = format!("Program ID: {program_id}\nData: {instruction_data_hex}");
 
-        let parsed = parse_dflow_aggregator_instruction(&instruction.data, &instruction.accounts);
+        let parsed = parse_dflow_aggregator_instruction(data, &accounts);
 
         let (title, condensed_fields, mut expanded_fields) = match parsed {
             Ok(parsed) => build_parsed_fields(&parsed, &program_id)?,
@@ -53,10 +52,7 @@ impl InstructionVisualizer for DflowAggregatorVisualizer {
         let condensed = SignablePayloadFieldListLayout {
             fields: condensed_fields,
         };
-        expanded_fields.push(create_raw_data_field(
-            &instruction.data,
-            Some(instruction_data_hex),
-        )?);
+        expanded_fields.push(create_raw_data_field(data, Some(instruction_data_hex))?);
         let expanded = SignablePayloadFieldListLayout {
             fields: expanded_fields,
         };

@@ -33,27 +33,23 @@ impl InstructionVisualizer for MetadaoConditionalVaultVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
+        let program_id = context.resolve_program_id()?;
+        let accounts = context.resolve_accounts()?;
+        let data = context.data();
 
-        if instruction.data.len() < 8 {
+        if data.len() < 8 {
             return Err(VisualSignError::DecodeError(
                 "Instruction data too short for Anchor discriminator".to_string(),
             ));
         }
 
         let idl = load_idl()?;
-        let parsed = parse_instruction_with_idl(
-            &instruction.data,
-            METADAO_CONDITIONAL_VAULT_PROGRAM_ID,
-            &idl,
-        )
-        .map_err(|e| VisualSignError::DecodeError(format!("IDL parse failed: {e}")))?;
+        let parsed = parse_instruction_with_idl(data, METADAO_CONDITIONAL_VAULT_PROGRAM_ID, &idl)
+            .map_err(|e| VisualSignError::DecodeError(format!("IDL parse failed: {e}")))?;
 
-        let named_accounts = build_named_accounts(&idl, &instruction.data, &instruction.accounts);
+        let named_accounts = build_named_accounts(&idl, data, &accounts);
 
-        build_visualization(context, instruction, &parsed, &named_accounts)
+        build_visualization(context, program_id, data, &parsed, &named_accounts)
     }
 
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
@@ -104,18 +100,19 @@ fn format_arg_value(value: &serde_json::Value) -> String {
 
 fn build_visualization(
     context: &VisualizerContext,
-    instruction: &solana_sdk::instruction::Instruction,
+    program_id: solana_sdk::pubkey::Pubkey,
+    data: &[u8],
     parsed: &SolanaParsedInstructionData,
     named_accounts: &BTreeMap<String, String>,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
-    let program_id = instruction.program_id.to_string();
+    let program_id_str = program_id.to_string();
     let title = format!("{DISPLAY_NAME}: {}", parsed.instruction_name);
 
     let condensed_fields = vec![create_text_field("Instruction", &parsed.instruction_name)?];
 
     let mut expanded_fields = vec![
         create_text_field("Program", DISPLAY_NAME)?,
-        create_text_field("Program ID", &program_id)?,
+        create_text_field("Program ID", &program_id_str)?,
         create_text_field("Instruction", &parsed.instruction_name)?,
         create_text_field("Discriminator", &parsed.discriminator)?,
     ];
@@ -132,10 +129,7 @@ fn build_visualization(
         expanded_fields.push(create_text_field(key, &format_arg_value(value))?);
     }
 
-    expanded_fields.push(create_raw_data_field(
-        &instruction.data,
-        Some(hex::encode(&instruction.data)),
-    )?);
+    expanded_fields.push(create_raw_data_field(data, None)?);
 
     let condensed = SignablePayloadFieldListLayout {
         fields: condensed_fields,
@@ -155,10 +149,7 @@ fn build_visualization(
         expanded: Some(expanded),
     };
 
-    let fallback_text = format!(
-        "Program ID: {program_id}\nData: {}",
-        hex::encode(&instruction.data)
-    );
+    let fallback_text = format!("Program ID: {program_id_str}\nData: {}", hex::encode(data));
 
     Ok(AnnotatedPayloadField {
         static_annotation: None,

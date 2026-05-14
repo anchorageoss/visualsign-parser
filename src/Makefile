@@ -13,15 +13,24 @@ all: generated
 
 .PHONY: build
 build:
-	cargo build --all
+	@# Split to avoid Cargo feature unification across the workspace.
+	@# parser_cli enables visualsign-solana/diagnostics; building it together
+	@# with parser_app/grpc-server would unify the feature ON for both.
+	cargo build --workspace --exclude parser_cli
+	cargo build -p parser_cli
 
 .PHONY: test
 test: build
 	@# The integration tests rely on binaries from other crates being built, so
 	@# we build all the workspace targets.
 	make build
-	@# Run all tests
-	cargo test --all-targets
+	@# diagnostics OFF: production payload shape (parser_app, integration, others).
+	cargo test --workspace --exclude parser_cli --all-targets
+	cargo test -p visualsign-solana --no-default-features --lib
+	@# diagnostics ON: parser_cli + lib tests gated behind the feature.
+	cargo test -p parser_cli --all-targets
+	cargo test -p visualsign --features diagnostics --lib
+	cargo test -p visualsign-solana --features diagnostics --lib
 
 .PHONY: fmt
 fmt:
@@ -30,7 +39,10 @@ fmt:
 .PHONY: lint
 lint:
 	cargo clippy --version
-	cargo clippy --all-targets -- -D warnings
+	cargo clippy --workspace --exclude parser_cli --all-targets -- -D warnings
+	cargo clippy -p parser_cli --all-targets -- -D warnings
+	cargo clippy -p visualsign --features diagnostics --lib -- -D warnings
+	cargo clippy -p visualsign-solana --features diagnostics --lib -- -D warnings
 
 .PHONY: generated
 generated:

@@ -373,7 +373,17 @@ async fn parser_solana_native_transfer_e2e() {
         tracing::debug!("📄 Emitted JSON for visual inspection:");
         tracing::debug!("{}", json_str);
 
-        // Validate that the parsed transaction contains all expected fields
+        let diag_fields: Vec<_> = signable_payload["Fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f.get("Type").and_then(|t| t.as_str()) == Some("diagnostic"))
+            .collect();
+        assert!(
+            diag_fields.is_empty(),
+            "parser_app must not emit diagnostic fields; got {diag_fields:?}"
+        );
+
         validate_required_fields_present(&signable_payload, &expected_sp);
     }
 

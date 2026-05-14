@@ -32,35 +32,27 @@ impl InstructionVisualizer for KaminoLimitVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
+        let program_id_str = context.resolve_program_id()?.to_string();
+        let accounts = context.resolve_accounts()?;
+        let data = context.data();
 
-        let parsed_result = parse_kamino_limit_instruction(&instruction.data);
-        let program_id_str = instruction.program_id.to_string();
+        let parsed_result = parse_kamino_limit_instruction(data);
 
         let (condensed_fields, expanded_fields, title_text) = match &parsed_result {
             Ok(parsed) => {
                 let named_accounts = match load_kamino_limit_idl() {
-                    Some(idl) => {
-                        build_named_accounts(idl, &instruction.data, &instruction.accounts)
-                    }
+                    Some(idl) => build_named_accounts(idl, data, &accounts),
                     None => BTreeMap::new(),
                 };
                 (
                     build_condensed_fields(&parsed.instruction_name)?,
-                    build_parsed_fields(
-                        &program_id_str,
-                        parsed,
-                        &named_accounts,
-                        &instruction.data,
-                    )?,
+                    build_parsed_fields(&program_id_str, parsed, &named_accounts, data)?,
                     format!("{KAMINO_LIMIT_DISPLAY_NAME}: {}", parsed.instruction_name),
                 )
             }
             Err(_) => (
                 build_fallback_condensed_fields()?,
-                build_fallback_fields(&program_id_str, &instruction.data)?,
+                build_fallback_fields(&program_id_str, data)?,
                 format!("{KAMINO_LIMIT_DISPLAY_NAME}: Unknown Instruction"),
             ),
         };
@@ -78,10 +70,7 @@ impl InstructionVisualizer for KaminoLimitVisualizer {
             }),
         };
 
-        let fallback_text = format!(
-            "Program ID: {program_id_str}\nData: {}",
-            hex::encode(&instruction.data)
-        );
+        let fallback_text = format!("Program ID: {program_id_str}\nData: {}", hex::encode(data));
 
         Ok(AnnotatedPayloadField {
             static_annotation: None,

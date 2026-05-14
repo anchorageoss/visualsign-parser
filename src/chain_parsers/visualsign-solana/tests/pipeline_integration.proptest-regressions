@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 548704a54ac8e05a9cb84af82765aec8e457c88bedae8bb4dad793dce735ec71 # shrinks to idl_json = "{\"instructions\":[{\"name\":\"a\",\"discriminator\":[46,144,62,75,254,227,21,61],\"accounts\":[],\"args\":[]}]}", use_valid_disc = false, inst_idx = 0, data = []

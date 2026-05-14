@@ -31,17 +31,16 @@ impl InstructionVisualizer for OrcaWhirlpoolVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
+        let program_id = context.resolve_program_id()?;
+        let resolved_accounts = context.resolve_accounts()?;
+        let data = context.data();
 
-        let account_keys: Vec<String> = instruction
-            .accounts
+        let account_keys: Vec<String> = resolved_accounts
             .iter()
             .map(|account| account.pubkey.to_string())
             .collect();
 
-        let parsed = parse_orca_whirlpool_instruction(&instruction.data, &account_keys)?;
+        let parsed = parse_orca_whirlpool_instruction(data, &account_keys)?;
         let named_accounts = build_named_accounts(&parsed, &account_keys);
 
         let title_text = format!("{ORCA_WHIRLPOOL_DISPLAY_NAME}: {}", parsed.instruction_name);
@@ -54,12 +53,7 @@ impl InstructionVisualizer for OrcaWhirlpoolVisualizer {
         };
 
         let expanded = SignablePayloadFieldListLayout {
-            fields: build_expanded_fields(
-                &parsed,
-                &named_accounts,
-                &instruction.program_id.to_string(),
-                &instruction.data,
-            )?,
+            fields: build_expanded_fields(&parsed, &named_accounts, &program_id.to_string(), data)?,
         };
 
         let preview_layout = SignablePayloadFieldPreviewLayout {
@@ -73,11 +67,7 @@ impl InstructionVisualizer for OrcaWhirlpoolVisualizer {
             expanded: Some(expanded),
         };
 
-        let fallback_text = format!(
-            "Program ID: {}\nData: {}",
-            instruction.program_id,
-            hex::encode(&instruction.data)
-        );
+        let fallback_text = format!("Program ID: {program_id}\nData: {}", hex::encode(data));
 
         Ok(AnnotatedPayloadField {
             static_annotation: None,
@@ -182,7 +172,7 @@ fn build_expanded_fields(
     }
 
     fields.push(
-        create_raw_data_field(data, Some(hex::encode(data)))
+        create_raw_data_field(data, None)
             .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
     );
 

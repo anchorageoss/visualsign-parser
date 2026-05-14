@@ -5,8 +5,8 @@ mod config;
 use std::fmt;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
-    available_visualizers, visualize_with_any,
+    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind, available_visualizers, visualize_with_any,
 };
 use config::SwigWalletConfig;
 use solana_parser::solana::structs::SolanaAccount;
@@ -35,19 +35,35 @@ impl InstructionVisualizer for SwigWalletVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = context
-            .current_instruction()
-            .ok_or_else(|| VisualSignError::MissingData("No instruction found".into()))?;
+        // Build AccountMeta shim for the parser.
+        // Unresolved accounts are rejected rather than substituted with
+        // Pubkey::default(), which would render as a valid-looking address.
+        let accounts: Vec<AccountMeta> = (0..context.num_accounts())
+            .map(|i| match context.account(i) {
+                Some(AccountRef::Resolved(pk)) => Ok(AccountMeta::new_readonly(*pk, false)),
+                Some(AccountRef::Unresolved { raw_index }) => Err(VisualSignError::DecodeError(
+                    format!("swig: unresolved account index {raw_index} at position {i}"),
+                )),
+                None => Err(VisualSignError::DecodeError(format!(
+                    "swig: missing account at position {i}"
+                ))),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Convert 0-based index to 1-based instruction number for user-facing labels
         // (e.g., "Instruction 1" instead of "Instruction 0")
         let instruction_number = context.instruction_index() + 1;
-        let decoded = parse_swig_instruction(&instruction.data, &instruction.accounts)
+        let decoded = parse_swig_instruction(context.data(), &accounts)
             .map_err(|err| VisualSignError::DecodeError(err.to_string()))?;
+
+        let program_id_str = match context.program_id() {
+            ProgramRef::Resolved(pk) => pk.to_string(),
+            ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
+        };
 
         let summary = decoded.summary();
         let mut expanded_fields = vec![
-            make_text_field("Program ID", instruction.program_id.to_string())?,
+            make_text_field("Program ID", program_id_str.clone())?,
             make_text_field("Instruction Type", decoded.name())?,
         ];
         expanded_fields.extend(build_variant_fields(&decoded)?);
@@ -72,8 +88,8 @@ impl InstructionVisualizer for SwigWalletVisualizer {
 
         let fallback_text = format!(
             "Program ID: {}\nData: {}",
-            instruction.program_id,
-            hex::encode(&instruction.data)
+            program_id_str,
+            hex::encode(context.data())
         );
 
         Ok(AnnotatedPayloadField {
@@ -846,18 +862,29 @@ fn visualize_inner_instruction(instruction: Instruction) -> Option<String> {
     let visualizer_refs: Vec<&dyn InstructionVisualizer> =
         visualizers.iter().map(|viz| viz.as_ref()).collect();
 
+    // Build account_keys and a CompiledInstruction from the resolved Instruction.
+    // The program_id goes at index 0, then each account pubkey follows.
+    let mut account_keys = vec![instruction.program_id];
+    for meta in &instruction.accounts {
+        account_keys.push(meta.pubkey);
+    }
+    let num_accounts = u8::try_from(instruction.accounts.len()).ok()?;
+    let compiled = solana_sdk::instruction::CompiledInstruction {
+        program_id_index: 0,
+        accounts: (1..=num_accounts).collect(),
+        data: instruction.data.clone(),
+    };
+
     let sender = SolanaAccount {
-        account_key: instruction
-            .accounts
-            .first()
-            .map(|meta| meta.pubkey.to_string())
-            .unwrap_or_else(|| instruction.program_id.to_string()),
+        account_key: account_keys
+            .get(1)
+            .map(|pk| pk.to_string())
+            .unwrap_or_else(|| account_keys[0].to_string()),
         signer: false,
         writable: false,
     };
-    let instructions = vec![instruction];
     let idl_registry = crate::idl::IdlRegistry::new();
-    let context = VisualizerContext::new(&sender, 0, &instructions, &idl_registry);
+    let context = VisualizerContext::new(&sender, &compiled, &account_keys, &idl_registry, 0);
 
     visualize_with_any(&visualizer_refs, &context)
         .and_then(|result| result.ok())
@@ -929,9 +956,11 @@ fn summarize_visualized_field(field: &AnnotatedPayloadField) -> Option<String> {
                 Some(address_v2.address.clone())
             }
         }
-        ListLayout { common, .. } | Divider { common, .. } | Unknown { common, .. } => {
-            fallback_summary(common)
-        }
+        ListLayout { common, .. } => fallback_summary(common),
+        Divider { common, .. } => fallback_summary(common),
+        Unknown { common, .. } => fallback_summary(common),
+        #[cfg(feature = "diagnostics")]
+        Diagnostic { common, .. } => fallback_summary(common),
     }
 }
 
@@ -2300,10 +2329,15 @@ mod tests {
             "Expected Swig program ID to be present in JSON: {json}"
         );
 
+        let display_fields: Vec<_> = payload
+            .fields
+            .iter()
+            .filter(|f| f.field_type() != "diagnostic")
+            .collect();
         assert_eq!(
-            payload.fields.len(),
+            display_fields.len(),
             3,
-            "Expected three top-level fields (network, instruction, accounts)"
+            "Expected three display fields (network, instruction, accounts)"
         );
 
         // Network field
@@ -2389,7 +2423,7 @@ mod tests {
         );
         assert_text_field(expanded_fields, "Actions (hex)", "0700000008000000");
 
-        // Accounts field
+        // Accounts field (diagnostics are appended after accounts)
         match &payload.fields[2] {
             SignablePayloadField::PreviewLayout {
                 common,
@@ -2433,10 +2467,15 @@ mod tests {
             "Expected secp256r1 verification program to be represented in JSON: {json}"
         );
 
+        let display_fields: Vec<_> = payload
+            .fields
+            .iter()
+            .filter(|f| f.field_type() != "diagnostic")
+            .collect();
         assert_eq!(
-            payload.fields.len(),
+            display_fields.len(),
             5,
-            "Expected five top-level fields (network + 3 instructions + accounts)"
+            "Expected five display fields (network + 3 instructions + accounts)"
         );
 
         // Instruction 1 - Compute budget

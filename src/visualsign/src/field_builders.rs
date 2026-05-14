@@ -1,4 +1,6 @@
 use crate::errors;
+#[cfg(feature = "diagnostics")]
+use crate::SignablePayloadFieldDiagnostic;
 use crate::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldAddressV2,
     SignablePayloadFieldAmountV2, SignablePayloadFieldCommon, SignablePayloadFieldListLayout,
@@ -210,6 +212,46 @@ pub fn create_preview_layout(
         },
         static_annotation: None,
         dynamic_annotation: None,
+    }
+}
+
+#[cfg(feature = "diagnostics")]
+pub fn create_diagnostic_field(
+    rule: &str,
+    domain: &str,
+    level: crate::lint::Severity,
+    message: &str,
+    instruction_index: Option<u32>,
+) -> AnnotatedPayloadField {
+    let level_str = level.as_str();
+    match level {
+        crate::lint::Severity::Warn | crate::lint::Severity::Error => {
+            tracing::warn!(
+                rule,
+                domain,
+                level = level_str,
+                ?instruction_index,
+                "{message}"
+            );
+        }
+        crate::lint::Severity::Ok | crate::lint::Severity::Allow => {}
+    }
+    AnnotatedPayloadField {
+        static_annotation: None,
+        dynamic_annotation: None,
+        signable_payload_field: SignablePayloadField::Diagnostic {
+            common: SignablePayloadFieldCommon {
+                fallback_text: format!("{level_str}: {message}"),
+                label: rule.to_string(),
+            },
+            diagnostic: SignablePayloadFieldDiagnostic {
+                rule: rule.to_string(),
+                domain: domain.to_string(),
+                level: level_str.to_string(),
+                message: message.to_string(),
+                instruction_index,
+            },
+        },
     }
 }
 

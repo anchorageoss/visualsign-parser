@@ -35,5 +35,8 @@ bs58 = "0.5"
 proptest = "1"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
+[features]
+diagnostics = ["visualsign/diagnostics"]
+
 [lints]
 workspace = true
