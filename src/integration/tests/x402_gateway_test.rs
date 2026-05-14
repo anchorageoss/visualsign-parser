@@ -14,6 +14,8 @@ const MOCK_PORT: u16 = 18090;
 // Note: parser_grpc_server always binds 0.0.0.0:44020 (hardcoded in binary).
 // The gateway is pointed at that address via GRPC_ADDR env var.
 const GW_PORT: u16 = 18080;
+/// Serializes these fixed-port tests to avoid cross-test port binding races
+/// when the integration test binary is executed with multiple test threads.
 static TEST_MUTEX: Mutex<()> = Mutex::const_new(());
 
 // ── Binary helpers ────────────────────────────────────────────────────────────
