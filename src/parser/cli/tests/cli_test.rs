@@ -203,16 +203,53 @@ fn test_cli_with_fixtures() {
                 }
             }
             Err(_) => {
-                // Non-JSON output (text/human): plain string comparison
+                // Non-JSON output (text/human): strip diagnostic blocks from the
+                // actual Debug-formatted payload so the display fixture stays
+                // diagnostics-agnostic, matching how the JSON branch filters them above.
+                #[cfg_attr(not(feature = "diagnostics"), allow(unused_mut))]
+                let mut actual_display = actual_output.trim().to_string();
+                #[cfg(feature = "diagnostics")]
+                {
+                    actual_display = strip_debug_diagnostic_blocks(&actual_display);
+                }
                 assert_strings_match(
                     test_name,
                     "display",
                     expected_display.trim(),
-                    actual_output.trim(),
+                    &actual_display,
                 );
             }
         }
     }
+}
+
+/// Remove `Diagnostic { ... },` blocks from a Rust `{:#?}` payload dump.
+/// The blocks live inside the `fields:` array at 8-space indent, so balanced-brace
+/// counting from each `        Diagnostic {` line drops the whole entry.
+#[cfg(feature = "diagnostics")]
+fn strip_debug_diagnostic_blocks(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut depth: i32 = 0;
+    for line in input.lines() {
+        if depth == 0 && line == "        Diagnostic {" {
+            depth = 1;
+            continue;
+        }
+        if depth > 0 {
+            depth += line.matches('{').count() as i32;
+            depth -= line.matches('}').count() as i32;
+            if depth == 0 {
+                continue;
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !input.ends_with('\n') && out.ends_with('\n') {
+        out.pop();
+    }
+    out
 }
 
 fn assert_strings_match(test_name: &str, fixture_type: &str, expected: &str, actual: &str) {
