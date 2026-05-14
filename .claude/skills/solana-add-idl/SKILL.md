@@ -153,7 +153,7 @@ Follow these rules in all generated code:
 - `use` statements at top of module, never inside functions
 - Inline format strings: `format!("{variable}")` not `format!("{}", variable)`
 - Use `create_text_field` and `create_raw_data_field` from `visualsign::field_builders` — never construct field structs directly
-- For raw-data fields, pass `None` as the second arg of `create_raw_data_field` — the helper falls back to lowercase byte-by-byte hex; `Some(hex::encode(data))` is redundant
+- For raw-data fields, pass `None` as the second arg of `create_raw_data_field` unless you already have a precomputed hex string to reuse (e.g. one you built for `fallback_text`). Do not call `hex::encode(data)` solely to populate this arg — the helper falls back to the same lowercase byte-by-byte hex on `None`.
 - ASCII only in user-visible strings: `>=` not `≥`, `->` not `→`
 - Rust edition 2024 on nightly
 
