@@ -30,7 +30,7 @@ SignablePayload {
         PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Program ID: 11111111111111111111111111111111\nData: 0200000000e40b5402000000",
-                label: "Transfer: 10000000000 lamports",
+                label: "Instruction 1",
             },
             preview_layout: SignablePayloadFieldPreviewLayout {
                 title: Some(
@@ -115,7 +115,7 @@ SignablePayload {
         PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Program ID: ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL\nData: 01",
-                label: "Create Associated Token Account (Idempotent)",
+                label: "Instruction 2",
             },
             preview_layout: SignablePayloadFieldPreviewLayout {
                 title: Some(
@@ -184,7 +184,7 @@ SignablePayload {
         PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Program ID: SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy\nData: 0e00e40b5402000000",
-                label: "Stake Pool Instruction: Deposit SOL",
+                label: "Instruction 3",
             },
             preview_layout: SignablePayloadFieldPreviewLayout {
                 title: Some(
@@ -240,7 +240,7 @@ SignablePayload {
         PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Program ID: ComputeBudget111111111111111111111111111111\nData: 02801a0600",
-                label: "Set Compute Unit Limit: 400000 units",
+                label: "Instruction 4",
             },
             preview_layout: SignablePayloadFieldPreviewLayout {
                 title: Some(
@@ -322,7 +322,7 @@ SignablePayload {
         PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Program ID: ComputeBudget111111111111111111111111111111\nData: 0350c3000000000000",
-                label: "Set Compute Unit Price: 50000 micro-lamports per compute unit",
+                label: "Instruction 5",
             },
             preview_layout: SignablePayloadFieldPreviewLayout {
                 title: Some(
@@ -404,7 +404,7 @@ SignablePayload {
         PreviewLayout {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Program ID: 11111111111111111111111111111111\nData: 020000001027000000000000",
-                label: "Transfer: 10000 lamports",
+                label: "Instruction 6",
             },
             preview_layout: SignablePayloadFieldPreviewLayout {
                 title: Some(

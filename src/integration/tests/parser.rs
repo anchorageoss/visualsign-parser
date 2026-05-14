@@ -243,7 +243,7 @@ async fn parser_solana_native_transfer_e2e() {
                 },
                 {
                     "FallbackText": "Program ID: 11111111111111111111111111111111\nData: 0200000000ca9a3b00000000",
-                    "Label": "Transfer: 1000000000 lamports",
+                    "Label": "Instruction 1",
                     "PreviewLayout": {
                         "Condensed": {
                             "Fields": [
