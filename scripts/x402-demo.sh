@@ -6,7 +6,7 @@
 #                scenario with commentary.
 #
 # Run from the repo root: ./scripts/x402-demo.sh
-# Requirements: bash, curl, jq, base64, cargo. No network needed.
+# Requirements: bash, curl, jq, base64, cargo, lsof, make. No network needed.
 #
 set -euo pipefail
 
@@ -36,12 +36,12 @@ pause() { sleep "${DEMO_PAUSE:-0.4}"; }
 
 chapter "Preflight" "Make sure we have everything we need before starting."
 
-for tool in curl jq base64 cargo; do
+for tool in curl jq base64 cargo lsof make; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     fail "missing tool: $tool"
   fi
 done
-ok "curl, jq, base64, cargo all present"
+ok "curl, jq, base64, cargo, lsof, make all present"
 
 MOCK_BIN="src/target/debug/mock_facilitator"
 GRPC_BIN="src/target/debug/parser_grpc_server"
@@ -180,7 +180,7 @@ build_payment_signature() {
   requirements=$(printf %s "$pr_b64" | base64 -d 2>/dev/null | jq '.accepts[0]')
   jq -nc --argjson req "$requirements" \
     '{x402Version: 2, accepted: $req, payload: {payer: "0xDEM0DEM0DEM0DEM0DEM0DEM0DEM0DEM0DEM0DEM0"}}' \
-    | base64 -w0
+    | base64 | tr -d '\n'
 }
 
 # Pretty-print a JSON snippet, trimmed to N lines.

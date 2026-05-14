@@ -40,23 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         health_client,
     };
 
-    let x402_cfg =
-        parser_gateway::x402_config::X402Config::from_env().expect("invalid X402 configuration");
-    let x402_middleware = x402_cfg
-        .build_middleware()
-        .expect("invalid X402 price tags");
-
-    if let Err(e) = probe_facilitator(&x402_cfg.facilitator_url, x402_cfg.facilitator_timeout).await
-    {
-        return Err(format!(
-            "x402 facilitator probe failed for {}: {e}",
-            x402_cfg.facilitator_url
-        )
-        .into());
-    }
-    println!("x402 facilitator probe OK");
-
-    let app = Router::new()
+    let mut app = Router::new()
         .route(
             "/health",
             get(parser_gateway::handlers::health::health_handler),
@@ -64,11 +48,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/visualsign/api/v1/parse",
             post(parser_gateway::handlers::parse::parse_handler),
-        )
-        .route(
-            "/visualsign/api/v2/parse",
-            post(parser_gateway::handlers::parse::parse_handler).layer(x402_middleware),
-        )
+        );
+
+    match parser_gateway::x402_config::X402Config::from_env() {
+        Ok(x402_cfg) => match x402_cfg.build_middleware() {
+            Ok(x402_middleware) => {
+                if let Err(e) =
+                    probe_facilitator(&x402_cfg.facilitator_url, x402_cfg.facilitator_timeout).await
+                {
+                    eprintln!(
+                        "WARNING: x402 disabled; facilitator probe failed for {}: {e}",
+                        x402_cfg.facilitator_url
+                    );
+                } else {
+                    println!("x402 facilitator probe OK");
+                    app = app.route(
+                        "/visualsign/api/v2/parse",
+                        post(parser_gateway::handlers::parse::parse_handler)
+                            .layer(x402_middleware),
+                    );
+                }
+            }
+            Err(e) => eprintln!("WARNING: x402 disabled; invalid x402 price tags: {e}"),
+        },
+        Err(e) => eprintln!("WARNING: x402 disabled; invalid x402 configuration: {e}"),
+    }
+
+    let app = app
         .layer(DefaultBodyLimit::max(GRPC_MAX_RECV_MSG_SIZE))
         .with_state(state);
 

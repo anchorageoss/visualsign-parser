@@ -37,7 +37,7 @@ pub struct PriceTagConfig {
     pub asset: String,   // e.g. "USDC"
     pub price_usd: Decimal,
     pub pay_to: PayToAddress,
-    pub scheme: String, // "exact" (only supported v1; "upto" future)
+    pub scheme: PriceScheme, // currently only "exact" is supported for v2 tags
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +84,25 @@ struct PriceTagWire {
 
 fn default_scheme() -> String {
     "exact".to_string()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PriceScheme {
+    Exact,
+}
+
+impl FromStr for PriceScheme {
+    type Err = ConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "exact" => Ok(Self::Exact),
+            other => Err(ConfigError::Invalid {
+                var: "X402_PRICE_TAGS_JSON",
+                message: format!("unsupported scheme '{other}'; only 'exact' is supported"),
+            }),
+        }
+    }
 }
 
 impl PayToWire {
@@ -214,7 +233,7 @@ impl X402Config {
             asset: "USDC".to_string(),
             price_usd,
             pay_to,
-            scheme: "exact".to_string(),
+            scheme: PriceScheme::Exact,
         })
     }
 
@@ -246,7 +265,7 @@ impl X402Config {
                         }
                     })?,
                     pay_to: w.pay_to.into_pay_to()?,
-                    scheme: w.scheme,
+                    scheme: w.scheme.parse()?,
                 })
             })
             .collect()
@@ -259,10 +278,12 @@ use std::sync::Arc;
 use x402_axum::X402LayerBuilder;
 use x402_axum::facilitator_client::FacilitatorClient;
 use x402_axum::paygate::StaticPriceTags;
+use x402_chain_eip155::KnownNetworkEip155;
+use x402_chain_eip155::V2Eip155Exact;
 use x402_chain_eip155::chain::ChecksummedAddress;
-use x402_chain_eip155::{KnownNetworkEip155, V2Eip155Exact};
+use x402_chain_solana::KnownNetworkSolana;
+use x402_chain_solana::V2SolanaExact;
 use x402_chain_solana::chain::Address as SolanaAddress;
-use x402_chain_solana::{KnownNetworkSolana, V2SolanaExact};
 use x402_types::networks::USDC;
 use x402_types::proto::v2;
 
@@ -309,6 +330,13 @@ impl X402Config {
 
 /// Convert a single [`PriceTagConfig`] into a [`v2::PriceTag`].
 fn build_price_tag(tag: &PriceTagConfig) -> Result<v2::PriceTag, ConfigError> {
+    if tag.scheme != PriceScheme::Exact {
+        return Err(ConfigError::Invalid {
+            var: "X402_PRICE_TAGS_JSON",
+            message: "unsupported scheme; only 'exact' is supported".into(),
+        });
+    }
+
     // USDC has 6 decimals on all supported networks.
     // price_usd * 1_000_000 = atomic units.
     let atomic = tag
@@ -434,7 +462,7 @@ mod tests {
             cfg.price_tags[0].pay_to,
             PayToAddress::Evm("0x000000000000000000000000000000000000dEaD".to_string())
         );
-        assert_eq!(cfg.price_tags[0].scheme, "exact");
+        assert_eq!(cfg.price_tags[0].scheme, PriceScheme::Exact);
     }
 
     #[test]
@@ -497,5 +525,14 @@ mod tests {
         let err =
             X402Config::from_lookup(lookup(&[("X402_PRICE_TAGS_JSON", "not json")])).unwrap_err();
         assert!(matches!(err, ConfigError::JsonParse(_)));
+    }
+
+    #[test]
+    fn from_env_rejects_unsupported_scheme() {
+        let json = r#"[
+            {"network":"base","asset":"USDC","priceUsd":"0.05","payTo":{"evm":"0x1111111111111111111111111111111111111111"},"scheme":"upto"}
+        ]"#;
+        let err = X402Config::from_lookup(lookup(&[("X402_PRICE_TAGS_JSON", json)])).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid { .. }));
     }
 }

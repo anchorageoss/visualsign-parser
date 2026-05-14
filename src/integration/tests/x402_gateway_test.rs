@@ -1,21 +1,20 @@
 //! End-to-end: mock_facilitator + parser_grpc_server + parser_gateway,
 //! exercising the v2 x402-gated route alongside the v1 open route.
-//!
-//! Run with:
-//!   cargo test -p integration --test x402_gateway_test -- --test-threads=1
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::time::sleep;
 
-// ── Ports used by all five tests (fixed; tests run single-threaded) ───────────
+// ── Ports used by all five tests (fixed; serialized via TEST_MUTEX) ────────────
 const MOCK_PORT: u16 = 18090;
 // Note: parser_grpc_server always binds 0.0.0.0:44020 (hardcoded in binary).
 // The gateway is pointed at that address via GRPC_ADDR env var.
 const GW_PORT: u16 = 18080;
+static TEST_MUTEX: Mutex<()> = Mutex::const_new(());
 
 // ── Binary helpers ────────────────────────────────────────────────────────────
 
@@ -227,6 +226,7 @@ const ETH_TX_HEX: &str = "0xf86c808504a817c8008252089435353535353535353535353535
 /// `Payment-Required` header (base64 JSON), not in the response body.
 #[tokio::test]
 async fn path1_v2_without_payment_returns_402() {
+    let _guard = TEST_MUTEX.lock().await;
     let _p = start_procs().await;
 
     let body = serde_json::json!({
@@ -282,6 +282,7 @@ async fn path1_v2_without_payment_returns_402() {
 /// We first probe the 402 to learn the exact requirements, then echo them back in `accepted`.
 #[tokio::test]
 async fn path2_v2_with_valid_payment_returns_200() {
+    let _guard = TEST_MUTEX.lock().await;
     let _p = start_procs().await;
 
     // Fetch actual requirements from the 402 response.
@@ -317,6 +318,7 @@ async fn path2_v2_with_valid_payment_returns_200() {
 /// payload → 400. The gRPC parser rejects it before settlement.
 #[tokio::test]
 async fn path3_v2_valid_payment_bad_tx_returns_400() {
+    let _guard = TEST_MUTEX.lock().await;
     let _p = start_procs().await;
 
     let requirements = fetch_v2_requirements().await;
@@ -346,6 +348,7 @@ async fn path3_v2_valid_payment_bad_tx_returns_400() {
 /// Path 4: POST /visualsign/api/v1/parse without payment header → 200 (open route).
 #[tokio::test]
 async fn path4_v1_without_payment_returns_200() {
+    let _guard = TEST_MUTEX.lock().await;
     let _p = start_procs().await;
 
     let body = serde_json::json!({
@@ -368,6 +371,7 @@ async fn path4_v1_without_payment_returns_200() {
 /// Path 5: GET /health → 200 with no authentication.
 #[tokio::test]
 async fn path5_health_open() {
+    let _guard = TEST_MUTEX.lock().await;
     let _p = start_procs().await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{GW_PORT}/health"))
