@@ -34,6 +34,7 @@ import { Connection, Keypair, VersionedTransaction } from "@solana/web3.js";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
 import { p256 } from "@noble/curves/p256";
+import { sha256 } from "@noble/hashes/sha2";
 import { dirname, resolve } from "node:path";
 import { createX402Client, type WalletAdapter } from "x402-solana/client";
 
@@ -151,8 +152,15 @@ async function main(): Promise<void> {
       );
     }
     // qos_p256 encodes P256Public as encrypt_public || sign_public, each
-    // SEC1 uncompressed (65 bytes = 130 hex). The sign half is the second
-    // 65 bytes; the message + sig are pre-hashed P256 ECDSA values.
+    // SEC1 uncompressed (65 bytes = 130 hex chars). The sign half is the
+    // second 65 bytes.
+    //
+    // Hashing: parser_app builds `digest = sha256(borsh(payload))` and calls
+    // `P256Pair::sign(&digest)`. P256SignPair::sign forwards to
+    // `p256::ecdsa::SigningKey::sign(msg)`, whose default `Signer<Signature>`
+    // impl applies SHA-256 to `msg` again before signing. So the signed
+    // value is actually `sha256(digest)`. To verify with @noble/curves,
+    // hash one more time on this side and pass the prehash explicitly.
     const pubBytes = Buffer.from(sig.publicKey, "hex");
     if (pubBytes.length !== 130) {
       throw new Error(
@@ -160,9 +168,10 @@ async function main(): Promise<void> {
       );
     }
     const signHalf = pubBytes.subarray(65, 130);
-    const msgBytes = Buffer.from(sig.message, "hex");
+    const digest = Buffer.from(sig.message, "hex");
+    const inner = sha256(digest);
     const sigBytes = Buffer.from(sig.signature, "hex");
-    const ok = p256.verify(sigBytes, msgBytes, signHalf, { prehash: false });
+    const ok = p256.verify(sigBytes, inner, signHalf);
     if (!ok) {
       throw new Error("independent P256 verification FAILED");
     }
