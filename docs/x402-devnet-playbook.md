@@ -122,36 +122,23 @@ docker image ls | grep anchorageoss-visualsign-parser
 
 You should see all four. Build takes ~5 min cold, ~30 sec warm.
 
-### Step 2 — Compute the pinned TVC verifier pubkey
+### Step 2 — Set the pinned TVC verifier pubkey
 
 The gateway must be told the enclave's expected ephemeral public key at
-launch. For local-dev we re-use the test fixture key:
+launch. For local-dev the fixture keypair is committed to the repo and
+the *public* half is right there in `fixtures/ephemeral.pub` — just
+`cat` it into the env var:
 
 ```sh
-cd src
-cargo run -q --bin print_ephemeral_pubkey 2>/dev/null || \
-  cargo test -p integration --test x402_payai_devnet_test load_devnet_keypair_round_trips -- --nocapture 2>&1 \
-  | grep -E '^\[fixture\]' || true
-
-# Easier: derive the hex inline (matches what parser_grpc_server will sign with)
-EPH_HEX=$(cargo run --quiet -p integration --example print_tvc_pubkey 2>/dev/null \
-  || python3 - <<'PY'
-# Fallback: extract from fixtures/ephemeral.pub if present
-import sys, pathlib
-p = pathlib.Path("integration/fixtures/ephemeral.pub")
-print(p.read_text().strip())
-PY
-)
-echo "TVC pubkey hex: $EPH_HEX"
-cd ..
-export X402_TVC_VERIFIER_PUBKEY_HEX="$EPH_HEX"
+export X402_TVC_VERIFIER_PUBKEY_HEX=$(cat src/integration/fixtures/ephemeral.pub)
 ```
 
-If you don't have a quick way to print the hex, run the gateway once with
-`X402_TVC_VERIFIER_PUBKEY_HEX=00...00` (any wrong value). It will start,
-serve a request, log `attestation verification failed: public key
-mismatch: ... response key <REAL HEX>`. Copy the real hex, kill the
-gateway, and re-export.
+This is the same value `parser_grpc_server` will sign every parse
+response with, so the gateway's verification will pass.
+
+In production TVC, the enclave's `parser_app` is provisioned by Turnkey
+with a *different* ephemeral key and exposes its public half through the
+attested boot record. Part 2 walks through how to read that and pin it.
 
 ### Step 3 — Fund the reproducible test wallet
 
@@ -207,57 +194,92 @@ in the logs:
 
 ```
 x402 facilitator probe OK
-x402 attestation: pinned TVC pubkey 04abc123…<last 8>
-parser_gateway v… listening on 0.0.0.0:8080
+x402 attestation: pinned TVC pubkey 04716208..ed68bd57
+parser_gateway dev listening on 0.0.0.0:8080
 ```
 
 Confirm the 402 challenge directly:
 
 ```sh
-curl -i -X POST http://127.0.0.1:8080/visualsign/api/v2/parse \
+curl -s -i -X POST http://127.0.0.1:8080/visualsign/api/v2/parse \
   -H 'content-type: application/json' \
   -d '{"request":{"unsigned_payload":"0xdeadbeef","chain":"CHAIN_ETHEREUM"}}' \
-  | head -20
+  | head -3
 ```
 
 Expected: `HTTP/1.1 402 Payment Required` + a `payment-required` header
-whose base64-JSON includes a `solana-devnet` entry.
+whose base64-JSON includes an entry with network
+`solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` (the CAIP-2 form of Solana
+devnet that payai emits). To peek inside:
+
+```sh
+HDR=$(curl -s -i -X POST http://127.0.0.1:8080/visualsign/api/v2/parse \
+  -H 'content-type: application/json' \
+  -d '{"request":{"unsigned_payload":"0xdeadbeef","chain":"CHAIN_ETHEREUM"}}' \
+  | awk -F': ' 'tolower($1)=="payment-required"{print $2}' | tr -d '\r')
+echo "$HDR" | base64 -d | python3 -m json.tool
+```
 
 ### Step 5 — Run the TS demo client to pay & parse
 
 ```sh
 cd scripts
-npm install      # one-time
+npm install            # one-time
+cd ..
 export GATEWAY_URL=http://127.0.0.1:8080
 export RPC_URL=https://api.devnet.solana.com
-npx tsx x402-solana-devnet-demo.ts
+node --experimental-strip-types --no-warnings scripts/x402-solana-devnet-demo.ts
 ```
+
+(`tsx` works too, but Node 22.6+ strips TS types natively — no
+build/transpile step needed.)
 
 What you should see:
 
 ```
-── Wallet ─────────────────────────────────…
+-- Wallet -----------------------------------------------------------
 buyer address : x2iWww6XjauBk83HpBMzkGPijbzy4vqdRzS5skWPxmW
-buyer balance : 1.9234 SOL on devnet
-── Probe 402 ──────────────────────────────…
-accepts: solana-devnet
-price: 1000 atoms USDC -> x2iWww6X… on solana-devnet
-── Sign X-PAYMENT ─────────────────────────…
-header length: 1842 chars
-── Paid request ───────────────────────────…
+buyer balance : 5.0000 SOL on devnet
+
+-- x402 client (payai/x402-solana) ----------------------------------
+client constructed; making paid request...
+
+-- Paid POST /visualsign/api/v2/parse -------------------------------
+[x402-solana] Making initial request to: http://127.0.0.1:8080/visualsign/api/v2/parse
+[x402-solana] Initial response status: 402
+[x402-solana] Got 402, parsing payment requirements...
+[x402-solana] Creating signed transaction...
+[x402-solana] Transaction signed successfully
+[x402-solana] Retrying request with PAYMENT-SIGNATURE header...
+[x402-solana] Retry response status: 200
 status: 200
-X-PAYMENT-RESPONSE: eyJzdWNjZX…
-signature pubkey: 04abc123…
-── Independent P256 verification ──────────…
+settlement: {
+  "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+  "payer": "x2iWww6XjauBk83HpBMzkGPijbzy4vqdRzS5skWPxmW",
+  "success": true,
+  "transaction": "<base58 solana tx signature, ~88 chars>"
+}
+
+-- Independent P256 verification ------------------------------------
 response signature verifies against pinned TVC pubkey ✓
-── Done ───────────────────────────────────…
-payload bytes: 1284
+
+-- Done -------------------------------------------------------------
+payload bytes: 734
 ```
 
-The `solana-devnet ✓` line is the assertion that closes the loop: the
-gateway returned a 200 *and* the response signature verifies against the
-pinned enclave pubkey using `@noble/curves/p256` (cross-impl with the
-Rust verifier).
+Three independent things just happened:
+
+1. **payai settled a real USDC transfer on Solana devnet.** Paste the
+   `settlement.transaction` value into
+   `https://explorer.solana.com/tx/<signature>?cluster=devnet` to see
+   it on chain.
+2. **The gateway returned 200,** meaning its server-side P256
+   verification of the parse response against the pinned TVC pubkey
+   passed. A 502 here would mean settlement skipped (no charge).
+3. **The TS demo independently re-verified the response signature**
+   using `@noble/curves/p256` against the same pinned pubkey, proving
+   you don't have to trust the gateway's word — any consumer can run
+   the same check.
 
 ### Step 6 — Watch the gateway logs
 
@@ -269,7 +291,7 @@ make dev-logs
 
 You'll see one of two flows per request:
 
-- `(verified)` and `x402 settled in <ms>` for a happy path
+- `attestation: pinned TVC pubkey …` at startup, then quiet 200s
 - `attestation verification failed: …` + the 502 — if you ever boot the
   gateway with a wrong `X402_TVC_VERIFIER_PUBKEY_HEX`, this is what
   prevents payment for an unattested response.
@@ -280,26 +302,17 @@ You'll see one of two flows per request:
 make dev-down
 ```
 
-### Run the gated devnet test from cargo (optional)
-
-```sh
-cd src
-X402_E2E=1 cargo test -p integration --test x402_payai_devnet_test \
-  -- --ignored --nocapture
-```
-
-This boots its own stack (the same binaries, run natively rather than in
-containers) and runs the same end-to-end flow from Rust. Useful as a
-regression gate in a CI job labeled `e2e-devnet`.
-
 ### Common failures (Part 1)
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `WARNING: x402 disabled; facilitator probe failed` | No egress to `facilitator.payai.network` | Check VPN / corp proxy; the v2 route stays unmounted otherwise |
 | `FATAL: X402_TVC_VERIFIER_PUBKEY_HEX … required for X402_PROFILE=payai` | Forgot to export the pubkey | See Step 2 |
-| `buyer ATA … has only N USDC atoms` (panic from cargo test) | Wallet underfunded | faucet.circle.com |
-| `attestation verification failed: public key mismatch` on every request | Wrong pubkey pinned (env stale, or the parser_grpc_server image rebuilt with a different ephemeral fixture) | Re-derive the hex from `fixtures/ephemeral.pub` |
+| Demo aborts with `paid request failed: 402` | Wallet underfunded on devnet (USDC or SOL) | Top up via faucet.circle.com / faucet.solana.com |
+| `attestation verification failed: public key mismatch` on every request | Wrong pubkey pinned (env stale) | Re-export `X402_TVC_VERIFIER_PUBKEY_HEX` from `fixtures/ephemeral.pub` |
+| Demo throws `independent P256 verification FAILED` | `X402_TVC_VERIFIER_PUBKEY_HEX` set differently for the gateway vs the demo | Use the same value in both shells |
+| Container immediately exits with `syntax error: unterminated quoted string` | You replaced `entrypoint:` with `command:` in compose | Restore `entrypoint: ["/binary"]` — stagex/core-busybox sets ENTRYPOINT=`/bin/sh` |
+| Gateway crashes at startup with `No CA certificates were loaded from the system` | Building from a Containerfile that didn't COPY the CA bundle | Pull CA certs from `stagex/core-ca-certificates` into `/etc/ssl/certs/` (see `images/parser_gateway/Containerfile`) |
 | Demo hangs on "Sign X-PAYMENT" | Solana devnet RPC slow / blockhash fetch timeout | Switch `RPC_URL` to your own RPC endpoint |
 
 ---

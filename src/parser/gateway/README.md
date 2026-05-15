@@ -122,11 +122,10 @@ devnet with SOL + USDC before running. See
 ## Integration tests
 
 ```sh
-# Always-on (offline, mock facilitator) — 6 paths including signature
-# tamper detection.
+# Offline, mock facilitator. 6 paths including signature-tamper
+# detection (Path 6: pinned-pubkey mismatch -> 502 and no settlement).
 make -C src test
-
-# Gated devnet E2E (real payai + Solana devnet). Requires the
-# reproducible buyer wallet to be funded.
-X402_E2E=1 cargo test -p integration --test x402_payai_devnet_test -- --ignored
 ```
+
+For real-payai + Solana devnet end-to-end, drive the demo TS client
+against a `make dev-up-payai` stack — see `docs/x402-devnet-playbook.md`.
