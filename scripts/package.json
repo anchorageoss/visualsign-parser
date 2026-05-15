@@ -15,7 +15,7 @@
     "@solana/web3.js": "^1.95.5"
   },
   "optionalDependencies": {
-    "x402-solana": "^2.0.1"
+    "x402-solana": "^2.0.4"
   },
   "devDependencies": {
     "tsx": "^4.20.0",

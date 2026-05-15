@@ -17,7 +17,9 @@
 services:
   parser_grpc_server:
     image: anchorageoss-visualsign-parser/parser_grpc_server:latest
-    command: ["/parser_grpc_server"]
+    # stagex/core-busybox sets ENTRYPOINT ["/bin/sh"], so we override to
+    # exec the static-musl binary directly.
+    entrypoint: ["/parser_grpc_server"]
     environment:
       EPHEMERAL_FILE: "/etc/parser/ephemeral.secret"
     volumes:
@@ -30,7 +32,7 @@ services:
 
   parser_gateway:
     image: anchorageoss-visualsign-parser/parser_gateway:latest
-    command: ["/parser_gateway"]
+    entrypoint: ["/parser_gateway"]
     depends_on:
       - parser_grpc_server
     environment:
