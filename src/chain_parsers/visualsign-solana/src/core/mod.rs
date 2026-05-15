@@ -30,11 +30,12 @@ pub enum VisualizerKind {
 
 /// Maximum nesting depth for visualizing inner instructions.
 ///
-/// Solana's runtime CPI cap is 4, so any visualization that hits this depth is
-/// either malformed or adversarial input. The cap prevents stack-overflow DoS
-/// through nested-instruction encodings (e.g., a `vaultTransactionCreate`
-/// containing another `vaultTransactionCreate`, or a swig instruction wrapping
-/// another swig instruction).
+/// Matches Solana's runtime CPI cap of 4: contexts may reach `call_depth ==
+/// MAX_CALL_DEPTH`, but any attempt to nest beyond it (i.e. exceed this depth)
+/// returns `None` from [`VisualizerContext::for_nested_call`]. The cap
+/// prevents stack-overflow DoS through nested-instruction encodings (e.g.,
+/// a `vaultTransactionCreate` containing another `vaultTransactionCreate`,
+/// or a swig instruction wrapping another swig instruction).
 pub const MAX_CALL_DEPTH: u8 = 4;
 
 /// Context for visualizing a Solana instruction.

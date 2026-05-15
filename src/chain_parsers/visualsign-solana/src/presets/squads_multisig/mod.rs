@@ -444,6 +444,20 @@ fn reconstruct_instructions(
     let num_writable_signers = vault_msg.num_writable_signers as usize;
     let num_writable_non_signers = vault_msg.num_writable_non_signers as usize;
 
+    // Validate the header invariants up-front: a malformed input that claims
+    // more writable signers than signers, more signers than keys, or more
+    // writable non-signers than non-signer slots would silently mis-label
+    // accounts as signers/writable downstream. Refuse instead.
+    if num_writable_signers > num_signers {
+        return Err("num_writable_signers > num_signers");
+    }
+    if num_signers > num_keys {
+        return Err("num_signers > account_keys.len()");
+    }
+    if num_writable_non_signers > num_keys - num_signers {
+        return Err("num_writable_non_signers > non-signer slots");
+    }
+
     let account_meta_for_index = |idx: usize| -> Option<AccountMeta> {
         let pubkey = *account_keys.get(idx)?;
         let is_signer = idx < num_signers;
@@ -752,6 +766,27 @@ mod tests {
             reconstruct_instructions(&vault_msg).is_err(),
             "out-of-range account index must be rejected"
         );
+    }
+
+    #[test]
+    fn test_reconstruct_instructions_rejects_inconsistent_header() {
+        // num_writable_signers > num_signers — would mis-label non-signers as
+        // writable. Refuse.
+        let too_many_writable_signers =
+            make_vault_msg(1, 2, 0, vec![make_pubkey(0), make_pubkey(1)], vec![]);
+        assert!(reconstruct_instructions(&too_many_writable_signers).is_err());
+
+        // num_signers > account_keys.len() — would treat keys past the end
+        // as signers via out-of-bounds index assumptions. Refuse.
+        let signers_exceed_keys =
+            make_vault_msg(3, 0, 0, vec![make_pubkey(0), make_pubkey(1)], vec![]);
+        assert!(reconstruct_instructions(&signers_exceed_keys).is_err());
+
+        // num_writable_non_signers > non-signer slot count — would mark
+        // entries past the end as writable. Refuse.
+        let too_many_writable_non_signers =
+            make_vault_msg(1, 0, 5, vec![make_pubkey(0), make_pubkey(1)], vec![]);
+        assert!(reconstruct_instructions(&too_many_writable_non_signers).is_err());
     }
 
     #[test]
