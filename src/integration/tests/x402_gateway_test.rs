@@ -82,11 +82,7 @@ fn fixture_ephemeral_pubkey_hex() -> String {
     qos_hex::encode(&pair.public_key().to_bytes())
 }
 
-async fn start_procs() -> Procs {
-    start_procs_with_env(&[]).await
-}
-
-async fn start_procs_with_env(extra: &[(&str, &str)]) -> Procs {
+async fn start_procs(extra_env: &[(&str, &str)]) -> Procs {
     // --- Friction 2: startup ordering ---
     // parser_gateway probes mock_facilitator at startup. We must ensure
     // mock_facilitator is ready before spawning the gateway.
@@ -137,7 +133,7 @@ async fn start_procs_with_env(extra: &[(&str, &str)]) -> Procs {
             "X402_FACILITATOR_URL",
             format!("http://127.0.0.1:{MOCK_PORT}"),
         );
-    for (k, v) in extra {
+    for (k, v) in extra_env {
         cmd.env(k, v);
     }
     let gateway = cmd
@@ -247,7 +243,7 @@ const ETH_TX_HEX: &str = "0xf86c808504a817c8008252089435353535353535353535353535
 #[tokio::test]
 async fn path1_v2_without_payment_returns_402() {
     let _guard = TEST_MUTEX.lock().await;
-    let _p = start_procs().await;
+    let _p = start_procs(&[]).await;
 
     let body = serde_json::json!({
         "request": { "unsigned_payload": "0xdeadbeef", "chain": "CHAIN_ETHEREUM" }
@@ -303,7 +299,7 @@ async fn path1_v2_without_payment_returns_402() {
 #[tokio::test]
 async fn path2_v2_with_valid_payment_returns_200() {
     let _guard = TEST_MUTEX.lock().await;
-    let _p = start_procs().await;
+    let _p = start_procs(&[]).await;
 
     // Fetch actual requirements from the 402 response.
     let requirements = fetch_v2_requirements().await;
@@ -339,7 +335,7 @@ async fn path2_v2_with_valid_payment_returns_200() {
 #[tokio::test]
 async fn path3_v2_valid_payment_bad_tx_returns_400() {
     let _guard = TEST_MUTEX.lock().await;
-    let _p = start_procs().await;
+    let _p = start_procs(&[]).await;
 
     let requirements = fetch_v2_requirements().await;
     let payment_header = build_payment_signature(&requirements);
@@ -369,7 +365,7 @@ async fn path3_v2_valid_payment_bad_tx_returns_400() {
 #[tokio::test]
 async fn path4_v1_without_payment_returns_200() {
     let _guard = TEST_MUTEX.lock().await;
-    let _p = start_procs().await;
+    let _p = start_procs(&[]).await;
 
     let body = serde_json::json!({
         "request": { "unsigned_payload": ETH_TX_HEX, "chain": "CHAIN_ETHEREUM" }
@@ -392,7 +388,7 @@ async fn path4_v1_without_payment_returns_200() {
 #[tokio::test]
 async fn path5_health_open() {
     let _guard = TEST_MUTEX.lock().await;
-    let _p = start_procs().await;
+    let _p = start_procs(&[]).await;
 
     let resp = reqwest::get(format!("http://127.0.0.1:{GW_PORT}/health"))
         .await
@@ -422,7 +418,7 @@ async fn path6_tampered_pubkey_returns_502_no_settle() {
     // Sanity: must differ from the fixture's pubkey.
     assert_ne!(wrong_hex, fixture_ephemeral_pubkey_hex());
 
-    let _p = start_procs_with_env(&[("X402_TVC_VERIFIER_PUBKEY_HEX", wrong_hex.as_str())]).await;
+    let _p = start_procs(&[("X402_TVC_VERIFIER_PUBKEY_HEX", wrong_hex.as_str())]).await;
 
     // Read settle_count before the request.
     let before = read_settle_count().await;

@@ -87,11 +87,14 @@ pub async fn parse_handler(
         }
     };
 
+    // Missing signature from parser_app is the same class of trust failure
+    // as a bad signature: surface 502 + don't settle. (502 makes x402-axum's
+    // settle-on-success contract treat this as "do not charge".)
     let proto_signature = match parsed_tx.signature {
         Some(s) => s,
         None => {
             return (
-                StatusCode::INTERNAL_SERVER_ERROR,
+                StatusCode::BAD_GATEWAY,
                 Json(error_response("missing signature in response".to_string())),
             );
         }

@@ -13,13 +13,10 @@
 
 use generated::parser::{Signature, SignatureScheme};
 use qos_p256::P256Public;
-use std::path::Path;
 use subtle::ConstantTimeEq;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AttestationError {
-    #[error("missing signature on parse response")]
-    MissingSignature,
     #[error("unsupported signature scheme: {0}")]
     UnsupportedScheme(String),
     #[error("public key mismatch: response key does not match pinned TVC verifier key")]
@@ -39,7 +36,7 @@ pub enum AttestationError {
 
 pub struct AttestationVerifier {
     pinned_public: P256Public,
-    pinned_hex_lower: String,
+    pinned_bytes: Vec<u8>,
 }
 
 impl AttestationVerifier {
@@ -78,16 +75,16 @@ impl AttestationVerifier {
     }
 
     pub fn from_hex(hex_value: &str) -> Result<Self, AttestationError> {
-        let trimmed = hex_value.trim();
-        let bytes = qos_hex::decode(trimmed).map_err(|e| AttestationError::Hex {
-            field: "X402_TVC_VERIFIER_PUBKEY_HEX",
-            message: format!("{e:?}"),
-        })?;
-        let pinned_public = P256Public::from_bytes(&bytes)
+        let pinned_bytes =
+            qos_hex::decode(hex_value.trim()).map_err(|e| AttestationError::Hex {
+                field: "X402_TVC_VERIFIER_PUBKEY_HEX",
+                message: format!("{e:?}"),
+            })?;
+        let pinned_public = P256Public::from_bytes(&pinned_bytes)
             .map_err(|e| AttestationError::InvalidPinnedKey(format!("{e:?}")))?;
         Ok(Self {
             pinned_public,
-            pinned_hex_lower: trimmed.to_ascii_lowercase(),
+            pinned_bytes,
         })
     }
 
@@ -101,11 +98,16 @@ impl AttestationVerifier {
             return Err(AttestationError::UnsupportedScheme(scheme_name));
         }
 
-        let response_hex_lower = sig.public_key.to_ascii_lowercase();
-        let pinned_bytes = self.pinned_hex_lower.as_bytes();
-        let response_bytes = response_hex_lower.as_bytes();
-        if pinned_bytes.len() != response_bytes.len()
-            || pinned_bytes.ct_eq(response_bytes).unwrap_u8() != 1
+        let response_bytes =
+            qos_hex::decode(&sig.public_key).map_err(|e| AttestationError::Hex {
+                field: "signature.public_key",
+                message: format!("{e:?}"),
+            })?;
+        if response_bytes.len() != self.pinned_bytes.len()
+            || response_bytes
+                .ct_eq(self.pinned_bytes.as_slice())
+                .unwrap_u8()
+                != 1
         {
             return Err(AttestationError::PubkeyMismatch);
         }
@@ -125,35 +127,10 @@ impl AttestationVerifier {
             .map_err(|_| AttestationError::Verify)
     }
 
-    /// Public hex representation of the pinned key, lowercased. Useful for
-    /// log/error messages.
-    pub fn pinned_hex(&self) -> &str {
-        &self.pinned_hex_lower
+    /// Hex representation of the pinned key. Useful for log/error messages.
+    pub fn pinned_hex(&self) -> String {
+        qos_hex::encode(&self.pinned_bytes)
     }
-}
-
-/// Allow callers to fail closed when a pinned verifier is required but absent.
-pub fn require_verifier(
-    profile_is_local: bool,
-    verifier: Option<AttestationVerifier>,
-) -> Result<Option<AttestationVerifier>, AttestationError> {
-    match (verifier, profile_is_local) {
-        (Some(v), _) => Ok(Some(v)),
-        (None, true) => Ok(None),
-        (None, false) => Err(AttestationError::InvalidPinnedKey(
-            "X402_TVC_VERIFIER_PUBKEY_HEX or _FILE required for non-local profile".into(),
-        )),
-    }
-}
-
-/// Borrow the path-only helper into a non-allocating verifier of the file.
-/// Provided for callers that prefer passing a `&Path` over going through env vars.
-pub fn from_file(path: &Path) -> Result<AttestationVerifier, AttestationError> {
-    let raw = std::fs::read_to_string(path).map_err(|e| AttestationError::PubkeyFile {
-        path: path.display().to_string(),
-        message: e.to_string(),
-    })?;
-    AttestationVerifier::from_hex(raw.trim())
 }
 
 #[cfg(test)]
@@ -205,10 +182,7 @@ mod tests {
         let pair_b = P256Pair::generate().unwrap();
         let pinned_hex = qos_hex::encode(&pair_a.public_key().to_bytes());
         let verifier = AttestationVerifier::from_hex(&pinned_hex).unwrap();
-        let mut sig = make_signed_response(&pair_b);
-        // Even if we lied about the public key, the mismatch with the pinned
-        // hex should be caught first.
-        sig.public_key = qos_hex::encode(&pair_b.public_key().to_bytes());
+        let sig = make_signed_response(&pair_b);
         assert!(matches!(
             verifier.verify(&sig).unwrap_err(),
             AttestationError::PubkeyMismatch
@@ -221,7 +195,6 @@ mod tests {
         let pinned_hex = qos_hex::encode(&pair.public_key().to_bytes());
         let verifier = AttestationVerifier::from_hex(&pinned_hex).unwrap();
         let mut sig = make_signed_response(&pair);
-        // flip the last hex char of the signature
         let mut chars: Vec<char> = sig.signature.chars().collect();
         let last_idx = chars.len() - 1;
         chars[last_idx] = if chars[last_idx] == '0' { '1' } else { '0' };
@@ -246,41 +219,11 @@ mod tests {
     }
 
     #[test]
-    fn require_verifier_fails_closed_in_non_local() {
-        let res = require_verifier(false, None);
-        assert!(res.is_err());
-    }
-
-    #[test]
-    fn require_verifier_allows_missing_in_local() {
-        let res = require_verifier(true, None).unwrap();
-        assert!(res.is_none());
-    }
-
-    #[test]
-    fn from_lookup_file_path_works() {
+    fn pubkey_compare_is_case_insensitive() {
         let pair = P256Pair::generate().unwrap();
         let pinned_hex = qos_hex::encode(&pair.public_key().to_bytes());
-        let tmp = tempfile_path("tvc_pubkey");
-        std::fs::write(&tmp, &pinned_hex).unwrap();
-        let v = AttestationVerifier::from_lookup(|k| match k {
-            "X402_TVC_VERIFIER_PUBKEY_FILE" => Some(tmp.display().to_string()),
-            _ => None,
-        })
-        .unwrap()
-        .unwrap();
-        assert_eq!(v.pinned_hex(), pinned_hex.to_ascii_lowercase());
-        let _ = std::fs::remove_file(&tmp);
-    }
-
-    fn tempfile_path(prefix: &str) -> std::path::PathBuf {
-        let mut p = std::env::temp_dir();
-        let pid = std::process::id();
-        let suffix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        p.push(format!("{prefix}-{pid}-{suffix}"));
-        p
+        let verifier = AttestationVerifier::from_hex(&pinned_hex.to_uppercase()).unwrap();
+        let sig = make_signed_response(&pair);
+        verifier.verify(&sig).expect("hex case must not matter");
     }
 }

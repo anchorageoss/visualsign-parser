@@ -70,7 +70,7 @@ function buildWalletAdapter(buyer: Keypair): WalletAdapter {
 
 function logSection(title: string): void {
   console.log("");
-  console.log(`── ${title} `.padEnd(72, "─"));
+  console.log(`-- ${title} `.padEnd(72, "-"));
 }
 
 async function main(): Promise<void> {

@@ -92,10 +92,7 @@ fn extract_network(req: &Value) -> String {
         .to_string()
 }
 
-async fn verify(
-    State(_state): State<MockState>,
-    Json(req): Json<VerifyRequest>,
-) -> Json<VerifyResponse> {
+async fn verify(Json(req): Json<VerifyRequest>) -> Json<VerifyResponse> {
     Json(VerifyResponse {
         is_valid: true,
         payer: extract_payer(&req.payment_payload),
@@ -110,7 +107,7 @@ async fn settle(
     let mut buf = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut buf);
     let tx = format!("0xmock{}", hex_encode(&buf));
-    state.settle_count.fetch_add(1, Ordering::SeqCst);
+    state.settle_count.fetch_add(1, Ordering::Relaxed);
     Json(SettleResponse {
         success: true,
         transaction: tx,
@@ -147,7 +144,7 @@ async fn supported() -> Json<SupportedResponse> {
 }
 
 async fn settle_count_handler(State(state): State<MockState>) -> Json<serde_json::Value> {
-    let n = state.settle_count.load(Ordering::SeqCst);
+    let n = state.settle_count.load(Ordering::Relaxed);
     Json(serde_json::json!({ "settle_count": n }))
 }
 
@@ -267,7 +264,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(state.settle_count.load(Ordering::SeqCst), 0);
+        assert_eq!(state.settle_count.load(Ordering::Relaxed), 0);
 
         // settle increments
         let _ = app
@@ -280,6 +277,6 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(state.settle_count.load(Ordering::SeqCst), 1);
+        assert_eq!(state.settle_count.load(Ordering::Relaxed), 1);
     }
 }

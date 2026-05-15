@@ -47,11 +47,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let attestation: Option<Arc<AttestationVerifier>> = match AttestationVerifier::from_env() {
         Ok(Some(v)) => {
-            println!(
-                "x402 attestation: pinned TVC pubkey {}…{} (lower-cased)",
-                &v.pinned_hex()[..8.min(v.pinned_hex().len())],
-                &v.pinned_hex()[v.pinned_hex().len().saturating_sub(8)..]
-            );
+            let hex = v.pinned_hex();
+            let head = &hex[..8.min(hex.len())];
+            let tail = &hex[hex.len().saturating_sub(8)..];
+            println!("x402 attestation: pinned TVC pubkey {head}..{tail}");
             Some(Arc::new(v))
         }
         Ok(None) => {
