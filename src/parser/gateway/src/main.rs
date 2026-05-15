@@ -64,8 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("x402 facilitator probe OK");
                     app = app.route(
                         "/visualsign/api/v2/parse",
-                        post(parser_gateway::handlers::parse::parse_handler)
-                            .layer(x402_middleware),
+                        post(parser_gateway::handlers::parse::parse_handler).layer(x402_middleware),
                     );
                 }
             }
