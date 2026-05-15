@@ -12,7 +12,9 @@ use generated::grpc::health::v1::health_client::HealthClient;
 use generated::parser::parser_service_client::ParserServiceClient;
 use generated::tonic;
 use host_primitives::GRPC_MAX_RECV_MSG_SIZE;
+use parser_gateway::attestation::AttestationVerifier;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -35,9 +37,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_encoding_message_size(GRPC_MAX_RECV_MSG_SIZE);
     let health_client = HealthClient::new(channel);
 
+    // Build the TVC attestation verifier. The pinned pubkey is provisioned
+    // out-of-band (Turnkey TVC plants it as a launch arg) and must match the
+    // enclave's ephemeral key. Fail-closed in non-local profiles: a production
+    // gateway without a pinned verifier would happily forward (and settle for)
+    // unattested responses.
+    let profile_str = std::env::var("X402_PROFILE").unwrap_or_else(|_| "local".to_string());
+    let is_local_profile = profile_str == "local";
+
+    let attestation: Option<Arc<AttestationVerifier>> = match AttestationVerifier::from_env() {
+        Ok(Some(v)) => {
+            println!(
+                "x402 attestation: pinned TVC pubkey {}…{} (lower-cased)",
+                &v.pinned_hex()[..8.min(v.pinned_hex().len())],
+                &v.pinned_hex()[v.pinned_hex().len().saturating_sub(8)..]
+            );
+            Some(Arc::new(v))
+        }
+        Ok(None) => {
+            if is_local_profile {
+                eprintln!(
+                    "WARNING: X402_TVC_VERIFIER_PUBKEY_HEX not set; gateway will not attest \
+                     parse responses (allowed because X402_PROFILE=local)"
+                );
+                None
+            } else {
+                eprintln!(
+                    "FATAL: X402_TVC_VERIFIER_PUBKEY_HEX (or _FILE) is required for \
+                     X402_PROFILE={profile_str}"
+                );
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("FATAL: invalid TVC verifier pubkey configuration: {e}");
+            std::process::exit(1);
+        }
+    };
+
     let state = parser_gateway::state::AppState {
         grpc_client,
         health_client,
+        attestation,
     };
 
     let mut app = Router::new()

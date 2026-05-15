@@ -5,6 +5,7 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::panic)]
 
+pub mod attestation;
 pub mod handlers;
 pub mod state;
 pub mod turnkey;

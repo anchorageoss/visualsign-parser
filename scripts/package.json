@@ -1,0 +1,24 @@
+{
+  "name": "visualsign-parser-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Demo TS clients for visualsign-parser gateway flows (x402 over Solana devnet, etc.).",
+  "scripts": {
+    "demo:x402-solana-devnet": "tsx x402-solana-devnet-demo.ts"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.6.0",
+    "@solana/spl-token": "^0.4.8",
+    "@solana/web3.js": "^1.95.5"
+  },
+  "optionalDependencies": {
+    "x402-solana": "^2.0.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0",
+    "typescript": "^5.6.3"
+  }
+}

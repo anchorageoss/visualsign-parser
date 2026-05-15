@@ -56,5 +56,13 @@ tracing = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "net", "time"] }
 
+# Test-only Solana x402 client (no production crate depends on these).
+solana-sdk = "2.1.15"
+solana-client = "2.1.15"
+spl-token = "7.0.0"
+spl-associated-token-account = "6.0.0"
+bincode = "1.3"
+thiserror = "1"
+
 [lints]
 workspace = true

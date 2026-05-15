@@ -15,7 +15,9 @@ const PARSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub async fn parse_handler(
     State(AppState {
-        mut grpc_client, ..
+        mut grpc_client,
+        attestation,
+        ..
     }): State<AppState>,
     Json(wrapper): Json<TurnkeyRequestWrapper>,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
@@ -85,20 +87,41 @@ pub async fn parse_handler(
         }
     };
 
-    let signature = parsed_tx.signature.map(|sig| {
-        let scheme = match sig.scheme {
-            x if x == SignatureScheme::TurnkeyP256EphemeralKey as i32 => {
-                SignatureScheme::TurnkeyP256EphemeralKey
-            }
-            _ => SignatureScheme::Unspecified,
-        };
-        let scheme_str = scheme.as_str_name();
-        TurnkeySignature {
-            message: sig.message,
-            public_key: sig.public_key,
-            scheme: scheme_str.to_string(),
-            signature: sig.signature,
+    let proto_signature = match parsed_tx.signature {
+        Some(s) => s,
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(error_response("missing signature in response".to_string())),
+            );
         }
+    };
+
+    // TVC attestation: only forward responses that verifiably came from the
+    // pinned enclave key. A 502 here causes x402-axum's settle-on-success
+    // contract to skip /settle so payment is not charged for an unattested
+    // response.
+    if let Some(verifier) = attestation.as_ref()
+        && let Err(e) = verifier.verify(&proto_signature)
+    {
+        eprintln!("attestation verification failed: {e}");
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(error_response(format!("attestation failed: {e}"))),
+        );
+    }
+
+    let scheme = match proto_signature.scheme {
+        x if x == SignatureScheme::TurnkeyP256EphemeralKey as i32 => {
+            SignatureScheme::TurnkeyP256EphemeralKey
+        }
+        _ => SignatureScheme::Unspecified,
+    };
+    let signature = Some(TurnkeySignature {
+        message: proto_signature.message,
+        public_key: proto_signature.public_key,
+        scheme: scheme.as_str_name().to_string(),
+        signature: proto_signature.signature,
     });
 
     (

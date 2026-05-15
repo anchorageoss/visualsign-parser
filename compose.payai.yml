@@ -1,0 +1,46 @@
+# Local-dev x402 stack against the **real** payai facilitator on Solana
+# **devnet**. Builds the same stagex-built OCI images used in production —
+# `make non-oci-docker-images` loads them into the docker daemon first.
+#
+# Required env at host shell level (set before `make dev-up-payai`):
+#   X402_PAYTO=<base58 Solana receiver pubkey>
+#       — where payai will route the USDC. For local testing this can be
+#         the buyer wallet itself for a self-transfer.
+#   X402_TVC_VERIFIER_PUBKEY_HEX=<hex of qos_p256 P256Public::to_bytes()>
+#       — pinned ephemeral key the gateway will verify against. Without this
+#         the gateway fail-closes (X402_PROFILE != local).
+#
+# To target a TVC-deployed gateway image instead of a local build, replace
+# the `image:` field with the GHCR digest-pinned form, e.g.
+#   image: ghcr.io/anchorageoss/parser_gateway:v0.1.2@sha256:<digest>
+
+services:
+  parser_grpc_server:
+    image: anchorageoss-visualsign-parser/parser_grpc_server:latest
+    command: ["/parser_grpc_server"]
+    environment:
+      EPHEMERAL_FILE: "/etc/parser/ephemeral.secret"
+    volumes:
+      # Local-dev only. Production TVC provisions the real key via QoS host
+      # boot; the public half ends up as X402_TVC_VERIFIER_PUBKEY_HEX on the
+      # gateway side.
+      - ./src/integration/fixtures/ephemeral.secret:/etc/parser/ephemeral.secret:ro
+    ports:
+      - "44020:44020"
+
+  parser_gateway:
+    image: anchorageoss-visualsign-parser/parser_gateway:latest
+    command: ["/parser_gateway"]
+    depends_on:
+      - parser_grpc_server
+    environment:
+      GATEWAY_PORT: "8080"
+      GRPC_ADDR: "http://parser_grpc_server:44020"
+      X402_PROFILE: "payai"
+      X402_NETWORK: "solana-devnet"
+      X402_FACILITATOR_URL: "https://facilitator.payai.network"
+      X402_FACILITATOR_TIMEOUT_SECS: "10"
+      X402_PAYTO: "${X402_PAYTO:?X402_PAYTO must be set in your shell before docker compose up}"
+      X402_TVC_VERIFIER_PUBKEY_HEX: "${X402_TVC_VERIFIER_PUBKEY_HEX:?required: pin the TVC enclave's P256 public key here}"
+    ports:
+      - "8080:8080"

@@ -3,6 +3,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use qos_p256::P256Pair;
 use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -72,7 +73,20 @@ async fn wait_ready(url: &str) {
     panic!("service at {url} never became ready (timed out after 10 s)");
 }
 
+/// Load the test ephemeral key and return its `qos_hex` pubkey — the exact
+/// format parser_app emits in the wire signature and the gateway pins via
+/// `X402_TVC_VERIFIER_PUBKEY_HEX`.
+fn fixture_ephemeral_pubkey_hex() -> String {
+    let pair = P256Pair::from_hex_file("fixtures/ephemeral.secret")
+        .expect("load fixtures/ephemeral.secret");
+    qos_hex::encode(&pair.public_key().to_bytes())
+}
+
 async fn start_procs() -> Procs {
+    start_procs_with_env(&[]).await
+}
+
+async fn start_procs_with_env(extra: &[(&str, &str)]) -> Procs {
     // --- Friction 2: startup ordering ---
     // parser_gateway probes mock_facilitator at startup. We must ensure
     // mock_facilitator is ready before spawning the gateway.
@@ -114,15 +128,19 @@ async fn start_procs() -> Procs {
 
     // 3. Start the gateway last — it probes the mock at startup.
     //    Friction 5: env var names confirmed from gateway/src/main.rs.
-    let gateway = Command::new(target_bin("parser_gateway"))
-        .env("GATEWAY_PORT", GW_PORT.to_string())
+    let mut cmd = Command::new(target_bin("parser_gateway"));
+    cmd.env("GATEWAY_PORT", GW_PORT.to_string())
         // grpc server always listens on 44020 (hardcoded in binary)
         .env("GRPC_ADDR", "http://127.0.0.1:44020")
         .env("X402_PROFILE", "local")
         .env(
             "X402_FACILITATOR_URL",
             format!("http://127.0.0.1:{MOCK_PORT}"),
-        )
+        );
+    for (k, v) in extra {
+        cmd.env(k, v);
+    }
+    let gateway = cmd
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .spawn()
@@ -381,4 +399,71 @@ async fn path5_health_open() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
+}
+
+/// Path 6: TVC attestation mismatch → 502 and no settlement.
+///
+/// Pin a *non-matching* TVC pubkey on the gateway, then submit a valid payment
+/// for a parseable transaction. parser_app produces a legitimate signature with
+/// the fixture ephemeral key, but the gateway's pinned pubkey is a freshly
+/// generated unrelated keypair, so the verifier rejects on pubkey mismatch.
+/// The handler must return 502, and `/debug/settle_count` on the mock
+/// facilitator must remain unchanged — the gateway must not have paid the
+/// facilitator for an unattested response.
+#[tokio::test]
+async fn path6_tampered_pubkey_returns_502_no_settle() {
+    let _guard = TEST_MUTEX.lock().await;
+
+    // Generate an unrelated keypair: the gateway will pin THIS pubkey, but
+    // parser_app will keep signing with the on-disk fixture key. The two won't
+    // match, so verification must fail.
+    let wrong = P256Pair::generate().expect("generate wrong keypair");
+    let wrong_hex = qos_hex::encode(&wrong.public_key().to_bytes());
+    // Sanity: must differ from the fixture's pubkey.
+    assert_ne!(wrong_hex, fixture_ephemeral_pubkey_hex());
+
+    let _p = start_procs_with_env(&[("X402_TVC_VERIFIER_PUBKEY_HEX", wrong_hex.as_str())]).await;
+
+    // Read settle_count before the request.
+    let before = read_settle_count().await;
+
+    let requirements = fetch_v2_requirements().await;
+    let payment_header = build_payment_signature(&requirements);
+
+    let body = serde_json::json!({
+        "request": { "unsigned_payload": ETH_TX_HEX, "chain": "CHAIN_ETHEREUM" }
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{GW_PORT}/visualsign/api/v2/parse"
+        ))
+        .header("Payment-Signature", payment_header)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    let status = resp.status();
+    let body_text = resp.text().await.unwrap_or_default();
+    assert_eq!(
+        status, 502,
+        "expected 502 Bad Gateway on attestation mismatch; got {status}; body: {body_text}"
+    );
+
+    // Settlement must NOT have happened — payment must not be charged for an
+    // unattested response.
+    let after = read_settle_count().await;
+    assert_eq!(
+        before, after,
+        "/debug/settle_count must not advance for an attestation failure"
+    );
+}
+
+async fn read_settle_count() -> usize {
+    let resp = reqwest::get(format!("http://127.0.0.1:{MOCK_PORT}/debug/settle_count"))
+        .await
+        .expect("read settle_count");
+    let v: serde_json::Value = resp.json().await.expect("settle_count JSON");
+    v["settle_count"].as_u64().expect("settle_count number") as usize
 }

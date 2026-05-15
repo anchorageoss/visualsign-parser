@@ -202,20 +202,38 @@ impl X402Config {
     where
         F: Fn(&str) -> Option<String>,
     {
-        let (network, price_str, default_payto): (&str, &str, Option<PayToAddress>) = match profile
-        {
-            X402Profile::Local => (
-                "base-sepolia",
-                "0.0001",
-                Some(PayToAddress::Evm(
-                    "0x000000000000000000000000000000000000dEaD".to_string(),
-                )),
-            ),
-            X402Profile::PayAi => ("base", "0.001", None),
-            X402Profile::Custom => {
-                return Err(ConfigError::MissingVar("X402_PRICE_TAGS_JSON"));
-            }
-        };
+        let network_override = get("X402_NETWORK");
+        let (network, price_str, default_payto): (&str, &str, Option<PayToAddress>) =
+            match (profile, network_override.as_deref()) {
+                // Explicit override takes priority over profile defaults. The default
+                // payTo only makes sense for the local burn-address case; everywhere
+                // else the operator must set X402_PAYTO.
+                (_, Some("base-sepolia")) => ("base-sepolia", "0.0001", None),
+                (_, Some("base")) => ("base", "0.001", None),
+                (_, Some("solana")) => ("solana", "0.001", None),
+                (_, Some("solana-devnet")) => ("solana-devnet", "0.001", None),
+                (_, Some(other)) => {
+                    return Err(ConfigError::Invalid {
+                        var: "X402_NETWORK",
+                        message: format!(
+                            "unsupported network '{other}'; expected one of \
+                         base-sepolia, base, solana, solana-devnet"
+                        ),
+                    });
+                }
+                // Profile defaults when X402_NETWORK is unset.
+                (X402Profile::Local, None) => (
+                    "base-sepolia",
+                    "0.0001",
+                    Some(PayToAddress::Evm(
+                        "0x000000000000000000000000000000000000dEaD".to_string(),
+                    )),
+                ),
+                (X402Profile::PayAi, None) => ("base", "0.001", None),
+                (X402Profile::Custom, None) => {
+                    return Err(ConfigError::MissingVar("X402_PRICE_TAGS_JSON"));
+                }
+            };
 
         let price_usd = Decimal::from_str(price_str).map_err(|e| ConfigError::Invalid {
             var: "(internal seed price)",
@@ -389,6 +407,19 @@ fn build_price_tag(tag: &PriceTagConfig) -> Result<v2::PriceTag, ConfigError> {
                 USDC::solana().amount(atomic),
             ))
         }
+        (PayToAddress::Solana(addr_s), "solana-devnet") => {
+            let addr: SolanaAddress =
+                addr_s
+                    .parse()
+                    .map_err(|e: <SolanaAddress as FromStr>::Err| ConfigError::Invalid {
+                        var: "payTo.solana",
+                        message: format!("invalid Solana address '{addr_s}': {e}"),
+                    })?;
+            Ok(V2SolanaExact::price_tag(
+                addr,
+                USDC::solana_devnet().amount(atomic),
+            ))
+        }
         (pay_to, network) => Err(ConfigError::Invalid {
             var: "X402_PRICE_TAGS_JSON",
             message: format!(
@@ -525,6 +556,63 @@ mod tests {
         let err =
             X402Config::from_lookup(lookup(&[("X402_PRICE_TAGS_JSON", "not json")])).unwrap_err();
         assert!(matches!(err, ConfigError::JsonParse(_)));
+    }
+
+    #[test]
+    fn from_env_payai_solana_devnet_with_payto() {
+        let cfg = X402Config::from_lookup(lookup(&[
+            ("X402_PROFILE", "payai"),
+            ("X402_NETWORK", "solana-devnet"),
+            ("X402_PAYTO", "EGBQqKn968sVv5cQh5Cr72pSTHfxsuzq7o7asqYB5uEV"),
+        ]))
+        .unwrap();
+        assert_eq!(cfg.profile, X402Profile::PayAi);
+        assert_eq!(cfg.price_tags[0].network, "solana-devnet");
+        assert!(matches!(cfg.price_tags[0].pay_to, PayToAddress::Solana(_)));
+    }
+
+    #[test]
+    fn from_env_solana_devnet_rejects_evm_payto() {
+        let err = X402Config::from_lookup(lookup(&[
+            ("X402_PROFILE", "payai"),
+            ("X402_NETWORK", "solana-devnet"),
+            ("X402_PAYTO", "0xabcdef0000000000000000000000000000000001"),
+        ]))
+        .unwrap();
+        // The config layer accepts the seed; build_price_tag rejects the combo.
+        let err = build_price_tag(&err.price_tags[0]).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid { .. }));
+    }
+
+    #[test]
+    fn from_env_unknown_network_rejected() {
+        let err = X402Config::from_lookup(lookup(&[
+            ("X402_PROFILE", "payai"),
+            ("X402_NETWORK", "fake-net"),
+            ("X402_PAYTO", "EGBQqKn968sVv5cQh5Cr72pSTHfxsuzq7o7asqYB5uEV"),
+        ]))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                var: "X402_NETWORK",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn build_price_tag_solana_devnet_ok() {
+        let tag = PriceTagConfig {
+            network: "solana-devnet".to_string(),
+            asset: "USDC".to_string(),
+            price_usd: Decimal::from_str("0.001").unwrap(),
+            pay_to: PayToAddress::Solana(
+                "EGBQqKn968sVv5cQh5Cr72pSTHfxsuzq7o7asqYB5uEV".to_string(),
+            ),
+            scheme: PriceScheme::Exact,
+        };
+        let _ = build_price_tag(&tag).expect("devnet tag must build");
     }
 
     #[test]

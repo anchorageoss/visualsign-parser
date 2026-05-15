@@ -2,10 +2,13 @@
 
 use axum::{
     Json, Router,
+    extract::State,
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,11 +54,27 @@ pub struct SupportedKind {
     pub scheme: String,
 }
 
+/// Test-observable counters for the mock facilitator.
+///
+/// `settle_count` is incremented on every successful `/settle` call. The x402
+/// gateway integration tests use this to confirm the gateway's
+/// settle-on-success contract: a 4xx/5xx response must NOT trigger settlement.
+#[derive(Clone, Default)]
+pub struct MockState {
+    pub settle_count: Arc<AtomicUsize>,
+}
+
 pub fn router() -> Router {
+    router_with_state(MockState::default())
+}
+
+pub fn router_with_state(state: MockState) -> Router {
     Router::new()
         .route("/verify", post(verify))
         .route("/settle", post(settle))
         .route("/supported", get(supported))
+        .route("/debug/settle_count", get(settle_count_handler))
+        .with_state(state)
 }
 
 fn extract_payer(payload: &Value) -> String {
@@ -73,18 +92,25 @@ fn extract_network(req: &Value) -> String {
         .to_string()
 }
 
-async fn verify(Json(req): Json<VerifyRequest>) -> Json<VerifyResponse> {
+async fn verify(
+    State(_state): State<MockState>,
+    Json(req): Json<VerifyRequest>,
+) -> Json<VerifyResponse> {
     Json(VerifyResponse {
         is_valid: true,
         payer: extract_payer(&req.payment_payload),
     })
 }
 
-async fn settle(Json(req): Json<SettleRequest>) -> Json<SettleResponse> {
+async fn settle(
+    State(state): State<MockState>,
+    Json(req): Json<SettleRequest>,
+) -> Json<SettleResponse> {
     use rand::RngCore;
     let mut buf = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut buf);
     let tx = format!("0xmock{}", hex_encode(&buf));
+    state.settle_count.fetch_add(1, Ordering::SeqCst);
     Json(SettleResponse {
         success: true,
         transaction: tx,
@@ -111,8 +137,18 @@ async fn supported() -> Json<SupportedResponse> {
                 asset: "USDC".to_string(),
                 scheme: "exact".to_string(),
             },
+            SupportedKind {
+                network: "solana-devnet".to_string(),
+                asset: "USDC".to_string(),
+                scheme: "exact".to_string(),
+            },
         ],
     })
+}
+
+async fn settle_count_handler(State(state): State<MockState>) -> Json<serde_json::Value> {
+    let n = state.settle_count.load(Ordering::SeqCst);
+    Json(serde_json::json!({ "settle_count": n }))
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -182,7 +218,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn supported_lists_three_networks() {
+    async fn supported_lists_four_networks() {
         let app = router();
         let resp = app
             .oneshot(Request::get("/supported").body(Body::empty()).unwrap())
@@ -191,6 +227,59 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(v["kinds"].as_array().unwrap().len(), 3);
+        let kinds = v["kinds"].as_array().unwrap();
+        assert_eq!(kinds.len(), 4);
+        let networks: Vec<&str> = kinds
+            .iter()
+            .map(|k| k["network"].as_str().unwrap())
+            .collect();
+        assert!(networks.contains(&"solana-devnet"));
+    }
+
+    #[tokio::test]
+    async fn settle_count_increments_only_on_settle() {
+        let state = MockState::default();
+        let app = router_with_state(state.clone());
+        // initial reading
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::get("/debug/settle_count")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["settle_count"], 0);
+
+        // verify alone does NOT increment
+        let body =
+            serde_json::json!({ "paymentPayload": { "payer": "x" }, "paymentRequirements": {} });
+        let _ = app
+            .clone()
+            .oneshot(
+                Request::post("/verify")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(state.settle_count.load(Ordering::SeqCst), 0);
+
+        // settle increments
+        let _ = app
+            .clone()
+            .oneshot(
+                Request::post("/settle")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(state.settle_count.load(Ordering::SeqCst), 1);
     }
 }
