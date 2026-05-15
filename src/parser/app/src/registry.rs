@@ -1,9 +1,13 @@
 //! Registry module for managing type definitions and lookups
 
 // TODO(pg): this may not be the right place for this
-/// Creates and configures a new transaction converter registry with all supported chains.
+/// Creates and configures a new transaction converter registry.
 ///
-/// Returns a registry with converters for Solana and Unspecified transaction types.
+/// Returns a registry containing a converter for each chain enabled via Cargo
+/// features (see `[features]` in `parser_app/Cargo.toml`). Chains whose
+/// feature is disabled are omitted; requests for those chains hit the
+/// registry-miss path in `convert_transaction` and surface as
+/// `InvalidArgument` at the gRPC layer.
 #[must_use]
 pub fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
     #[allow(unused_mut)] // mut is unused when no chain features are enabled

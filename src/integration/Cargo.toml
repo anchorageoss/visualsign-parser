@@ -12,13 +12,7 @@ qos_hex = { workspace = true }
 qos_nsm = { workspace = true, features = ["mock"] }
 qos_test_primitives = { workspace = true }
 
-parser_app = { path = "../parser/app", default-features = false, features = [
-  "ethereum",
-  "solana",
-  "sui",
-  "tron",
-  "unspecified",
-] }
+parser_app = { path = "../parser/app" }
 
 generated = { path = "../generated", default-features = false }
 

@@ -44,6 +44,19 @@ lint:
 	cargo clippy -p visualsign --features diagnostics --lib -- -D warnings
 	cargo clippy -p visualsign-solana --features diagnostics --lib -- -D warnings
 
+.PHONY: narrow-build-check
+narrow-build-check:
+	@# Guards parser_app's per-chain feature gating. If a future change
+	@# re-introduces an unconditional reference to a chain crate from
+	@# parser_app, one of these narrow builds will fail to compile.
+	@# Not wired into CI yet — invoke manually or via a follow-up workflow.
+	cargo build -p parser_app --no-default-features
+	cargo build -p parser_app --no-default-features --features ethereum
+	cargo build -p parser_app --no-default-features --features solana
+	cargo clippy -p parser_app --no-default-features --all-targets -- -D warnings
+	cargo clippy -p parser_app --no-default-features --features ethereum --all-targets -- -D warnings
+	cargo clippy -p parser_app --no-default-features --features solana --all-targets -- -D warnings
+
 .PHONY: generated
 generated:
 	cargo run --manifest-path ./codegen/Cargo.toml && make fmt
