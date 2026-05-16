@@ -21,6 +21,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 base64 = "0.22"
 
+# CLI args. TVC pivots receive config via `pivotArgs`, not env vars; clap's
+# `env = "..."` attribute keeps compose + integration tests working unchanged.
+clap = { version = "4.0", features = ["derive", "env"] }
+
 [lints]
 workspace = true
 

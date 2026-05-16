@@ -714,21 +714,24 @@ Steps:
    # Prints GATEWAY_SIGNING_PUBKEY_HEX=<260-char-hex>
    ```
 
-2. **Deploy `parser_http_server` to TVC** with the public half pinned in
-   its env. Add to the TVC deploy config's env block:
+2. **Deploy `parser_http_server` to TVC** with the public half pinned at
+   pivot launch. `tvc deploy create` has no env-injection mechanism, so
+   the pubkey is passed via `pivotArgs` (clap on the binary side):
 
    ```json
    {
-     "envVars": [
-       { "name": "GATEWAY_SIGNING_PUBKEY_HEX",
-         "value": "<260-char-hex from step 1>" }
+     "pivotArgs": [
+       "--gateway-signing-pubkey-hex",
+       "<260-char-hex from step 1>"
      ]
    }
    ```
 
    After re-deploy, `parser_app` (linked into `parser_http_server`)
    rejects every parse request whose `payment_marker` doesn't carry a
-   VPM signed by exactly this key.
+   VPM signed by exactly this key. The HTTP listener defaults to port
+   3000; the ephemeral key is read from `qos_core::EPHEMERAL_KEY_FILE`
+   (provisioned by QOS) with no override.
 
 3. **Deploy `parser_gateway` outside TVC** with `HTTP_BACKEND_URL`
    pointing at the TVC app URL:

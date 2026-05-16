@@ -21,14 +21,17 @@
 //!   visualsign-turnkey-client (and any HTTP-only client) keeps working
 //!   byte-for-byte.
 //! - `POST /visualsign/api/v2/parse` — same payload; additionally
-//!   enforces `GATEWAY_SIGNING_PUBKEY_HEX` when set (TVC-enforced mode
-//!   from plan v3). When unset, behaves the same as v1.
+//!   enforces a pinned gateway pubkey when supplied (TVC-enforced mode
+//!   from plan v3). When omitted, behaves the same as v1.
 //!
-//! Env vars:
-//! - `HTTP_PORT` (default: 3000) — Turnkey TVC public ingress default.
-//! - `EPHEMERAL_FILE` (required) — path to the parser_app ephemeral key.
-//! - `GATEWAY_SIGNING_PUBKEY_HEX` (optional) — pinned gateway P256 sign
-//!   pubkey for VPM verification on v2.
+//! Configuration (CLI args; env vars listed are clap fallbacks):
+//! - `--port <u16>` / `HTTP_PORT` (default 3000) — Turnkey TVC public ingress.
+//! - `--gateway-signing-pubkey-hex <hex>` / `GATEWAY_SIGNING_PUBKEY_HEX`
+//!   (optional) — pinned gateway P256 sign pubkey for VPM verification on v2.
+//!
+//! The ephemeral key is read from `qos_core::EPHEMERAL_KEY_FILE` (provisioned
+//! by QOS inside the enclave). No override flag — if a deployment ever needs
+//! a non-canonical path, bind-mount it instead.
 
 use axum::{
     Json, Router,
@@ -37,6 +40,7 @@ use axum::{
     routing::{get, post},
 };
 use base64::Engine;
+use clap::Parser;
 use generated::parser::{Chain, ChainMetadata, SignatureScheme};
 use host_primitives::turnkey::{
     TurnkeyParsedTransaction, TurnkeyPayload, TurnkeyRequestWrapper, TurnkeyResponse,
@@ -49,11 +53,26 @@ use qos_p256::P256Pair;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+#[derive(Parser, Debug)]
+#[command(version = env!("VERSION"))]
+struct Args {
+    /// HTTP port to listen on.
+    #[arg(long, env = "HTTP_PORT", default_value_t = 3000)]
+    port: u16,
+
+    /// Hex-encoded P256 SEC1 uncompressed sign pubkey of `parser_gateway`.
+    /// When supplied, `/visualsign/api/v2/parse` is TVC-enforced: it
+    /// requires a valid VerifiedPaymentMarker signed by this key.
+    /// When omitted, v2 behaves the same as v1.
+    #[arg(long, env = "GATEWAY_SIGNING_PUBKEY_HEX")]
+    gateway_signing_pubkey_hex: Option<String>,
+}
+
 #[derive(Clone)]
 struct AppState {
     ephemeral_key: Arc<P256Pair>,
-    /// Disabled when GATEWAY_SIGNING_PUBKEY_HEX is unset. The v1 route
-    /// always passes `Disabled`; the v2 route uses this policy.
+    /// Disabled when `--gateway-signing-pubkey-hex` is unset. The v1
+    /// route always passes `Disabled`; the v2 route uses this policy.
     policy: Arc<PaymentPolicy>,
 }
 
@@ -180,28 +199,27 @@ fn handle_parse(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let port: u16 = std::env::var("HTTP_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(3000);
+    let args = Args::parse();
 
-    let ephemeral_file = std::env::var("EPHEMERAL_FILE")
-        .unwrap_or_else(|_| "integration/fixtures/ephemeral.secret".to_string());
-    let handle = EphemeralKeyHandle::new(ephemeral_file.clone());
+    let handle = EphemeralKeyHandle::new(qos_core::EPHEMERAL_KEY_FILE.to_string());
     let ephemeral_key = handle
         .get_ephemeral_key()
         .expect("failed to load ephemeral key");
     eprintln!(
-        "parser_http_server {} loaded ephemeral key from {ephemeral_file}",
-        env!("VERSION")
+        "parser_http_server {} loaded ephemeral key from {}",
+        env!("VERSION"),
+        qos_core::EPHEMERAL_KEY_FILE,
     );
 
-    let policy =
-        PaymentPolicy::from_env().expect("invalid GATEWAY_SIGNING_PUBKEY_HEX configuration");
+    let policy = match args.gateway_signing_pubkey_hex.as_deref() {
+        Some(hex) => PaymentPolicy::from_hex(hex)
+            .expect("invalid --gateway-signing-pubkey-hex configuration"),
+        None => PaymentPolicy::Disabled,
+    };
     if matches!(policy, PaymentPolicy::Required { .. }) {
-        eprintln!("v2 route is TVC-enforced (GATEWAY_SIGNING_PUBKEY_HEX is set)");
+        eprintln!("v2 route is TVC-enforced (gateway signing pubkey supplied)");
     } else {
-        eprintln!("v2 route is open (GATEWAY_SIGNING_PUBKEY_HEX unset)");
+        eprintln!("v2 route is open (no gateway signing pubkey)");
     }
 
     let state = AppState {
@@ -215,7 +233,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/visualsign/api/v2/parse", post(parse_v2))
         .with_state(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
     eprintln!("parser_http_server listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app)

@@ -6704,6 +6704,7 @@ version = "0.1.0"
 dependencies = [
  "axum 0.8.8",
  "base64 0.22.1",
+ "clap",
  "generated",
  "host_primitives",
  "parser_app",
