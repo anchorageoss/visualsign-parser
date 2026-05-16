@@ -1,15 +1,42 @@
-//! Verifies that a parse response was signed by a pinned TVC (Turnkey Verifiable
-//! Compute) ephemeral key.
+//! **Demo-only response-signature verification.** The gateway pins one
+//! `qos_p256::P256Public` value at boot via env var and rejects any parse
+//! response whose `Signature.public_key` doesn't match.
 //!
-//! The gateway sits between an HTTP client (which may be paying via x402) and the
-//! parser_app gRPC service. parser_app signs every response with an ephemeral
-//! P256 keypair provisioned into the enclave by Turnkey. The gateway must refuse
-//! to release the response to the client (and skip x402 settlement) unless the
-//! signature verifies against a TVC pubkey that was pinned at the gateway's
-//! launch time. The pubkey is provided via env var (`X402_TVC_VERIFIER_PUBKEY_HEX`,
-//! or a file path via `X402_TVC_VERIFIER_PUBKEY_FILE`) and matches the same
-//! `qos_hex::encode(P256Public::to_bytes())` format parser_app emits in the wire
-//! signature.
+//! This is NOT a production attestation flow. It does not parse or validate
+//! an AWS Nitro / Intel TDX attestation document; it does not check PCRs; it
+//! does not verify Turnkey operator signatures over the deploy manifest. It
+//! assumes someone else (a TVC operator, an ops engineer, the demo playbook)
+//! put a trustworthy pubkey hex in the env var.
+//!
+//! ## Production replacement
+//!
+//! In a real Turnkey TVC deployment, replace this with the real attestation
+//! chain. The Turnkey Rust SDK already exposes the validator:
+//!
+//! - `tkhq/rust-sdk` → `proofs::parse_and_verify_aws_nitro_attestation`
+//!   <https://github.com/tkhq/rust-sdk/blob/373fed6/proofs/src/lib.rs#L298>
+//!
+//! Sketch of the production path:
+//! 1. parser_app exposes its Nitro attestation document via a new
+//!    `GetAttestation` gRPC method (it already holds one from QOS boot).
+//! 2. Gateway at startup fetches the doc, calls
+//!    `parse_and_verify_aws_nitro_attestation(doc, expected_pcrs)`, and
+//!    extracts the embedded ephemeral pubkey from the returned struct.
+//! 3. That extracted pubkey is what gets used for per-response P256 verify
+//!    — same wire path as today, just sourced from attestation instead of
+//!    an env var.
+//!
+//! Until that lands, this module's `from_env()` is the demo crutch.
+//!
+//! ## Env vars (demo only)
+//!
+//! - `TVC_DEMO_PINNED_PUBKEY_HEX` — hex of `P256Public::to_bytes()`.
+//! - `TVC_DEMO_PINNED_PUBKEY_FILE` — file containing the same hex.
+//!
+//! The hex is the qos_p256 compound key (encrypt half || sign half, each
+//! SEC1 uncompressed) — 130 bytes / 260 hex chars. This is NOT a Solana
+//! base58 address; the two share the word "pubkey" but live in different
+//! namespaces.
 
 use generated::parser::{Signature, SignatureScheme};
 use qos_p256::P256Public;
@@ -42,8 +69,8 @@ pub struct AttestationVerifier {
 impl AttestationVerifier {
     /// Production entrypoint — reads from the real process environment.
     ///
-    /// Returns `Ok(None)` if neither `X402_TVC_VERIFIER_PUBKEY_HEX` nor
-    /// `X402_TVC_VERIFIER_PUBKEY_FILE` is set. Callers decide whether absence
+    /// Returns `Ok(None)` if neither `TVC_DEMO_PINNED_PUBKEY_HEX` nor
+    /// `TVC_DEMO_PINNED_PUBKEY_FILE` is set. Callers decide whether absence
     /// is fatal based on profile (production deployments fail closed; local
     /// dev runs without a pinned verifier).
     pub fn from_env() -> Result<Option<Self>, AttestationError> {
@@ -57,8 +84,8 @@ impl AttestationVerifier {
         F: Fn(&str) -> Option<String>,
     {
         let hex_value = match (
-            get("X402_TVC_VERIFIER_PUBKEY_HEX"),
-            get("X402_TVC_VERIFIER_PUBKEY_FILE"),
+            get("TVC_DEMO_PINNED_PUBKEY_HEX"),
+            get("TVC_DEMO_PINNED_PUBKEY_FILE"),
         ) {
             (Some(s), _) => s,
             (None, Some(path)) => std::fs::read_to_string(&path)
@@ -77,7 +104,7 @@ impl AttestationVerifier {
     pub fn from_hex(hex_value: &str) -> Result<Self, AttestationError> {
         let pinned_bytes =
             qos_hex::decode(hex_value.trim()).map_err(|e| AttestationError::Hex {
-                field: "X402_TVC_VERIFIER_PUBKEY_HEX",
+                field: "TVC_DEMO_PINNED_PUBKEY_HEX",
                 message: format!("{e:?}"),
             })?;
         let pinned_public = P256Public::from_bytes(&pinned_bytes)

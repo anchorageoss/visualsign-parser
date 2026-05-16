@@ -56,13 +56,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(None) => {
             if is_local_profile {
                 eprintln!(
-                    "WARNING: X402_TVC_VERIFIER_PUBKEY_HEX not set; gateway will not attest \
+                    "WARNING: TVC_DEMO_PINNED_PUBKEY_HEX not set; gateway will not attest \
                      parse responses (allowed because X402_PROFILE=local)"
                 );
                 None
             } else {
                 eprintln!(
-                    "FATAL: X402_TVC_VERIFIER_PUBKEY_HEX (or _FILE) is required for \
+                    "FATAL: TVC_DEMO_PINNED_PUBKEY_HEX (or _FILE) is required for \
                      X402_PROFILE={profile_str}"
                 );
                 std::process::exit(1);

@@ -6,7 +6,7 @@
 #   X402_PAYTO=<base58 Solana receiver pubkey>
 #       — where payai will route the USDC. For local testing this can be
 #         the buyer wallet itself for a self-transfer.
-#   X402_TVC_VERIFIER_PUBKEY_HEX=<hex of qos_p256 P256Public::to_bytes()>
+#   TVC_DEMO_PINNED_PUBKEY_HEX=<hex of qos_p256 P256Public::to_bytes()>
 #       — pinned ephemeral key the gateway will verify against. Without this
 #         the gateway fail-closes (X402_PROFILE != local).
 #
@@ -24,7 +24,7 @@ services:
       EPHEMERAL_FILE: "/etc/parser/ephemeral.secret"
     volumes:
       # Local-dev only. Production TVC provisions the real key via QoS host
-      # boot; the public half ends up as X402_TVC_VERIFIER_PUBKEY_HEX on the
+      # boot; the public half ends up as TVC_DEMO_PINNED_PUBKEY_HEX on the
       # gateway side.
       - ./src/integration/fixtures/ephemeral.secret:/etc/parser/ephemeral.secret:ro
     ports:
@@ -43,6 +43,6 @@ services:
       X402_FACILITATOR_URL: "https://facilitator.payai.network"
       X402_FACILITATOR_TIMEOUT_SECS: "10"
       X402_PAYTO: "${X402_PAYTO:?X402_PAYTO must be set in your shell before docker compose up}"
-      X402_TVC_VERIFIER_PUBKEY_HEX: "${X402_TVC_VERIFIER_PUBKEY_HEX:?required: pin the TVC enclave's P256 public key here}"
+      TVC_DEMO_PINNED_PUBKEY_HEX: "${TVC_DEMO_PINNED_PUBKEY_HEX:?required: pin the TVC enclave's P256 public key here}"
     ports:
       - "8080:8080"

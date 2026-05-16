@@ -163,9 +163,9 @@ jobs:
           # against a pinned pubkey + handles x402 settlement). Operators
           # need both digests pinned to actually establish the trust pair.
           if [ "${TARGET_NAME}" = "parser_app" ]; then
-            role_note=$'\nThe enclave-side binary. Its ephemeral public key, signed by QOS during boot, becomes the gateway-side `X402_TVC_VERIFIER_PUBKEY_HEX`.'
+            role_note=$'\nThe enclave-side binary. Its ephemeral public key, signed by QOS during boot, becomes the gateway-side `TVC_DEMO_PINNED_PUBKEY_HEX`.'
           else
-            role_note=$'\nThe host-side gateway. Pin the matching `parser_app` digest as the enclave it talks to; the gateway verifies every response against the enclave\'s ephemeral pubkey (pinned at boot via `X402_TVC_VERIFIER_PUBKEY_HEX` or `X402_TVC_VERIFIER_PUBKEY_FILE`).'
+            role_note=$'\nThe host-side gateway. Pin the matching `parser_app` digest as the enclave it talks to; the gateway verifies every response against the enclave\'s ephemeral pubkey (pinned at boot via `TVC_DEMO_PINNED_PUBKEY_HEX` or `TVC_DEMO_PINNED_PUBKEY_FILE`).'
           fi
 
           deploy_md="${RUNNER_TEMP}/tvc_deploy_${TARGET_NAME}.md"

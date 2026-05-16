@@ -32,9 +32,9 @@ exact format `parser_app` emits in the wire signature's `publicKey` field.
 
 ```sh
 # Set by TVC at boot (or via your local-dev compose file)
-X402_TVC_VERIFIER_PUBKEY_HEX=<260 hex chars>
+TVC_DEMO_PINNED_PUBKEY_HEX=<260 hex chars>
 # Or, equivalently:
-X402_TVC_VERIFIER_PUBKEY_FILE=/path/to/pubkey.hex
+TVC_DEMO_PINNED_PUBKEY_FILE=/path/to/pubkey.hex
 ```
 
 If neither is set:
@@ -55,8 +55,8 @@ All env vars are read at startup. Bad values fail-closed (gateway exits 1).
 | `X402_NETWORK`                   | no        | profile-default                     | `base-sepolia`, `base`, `solana`, `solana-devnet`                                      |
 | `X402_PAYTO`                     | depends   | burn address for `local`            | EVM `0x…` or Solana base58                                                             |
 | `X402_PRICE_TAGS_JSON`           | no        | seeded from profile + `X402_NETWORK` | full multi-tag override; see the JSON shape in `x402_config.rs`                        |
-| `X402_TVC_VERIFIER_PUBKEY_HEX`   | **yes** (non-local) | —                          | pinned enclave pubkey, hex                                                             |
-| `X402_TVC_VERIFIER_PUBKEY_FILE`  | no        | —                                   | alternative to `_HEX`: file holding the hex                                            |
+| `TVC_DEMO_PINNED_PUBKEY_HEX`   | **yes** (non-local) | —                          | pinned enclave pubkey, hex                                                             |
+| `TVC_DEMO_PINNED_PUBKEY_FILE`  | no        | —                                   | alternative to `_HEX`: file holding the hex                                            |
 
 ### Profiles
 
@@ -87,7 +87,7 @@ make dev-up-mock
 
 # Real payai facilitator on Solana devnet.
 export X402_PAYTO=<your devnet receiver pubkey>
-export X402_TVC_VERIFIER_PUBKEY_HEX=<260-char hex from parser_app>
+export TVC_DEMO_PINNED_PUBKEY_HEX=<260-char hex from parser_app>
 make dev-up-payai
 
 # Tear down either stack.
@@ -109,7 +109,7 @@ Solana devnet:
 cd scripts
 npm install
 GATEWAY_URL=http://127.0.0.1:8080 \
-X402_TVC_VERIFIER_PUBKEY_HEX=<260-char hex> \
+TVC_DEMO_PINNED_PUBKEY_HEX=<260-char hex> \
 npx tsx x402-solana-devnet-demo.ts
 ```
 

@@ -91,9 +91,9 @@ git checkout spec/x402-gated-http-api
 make non-oci-docker-images                                  # build stagex images
 cd scripts && npm install && cd ..                          # one-time TS deps
 export X402_PAYTO=x2iWww6XjauBk83HpBMzkGPijbzy4vqdRzS5skWPxmW
-export X402_TVC_VERIFIER_PUBKEY_HEX=$(make print-tvc-pubkey-hex)
+export TVC_DEMO_PINNED_PUBKEY_HEX=$(make print-tvc-pubkey-hex)
 make dev-up-payai
-X402_TVC_VERIFIER_PUBKEY_HEX=$X402_TVC_VERIFIER_PUBKEY_HEX \
+TVC_DEMO_PINNED_PUBKEY_HEX=$TVC_DEMO_PINNED_PUBKEY_HEX \
   npx --prefix scripts tsx scripts/x402-solana-devnet-demo.ts
 make dev-down
 ```
@@ -130,7 +130,7 @@ the *public* half is right there in `fixtures/ephemeral.pub` — just
 `cat` it into the env var:
 
 ```sh
-export X402_TVC_VERIFIER_PUBKEY_HEX=$(cat src/integration/fixtures/ephemeral.pub)
+export TVC_DEMO_PINNED_PUBKEY_HEX=$(cat src/integration/fixtures/ephemeral.pub)
 ```
 
 This is the same value `parser_grpc_server` will sign every parse
@@ -183,7 +183,7 @@ USDC moved goes back to the same account. Override with a different
 
 ```sh
 export X402_PAYTO="$ADDR"
-export X402_TVC_VERIFIER_PUBKEY_HEX     # already exported in Step 2
+export TVC_DEMO_PINNED_PUBKEY_HEX     # already exported in Step 2
 make dev-up-payai
 ```
 
@@ -293,7 +293,7 @@ You'll see one of two flows per request:
 
 - `attestation: pinned TVC pubkey …` at startup, then quiet 200s
 - `attestation verification failed: …` + the 502 — if you ever boot the
-  gateway with a wrong `X402_TVC_VERIFIER_PUBKEY_HEX`, this is what
+  gateway with a wrong `TVC_DEMO_PINNED_PUBKEY_HEX`, this is what
   prevents payment for an unattested response.
 
 ### Step 7 — Tear down
@@ -307,10 +307,10 @@ make dev-down
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `WARNING: x402 disabled; facilitator probe failed` | No egress to `facilitator.payai.network` | Check VPN / corp proxy; the v2 route stays unmounted otherwise |
-| `FATAL: X402_TVC_VERIFIER_PUBKEY_HEX … required for X402_PROFILE=payai` | Forgot to export the pubkey | See Step 2 |
+| `FATAL: TVC_DEMO_PINNED_PUBKEY_HEX … required for X402_PROFILE=payai` | Forgot to export the pubkey | See Step 2 |
 | Demo aborts with `paid request failed: 402` | Wallet underfunded on devnet (USDC or SOL) | Top up via faucet.circle.com / faucet.solana.com |
-| `attestation verification failed: public key mismatch` on every request | Wrong pubkey pinned (env stale) | Re-export `X402_TVC_VERIFIER_PUBKEY_HEX` from `fixtures/ephemeral.pub` |
-| Demo throws `independent P256 verification FAILED` | `X402_TVC_VERIFIER_PUBKEY_HEX` set differently for the gateway vs the demo | Use the same value in both shells |
+| `attestation verification failed: public key mismatch` on every request | Wrong pubkey pinned (env stale) | Re-export `TVC_DEMO_PINNED_PUBKEY_HEX` from `fixtures/ephemeral.pub` |
+| Demo throws `independent P256 verification FAILED` | `TVC_DEMO_PINNED_PUBKEY_HEX` set differently for the gateway vs the demo | Use the same value in both shells |
 | Container immediately exits with `syntax error: unterminated quoted string` | You replaced `entrypoint:` with `command:` in compose | Restore `entrypoint: ["/binary"]` — stagex/core-busybox sets ENTRYPOINT=`/bin/sh` |
 | Gateway crashes at startup with `No CA certificates were loaded from the system` | Building from a Containerfile that didn't COPY the CA bundle | Pull CA certs from `stagex/core-ca-certificates` into `/etc/ssl/certs/` (see `images/parser_gateway/Containerfile`) |
 | Demo hangs on "Sign X-PAYMENT" | Solana devnet RPC slow / blockhash fetch timeout | Switch `RPC_URL` to your own RPC endpoint |
@@ -356,7 +356,7 @@ tvc deploy create tvc-deploy.json
 
 Once the deploy reaches "running", **read back the enclave's ephemeral
 public key** from the TVC console or API. This is the value you pin
-into the gateway as `X402_TVC_VERIFIER_PUBKEY_HEX`.
+into the gateway as `TVC_DEMO_PINNED_PUBKEY_HEX`.
 
 In a typical Turnkey TVC deploy this surfaces as a field on the deployed
 app's attested boot record (the value `parser_app` writes when it loads
@@ -387,7 +387,7 @@ exposes for your deploy.
 # enclave instead). Set GRPC_ADDR to the enclave URL.
 
 export X402_PAYTO=<your real receiver, devnet or mainnet>
-export X402_TVC_VERIFIER_PUBKEY_HEX="$TVC_ENCLAVE_PUBKEY"
+export TVC_DEMO_PINNED_PUBKEY_HEX="$TVC_ENCLAVE_PUBKEY"
 docker compose -f compose.payai.yml up
 ```
 
@@ -408,7 +408,7 @@ X402_NETWORK=solana-devnet           # or solana on mainnet
 X402_FACILITATOR_URL=https://facilitator.payai.network
 X402_FACILITATOR_TIMEOUT_SECS=10
 X402_PAYTO=<receiver pubkey>
-X402_TVC_VERIFIER_PUBKEY_HEX=<from Step 2; read from enclave attested boot>
+TVC_DEMO_PINNED_PUBKEY_HEX=<from Step 2; read from enclave attested boot>
 ```
 
 The image to pull is `ghcr.io/anchorageoss/parser_gateway:vX.Y.Z@sha256:<B>`
@@ -437,7 +437,7 @@ pubkey:
 cd scripts
 GATEWAY_URL=https://<your-gateway-host> \
 RPC_URL=https://api.devnet.solana.com \
-X402_TVC_VERIFIER_PUBKEY_HEX="$TVC_ENCLAVE_PUBKEY" \
+TVC_DEMO_PINNED_PUBKEY_HEX="$TVC_ENCLAVE_PUBKEY" \
   npx tsx x402-solana-devnet-demo.ts
 ```
 
@@ -453,7 +453,7 @@ Set the pubkey env to a single-bit-wrong value and re-run the client:
 ```sh
 WRONG=$(echo "$TVC_ENCLAVE_PUBKEY" | sed 's/.$/0/' )
 GATEWAY_URL=https://<your-gateway-host> \
-X402_TVC_VERIFIER_PUBKEY_HEX="$WRONG" \
+TVC_DEMO_PINNED_PUBKEY_HEX="$WRONG" \
   npx tsx x402-solana-devnet-demo.ts
 ```
 
@@ -466,9 +466,9 @@ trust in the gateway's word.)
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `FATAL: X402_TVC_VERIFIER_PUBKEY_HEX … required` at gateway boot | Env not propagated | Check your TVC deploy manifest's env block |
-| Gateway returns 502 on every request | `X402_TVC_VERIFIER_PUBKEY_HEX` doesn't match the live enclave's ephemeral key | Re-read the pubkey from the enclave's attested boot record after re-deploy; rotating the parser_app deploy generates a new ephemeral key |
-| Gateway 200 but client `Independent P256 verification FAILED` | You pinned the wrong pubkey *only on the client* (gateway has the right one) | Re-export `X402_TVC_VERIFIER_PUBKEY_HEX` for the client |
+| `FATAL: TVC_DEMO_PINNED_PUBKEY_HEX … required` at gateway boot | Env not propagated | Check your TVC deploy manifest's env block |
+| Gateway returns 502 on every request | `TVC_DEMO_PINNED_PUBKEY_HEX` doesn't match the live enclave's ephemeral key | Re-read the pubkey from the enclave's attested boot record after re-deploy; rotating the parser_app deploy generates a new ephemeral key |
+| Gateway 200 but client `Independent P256 verification FAILED` | You pinned the wrong pubkey *only on the client* (gateway has the right one) | Re-export `TVC_DEMO_PINNED_PUBKEY_HEX` for the client |
 | Client gets `402` even after sending X-PAYMENT | x402-axum middleware rejected the header (malformed amount, wrong network, expired blockhash) | Inspect gateway logs; the most common cause is a stale blockhash — retry within ~90 s of building the tx |
 
 ---

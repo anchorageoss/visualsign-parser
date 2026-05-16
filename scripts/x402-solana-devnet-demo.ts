@@ -24,7 +24,7 @@
  *   GATEWAY_URL   default http://127.0.0.1:8080
  *   RPC_URL       default https://api.devnet.solana.com
  *   WALLET_SEED   default ../src/integration/fixtures/devnet/wallet.seed
- *   X402_TVC_VERIFIER_PUBKEY_HEX
+ *   TVC_DEMO_PINNED_PUBKEY_HEX
  *                 if set, the demo independently P256-verifies the response
  *                 signature against this key (cross-impl check vs the
  *                 gateway).
@@ -40,7 +40,7 @@ import { createX402Client, type WalletAdapter } from "x402-solana/client";
 
 const GATEWAY_URL = process.env.GATEWAY_URL ?? "http://127.0.0.1:8080";
 const RPC_URL = process.env.RPC_URL ?? "https://api.devnet.solana.com";
-const TVC_HEX = process.env.X402_TVC_VERIFIER_PUBKEY_HEX?.toLowerCase();
+const TVC_HEX = process.env.TVC_DEMO_PINNED_PUBKEY_HEX?.toLowerCase();
 
 async function loadBuyerKeypair(): Promise<Keypair> {
   const __filename = fileURLToPath(import.meta.url);
@@ -148,7 +148,7 @@ async function main(): Promise<void> {
     logSection("Independent P256 verification");
     if (sig.publicKey.toLowerCase() !== TVC_HEX) {
       throw new Error(
-        `response pubkey ${sig.publicKey} != X402_TVC_VERIFIER_PUBKEY_HEX`,
+        `response pubkey ${sig.publicKey} != TVC_DEMO_PINNED_PUBKEY_HEX`,
       );
     }
     // qos_p256 encodes P256Public as encrypt_public || sign_public, each

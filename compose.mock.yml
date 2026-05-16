@@ -39,7 +39,7 @@ services:
       GRPC_ADDR: "http://parser_grpc_server:44020"
       X402_PROFILE: "local"
       X402_FACILITATOR_URL: "http://mock_facilitator:8090"
-      # X402_TVC_VERIFIER_PUBKEY_HEX intentionally omitted: local profile
+      # TVC_DEMO_PINNED_PUBKEY_HEX intentionally omitted: local profile
       # allows running without attestation. Set this env var here to opt
       # into verification locally (the gateway will fail on mismatch).
     ports:

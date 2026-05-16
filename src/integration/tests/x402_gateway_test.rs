@@ -75,7 +75,7 @@ async fn wait_ready(url: &str) {
 
 /// Load the test ephemeral key and return its `qos_hex` pubkey — the exact
 /// format parser_app emits in the wire signature and the gateway pins via
-/// `X402_TVC_VERIFIER_PUBKEY_HEX`.
+/// `TVC_DEMO_PINNED_PUBKEY_HEX`.
 fn fixture_ephemeral_pubkey_hex() -> String {
     let pair = P256Pair::from_hex_file("fixtures/ephemeral.secret")
         .expect("load fixtures/ephemeral.secret");
@@ -418,7 +418,7 @@ async fn path6_tampered_pubkey_returns_502_no_settle() {
     // Sanity: must differ from the fixture's pubkey.
     assert_ne!(wrong_hex, fixture_ephemeral_pubkey_hex());
 
-    let _p = start_procs(&[("X402_TVC_VERIFIER_PUBKEY_HEX", wrong_hex.as_str())]).await;
+    let _p = start_procs(&[("TVC_DEMO_PINNED_PUBKEY_HEX", wrong_hex.as_str())]).await;
 
     // Read settle_count before the request.
     let before = read_settle_count().await;
