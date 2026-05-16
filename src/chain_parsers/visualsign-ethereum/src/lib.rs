@@ -27,6 +27,7 @@ pub mod abi_metadata;
 pub mod abi_registry;
 pub mod context;
 pub mod contracts;
+pub mod eip712;
 pub mod embedded_abis;
 pub(crate) mod eth_json;
 pub mod fmt;
@@ -264,6 +265,15 @@ impl VisualSignConverterFromString<EthereumTransactionWrapper> for EthereumVisua
         transaction_data: &str,
         options: VisualSignOptions,
     ) -> Result<SignablePayload, VisualSignError> {
+        // Route typed-data JSON to the EIP-712 converter so the single registry entry
+        // under `Chain::Ethereum` accepts both transaction and typed-data inputs.
+        if matches!(
+            eth_json::peek_json_kind(transaction_data),
+            Some(eth_json::EthJsonKind::TypedData)
+        ) {
+            let converter = eip712::Eip712VisualSignConverter::with_registry(self.registry.clone());
+            return converter.to_visual_sign_payload_from_string(transaction_data, options);
+        }
         let wrapper = EthereumTransactionWrapper::from_string_with_options(
             transaction_data,
             options.developer_config.as_ref(),
@@ -617,6 +627,19 @@ pub fn transaction_string_to_visual_sign(
 ) -> Result<SignablePayload, VisualSignError> {
     let converter = EthereumVisualSignConverter::new();
     converter.to_visual_sign_payload_from_string(transaction_data, options)
+}
+
+/// Render an EIP-712 typed-data signing request (`eth_signTypedData_v4` JSON).
+///
+/// Uses the embedded ERC-7730 descriptor registry to find a matching clear-signing
+/// descriptor. When no descriptor matches, falls back to a structured tree walk
+/// over the payload's `types` declaration.
+pub fn eip712_typed_data_to_visual_sign(
+    data: &str,
+    options: VisualSignOptions,
+) -> Result<SignablePayload, VisualSignError> {
+    let converter = eip712::Eip712VisualSignConverter::new();
+    converter.to_visual_sign_payload_from_string(data, options)
 }
 
 #[cfg(test)]
