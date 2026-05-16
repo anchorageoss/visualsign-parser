@@ -56,9 +56,9 @@ narrow-build-check:
 	@# Guards parser_app's per-chain feature gating. If a future change
 	@# re-introduces an unconditional reference to a chain crate from
 	@# parser_app, one of these narrow builds will fail to compile.
-	@# Not wired into CI yet -- invoke manually or via a follow-up
-	@# workflow. Driven by $(PARSER_APP_CHAINS) so new chain crates are
-	@# picked up automatically.
+	@# Wired into main CI; runs on every PR. Driven by
+	@# $(PARSER_APP_CHAINS) so new chain crates are picked up
+	@# automatically.
 	@#
 	@# Includes clippy under each narrow feature set so dead-code /
 	@# unused-import lints that only trigger when a chain is OFF are
@@ -68,6 +68,40 @@ narrow-build-check:
 	@set -e; for c in $(PARSER_APP_CHAINS); do \
 		cargo build -p parser_app --no-default-features --features $$c; \
 		cargo clippy -p parser_app --no-default-features --features $$c --all-targets -- -D warnings; \
+	done
+
+.PHONY: feature-matrix-check
+feature-matrix-check:
+	@# Deep coverage of parser_app's feature gating: empty, every chain
+	@# alone, every chain + diagnostics, every depth-2 pair, and every
+	@# depth-2 pair + diagnostics. Hand-rolled (no cargo-hack dependency);
+	@# matrix is generated from $(PARSER_APP_CHAINS) so it doesn't drift
+	@# when chains are added.
+	@#
+	@# Note: `diagnostics` propagates to the always-on `visualsign` core
+	@# crate, and weakly to `visualsign-solana` via the `?` syntax. The
+	@# non-solana + diagnostics combos still exercise the weak-dep path
+	@# (resolving to a no-op for visualsign-solana).
+	@#
+	@# LOCAL ONLY -- not wired into CI. The full matrix accumulates ~28GB
+	@# in the cargo target dir; ensure ~30GB free in src/target before
+	@# running. Use before releases or when touching feature definitions;
+	@# the per-PR narrow-build-check above covers the common regression
+	@# class on every change.
+	cargo build -p parser_app --no-default-features
+	@set -e; for c in $(PARSER_APP_CHAINS); do \
+		cargo build -p parser_app --no-default-features --features $$c; \
+		cargo build -p parser_app --no-default-features --features "$$c diagnostics"; \
+	done
+	@set -e; i=0; for c1 in $(PARSER_APP_CHAINS); do \
+		i=$$((i+1)); j=0; \
+		for c2 in $(PARSER_APP_CHAINS); do \
+			j=$$((j+1)); \
+			if [ $$j -gt $$i ]; then \
+				cargo build -p parser_app --no-default-features --features "$$c1 $$c2"; \
+				cargo build -p parser_app --no-default-features --features "$$c1 $$c2 diagnostics"; \
+			fi; \
+		done; \
 	done
 
 .PHONY: generated
