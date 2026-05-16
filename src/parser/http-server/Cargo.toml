@@ -4,9 +4,23 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
+[features]
+# Chain visualizers compiled into the binary. Mirrors parser_app's default
+# set; trim with `--no-default-features --features solana` (or any subset)
+# to shrink the image and attestation surface for chain-specific deploys.
+default = ["ethereum", "solana", "sui", "tron", "unspecified"]
+ethereum = ["parser_app/ethereum"]
+solana = ["parser_app/solana"]
+sui = ["parser_app/sui"]
+tron = ["parser_app/tron"]
+unspecified = ["parser_app/unspecified"]
+
 [dependencies]
 # Internal — same parse logic + envelope shapes the gRPC server already uses.
-parser_app = { path = "../app" }
+# `default-features = false` so http-server's [features] above is the single
+# place chains get enabled; otherwise parser_app would auto-pull all chains
+# regardless of what http-server selects.
+parser_app = { path = "../app", default-features = false }
 generated = { path = "../../generated", features = ["tonic_types", "serde_derive"] }
 host_primitives = { path = "../../host_primitives" }
 

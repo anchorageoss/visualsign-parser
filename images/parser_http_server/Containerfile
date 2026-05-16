@@ -11,6 +11,14 @@ ENV RELEASE_DIR=/src/target/x86_64-unknown-linux-musl/release
 ARG VERSION
 ENV VERSION=$VERSION
 
+# Chain visualizers compiled into this image. Override per deployment with
+# --build-arg CHAIN_FEATURES="<space-separated subset>". CARGOFLAGS above
+# passes --no-default-features, so chains not listed here are NOT linked into
+# the binary, shrinking both the image and the attestation surface. Default
+# mirrors parser_http_server/Cargo.toml's `default` feature set.
+ARG CHAIN_FEATURES="ethereum solana sui tron unspecified"
+ENV CHAIN_FEATURES=$CHAIN_FEATURES
+
 # Load Rust sources
 ADD src /src
 WORKDIR /src/
@@ -21,7 +29,7 @@ RUN cargo fetch
 WORKDIR /src/parser/http-server
 RUN --network=none <<-EOF
     set -eu
-    cargo build ${CARGOFLAGS}
+    cargo build ${CARGOFLAGS} --features "${CHAIN_FEATURES}"
     mkdir -p /rootfs
     mv ${RELEASE_DIR}/parser_http_server /rootfs/
 EOF
