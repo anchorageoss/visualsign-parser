@@ -1084,61 +1084,127 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_program_tokenkeg() {
-        // Test case from GitHub issue #76
-        // Transaction with TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA program
+    fn test_spl_token_tokenkeg_recognition() {
+        // Regression for github.com/anchorageoss/visualsign-parser/issues/76 —
+        // TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA must now be recognized
+        // as SPL Token (not fall through to unknown_program).
         let tokenkeg_tx = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAEDGtcy7Vc3xB54TVH4H/JNV6GLORFZVW2eiFky1mqlJTJHohT28K37lWNJzHkspHGumVg0rwhDxT5hd/JUEGupaAbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpiz/aiPOGc/sEVBMImlZdQN5iFK0CVj9fTne9d3VuvB0BAgIBACMGAAF5QmVCZ074eW/VU/D+KlEJonY3BgtzkD1DFS0OaNFWDA==";
 
-        let tx_result = SolanaTransactionWrapper::from_string(tokenkeg_tx);
-        assert!(tx_result.is_ok(), "Should parse TokenKeg transaction");
+        let tx = SolanaTransactionWrapper::from_string(tokenkeg_tx)
+            .expect("Should parse TokenKeg transaction");
+        let payload = SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                tx,
+                VisualSignOptions {
+                    metadata: None,
+                    decode_transfers: true,
+                    transaction_name: Some("SPL Token Test".to_string()),
+                    developer_config: None,
+                },
+            )
+            .expect("Should convert TokenKeg transaction to payload");
 
-        let tx = tx_result.unwrap();
-        let payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
-            tx,
-            VisualSignOptions {
-                metadata: None,
-                decode_transfers: true,
-                transaction_name: Some("TokenKeg Test".to_string()),
-                developer_config: None,
-            },
-        );
-
-        assert!(
-            payload_result.is_ok(),
-            "Should convert TokenKeg transaction to payload"
-        );
-
-        let payload = payload_result.unwrap();
-
-        // Verify we have instruction fields (should not be empty)
-        // Labels are now operation-specific (e.g., program ID) rather than "Instruction N"
         let instruction_fields: Vec<_> = payload
             .fields
             .iter()
-            .filter(|f| matches!(f, SignablePayloadField::PreviewLayout { .. }))
+            .filter(|f| f.label().starts_with("Instruction"))
             .collect();
-
-        assert!(
-            !instruction_fields.is_empty(),
-            "Should have at least one instruction field for TokenKeg program"
+        assert_eq!(
+            instruction_fields.len(),
+            1,
+            "Should have exactly 1 instruction"
         );
 
-        // Verify we have instruction preview layouts (network + instruction + accounts = at least 1 instruction)
-        assert!(
-            !instruction_fields.is_empty(),
-            "Should have at least 1 instruction preview layout"
-        );
-
-        // Verify the instruction contains the TokenKeg program ID
         let json_str = payload.to_json().unwrap();
         assert!(
             json_str.contains("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
             "Should contain TokenKeg program ID in the output"
         );
+        // The instruction should be parsed by the SPL Token preset, so the
+        // output should mention either the operation ("Mint To") or the
+        // program label ("SPL Token") — not just raw hex.
+        assert!(
+            json_str.contains("Mint To") || json_str.contains("SPL Token"),
+            "Should recognize TokenKeg as SPL Token program with proper instruction parsing"
+        );
+    }
 
-        println!("✅ TokenKeg transaction parsed successfully");
-        println!("Number of instruction fields: {}", instruction_fields.len());
-        println!("JSON output:\n{json_str}");
+    #[test]
+    fn test_unknown_program_fallback() {
+        // A program ID that's clearly synthetic and will never have a preset:
+        // ensures genuinely-unknown programs still flow through the
+        // unknown_program visualizer rather than crashing or losing the
+        // raw data.
+        use solana_sdk::{
+            hash::Hash, instruction::CompiledInstruction, message::Message, pubkey::Pubkey,
+            signature::Signature, transaction::Transaction as SolanaTransaction,
+        };
+
+        let unknown_program_id = Pubkey::new_from_array([
+            0x46, 0x41, 0x4B, 0x45, // "FAKE"
+            0x50, 0x52, 0x4F, 0x47, // "PROG"
+            0x52, 0x41, 0x4D, 0x21, // "RAM!"
+            0x46, 0x41, 0x4B, 0x45, 0x50, 0x52, 0x4F, 0x47, 0x52, 0x41, 0x4D, 0x21, 0x21, 0x21,
+            0x21, 0x21, 0x00, 0x00, 0x00, 0x00,
+        ]);
+        let fee_payer = Pubkey::new_unique();
+        let instruction_data = vec![0x01, 0x02, 0x03, 0x04, 0x05];
+
+        let message = Message {
+            header: solana_sdk::message::MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 1,
+            },
+            account_keys: vec![fee_payer, unknown_program_id],
+            recent_blockhash: Hash::new_unique(),
+            instructions: vec![CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0],
+                data: instruction_data.clone(),
+            }],
+        };
+        let transaction = SolanaTransaction {
+            signatures: vec![Signature::default()],
+            message,
+        };
+
+        let payload = SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::Legacy(transaction),
+                VisualSignOptions {
+                    decode_transfers: false,
+                    metadata: None,
+                    transaction_name: Some("Unknown Program Test".to_string()),
+                    developer_config: None,
+                },
+            )
+            .expect("Should convert unknown program transaction to payload");
+
+        let instruction_fields: Vec<_> = payload
+            .fields
+            .iter()
+            .filter(|f| f.label().starts_with("Instruction"))
+            .collect();
+        assert_eq!(
+            instruction_fields.len(),
+            1,
+            "Should have exactly 1 instruction"
+        );
+
+        let json_str = payload.to_json().unwrap();
+        assert!(
+            json_str.contains(&unknown_program_id.to_string()),
+            "Should contain the unknown program ID in the output"
+        );
+        assert!(
+            json_str.contains("0102030405"),
+            "Should show instruction data as hex for unknown programs"
+        );
+        assert!(
+            json_str.contains("Program ID"),
+            "Unknown program should display with 'Program ID' field"
+        );
     }
 
     // Lock in main's behavior: when v0 instruction decoding fails on the

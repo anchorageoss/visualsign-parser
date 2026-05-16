@@ -2,3 +2,8 @@
 out
 docs/superpowers/
 .surfpool/
+
+# Coverage artifacts (see TESTING.md)
+lcov.info
+*.profraw
+*.profdata
