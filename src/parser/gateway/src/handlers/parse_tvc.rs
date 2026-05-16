@@ -23,7 +23,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use base64::Engine;
-use generated::parser::{Chain, ChainMetadata, ParseRequest, SignatureScheme};
+use generated::parser::{Chain, ChainMetadata, ParseRequest};
 use generated::tonic;
 use host_primitives::payment_marker::{VPM_VERSION, VerifiedPaymentMarker, request_hash};
 use qos_crypto::sha_256;
@@ -51,6 +51,7 @@ pub async fn parse_handler_tvc(
         mut grpc_client,
         signer,
         x402_config,
+        http_backend_url,
         ..
     }): State<AppState>,
     headers: HeaderMap,
@@ -229,68 +230,36 @@ pub async fn parse_handler_tvc(
         }
     };
 
-    // Forward to parser_app with the signed marker.
-    let request = tonic::Request::new(ParseRequest {
-        unsigned_payload: wrapper.request.unsigned_payload,
-        chain,
-        chain_metadata: wrapper.request.chain_metadata.map(ChainMetadata::from),
-        payment_marker,
-    });
-    let response = match tokio::time::timeout(PARSE_TIMEOUT, grpc_client.parse(request)).await {
-        Ok(Ok(r)) => r.into_inner(),
-        Ok(Err(e)) => {
-            let (http_status, msg) = match e.code() {
-                tonic::Code::InvalidArgument => (StatusCode::BAD_REQUEST, e.message().to_string()),
-                tonic::Code::NotFound => (StatusCode::NOT_FOUND, e.message().to_string()),
-                tonic::Code::FailedPrecondition => {
-                    // parser_app's "payment required" path — surface the
-                    // canonical 402 with our PaymentRequired body.
-                    eprintln!("parser_app rejected payment: {}", e.message());
-                    return payment_required(&config);
-                }
-                _ => {
-                    eprintln!("gRPC error: {e}");
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "internal error".to_string(),
-                    )
-                }
-            };
-            return error(http_status, &msg);
-        }
-        Err(_) => return error(StatusCode::GATEWAY_TIMEOUT, "request timed out"),
-    };
+    let unsigned_payload = wrapper.request.unsigned_payload;
+    let chain_metadata = wrapper.request.chain_metadata;
 
-    // Materialize the response (same shape as the existing v1 handler).
-    let parsed_tx = match response.parsed_transaction {
-        Some(tx) => tx,
-        None => {
-            return error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "missing parsed_transaction",
-            );
+    let forward_result = if let Some(http_url) = http_backend_url.as_deref() {
+        forward_http(
+            http_url,
+            unsigned_payload,
+            chain,
+            chain_metadata,
+            payment_marker,
+        )
+        .await
+    } else {
+        forward_grpc(
+            &mut grpc_client,
+            unsigned_payload,
+            chain,
+            chain_metadata,
+            payment_marker,
+        )
+        .await
+    };
+    let (payload, signature) = match forward_result {
+        Ok(parts) => parts,
+        Err(BackendError::PaymentRejected(msg)) => {
+            eprintln!("backend rejected payment: {msg}");
+            return payment_required(&config);
         }
+        Err(BackendError::Failed { status, msg }) => return error(status, &msg),
     };
-    let payload = match parsed_tx.payload {
-        Some(p) => p,
-        None => return error(StatusCode::INTERNAL_SERVER_ERROR, "missing payload"),
-    };
-    let proto_signature = match parsed_tx.signature {
-        Some(s) => s,
-        None => return error(StatusCode::BAD_GATEWAY, "missing signature"),
-    };
-    let scheme = match proto_signature.scheme {
-        x if x == SignatureScheme::TurnkeyP256EphemeralKey as i32 => {
-            SignatureScheme::TurnkeyP256EphemeralKey
-        }
-        _ => SignatureScheme::Unspecified,
-    };
-    let signature = Some(TurnkeySignature {
-        message: proto_signature.message,
-        public_key: proto_signature.public_key,
-        scheme: scheme.as_str_name().to_string(),
-        signature: proto_signature.signature,
-    });
 
     // Build Payment-Response header (base64 JSON of the settle response,
     // same shape x402-axum used to set on the way out).
@@ -453,3 +422,185 @@ fn now_ms() -> u64 {
 /// the AppState alias.
 #[allow(dead_code)]
 fn _force_use(_: &GatewaySigner) {}
+
+#[derive(Debug)]
+enum BackendError {
+    /// Backend returned a "payment required" signal — the gateway will
+    /// translate to the canonical 402 + PaymentRequired body.
+    PaymentRejected(String),
+    /// Generic backend error — surfaced to the client as-is.
+    Failed { status: StatusCode, msg: String },
+}
+
+type BackendOk = (
+    generated::parser::ParsedTransactionPayload,
+    Option<TurnkeySignature>,
+);
+
+async fn forward_grpc(
+    grpc_client: &mut crate::state::GrpcClient,
+    unsigned_payload: String,
+    chain: i32,
+    chain_metadata: Option<host_primitives::turnkey::ChainMetadataInput>,
+    payment_marker: Vec<u8>,
+) -> Result<BackendOk, BackendError> {
+    use generated::parser::SignatureScheme;
+    let request = tonic::Request::new(ParseRequest {
+        unsigned_payload,
+        chain,
+        chain_metadata: chain_metadata.map(ChainMetadata::from),
+        payment_marker,
+    });
+    let response = match tokio::time::timeout(PARSE_TIMEOUT, grpc_client.parse(request)).await {
+        Ok(Ok(r)) => r.into_inner(),
+        Ok(Err(e)) => {
+            return Err(match e.code() {
+                tonic::Code::InvalidArgument => BackendError::Failed {
+                    status: StatusCode::BAD_REQUEST,
+                    msg: e.message().to_string(),
+                },
+                tonic::Code::NotFound => BackendError::Failed {
+                    status: StatusCode::NOT_FOUND,
+                    msg: e.message().to_string(),
+                },
+                tonic::Code::FailedPrecondition => {
+                    BackendError::PaymentRejected(e.message().to_string())
+                }
+                _ => {
+                    eprintln!("gRPC error: {e}");
+                    BackendError::Failed {
+                        status: StatusCode::INTERNAL_SERVER_ERROR,
+                        msg: "internal error".to_string(),
+                    }
+                }
+            });
+        }
+        Err(_) => {
+            return Err(BackendError::Failed {
+                status: StatusCode::GATEWAY_TIMEOUT,
+                msg: "request timed out".to_string(),
+            });
+        }
+    };
+
+    let parsed_tx = response
+        .parsed_transaction
+        .ok_or_else(|| BackendError::Failed {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            msg: "missing parsed_transaction".to_string(),
+        })?;
+    let payload = parsed_tx.payload.ok_or_else(|| BackendError::Failed {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        msg: "missing payload".to_string(),
+    })?;
+    let proto_signature = parsed_tx.signature.ok_or_else(|| BackendError::Failed {
+        status: StatusCode::BAD_GATEWAY,
+        msg: "missing signature".to_string(),
+    })?;
+    let scheme = match proto_signature.scheme {
+        x if x == SignatureScheme::TurnkeyP256EphemeralKey as i32 => {
+            SignatureScheme::TurnkeyP256EphemeralKey
+        }
+        _ => SignatureScheme::Unspecified,
+    };
+    Ok((
+        payload,
+        Some(TurnkeySignature {
+            message: proto_signature.message,
+            public_key: proto_signature.public_key,
+            scheme: scheme.as_str_name().to_string(),
+            signature: proto_signature.signature,
+        }),
+    ))
+}
+
+async fn forward_http(
+    base_url: &str,
+    unsigned_payload: String,
+    chain: i32,
+    chain_metadata: Option<host_primitives::turnkey::ChainMetadataInput>,
+    payment_marker: Vec<u8>,
+) -> Result<BackendOk, BackendError> {
+    use host_primitives::turnkey::{TurnkeyRequest, TurnkeyRequestWrapper};
+    let chain_str = match generated::parser::Chain::from_i32(chain) {
+        Some(c) => c.as_str_name().to_string(),
+        None => {
+            return Err(BackendError::Failed {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                msg: format!("invalid chain enum {chain}"),
+            });
+        }
+    };
+    let body = TurnkeyRequestWrapper {
+        request: TurnkeyRequest {
+            unsigned_payload,
+            chain: chain_str,
+            chain_metadata,
+            payment_marker_b64: Some(
+                base64::engine::general_purpose::STANDARD.encode(&payment_marker),
+            ),
+        },
+    };
+
+    let url = format!("{}/visualsign/api/v2/parse", base_url.trim_end_matches('/'));
+    let client = match reqwest::Client::builder().timeout(PARSE_TIMEOUT).build() {
+        Ok(c) => c,
+        Err(e) => {
+            return Err(BackendError::Failed {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                msg: format!("reqwest build: {e}"),
+            });
+        }
+    };
+    let resp = match client.post(&url).json(&body).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(BackendError::Failed {
+                status: StatusCode::BAD_GATEWAY,
+                msg: format!("http backend unreachable: {e}"),
+            });
+        }
+    };
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    let parsed: TurnkeyResponseWrapper = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(BackendError::Failed {
+                status: StatusCode::BAD_GATEWAY,
+                msg: format!("http backend returned non-JSON ({status}): {e}; body: {text}"),
+            });
+        }
+    };
+
+    // parser_http_server returns 402 with `error` set when the VPM check
+    // fails. Surface that as PaymentRejected so the gateway translates
+    // back to a canonical PaymentRequired body keyed off our config.
+    if status == StatusCode::PAYMENT_REQUIRED {
+        return Err(BackendError::PaymentRejected(
+            parsed
+                .error
+                .unwrap_or_else(|| "payment required".to_string()),
+        ));
+    }
+    if !status.is_success() {
+        return Err(BackendError::Failed {
+            status: StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
+            msg: parsed
+                .error
+                .unwrap_or_else(|| format!("http backend error {status}")),
+        });
+    }
+
+    let payload = parsed.response.parsed_transaction.payload;
+    let signature = parsed.response.parsed_transaction.signature;
+    Ok((
+        generated::parser::ParsedTransactionPayload {
+            parsed_payload: payload.signable_payload.clone(),
+            input_payload_digest: payload.input_payload_digest,
+            metadata_digest: payload.metadata_digest,
+            signable_payload: payload.signable_payload,
+        },
+        signature,
+    ))
+}

@@ -6703,6 +6703,7 @@ name = "parser_http_server"
 version = "0.1.0"
 dependencies = [
  "axum 0.8.8",
+ "base64 0.22.1",
  "generated",
  "host_primitives",
  "parser_app",

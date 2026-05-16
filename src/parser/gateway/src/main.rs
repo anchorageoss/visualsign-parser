@@ -143,12 +143,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Optional HTTP backend: when set, the v2 TVC-enforced handler POSTs
+    // the parse request to this URL (paired with parser_http_server)
+    // instead of forwarding via gRPC. Used to put the gateway in front of
+    // a TVC-deployed parser_http_server whose only listener is HTTP.
+    let http_backend_url = std::env::var("HTTP_BACKEND_URL")
+        .ok()
+        .filter(|s| !s.is_empty());
+    if let Some(ref url) = http_backend_url {
+        println!("HTTP backend: {url} (gRPC channel unused on /v2)");
+    }
+
     let state = parser_gateway::state::AppState {
         grpc_client,
         health_client,
         attestation,
         signer,
         x402_config: x402_cfg.map(Arc::new),
+        http_backend_url,
     };
 
     let app = app

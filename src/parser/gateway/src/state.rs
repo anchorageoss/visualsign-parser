@@ -23,4 +23,10 @@ pub struct AppState {
     pub signer: Option<Arc<GatewaySigner>>,
     /// X402 config (facilitator URL, price tags). Set when v2 is enabled.
     pub x402_config: Option<Arc<X402Config>>,
+    /// When set, the v2 TVC-enforced handler POSTs the parse request to
+    /// this URL (paired with `parser_http_server`'s
+    /// `/visualsign/api/v2/parse`) instead of forwarding via gRPC to
+    /// `parser_grpc_server`. Lets the gateway sit in front of a
+    /// TVC-deployed `parser_http_server` whose only listener is HTTP.
+    pub http_backend_url: Option<String>,
 }

@@ -7,25 +7,39 @@ use serde::{Deserialize, Serialize};
 /// in error responses, where we have no real payload to digest.
 pub const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct TurnkeyRequestWrapper {
     pub request: TurnkeyRequest,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct TurnkeyRequest {
     pub unsigned_payload: String,
     pub chain: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chain_metadata: Option<ChainMetadataInput>,
+    /// Optional borsh-serialized `SignedVerifiedPaymentMarker`, base64-
+    /// encoded. Set by `parser_gateway` when it hand-rolls the
+    /// verify→settle→sign-VPM flow and POSTs to an HTTP backend
+    /// (`parser_http_server`). The receiver base64-decodes and forwards
+    /// the raw bytes to `parser_app::routes::parse::parse` as
+    /// `ParseRequest.payment_marker`. Open v1 callers leave it None.
+    ///
+    /// Wire name: `payment_marker_b64` (snake_case, matching the rest of
+    /// this envelope — kept compatible with the Go visualsign-turnkey-client).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payment_marker_b64: Option<String>,
 }
+
+// ChainMetadataInput needs Serialize too so parser_gateway can build the
+// outbound HTTP body symmetrically with what parser_http_server parses.
 
 /// Tagged representation of chain metadata for unambiguous JSON deserialization.
 ///
 /// The generated `ChainMetadata` uses `serde(untagged)` on the inner oneof enum, which means
 /// serde tries Ethereum first. A Solana payload with only `networkId` would be silently
 /// decoded as `EthereumMetadata`. This wrapper uses an explicit `chain` discriminator.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(tag = "chain", rename_all = "camelCase")]
 pub enum ChainMetadataInput {
     #[serde(rename = "CHAIN_ETHEREUM")]
@@ -46,20 +60,20 @@ impl From<ChainMetadataInput> for ChainMetadata {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct TurnkeyResponseWrapper {
     pub response: TurnkeyResponse,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnkeyResponse {
     pub parsed_transaction: TurnkeyParsedTransaction,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnkeyParsedTransaction {
     pub payload: TurnkeyPayload,
@@ -67,7 +81,7 @@ pub struct TurnkeyParsedTransaction {
     pub signature: Option<TurnkeySignature>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnkeyPayload {
     pub signable_payload: String,
@@ -75,7 +89,7 @@ pub struct TurnkeyPayload {
     pub input_payload_digest: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnkeySignature {
     pub message: String,

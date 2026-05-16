@@ -36,6 +36,7 @@ use axum::{
     http::StatusCode,
     routing::{get, post},
 };
+use base64::Engine;
 use generated::parser::{Chain, ChainMetadata, SignatureScheme};
 use host_primitives::turnkey::{
     TurnkeyParsedTransaction, TurnkeyPayload, TurnkeyRequestWrapper, TurnkeyResponse,
@@ -92,13 +93,28 @@ fn handle_parse(
         }
     };
 
-    // TVC-enforced mode threads the VPM through the proto field. Open
-    // v1 callers never set this, so empty vec is fine.
+    // TVC-enforced mode threads the VPM through `paymentMarkerB64` in
+    // the JSON body — base64 of `borsh(SignedVerifiedPaymentMarker)`.
+    // Open v1 callers leave it None.
+    let payment_marker = match wrapper.request.payment_marker_b64 {
+        None => Vec::new(),
+        Some(b64) => match base64::engine::general_purpose::STANDARD.decode(b64.as_bytes()) {
+            Ok(b) => b,
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(error_response(
+                        "paymentMarkerB64 is not valid base64".to_string(),
+                    )),
+                );
+            }
+        },
+    };
     let proto_req = generated::parser::ParseRequest {
         unsigned_payload: wrapper.request.unsigned_payload,
         chain,
         chain_metadata: wrapper.request.chain_metadata.map(ChainMetadata::from),
-        payment_marker: Vec::new(),
+        payment_marker,
     };
 
     let proto_resp = match parse(&proto_req, &state.ephemeral_key, policy) {
