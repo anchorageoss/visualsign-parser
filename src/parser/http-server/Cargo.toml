@@ -14,6 +14,14 @@ solana = ["parser_app/solana"]
 sui = ["parser_app/sui"]
 tron = ["parser_app/tron"]
 unspecified = ["parser_app/unspecified"]
+# Switch qos_core constants (notably `EPHEMERAL_KEY_FILE`) to their in-enclave
+# paths (`/qos.ephemeral.key` instead of `./local-enclave/qos.ephemeral.key`).
+# parser_http_server only ever runs as a TVC pivot, so this must be on for
+# production builds. Without it the pivot crashes at startup trying to read
+# the dev path, which surfaces as `Healthy / Desired Replicas: 0/N`. The
+# name mirrors parser_app's identically-named feature for consistency,
+# even though http-server doesn't speak vsock itself.
+vsock = ["qos_core/vm"]
 
 [dependencies]
 # Internal — same parse logic + envelope shapes the gRPC server already uses.

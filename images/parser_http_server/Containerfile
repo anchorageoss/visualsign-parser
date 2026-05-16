@@ -29,7 +29,10 @@ RUN cargo fetch
 WORKDIR /src/parser/http-server
 RUN --network=none <<-EOF
     set -eu
-    cargo build ${CARGOFLAGS} --features "${CHAIN_FEATURES}"
+    # `vsock` switches qos_core constants to in-enclave paths
+    # (`/qos.ephemeral.key`). Without it the pivot reads the dev path and
+    # crash-loops at startup, showing `Healthy / Desired Replicas: 0/N`.
+    cargo build ${CARGOFLAGS} --features "vsock ${CHAIN_FEATURES}"
     mkdir -p /rootfs
     mv ${RELEASE_DIR}/parser_http_server /rootfs/
 EOF
