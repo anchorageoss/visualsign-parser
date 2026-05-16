@@ -17,11 +17,11 @@ health_check = { path = "../../health_check" }
 host_primitives = { path = "../../host_primitives" }
 metrics = { path = "../../metrics" }
 visualsign = {workspace = true}
-visualsign-ethereum = { path = "../../chain_parsers/visualsign-ethereum"}
-visualsign-solana = { path = "../../chain_parsers/visualsign-solana"}
-visualsign-sui = { path = "../../chain_parsers/visualsign-sui"}
-visualsign-tron = { path = "../../chain_parsers/visualsign-tron"}
-visualsign-unspecified = { path = "../../chain_parsers/visualsign-unspecified"}
+visualsign-ethereum = { path = "../../chain_parsers/visualsign-ethereum", optional = true }
+visualsign-solana = { path = "../../chain_parsers/visualsign-solana", optional = true }
+visualsign-sui = { path = "../../chain_parsers/visualsign-sui", optional = true }
+visualsign-tron = { path = "../../chain_parsers/visualsign-tron", optional = true }
+visualsign-unspecified = { path = "../../chain_parsers/visualsign-unspecified", optional = true }
 
 serde_json = "1"
 serde = { version = "1", features = ["derive"], default-features = false }
@@ -32,6 +32,17 @@ bs58 = { version = "0.5.1", default-features = false }
 sha2 = { version = "0.10.8", default-features = false }
 
 [features]
+# diagnostics is intentionally NOT in `default`: parser_app is the production
+# binary, and `cargo build --workspace --exclude parser_cli` (see Makefile)
+# relies on diagnostics being OFF for parser_app/integration to keep the
+# production payload shape. Opt in explicitly with `--features diagnostics`.
+default = ["ethereum", "solana", "sui", "tron", "unspecified"]
+ethereum = ["dep:visualsign-ethereum"]
+solana = ["dep:visualsign-solana"]
+sui = ["dep:visualsign-sui"]
+tron = ["dep:visualsign-tron"]
+unspecified = ["dep:visualsign-unspecified"]
+diagnostics = ["visualsign/diagnostics", "visualsign-solana?/diagnostics"]
 vsock = ["qos_core/vm"]
 
 [lints]
