@@ -22,10 +22,16 @@ services:
     entrypoint: ["/parser_grpc_server"]
     environment:
       EPHEMERAL_FILE: "/etc/parser/ephemeral.secret"
+      # TVC-enforced payment: parser_app refuses parse calls unless they
+      # carry a VPM signed by this exact gateway pubkey. Read from the
+      # GATEWAY_SIGNING_PUBKEY_HEX shell env (mint via `gateway_keygen`
+      # and paste the printed value).
+      GATEWAY_SIGNING_PUBKEY_HEX: "${GATEWAY_SIGNING_PUBKEY_HEX:?required: hex of gateway P256 sign pubkey (run gateway_keygen and paste the printed value)}"
     volumes:
       # Local-dev only. Production TVC provisions the real key via QoS host
-      # boot; the public half ends up as TVC_DEMO_PINNED_PUBKEY_HEX on the
-      # gateway side.
+      # boot; the public half ends up in GATEWAY_SIGNING_PUBKEY_HEX (on
+      # the parser_grpc_server / parser_app side) and the private half
+      # lives on the gateway side.
       - ./src/integration/fixtures/ephemeral.secret:/etc/parser/ephemeral.secret:ro
     ports:
       - "44020:44020"
@@ -43,6 +49,13 @@ services:
       X402_FACILITATOR_URL: "https://facilitator.payai.network"
       X402_FACILITATOR_TIMEOUT_SECS: "10"
       X402_PAYTO: "${X402_PAYTO:?X402_PAYTO must be set in your shell before docker compose up}"
-      TVC_DEMO_PINNED_PUBKEY_HEX: "${TVC_DEMO_PINNED_PUBKEY_HEX:?required: pin the TVC enclave's P256 public key here}"
+      # TVC-enforced flow: gateway signs every VerifiedPaymentMarker with
+      # this P256 keypair (JSON {private, public} at this path). The
+      # public half must match parser_app's GATEWAY_SIGNING_PUBKEY_HEX
+      # above. In Cloud Run / k8s, mount the same secret as a
+      # secret-volume at this path.
+      GATEWAY_SIGNING_KEY_FILE: "/etc/parser/gateway_signer.json"
+    volumes:
+      - "${GATEWAY_SIGNING_KEY_FILE_HOST:?required: host path to gateway signing key JSON (run gateway_keygen)}:/etc/parser/gateway_signer.json:ro"
     ports:
       - "8080:8080"
