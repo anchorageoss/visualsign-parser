@@ -170,14 +170,16 @@ mod tests {
 
     #[test]
     fn validates_erc2612_against_v1_schema() {
-        let schema: Value = serde_json::from_str(include_str!(
-            "../../../static/eip7730/specs/erc7730-v1.schema.json"
-        ))
-        .unwrap();
-        let descriptor: Value = serde_json::from_str(include_str!(
-            "../../../static/eip7730/ercs/eip712-erc2612-permit.json"
-        ))
-        .unwrap();
+        use crate::eip712::descriptor::read_optional_static;
+        let (Some(schema_text), Some(descriptor_text)) = (
+            read_optional_static("specs/erc7730-v1.schema.json"),
+            read_optional_static("ercs/eip712-erc2612-permit.json"),
+        ) else {
+            eprintln!("skip: static/eip7730 not present");
+            return;
+        };
+        let schema: Value = serde_json::from_str(&schema_text).unwrap();
+        let descriptor: Value = serde_json::from_str(&descriptor_text).unwrap();
         if let Err(errs) = validate(&descriptor, &schema) {
             panic!("erc2612 descriptor failed validation: {errs:#?}");
         }

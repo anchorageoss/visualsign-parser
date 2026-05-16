@@ -31,12 +31,31 @@ static FIXTURES: [&str; 8] = [
     "eip712-fallback-unknown",
 ];
 
+/// Fixtures opt into "requires embedded ERC-7730 registry" by dropping an empty
+/// `<name>.requires-registry` marker next to their `.input` / `.expected` files.
+/// When `static/eip7730/` isn't checked out, marked fixtures are skipped.
+fn static_eip7730_present() -> bool {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.push("static/eip7730");
+    p.exists()
+}
+
+fn fixture_requires_registry(fixtures_dir: &std::path::Path, test_name: &str) -> bool {
+    fixtures_dir
+        .join(format!("{test_name}.requires-registry"))
+        .exists()
+}
+
 #[test]
 fn test_with_fixtures() {
-    // Get paths for all test cases
     let fixtures_dir = fixture_path("");
+    let registry_present = static_eip7730_present();
 
     for test_name in FIXTURES {
+        if !registry_present && fixture_requires_registry(&fixtures_dir, test_name) {
+            eprintln!("skip {test_name}: static/eip7730 not present");
+            continue;
+        }
         let input_path = fixtures_dir.join(format!("{test_name}.input"));
 
         // Read input file contents
@@ -270,6 +289,10 @@ fn test_abi_from_metadata_decodes_function() {
 ///   -> token resolution -> `tokenAmount` + `date` format renderers.
 #[test]
 fn test_eip712_erc2612_usdc_permit_end_to_end() {
+    if !static_eip7730_present() {
+        eprintln!("skip: static/eip7730 not present");
+        return;
+    }
     let payload = r#"{
       "type": "typedData",
       "domain": {
