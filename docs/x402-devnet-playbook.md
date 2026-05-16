@@ -681,20 +681,98 @@ etc.) moved to `host_primitives::turnkey` so both `parser_gateway` and
    Should return a Turnkey envelope with the parsed payload + ephemeral-key
    signature. No X-Stamp required (v1 is open).
 
-### Turning on TVC-enforced payment
+### Turning on TVC-enforced payment (canonical deploy)
 
-Once `parser_http_server` is live, you can deploy the v3 trust pair:
+Once `parser_http_server` is live in TVC, deploying the v3 trust pair is
+two side-by-side steps. The gateway sits outside TVC (Cloud Run /
+k8s / wherever has egress), and addresses the enclave over HTTP because
+that's the only transport `*.turnkey.cloud` ingress accepts.
 
-1. Mint a gateway signing key with `gateway_keygen`.
-2. Re-deploy `parser_http_server` with `GATEWAY_SIGNING_PUBKEY_HEX=<pub>`
-   in its env (Turnkey TVC supports env via deployment config).
-3. Deploy `parser_gateway` separately (Cloud Run / k8s / wherever) with
-   `GATEWAY_SIGNING_KEY_FILE`, `X402_PROFILE=payai`, `X402_NETWORK=solana-devnet`,
-   `GRPC_ADDR` replaced with `HTTP_FORWARD_URL=https://app-<uuid>.turnkey.cloud`
-   (NOTE: the gateway's TVC-relay-over-HTTP mode is still v3.1 work — not
-   in #304. For now, the gateway expects gRPC backends. To use the v3
-   trust pair against a TVC-deployed `parser_http_server`, the gateway
-   needs an HTTP backend mode.)
+```
+                       Solana devnet                facilitator.payai.network
+                            ▲                                ▲
+                            │ on-chain settle                │ verify + settle
+                            │                                │
+   browser / SDK            │                                │
+        │                   │                                │
+        ▼                   │                                │
+  ┌───────────────┐  HTTP  ┌─┴────────────────┐ HTTPS ┌──────┴────────────────────┐
+  │ x402 client   │ ─────▶ │ parser_gateway   │ ────▶ │ parser_http_server (TVC)  │
+  │ (TS demo /    │  402   │ (Cloud Run, etc.)│       │ ghcr…/parser_http_server  │
+  │  custom)      │ ◀───── │  verify→settle→  │       │  GATEWAY_SIGNING_PUBKEY_  │
+  └───────────────┘   200  │  sign VPM →      │       │  HEX pinned at boot       │
+                           │  forward HTTP    │       └───────────────────────────┘
+                           └──────────────────┘
+```
+
+Steps:
+
+1. **Mint the gateway signing key:**
+
+   ```sh
+   cargo run -p parser_gateway --bin gateway_keygen -- /tmp/gateway_signer.json
+   # Prints GATEWAY_SIGNING_PUBKEY_HEX=<260-char-hex>
+   ```
+
+2. **Deploy `parser_http_server` to TVC** with the public half pinned in
+   its env. Add to the TVC deploy config's env block:
+
+   ```json
+   {
+     "envVars": [
+       { "name": "GATEWAY_SIGNING_PUBKEY_HEX",
+         "value": "<260-char-hex from step 1>" }
+     ]
+   }
+   ```
+
+   After re-deploy, `parser_app` (linked into `parser_http_server`)
+   rejects every parse request whose `payment_marker` doesn't carry a
+   VPM signed by exactly this key.
+
+3. **Deploy `parser_gateway` outside TVC** with `HTTP_BACKEND_URL`
+   pointing at the TVC app URL:
+
+   ```sh
+   # Example: Cloud Run-style env block
+   GATEWAY_PORT=8080
+   X402_PROFILE=payai
+   X402_NETWORK=solana-devnet
+   X402_FACILITATOR_URL=https://facilitator.payai.network
+   X402_PAYTO=<receiver pubkey>
+   GATEWAY_SIGNING_KEY_FILE=/etc/secrets/gateway/signer.json
+   HTTP_BACKEND_URL=https://app-<uuid>.turnkey.cloud
+   ```
+
+   When `HTTP_BACKEND_URL` is set, the v2 handler POSTs the
+   verified+settled+VPM-signed parse to
+   `${HTTP_BACKEND_URL}/visualsign/api/v2/parse` (Turnkey JSON envelope
+   with `payment_marker_b64` carrying the borsh-encoded VPM) instead of
+   calling parser_grpc_server over gRPC. The `GRPC_ADDR` env is ignored
+   in this mode.
+
+   The mock-facilitator path (`X402_PROFILE=local`) works identically;
+   you can rehearse this whole topology locally by pointing
+   `HTTP_BACKEND_URL` at a containerized `parser_http_server` before
+   deploying to TVC.
+
+4. **Smoke-test from the client:**
+
+   ```sh
+   GATEWAY_URL=https://<your-gateway-host> \
+   RPC_URL=https://api.devnet.solana.com \
+     node --experimental-strip-types --no-warnings scripts/x402-solana-devnet-demo.ts
+   ```
+
+   The 200 response now means: payai settled on-chain → gateway signed
+   a VPM → TVC enclave verified the VPM signature + request_hash
+   binding + pubkey pinning → enclave signed the parse response. Any
+   failure short-circuits to 402 / 4xx before any payment is settled.
+
+Validated end-to-end locally with `parser_gateway` (HTTP_BACKEND_URL
+mode) → `parser_http_server` against real payai + Solana devnet — the
+on-chain settle landed at
+`2Q4vB1fQcJfyuW94YvjPKRYuoJgqWZtgSmkbcttJRGdT6FHQsNAypGVXEU6jTfxnTQUg9wpMq6shZzXxYBcgmuoR`.
 
 ### Diagnostic tools
 
