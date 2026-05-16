@@ -482,3 +482,115 @@ Two changes once the devnet rehearsal is clean:
    and fund the receiver wallet with **real USDC** (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`).
 
 Same trust pair, same flow. The gateway code doesn't change.
+
+---
+
+## Part 4 — TVC-enforced payment (stacked PR #304)
+
+Plan v3 lands on a separate branch (`spec/x402-tvc-enforced`, PR #304)
+that replaces the demo response-attestation verifier with parser-app-side
+payment enforcement. The enclave refuses to process any parse request
+that doesn't carry a valid gateway-signed `VerifiedPaymentMarker`.
+
+What changes vs Parts 1–2:
+
+- The gateway has its own P256 signing identity (`GATEWAY_SIGNING_KEY_FILE`).
+  It hand-rolls the call order `verify → settle → sign VPM → forward` so
+  the post-settle txid is committed to in the marker before parser_app
+  sees the request.
+- `parser_app` pins the gateway's public key via `GATEWAY_SIGNING_PUBKEY_HEX`.
+  Mismatch → `FailedPrecondition` → gateway translates to HTTP 402.
+- The v1 open route is unmounted when TVC enforcement is on (the policy
+  is global at parser_app, so an open route would 402 everything).
+- The demo `TVC_DEMO_PINNED_PUBKEY_HEX` becomes optional; the new
+  GATEWAY pubkey is the actual trust anchor.
+
+### Step 1 — Mint a gateway signing key
+
+```sh
+cargo run -p parser_gateway --bin gateway_keygen -- /tmp/gateway_signer.json
+# Prints: GATEWAY_SIGNING_PUBKEY_HEX=<260-char-hex>
+```
+
+Save the printed hex — it's what parser_app will pin.
+
+In production, the same JSON file (or a JSON blob with `{private, public}`
+fields) is mounted via Cloud Run Secret Manager / k8s Secret volumes at
+the configured `GATEWAY_SIGNING_KEY_FILE` path.
+
+### Step 2 — Bring the stack up
+
+```sh
+git checkout spec/x402-tvc-enforced
+make non-oci-docker-images          # rebuilds stagex images with the
+                                     # TVC-enforced flow
+
+export GATEWAY_SIGNING_KEY_FILE_HOST=/tmp/gateway_signer.json
+export GATEWAY_SIGNING_PUBKEY_HEX=$(jq -r .public /tmp/gateway_signer.json)
+export X402_PAYTO=x2iWww6XjauBk83HpBMzkGPijbzy4vqdRzS5skWPxmW
+
+docker compose -f compose.payai.yml up -d
+docker logs visualsign-parser-parser_gateway-1 | tail
+# Expect:
+#   gateway signer loaded; pubkey 04xxxxxx...
+#   x402 facilitator probe OK
+#   parser_gateway dev listening on 0.0.0.0:8080
+```
+
+### Step 3 — Pay + parse
+
+Same TS demo:
+
+```sh
+GATEWAY_URL=http://127.0.0.1:8080 RPC_URL=https://api.devnet.solana.com \
+  node --experimental-strip-types --no-warnings scripts/x402-solana-devnet-demo.ts
+```
+
+Expected output (the parser-app verification line is the new bit):
+
+```
+[x402-solana] Retry response status: 200
+status: 200
+settlement: {
+  "network":     "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+  "payer":       "x2iWww6XjauBk83HpBMzkGPijbzy4vqdRzS5skWPxmW",
+  "success":     true,
+  "transaction": "<base58 solana sig>"
+}
+```
+
+In `docker logs visualsign-parser-parser_grpc_server-1` you should see
+zero rejection log lines (the parser silently accepts a valid VPM).
+
+### Step 4 — Tamper sanity-check
+
+```sh
+make dev-down
+# Pin parser_app to a DIFFERENT pubkey than the gateway is signing with.
+docker run --rm -v /tmp:/tmp parser_gateway_keygen /tmp/wrong_signer.json \
+  > /dev/null  # or run cargo gateway_keygen
+WRONG=$(jq -r .public /tmp/wrong_signer.json)
+GATEWAY_SIGNING_PUBKEY_HEX="$WRONG" \
+GATEWAY_SIGNING_KEY_FILE_HOST=/tmp/gateway_signer.json \
+X402_PAYTO=x2iWww6XjauBk83HpBMzkGPijbzy4vqdRzS5skWPxmW \
+  docker compose -f compose.payai.yml up -d
+
+GATEWAY_URL=http://127.0.0.1:8080 RPC_URL=https://api.devnet.solana.com \
+  node --experimental-strip-types --no-warnings scripts/x402-solana-devnet-demo.ts || true
+# Expect: paid request failed: 402 - "payment required"
+docker logs visualsign-parser-parser_grpc_server-1 | grep 'gateway_pubkey_hex'
+# Expect: payment marker gateway_pubkey_hex does not match pinned key
+```
+
+Known quirk: payai still settles before parser_app rejects, so an
+operator misconfiguration costs the buyer one demo payment per attempt.
+v3.1 will tighten this by gating settle on a pre-validation step.
+
+### What's still open in v3.0 (deferred to v3.1)
+
+- Gateway pubkey is statically pinned; v3.1 will derive it dynamically
+  from a chained gateway attestation.
+- Payer Ed25519 sig on the Solana tx isn't re-verified inside parser_app;
+  payai's `/verify` checks it before settle, and the VPM's
+  `x_payment_hash` binds the marker to the exact X-PAYMENT body.
+- Settle-then-reject quirk (above).

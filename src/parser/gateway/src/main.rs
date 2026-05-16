@@ -101,15 +101,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let mut app = Router::new()
-        .route(
-            "/health",
-            get(parser_gateway::handlers::health::health_handler),
-        )
-        .route(
+    let mut app = Router::new().route(
+        "/health",
+        get(parser_gateway::handlers::health::health_handler),
+    );
+
+    // Mount the open v1 route ONLY when the gateway is not in TVC-enforced
+    // mode. parser_app's PaymentPolicy is global once `GATEWAY_SIGNING_PUBKEY_HEX`
+    // is pinned — every parse request needs a valid VPM, so an open v1 route
+    // would 402 every call.
+    if signer.is_none() {
+        app = app.route(
             "/visualsign/api/v1/parse",
             post(parser_gateway::handlers::parse::parse_handler),
         );
+    }
 
     if let Some(ref cfg) = x402_cfg {
         if let Err(e) = probe_facilitator(&cfg.facilitator_url, cfg.facilitator_timeout).await {
