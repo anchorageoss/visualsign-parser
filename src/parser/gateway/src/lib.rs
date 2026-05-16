@@ -7,6 +7,7 @@
 
 pub mod attestation;
 pub mod handlers;
+pub mod signing;
 pub mod state;
 pub mod turnkey;
 pub mod x402_config;

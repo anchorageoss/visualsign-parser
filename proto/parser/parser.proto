@@ -49,6 +49,15 @@ message ParseRequest {
   string unsigned_payload = 1;
   Chain chain = 2;
   ChainMetadata chain_metadata = 3;
+
+  // Borsh-encoded VerifiedPaymentMarker signed by the gateway. parser_app
+  // verifies this before processing. Empty for the legacy open routes (v1)
+  // and for local-dev / gRPC-direct callers. The gated v2 route always
+  // populates it (gateway hand-rolls verify->settle->sign before forwarding).
+  // When the marker is empty in a context that requires payment, parser_app
+  // returns a FailedPrecondition status whose details carry the canonical
+  // x402 PaymentRequired body, which the gateway materializes as HTTP 402.
+  bytes payment_marker = 4;
 }
 
 message ChainMetadata {

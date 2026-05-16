@@ -21,6 +21,9 @@ pub mod chain_conversion;
 
 pub mod registry;
 
+/// VerifiedPaymentMarker verification (TVC-enforced x402 payment).
+pub mod payment_verify;
+
 /// Routes for the parser service
 pub mod routes {
     /// Parse route

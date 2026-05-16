@@ -5,7 +5,9 @@ edition = "2024"
 publish = false
 
 [dependencies]
-qos_core = { workspace = true}
+qos_core = { workspace = true }
+qos_crypto = { workspace = true } # sha_256 for payment_marker hashing
+serde = { workspace = true, features = ["derive"] } # VPM is also JSON-renderable for logs
 
 tonic = { version = "0.9", default-features = false }
 prost = { version = "0.11", features = [

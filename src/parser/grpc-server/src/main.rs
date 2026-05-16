@@ -15,6 +15,7 @@ use generated::parser::{
     parser_service_server::{ParserService, ParserServiceServer},
 };
 use generated::tonic::{self, Request, Response, Status};
+use parser_app::payment_verify::PaymentPolicy;
 use parser_app::routes::parse::parse;
 use qos_core::handles::EphemeralKeyHandle;
 use qos_p256::P256Pair;
@@ -23,18 +24,22 @@ use std::net::SocketAddr;
 /// Standalone gRPC service that calls the parser directly
 struct GrpcService {
     ephemeral_key: P256Pair,
+    policy: PaymentPolicy,
 }
 
 /// Health check service - always returns SERVING
 struct HealthService;
 
 impl GrpcService {
-    fn new(ephemeral_file: &str) -> Self {
+    fn new(ephemeral_file: &str, policy: PaymentPolicy) -> Self {
         let handle = EphemeralKeyHandle::new(ephemeral_file.to_string());
         let ephemeral_key = handle
             .get_ephemeral_key()
             .expect("Failed to load ephemeral key");
-        Self { ephemeral_key }
+        Self {
+            ephemeral_key,
+            policy,
+        }
     }
 }
 
@@ -45,7 +50,7 @@ impl ParserService for GrpcService {
         request: Request<ParseRequest>,
     ) -> Result<Response<ParseResponse>, Status> {
         // Direct function call - no sockets needed
-        parse(&request.into_inner(), &self.ephemeral_key)
+        parse(&request.into_inner(), &self.ephemeral_key, &self.policy)
             .map(Response::new)
             .map_err(|e| Status::new(tonic::Code::from_i32(e.code as i32), e.message))
     }
@@ -80,7 +85,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ephemeral_file = std::env::var("EPHEMERAL_FILE")
         .unwrap_or_else(|_| "integration/fixtures/ephemeral.secret".to_string());
 
-    let svc = GrpcService::new(&ephemeral_file);
+    let policy =
+        PaymentPolicy::from_env().expect("invalid GATEWAY_SIGNING_PUBKEY_HEX configuration");
+    let svc = GrpcService::new(&ephemeral_file, policy);
 
     let reflection_service = generated::tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(generated::FILE_DESCRIPTOR_SET)

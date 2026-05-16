@@ -2,6 +2,8 @@
 
 #![deny(clippy::all, clippy::unwrap_used)]
 
+pub mod payment_marker;
+
 use std::time::Duration;
 
 use borsh::BorshDeserialize;

@@ -210,6 +210,7 @@ fn test_ethereum_abi_with_secp256k1_signature() {
         chain_metadata: Some(ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(ethereum_metadata)),
         }),
+        payment_marker: Vec::new(),
     };
 
     // Verify the request was created correctly
@@ -298,6 +299,7 @@ fn test_solana_idl_with_ed25519_signature() {
         chain_metadata: Some(ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Solana(solana_metadata)),
         }),
+        payment_marker: Vec::new(),
     };
 
     // Verify the request was created correctly
@@ -380,6 +382,7 @@ fn test_signature_tampering_detection() {
         chain_metadata: Some(ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(ethereum_metadata)),
         }),
+        payment_marker: Vec::new(),
     };
 
     // Now verify with tampered ABI

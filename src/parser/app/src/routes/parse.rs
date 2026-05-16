@@ -1,5 +1,6 @@
 //! Parsing endpoint for `VisualSign`
 
+use crate::payment_verify::{self, PaymentPolicy};
 use crate::{chain_conversion, errors::GrpcError, registry::create_registry};
 use generated::parser::Chain as ProtoChain;
 use generated::{
@@ -17,6 +18,10 @@ use visualsign::vsptrait::VisualSignOptions;
 
 /// Parses an unsigned transaction payload and returns a signed parsed response.
 ///
+/// Enforces the configured `PaymentPolicy` before doing any parser work. When
+/// the policy is `Required`, an empty / invalid / tampered VPM short-circuits
+/// here with `FailedPrecondition` — the gateway materializes that as HTTP 402.
+///
 /// # Panics
 ///
 /// Panics if the `ParsedTransactionPayload` cannot be serialized to Borsh format.
@@ -24,7 +29,10 @@ use visualsign::vsptrait::VisualSignOptions;
 pub fn parse(
     parse_request: &ParseRequest,
     ephemeral_key: &P256Pair,
+    policy: &PaymentPolicy,
 ) -> Result<ParseResponse, GrpcError> {
+    payment_verify::verify(parse_request, policy)?;
+
     let request_payload = parse_request.unsigned_payload.as_str();
     if request_payload.is_empty() {
         return Err(GrpcError::new(

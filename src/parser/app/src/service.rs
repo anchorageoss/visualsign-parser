@@ -9,20 +9,24 @@ use generated::{
 use qos_core::handles::EphemeralKeyHandle;
 use tokio::sync::RwLock;
 
+use crate::payment_verify::PaymentPolicy;
+
 /// Struct holding a request processor for QOS
 #[derive(Debug)]
 pub struct Processor {
     handle: EphemeralKeyHandle,
+    policy: Arc<PaymentPolicy>,
 }
 
 /// `Processor` shared between tasks
 pub type SharedProcessor = Arc<RwLock<Processor>>;
 
 impl Processor {
-    /// Creates a new request processor. The only argument needed is an ephemeral key handle.
+    /// Creates a new request processor. Needs the ephemeral key handle plus
+    /// a `PaymentPolicy` (load from env via `PaymentPolicy::from_env()`).
     #[must_use]
-    pub fn new(handle: EphemeralKeyHandle) -> SharedProcessor {
-        Arc::new(RwLock::new(Self { handle }))
+    pub fn new(handle: EphemeralKeyHandle, policy: Arc<PaymentPolicy>) -> SharedProcessor {
+        Arc::new(RwLock::new(Self { handle, policy }))
     }
 }
 
@@ -67,7 +71,7 @@ impl Processor {
 
             let output = match input {
                 qos_parser_request::Input::ParseRequest(parse_request) => {
-                    match crate::routes::parse::parse(parse_request, &ephemeral_key)
+                    match crate::routes::parse::parse(parse_request, &ephemeral_key, &self.policy)
                         .map(qos_parser_response::Output::ParseResponse)
                         .map_err(|e| {
                             qos_parser_response::Output::Status(Status {
