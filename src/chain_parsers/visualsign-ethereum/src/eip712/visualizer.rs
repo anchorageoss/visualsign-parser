@@ -1,7 +1,8 @@
 //! EIP-712 visualizer orchestrator: parse payload, match descriptor, render fields,
 //! assemble final `SignablePayload` (or fall back to a structured tree walk).
 
-use crate::eip712::descriptor::{DescriptorField, embedded};
+use crate::eip712::descriptor::DescriptorField;
+use crate::eip712::descriptor::registry::LayeredErc7730Registry;
 use crate::eip712::fallback;
 use crate::eip712::format::{RenderContext, render_field};
 use crate::eip712::payload::Eip712Payload;
@@ -77,15 +78,16 @@ impl VisualSignConverter<Eip712TransactionWrapper> for Eip712VisualSignConverter
 
         let mut fields = header_fields(&payload, chain_id, &self.registry)?;
 
-        // Wallets pass `abi_mappings`, not ERC-7730 descriptors — by design. The
-        // embedded registry is the only ERC-7730 source on the live path; on a
-        // miss we drop to the structured tree-walk fallback.
-        let descriptor = match payload
-            .domain
-            .verifying_contract
-            .and_then(|vc| embedded::find_eip712(chain_id, vc, &payload.primary_type))
-        {
-            Some(d) => d,
+        // Only the embedded ERC-7730 registry is consulted on the live path. The
+        // lookup also verifies the descriptor's declared EIP-712 schema matches
+        // the payload's `types` field — without that check, an attacker could
+        // submit a payload claiming a known `primaryType` but with reordered or
+        // renamed fields, and we'd render the descriptor's expected labels
+        // against the wrong values. EIP-712 has no separate ABI; the payload's
+        // own `types` map is the authoritative schema, so we cross-check both.
+        let layered = LayeredErc7730Registry::new(None);
+        let descriptor = match layered.find_for_payload(&payload) {
+            Some((d, _src)) => d,
             None => return tree_walk_payload(&payload, options, fields),
         };
         let format = match descriptor.display.formats.get(&payload.primary_type) {
