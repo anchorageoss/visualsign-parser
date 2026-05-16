@@ -11,6 +11,7 @@ members = [
   "parser/cli",
   "parser/gateway",
   "parser/grpc-server",
+  "parser/http-server",
   "parser/mock-facilitator",
   "visualsign",
   "chain_parsers/visualsign-ethereum",

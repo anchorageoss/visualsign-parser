@@ -14,6 +14,10 @@ out/parser_grpc_server/index.json: \
 	$(shell git ls-files images/parser_grpc_server src)
 	$(call build,parser_grpc_server)
 
+out/parser_http_server/index.json: \
+	$(shell git ls-files images/parser_http_server src)
+	$(call build,parser_http_server)
+
 out/mock_facilitator/index.json: \
 	$(shell git ls-files images/mock_facilitator src)
 	$(call build,mock_facilitator)
@@ -23,6 +27,7 @@ non-oci-docker-images:
 	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_app -f images/parser_app/Containerfile .
 	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_gateway -f images/parser_gateway/Containerfile .
 	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_grpc_server -f images/parser_grpc_server/Containerfile .
+	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_http_server -f images/parser_http_server/Containerfile .
 	docker buildx build --load --tag anchorageoss-visualsign-parser/mock_facilitator -f images/mock_facilitator/Containerfile .
 
 # ── Local dev stacks ────────────────────────────────────────────────────────

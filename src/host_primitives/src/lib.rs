@@ -3,6 +3,7 @@
 #![deny(clippy::all, clippy::unwrap_used)]
 
 pub mod payment_marker;
+pub mod turnkey;
 
 use std::time::Duration;
 

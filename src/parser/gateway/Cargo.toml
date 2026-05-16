@@ -45,6 +45,11 @@ borsh = { version = "1", features = ["std", "derive"], default-features = false 
 # Base64 for X-PAYMENT body decoding (we hash the inner bytes for x_payment_hash).
 base64 = "0.22"
 
+# Turnkey API key signing for outbound TVC calls (the tvc_probe bin).
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+prost = { version = "0.11", default-features = false, features = ["std"] }
+tonic = { version = "0.9", default-features = false, features = ["transport", "codegen", "prost", "tls", "tls-roots"] }
+
 # error handling
 thiserror = "1"
 
@@ -62,6 +67,10 @@ path = "src/main.rs"
 [[bin]]
 name = "gateway_keygen"
 path = "src/bin/gateway_keygen.rs"
+
+[[bin]]
+name = "tvc_probe"
+path = "src/bin/tvc_probe.rs"
 
 [lints]
 workspace = true

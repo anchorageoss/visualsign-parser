@@ -594,3 +594,117 @@ v3.1 will tighten this by gating settle on a pre-validation step.
   payai's `/verify` checks it before settle, and the VPM's
   `x_payment_hash` binds the marker to the exact X-PAYMENT body.
 - Settle-then-reject quirk (above).
+
+---
+
+## Part 5 — Deploying to real Turnkey TVC
+
+Verified against a deployed Turnkey TVC app whose pivot is `parser_app`
+(gRPC, port 3000, `healthCheckType: TVC_HEALTH_CHECK_TYPE_GRPC`):
+
+- **`*.turnkey.cloud` public ingress accepts HTTP only.** Cloudflare in
+  front of the public domain rejects gRPC traffic with a 403 + `text/html`
+  body, regardless of `content-type: application/grpc` or any auth
+  header. We verified this from three transports (tonic + TLS, grpcurl,
+  raw `curl --http2-prior-knowledge`); all hit the same Cloudflare WAF
+  block. So a deployed TVC pivot whose only listener is gRPC cannot be
+  reached by external callers — the bytes never reach the app.
+- The `healthCheckType: TVC_HEALTH_CHECK_TYPE_GRPC` in the deploy config
+  applies to Turnkey's internal-network health probes; it does NOT mean
+  the public ingress speaks gRPC. To accept external calls, deploy a
+  pivot that speaks HTTP and set `healthCheckType: TVC_HEALTH_CHECK_TYPE_HTTP`.
+
+### `parser_http_server` — the HTTP-speaking pivot
+
+New stagex image at `images/parser_http_server/Containerfile`. Built
+identically to `parser_grpc_server` but exposes:
+
+| Route | Behavior |
+| --- | --- |
+| `GET /health` | 200 OK. Maps to `TVC_HEALTH_CHECK_TYPE_HTTP`. |
+| `POST /visualsign/api/v1/parse` | Open. Turnkey envelope JSON in, signed `parsedTransaction` JSON out. Same wire shape the Go `visualsign-turnkey-client` reference uses. |
+| `POST /visualsign/api/v2/parse` | TVC-enforced if `GATEWAY_SIGNING_PUBKEY_HEX` is set (parser_app verifies a `VerifiedPaymentMarker` first), otherwise behaves like v1. |
+
+Re-uses the existing `parser_app::routes::parse::parse` function — no
+new parsing logic. The Turnkey wire-envelope types (`TurnkeyRequestWrapper`
+etc.) moved to `host_primitives::turnkey` so both `parser_gateway` and
+`parser_http_server` produce the exact same bytes.
+
+### Deploy steps
+
+1. Build + publish the image:
+
+   ```sh
+   make non-oci-docker-images          # builds locally
+   # CI: push to ghcr.io/anchorageoss/parser_http_server on tagged release
+   ```
+
+   The CI release notes from `stagex.yml` will print a paste-ready
+   `tvc deploy create` recipe with the pinned digest.
+
+2. Create or update the TVC deployment config (`tvc deploy init`,
+   then edit):
+
+   ```json
+   {
+     "appId": "<your-tvc-app-id>",
+     "qosVersion": "v2026.2.6",
+     "pivotContainerImageUrl": "ghcr.io/anchorageoss/parser_http_server:vX.Y.Z@sha256:<digest>",
+     "pivotPath": "/parser_http_server",
+     "pivotArgs": [],
+     "expectedPivotDigest": "sha256:<binary-digest-from-release-notes>",
+     "debugMode": false,
+     "healthCheckType": "TVC_HEALTH_CHECK_TYPE_HTTP",
+     "healthCheckPort": 3000,
+     "publicIngressPort": 3000
+   }
+   ```
+
+   Critical fields vs the existing gRPC deployment:
+   - `pivotContainerImageUrl` → `parser_http_server` (was `parser_app`)
+   - `pivotPath` → `/parser_http_server` (was `/parser_app`)
+   - `healthCheckType` → `TVC_HEALTH_CHECK_TYPE_HTTP` (was `_GRPC`)
+
+3. `tvc deploy create tvc-deploy.json`
+
+4. Approve the manifest (`tvc deploy approve`) — operator-side ceremony,
+   same as today.
+
+5. Once `tvc app status --app-id <id>` shows N/N replicas healthy:
+
+   ```sh
+   curl -X POST https://app-<your-app-id>.turnkey.cloud/visualsign/api/v1/parse \
+     -H 'content-type: application/json' \
+     -d '{"request":{"unsigned_payload":"0xf86c808504a817c800...","chain":"CHAIN_ETHEREUM"}}'
+   ```
+
+   Should return a Turnkey envelope with the parsed payload + ephemeral-key
+   signature. No X-Stamp required (v1 is open).
+
+### Turning on TVC-enforced payment
+
+Once `parser_http_server` is live, you can deploy the v3 trust pair:
+
+1. Mint a gateway signing key with `gateway_keygen`.
+2. Re-deploy `parser_http_server` with `GATEWAY_SIGNING_PUBKEY_HEX=<pub>`
+   in its env (Turnkey TVC supports env via deployment config).
+3. Deploy `parser_gateway` separately (Cloud Run / k8s / wherever) with
+   `GATEWAY_SIGNING_KEY_FILE`, `X402_PROFILE=payai`, `X402_NETWORK=solana-devnet`,
+   `GRPC_ADDR` replaced with `HTTP_FORWARD_URL=https://app-<uuid>.turnkey.cloud`
+   (NOTE: the gateway's TVC-relay-over-HTTP mode is still v3.1 work — not
+   in #304. For now, the gateway expects gRPC backends. To use the v3
+   trust pair against a TVC-deployed `parser_http_server`, the gateway
+   needs an HTTP backend mode.)
+
+### Diagnostic tools
+
+- `scripts/turnkey-probe.ts` — minimal Node script that sends an
+  X-Stamp-signed HTTP request to any Turnkey URL. Reads your API key
+  from `~/.config/turnkey/keys/<name>.{private,public}`. Use it to poke
+  at `api.turnkey.com` queries (list_tvc_apps, get_tvc_deployment, etc.)
+  or at your deployed app's HTTP routes.
+
+- `cargo run -p parser_gateway --bin tvc_probe -- <APP_URL> <ORG_ID>` —
+  Rust + tonic + TLS + X-Stamp gRPC probe. Useful to confirm what we
+  found about the gRPC public-ingress block. Returns Cloudflare 403 from
+  any deployed TVC app today.

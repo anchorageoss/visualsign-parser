@@ -497,4 +497,3 @@ async fn path6_tampered_pubkey_returns_502_no_settle() {
         "expected 402 PaymentRequired on parser VPM verify failure; got {status}; body: {body_text}"
     );
 }
-

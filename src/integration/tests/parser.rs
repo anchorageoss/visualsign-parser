@@ -515,7 +515,7 @@ async fn parser_charset_validation_all_chains() {
                 unsigned_payload: transaction.to_string(),
                 chain: chain as i32,
                 chain_metadata: None,
-            payment_marker: Vec::new(),
+                payment_marker: Vec::new(),
             };
 
             let parse_response = test_args

@@ -1,0 +1,28 @@
+[package]
+name = "parser_http_server"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+# Internal — same parse logic + envelope shapes the gRPC server already uses.
+parser_app = { path = "../app" }
+generated = { path = "../../generated", features = ["tonic_types", "serde_derive"] }
+host_primitives = { path = "../../host_primitives" }
+
+# Crypto / hashing for the optional VPM enforcement.
+qos_core = { workspace = true }
+qos_p256 = { workspace = true }
+
+# HTTP + serialization.
+axum = { version = "0.8", features = ["http1", "http2", "tokio", "json"], default-features = false }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time", "net"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "parser_http_server"
+path = "src/main.rs"
