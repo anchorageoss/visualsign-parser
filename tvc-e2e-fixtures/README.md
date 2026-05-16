@@ -12,9 +12,9 @@ the repo's source.
 | `02_tvc_health_response.txt` | `curl -i https://app-…turnkey.cloud/health` — 200, empty body | smoke test § 1 |
 | `03_tvc_v1_parse_response.json` | `/v1/parse` direct against TVC, signed by the enclave ephemeral key | smoke test § 2 |
 | `04_tvc_v2_no_vpm_rejection.txt` | `/v2/parse` direct against TVC with no VPM → `"payment marker is required"` (proves `--gateway-signing-pubkey-hex` is active) | smoke test § 3 |
-| `05_gateway_local_startup.log` | `parser_gateway` startup banner under `X402_PROFILE=local` against TVC backend | full x402 loop § startup |
+| `05_gateway_local_startup.txt` | `parser_gateway` startup banner under `X402_PROFILE=local` against TVC backend | full x402 loop § startup |
 | `06_gateway_local_paid_response.json` | `/v2/parse` via gateway with a mock-fac-fabricated `Payment-Signature` — same envelope shape as the real-money path | full x402 loop § paid request |
-| `07_gateway_payai_startup.log` | Same gateway, re-launched with `X402_PROFILE=payai` + `X402_NETWORK=solana-devnet` | real-devnet variant § startup |
+| `07_gateway_payai_startup.txt` | Same gateway, re-launched with `X402_PROFILE=payai` + `X402_NETWORK=solana-devnet` | real-devnet variant § startup |
 | `08_gateway_payai_402_raw.txt` | Raw 402 response from the payai-mode gateway (note the Payment-Required header is base64-JSON) | real-devnet variant § 402 |
 | `09_gateway_payai_402_decoded.json` | The same Payment-Required header, base64-decoded — shows the devnet USDC mint, payai's `feePayer`, the buyer pubkey as `payTo` | real-devnet variant § 402 |
 | `10_devnet_settlement_tx.json` | `getTransaction` for the real Solana devnet settlement signature `WWTGNvgRBXtg…GQXX71vy` — two signers (buyer + payai feePayer), fee 10001 lamports, status null (success) | real-devnet variant § confirmation |
