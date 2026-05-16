@@ -1,0 +1,10 @@
+App ID: <APP_ID>
+Targeted Deployment: <DEPLOY_ID_LIVE>
+
+Deployment: <DEPLOY_ID_BROKEN>
+  Healthy / Desired Replicas: 0/3
+  Last Updated: 1778973059.000000000s
+
+Deployment: <DEPLOY_ID_LIVE>
+  Healthy / Desired Replicas: 3/3
+  Last Updated: 1778973058.000000000s

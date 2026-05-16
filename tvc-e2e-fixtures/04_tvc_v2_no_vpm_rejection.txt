@@ -1,0 +1,13 @@
+HTTP/2 402 
+date: Sat, 16 May 2026 23:11:20 GMT
+content-type: application/json
+content-length: 296
+nel: {"report_to":"default","max_age":31536000,"include_subdomains":true}
+report-to: {"group":"default","max_age":31536000,"endpoints":[{"url":"https://turnkey.report-uri.com/a/t/g"}],"include_subdomains":true}
+cf-cache-status: DYNAMIC
+set-cookie: __cflb=02DiuJJFUtoDKVEqre8efgPkzm6PnHC6yRsuHTUtbDGB6; HttpOnly; SameSite=Lax; Path=/; Expires=Sun, 17 May 2026 22:11:20 GMT
+server: cloudflare
+cf-ray: 9fce0f9ac96076aa-SEA
+alt-svc: h3=":443"; ma=86400
+
+{"response":{"parsedTransaction":{"payload":{"signablePayload":"","metadataDigest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","inputPayloadDigest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}}},"error":"payment marker is required for this endpoint"}
