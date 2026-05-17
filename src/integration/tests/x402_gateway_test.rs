@@ -548,6 +548,22 @@ async fn path7_v2_ethereum_request_accepts_only_evm_tags() {
             net.contains("84532") || net.starts_with("eip155:") || net == "base-sepolia",
             "ETH 402 must only carry EVM tags; saw network={net:?}; full: {entry}"
         );
+        // EVM v2 wire shape that the x402-evm client refuses to parse without:
+        //   asset = 0x-prefixed 20-byte contract address (NOT the symbol "USDC")
+        //   extra.name + extra.version  = EIP-712 domain for the token
+        let asset = entry["asset"].as_str().unwrap_or("");
+        assert!(
+            asset.starts_with("0x") && asset.len() == 42,
+            "EVM tag asset must be a 0x-prefixed contract address; got {asset:?}"
+        );
+        assert!(
+            entry["extra"]["name"].is_string(),
+            "EVM tag must carry extra.name (EIP-712 domain); full: {entry}"
+        );
+        assert!(
+            entry["extra"]["version"].is_string(),
+            "EVM tag must carry extra.version (EIP-712 domain); full: {entry}"
+        );
     }
 }
 

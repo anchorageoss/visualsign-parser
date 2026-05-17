@@ -28,7 +28,10 @@ use generated::tonic;
 use host_primitives::payment_marker::{VPM_VERSION, VerifiedPaymentMarker, request_hash};
 use qos_crypto::sha_256;
 use serde::Deserialize;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use x402_chain_eip155::KnownNetworkEip155;
+use x402_chain_eip155::chain::{AssetTransferMethod, Eip155TokenDeployment};
+use x402_types::networks::USDC as UsdcEip155;
 
 const PARSE_TIMEOUT: Duration = Duration::from_secs(30);
 const FACILITATOR_TIMEOUT: Duration = Duration::from_secs(10);
@@ -406,38 +409,41 @@ fn translate_to_canonical(
                 "feePayer": "2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4",
             })),
         ),
-        // EVM networks — translate to CAIP-2 form (`eip155:<chainId>`),
-        // resolve "USDC" to the token contract address, and include the
-        // EIP-712 domain parameters (name, version) that the x402 v2
-        // exact-EVM client needs to sign transferWithAuthorization.
-        // Circle's USDC on Base Sepolia + Base both use FiatTokenV2_2
-        // with domain { name: "USDC", version: "2" }.
-        "base-sepolia" => (
-            "eip155:84532".to_string(),
-            if asset == "USDC" {
-                "0x036CbD53842c5426634e7929541eC2318f3dCF7e".to_string()
-            } else {
-                asset.to_string()
+        // EVM networks (USDC): pull the canonical deployment from
+        // x402_chain_eip155 instead of hand-rolling. That crate is the
+        // upstream source of truth for chain id, token contract address,
+        // and EIP-712 domain — Circle's USDC on Base uses name "USD Coin"
+        // (not "USDC") on mainnet and "USDC" on Base Sepolia, and getting
+        // that wrong silently breaks signature verification.
+        _ if asset == "USDC" => match eip155_usdc_deployment(network) {
+            Some(usdc) => match usdc.transfer_method {
+                AssetTransferMethod::Eip3009 { name, version } => (
+                    usdc.chain_reference.as_chain_id().to_string(),
+                    usdc.address.to_checksum(None),
+                    Some(serde_json::json!({"name": name, "version": version})),
+                ),
+                // USDC on every chain we support today is Eip3009. If a
+                // future deployment moves to Permit2, fall back to a
+                // pass-through; the facilitator will reject the
+                // unsupported scheme rather than silently mis-sign.
+                AssetTransferMethod::Permit2 => (network.to_string(), asset.to_string(), None),
             },
-            Some(serde_json::json!({
-                "name": "USDC",
-                "version": "2",
-            })),
-        ),
-        "base" => (
-            "eip155:8453".to_string(),
-            if asset == "USDC" {
-                "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".to_string()
-            } else {
-                asset.to_string()
-            },
-            Some(serde_json::json!({
-                "name": "USDC",
-                "version": "2",
-            })),
-        ),
-        // Unknown networks: pass through, no extra block.
+            None => (network.to_string(), asset.to_string(), None),
+        },
         _ => (network.to_string(), asset.to_string(), None),
+    }
+}
+
+/// Returns the canonical USDC deployment for an EVM `network` short name,
+/// or `None` if the network isn't a known EVM x402 venue. Centralises the
+/// short-name → upstream-constant mapping so the price-tag side
+/// (`x402_config::seeded_tag`) and the wire-emission side
+/// (`translate_to_canonical`) can't drift.
+fn eip155_usdc_deployment(network: &str) -> Option<Eip155TokenDeployment> {
+    match network {
+        "base-sepolia" => Some(UsdcEip155::base_sepolia()),
+        "base" => Some(UsdcEip155::base()),
+        _ => None,
     }
 }
 
@@ -461,7 +467,6 @@ fn accepted_to_terms(accepted: &serde_json::Value) -> (String, String, String) {
 }
 
 fn now_ms() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -653,4 +658,75 @@ async fn forward_http(
         },
         signature,
     ))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn translate_evm_base_sepolia_emits_v2_shape() {
+        let (network, asset, extra) = translate_to_canonical("base-sepolia", "USDC");
+        assert_eq!(network, "eip155:84532");
+        let asset_addr = asset.strip_prefix("0x").expect("EVM asset must be 0x-hex");
+        assert_eq!(asset_addr.len(), 40, "EVM asset must be 20-byte contract");
+        let extra = extra.expect("EVM must carry EIP-712 extra");
+        assert_eq!(extra["name"], "USDC", "Base Sepolia USDC domain name");
+        assert_eq!(extra["version"], "2");
+    }
+
+    #[test]
+    fn translate_evm_base_mainnet_uses_usd_coin_name() {
+        // Latent bug guard: Circle's FiatTokenV2_2 on Base mainnet uses
+        // the EIP-712 domain name "USD Coin", not "USDC". Hardcoding
+        // "USDC" (as a previous revision did) silently breaks signature
+        // verification on mainnet while Base Sepolia keeps working.
+        let (network, _, extra) = translate_to_canonical("base", "USDC");
+        assert_eq!(network, "eip155:8453");
+        let extra = extra.expect("EVM must carry EIP-712 extra");
+        assert_eq!(
+            extra["name"], "USD Coin",
+            "Base mainnet USDC domain name must come from x402_chain_eip155 (Circle uses \"USD Coin\")"
+        );
+        assert_eq!(extra["version"], "2");
+    }
+
+    #[test]
+    fn translate_solana_devnet_emits_caip2_and_fee_payer() {
+        let (network, asset, extra) = translate_to_canonical("solana-devnet", "USDC");
+        assert!(network.starts_with("solana:"), "CAIP-2 form for Solana");
+        assert_eq!(asset, "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+        let extra = extra.expect("payai requires a feePayer in extra");
+        assert!(
+            extra.get("feePayer").is_some(),
+            "Solana extra must carry payai feePayer"
+        );
+    }
+
+    #[test]
+    fn translate_solana_mainnet_emits_caip2_and_fee_payer() {
+        let (network, asset, extra) = translate_to_canonical("solana", "USDC");
+        assert!(network.starts_with("solana:"));
+        assert_eq!(asset, "EPjFWdd5AufqSSqeMxKf8aSXdrEv2Hk7UFEqA8zoYC");
+        assert!(extra.is_some());
+    }
+
+    #[test]
+    fn translate_unknown_network_passes_through() {
+        let (n, a, x) = translate_to_canonical("polkadot", "USDC");
+        assert_eq!(n, "polkadot");
+        assert_eq!(a, "USDC");
+        assert!(x.is_none());
+    }
+
+    #[test]
+    fn translate_non_usdc_asset_passes_through_unchanged() {
+        // We only know how to resolve USDC today. A request for, say,
+        // "USDT" on base-sepolia leaves both fields alone — that scheme
+        // isn't supported and the facilitator will reject downstream.
+        let (n, a, _) = translate_to_canonical("base-sepolia", "USDT");
+        assert_eq!(n, "base-sepolia");
+        assert_eq!(a, "USDT");
+    }
 }

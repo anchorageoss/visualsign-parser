@@ -46,28 +46,50 @@ function logSection(title: string): void {
   console.log(`-- ${title} `.padEnd(72, "-"));
 }
 
+async function loadKey(): Promise<string> {
+  try {
+    return (await readFile(WALLET_KEY_PATH, "utf-8")).trim();
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      console.error(
+        `wallet key not found at ${WALLET_KEY_PATH}\n` +
+          `  Generate one with viem's generatePrivateKey, write 32-byte hex to that path (mode 600),\n` +
+          `  then fund the derived address with Base Sepolia USDC (https://faucet.circle.com).`,
+      );
+      process.exit(1);
+    }
+    throw e;
+  }
+}
+
 async function main(): Promise<void> {
   // ── Wallet ──────────────────────────────────────────────────────────
-  const keyHex = (await readFile(WALLET_KEY_PATH, "utf-8")).trim();
+  const keyHex = await loadKey();
   const account = privateKeyToAccount(`0x${keyHex.replace(/^0x/, "")}`);
   logSection("Wallet");
   console.log("buyer address :", account.address);
 
   const pub = createPublicClient({ chain: baseSepolia, transport: http(RPC_URL) });
-  const ethBalance = await pub.getBalance({ address: account.address });
-  console.log("buyer ETH     :", (Number(ethBalance) / 1e18).toFixed(6), "ETH");
   const usdcAbi = parseAbi(["function balanceOf(address) view returns (uint256)"]);
-  const usdcBalance = await pub.readContract({
-    address: USDC_BASE_SEPOLIA,
-    abi: usdcAbi,
-    functionName: "balanceOf",
-    args: [account.address],
-  });
+  // ETH balance is informational only — payai's facilitator pays gas in
+  // the x402 v2 flow. USDC is what actually matters. Fetch in parallel.
+  const [ethBalance, usdcBalance] = await Promise.all([
+    pub.getBalance({ address: account.address }),
+    pub.readContract({
+      address: USDC_BASE_SEPOLIA,
+      abi: usdcAbi,
+      functionName: "balanceOf",
+      args: [account.address],
+    }),
+  ]);
+  console.log("buyer ETH     :", (Number(ethBalance) / 1e18).toFixed(6), "ETH (informational; payai pays gas)");
   console.log("buyer USDC    :", (Number(usdcBalance) / 1e6).toFixed(6), "USDC");
   if (usdcBalance < 100n) {
-    console.warn(
-      "WARN: low USDC; get test funds from https://faucet.circle.com (Base Sepolia, mint above).",
+    console.error(
+      "ERROR: USDC balance too low to pay the 402 (need ≥ 0.0001 USDC).\n" +
+        "  Top up at https://faucet.circle.com — pick Base Sepolia, mint 0x036CbD…CF7e.",
     );
+    process.exit(1);
   }
 
   // ── x402 client ─────────────────────────────────────────────────────
