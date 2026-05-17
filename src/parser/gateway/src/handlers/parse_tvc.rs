@@ -16,7 +16,7 @@ use crate::turnkey::{
     TurnkeyParsedTransaction, TurnkeyPayload, TurnkeyRequestWrapper, TurnkeyResponse,
     TurnkeyResponseWrapper, TurnkeySignature, error_response,
 };
-use crate::x402_config::X402Config;
+use crate::x402_config::{X402Config, network_matches_chain};
 use axum::{
     Json,
     extract::State,
@@ -71,8 +71,8 @@ pub async fn parse_handler_tvc(
         None => return error(StatusCode::INTERNAL_SERVER_ERROR, "x402 config not loaded"),
     };
 
-    let chain = match Chain::from_str_name(&wrapper.request.chain) {
-        Some(c) => c as i32,
+    let chain_enum = match Chain::from_str_name(&wrapper.request.chain) {
+        Some(c) => c,
         None => {
             return error(
                 StatusCode::BAD_REQUEST,
@@ -80,6 +80,7 @@ pub async fn parse_handler_tvc(
             );
         }
     };
+    let chain = chain_enum as i32;
 
     // Read X-Payment (case-insensitive). Absent -> 402 with PaymentRequired.
     let payment_b64 = match headers
@@ -88,7 +89,7 @@ pub async fn parse_handler_tvc(
         .map(|(_, v)| v.to_str().unwrap_or_default().to_string())
     {
         Some(s) if !s.is_empty() => s,
-        _ => return payment_required(&config),
+        _ => return payment_required(&config, chain_enum),
     };
 
     // Decode the payment payload so we can pick the matching price tag.
@@ -256,7 +257,7 @@ pub async fn parse_handler_tvc(
         Ok(parts) => parts,
         Err(BackendError::PaymentRejected(msg)) => {
             eprintln!("backend rejected payment: {msg}");
-            return payment_required(&config);
+            return payment_required(&config, chain_enum);
         }
         Err(BackendError::Failed { status, msg }) => return error(status, &msg),
     };
@@ -298,15 +299,25 @@ fn error(code: StatusCode, msg: &str) -> (StatusCode, HeaderMap, Json<TurnkeyRes
     )
 }
 
-/// 402 PaymentRequired with the canonical x402 v2 body. Translates our
-/// internal network/asset names to the CAIP-2 form payai's TS client
+/// 402 PaymentRequired with the canonical x402 v2 body, filtered to the
+/// price tags whose network matches the parse-request `chain`. Translates
+/// our internal network/asset names to the CAIP-2 form payai's TS client
 /// expects, and includes payai's known fee-payer in `extra` so the buyer
 /// can build a tx with payai as fee-payer (the only fee-payer the
 /// facilitator will co-sign at /settle).
-fn payment_required(config: &X402Config) -> (StatusCode, HeaderMap, Json<TurnkeyResponseWrapper>) {
+///
+/// When no configured tag covers the request's chain (e.g. CHAIN_TRON,
+/// CHAIN_SUI, CHAIN_BITCOIN, CHAIN_CUSTOM, CHAIN_UNSPECIFIED today),
+/// returns 400 instead of a 402 — paywalling a request the gateway has
+/// no settlement path for would mislead the buyer.
+fn payment_required(
+    config: &X402Config,
+    chain: Chain,
+) -> (StatusCode, HeaderMap, Json<TurnkeyResponseWrapper>) {
     let accepts: Vec<serde_json::Value> = config
         .price_tags
         .iter()
+        .filter(|t| network_matches_chain(&t.network, chain))
         .map(|t| {
             let (network, asset, extra) = translate_to_canonical(&t.network, &t.asset);
             let amount = (t.price_usd * rust_decimal::Decimal::from(1_000_000u64))
@@ -330,6 +341,18 @@ fn payment_required(config: &X402Config) -> (StatusCode, HeaderMap, Json<Turnkey
             entry
         })
         .collect();
+
+    if accepts.is_empty() {
+        return error(
+            StatusCode::BAD_REQUEST,
+            &format!(
+                "x402 payment not available for chain {chain_name}; \
+                 gateway has no price tag matching a network x402 settles on \
+                 for this chain (supported: CHAIN_ETHEREUM, CHAIN_SOLANA)",
+                chain_name = chain.as_str_name(),
+            ),
+        );
+    }
 
     let body = serde_json::json!({
         "x402Version": 2,

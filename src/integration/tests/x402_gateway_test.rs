@@ -497,3 +497,127 @@ async fn path6_tampered_pubkey_returns_502_no_settle() {
         "expected 402 PaymentRequired on parser VPM verify failure; got {status}; body: {body_text}"
     );
 }
+
+// ── Per-chain network derivation (no payment header → 402 carries only the
+//    accepts entries matching the parse-request's chain) ─────────────────────
+
+fn decode_payment_required(resp: &reqwest::Response) -> serde_json::Value {
+    use base64::Engine;
+    let header = resp
+        .headers()
+        .get("Payment-Required")
+        .expect("Payment-Required header must be present")
+        .as_bytes()
+        .to_vec();
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(&header)
+        .expect("Payment-Required must be base64");
+    serde_json::from_slice(&decoded).expect("Payment-Required must be JSON")
+}
+
+/// Path 7: POST /v2/parse with `chain: CHAIN_ETHEREUM` and no Payment-Signature
+/// → 402, accepts contains ONLY EVM (base-sepolia / eip155:84532) tags, no
+/// Solana entry. Local profile by default offers both chains, so this proves
+/// the per-chain filter at the handler.
+#[tokio::test]
+async fn path7_v2_ethereum_request_accepts_only_evm_tags() {
+    let _guard = TEST_MUTEX.lock().await;
+    let _p = start_procs(&[]).await;
+
+    let body = serde_json::json!({
+        "request": { "unsigned_payload": "0x", "chain": "CHAIN_ETHEREUM" }
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{GW_PORT}/visualsign/api/v2/parse"
+        ))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 402);
+
+    let v = decode_payment_required(&resp);
+    let accepts = v["accepts"].as_array().expect("accepts must be array");
+    assert!(!accepts.is_empty(), "ETH 402 must offer at least one tag");
+    for entry in accepts {
+        let net = entry["network"].as_str().unwrap_or("");
+        assert!(
+            net.contains("84532") || net.starts_with("eip155:") || net == "base-sepolia",
+            "ETH 402 must only carry EVM tags; saw network={net:?}; full: {entry}"
+        );
+    }
+}
+
+/// Path 8: POST /v2/parse with `chain: CHAIN_SOLANA` and no Payment-Signature
+/// → 402, accepts contains ONLY Solana (solana-devnet) tags.
+#[tokio::test]
+async fn path8_v2_solana_request_accepts_only_solana_tags() {
+    let _guard = TEST_MUTEX.lock().await;
+    let _p = start_procs(&[]).await;
+
+    let body = serde_json::json!({
+        "request": { "unsigned_payload": "0x", "chain": "CHAIN_SOLANA" }
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{GW_PORT}/visualsign/api/v2/parse"
+        ))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 402);
+
+    let v = decode_payment_required(&resp);
+    let accepts = v["accepts"].as_array().expect("accepts must be array");
+    assert!(
+        !accepts.is_empty(),
+        "Solana 402 must offer at least one tag"
+    );
+    for entry in accepts {
+        let net = entry["network"].as_str().unwrap_or("");
+        assert!(
+            net.starts_with("solana:") || net == "solana-devnet" || net == "solana",
+            "Solana 402 must only carry Solana tags; saw network={net:?}; full: {entry}"
+        );
+    }
+}
+
+/// Path 9: POST /v2/parse with `chain: CHAIN_TRON` (or any chain x402 doesn't
+/// natively settle on) → 400 with a clear error, NOT a 402. A 402 here would
+/// imply the buyer can pay their way through; the gateway has no settlement
+/// path so it's misleading.
+#[tokio::test]
+async fn path9_v2_unsupported_chain_returns_400() {
+    let _guard = TEST_MUTEX.lock().await;
+    let _p = start_procs(&[]).await;
+
+    let body = serde_json::json!({
+        "request": { "unsigned_payload": "0x", "chain": "CHAIN_TRON" }
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{GW_PORT}/visualsign/api/v2/parse"
+        ))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        400,
+        "expected 400 for unsupported chain, not 402"
+    );
+    let text = resp.text().await.unwrap_or_default();
+    assert!(
+        text.contains("CHAIN_TRON") || text.contains("not available"),
+        "error body should name the unsupported chain; got: {text}"
+    );
+}
