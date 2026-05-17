@@ -733,6 +733,79 @@ async fn path11_undercut_amount_returns_402_no_settle() {
     );
 }
 
+/// Path 13: oversize POST body to /v2/parse (just past the gateway's
+/// 64 KiB cap). axum's body-limit layer rejects before any extractor
+/// reads the body, so this is a 413 with no facilitator call and no
+/// settlement — closes the pre-paywall body-ingest amplification.
+#[tokio::test]
+async fn path13_oversize_body_returns_413_no_settle() {
+    let _guard = TEST_MUTEX.lock().await;
+    let _p = start_procs(&[]).await;
+    let before = settle_count().await;
+
+    // 65 KiB of hex chars, padded inside a request envelope — well past
+    // the 64 KiB cap regardless of envelope overhead.
+    let big_hex = "0x".to_string() + &"a".repeat(65 * 1024);
+    let body = serde_json::json!({
+        "request": { "unsigned_payload": big_hex, "chain": "CHAIN_ETHEREUM" }
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{GW_PORT}/visualsign/api/v2/parse"
+        ))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        413,
+        "oversize body must trigger 413 Payload Too Large before any handler runs"
+    );
+    assert_eq!(
+        settle_count().await,
+        before,
+        "/settle must not run for an oversize body"
+    );
+}
+
+/// Path 14: a real-world-sized parse request (the ETH_TX_HEX fixture,
+/// ~500 bytes including the JSON envelope) still goes through the paid
+/// path unchanged. Regression guard against the body cap being set too
+/// tight for legitimate traffic.
+#[tokio::test]
+async fn path14_legitimate_body_size_unchanged_under_cap() {
+    let _guard = TEST_MUTEX.lock().await;
+    let _p = start_procs(&[]).await;
+
+    let body = serde_json::json!({
+        "request": { "unsigned_payload": ETH_TX_HEX, "chain": "CHAIN_ETHEREUM" }
+    });
+    let body_bytes = serde_json::to_vec(&body).unwrap();
+    assert!(
+        body_bytes.len() < 64 * 1024,
+        "legitimate parse envelope ({} bytes) must fit under the body cap",
+        body_bytes.len()
+    );
+
+    let requirements = fetch_v2_requirements().await;
+    let payment_header = build_payment_signature(&requirements);
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{GW_PORT}/visualsign/api/v2/parse"
+        ))
+        .header("Payment-Signature", payment_header)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200, "legitimate paid request must still 200");
+}
+
 /// Path 12: buyer echoes the offer with `network` swapped to a different
 /// chain's network (cross-chain confusion). Gateway must reject.
 #[tokio::test]

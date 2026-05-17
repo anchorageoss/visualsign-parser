@@ -227,10 +227,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         policy: Arc::new(policy),
     };
 
+    // 64 KiB caps every parse-request body the TVC pivot will accept.
+    // axum's default is 2 MiB; a real parse envelope is hundreds of bytes,
+    // and accepting more lets an attacker force expensive sync parsing
+    // (block_in_place) on the enclave's CPU per call. Same cap as the
+    // gateway in front of us, so a properly-formed request that passes the
+    // gateway can't be rejected here.
+    const PIVOT_BODY_LIMIT_BYTES: usize = 64 * 1024;
     let app = Router::new()
         .route("/health", get(health))
         .route("/visualsign/api/v1/parse", post(parse_v1))
         .route("/visualsign/api/v2/parse", post(parse_v2))
+        .layer(axum::extract::DefaultBodyLimit::max(PIVOT_BODY_LIMIT_BYTES))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));

@@ -163,8 +163,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_backend_url,
     };
 
+    // 64 KiB caps the public ingress body. The gRPC backend's
+    // `GRPC_MAX_RECV_MSG_SIZE` (~25 MiB) is the wrong number for the public
+    // HTTP layer — a parse request is ≤ a few KB in real traffic, while a
+    // 25 MiB unauthenticated body lets a non-paying caller force the gateway
+    // to JSON-parse 25 MB before any Payment-Signature check runs. 64 KiB
+    // leaves headroom for `chain_metadata.abi_mappings` while shrinking the
+    // pre-paywall amplification surface by ~400×.
+    const PUBLIC_BODY_LIMIT_BYTES: usize = 64 * 1024;
     let app = app
-        .layer(DefaultBodyLimit::max(GRPC_MAX_RECV_MSG_SIZE))
+        .layer(DefaultBodyLimit::max(PUBLIC_BODY_LIMIT_BYTES))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
