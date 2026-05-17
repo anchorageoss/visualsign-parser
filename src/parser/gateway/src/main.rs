@@ -13,6 +13,7 @@ use generated::parser::parser_service_client::ParserServiceClient;
 use generated::tonic;
 use host_primitives::GRPC_MAX_RECV_MSG_SIZE;
 use parser_gateway::attestation::AttestationVerifier;
+use parser_gateway::auth::BearerToken;
 use parser_gateway::signing::GatewaySigner;
 use parser_gateway::x402_config::X402Config;
 use std::net::SocketAddr;
@@ -163,6 +164,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_backend_url,
     };
 
+    // Optional shared-bearer-token gate. Sits above the body-limit layer so
+    // unauthenticated callers don't even consume the 64 KiB JSON-parse budget.
+    // /health is carved out inside the middleware (Cloud Run / operator probes
+    // don't need the token).
+    let bearer_token = match BearerToken::from_env() {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("FATAL: invalid gateway-auth bearer-token configuration: {e}");
+            std::process::exit(1);
+        }
+    };
+    if let Some(token) = bearer_token.as_ref() {
+        let len = token.byte_len();
+        println!("gateway bearer-token gate enabled ({len}-byte token)");
+    }
+
     // 64 KiB caps the public ingress body. The gRPC backend's
     // `GRPC_MAX_RECV_MSG_SIZE` (~25 MiB) is the wrong number for the public
     // HTTP layer — a parse request is ≤ a few KB in real traffic, while a
@@ -171,9 +188,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // leaves headroom for `chain_metadata.abi_mappings` while shrinking the
     // pre-paywall amplification surface by ~400×.
     const PUBLIC_BODY_LIMIT_BYTES: usize = 64 * 1024;
-    let app = app
-        .layer(DefaultBodyLimit::max(PUBLIC_BODY_LIMIT_BYTES))
-        .with_state(state);
+    let mut app = app.layer(DefaultBodyLimit::max(PUBLIC_BODY_LIMIT_BYTES));
+    if let Some(token) = bearer_token {
+        app = app.layer(axum::middleware::from_fn_with_state(
+            token,
+            parser_gateway::auth::require_bearer_token,
+        ));
+    }
+    let app = app.with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("parser_gateway {} listening on {addr}", env!("VERSION"));

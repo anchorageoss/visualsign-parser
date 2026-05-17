@@ -57,6 +57,14 @@ All env vars are read at startup. Bad values fail-closed (gateway exits 1).
 | `X402_PRICE_TAGS_JSON`           | no        | seeded from profile + `X402_NETWORK` | full multi-tag override; see the JSON shape in `x402_config.rs`                        |
 | `TVC_DEMO_PINNED_PUBKEY_HEX`   | **yes** (non-local) | —                          | pinned enclave pubkey, hex                                                             |
 | `TVC_DEMO_PINNED_PUBKEY_FILE`  | no        | —                                   | alternative to `_HEX`: file holding the hex                                            |
+| `GATEWAY_AUTH_BEARER_TOKEN`    | no        | —                                   | optional shared-bearer-token gate. When set, every route except `/health` requires `Authorization: Bearer <this-value>` or returns 401. Mutually exclusive with `_FILE`. |
+| `GATEWAY_AUTH_BEARER_FILE`     | no        | —                                   | path to a file containing the bearer token (whitespace-trimmed). Preferred for Cloud Run / k8s secret-volume mounts. Mutually exclusive with `_TOKEN`. |
+
+The bearer-token gate is a weak shared-secret intended to keep random
+crawlers off the endpoint while AI-agent callers (which can set arbitrary
+HTTP headers but can't easily mint per-caller identity tokens) can still
+reach the x402 settlement layer. `/health` is intentionally excluded so
+operators / orchestrators can probe liveness without sharing the token.
 
 ### Network selection per parse chain
 

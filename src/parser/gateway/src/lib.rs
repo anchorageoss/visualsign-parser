@@ -6,6 +6,7 @@
 #![allow(clippy::panic)]
 
 pub mod attestation;
+pub mod auth;
 pub mod handlers;
 pub mod signing;
 pub mod state;
