@@ -115,10 +115,7 @@ pub async fn parse_handler_tvc(
 
     // Find the matching price tag (config-side). We use the network as the
     // primary key; the buyer must have picked one of our offered tags.
-    let accepted = payload
-        .accepted
-        .clone()
-        .unwrap_or_else(|| serde_json::Value::Null);
+    let accepted = payload.accepted.clone().unwrap_or(serde_json::Value::Null);
 
     let client = match reqwest::Client::builder()
         .timeout(FACILITATOR_TIMEOUT)
@@ -409,7 +406,37 @@ fn translate_to_canonical(
                 "feePayer": "2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4",
             })),
         ),
-        // EVM and unknown networks: pass through, no extra block.
+        // EVM networks — translate to CAIP-2 form (`eip155:<chainId>`),
+        // resolve "USDC" to the token contract address, and include the
+        // EIP-712 domain parameters (name, version) that the x402 v2
+        // exact-EVM client needs to sign transferWithAuthorization.
+        // Circle's USDC on Base Sepolia + Base both use FiatTokenV2_2
+        // with domain { name: "USDC", version: "2" }.
+        "base-sepolia" => (
+            "eip155:84532".to_string(),
+            if asset == "USDC" {
+                "0x036CbD53842c5426634e7929541eC2318f3dCF7e".to_string()
+            } else {
+                asset.to_string()
+            },
+            Some(serde_json::json!({
+                "name": "USDC",
+                "version": "2",
+            })),
+        ),
+        "base" => (
+            "eip155:8453".to_string(),
+            if asset == "USDC" {
+                "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".to_string()
+            } else {
+                asset.to_string()
+            },
+            Some(serde_json::json!({
+                "name": "USDC",
+                "version": "2",
+            })),
+        ),
+        // Unknown networks: pass through, no extra block.
         _ => (network.to_string(), asset.to_string(), None),
     }
 }
