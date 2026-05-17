@@ -248,6 +248,103 @@ parser_http_server (TVC, app-<APP_ID>…turnkey.cloud)
 gateway → TS client (200 with signed parse)
 ```
 
+## Variant: real settlement on Base Sepolia (payai facilitator)
+
+Same trust pair, EVM side. A real USDC `transferWithAuthorization` (EIP-3009) on Base Sepolia, settled by payai. Validates the gateway's EVM 402 shape and the @x402/evm exact-scheme client path. Proven on-chain — tx `0x61a3afa9af9c1f6fa1c9d0d4b8bda942096894786a7fac3719073c2e5efccd93` (block 41,672,691) was the first successful run.
+
+Prereqs: `~/.config/visualsign/base-sepolia/wallet.key` (32-byte hex private key, mode 600) is funded with Base Sepolia USDC. Fund at <https://faucet.circle.com> (pick "Base Sepolia"; USDC mint is `0x036CbD53842c5426634e7929541eC2318f3dCF7e`). ETH for gas is not strictly needed — payai's facilitator broadcasts via Multicall3 and covers gas — but a few drops as a fallback don't hurt.
+
+Generate the wallet locally (don't print the private bytes; the file is mode 600):
+
+```bash
+mkdir -p ~/.config/visualsign/base-sepolia
+node -e '
+  const { generatePrivateKey, privateKeyToAccount } = require("./scripts/node_modules/viem/accounts");
+  const fs = require("fs");
+  const pk = generatePrivateKey();
+  fs.writeFileSync(process.env.HOME + "/.config/visualsign/base-sepolia/wallet.key", pk.slice(2) + "\n", { mode: 0o600 });
+  fs.writeFileSync(process.env.HOME + "/.config/visualsign/base-sepolia/wallet.address", privateKeyToAccount(pk).address + "\n");
+  console.log(privateKeyToAccount(pk).address);
+'
+```
+
+Re-launch the gateway with the payai profile aimed at base-sepolia (kill the previous one first):
+
+```bash
+cd src
+
+GW_PID=$(ss -tlnp 2>&1 | awk '/:8080 /{ for(i=1;i<=NF;i++) if(match($i, /pid=([0-9]+)/, m)) print m[1] }' | head -1)
+[ -n "$GW_PID" ] && kill "$GW_PID"
+
+ADDR=$(cat ~/.config/visualsign/base-sepolia/wallet.address | tr -d '\n')
+nohup env \
+  GATEWAY_PORT=8080 \
+  GRPC_ADDR=http://127.0.0.1:44020 \
+  X402_PROFILE=payai \
+  X402_NETWORK=base-sepolia \
+  X402_PAYTO=$ADDR \
+  GATEWAY_SIGNING_KEY_FILE=$HOME/.config/visualsign/gateway/private.key \
+  HTTP_BACKEND_URL=https://app-<APP_ID>.turnkey.cloud \
+  ./target/debug/parser_gateway >/tmp/gateway.basesep.log 2>&1 < /dev/null &
+disown
+```
+
+The 402 from this gateway carries the v2-correct shape (notice the differences from the Solana variant):
+
+```json
+{
+  "amount":  "100",
+  "asset":   "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  "extra":   { "name": "USDC", "version": "2" },
+  "maxTimeoutSeconds": 300,
+  "network": "eip155:84532",
+  "payTo":   "0x7850b376011285f023603e8ad09b550b47f05bf5",
+  "scheme":  "exact"
+}
+```
+
+`network` is CAIP-2 form (`eip155:84532`), `asset` is the USDC contract, and `extra` carries the EIP-712 domain (`{name: "USDC", version: "2"}` matches Circle's FiatTokenV2_2). These three are what `@x402/evm/exact/client` needs to sign — the gateway translates them in `parse_tvc.rs::translate_to_canonical` per chain.
+
+Drive the demo:
+
+```bash
+cd scripts
+GATEWAY_URL=http://127.0.0.1:8080 ./x402-base-sepolia-demo.ts
+```
+
+The demo uses `@x402/core/client` + `@x402/evm/exact/client` (already in `scripts/package.json`). It signs the EIP-3009 authorization, retries `/v2/parse` with the `Payment-Signature` header, decodes the settled tx hash from the `Payment-Response` header, and validates the parse response.
+
+Expected tail:
+
+```
+-- Paid POST /visualsign/api/v2/parse ----------------------------------
+status: 200
+response.error : null
+payloadLen     : 734
+enclavePubKey  : 049d817479c5e931137524e579e5af3581c5e0d02688101c30fa324c2a365995a5c8483d2725f1846c0f937501de671de5ef5a6388ddd4d8fbc0a3e6b673d186b904f1d2c385779acdb048c26324c38ff49ad696c49d8a6fc86a4e872b9d8076a7534ad190e8174ba8836aaa2b5cf51eec28529f393981702b5e410e965cc8c6fd21
+
+-- Settlement (Payment-Response) ---------------------------------------
+{
+  "network": "base-sepolia",
+  "payer": "0x7850b376011285f023603e8ad09b550b47f05bf5",
+  "success": true,
+  "transaction": "0x<66-char base-sepolia tx hash>"
+}
+explorer       : https://sepolia.basescan.org/tx/0x…
+```
+
+Inspect the on-chain settlement:
+
+```bash
+curl -sS -X POST https://sepolia.base.org -H 'Content-Type: application/json' \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getTransactionReceipt\",\"params\":[\"<0xhash>\"]}" \
+  | jq '.result | {blockNumber, status, from, to, gasUsed, logs_count: (.logs | length)}'
+```
+
+Expect `status: 0x1`, two log entries on the USDC contract (`AuthorizationUsed` from the buyer, then `Transfer` from buyer → payTo), `from` = a payai-controlled executor, `to` = Multicall3 (`0xca11bde05977b3631167028862be2a173976ca11`).
+
+The `enclavePubKey` in the parse response is identical to the value in the Solana variant — same deployed pivot, same attested ephemeral key answering both chain flows.
+
 ## Teardown
 
 ```bash
