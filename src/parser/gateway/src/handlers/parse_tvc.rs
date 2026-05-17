@@ -116,9 +116,17 @@ pub async fn parse_handler_tvc(
         }
     };
 
-    // Find the matching price tag (config-side). We use the network as the
-    // primary key; the buyer must have picked one of our offered tags.
+    // The buyer must have echoed one of our offered tags verbatim.
+    // Without this gate the buyer fully controls payTo/asset/amount/network
+    // through to the facilitator and the VPM the enclave consumes — a
+    // self-transfer of 1 atomic unit satisfies the facilitator and the
+    // enclave's signature-only check, bypassing the paywall.
     let accepted = payload.accepted.clone().unwrap_or(serde_json::Value::Null);
+    let offers = build_canonical_offers(&config, chain_enum);
+    if let Err(why) = validate_accepted_is_offered(&accepted, &offers) {
+        eprintln!("rejected Payment-Signature: {why}");
+        return payment_required(&config, chain_enum);
+    }
 
     let client = match reqwest::Client::builder()
         .timeout(FACILITATOR_TIMEOUT)
@@ -314,34 +322,7 @@ fn payment_required(
     config: &X402Config,
     chain: Chain,
 ) -> (StatusCode, HeaderMap, Json<TurnkeyResponseWrapper>) {
-    let accepts: Vec<serde_json::Value> = config
-        .price_tags
-        .iter()
-        .filter(|t| network_matches_chain(&t.network, chain))
-        .map(|t| {
-            let (network, asset, extra) = translate_to_canonical(&t.network, &t.asset);
-            let amount = (t.price_usd * rust_decimal::Decimal::from(1_000_000u64))
-                .round()
-                .to_string();
-            let pay_to = match &t.pay_to {
-                crate::x402_config::PayToAddress::Evm(s) => s.clone(),
-                crate::x402_config::PayToAddress::Solana(s) => s.clone(),
-            };
-            let mut entry = serde_json::json!({
-                "scheme": "exact",
-                "network": network,
-                "asset": asset,
-                "amount": amount,
-                "payTo": pay_to,
-                "maxTimeoutSeconds": 300,
-            });
-            if let Some(extra_obj) = extra {
-                entry["extra"] = extra_obj;
-            }
-            entry
-        })
-        .collect();
-
+    let accepts = build_canonical_offers(config, chain);
     if accepts.is_empty() {
         return error(
             StatusCode::BAD_REQUEST,
@@ -372,6 +353,116 @@ fn payment_required(
         headers,
         Json(error_response("payment required".to_string())),
     )
+}
+
+/// Build the canonical `accepts[]` array the gateway is willing to honor for
+/// a request on `chain`. The same logic powers the 402 emission AND the
+/// per-request validation gate in `validate_accepted_is_offered` — sharing
+/// the construction is how we make sure the buyer can never echo back an
+/// offer the gateway didn't actually make.
+fn build_canonical_offers(config: &X402Config, chain: Chain) -> Vec<serde_json::Value> {
+    config
+        .price_tags
+        .iter()
+        .filter(|t| network_matches_chain(&t.network, chain))
+        .map(|t| {
+            let (network, asset, extra) = translate_to_canonical(&t.network, &t.asset);
+            let amount = (t.price_usd * rust_decimal::Decimal::from(1_000_000u64))
+                .round()
+                .to_string();
+            let pay_to = match &t.pay_to {
+                crate::x402_config::PayToAddress::Evm(s) => s.clone(),
+                crate::x402_config::PayToAddress::Solana(s) => s.clone(),
+            };
+            let mut entry = serde_json::json!({
+                "scheme": "exact",
+                "network": network,
+                "asset": asset,
+                "amount": amount,
+                "payTo": pay_to,
+                "maxTimeoutSeconds": 300,
+            });
+            if let Some(extra_obj) = extra {
+                entry["extra"] = extra_obj;
+            }
+            entry
+        })
+        .collect()
+}
+
+/// Reject `Payment-Signature` requests whose echoed `accepted` block doesn't
+/// match one of the gateway's offers for the request's chain. Without this
+/// gate, the buyer fully controls the `payTo`/`asset`/`amount`/`network`
+/// fields that flow into the facilitator's `/verify` + `/settle` and into
+/// the VPM the enclave consumes — a self-transfer of 1 atomic unit to the
+/// buyer's own wallet would be settled by payai (internally consistent),
+/// signed by the gateway, and honored by the enclave (which only verifies
+/// signature + request-hash binding, not economic policy).
+///
+/// Match rule: the buyer's `(scheme, network, asset, payTo)` must equal
+/// some offered tag, and the buyer's `amount` must be `>=` that tag's
+/// `amount` (overpay is allowed; underpay is not). EVM addresses are
+/// compared case-insensitively because checksummed mixed-case echoes are
+/// equivalent to lowercase. Comparison is intentionally strict on the
+/// network identifier (CAIP-2 string) to prevent cross-chain confusion.
+fn validate_accepted_is_offered(
+    accepted: &serde_json::Value,
+    offers: &[serde_json::Value],
+) -> Result<(), String> {
+    if !accepted.is_object() {
+        return Err("Payment-Signature `accepted` must be a JSON object".to_string());
+    }
+    let buyer = AcceptedClaim::extract(accepted)?;
+
+    for offer in offers {
+        // `offers` is generated by us, fields always present and well-typed.
+        let o = AcceptedClaim::extract(offer)
+            .map_err(|e| format!("gateway offer is malformed (bug): {e}"))?;
+        if o.scheme == buyer.scheme
+            && o.network == buyer.network
+            && o.asset.eq_ignore_ascii_case(buyer.asset)
+            && o.pay_to.eq_ignore_ascii_case(buyer.pay_to)
+            && buyer.amount_atomic >= o.amount_atomic
+        {
+            return Ok(());
+        }
+    }
+
+    Err(format!(
+        "Payment-Signature accepted {{network={:?}, payTo={:?}, asset={:?}, scheme={:?}, amount={}}} \
+         does not match any offer the gateway advertised for this chain. Refetch the 402 and \
+         echo the unmodified `Payment-Required` entry.",
+        buyer.network, buyer.pay_to, buyer.asset, buyer.scheme, buyer.amount_atomic,
+    ))
+}
+
+struct AcceptedClaim<'a> {
+    scheme: &'a str,
+    network: &'a str,
+    asset: &'a str,
+    pay_to: &'a str,
+    amount_atomic: u128,
+}
+
+impl<'a> AcceptedClaim<'a> {
+    fn extract(v: &'a serde_json::Value) -> Result<Self, String> {
+        fn s<'b>(v: &'b serde_json::Value, key: &str) -> Result<&'b str, String> {
+            v.get(key)
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| format!("missing or non-string field `{key}` in accepted"))
+        }
+        let amount_str = s(v, "amount")?;
+        let amount_atomic: u128 = amount_str
+            .parse()
+            .map_err(|_| format!("amount {amount_str:?} must be a non-negative integer string"))?;
+        Ok(AcceptedClaim {
+            scheme: s(v, "scheme")?,
+            network: s(v, "network")?,
+            asset: s(v, "asset")?,
+            pay_to: s(v, "payTo")?,
+            amount_atomic,
+        })
+    }
 }
 
 /// Map our short network/asset names to the CAIP-2 / mint-address form payai
@@ -728,5 +819,146 @@ mod tests {
         let (n, a, _) = translate_to_canonical("base-sepolia", "USDT");
         assert_eq!(n, "base-sepolia");
         assert_eq!(a, "USDT");
+    }
+
+    // ── validate_accepted_is_offered ────────────────────────────────────
+
+    fn one_offer() -> serde_json::Value {
+        serde_json::json!({
+            "scheme": "exact",
+            "network": "eip155:84532",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "amount": "100",
+            "payTo": "0x7850B376011285F023603E8AD09b550b47f05bf5",
+            "maxTimeoutSeconds": 300,
+            "extra": {"name": "USDC", "version": "2"},
+        })
+    }
+
+    #[test]
+    fn validate_accepts_exact_echo() {
+        let offer = one_offer();
+        assert!(validate_accepted_is_offered(&offer, &[offer.clone()]).is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_overpay() {
+        let offer = one_offer();
+        let mut buyer = offer.clone();
+        buyer["amount"] = serde_json::Value::String("1000000".to_string());
+        assert!(validate_accepted_is_offered(&buyer, &[offer]).is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_lowercased_evm_addresses() {
+        // EVM addresses come back from `Address::to_checksum(None)` mixed-case.
+        // A buyer that normalises to lowercase before echoing still matches.
+        let offer = one_offer();
+        let mut buyer = offer.clone();
+        buyer["asset"] =
+            serde_json::Value::String("0x036cbd53842c5426634e7929541ec2318f3dcf7e".to_string());
+        buyer["payTo"] =
+            serde_json::Value::String("0x7850b376011285f023603e8ad09b550b47f05bf5".to_string());
+        assert!(validate_accepted_is_offered(&buyer, &[offer]).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_tampered_pay_to() {
+        let offer = one_offer();
+        let mut buyer = offer.clone();
+        buyer["payTo"] =
+            serde_json::Value::String("0xAAAAaaaaAAaaAaaAaaAaAAAaaAAAAAaaaAAAAaAa".to_string());
+        let err = validate_accepted_is_offered(&buyer, &[offer]).unwrap_err();
+        assert!(err.contains("does not match"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_undercut_amount() {
+        let offer = one_offer();
+        let mut buyer = offer.clone();
+        buyer["amount"] = serde_json::Value::String("1".to_string());
+        assert!(validate_accepted_is_offered(&buyer, &[offer]).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_wrong_asset() {
+        let offer = one_offer();
+        let mut buyer = offer.clone();
+        // Same-network, different (fake) token. A buyer can't substitute
+        // their own ERC-20 even if the rest matches.
+        buyer["asset"] =
+            serde_json::Value::String("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_string());
+        assert!(validate_accepted_is_offered(&buyer, &[offer]).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_wrong_network() {
+        let offer = one_offer();
+        let mut buyer = offer.clone();
+        // Cross-chain confusion: claim Base mainnet against an offer for
+        // Base Sepolia. CAIP-2 mismatch.
+        buyer["network"] = serde_json::Value::String("eip155:8453".to_string());
+        assert!(validate_accepted_is_offered(&buyer, &[offer]).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_wrong_scheme() {
+        let offer = one_offer();
+        let mut buyer = offer.clone();
+        buyer["scheme"] = serde_json::Value::String("upto".to_string());
+        assert!(validate_accepted_is_offered(&buyer, &[offer]).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_missing_required_field() {
+        let offer = one_offer();
+        let mut buyer = offer.clone();
+        buyer.as_object_mut().unwrap().remove("payTo");
+        let err = validate_accepted_is_offered(&buyer, &[offer]).unwrap_err();
+        assert!(
+            err.contains("payTo"),
+            "error should name the missing field: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_non_object_accepted() {
+        let offer = one_offer();
+        // Mirrors the historic "no header sent" path where `accepted` falls
+        // through as Value::Null.
+        assert!(validate_accepted_is_offered(&serde_json::Value::Null, &[offer]).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_when_no_offers_for_chain() {
+        // When the chain has no offers (e.g. CHAIN_TRON), even a perfectly
+        // well-formed accepted is rejected — there's nothing to match.
+        let buyer = one_offer();
+        assert!(validate_accepted_is_offered(&buyer, &[]).is_err());
+    }
+
+    #[test]
+    fn validate_picks_matching_offer_in_multi_chain_config() {
+        // Local profile seeds two tags (one EVM, one Solana) — both must
+        // be present in `offers` and the validator must pick the matching
+        // one without false positives across chains.
+        let evm = one_offer();
+        let solana = serde_json::json!({
+            "scheme": "exact",
+            "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+            "asset": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+            "amount": "100",
+            "payTo": "11111111111111111111111111111111",
+            "maxTimeoutSeconds": 300,
+        });
+        let offers = vec![evm.clone(), solana.clone()];
+
+        assert!(validate_accepted_is_offered(&evm, &offers).is_ok());
+        assert!(validate_accepted_is_offered(&solana, &offers).is_ok());
+
+        // Cross-substitution: Solana asset against EVM offer — must not pass.
+        let mut frankenstein = evm.clone();
+        frankenstein["asset"] = solana["asset"].clone();
+        assert!(validate_accepted_is_offered(&frankenstein, &offers).is_err());
     }
 }

@@ -637,3 +637,137 @@ async fn path9_v2_unsupported_chain_returns_400() {
         "error body should name the unsupported chain; got: {text}"
     );
 }
+
+// ── Paywall-bypass attempts: buyer mutates the echoed `accepted` block ────
+//   Gate at parse_handler_tvc rejects with a fresh 402 BEFORE any call to
+//   the facilitator, so settle_count must NOT advance.
+
+async fn settle_count() -> usize {
+    let v: serde_json::Value = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{MOCK_PORT}/debug/settle_count"))
+        .send()
+        .await
+        .expect("settle_count GET")
+        .json()
+        .await
+        .expect("settle_count JSON");
+    v["settle_count"].as_u64().unwrap_or(0) as usize
+}
+
+/// Path 10: buyer echoes the offer with `payTo` swapped to their own
+/// wallet — a self-transfer the facilitator would happily settle. Gateway
+/// must reject with 402 before it ever calls `/verify`. The mock fac's
+/// settle_count must NOT increment.
+#[tokio::test]
+async fn path10_tampered_pay_to_returns_402_no_settle() {
+    let _guard = TEST_MUTEX.lock().await;
+    let _p = start_procs(&[]).await;
+
+    let requirements = fetch_v2_requirements().await;
+    let before = settle_count().await;
+
+    let mut tampered = requirements.clone();
+    tampered["payTo"] =
+        serde_json::Value::String("0xAAAAaaaaAAaaAaaAaaAaAAAaaAAAAAaaaAAAAaAa".to_string());
+    let payment_header = build_payment_signature(&tampered);
+
+    let body = serde_json::json!({
+        "request": { "unsigned_payload": ETH_TX_HEX, "chain": "CHAIN_ETHEREUM" }
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{GW_PORT}/visualsign/api/v2/parse"
+        ))
+        .header("Payment-Signature", payment_header)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        402,
+        "tampered payTo must trigger 402 BEFORE any facilitator call"
+    );
+    let after = settle_count().await;
+    assert_eq!(
+        after, before,
+        "/settle must NOT have been called for a tampered payTo; before={before} after={after}"
+    );
+}
+
+/// Path 11: buyer echoes the offer with `amount` undercut to "1" (way
+/// below the configured price). Gateway must reject, no /settle call.
+#[tokio::test]
+async fn path11_undercut_amount_returns_402_no_settle() {
+    let _guard = TEST_MUTEX.lock().await;
+    let _p = start_procs(&[]).await;
+
+    let requirements = fetch_v2_requirements().await;
+    let before = settle_count().await;
+
+    let mut undercut = requirements.clone();
+    undercut["amount"] = serde_json::Value::String("1".to_string());
+    let payment_header = build_payment_signature(&undercut);
+
+    let body = serde_json::json!({
+        "request": { "unsigned_payload": ETH_TX_HEX, "chain": "CHAIN_ETHEREUM" }
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{GW_PORT}/visualsign/api/v2/parse"
+        ))
+        .header("Payment-Signature", payment_header)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 402, "undercut amount must trigger 402");
+    assert_eq!(
+        settle_count().await,
+        before,
+        "/settle must not run for an undercut amount"
+    );
+}
+
+/// Path 12: buyer echoes the offer with `network` swapped to a different
+/// chain's network (cross-chain confusion). Gateway must reject.
+#[tokio::test]
+async fn path12_cross_chain_network_returns_402_no_settle() {
+    let _guard = TEST_MUTEX.lock().await;
+    let _p = start_procs(&[]).await;
+
+    let requirements = fetch_v2_requirements().await;
+    let before = settle_count().await;
+
+    let mut swapped = requirements.clone();
+    // The chain query is CHAIN_ETHEREUM (so the gateway only offers EVM
+    // tags); switch to a Solana CAIP-2 network identifier.
+    swapped["network"] =
+        serde_json::Value::String("solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1".to_string());
+    let payment_header = build_payment_signature(&swapped);
+
+    let body = serde_json::json!({
+        "request": { "unsigned_payload": ETH_TX_HEX, "chain": "CHAIN_ETHEREUM" }
+    });
+
+    let resp = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{GW_PORT}/visualsign/api/v2/parse"
+        ))
+        .header("Payment-Signature", payment_header)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 402, "cross-chain network must trigger 402");
+    assert_eq!(
+        settle_count().await,
+        before,
+        "/settle must not run for a cross-chain network"
+    );
+}
