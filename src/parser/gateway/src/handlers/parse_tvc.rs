@@ -492,7 +492,7 @@ fn translate_to_canonical(
             "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp".to_string(),
             // Solana mainnet USDC mint
             if asset == "USDC" {
-                "EPjFWdd5AufqSSqeMxKf8aSXdrEv2Hk7UFEqA8zoYC".to_string()
+                "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string()
             } else {
                 asset.to_string()
             },
@@ -799,7 +799,7 @@ mod tests {
     fn translate_solana_mainnet_emits_caip2_and_fee_payer() {
         let (network, asset, extra) = translate_to_canonical("solana", "USDC");
         assert!(network.starts_with("solana:"));
-        assert_eq!(asset, "EPjFWdd5AufqSSqeMxKf8aSXdrEv2Hk7UFEqA8zoYC");
+        assert_eq!(asset, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
         assert!(extra.is_some());
     }
 
