@@ -52,20 +52,55 @@ All env vars are read at startup. Bad values fail-closed (gateway exits 1).
 | `X402_PROFILE`                   | no        | `local`                             | one of `local`, `payai`, `custom`                                                      |
 | `X402_FACILITATOR_URL`           | depends   | profile-default                     | overrides per-profile default                                                          |
 | `X402_FACILITATOR_TIMEOUT_SECS`  | no        | `5`                                 | facilitator HTTP timeout                                                               |
-| `X402_NETWORK`                   | no        | profile-default                     | `base-sepolia`, `base`, `solana`, `solana-devnet`                                      |
+| `X402_NETWORK`                   | no        | profile-default                     | **legacy single-chain override.** When set, the gateway only offers this one network on every 402. When unset, the network is derived per request from the parse-request's `chain` field (see "Network selection per parse chain" below). Allowed values: `base-sepolia`, `base`, `solana`, `solana-devnet`. |
 | `X402_PAYTO`                     | depends   | burn address for `local`            | EVM `0x…` or Solana base58                                                             |
 | `X402_PRICE_TAGS_JSON`           | no        | seeded from profile + `X402_NETWORK` | full multi-tag override; see the JSON shape in `x402_config.rs`                        |
 | `TVC_DEMO_PINNED_PUBKEY_HEX`   | **yes** (non-local) | —                          | pinned enclave pubkey, hex                                                             |
 | `TVC_DEMO_PINNED_PUBKEY_FILE`  | no        | —                                   | alternative to `_HEX`: file holding the hex                                            |
+| `GATEWAY_AUTH_BEARER_TOKEN`    | no        | —                                   | optional shared-bearer-token gate. When set, every route except `/health` requires `Authorization: Bearer <this-value>` or returns 401. Mutually exclusive with `_FILE`. |
+| `GATEWAY_AUTH_BEARER_FILE`     | no        | —                                   | path to a file containing the bearer token (whitespace-trimmed). Preferred for Cloud Run / k8s secret-volume mounts. Mutually exclusive with `_TOKEN`. |
+
+The bearer-token gate is a weak shared-secret intended to keep random
+crawlers off the endpoint while AI-agent callers (which can set arbitrary
+HTTP headers but can't easily mint per-caller identity tokens) can still
+reach the x402 settlement layer. `/health` is intentionally excluded so
+operators / orchestrators can probe liveness without sharing the token.
+
+### Network selection per parse chain
+
+When `X402_NETWORK` is unset (the default), the gateway derives the
+payment network from the parse request's `chain` field on every 402:
+
+| Parse request chain    | 402 advertises             |
+| ---------------------- | -------------------------- |
+| `CHAIN_ETHEREUM`       | `base-sepolia` (local), `base` (payai) |
+| `CHAIN_SOLANA`         | `solana-devnet` (local), `solana` (payai mainnet) when configured |
+| anything else          | **400 Bad Request** — x402 doesn't natively settle on Tron / Sui / Bitcoin yet. A 402 here would imply the buyer can pay their way through; the gateway has no path so it surfaces the error instead. |
+
+In `local` profile, the gateway auto-seeds both an EVM tag
+(`base-sepolia`, burn `0x…dEaD` payTo) and a Solana tag
+(`solana-devnet`, System program payTo) so a single binary handles
+both chains in offline dev with no extra config.
+
+In `payai` / `custom`, multi-chain operators provide tags explicitly
+via `X402_PRICE_TAGS_JSON`; single-chain operators set `X402_NETWORK`
++ `X402_PAYTO` (legacy path).
+
+If `X402_NETWORK` is set, the gateway falls back to the legacy
+single-chain mode: only that one network is offered on every 402,
+regardless of the parse request's chain. Useful for staging /
+manual probes; production should typically leave `X402_NETWORK`
+unset and let per-chain derivation pick the right one.
 
 ### Profiles
 
 - `local` — `X402_FACILITATOR_URL` defaults to `http://127.0.0.1:8090`
-  (the bundled `mock_facilitator`). `X402_NETWORK` defaults to
-  `base-sepolia`. Designed for offline dev.
+  (the bundled `mock_facilitator`). When `X402_NETWORK` is unset (the
+  default), the gateway offers `base-sepolia` for ETH parses and
+  `solana-devnet` for Solana parses. Designed for offline dev.
 - `payai` — facilitator defaults to `https://facilitator.payai.network`.
-  `X402_NETWORK` defaults to `base`; set it to `solana-devnet` for the
-  devnet flow.
+  `X402_NETWORK` defaults to `base` (single-chain seed for EVM); for
+  multi-chain or Solana, set `X402_PRICE_TAGS_JSON` directly.
 - `custom` — bring your own facilitator URL and price tags via env.
 
 ### Network egress requirement

@@ -51,6 +51,15 @@ pub struct ParseRequest {
     pub chain: i32,
     #[prost(message, optional, tag = "3")]
     pub chain_metadata: ::core::option::Option<ChainMetadata>,
+    /// Borsh-encoded VerifiedPaymentMarker signed by the gateway. parser_app
+    /// verifies this before processing. Empty for the legacy open routes (v1)
+    /// and for local-dev / gRPC-direct callers. The gated v2 route always
+    /// populates it (gateway hand-rolls verify->settle->sign before forwarding).
+    /// When the marker is empty in a context that requires payment, parser_app
+    /// returns a FailedPrecondition status whose details carry the canonical
+    /// x402 PaymentRequired body, which the gateway materializes as HTTP 402.
+    #[prost(bytes = "vec", tag = "4")]
+    pub payment_marker: ::prost::alloc::vec::Vec<u8>,
 }
 #[cfg_attr(
     feature = "serde_derive",

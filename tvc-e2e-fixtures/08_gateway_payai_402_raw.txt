@@ -1,0 +1,7 @@
+HTTP/1.1 402 Payment Required
+content-type: application/json
+payment-required: eyJhY2NlcHRzIjpbeyJhbW91bnQiOiIxMDAwIiwiYXNzZXQiOiI0ek1NQzlzcnQ1Umk1WDE0R0FnWGhhSGlpM0duUEFFRVJZUEpnWkpEbmNEVSIsImV4dHJhIjp7ImZlZVBheWVyIjoiMndLdXBMUjlxNndYWXBwdzhHcjJOdld4S0JVcW00UFBKS2tRZm94SERCZzQifSwibWF4VGltZW91dFNlY29uZHMiOjMwMCwibmV0d29yayI6InNvbGFuYTpFdFdUUkFCWmFZcTZpTWZlWUtvdVJ1MTY2VlUyeHFhMSIsInBheVRvIjoieDJpV3d3NlhqYXVCazgzSHBCTXprR1BpamJ6eTR2cWRSelM1c2tXUHhtVyIsInNjaGVtZSI6ImV4YWN0In1dLCJlcnJvciI6IlBheW1lbnQtU2lnbmF0dXJlIGhlYWRlciBpcyByZXF1aXJlZCIsIng0MDJWZXJzaW9uIjoyfQ==
+content-length: 268
+date: Sat, 16 May 2026 23:11:21 GMT
+
+{"response":{"parsedTransaction":{"payload":{"signablePayload":"","metadataDigest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","inputPayloadDigest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}}},"error":"payment required"}

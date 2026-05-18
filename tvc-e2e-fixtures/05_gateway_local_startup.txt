@@ -1,0 +1,16 @@
+INFO: demo TVC_DEMO_PINNED_PUBKEY_HEX not set (allowed for X402_PROFILE=local or when GATEWAY_SIGNING_KEY_FILE drives the TVC-enforced flow).
+gateway signer loaded; pubkey <GATEWAY_SIGNING_PUBKEY_HEX>...
+x402 facilitator probe OK
+HTTP backend: https://app-<APP_ID>.turnkey.cloud (gRPC channel unused on /v2)
+parser_gateway 0.700.21+spec-x402-tvc-enforced-1171203cf48c listening on 0.0.0.0:8080
+health check failed: status: Unavailable, message: "error trying to connect: tcp connect error: Connection refused (os error 111)", details: [], metadata: MetadataMap { headers: {} }
+health check failed: status: Unavailable, message: "error trying to connect: tcp connect error: Connection refused (os error 111)", details: [], metadata: MetadataMap { headers: {} }
+health check failed: status: Unavailable, message: "error trying to connect: tcp connect error: Connection refused (os error 111)", details: [], metadata: MetadataMap { headers: {} }
+health check failed: status: Unavailable, message: "error trying to connect: tcp connect error: Connection refused (os error 111)", details: [], metadata: MetadataMap { headers: {} }
+health check failed: status: Unavailable, message: "error trying to connect: tcp connect error: Connection refused (os error 111)", details: [], metadata: MetadataMap { headers: {} }
+health check failed: status: Unavailable, message: "error trying to connect: tcp connect error: Connection refused (os error 111)", details: [], metadata: MetadataMap { headers: {} }
+health check failed: status: Unavailable, message: "error trying to connect: tcp connect error: Connection refused (os error 111)", details: [], metadata: MetadataMap { headers: {} }
+health check failed: status: Unavailable, message: "error trying to connect: tcp connect error: Connection refused (os error 111)", details: [], metadata: MetadataMap { headers: {} }
+health check failed: status: Unavailable, message: "error trying to connect: tcp connect error: Connection refused (os error 111)", details: [], metadata: MetadataMap { headers: {} }
+health check failed: status: Unavailable, message: "error trying to connect: tcp connect error: Connection refused (os error 111)", details: [], metadata: MetadataMap { headers: {} }
+Shutting down gateway

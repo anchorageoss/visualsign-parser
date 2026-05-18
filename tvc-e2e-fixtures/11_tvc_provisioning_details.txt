@@ -1,0 +1,20 @@
+Deployment: <DEPLOY_ID_LIVE>
+Verification: verified (attestation + approvals)
+Ephemeral Key: <ENCLAVE_EPHEMERAL_PUBKEY>
+Module ID: <NITRO_MODULE_ID>
+Digest: SHA384
+Timestamp (ms): 1778973081656
+User Data: 1b60293c14edf0f6691cf0fa04cbacbd54f0dd609bef047abbd914b09285c76b
+Nonce: (none)
+PCRs:
+  PCR0: d787eb65da5541d0e3cffdd2fa39cadc9fa98534854d3e78e3c8d03f10c3a5fe38ff554c824d70dae5079689c22253ab
+  PCR1: d787eb65da5541d0e3cffdd2fa39cadc9fa98534854d3e78e3c8d03f10c3a5fe38ff554c824d70dae5079689c22253ab
+  PCR2: 21b9efbc184807662e966d34f390821309eeac6802309798826296bf3e8bec7c10edb30948c90ba67310f7b964fc500a
+  PCR3: b798abfdbd591d5e1b7db6485a6de9e65100f5796d9e3a2bd7c179989cd663338b567162974974fbcc45d03847e70d8b
+Certificate Length: 638 bytes
+CA Bundle Certificates: 4
+Manifest Set Approvals: 1/1
+  <OPERATOR_ALIAS>: <MANIFEST_SET_OPERATOR_PUBKEY>
+Share Set Approvals: 2
+  2: <SHARE_SET_MEMBER_PUBKEY>
+  2: <SHARE_SET_MEMBER_PUBKEY>

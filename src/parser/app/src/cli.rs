@@ -104,8 +104,14 @@ impl Cli {
         } else if opts.parsed.help() {
             println!("{}", opts.parsed.info());
         } else {
-            let processor =
-                crate::service::Processor::new(EphemeralKeyHandle::new(opts.ephemeral_file()));
+            let policy = std::sync::Arc::new(
+                crate::payment_verify::PaymentPolicy::from_env()
+                    .expect("invalid GATEWAY_SIGNING_PUBKEY_HEX configuration"),
+            );
+            let processor = crate::service::Processor::new(
+                EphemeralKeyHandle::new(opts.ephemeral_file()),
+                policy,
+            );
 
             println!(
                 "---- Starting Parser server (version: {}) -----",

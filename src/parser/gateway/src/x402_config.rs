@@ -6,6 +6,11 @@ use std::str::FromStr;
 use std::time::Duration;
 use url::Url;
 
+/// Default Solana "burn"-style payTo used in the local profile when an
+/// operator hasn't supplied an explicit one. Solana System Program ID is
+/// 32 zero bytes; sending USDC there sinks it without crediting anyone.
+const SOLANA_BURN_PAYTO: &str = "11111111111111111111111111111111";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum X402Profile {
     Local,
@@ -144,7 +149,27 @@ impl X402Config {
         let price_tags = if let Some(json) = get("X402_PRICE_TAGS_JSON") {
             Self::parse_tags_json(&json)?
         } else {
-            vec![Self::seeded_tag(&get, profile)?]
+            let mut tags = vec![Self::seeded_tag(&get, profile)?];
+            // Local profile, derive mode (no X402_NETWORK override): also
+            // offer a Solana tag with a burn-style payTo so a single local
+            // gateway answers both CHAIN_ETHEREUM (base-sepolia) and
+            // CHAIN_SOLANA (solana-devnet) requests out of the box. Other
+            // profiles stay single-chain by default; operators wanting
+            // multi-chain in payai/custom use X402_PRICE_TAGS_JSON.
+            if profile == X402Profile::Local && get("X402_NETWORK").is_none() {
+                let price_usd = Decimal::from_str("0.0001").map_err(|e| ConfigError::Invalid {
+                    var: "(internal seed price)",
+                    message: e.to_string(),
+                })?;
+                tags.push(PriceTagConfig {
+                    network: "solana-devnet".to_string(),
+                    asset: "USDC".to_string(),
+                    price_usd,
+                    pay_to: PayToAddress::Solana(SOLANA_BURN_PAYTO.to_string()),
+                    scheme: PriceScheme::Exact,
+                });
+            }
+            tags
         };
 
         if price_tags.is_empty() {
@@ -482,7 +507,10 @@ mod tests {
         assert_eq!(cfg.facilitator_url.as_str(), "http://127.0.0.1:8090/");
         assert_eq!(cfg.facilitator_timeout, Duration::from_secs(5));
         assert_eq!(cfg.protocol_version, "v2");
-        assert_eq!(cfg.price_tags.len(), 1);
+        // Local profile + derive mode emits BOTH chains so a single gateway
+        // can answer CHAIN_ETHEREUM and CHAIN_SOLANA requests with no extra
+        // config. EVM tag first (legacy ordering), Solana tag appended.
+        assert_eq!(cfg.price_tags.len(), 2);
         assert_eq!(cfg.price_tags[0].network, "base-sepolia");
         assert_eq!(cfg.price_tags[0].asset, "USDC");
         assert_eq!(
@@ -494,6 +522,26 @@ mod tests {
             PayToAddress::Evm("0x000000000000000000000000000000000000dEaD".to_string())
         );
         assert_eq!(cfg.price_tags[0].scheme, PriceScheme::Exact);
+        assert_eq!(cfg.price_tags[1].network, "solana-devnet");
+        assert_eq!(cfg.price_tags[1].asset, "USDC");
+        assert_eq!(
+            cfg.price_tags[1].pay_to,
+            PayToAddress::Solana(SOLANA_BURN_PAYTO.to_string())
+        );
+    }
+
+    #[test]
+    fn from_env_local_with_explicit_network_stays_single_chain() {
+        // X402_NETWORK override → legacy single-tag mode, no Solana auto-add.
+        // (The explicit-network path strips the burn-address default, so the
+        // test must supply X402_PAYTO too — same as production callers.)
+        let cfg = X402Config::from_lookup(lookup(&[
+            ("X402_NETWORK", "base-sepolia"),
+            ("X402_PAYTO", "0xabcdef0000000000000000000000000000000001"),
+        ]))
+        .unwrap();
+        assert_eq!(cfg.price_tags.len(), 1);
+        assert_eq!(cfg.price_tags[0].network, "base-sepolia");
     }
 
     #[test]

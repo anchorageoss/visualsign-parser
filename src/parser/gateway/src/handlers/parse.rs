@@ -38,6 +38,7 @@ pub async fn parse_handler(
         unsigned_payload: wrapper.request.unsigned_payload,
         chain,
         chain_metadata: wrapper.request.chain_metadata.map(ChainMetadata::from),
+        payment_marker: Vec::new(), // populated by v2 gated handler; empty here for v1
     });
 
     let response = match tokio::time::timeout(PARSE_TIMEOUT, grpc_client.parse(request)).await {

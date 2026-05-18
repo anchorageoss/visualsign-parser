@@ -482,3 +482,310 @@ Two changes once the devnet rehearsal is clean:
    and fund the receiver wallet with **real USDC** (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`).
 
 Same trust pair, same flow. The gateway code doesn't change.
+
+---
+
+## Part 4 — TVC-enforced payment (stacked PR #304)
+
+Plan v3 lands on a separate branch (`spec/x402-tvc-enforced`, PR #304)
+that replaces the demo response-attestation verifier with parser-app-side
+payment enforcement. The enclave refuses to process any parse request
+that doesn't carry a valid gateway-signed `VerifiedPaymentMarker`.
+
+What changes vs Parts 1–2:
+
+- The gateway has its own P256 signing identity (`GATEWAY_SIGNING_KEY_FILE`).
+  It hand-rolls the call order `verify → settle → sign VPM → forward` so
+  the post-settle txid is committed to in the marker before parser_app
+  sees the request.
+- `parser_app` pins the gateway's public key via `GATEWAY_SIGNING_PUBKEY_HEX`.
+  Mismatch → `FailedPrecondition` → gateway translates to HTTP 402.
+- The v1 open route is unmounted when TVC enforcement is on (the policy
+  is global at parser_app, so an open route would 402 everything).
+- The demo `TVC_DEMO_PINNED_PUBKEY_HEX` becomes optional; the new
+  GATEWAY pubkey is the actual trust anchor.
+
+### Step 1 — Mint a gateway signing key
+
+```sh
+cargo run -p parser_gateway --bin gateway_keygen -- /tmp/gateway_signer.json
+# Prints: GATEWAY_SIGNING_PUBKEY_HEX=<260-char-hex>
+```
+
+Save the printed hex — it's what parser_app will pin.
+
+In production, the same JSON file (or a JSON blob with `{private, public}`
+fields) is mounted via Cloud Run Secret Manager / k8s Secret volumes at
+the configured `GATEWAY_SIGNING_KEY_FILE` path.
+
+### Step 2 — Bring the stack up
+
+```sh
+git checkout spec/x402-tvc-enforced
+make non-oci-docker-images          # rebuilds stagex images with the
+                                     # TVC-enforced flow
+
+export GATEWAY_SIGNING_KEY_FILE_HOST=/tmp/gateway_signer.json
+export GATEWAY_SIGNING_PUBKEY_HEX=$(jq -r .public /tmp/gateway_signer.json)
+export X402_PAYTO=x2iWww6XjauBk83HpBMzkGPijbzy4vqdRzS5skWPxmW
+
+docker compose -f compose.payai.yml up -d
+docker logs visualsign-parser-parser_gateway-1 | tail
+# Expect:
+#   gateway signer loaded; pubkey 04xxxxxx...
+#   x402 facilitator probe OK
+#   parser_gateway dev listening on 0.0.0.0:8080
+```
+
+### Step 3 — Pay + parse
+
+Same TS demo:
+
+```sh
+GATEWAY_URL=http://127.0.0.1:8080 RPC_URL=https://api.devnet.solana.com \
+  node --experimental-strip-types --no-warnings scripts/x402-solana-devnet-demo.ts
+```
+
+Expected output (the parser-app verification line is the new bit):
+
+```
+[x402-solana] Retry response status: 200
+status: 200
+settlement: {
+  "network":     "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+  "payer":       "x2iWww6XjauBk83HpBMzkGPijbzy4vqdRzS5skWPxmW",
+  "success":     true,
+  "transaction": "<base58 solana sig>"
+}
+```
+
+In `docker logs visualsign-parser-parser_grpc_server-1` you should see
+zero rejection log lines (the parser silently accepts a valid VPM).
+
+### Step 4 — Tamper sanity-check
+
+```sh
+make dev-down
+# Pin parser_app to a DIFFERENT pubkey than the gateway is signing with.
+docker run --rm -v /tmp:/tmp parser_gateway_keygen /tmp/wrong_signer.json \
+  > /dev/null  # or run cargo gateway_keygen
+WRONG=$(jq -r .public /tmp/wrong_signer.json)
+GATEWAY_SIGNING_PUBKEY_HEX="$WRONG" \
+GATEWAY_SIGNING_KEY_FILE_HOST=/tmp/gateway_signer.json \
+X402_PAYTO=x2iWww6XjauBk83HpBMzkGPijbzy4vqdRzS5skWPxmW \
+  docker compose -f compose.payai.yml up -d
+
+GATEWAY_URL=http://127.0.0.1:8080 RPC_URL=https://api.devnet.solana.com \
+  node --experimental-strip-types --no-warnings scripts/x402-solana-devnet-demo.ts || true
+# Expect: paid request failed: 402 - "payment required"
+docker logs visualsign-parser-parser_grpc_server-1 | grep 'gateway_pubkey_hex'
+# Expect: payment marker gateway_pubkey_hex does not match pinned key
+```
+
+Known quirk: payai still settles before parser_app rejects, so an
+operator misconfiguration costs the buyer one demo payment per attempt.
+v3.1 will tighten this by gating settle on a pre-validation step.
+
+### What's still open in v3.0 (deferred to v3.1)
+
+- Gateway pubkey is statically pinned; v3.1 will derive it dynamically
+  from a chained gateway attestation.
+- Payer Ed25519 sig on the Solana tx isn't re-verified inside parser_app;
+  payai's `/verify` checks it before settle, and the VPM's
+  `x_payment_hash` binds the marker to the exact X-PAYMENT body.
+- Settle-then-reject quirk (above).
+
+---
+
+## Part 5 — Deploying to real Turnkey TVC
+
+Verified against a deployed Turnkey TVC app whose pivot is `parser_app`
+(gRPC, port 3000, `healthCheckType: TVC_HEALTH_CHECK_TYPE_GRPC`):
+
+- **`*.turnkey.cloud` public ingress accepts HTTP only.** Cloudflare in
+  front of the public domain rejects gRPC traffic with a 403 + `text/html`
+  body, regardless of `content-type: application/grpc` or any auth
+  header. We verified this from three transports (tonic + TLS, grpcurl,
+  raw `curl --http2-prior-knowledge`); all hit the same Cloudflare WAF
+  block. So a deployed TVC pivot whose only listener is gRPC cannot be
+  reached by external callers — the bytes never reach the app.
+- The `healthCheckType: TVC_HEALTH_CHECK_TYPE_GRPC` in the deploy config
+  applies to Turnkey's internal-network health probes; it does NOT mean
+  the public ingress speaks gRPC. To accept external calls, deploy a
+  pivot that speaks HTTP and set `healthCheckType: TVC_HEALTH_CHECK_TYPE_HTTP`.
+
+### `parser_http_server` — the HTTP-speaking pivot
+
+New stagex image at `images/parser_http_server/Containerfile`. Built
+identically to `parser_grpc_server` but exposes:
+
+| Route | Behavior |
+| --- | --- |
+| `GET /health` | 200 OK. Maps to `TVC_HEALTH_CHECK_TYPE_HTTP`. |
+| `POST /visualsign/api/v1/parse` | Open. Turnkey envelope JSON in, signed `parsedTransaction` JSON out. Same wire shape the Go `visualsign-turnkey-client` reference uses. |
+| `POST /visualsign/api/v2/parse` | TVC-enforced if `GATEWAY_SIGNING_PUBKEY_HEX` is set (parser_app verifies a `VerifiedPaymentMarker` first), otherwise behaves like v1. |
+
+Re-uses the existing `parser_app::routes::parse::parse` function — no
+new parsing logic. The Turnkey wire-envelope types (`TurnkeyRequestWrapper`
+etc.) moved to `host_primitives::turnkey` so both `parser_gateway` and
+`parser_http_server` produce the exact same bytes.
+
+### Deploy steps
+
+1. Build + publish the image:
+
+   ```sh
+   make non-oci-docker-images          # builds locally
+   # CI: push to ghcr.io/anchorageoss/parser_http_server on tagged release
+   ```
+
+   The CI release notes from `stagex.yml` will print a paste-ready
+   `tvc deploy create` recipe with the pinned digest.
+
+2. Create or update the TVC deployment config (`tvc deploy init`,
+   then edit):
+
+   ```json
+   {
+     "appId": "<your-tvc-app-id>",
+     "qosVersion": "v2026.2.6",
+     "pivotContainerImageUrl": "ghcr.io/anchorageoss/parser_http_server:vX.Y.Z@sha256:<digest>",
+     "pivotPath": "/parser_http_server",
+     "pivotArgs": [],
+     "expectedPivotDigest": "sha256:<binary-digest-from-release-notes>",
+     "debugMode": false,
+     "healthCheckType": "TVC_HEALTH_CHECK_TYPE_HTTP",
+     "healthCheckPort": 3000,
+     "publicIngressPort": 3000
+   }
+   ```
+
+   Critical fields vs the existing gRPC deployment:
+   - `pivotContainerImageUrl` → `parser_http_server` (was `parser_app`)
+   - `pivotPath` → `/parser_http_server` (was `/parser_app`)
+   - `healthCheckType` → `TVC_HEALTH_CHECK_TYPE_HTTP` (was `_GRPC`)
+
+3. `tvc deploy create tvc-deploy.json`
+
+4. Approve the manifest (`tvc deploy approve`) — operator-side ceremony,
+   same as today.
+
+5. Once `tvc app status --app-id <id>` shows N/N replicas healthy:
+
+   ```sh
+   curl -X POST https://app-<your-app-id>.turnkey.cloud/visualsign/api/v1/parse \
+     -H 'content-type: application/json' \
+     -d '{"request":{"unsigned_payload":"0xf86c808504a817c800...","chain":"CHAIN_ETHEREUM"}}'
+   ```
+
+   Should return a Turnkey envelope with the parsed payload + ephemeral-key
+   signature. No X-Stamp required (v1 is open).
+
+### Turning on TVC-enforced payment (canonical deploy)
+
+Once `parser_http_server` is live in TVC, deploying the v3 trust pair is
+two side-by-side steps. The gateway sits outside TVC (Cloud Run /
+k8s / wherever has egress), and addresses the enclave over HTTP because
+that's the only transport `*.turnkey.cloud` ingress accepts.
+
+```
+                       Solana devnet                facilitator.payai.network
+                            ▲                                ▲
+                            │ on-chain settle                │ verify + settle
+                            │                                │
+   browser / SDK            │                                │
+        │                   │                                │
+        ▼                   │                                │
+  ┌───────────────┐  HTTP  ┌─┴────────────────┐ HTTPS ┌──────┴────────────────────┐
+  │ x402 client   │ ─────▶ │ parser_gateway   │ ────▶ │ parser_http_server (TVC)  │
+  │ (TS demo /    │  402   │ (Cloud Run, etc.)│       │ ghcr…/parser_http_server  │
+  │  custom)      │ ◀───── │  verify→settle→  │       │  GATEWAY_SIGNING_PUBKEY_  │
+  └───────────────┘   200  │  sign VPM →      │       │  HEX pinned at boot       │
+                           │  forward HTTP    │       └───────────────────────────┘
+                           └──────────────────┘
+```
+
+Steps:
+
+1. **Mint the gateway signing key:**
+
+   ```sh
+   cargo run -p parser_gateway --bin gateway_keygen -- /tmp/gateway_signer.json
+   # Prints GATEWAY_SIGNING_PUBKEY_HEX=<260-char-hex>
+   ```
+
+2. **Deploy `parser_http_server` to TVC** with the public half pinned at
+   pivot launch. `tvc deploy create` has no env-injection mechanism, so
+   the pubkey is passed via `pivotArgs` (clap on the binary side):
+
+   ```json
+   {
+     "pivotArgs": [
+       "--gateway-signing-pubkey-hex",
+       "<260-char-hex from step 1>"
+     ]
+   }
+   ```
+
+   After re-deploy, `parser_app` (linked into `parser_http_server`)
+   rejects every parse request whose `payment_marker` doesn't carry a
+   VPM signed by exactly this key. The HTTP listener defaults to port
+   3000; the ephemeral key is read from `qos_core::EPHEMERAL_KEY_FILE`
+   (provisioned by QOS) with no override.
+
+3. **Deploy `parser_gateway` outside TVC** with `HTTP_BACKEND_URL`
+   pointing at the TVC app URL:
+
+   ```sh
+   # Example: Cloud Run-style env block
+   GATEWAY_PORT=8080
+   X402_PROFILE=payai
+   X402_NETWORK=solana-devnet
+   X402_FACILITATOR_URL=https://facilitator.payai.network
+   X402_PAYTO=<receiver pubkey>
+   GATEWAY_SIGNING_KEY_FILE=/etc/secrets/gateway/signer.json
+   HTTP_BACKEND_URL=https://app-<uuid>.turnkey.cloud
+   ```
+
+   When `HTTP_BACKEND_URL` is set, the v2 handler POSTs the
+   verified+settled+VPM-signed parse to
+   `${HTTP_BACKEND_URL}/visualsign/api/v2/parse` (Turnkey JSON envelope
+   with `payment_marker_b64` carrying the borsh-encoded VPM) instead of
+   calling parser_grpc_server over gRPC. The `GRPC_ADDR` env is ignored
+   in this mode.
+
+   The mock-facilitator path (`X402_PROFILE=local`) works identically;
+   you can rehearse this whole topology locally by pointing
+   `HTTP_BACKEND_URL` at a containerized `parser_http_server` before
+   deploying to TVC.
+
+4. **Smoke-test from the client:**
+
+   ```sh
+   GATEWAY_URL=https://<your-gateway-host> \
+   RPC_URL=https://api.devnet.solana.com \
+     node --experimental-strip-types --no-warnings scripts/x402-solana-devnet-demo.ts
+   ```
+
+   The 200 response now means: payai settled on-chain → gateway signed
+   a VPM → TVC enclave verified the VPM signature + request_hash
+   binding + pubkey pinning → enclave signed the parse response. Any
+   failure short-circuits to 402 / 4xx before any payment is settled.
+
+Validated end-to-end locally with `parser_gateway` (HTTP_BACKEND_URL
+mode) → `parser_http_server` against real payai + Solana devnet — the
+on-chain settle landed at
+`2Q4vB1fQcJfyuW94YvjPKRYuoJgqWZtgSmkbcttJRGdT6FHQsNAypGVXEU6jTfxnTQUg9wpMq6shZzXxYBcgmuoR`.
+
+### Diagnostic tools
+
+- `scripts/turnkey-probe.ts` — minimal Node script that sends an
+  X-Stamp-signed HTTP request to any Turnkey URL. Reads your API key
+  from `~/.config/turnkey/keys/<name>.{private,public}`. Use it to poke
+  at `api.turnkey.com` queries (list_tvc_apps, get_tvc_deployment, etc.)
+  or at your deployed app's HTTP routes.
+
+- `cargo run -p parser_gateway --bin tvc_probe -- <APP_URL> <ORG_ID>` —
+  Rust + tonic + TLS + X-Stamp gRPC probe. Useful to confirm what we
+  found about the gRPC public-ingress block. Returns Cloudflare 403 from
+  any deployed TVC app today.

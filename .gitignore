@@ -4,3 +4,4 @@ docs/superpowers/
 .surfpool/
 node_modules/
 *.log
+deploy-*.json

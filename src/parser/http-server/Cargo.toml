@@ -1,0 +1,55 @@
+[package]
+name = "parser_http_server"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+# Chain visualizers compiled into the binary. Mirrors parser_app's default
+# set; trim with `--no-default-features --features solana` (or any subset)
+# to shrink the image and attestation surface for chain-specific deploys.
+default = ["ethereum", "solana", "sui", "tron", "unspecified"]
+ethereum = ["parser_app/ethereum"]
+solana = ["parser_app/solana"]
+sui = ["parser_app/sui"]
+tron = ["parser_app/tron"]
+unspecified = ["parser_app/unspecified"]
+# Switch qos_core constants (notably `EPHEMERAL_KEY_FILE`) to their in-enclave
+# paths (`/qos.ephemeral.key` instead of `./local-enclave/qos.ephemeral.key`).
+# parser_http_server only ever runs as a TVC pivot, so this must be on for
+# production builds. Without it the pivot crashes at startup trying to read
+# the dev path, which surfaces as `Healthy / Desired Replicas: 0/N`. The
+# name mirrors parser_app's identically-named feature for consistency,
+# even though http-server doesn't speak vsock itself.
+vsock = ["qos_core/vm"]
+
+[dependencies]
+# Internal — same parse logic + envelope shapes the gRPC server already uses.
+# `default-features = false` so http-server's [features] above is the single
+# place chains get enabled; otherwise parser_app would auto-pull all chains
+# regardless of what http-server selects.
+parser_app = { path = "../app", default-features = false }
+generated = { path = "../../generated", features = ["tonic_types", "serde_derive"] }
+host_primitives = { path = "../../host_primitives" }
+
+# Crypto / hashing for the optional VPM enforcement.
+qos_core = { workspace = true }
+qos_p256 = { workspace = true }
+
+# HTTP + serialization.
+axum = { version = "0.8", features = ["http1", "http2", "tokio", "json"], default-features = false }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time", "net"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = "0.22"
+
+# CLI args. TVC pivots receive config via `pivotArgs`, not env vars; clap's
+# `env = "..."` attribute keeps compose + integration tests working unchanged.
+clap = { version = "4.0", features = ["derive", "env"] }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "parser_http_server"
+path = "src/main.rs"

@@ -1,0 +1,15 @@
+{
+  "appId": "<APP_ID>",
+  "qosVersion": "v2026.2.6",
+  "pivotContainerImageUrl": "ghcr.io/anchorageoss/parser_http_server:pr-304@sha256:<IMAGE_MANIFEST_DIGEST>",
+  "pivotPath": "/parser_http_server",
+  "pivotArgs": [
+    "--gateway-signing-pubkey-hex",
+    "<GATEWAY_SIGNING_PUBKEY_HEX>"
+  ],
+  "expectedPivotDigest": "<BINARY_SHA256>",
+  "debugMode": false,
+  "healthCheckType": "TVC_HEALTH_CHECK_TYPE_HTTP",
+  "healthCheckPort": 3000,
+  "publicIngressPort": 3000
+}

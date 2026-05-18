@@ -34,17 +34,27 @@ url = "2"
 # attestation: verifies the TVC ephemeral-key signature on the parse response
 qos_p256 = { workspace = true }
 qos_hex = { workspace = true }
+qos_crypto = { workspace = true } # sha_256 for VPM hashing
 subtle = { version = "2", default-features = false }
+
+# Borsh: canonical encoding for the VerifiedPaymentMarker (VPM) the gateway
+# signs and parser_app verifies. Must match wire-for-wire between the two
+# crates, hence borsh (deterministic, schema-validated) over serde_json.
+borsh = { version = "1", features = ["std", "derive"], default-features = false }
+
+# Base64 for X-PAYMENT body decoding (we hash the inner bytes for x_payment_hash).
+base64 = "0.22"
+
+# Turnkey API key signing for outbound TVC calls (the tvc_probe bin).
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+prost = { version = "0.11", default-features = false, features = ["std"] }
+tonic = { version = "0.9", default-features = false, features = ["transport", "codegen", "prost", "tls", "tls-roots"] }
 
 # error handling
 thiserror = "1"
 
 # http client (for startup facilitator probe, Task 9)
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
-
-[dev-dependencies]
-qos_crypto = { workspace = true }
-borsh = { version = "1", features = ["std", "derive"], default-features = false }
 
 [lib]
 name = "parser_gateway"
@@ -53,6 +63,14 @@ path = "src/lib.rs"
 [[bin]]
 name = "parser_gateway"
 path = "src/main.rs"
+
+[[bin]]
+name = "gateway_keygen"
+path = "src/bin/gateway_keygen.rs"
+
+[[bin]]
+name = "tvc_probe"
+path = "src/bin/tvc_probe.rs"
 
 [lints]
 workspace = true

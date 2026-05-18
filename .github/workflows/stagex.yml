@@ -48,6 +48,7 @@ jobs:
             label: "parser_cli (Solana)"
           - name: parser_gateway
           - name: parser_grpc_server
+          - name: parser_http_server
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -136,7 +137,7 @@ jobs:
           docker image push --all-tags "ghcr.io/anchorageoss/${{ matrix.target.name }}"
 
       - name: TVC deployment details
-        if: matrix.target.name == 'parser_app' || matrix.target.name == 'parser_gateway'
+        if: matrix.target.name == 'parser_app' || matrix.target.name == 'parser_gateway' || matrix.target.name == 'parser_http_server'
         shell: bash
         env:
           TARGET_NAME: ${{ matrix.target.name }}
@@ -162,11 +163,17 @@ jobs:
           # parser_gateway is the host-side binary (verifies the signature
           # against a pinned pubkey + handles x402 settlement). Operators
           # need both digests pinned to actually establish the trust pair.
-          if [ "${TARGET_NAME}" = "parser_app" ]; then
-            role_note=$'\nThe enclave-side binary. Its ephemeral public key, signed by QOS during boot, becomes the gateway-side `TVC_DEMO_PINNED_PUBKEY_HEX`.'
-          else
-            role_note=$'\nThe host-side gateway. Pin the matching `parser_app` digest as the enclave it talks to; the gateway verifies every response against the enclave\'s ephemeral pubkey (pinned at boot via `TVC_DEMO_PINNED_PUBKEY_HEX` or `TVC_DEMO_PINNED_PUBKEY_FILE`).'
-          fi
+          case "${TARGET_NAME}" in
+            parser_app)
+              role_note=$'\nThe enclave-side binary that speaks gRPC over vsock to QOS. Use this as the TVC pivot when your callers reach the app via Turnkey-internal routing.'
+              ;;
+            parser_http_server)
+              role_note=$'\nThe HTTP+JSON enclave-side binary intended for TVC public ingress. Cloudflare in front of `app-<uuid>.turnkey.cloud` only accepts HTTP, so this is the variant to pivot when external clients call the app directly. Routes: `GET /health` (Turnkey HTTP health check), `POST /visualsign/api/v1/parse` (open), `POST /visualsign/api/v2/parse` (TVC-enforced when `GATEWAY_SIGNING_PUBKEY_HEX` is set). Deploy with `healthCheckType: TVC_HEALTH_CHECK_TYPE_HTTP`, `publicIngressPort: 3000`.'
+              ;;
+            parser_gateway)
+              role_note=$'\nThe host-side gateway that performs x402 verify+settle and signs a `VerifiedPaymentMarker` for the enclave to verify. Pairs with `parser_http_server`\'s `/v2` route; the gateway\'s P256 sign pubkey is pinned in the enclave\'s `GATEWAY_SIGNING_PUBKEY_HEX` env.'
+              ;;
+          esac
 
           deploy_md="${RUNNER_TEMP}/tvc_deploy_${TARGET_NAME}.md"
           {

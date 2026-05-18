@@ -1,6 +1,8 @@
 //! Shared application state for the gateway router.
 
 use crate::attestation::AttestationVerifier;
+use crate::signing::GatewaySigner;
+use crate::x402_config::X402Config;
 use generated::grpc::health::v1::health_client::HealthClient;
 use generated::parser::parser_service_client::ParserServiceClient;
 use generated::tonic;
@@ -12,10 +14,19 @@ pub type GrpcClient = ParserServiceClient<tonic::transport::Channel>;
 pub struct AppState {
     pub grpc_client: GrpcClient,
     pub health_client: HealthClient<tonic::transport::Channel>,
-    /// Optional pinned TVC verifier. When set, every parse response is
-    /// validated before the gateway returns 200; on failure the handler
-    /// returns 502 and x402-axum's settle-on-success contract skips
-    /// settlement. When `None`, the gateway runs without attestation —
-    /// allowed only when `X402_PROFILE=local` (enforced at startup).
+    /// Optional pinned demo response-attestation verifier (plan v1).
+    /// `None` in the new TVC-enforced flow, where parser_app is the
+    /// trust boundary instead.
     pub attestation: Option<Arc<AttestationVerifier>>,
+    /// Gateway signing identity for VerifiedPaymentMarkers. Set when the
+    /// TVC-enforced v2 route is enabled.
+    pub signer: Option<Arc<GatewaySigner>>,
+    /// X402 config (facilitator URL, price tags). Set when v2 is enabled.
+    pub x402_config: Option<Arc<X402Config>>,
+    /// When set, the v2 TVC-enforced handler POSTs the parse request to
+    /// this URL (paired with `parser_http_server`'s
+    /// `/visualsign/api/v2/parse`) instead of forwarding via gRPC to
+    /// `parser_grpc_server`. Lets the gateway sit in front of a
+    /// TVC-deployed `parser_http_server` whose only listener is HTTP.
+    pub http_backend_url: Option<String>,
 }
