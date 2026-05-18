@@ -1,6 +1,5 @@
 //! x402 configuration loaded from env vars + named profiles.
 
-use generated::parser::Chain;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use std::str::FromStr;
@@ -11,22 +10,6 @@ use url::Url;
 /// operator hasn't supplied an explicit one. Solana System Program ID is
 /// 32 zero bytes; sending USDC there sinks it without crediting anyone.
 const SOLANA_BURN_PAYTO: &str = "11111111111111111111111111111111";
-
-/// True iff the gateway should advertise `network` as an acceptable payment
-/// venue for a parse request on `chain`. Drives the per-request filter on
-/// `config.price_tags` in `payment_required`.
-///
-/// Today x402 has native facilitator support only for EVM (base, base-sepolia)
-/// and Solana (solana, solana-devnet). Tron, Sui, Bitcoin, Custom, and
-/// Unspecified return false here — the handler turns that into a 400 with a
-/// clear "x402 payment not available for chain X" error rather than a 402
-/// the buyer has no way to satisfy.
-pub fn network_matches_chain(network: &str, chain: Chain) -> bool {
-    matches!(
-        (chain, network),
-        (Chain::Ethereum, "base" | "base-sepolia") | (Chain::Solana, "solana" | "solana-devnet")
-    )
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum X402Profile {
@@ -559,32 +542,6 @@ mod tests {
         .unwrap();
         assert_eq!(cfg.price_tags.len(), 1);
         assert_eq!(cfg.price_tags[0].network, "base-sepolia");
-    }
-
-    #[test]
-    fn network_matches_chain_table() {
-        // Supported pairs
-        assert!(network_matches_chain("base", Chain::Ethereum));
-        assert!(network_matches_chain("base-sepolia", Chain::Ethereum));
-        assert!(network_matches_chain("solana", Chain::Solana));
-        assert!(network_matches_chain("solana-devnet", Chain::Solana));
-        // Cross-chain mismatches
-        assert!(!network_matches_chain("base", Chain::Solana));
-        assert!(!network_matches_chain("solana", Chain::Ethereum));
-        // Chains x402 doesn't natively settle on
-        for chain in [
-            Chain::Tron,
-            Chain::Sui,
-            Chain::Bitcoin,
-            Chain::Custom,
-            Chain::Unspecified,
-        ] {
-            assert!(!network_matches_chain("base-sepolia", chain));
-            assert!(!network_matches_chain("solana-devnet", chain));
-        }
-        // Unknown network strings
-        assert!(!network_matches_chain("polygon", Chain::Ethereum));
-        assert!(!network_matches_chain("", Chain::Ethereum));
     }
 
     #[test]

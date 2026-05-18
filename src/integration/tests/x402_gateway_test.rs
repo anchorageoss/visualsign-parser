@@ -498,8 +498,8 @@ async fn path6_tampered_pubkey_returns_502_no_settle() {
     );
 }
 
-// ── Per-chain network derivation (no payment header → 402 carries only the
-//    accepts entries matching the parse-request's chain) ─────────────────────
+// ── Cross-chain payment surface (no payment header → 402 carries every
+//    configured tag regardless of parse-request chain) ──────────────────────
 
 fn decode_payment_required(resp: &reqwest::Response) -> serde_json::Value {
     use base64::Engine;
@@ -516,11 +516,14 @@ fn decode_payment_required(resp: &reqwest::Response) -> serde_json::Value {
 }
 
 /// Path 7: POST /v2/parse with `chain: CHAIN_ETHEREUM` and no Payment-Signature
-/// → 402, accepts contains ONLY EVM (base-sepolia / eip155:84532) tags, no
-/// Solana entry. Local profile by default offers both chains, so this proves
-/// the per-chain filter at the handler.
+/// → 402, accepts contains EVERY configured tag (both EVM and Solana). Parse-
+/// chain and settlement-chain are independent — the buyer chooses which
+/// configured tag to pay regardless of the chain being parsed. The local
+/// profile seeds both an EVM (base-sepolia) and a Solana (solana-devnet)
+/// tag, so both must be present. The EVM tag still has to carry the
+/// x402-evm wire shape (0x-prefixed asset + EIP-712 extra).
 #[tokio::test]
-async fn path7_v2_ethereum_request_accepts_only_evm_tags() {
+async fn path7_v2_ethereum_request_accepts_all_tags() {
     let _guard = TEST_MUTEX.lock().await;
     let _p = start_procs(&[]).await;
 
@@ -542,35 +545,48 @@ async fn path7_v2_ethereum_request_accepts_only_evm_tags() {
     let v = decode_payment_required(&resp);
     let accepts = v["accepts"].as_array().expect("accepts must be array");
     assert!(!accepts.is_empty(), "ETH 402 must offer at least one tag");
+
+    let mut saw_evm = false;
+    let mut saw_solana = false;
     for entry in accepts {
         let net = entry["network"].as_str().unwrap_or("");
-        assert!(
-            net.contains("84532") || net.starts_with("eip155:") || net == "base-sepolia",
-            "ETH 402 must only carry EVM tags; saw network={net:?}; full: {entry}"
-        );
-        // EVM v2 wire shape that the x402-evm client refuses to parse without:
-        //   asset = 0x-prefixed 20-byte contract address (NOT the symbol "USDC")
-        //   extra.name + extra.version  = EIP-712 domain for the token
-        let asset = entry["asset"].as_str().unwrap_or("");
-        assert!(
-            asset.starts_with("0x") && asset.len() == 42,
-            "EVM tag asset must be a 0x-prefixed contract address; got {asset:?}"
-        );
-        assert!(
-            entry["extra"]["name"].is_string(),
-            "EVM tag must carry extra.name (EIP-712 domain); full: {entry}"
-        );
-        assert!(
-            entry["extra"]["version"].is_string(),
-            "EVM tag must carry extra.version (EIP-712 domain); full: {entry}"
-        );
+        if net.contains("84532") || net.starts_with("eip155:") || net == "base-sepolia" {
+            saw_evm = true;
+            // EVM v2 wire shape that the x402-evm client refuses to parse without:
+            //   asset = 0x-prefixed 20-byte contract address (NOT the symbol "USDC")
+            //   extra.name + extra.version  = EIP-712 domain for the token
+            let asset = entry["asset"].as_str().unwrap_or("");
+            assert!(
+                asset.starts_with("0x") && asset.len() == 42,
+                "EVM tag asset must be a 0x-prefixed contract address; got {asset:?}"
+            );
+            assert!(
+                entry["extra"]["name"].is_string(),
+                "EVM tag must carry extra.name (EIP-712 domain); full: {entry}"
+            );
+            assert!(
+                entry["extra"]["version"].is_string(),
+                "EVM tag must carry extra.version (EIP-712 domain); full: {entry}"
+            );
+        } else if net.starts_with("solana:") || net == "solana-devnet" || net == "solana" {
+            saw_solana = true;
+        } else {
+            panic!("unexpected network in 402 accepts[]: {net:?}; full: {entry}");
+        }
     }
+    assert!(saw_evm, "ETH 402 must carry an EVM tag");
+    assert!(
+        saw_solana,
+        "ETH 402 must also carry a Solana tag (cross-chain pay)"
+    );
 }
 
 /// Path 8: POST /v2/parse with `chain: CHAIN_SOLANA` and no Payment-Signature
-/// → 402, accepts contains ONLY Solana (solana-devnet) tags.
+/// → 402, accepts contains EVERY configured tag (both EVM and Solana). The
+/// symmetric counterpart to Path 7: a Solana parse can also be paid for in
+/// Base USDC if the buyer prefers.
 #[tokio::test]
-async fn path8_v2_solana_request_accepts_only_solana_tags() {
+async fn path8_v2_solana_request_accepts_all_tags() {
     let _guard = TEST_MUTEX.lock().await;
     let _p = start_procs(&[]).await;
 
@@ -595,21 +611,34 @@ async fn path8_v2_solana_request_accepts_only_solana_tags() {
         !accepts.is_empty(),
         "Solana 402 must offer at least one tag"
     );
+
+    let mut saw_evm = false;
+    let mut saw_solana = false;
     for entry in accepts {
         let net = entry["network"].as_str().unwrap_or("");
-        assert!(
-            net.starts_with("solana:") || net == "solana-devnet" || net == "solana",
-            "Solana 402 must only carry Solana tags; saw network={net:?}; full: {entry}"
-        );
+        if net.starts_with("solana:") || net == "solana-devnet" || net == "solana" {
+            saw_solana = true;
+        } else if net.contains("84532") || net.starts_with("eip155:") || net == "base-sepolia" {
+            saw_evm = true;
+        } else {
+            panic!("unexpected network in 402 accepts[]: {net:?}; full: {entry}");
+        }
     }
+    assert!(saw_solana, "Solana 402 must carry a Solana tag");
+    assert!(
+        saw_evm,
+        "Solana 402 must also carry an EVM tag (cross-chain pay)"
+    );
 }
 
-/// Path 9: POST /v2/parse with `chain: CHAIN_TRON` (or any chain x402 doesn't
-/// natively settle on) → 400 with a clear error, NOT a 402. A 402 here would
-/// imply the buyer can pay their way through; the gateway has no settlement
-/// path so it's misleading.
+/// Path 9: POST /v2/parse with `chain: CHAIN_TRON` (or any chain parser_app
+/// doesn't speak natively) → still a 402 with the full accepts[] list. The
+/// gateway no longer pre-empts unsupported parse chains; if the buyer pays,
+/// parser_app returns an unsupported-chain error post-settlement and the
+/// handler returns non-2xx so the settle-on-success contract still applies
+/// at the next layer. Parse-chain independence is preserved end-to-end.
 #[tokio::test]
-async fn path9_v2_unsupported_chain_returns_400() {
+async fn path9_v2_unsupported_chain_still_returns_402() {
     let _guard = TEST_MUTEX.lock().await;
     let _p = start_procs(&[]).await;
 
@@ -628,13 +657,15 @@ async fn path9_v2_unsupported_chain_returns_400() {
 
     assert_eq!(
         resp.status(),
-        400,
-        "expected 400 for unsupported chain, not 402"
+        402,
+        "unsupported parse chain must still get a 402; gateway no longer pre-empts"
     );
-    let text = resp.text().await.unwrap_or_default();
+
+    let v = decode_payment_required(&resp);
+    let accepts = v["accepts"].as_array().expect("accepts must be array");
     assert!(
-        text.contains("CHAIN_TRON") || text.contains("not available"),
-        "error body should name the unsupported chain; got: {text}"
+        !accepts.is_empty(),
+        "402 for unsupported parse chain must still offer every configured tag"
     );
 }
 
@@ -817,8 +848,10 @@ async fn path12_cross_chain_network_returns_402_no_settle() {
     let before = settle_count().await;
 
     let mut swapped = requirements.clone();
-    // The chain query is CHAIN_ETHEREUM (so the gateway only offers EVM
-    // tags); switch to a Solana CAIP-2 network identifier.
+    // Swap only `network` (to a Solana CAIP-2 id) while keeping the EVM
+    // `payTo` from the original offer. The gateway now offers both EVM and
+    // Solana tags, but neither offer matches "Solana network + EVM payTo",
+    // so validate_accepted_is_offered must still reject before /verify.
     swapped["network"] =
         serde_json::Value::String("solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1".to_string());
     let payment_header = build_payment_signature(&swapped);
