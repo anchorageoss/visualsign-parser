@@ -1,0 +1,26 @@
+{
+  "type": "typedData",
+  "domain": {
+    "name": "Made-Up Protocol",
+    "version": "1",
+    "chainId": "0x1",
+    "verifyingContract": "0xfeedfacefeedfacefeedfacefeedfacefeedface"
+  },
+  "primaryType": "TotallyNovelOp",
+  "types": {
+    "EIP712Domain": [
+      {"name": "name", "type": "string"},
+      {"name": "version", "type": "string"},
+      {"name": "chainId", "type": "uint256"},
+      {"name": "verifyingContract", "type": "address"}
+    ],
+    "TotallyNovelOp": [
+      {"name": "weirdValue", "type": "uint256"},
+      {"name": "noteTo",     "type": "address"}
+    ]
+  },
+  "message": {
+    "weirdValue": "42",
+    "noteTo":     "0x3333333333333333333333333333333333333333"
+  }
+}
