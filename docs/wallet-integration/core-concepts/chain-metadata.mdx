@@ -17,7 +17,9 @@ Chain metadata helps the parser understand smart contract interactions. Without 
 
 ## Ethereum: Contract ABI
 
-For Ethereum and EVM chains, provide the contract ABI to decode function calls:
+For Ethereum and EVM chains, provide the contract ABI to decode function calls. ABIs are passed as a map keyed by contract address — wallets can supply one ABI per contract the transaction touches.
+
+For an end-to-end Ethereum integration walkthrough (supported networks, what's auto-decoded, the rendered payload), see [Ethereum for Wallets](../chains/ethereum).
 
 ### gRPC example
 
@@ -28,14 +30,21 @@ request := &pb.ParseRequest{
     ChainMetadata: &pb.ChainMetadata{
         Metadata: &pb.ChainMetadata_Ethereum{
             Ethereum: &pb.EthereumMetadata{
-                Abi: &pb.Abi{
-                    Value: contractABI, // JSON ABI string
+                NetworkId: proto.String("ETHEREUM_MAINNET"),
+                AbiMappings: map[string]*pb.Abi{
+                    "0xdac17f958d2ee523a2206206994597c13d831ec7": {
+                        Value: contractABI, // JSON ABI string
+                    },
                 },
             },
         },
     },
 }
 ```
+
+### Address casing
+
+`abi_mappings` keys are 0x-prefixed contract addresses. The parser does not normalize them, so a contract registered under one casing won't match a transaction targeting the same address with a different casing. Pick one convention — all lowercase or EIP-55 checksummed — and apply it consistently.
 
 ### ABI format
 
@@ -64,15 +73,15 @@ The ABI is standard Solidity ABI JSON:
 
 ### Specifying network
 
-For EVM chains other than mainnet, specify the network:
+For EVM chains other than mainnet, set `network_id`. Supported values: `ETHEREUM_MAINNET`, `POLYGON_MAINNET`, `ARBITRUM_MAINNET`, `OPTIMISM_MAINNET`, `BASE_MAINNET`.
 
 ```go
 ChainMetadata: &pb.ChainMetadata{
     Metadata: &pb.ChainMetadata_Ethereum{
         Ethereum: &pb.EthereumMetadata{
-            NetworkId: "POLYGON_MAINNET",  // or ARBITRUM_MAINNET, etc.
-            Abi: &pb.Abi{
-                Value: contractABI,
+            NetworkId: proto.String("POLYGON_MAINNET"),
+            AbiMappings: map[string]*pb.Abi{
+                "0x...": { Value: contractABI },
             },
         },
     },
@@ -134,18 +143,31 @@ ChainMetadata: &pb.ChainMetadata{
 
 ## Library integration
 
-When using the library directly (not gRPC), pass metadata as a function parameter:
+When using the library directly (not gRPC), pass metadata via `VisualSignOptions`. The Ethereum metadata shape mirrors the proto: a `network_id` and an `abi_mappings` map keyed by contract address.
 
 ```rust
-use visualsign_parser::{parse_transaction, Chain, ChainMetadata, EthereumMetadata};
+use std::collections::HashMap;
+use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
+use visualsign::vsptrait::VisualSignOptions;
 
-let metadata = ChainMetadata::Ethereum(EthereumMetadata {
-    abi: Some(contract_abi.to_string()),
-    network_id: None,
-});
+let mut abi_mappings = HashMap::new();
+abi_mappings.insert(
+    "0xdac17f958d2ee523a2206206994597c13d831ec7".to_string(),
+    Abi { value: contract_abi_json, signature: None },
+);
 
-let result = parse_transaction(raw_tx, Chain::Ethereum, Some(metadata));
+let options = VisualSignOptions {
+    metadata: Some(ChainMetadata {
+        metadata: Some(Metadata::Ethereum(EthereumMetadata {
+            network_id: Some("ETHEREUM_MAINNET".to_string()),
+            abi_mappings,
+        })),
+    }),
+    ..Default::default()
+};
 ```
+
+See [Library Integration](../library/getting-started) for the full end-to-end example.
 
 ## Obtaining metadata
 
