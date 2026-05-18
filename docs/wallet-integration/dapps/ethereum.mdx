@@ -1,0 +1,115 @@
+---
+title: Ethereum for dApp Builders
+description: Design contracts and ship ABIs so wallets render your transactions meaningfully
+---
+
+If your dApp's contracts aren't ERC-20, ERC-721, Permit2, or a Uniswap router, the parser cannot decode their calldata without help. To users, that means a 4-byte selector and an opaque hex blob in the signing screen — exactly the kind of "approve this thing you can't read" UX that VisualSign exists to eliminate.
+
+This page covers what dApp and contract authors can do to make their transactions render as readable, structured fields in any wallet that uses VisualSign.
+
+The companion to this page is [Ethereum for Wallets](../chains/ethereum), which describes what wallets do with the metadata you ship.
+
+## How wallets find your ABI
+
+VisualSign does not host an ABI registry. Wallets that want to render your contract calls fetch your ABI from somewhere — Etherscan and other block explorers, your documentation site, a well-known URL on your domain, a community-maintained registry, or a private store the wallet operator curates. Then they pass it to the parser as part of `EthereumMetadata.abi_mappings`, keyed by contract address.
+
+Your job as a dApp author is to make the ABI easy to find, easy to verify, and stable across deployments:
+
+- **Verify your contracts on the relevant block explorer** (Etherscan, Polygonscan, Arbiscan, and so on). Verified contracts publish their ABI on a well-known surface that almost every wallet already consults.
+- **Publish the canonical ABI alongside your contract source.** A `contracts/abi/<contract>.json` file in your repo, mirrored on your documentation site, gives wallets a stable URL to fetch from when they're not relying on an explorer.
+- **Use stable contract addresses.** Proxy patterns are fine — wallets resolve the implementation off-chain — but a contract whose address changes every deploy forces every wallet to re-fetch your ABI continuously.
+- **Version your ABI when interfaces change.** Wallets cache. If your function signatures change without a version bump, users will see decoded fields that no longer match what your contract does.
+
+## Sign your ABI
+
+The `Abi` message includes an optional `signature` field. Signing your ABI lets a wallet cryptographically verify that the ABI it loaded matches the one you published, without trusting whoever served the file.
+
+Signature validation in the parser today:
+
+- **Algorithm**: `secp256k1` (no other algorithms are accepted).
+- **Hash**: SHA-256 over the raw ABI JSON string, byte for byte.
+- **Format**: DER-encoded signature, hex-encoded as the `value`.
+- **Public key**: hex-encoded secp256k1 point, passed in `metadata` under the key `public_key`.
+
+### A signing example
+
+The signing operation is straightforward — sign the SHA-256 of the canonical ABI JSON. In Node.js:
+
+```javascript
+import { createHash } from "node:crypto";
+import { secp256k1 } from "@noble/curves/secp256k1";
+
+const abiJson = JSON.stringify(abi); // canonical form — no reformat after signing
+const digest = createHash("sha256").update(abiJson).digest();
+
+const privateKey = /* your signing key, kept offline */;
+const sig = secp256k1.sign(digest, privateKey, { prehash: false }); // DER form
+console.log(sig.toDERHex());
+console.log(secp256k1.getPublicKey(privateKey, false).toString("hex"));
+```
+
+Then ship the ABI, the signature, and the public key together so wallets can build the `Abi` message:
+
+```protobuf
+message Abi {
+  string value = 1;                         // The exact JSON bytes you hashed.
+  optional SignatureMetadata signature = 2;
+}
+
+message SignatureMetadata {
+  string value = 1;                         // DER signature, hex-encoded.
+  repeated Metadata metadata = 2;
+}
+
+message Metadata {
+  string key = 1;                           // e.g. "algorithm", "public_key", "issuer", "timestamp".
+  string value = 2;
+}
+```
+
+The metadata bag must contain at least `algorithm` (set to `"secp256k1"`) and `public_key` (hex-encoded). `issuer` and `timestamp` are preserved but not used in validation.
+
+### Trust model
+
+Signing proves the ABI was not modified after you signed it. It does **not** prove who signed it — the parser accepts any well-formed signature from any key. To establish identity, wallets verify your public key against an allowlist they maintain (a static config, a registry of audited dApps, or whatever fits their threat model). Publish your signing key alongside your contracts so wallets can pin it.
+
+If signature validation fails, the parser logs a warning and **silently skips that ABI entry**, falling back to raw-hex rendering for calls to that contract. That means a wrong signature is worse than no signature — users see less information, not more. Ship unsigned ABIs until you're confident the signing pipeline is stable, then add signatures once your wallet integrators are ready to verify them.
+
+## Design calldata that visualizes well
+
+The parser only sees what's in your transaction's calldata. It does not simulate execution, read event logs, or query state. A few patterns make the difference between a clear preview and a wall of hex:
+
+- **Use canonical interfaces wherever possible.** Calls to `transfer(address,uint256)`, `approve(address,uint256)`, ERC-721 transfers, Permit2, and Uniswap routers are decoded automatically — no ABI required. If your contract's functions can be expressed in terms of standard interfaces, do so.
+- **Prefer typed parameters over `bytes` blobs.** A function that takes `(address recipient, uint256 amount, uint8 tier)` decodes into three named, typed fields. The same data passed as `bytes data` decodes as one opaque hex string. Reserve `bytes` for genuinely opaque payloads (signatures, encrypted notes) and use typed parameters for anything you want users to see.
+- **Encode multi-step intent as commands, not as a single opaque blob.** Uniswap's Universal Router is the canonical example: a list of typed commands becomes a list of nested `PreviewLayout` fields, one per step. A contract that bundles "wrap, swap, send" as three command codes plus their parameters renders more clearly than a contract that takes a single `bytes payload` and parses it internally.
+- **Don't encode semantic meaning only in event logs.** Logs are not available to the parser — they only exist after execution. If a user needs to know "this call transfers X tokens to Y", the X and Y must be visible in the calldata, not just emitted on success.
+- **Name your function parameters.** Solidity preserves parameter names in the ABI, and the parser uses them as field labels. `swap(address tokenIn, address tokenOut, uint256 amountIn)` renders far better than `swap(address, address, uint256)`.
+
+## EIP-712 typed data
+
+This parser is transaction-focused — it reads RLP-encoded EVM transactions, not EIP-712 typed-data signatures. If your dApp asks users to sign permits, orders, or other off-chain structured messages, that flow is out of scope for the current Ethereum parser. The same wallet team handling EIP-712 rendering on their side may follow up with first-class support; track repo issues for status.
+
+## Verify what users will see
+
+Before announcing a contract to wallet integrators, render a real transaction against your ABI locally with `parser_cli`:
+
+```bash
+cargo run --bin parser_cli -- \
+  --chain ethereum \
+  --network ETHEREUM_MAINNET \
+  --output human \
+  --abi-json-mappings "MyContract:path/to/your-abi.json:0xYourContractAddress" \
+  -t <raw-unsigned-tx-hex>
+```
+
+The `--abi-json-mappings` flag can be passed multiple times if your transaction touches several of your contracts.
+
+The `human` output is what a wallet user will see; the `json` output is the exact `SignablePayload` your integrators will render. See [Parser CLI](/parser-cli) for the full set of flags.
+
+A short loop of (modify ABI → render → adjust function names and types → re-render) catches almost every "users will see something confusing" problem before it ships.
+
+## Next steps
+
+- [Ethereum for Wallets](../chains/ethereum) — Confirm your assumptions about how wallets will integrate.
+- [Field Types](/field-types) — The full `SignablePayload` schema, so you can mentally map your calldata to what users see.
+- [Parser CLI](/parser-cli) — The local rendering loop in detail.

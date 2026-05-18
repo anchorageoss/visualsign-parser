@@ -1,0 +1,208 @@
+---
+title: Ethereum for Wallets
+description: Integrate the VisualSign parser for Ethereum and EVM-compatible chains
+---
+
+This page covers what an EVM wallet needs to integrate the VisualSign parser: which networks are supported, what gets decoded automatically, when to provide an ABI, and what the rendered output looks like.
+
+For deployment options (Turnkey-hosted, self-hosted TEE, library, or gRPC), see [Choosing a Deployment Model](../overview). For the chain-agnostic API shape, see the [gRPC API Reference](/api-reference).
+
+## Prerequisites
+
+- A deployment of the parser (see [overview](../overview)).
+- The raw unsigned transaction as hex (with or without `0x` prefix) or base64.
+
+## Quick path
+
+For known protocols and standard token transfers, no ABI is required — the parser ships with built-in decoders and a registry of well-known tokens. The minimum request is the raw transaction plus the chain and network identifier:
+
+```go
+request := &pb.ParseRequest{
+    UnsignedPayload: rawTxHex,
+    Chain:           pb.Chain_CHAIN_ETHEREUM,
+    ChainMetadata: &pb.ChainMetadata{
+        Metadata: &pb.ChainMetadata_Ethereum{
+            Ethereum: &pb.EthereumMetadata{
+                NetworkId: proto.String("ETHEREUM_MAINNET"),
+            },
+        },
+    },
+}
+
+resp, err := client.Parse(ctx, request)
+// resp.ParsedTransaction.Payload.SignablePayload is a JSON string.
+```
+
+The response's `signable_payload` is a JSON string conforming to the schema documented in [Field Types](/field-types). Display it to the user before signing.
+
+## Supported EVM networks
+
+| `network_id` | Chain ID |
+|---|---|
+| `ETHEREUM_MAINNET` | 1 |
+| `POLYGON_MAINNET` | 137 |
+| `ARBITRUM_MAINNET` | 42161 |
+| `OPTIMISM_MAINNET` | 10 |
+| `BASE_MAINNET` | 8453 |
+
+The `network_id` controls which token registry the parser uses when resolving contract addresses to symbols. If you omit it, the parser falls back to mainnet — addresses that exist on other chains may not resolve correctly. Always set it.
+
+Other EVM-compatible chains can be parsed by passing a `network_id` value from the table above whose token set matches your target chain, but token resolution will only cover the addresses known for that chain ID.
+
+## What's auto-decoded versus what needs an ABI
+
+| Contract type | Built-in support | Notes |
+|---|---|---|
+| Native ETH transfers | Yes | No metadata needed. |
+| ERC-20 `transfer`, `approve`, `transferFrom` | Yes | Symbol and decimals are resolved from the built-in registry for well-known tokens (WETH, USDC, USDT, and others per chain). |
+| ERC-721 transfers and approvals | Yes | Token ID is shown; collection name resolves if the token is in the registry. |
+| Uniswap Universal Router (`execute`) | Yes | V2 and V3 exact-in swaps, `WRAP_ETH` / `UNWRAP_WETH`, `PAY_PORTION`, `PERMIT2_PERMIT`, and `PERMIT2_TRANSFER_FROM`. Each command renders as a nested `PreviewLayout`. V4 swap and initialize-pool commands are recognized but not yet decoded — they fall through to raw-hex rendering until support lands. |
+| Uniswap V4 PoolManager direct calls | No (yet) | The decoder exists as a stub; calls to `swap`, `modifyLiquidity`, `donate`, and `initialize` currently render through the generic fallback. Provide an ABI for the PoolManager if you want decoded fields today. |
+| Permit2 | Yes | Single allowance grants (`PERMIT`) and single signature-based transfers (`TRANSFER_FROM`). Batch variants (`PERMIT_BATCH`, `TRANSFER_FROM_BATCH`) are not yet decoded. |
+| Any other contract | Provide an ABI via `abi_mappings` | Without an ABI, calldata renders as the 4-byte selector plus raw hex parameters. |
+
+ERC-1155 contracts are recognized as a `TokenMetadata` type but have no dedicated calldata decoder. To decode ERC-1155 `safeTransferFrom` calls into readable fields, provide the contract's ABI.
+
+## Providing ABIs
+
+For contracts outside the auto-decoded set, populate `abi_mappings` keyed by contract address. The value is the Solidity ABI JSON, optionally with a signature for provenance (see [Ethereum for dApp Builders](../dapps/ethereum) for the signing model).
+
+### gRPC
+
+```go
+request := &pb.ParseRequest{
+    UnsignedPayload: rawTxHex,
+    Chain:           pb.Chain_CHAIN_ETHEREUM,
+    ChainMetadata: &pb.ChainMetadata{
+        Metadata: &pb.ChainMetadata_Ethereum{
+            Ethereum: &pb.EthereumMetadata{
+                NetworkId: proto.String("ETHEREUM_MAINNET"),
+                AbiMappings: map[string]*pb.Abi{
+                    "0xdac17f958d2ee523a2206206994597c13d831ec7": {
+                        Value: usdtAbiJSON, // Solidity ABI as a JSON string.
+                    },
+                },
+            },
+        },
+    },
+}
+```
+
+### Rust library
+
+```rust
+use std::collections::HashMap;
+use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
+use visualsign::vsptrait::VisualSignOptions;
+
+let mut abi_mappings = HashMap::new();
+abi_mappings.insert(
+    "0xdac17f958d2ee523a2206206994597c13d831ec7".to_string(),
+    Abi {
+        value: usdt_abi_json,
+        signature: None,
+    },
+);
+
+let options = VisualSignOptions {
+    metadata: Some(ChainMetadata {
+        metadata: Some(Metadata::Ethereum(EthereumMetadata {
+            network_id: Some("ETHEREUM_MAINNET".to_string()),
+            abi_mappings,
+        })),
+    }),
+    ..Default::default()
+};
+```
+
+### Address casing
+
+`abi_mappings` is a string-keyed map. The parser does not normalize keys, so a contract registered under one casing will not match a transaction targeting the same address with different casing. Pick one convention — all lowercase or EIP-55 checksummed — and apply it consistently across your wallet's ABI store and the values you pass on every parse request.
+
+## Supported transaction types
+
+The parser accepts unsigned Ethereum transactions in RLP form. Two transaction types are supported:
+
+| Type | Decoded | Notes |
+|---|---|---|
+| Legacy | Yes | Pre-EIP-1559, single `gasPrice` field. |
+| EIP-1559 (Type 2) | Yes | `maxFeePerGas` and `maxPriorityFeePerGas` render as separate fields. |
+| EIP-2930 (Type 1) | No | The parser returns `UnsupportedTransactionType("eip-2930")`. |
+| EIP-4844 (Type 3, blobs) | No | The parser returns `UnsupportedTransactionType("eip-4844")`. |
+| EIP-7702 (Type 4) | No | The parser returns `UnsupportedTransactionType("eip-7702")`. |
+
+If your wallet may submit unsupported types, surface the error message to the user and fall back to a raw-data display (see [Error Handling](../core-concepts/error-handling)).
+
+The standard API accepts unsigned transactions only. Signed envelope decoding is gated behind a developer flag (`DeveloperConfig::allow_signed_transactions`) intended for tooling, not production wallet flows.
+
+## The rendered payload
+
+The parser returns a JSON `SignablePayload` with a `Title`, optional `Subtitle`, and an array of `Fields`. For Ethereum, the top-level fields always include network, recipient, value, gas information, and nonce, followed by a decoded representation of the calldata (when applicable).
+
+Take a Uniswap Universal Router swap as a concrete example — an `execute` call with four commands (two V3 swaps, a fee payment, and a WETH unwrap). The parser produces:
+
+```json
+{
+  "Version": "0",
+  "PayloadType": "EthereumTx",
+  "Title": "Ethereum Transaction",
+  "Fields": [
+    { "Type": "text_v2", "Label": "Network",
+      "TextV2": { "Text": "Ethereum Mainnet" } },
+
+    { "Type": "address_v2", "Label": "To",
+      "AddressV2": { "Address": "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD",
+                     "AssetLabel": "ETH", "Name": "To" } },
+
+    { "Type": "amount_v2", "Label": "Value",
+      "AmountV2": { "Amount": "0", "Abbreviation": "ETH" } },
+
+    { "Type": "text_v2", "Label": "Gas Limit",
+      "TextV2": { "Text": "281329" } },
+
+    { "Type": "preview_layout", "Label": "Universal Router",
+      "PreviewLayout": {
+        "Title": { "Text": "Uniswap Universal Router Execute" },
+        "Subtitle": { "Text": "4 commands, deadline 2025-11-15 22:01:35 UTC" },
+        "Expanded": {
+          "Fields": [
+            { "Type": "preview_layout", "Label": "V3 Swap Exact In",
+              "PreviewLayout": {
+                "Title": { "Text": "V3 Swap Exact In" },
+                "Subtitle": { "Text": "Swap 240.000000000000000000 SETH for >=0.003573913782539750 WETH via V3 (0.3% fee)" },
+                "Expanded": { "Fields": [ /* Input Token, Input Amount, Output Token, Minimum Output, Fee Tier */ ] }
+              } },
+            /* second V3 swap, Pay Portion, Unwrap WETH commands, Deadline */
+          ]
+        }
+      } }
+  ]
+}
+```
+
+A few rendering rules to be aware of when building the UI:
+
+- **Every field has a `FallbackText`.** Render that string if you don't yet support the field's `Type`. New field types may be added in future versions, and `FallbackText` is the forward-compatible escape hatch.
+- **`PreviewLayout` is recursive.** Multi-step operations like Universal Router commands nest layouts. Show the `Subtitle` collapsed, and reveal the `Expanded.Fields` on user action.
+- **Amounts come pre-formatted.** `AmountV2.Amount` is already scaled by the token's decimals — render it verbatim alongside `AmountV2.Abbreviation`.
+- **Comparison operators are ASCII.** Slippage and minimums use `>=` and `<=`, not Unicode glyphs.
+
+The full set of field types — `TextV2`, `AddressV2`, `AmountV2`, `Number`, `PreviewLayout`, `Divider` — is documented in [Field Types](/field-types). The Uniswap fixture above is checked into the repo at `src/chain_parsers/visualsign-ethereum/tests/fixtures/uniswap-v3swap.expected` and can be reproduced end-to-end with `parser_cli` (see [Parser CLI](/parser-cli)).
+
+## Error handling for EVM
+
+Beyond the generic categories covered in [Error Handling](../core-concepts/error-handling), the EVM parser surfaces a few EVM-specific failure modes:
+
+| Symptom | What happened | Recommended UI |
+|---|---|---|
+| `FailedToDecodeTransaction` | The bytes are not a well-formed RLP unsigned transaction. | Show "Invalid transaction format" and block signing. |
+| `UnsupportedTransactionType("eip-2930" / "eip-4844" / "eip-7702")` | Recognized transaction type but not yet parseable. | Show the type and offer to sign with a raw-bytes display only. Do not silently downgrade. |
+| Calldata renders as `Method: 0xa9059cbb (unknown)` with hex data | Contract is outside the auto-decoded set and no ABI was supplied. | Surface a warning. Consider fetching the ABI from your wallet's contract registry and retrying. |
+| Token amounts render in raw units (e.g., `1500000`) without a symbol | The token contract is not in the built-in registry for the supplied `network_id`. | Either pre-load the token in your wallet's metadata layer or display the raw amount alongside the contract address. |
+
+## Next steps
+
+- [Ethereum for dApp Builders](../dapps/ethereum) — How contract authors make their transactions render meaningfully in your wallet.
+- [Chain Metadata](../core-concepts/chain-metadata) — Cross-chain reference for ABIs and IDLs.
+- [Attestation Verification](../self-hosted-tee/attestation) — Required for TEE deployments.
+- [Parser CLI](/parser-cli) — Reproduce parsing locally against your own fixtures.

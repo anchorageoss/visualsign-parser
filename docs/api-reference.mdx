@@ -62,8 +62,10 @@ message ChainMetadata {
 }
 
 message EthereumMetadata {
-  optional string network_id = 2;  // Network identifier (e.g., "ETHEREUM_MAINNET", "POLYGON_MAINNET")
-  optional Abi abi = 1;            // Contract ABI for decoding
+  reserved 1;                              // Removed: was singular `abi` field.
+  reserved "abi";                          //
+  optional string network_id = 2;          // Network identifier (e.g., "ETHEREUM_MAINNET", "POLYGON_MAINNET")
+  map<string, Abi> abi_mappings = 3;       // Contract address (0x-prefixed) to ABI definition
 }
 
 message SolanaMetadata {
@@ -143,14 +145,19 @@ grpcurl -plaintext -d '{
 ### With contract ABI
 
 ```bash
-# Ethereum with ABI for smart contract decoding
+# Ethereum with ABI for smart contract decoding.
+# abi_mappings is keyed by 0x-prefixed contract address; pick a consistent
+# casing convention (all lowercase or EIP-55 checksummed) across requests.
 grpcurl -plaintext -d '{
   "unsigned_payload": "0x...",
   "chain": "CHAIN_ETHEREUM",
   "chain_metadata": {
     "ethereum": {
-      "abi": {
-        "value": "[{\"inputs\":[],\"name\":\"transfer\",\"type\":\"function\"}]"
+      "network_id": "ETHEREUM_MAINNET",
+      "abi_mappings": {
+        "0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "value": "[{\"inputs\":[],\"name\":\"transfer\",\"type\":\"function\"}]"
+        }
       }
     }
   }

@@ -3,7 +3,13 @@ title: Ethereum
 description: Native transfers, ERC tokens, smart contracts, and DeFi protocols
 ---
 
-The Ethereum module handles transactions for Ethereum and all EVM-compatible chains.
+<Note>
+  Integrating a wallet? See [Ethereum for Wallets](/wallet-integration/chains/ethereum).
+  Building contracts that wallets render meaningfully? See [Ethereum for dApp Builders](/wallet-integration/dapps/ethereum).
+  This page describes the parser's capabilities for contributors adding new visualizations.
+</Note>
+
+The Ethereum module handles transactions for Ethereum and EVM-compatible chains.
 
 ## Architecture overview
 
@@ -16,54 +22,39 @@ The Ethereum module handles transactions for Ethereum and all EVM-compatible cha
 
 The Ethereum parser handles:
 - Native ETH transfers
-- ERC-20/721/1155 token standards
-- Smart contract method calls via ABI decoding
-- DeFi protocol interactions
-- ENS name resolution
+- ERC-20 and ERC-721 token standards
+- Uniswap Universal Router (V2 and V3 exact-in swaps; V4 commands recognized but not yet decoded) and Permit2
+- Smart contract method calls via wallet-supplied ABIs
 
 ## Transaction types
 
 ### 1. Simple transfer
-Basic ETH transfer between addresses with gas calculation.
+Basic ETH transfer between addresses with gas calculation. Supported transaction envelopes: Legacy and EIP-1559. EIP-2930, EIP-4844, and EIP-7702 currently return `UnsupportedTransactionType`.
 
 ### 2. Token operations
-- **ERC-20**: Transfer, Approve, TransferFrom
-- **ERC-721**: NFT transfers and approvals
-- **ERC-1155**: Multi-token standard
+- **ERC-20**: Transfer, Approve, TransferFrom — decoded automatically.
+- **ERC-721**: NFT transfers and approvals — decoded automatically.
+- **ERC-1155**: Recognized as a token type, but multi-token calls require a wallet-supplied ABI to decode.
 
 ### 3. Smart contract calls
-Decode function calls using contract ABI to show:
+Decode function calls using a wallet-supplied ABI to show:
 - Method name and parameters
-- Token amounts in human-readable format
-- Contract verification status
+- Token amounts in human-readable format using the token registry
 
-### 4. DeFi protocols
-Special handling for common protocols:
-- Uniswap (swaps, liquidity)
-- Compound (lending/borrowing)
-- Aave (deposits, withdrawals)
-- OpenSea (NFT trades)
+### 4. Auto-decoded protocols
+Built-in decoders ship for:
+- Uniswap Universal Router: V2 and V3 exact-in swaps, wrap/unwrap, fee payments, and single Permit2 commands. V4 commands are recognized but not yet decoded.
+- Permit2: single allowance grants and single signature-based transfers.
+
+The V4 PoolManager visualizer is currently a stub; direct calls fall through to the generic fallback decoder.
+
+Other DeFi protocols (Aave, Compound, OpenSea, and so on) are not decoded out of the box. They render through the generic ABI decoder when a wallet supplies the contract's ABI via `abi_mappings`.
 
 ## Visualization strategy
 
 ### Primary information
-```json
-{
-  "Title": "Swap ETH for USDC",
-  "Fields": [
-    {
-      "Type": "amount_v2",
-      "Label": "You Pay",
-      "AmountV2": { "Amount": "1.5", "Abbreviation": "ETH" }
-    },
-    {
-      "Type": "amount_v2",
-      "Label": "You Receive",
-      "AmountV2": { "Amount": "2,850", "Abbreviation": "USDC" }
-    }
-  ]
-}
-```
+
+For an annotated rendered example (a real Uniswap Universal Router swap with nested `PreviewLayout` commands), see [Ethereum for Wallets](/wallet-integration/chains/ethereum#the-rendered-payload).
 
 ### Gas information
 Always shown as expandable preview:
@@ -71,17 +62,12 @@ Always shown as expandable preview:
 - Expanded: Gas price, limit, max fee breakdown
 
 ### Risk indicators
-- First-time recipient addresses
-- Unverified contracts
-- Unlimited token approvals
-- High-value transfers
+
+The parser flags unlimited Permit2 allowances (max-u160) as `"Unlimited Amount"` so wallets can render an obvious warning. Other risk signals — first-time recipients, unverified contracts, high-value transfer thresholds — are wallet-side responsibilities and are not produced by the parser.
 
 ## Name resolution
 
-The module integrates with:
-- **ENS**: Ethereum Name Service
-- **Contract Registry**: Known verified contracts
-- **Token Lists**: Popular token databases
+The module resolves known token addresses through a built-in `ContractRegistry` mapping `(chain_id, address) → TokenMetadata`. Wallets can extend it through `EthereumMetadata.abi_mappings`. The parser is calldata-only and does not make RPC calls, so on-chain resolution (ENS, off-chain token lists) happens at the wallet layer, not here.
 
 ## Implementation details
 
@@ -90,18 +76,15 @@ Full source code available at:
 
 ## Chain support
 
-Compatible with all EVM chains:
-- Ethereum Mainnet
-- Polygon
-- Arbitrum
-- Optimism
-- BSC
-- Avalanche C-Chain
+The token registry ships with metadata for five networks:
 
-Configuration adjustments may be needed for:
-- Native token symbols
-- Block explorers
-- Gas token decimals
+- `ETHEREUM_MAINNET` (chain ID 1)
+- `POLYGON_MAINNET` (chain ID 137)
+- `ARBITRUM_MAINNET` (chain ID 42161)
+- `OPTIMISM_MAINNET` (chain ID 10)
+- `BASE_MAINNET` (chain ID 8453)
+
+Other EVM-compatible chains can be parsed by passing one of these `network_id` values, but token resolution is limited to the addresses known for that chain ID.
 
 ## Example outputs
 
