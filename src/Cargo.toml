@@ -79,6 +79,7 @@ visualsign = { path = "./visualsign" }
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
+disallowed_types = "deny"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
