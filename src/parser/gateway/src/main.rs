@@ -4,277 +4,17 @@
 #![allow(clippy::panic)]
 
 use axum::{
-    Json, Router,
+    Router,
     extract::DefaultBodyLimit,
-    extract::State,
-    http::StatusCode,
     routing::{get, post},
 };
-use generated::grpc::health::v1::{
-    HealthCheckRequest, health_check_response::ServingStatus, health_client::HealthClient,
-};
-use generated::parser::{
-    Chain, ChainMetadata, EthereumMetadata, ParseRequest, SignatureScheme, SolanaMetadata,
-    chain_metadata, parser_service_client::ParserServiceClient,
-};
+use generated::grpc::health::v1::health_client::HealthClient;
+use generated::parser::parser_service_client::ParserServiceClient;
 use generated::tonic;
 use host_primitives::GRPC_MAX_RECV_MSG_SIZE;
-use serde::{Deserialize, Serialize};
+use parser_gateway::attestation::AttestationVerifier;
 use std::net::SocketAddr;
-use std::time::Duration;
-
-#[derive(Deserialize)]
-struct TurnkeyRequestWrapper {
-    request: TurnkeyRequest,
-}
-
-/// Tagged representation of chain metadata for unambiguous JSON deserialization.
-///
-/// The generated `ChainMetadata` uses `serde(untagged)` on the inner oneof enum, which means
-/// serde tries Ethereum first. A Solana payload with only `networkId` would be silently
-/// decoded as `EthereumMetadata`. This wrapper uses an explicit `chain` discriminator.
-#[derive(Deserialize)]
-#[serde(tag = "chain", rename_all = "camelCase")]
-enum ChainMetadataInput {
-    #[serde(rename = "CHAIN_ETHEREUM")]
-    Ethereum(EthereumMetadata),
-    #[serde(rename = "CHAIN_SOLANA")]
-    Solana(SolanaMetadata),
-}
-
-impl From<ChainMetadataInput> for ChainMetadata {
-    fn from(input: ChainMetadataInput) -> Self {
-        let metadata = match input {
-            ChainMetadataInput::Ethereum(eth) => chain_metadata::Metadata::Ethereum(eth),
-            ChainMetadataInput::Solana(sol) => chain_metadata::Metadata::Solana(sol),
-        };
-        ChainMetadata {
-            metadata: Some(metadata),
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct TurnkeyRequest {
-    unsigned_payload: String,
-    chain: String,
-    chain_metadata: Option<ChainMetadataInput>,
-}
-
-#[derive(Serialize)]
-struct TurnkeyResponseWrapper {
-    response: TurnkeyResponse,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TurnkeyResponse {
-    parsed_transaction: TurnkeyParsedTransaction,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TurnkeyParsedTransaction {
-    payload: TurnkeyPayload,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<TurnkeySignature>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TurnkeyPayload {
-    signable_payload: String,
-    metadata_digest: String,
-    input_payload_digest: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TurnkeySignature {
-    message: String,
-    public_key: String,
-    scheme: String,
-    signature: String,
-}
-
-type GrpcClient = ParserServiceClient<tonic::transport::Channel>;
-
-#[derive(Clone)]
-struct AppState {
-    grpc_client: GrpcClient,
-    health_client: HealthClient<tonic::transport::Channel>,
-}
-
-const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
-const PARSE_TIMEOUT: Duration = Duration::from_secs(30);
-
-async fn health_handler(
-    State(AppState {
-        mut health_client, ..
-    }): State<AppState>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    let request = tonic::Request::new(HealthCheckRequest {
-        service: health_check::DEFAULT_SERVICE.to_string(),
-    });
-    match tokio::time::timeout(HEALTH_CHECK_TIMEOUT, health_client.check(request)).await {
-        Ok(Ok(resp)) => {
-            let status = resp.into_inner().status;
-            if status == ServingStatus::Serving as i32 {
-                (StatusCode::OK, Json(serde_json::json!({"status": "ok"})))
-            } else {
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(
-                        serde_json::json!({"status": "unhealthy", "reason": "grpc service not serving"}),
-                    ),
-                )
-            }
-        }
-        Ok(Err(e)) => {
-            eprintln!("health check failed: {e}");
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({"status": "unhealthy", "reason": "backend unavailable"})),
-            )
-        }
-        Err(_) => {
-            eprintln!("health check timed out after {HEALTH_CHECK_TIMEOUT:?}");
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(
-                    serde_json::json!({"status": "unhealthy", "reason": "health check timed out"}),
-                ),
-            )
-        }
-    }
-}
-
-async fn parse_handler(
-    State(AppState {
-        mut grpc_client, ..
-    }): State<AppState>,
-    Json(wrapper): Json<TurnkeyRequestWrapper>,
-) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
-    let chain = match Chain::from_str_name(&wrapper.request.chain) {
-        Some(c) => c as i32,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(error_response(format!(
-                    "unknown chain: {}",
-                    wrapper.request.chain
-                ))),
-            );
-        }
-    };
-
-    let request = tonic::Request::new(ParseRequest {
-        unsigned_payload: wrapper.request.unsigned_payload,
-        chain,
-        chain_metadata: wrapper.request.chain_metadata.map(ChainMetadata::from),
-    });
-
-    let response = match tokio::time::timeout(PARSE_TIMEOUT, grpc_client.parse(request)).await {
-        Ok(Ok(r)) => r.into_inner(),
-        Ok(Err(e)) => {
-            let (http_status, msg) = match e.code() {
-                tonic::Code::InvalidArgument => (StatusCode::BAD_REQUEST, e.message().to_string()),
-                tonic::Code::NotFound => (StatusCode::NOT_FOUND, e.message().to_string()),
-                _ => {
-                    eprintln!("gRPC error: {e}");
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "internal error".to_string(),
-                    )
-                }
-            };
-            return (http_status, Json(error_response(msg)));
-        }
-        Err(_) => {
-            eprintln!("parse RPC timed out after {PARSE_TIMEOUT:?}");
-            return (
-                StatusCode::GATEWAY_TIMEOUT,
-                Json(error_response("request timed out".to_string())),
-            );
-        }
-    };
-
-    let parsed_tx = match response.parsed_transaction {
-        Some(tx) => tx,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    "missing parsed_transaction in response".to_string(),
-                )),
-            );
-        }
-    };
-
-    let payload = match parsed_tx.payload {
-        Some(p) => p,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response("missing payload in response".to_string())),
-            );
-        }
-    };
-
-    let signature = parsed_tx.signature.map(|sig| {
-        let scheme = match sig.scheme {
-            x if x == SignatureScheme::TurnkeyP256EphemeralKey as i32 => {
-                SignatureScheme::TurnkeyP256EphemeralKey
-            }
-            _ => SignatureScheme::Unspecified,
-        };
-        let scheme_str = scheme.as_str_name();
-        TurnkeySignature {
-            message: sig.message,
-            public_key: sig.public_key,
-            scheme: scheme_str.to_string(),
-            signature: sig.signature,
-        }
-    });
-
-    (
-        StatusCode::OK,
-        Json(TurnkeyResponseWrapper {
-            response: TurnkeyResponse {
-                parsed_transaction: TurnkeyParsedTransaction {
-                    payload: TurnkeyPayload {
-                        signable_payload: payload.parsed_payload,
-                        metadata_digest: payload.metadata_digest,
-                        input_payload_digest: payload.input_payload_digest,
-                    },
-                    signature,
-                },
-            },
-            error: None,
-        }),
-    )
-}
-
-// SHA-256 of empty input: used as the canonical "no data" sentinel for digest fields.
-const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-
-fn error_response(msg: String) -> TurnkeyResponseWrapper {
-    TurnkeyResponseWrapper {
-        response: TurnkeyResponse {
-            parsed_transaction: TurnkeyParsedTransaction {
-                payload: TurnkeyPayload {
-                    signable_payload: String::new(),
-                    metadata_digest: EMPTY_SHA256.to_string(),
-                    input_payload_digest: EMPTY_SHA256.to_string(),
-                },
-                signature: None,
-            },
-        },
-        error: Some(msg),
-    }
-}
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -297,24 +37,108 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_encoding_message_size(GRPC_MAX_RECV_MSG_SIZE);
     let health_client = HealthClient::new(channel);
 
-    let state = AppState {
-        grpc_client,
-        health_client,
+    // Build the TVC attestation verifier. The pinned pubkey is provisioned
+    // out-of-band (Turnkey TVC plants it as a launch arg) and must match the
+    // enclave's ephemeral key. Fail-closed in non-local profiles: a production
+    // gateway without a pinned verifier would happily forward (and settle for)
+    // unattested responses.
+    let profile_str = std::env::var("X402_PROFILE").unwrap_or_else(|_| "local".to_string());
+    let is_local_profile = profile_str == "local";
+
+    let attestation: Option<Arc<AttestationVerifier>> = match AttestationVerifier::from_env() {
+        Ok(Some(v)) => {
+            let hex = v.pinned_hex();
+            let head = &hex[..8.min(hex.len())];
+            let tail = &hex[hex.len().saturating_sub(8)..];
+            println!("x402 attestation: pinned TVC pubkey {head}..{tail}");
+            Some(Arc::new(v))
+        }
+        Ok(None) => {
+            if is_local_profile {
+                eprintln!(
+                    "WARNING: TVC_DEMO_PINNED_PUBKEY_HEX not set; gateway will not attest \
+                     parse responses (allowed because X402_PROFILE=local)"
+                );
+                None
+            } else {
+                eprintln!(
+                    "FATAL: TVC_DEMO_PINNED_PUBKEY_HEX (or _FILE) is required for \
+                     X402_PROFILE={profile_str}"
+                );
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("FATAL: invalid TVC verifier pubkey configuration: {e}");
+            std::process::exit(1);
+        }
     };
 
-    let app = Router::new()
-        .route("/health", get(health_handler))
-        .route("/visualsign/api/v1/parse", post(parse_handler))
+    let state = parser_gateway::state::AppState {
+        grpc_client,
+        health_client,
+        attestation,
+    };
+
+    let mut app = Router::new()
+        .route(
+            "/health",
+            get(parser_gateway::handlers::health::health_handler),
+        )
+        .route(
+            "/visualsign/api/v1/parse",
+            post(parser_gateway::handlers::parse::parse_handler),
+        );
+
+    match parser_gateway::x402_config::X402Config::from_env() {
+        Ok(x402_cfg) => match x402_cfg.build_middleware() {
+            Ok(x402_middleware) => {
+                if let Err(e) =
+                    probe_facilitator(&x402_cfg.facilitator_url, x402_cfg.facilitator_timeout).await
+                {
+                    eprintln!(
+                        "WARNING: x402 disabled; facilitator probe failed for {}: {e}",
+                        x402_cfg.facilitator_url
+                    );
+                } else {
+                    println!("x402 facilitator probe OK");
+                    app = app.route(
+                        "/visualsign/api/v2/parse",
+                        post(parser_gateway::handlers::parse::parse_handler).layer(x402_middleware),
+                    );
+                }
+            }
+            Err(e) => eprintln!("WARNING: x402 disabled; invalid x402 price tags: {e}"),
+        },
+        Err(e) => eprintln!("WARNING: x402 disabled; invalid x402 configuration: {e}"),
+    }
+
+    let app = app
         .layer(DefaultBodyLimit::max(GRPC_MAX_RECV_MSG_SIZE))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("parser_gateway {} listening on {addr}", env!("VERSION"));
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
+    Ok(())
+}
+
+async fn probe_facilitator(
+    url: &url::Url,
+    timeout: std::time::Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut probe_url = url.clone();
+    let base_path = probe_url.path().trim_end_matches('/').to_string();
+    probe_url.set_path(&format!("{base_path}/supported"));
+    let client = reqwest::Client::builder().timeout(timeout).build()?;
+    let resp = client.get(probe_url).send().await?;
+    if !resp.status().is_success() {
+        return Err(format!("facilitator returned {}", resp.status()).into());
+    }
     Ok(())
 }
 
@@ -333,48 +157,4 @@ async fn shutdown_signal() {
     ctrl_c.await.expect("failed to listen for ctrl-c");
 
     println!("Shutting down gateway");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use generated::parser::{EthereumMetadata, SolanaMetadata};
-
-    #[test]
-    fn error_response_has_empty_sha256_digests() {
-        let resp = error_response("something broke".to_string());
-        let payload = &resp.response.parsed_transaction.payload;
-        assert_eq!(payload.metadata_digest, EMPTY_SHA256);
-        assert_eq!(payload.input_payload_digest, EMPTY_SHA256);
-        assert!(payload.signable_payload.is_empty());
-        assert_eq!(resp.error.as_deref(), Some("something broke"));
-    }
-
-    #[test]
-    fn chain_metadata_input_solana_not_misread_as_ethereum() {
-        let json = r#"{"chain":"CHAIN_SOLANA","networkId":"solana-mainnet"}"#;
-        let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
-        assert!(matches!(parsed, ChainMetadataInput::Solana(_)));
-    }
-
-    #[test]
-    fn chain_metadata_input_ethereum_deserializes() {
-        let json = r#"{"chain":"CHAIN_ETHEREUM","networkId":"ETHEREUM_MAINNET"}"#;
-        let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
-        assert!(matches!(parsed, ChainMetadataInput::Ethereum(_)));
-    }
-
-    #[test]
-    fn ethereum_metadata_abi_mappings_defaults_when_omitted() {
-        let json = r#"{"networkId":"ETHEREUM_MAINNET"}"#;
-        let parsed: EthereumMetadata = serde_json::from_str(json).unwrap();
-        assert!(parsed.abi_mappings.is_empty());
-    }
-
-    #[test]
-    fn solana_metadata_idl_mappings_defaults_when_omitted() {
-        let json = r#"{"networkId":"SOLANA_MAINNET"}"#;
-        let parsed: SolanaMetadata = serde_json::from_str(json).unwrap();
-        assert!(parsed.idl_mappings.is_empty());
-    }
 }

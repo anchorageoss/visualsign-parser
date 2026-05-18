@@ -1,0 +1,46 @@
+# Local-dev x402 stack with the bundled mock_facilitator (no network egress
+# required). Builds the same stagex-built OCI images used in production —
+# `make non-oci-docker-images` loads them into the docker daemon first.
+#
+# Use: `make dev-up-mock` (or `docker compose -f compose.mock.yml up`)
+# Tear down: `make dev-down`
+
+services:
+  mock_facilitator:
+    image: anchorageoss-visualsign-parser/mock_facilitator:latest
+    # stagex/core-busybox sets ENTRYPOINT ["/bin/sh"], so we override to
+    # exec the static-musl binary directly.
+    entrypoint: ["/mock_facilitator"]
+    environment:
+      MOCK_FACILITATOR_PORT: "8090"
+    ports:
+      - "8090:8090"
+
+  parser_grpc_server:
+    image: anchorageoss-visualsign-parser/parser_grpc_server:latest
+    entrypoint: ["/parser_grpc_server"]
+    environment:
+      EPHEMERAL_FILE: "/etc/parser/ephemeral.secret"
+    volumes:
+      # The test fixture key is fine for local dev; production TVC injects a
+      # real provisioned ephemeral key. NEVER ship this fixture into prod.
+      - ./src/integration/fixtures/ephemeral.secret:/etc/parser/ephemeral.secret:ro
+    ports:
+      - "44020:44020"
+
+  parser_gateway:
+    image: anchorageoss-visualsign-parser/parser_gateway:latest
+    entrypoint: ["/parser_gateway"]
+    depends_on:
+      - mock_facilitator
+      - parser_grpc_server
+    environment:
+      GATEWAY_PORT: "8080"
+      GRPC_ADDR: "http://parser_grpc_server:44020"
+      X402_PROFILE: "local"
+      X402_FACILITATOR_URL: "http://mock_facilitator:8090"
+      # TVC_DEMO_PINNED_PUBKEY_HEX intentionally omitted: local profile
+      # allows running without attestation. Set this env var here to opt
+      # into verification locally (the gateway will fail on mismatch).
+    ports:
+      - "8080:8080"
