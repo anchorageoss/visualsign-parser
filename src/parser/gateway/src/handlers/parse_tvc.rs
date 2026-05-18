@@ -190,6 +190,28 @@ pub async fn parse_handler_tvc(
             }
         };
 
+    // payai (and the x402 v2 settle contract generally) returns HTTP 200 with
+    // a JSON body whose `success: false` indicates the on-chain settlement
+    // did NOT land — most commonly `transaction_simulation_failed`. Treat
+    // that as a payment failure and short-circuit before signing a VPM or
+    // forwarding to parser_app — otherwise the merchant delivers value
+    // (parse + enclave signature) without payment having actually moved.
+    let settle_ok = settle_resp
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !settle_ok {
+        let reason = settle_resp
+            .get("errorReason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        eprintln!("facilitator /settle returned success=false: {reason}");
+        return error(
+            StatusCode::PAYMENT_REQUIRED,
+            &format!("settlement failed: {reason}"),
+        );
+    }
+
     let txid = settle_resp
         .get("transaction")
         .and_then(|v| v.as_str())
