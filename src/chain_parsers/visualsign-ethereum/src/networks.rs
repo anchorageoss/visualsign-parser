@@ -497,17 +497,17 @@ mod tests {
 
     #[test]
     fn test_constants_are_unique() {
-        let mut seen_ids = std::collections::HashSet::new();
+        let mut seen_ids = std::collections::BTreeSet::new();
         for &(chain_id, _, _, _) in ALL_NETWORKS {
             assert!(seen_ids.insert(chain_id));
         }
 
-        let mut seen_names = std::collections::HashSet::new();
+        let mut seen_names = std::collections::BTreeSet::new();
         for &(_, network_id, _, _) in ALL_NETWORKS {
             assert!(seen_names.insert(network_id));
         }
 
-        let mut seen_displays = std::collections::HashSet::new();
+        let mut seen_displays = std::collections::BTreeSet::new();
         for &(_, _, display, _) in ALL_NETWORKS {
             assert!(seen_displays.insert(display));
         }

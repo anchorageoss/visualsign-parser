@@ -8,7 +8,7 @@
 //! - Performance: No file I/O or JSON parsing overhead
 //! - Determinism: Same binary always uses same ABIs
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use alloy_json_abi::JsonAbi;
@@ -35,17 +35,17 @@ pub type ChainId = u64;
 #[derive(Clone)]
 pub struct AbiRegistry {
     /// Maps ABI name -> parsed JsonAbi
-    abis: Arc<HashMap<String, Arc<JsonAbi>>>,
+    abis: Arc<BTreeMap<String, Arc<JsonAbi>>>,
     /// Maps (chain_id, contract_address) -> ABI name
-    address_mappings: Arc<HashMap<(ChainId, Address), String>>,
+    address_mappings: Arc<BTreeMap<(ChainId, Address), String>>,
 }
 
 impl AbiRegistry {
     /// Creates a new empty ABI registry
     pub fn new() -> Self {
         Self {
-            abis: Arc::new(HashMap::new()),
-            address_mappings: Arc::new(HashMap::new()),
+            abis: Arc::new(BTreeMap::new()),
+            address_mappings: Arc::new(BTreeMap::new()),
         }
     }
 
