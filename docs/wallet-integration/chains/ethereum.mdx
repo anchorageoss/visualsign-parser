@@ -45,7 +45,7 @@ The response's `parsed_payload` is a JSON string conforming to the schema docume
 | `OPTIMISM_MAINNET` | 10 |
 | `BASE_MAINNET` | 8453 |
 
-The `network_id` controls which token registry the parser uses when resolving contract addresses to symbols. If you omit it, the parser falls back to mainnet — addresses that exist on other chains may not resolve correctly. Always set it.
+The `network_id` controls which token registry the parser uses when resolving contract addresses to symbols. If you omit it, the parser uses the chain ID embedded in the transaction (present in EIP-1559 and EIP-155 legacy transactions). It only defaults to mainnet when no chain ID is available from either source, which is only possible for pre-EIP-155 legacy transactions that carry no chain ID. Always set `network_id` explicitly so token resolution is correct regardless of transaction type.
 
 Other EVM-compatible chains can be parsed by passing a `network_id` value from the table above whose token set matches your target chain, but token resolution will only cover the addresses known for that chain ID.
 

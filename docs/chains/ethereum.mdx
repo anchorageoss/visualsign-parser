@@ -67,7 +67,7 @@ The parser flags unlimited Permit2 allowances (max-u160) as `"Unlimited Amount"`
 
 ## Name resolution
 
-The module resolves known token addresses through a built-in `ContractRegistry` mapping `(chain_id, address) → TokenMetadata`. Wallets can extend it through `EthereumMetadata.abi_mappings`. The parser is calldata-only and does not make RPC calls, so on-chain resolution (ENS, off-chain token lists) happens at the wallet layer, not here.
+The module resolves known token addresses through a built-in `ContractRegistry` mapping `(chain_id, address) → TokenMetadata`. Wallets can supply additional token entries in their own metadata layer to extend that set. `EthereumMetadata.abi_mappings` is separate: it provides contract ABIs for calldata decoding and does not add entries to the token registry. The parser is calldata-only and does not make RPC calls, so on-chain resolution (ENS, off-chain token lists) happens at the wallet layer, not here.
 
 ## Implementation details
 
