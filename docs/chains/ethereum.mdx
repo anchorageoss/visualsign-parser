@@ -23,7 +23,7 @@ The Ethereum module handles transactions for Ethereum and EVM-compatible chains.
 The Ethereum parser handles:
 - Native ETH transfers
 - ERC-20 and ERC-721 token standards
-- Uniswap Universal Router (V2 and V3 exact-in swaps; V4 commands recognized but not yet decoded) and Permit2
+- Uniswap Universal Router (V2 and V3 exact-in and exact-out swaps; V4 commands recognized but not yet decoded) and Permit2
 - Smart contract method calls via wallet-supplied ABIs
 
 ## Transaction types
@@ -33,7 +33,7 @@ Basic ETH transfer between addresses with gas calculation. Supported transaction
 
 ### 2. Token operations
 - **ERC-20**: Transfer, Approve, TransferFrom — decoded automatically.
-- **ERC-721**: NFT transfers and approvals — decoded automatically.
+- **ERC-721**: NFT transfers and approvals — not yet decoded; calls fall through to the raw-hex fallback. The visualizer is a stub pending implementation.
 - **ERC-1155**: Recognized as a token type, but multi-token calls require a wallet-supplied ABI to decode.
 
 ### 3. Smart contract calls
@@ -43,7 +43,7 @@ Decode function calls using a wallet-supplied ABI to show:
 
 ### 4. Auto-decoded protocols
 Built-in decoders ship for:
-- Uniswap Universal Router: V2 and V3 exact-in swaps, wrap/unwrap, fee payments, and single Permit2 commands. V4 commands are recognized but not yet decoded.
+- Uniswap Universal Router: V2 and V3 exact-in and exact-out swaps, wrap/unwrap, fee payments, and single Permit2 commands. V4 commands are recognized but not yet decoded.
 - Permit2: single allowance grants and single signature-based transfers.
 
 The V4 PoolManager visualizer is currently a stub; direct calls fall through to the generic fallback decoder.

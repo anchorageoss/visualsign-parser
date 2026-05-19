@@ -54,9 +54,9 @@ Other EVM-compatible chains can be parsed by passing a `network_id` value from t
 | Contract type | Built-in support | Notes |
 |---|---|---|
 | Native ETH transfers | Yes | No metadata needed. |
-| ERC-20 `transfer`, `approve`, `transferFrom` | Yes | Symbol and decimals are resolved from the built-in registry for well-known tokens (WETH, USDC, USDT, and others per chain). |
-| ERC-721 transfers and approvals | Yes | Token ID is shown; collection name resolves if the token is in the registry. |
-| Uniswap Universal Router (`execute`) | Yes | V2 and V3 exact-in swaps, `WRAP_ETH` / `UNWRAP_WETH`, `PAY_PORTION`, `PERMIT2_PERMIT`, and `PERMIT2_TRANSFER_FROM`. Each command renders as a nested `PreviewLayout`. V4 swap and initialize-pool commands are recognized but not yet decoded — they fall through to raw-hex rendering until support lands. |
+| ERC-20 `transfer`, `approve`, `transferFrom` | Yes | Calldata is decoded into structured fields. Symbol and decimals resolve for tokens in the built-in registry (WETH, USDC, USDT, and others per chain) when the token is part of a Uniswap Universal Router command; standalone ERC-20 transfers render raw units without a symbol for tokens not in the registry. |
+| ERC-721 transfers and approvals | Not yet | The ERC-721 visualizer is a stub; calls fall through to raw-hex rendering. Token ID and collection name are not shown until support lands. |
+| Uniswap Universal Router (`execute`) | Yes | V2 and V3 exact-in and exact-out swaps, `WRAP_ETH` / `UNWRAP_WETH`, `PAY_PORTION`, `PERMIT2_PERMIT`, and `PERMIT2_TRANSFER_FROM`. Each command renders as a nested `PreviewLayout`. V4 swap and initialize-pool commands are recognized but not yet decoded — they fall through to raw-hex rendering until support lands. |
 | Uniswap V4 PoolManager direct calls | No (yet) | The decoder exists as a stub; calls to `swap`, `modifyLiquidity`, `donate`, and `initialize` currently render through the generic fallback. Provide an ABI for the PoolManager if you want decoded fields today. |
 | Permit2 | Yes | Single allowance grants (`PERMIT`) and single signature-based transfers (`TRANSFER_FROM`). Batch variants (`PERMIT_BATCH`, `TRANSFER_FROM_BATCH`) are not yet decoded. |
 | Any other contract | Provide an ABI via `abi_mappings` | Without an ABI, calldata renders as the 4-byte selector plus raw hex parameters. |
@@ -78,7 +78,7 @@ request := &pb.ParseRequest{
             Ethereum: &pb.EthereumMetadata{
                 NetworkId: proto.String("ETHEREUM_MAINNET"),
                 AbiMappings: map[string]*pb.Abi{
-                    "0xdac17f958d2ee523a2206206994597c13d831ec7": {
+                    "0xdac17f958d2ee523a2206206994597c13d831ec7": &pb.Abi{
                         Value: usdtAbiJSON, // Solidity ABI as a JSON string.
                     },
                 },
@@ -117,7 +117,7 @@ let options = VisualSignOptions {
 
 ### Address casing
 
-`abi_mappings` is a string-keyed map. The parser does not normalize keys, so a contract registered under one casing will not match a transaction targeting the same address with different casing. Pick one convention — all lowercase or EIP-55 checksummed — and apply it consistently across your wallet's ABI store and the values you pass on every parse request.
+`abi_mappings` is a string-keyed map. The parser parses each key into a numeric `Address` before registration, so address lookup is case-insensitive and `0xdAC17...` and `0xdac17...` resolve to the same contract. That said, use a consistent casing convention (all lowercase or EIP-55 checksummed) across your wallet's ABI store to avoid duplicate entries for the same contract.
 
 ## Supported transaction types
 
