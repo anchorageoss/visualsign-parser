@@ -90,7 +90,10 @@ message ParsedTransaction {
 }
 
 message ParsedTransactionPayload {
-  string signable_payload = 4;  // VisualSign JSON string
+  string parsed_payload = 1;         // VisualSign JSON string (primary)
+  string input_payload_digest = 2;   // SHA-256 of the unsigned payload
+  string metadata_digest = 3;        // SHA-256 (Borsh) of chain metadata
+  string signable_payload = 4;       // Legacy. Will be removed; use parsed_payload.
 }
 ```
 
@@ -114,7 +117,7 @@ enum SignatureScheme {
 
 ## Response structure
 
-The `signable_payload` field contains a JSON string with the following structure:
+The `parsed_payload` field contains a JSON string with the following structure:
 
 ```typescript
 interface TransactionData {
@@ -191,7 +194,9 @@ grpcurl -plaintext -d '{
 {
   "parsedTransaction": {
     "payload": {
-      "signablePayload": "{\"Version\":\"0\",\"Title\":\"Ethereum Transfer\",\"Fields\":[{\"Type\":\"text_v2\",\"Label\":\"To\",\"TextV2\":{\"Text\":\"0x3535...\"}}]}"
+      "parsedPayload": "{\"Version\":\"0\",\"Title\":\"Ethereum Transfer\",\"Fields\":[{\"Type\":\"text_v2\",\"Label\":\"To\",\"TextV2\":{\"Text\":\"0x3535...\"}}]}",
+      "inputPayloadDigest": "a1b2c3...",
+      "metadataDigest": "e3b0c4..."
     },
     "signature": {
       "scheme": "SIGNATURE_SCHEME_TURNKEY_P256_EPHEMERAL_KEY",
@@ -279,7 +284,7 @@ request = parser_pb2.ParseRequest(
 response = stub.Parse(request)
 
 # Get structured data
-transaction_data = json.loads(response.parsed_transaction.payload.signable_payload)
+transaction_data = json.loads(response.parsed_transaction.payload.parsed_payload)
 ```
 
 ### JavaScript/TypeScript
@@ -305,7 +310,7 @@ client.Parse({
         console.error('Parse error:', err);
         return;
     }
-    const transactionData = JSON.parse(response.parsedTransaction.payload.signablePayload);
+    const transactionData = JSON.parse(response.parsedTransaction.payload.parsedPayload);
     console.log('Parsed:', transactionData);
 });
 ```
