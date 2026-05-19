@@ -30,10 +30,10 @@ request := &pb.ParseRequest{
 }
 
 resp, err := client.Parse(ctx, request)
-// resp.ParsedTransaction.Payload.SignablePayload is a JSON string.
+// resp.ParsedTransaction.Payload.ParsedPayload is a JSON string.
 ```
 
-The response's `signable_payload` is a JSON string conforming to the schema documented in [Field Types](/field-types). Display it to the user before signing.
+The response's `parsed_payload` is a JSON string conforming to the schema documented in [Field Types](/field-types). Display it to the user before signing.
 
 ## Supported EVM networks
 

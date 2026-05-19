@@ -32,7 +32,7 @@ request := &pb.ParseRequest{
             Ethereum: &pb.EthereumMetadata{
                 NetworkId: proto.String("ETHEREUM_MAINNET"),
                 AbiMappings: map[string]*pb.Abi{
-                    "0xdac17f958d2ee523a2206206994597c13d831ec7": {
+                    "0xdac17f958d2ee523a2206206994597c13d831ec7": &pb.Abi{
                         Value: contractABI, // JSON ABI string
                     },
                 },
@@ -44,7 +44,7 @@ request := &pb.ParseRequest{
 
 ### Address casing
 
-`abi_mappings` keys are 0x-prefixed contract addresses. The parser does not normalize them, so a contract registered under one casing won't match a transaction targeting the same address with a different casing. Pick one convention — all lowercase or EIP-55 checksummed — and apply it consistently.
+`abi_mappings` keys are 0x-prefixed contract addresses. The parser parses each key into a numeric address before registration, so lookup is case-insensitive — `0xdAC17...` and `0xdac17...` resolve to the same contract. Use a consistent casing convention (all lowercase or EIP-55 checksummed) across your ABI store to avoid duplicate entries for the same address.
 
 ### ABI format
 
@@ -81,7 +81,7 @@ ChainMetadata: &pb.ChainMetadata{
         Ethereum: &pb.EthereumMetadata{
             NetworkId: proto.String("POLYGON_MAINNET"),
             AbiMappings: map[string]*pb.Abi{
-                "0x...": { Value: contractABI },
+                "0x...": &pb.Abi{ Value: contractABI },
             },
         },
     },

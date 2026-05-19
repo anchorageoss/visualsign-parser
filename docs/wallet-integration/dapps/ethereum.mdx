@@ -45,7 +45,7 @@ const digest = createHash("sha256").update(abiJson).digest();
 const privateKey = /* your signing key, kept offline */;
 const sig = secp256k1.sign(digest, privateKey, { prehash: false }); // DER form
 console.log(sig.toDERHex());
-console.log(secp256k1.getPublicKey(privateKey, false).toString("hex"));
+console.log(Buffer.from(secp256k1.getPublicKey(privateKey, false)).toString("hex"));
 ```
 
 Then ship the ABI, the signature, and the public key together so wallets can build the `Abi` message:
