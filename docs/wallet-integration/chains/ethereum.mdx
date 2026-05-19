@@ -54,7 +54,7 @@ Other EVM-compatible chains can be parsed by passing a `network_id` value from t
 | Contract type | Built-in support | Notes |
 |---|---|---|
 | Native ETH transfers | Yes | No metadata needed. |
-| ERC-20 `transfer`, `approve`, `transferFrom` | Yes | Calldata is decoded into structured fields. Symbol and decimals resolve for tokens in the built-in registry (WETH, USDC, USDT, and others per chain) when the token is part of a Uniswap Universal Router command; standalone ERC-20 transfers render raw units without a symbol for tokens not in the registry. |
+| ERC-20 `transfer`, `approve`, `transferFrom` | Yes | Calldata is decoded into structured fields. Standalone ERC-20 calls always render the raw on-chain integer amount without a symbol (the ERC-20 fallback decoder does not consult the token registry). Symbol and decimals resolve only when the token address is known in context — for example, inside a Uniswap Universal Router command. |
 | ERC-721 transfers and approvals | Not yet | The ERC-721 visualizer is a stub; calls fall through to raw-hex rendering. Token ID and collection name are not shown until support lands. |
 | Uniswap Universal Router (`execute`) | Yes | V2 and V3 exact-in and exact-out swaps, `WRAP_ETH` / `UNWRAP_WETH`, `PAY_PORTION`, `PERMIT2_PERMIT`, and `PERMIT2_TRANSFER_FROM`. Each command renders as a nested `PreviewLayout`. V4 swap and initialize-pool commands are recognized but not yet decoded — they fall through to raw-hex rendering until support lands. |
 | Uniswap V4 PoolManager direct calls | No (yet) | The decoder exists as a stub; calls to `swap`, `modifyLiquidity`, `donate`, and `initialize` currently render through the generic fallback. Provide an ABI for the PoolManager if you want decoded fields today. |
@@ -127,9 +127,9 @@ The parser accepts unsigned Ethereum transactions in RLP form. Two transaction t
 |---|---|---|
 | Legacy | Yes | Pre-EIP-1559, single `gasPrice` field. |
 | EIP-1559 (Type 2) | Yes | `maxFeePerGas` and `maxPriorityFeePerGas` render as separate fields. |
-| EIP-2930 (Type 1) | No | The parser returns `UnsupportedTransactionType("eip-2930")`. |
-| EIP-4844 (Type 3, blobs) | No | The parser returns `UnsupportedTransactionType("eip-4844")`. |
-| EIP-7702 (Type 4) | No | The parser returns `UnsupportedTransactionType("eip-7702")`. |
+| EIP-2930 (Type 1) | No | The parser returns an error: `"Unsupported transaction type: eip-2930"`. |
+| EIP-4844 (Type 3, blobs) | No | The parser returns an error: `"Unsupported transaction type: eip-4844"`. |
+| EIP-7702 (Type 4) | No | The parser returns an error: `"Unsupported transaction type: eip-7702"`. |
 
 If your wallet may submit unsupported types, surface the error message to the user and fall back to a raw-data display (see [Error Handling](../core-concepts/error-handling)).
 
@@ -184,7 +184,7 @@ A few rendering rules to be aware of when building the UI:
 
 - **Every field has a `FallbackText`.** Render that string if you don't yet support the field's `Type`. New field types may be added in future versions, and `FallbackText` is the forward-compatible escape hatch.
 - **`PreviewLayout` is recursive.** Multi-step operations like Universal Router commands nest layouts. Show the `Subtitle` collapsed, and reveal the `Expanded.Fields` on user action.
-- **Amounts come pre-formatted.** `AmountV2.Amount` is already scaled by the token's decimals — render it verbatim alongside `AmountV2.Abbreviation`.
+- **Amounts come pre-formatted when token metadata is known.** When the parser can resolve a token's decimals and symbol (built-in registry or wallet-supplied metadata), `AmountV2.Amount` is already scaled and `AmountV2.Abbreviation` is set — render both verbatim. When token metadata is unknown (for example, direct ERC-20 transfers to contracts outside the registry), `Amount` is the raw on-chain integer and `Abbreviation` is absent; display the raw value alongside the contract address in that case.
 - **Comparison operators are ASCII.** Slippage and minimums use `>=` and `<=`, not Unicode glyphs.
 
 The full set of field types — `TextV2`, `AddressV2`, `AmountV2`, `Number`, `PreviewLayout`, `Divider` — is documented in [Field Types](/field-types). The Uniswap fixture above is checked into the repo at `src/chain_parsers/visualsign-ethereum/tests/fixtures/uniswap-v3swap.expected` and can be reproduced end-to-end with `parser_cli` (see [Parser CLI](/parser-cli)).
@@ -195,8 +195,8 @@ Beyond the generic categories covered in [Error Handling](../core-concepts/error
 
 | Symptom | What happened | Recommended UI |
 |---|---|---|
-| `FailedToDecodeTransaction` | The bytes are not a well-formed RLP unsigned transaction. | Show "Invalid transaction format" and block signing. |
-| `UnsupportedTransactionType("eip-2930" / "eip-4844" / "eip-7702")` | Recognized transaction type but not yet parseable. | Show the type and offer to sign with a raw-bytes display only. Do not silently downgrade. |
+| `"Failed to decode transaction: ..."` | The bytes are not a well-formed RLP unsigned transaction. | Show "Invalid transaction format" and block signing. |
+| `"Unsupported transaction type: eip-2930"` (or eip-4844 / eip-7702) | Recognized transaction type but not yet parseable. | Show the type and offer to sign with a raw-bytes display only. Do not silently downgrade. |
 | Calldata renders as `Method: 0xa9059cbb (unknown)` with hex data | Contract is outside the auto-decoded set and no ABI was supplied. | Surface a warning. Consider fetching the ABI from your wallet's contract registry and retrying. |
 | Token amounts render in raw units (e.g., `1500000`) without a symbol | The token contract is not in the built-in registry for the supplied `network_id`. | Either pre-load the token in your wallet's metadata layer or display the raw amount alongside the contract address. |
 

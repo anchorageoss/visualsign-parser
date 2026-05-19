@@ -3,7 +3,7 @@ title: Ethereum for dApp Builders
 description: Design contracts and ship ABIs so wallets render your transactions meaningfully
 ---
 
-If your dApp's contracts aren't ERC-20, ERC-721, Permit2, or a Uniswap router, the parser cannot decode their calldata without help. To users, that means a 4-byte selector and an opaque hex blob in the signing screen — exactly the kind of "approve this thing you can't read" UX that VisualSign exists to eliminate.
+If your dApp's contracts aren't ERC-20, Permit2, or a Uniswap router, the parser cannot decode their calldata without help. (ERC-721 support is not yet implemented — those calls currently fall through to raw-hex rendering.) To users, that means a 4-byte selector and an opaque hex blob in the signing screen — exactly the kind of "approve this thing you can't read" UX that VisualSign exists to eliminate.
 
 This page covers what dApp and contract authors can do to make their transactions render as readable, structured fields in any wallet that uses VisualSign.
 
