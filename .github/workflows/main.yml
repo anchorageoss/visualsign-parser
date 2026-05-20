@@ -60,3 +60,5 @@ jobs:
         run: make -C src lint
       - name: Run tests
         run: make -C src test
+      - name: Check parser_app narrow feature builds
+        run: make -C src narrow-build-check
