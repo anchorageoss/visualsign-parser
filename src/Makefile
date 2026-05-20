@@ -67,6 +67,7 @@ narrow-build-check:
 	cargo build -p parser_app --no-default-features
 	cargo clippy -p parser_app --no-default-features --all-targets -- -D warnings
 	@set -e; for c in $(PARSER_APP_CHAINS); do \
+		echo "==> features: $$c"; \
 		cargo build -p parser_app --no-default-features --features $$c; \
 		cargo clippy -p parser_app --no-default-features --features $$c --all-targets -- -D warnings; \
 	done
@@ -89,7 +90,9 @@ feature-matrix-check:
 	@# the per-PR narrow-build-check above covers the common regression
 	@# class on every change.
 	@set -e; for c in $(PARSER_APP_CHAINS); do \
+		echo "==> features: $$c"; \
 		cargo build -p parser_app --no-default-features --features $$c; \
+		echo "==> features: $$c diagnostics"; \
 		cargo build -p parser_app --no-default-features --features "$$c diagnostics"; \
 	done
 	@set -e; i=0; for c1 in $(PARSER_APP_CHAINS); do \
@@ -97,7 +100,9 @@ feature-matrix-check:
 		for c2 in $(PARSER_APP_CHAINS); do \
 			j=$$((j+1)); \
 			if [ $$j -gt $$i ]; then \
+				echo "==> features: $$c1 $$c2"; \
 				cargo build -p parser_app --no-default-features --features "$$c1 $$c2"; \
+				echo "==> features: $$c1 $$c2 diagnostics"; \
 				cargo build -p parser_app --no-default-features --features "$$c1 $$c2 diagnostics"; \
 			fi; \
 		done; \
