@@ -51,9 +51,10 @@ fn decode_transaction(
 // wire-type-2 at tag 1), so a bare Raw whose `ref_block_bytes` payload happens to be a
 // parseable sub-message will *also* parse as a wrapped Transaction with `raw_data =
 // Some(near-empty Raw)`. Picking the wrapped form unconditionally hides the real bare-Raw
-// content. Try both and pick the form that decoded a real transaction (at least one
-// `contract`); if neither has contracts, prefer the wrapped form when it had `raw_data` at
-// all, else the bare-Raw result.
+// content. Try both parses and pick the form that decoded a real transaction (at least
+// one contract); when neither produced a contract, tie-break to bare — that's the safer
+// choice because an accidental wrapped re-parse usually yields an empty inner Raw with
+// the original ref_block_bytes lost.
 fn parse_tron_bytes(bytes: &[u8]) -> Result<transaction::Raw, TronParserError> {
     let bare_result = transaction::Raw::parse_from_bytes(bytes);
     let wrapped_raw = TronTransaction::parse_from_bytes(bytes)
@@ -62,8 +63,6 @@ fn parse_tron_bytes(bytes: &[u8]) -> Result<transaction::Raw, TronParserError> {
 
     match (bare_result, wrapped_raw) {
         (Ok(bare), Some(wrapped)) => {
-            // Both parsed. Prefer whichever yields contracts; tie-break to bare so a
-            // legitimate bare Raw isn't shadowed by an accidental wrapped re-parse.
             if !bare.contract.is_empty() {
                 Ok(bare)
             } else if !wrapped.contract.is_empty() {
@@ -436,12 +435,28 @@ fn resource_label(resource: protobuf::EnumOrUnknown<ResourceCode>) -> String {
     }
 }
 
-// f64 mantissa is 53 bits (~9.0e15). Tron's max-supply ceiling of ~10^17 SUN is above 2^53,
-// so amounts above ~9 quadrillion SUN (~9 billion TRX) in a single field will round in the
-// last digits — this only affects the displayed string, not the signed bytes. Realistic
-// per-tx amounts stay well below 2^53 SUN.
+// Convert an i64 SUN amount to a TRX decimal string using integer math, so the displayed
+// number is a byte-exact representation of the on-chain SUN value at any magnitude
+// (f64-based division would round the trailing digits above 2^53 SUN). Output omits the
+// fractional point when the value is a whole number of TRX and trims trailing zeros so
+// e.g. 1_500_000 SUN -> "1.5", not "1.500000".
 fn sun_to_trx_string(sun: i64) -> String {
-    format!("{}", sun as f64 / 1_000_000.0)
+    let (sign, magnitude) = if sun < 0 {
+        ("-", sun.unsigned_abs())
+    } else {
+        ("", sun as u64)
+    };
+    let whole = magnitude / 1_000_000;
+    let frac = magnitude % 1_000_000;
+    if frac == 0 {
+        format!("{sign}{whole}")
+    } else {
+        let mut frac_str = format!("{frac:06}");
+        while frac_str.ends_with('0') {
+            frac_str.pop();
+        }
+        format!("{sign}{whole}.{frac_str}")
+    }
 }
 
 // Returns only the human date; callers append the raw millis themselves to avoid a
@@ -964,6 +979,33 @@ mod tests {
             text_value(find_field(&payload, "Lock Period").unwrap()),
             "0"
         );
+    }
+
+    #[test]
+    fn sun_to_trx_string_is_byte_exact_at_any_magnitude() {
+        // Whole numbers of TRX render without a decimal point.
+        assert_eq!(sun_to_trx_string(0), "0");
+        assert_eq!(sun_to_trx_string(7_000_000), "7");
+        assert_eq!(sun_to_trx_string(100_000_000), "100");
+
+        // Fractional amounts trim trailing zeros.
+        assert_eq!(sun_to_trx_string(1), "0.000001");
+        assert_eq!(sun_to_trx_string(5), "0.000005");
+        assert_eq!(sun_to_trx_string(1_500_000), "1.5");
+        assert_eq!(sun_to_trx_string(1_234_567), "1.234567");
+
+        // Negative values keep the sign and the exact fractional digits.
+        assert_eq!(sun_to_trx_string(-1), "-0.000001");
+        assert_eq!(sun_to_trx_string(-1_500_000), "-1.5");
+
+        // Past 2^53 SUN — where the old f64 path would round — the string is still exact.
+        // 9_999_999_999_999_999 SUN = 9999999999.999999 TRX. f64 would round to "10000000000".
+        assert_eq!(
+            sun_to_trx_string(9_999_999_999_999_999),
+            "9999999999.999999"
+        );
+        // i64::MAX = 9_223_372_036_854_775_807 SUN -> 9223372036854.775807 TRX (last digits preserved).
+        assert_eq!(sun_to_trx_string(i64::MAX), "9223372036854.775807");
     }
 
     #[test]
