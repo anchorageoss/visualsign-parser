@@ -1960,6 +1960,7 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf88ba1141d185c399bee5288d850d63b8369520c1eafc32a0430b5b6c287bf4"
 dependencies = [
+ "sha2 0.10.9",
  "tinyvec",
 ]
 
@@ -6564,6 +6565,7 @@ dependencies = [
  "visualsign",
  "visualsign-ethereum",
  "visualsign-solana",
+ "visualsign-tron",
 ]
 
 [[package]]
@@ -14132,15 +14134,14 @@ name = "visualsign-tron"
 version = "0.1.0"
 dependencies = [
  "anychain-tron",
- "base58",
  "base64 0.22.1",
+ "bs58 0.5.1",
  "chrono",
  "hex",
  "log",
  "protobuf 3.7.2",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "thiserror 2.0.17",
  "visualsign",
 ]
