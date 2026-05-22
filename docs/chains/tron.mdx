@@ -1,44 +1,85 @@
 ---
 title: Tron
-description: TRX transfers, TRC-20 tokens, and energy/bandwidth system
+description: TRX transfers and Stake 2.0 resource staking on the Tron network
 ---
 
-The Tron module handles TRX transfers, TRC-20 tokens, and smart contract interactions on the Tron Virtual Machine.
+The Tron module decodes raw Tron transactions into VisualSign payloads. Coverage today is focused on TRX transfers and the Stake 2.0 (v2) resource staking family — the contract types that wallets sign most often outside of TRC-20 calls.
 
 ## Architecture overview
 
 ### Transaction model
-- **Encoding**: Protocol Buffers
-- **Account Model**: Account-based similar to Ethereum
-- **Energy System**: Bandwidth and Energy for transactions
-- **Fee Model**: TRX for bandwidth, Energy for smart contracts
+- **Encoding**: Protocol Buffers (the same `protocol.Transaction` and `protocol.transaction.Raw` messages used by tronweb and trongrid).
+- **Two wire forms**: parser_cli accepts both the bare `transaction.Raw` bytes (trongrid's `raw_data_hex`) and the wrapped `Transaction { raw_data, signature, ret }` form that wallets sign and broadcast.
+- **Account model**: Account-based, similar to Ethereum, with a fixed 21-byte address format (`0x41` mainnet prefix + 20-byte hash, displayed as base58check starting with `T`).
+- **Resource model**: TRX is frozen to obtain Bandwidth or Energy under Stake 2.0; these resources are what funds transaction execution.
 
 ### Key components
 
-The Tron parser handles:
-- TRX transfers
-- TRC-20 token operations
-- Smart contract interactions
-- Account resource management
+The Tron parser produces:
+- Top-level metadata: `Network`, `Timestamp`, `Expiration`, `Fee Limit`, `Ref Block`, and `Ref Block Hash`.
+- A `Contract Type` field plus contract-specific fields for each decoded contract.
+- Address fields rendered with the workspace `AddressV2` field type (base58check `T…` strings), and amount fields with `AmountV2` denominated in TRX.
 
-## Transaction types
+## Supported contract types
 
-- **TRX Transfer** - Native TRX token transfers between accounts
-- **TRC-20 Tokens** - Token standard similar to ERC-20 (Transfer, Approve, TransferFrom)
-- **Smart Contracts** - Tron Virtual Machine (TVM) compatible with Ethereum Virtual Machine
+| Contract | Stake 2.0? | Fields surfaced |
+|---|---|---|
+| `TransferContract` | n/a | From, To, Amount |
+| `FreezeBalanceV2Contract` | yes | Owner, Frozen Balance, Resource |
+| `UnfreezeBalanceV2Contract` | yes | Owner, Unfreeze Balance, Resource |
+| `WithdrawExpireUnfreezeContract` | yes | Owner |
+| `DelegateResourceContract` | yes | Owner, Receiver, Resource, Balance, Lock, Lock Period |
+| `UnDelegateResourceContract` | yes | Owner, Receiver, Resource, Balance |
+
+Any other contract type (TRC-10 transfers, `TriggerSmartContract` for TRC-20 / smart-contract calls, the deprecated Stake 1.0 family, witness/governance operations) renders as `Contract Type: <type_url> (not fully decoded)` — the top-level metadata is still shown, but contract-specific fields are not.
 
 ## Visualization strategy
 
-- **Resource Display** - Show bandwidth and energy consumption clearly, as these are key concepts for Tron users
-- **Contract Interactions** - Display contract method calls and parameters in human-readable format
+- **Amounts in TRX, not SUN** — amounts are converted from SUN (the on-chain integer unit) to TRX using exact integer math, so a signer sees `30 TRX` instead of `30000000 SUN`.
+- **Addresses as base58check** — Tron's 21-byte raw addresses (`0x41…`) are encoded to the `T…` form users see in wallets. Malformed inputs surface as `<invalid Tron address: hex>` rather than a confident-looking but synthetic string.
+- **Resource type explicit** — Stake 2.0 contracts always show whether the action affects `BANDWIDTH`, `ENERGY`, or `TRON_POWER`. Unknown enum values surface as `UNKNOWN(n)` so a future protocol upgrade can't silently collapse into a familiar label.
+
+## Using parser_cli
+
+The CLI accepts the wrapped or bare hex directly:
+
+```bash
+cargo run --bin parser_cli -- \
+  --chain tron \
+  --output human \
+  -t 0a730a02049d22080f1beff095be0cfd40a097a684e5335a55083612510a34747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e467265657a6542616c616e63655632436f6e747261637412190a15416a6ca578c7937e1bf6aea4be657f9d22716c424d100570a0df8cdbe433
+```
+
+Output:
+
+```
+┌─ Transaction: Tron Transaction
+│  Version: 0
+│  Type: TronTx
+│
+└─ Fields:
+   ├─ Network: Tron
+   ├─ Timestamp: 2026-05-21 16:34:12 UTC (1779381252000 ms)
+   ├─ Expiration: 2026-05-22 16:34:12 UTC (1779467652000 ms)
+   ├─ Fee Limit: 0 TRX
+   ├─ Ref Block: 049d
+   ├─ Ref Block Hash: 0f1beff095be0cfd
+   ├─ Contract Type: FreezeBalanceV2 (Stake)
+   ├─ Owner: TKfvnGvr7YMTBYz8xfx1XfgkWk2JZZgj4s
+   ├─ Frozen Balance: 0.000005 TRX
+   └─ Resource: BANDWIDTH
+```
+
+The `--network` flag is accepted for parity with other chains but isn't used today; the Tron parser has no chain-metadata plumbing.
 
 ## Implementation details
 
 Source code available at:
 - [Tron Parser](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-tron)
+- [parser_cli Tron plugin](https://github.com/anchorageoss/visualsign-parser/tree/main/src/parser/cli/src/tron.rs)
 
 ## Resources
 
 - [Tron Documentation](https://developers.tron.network/)
-- [TRC-20 Standard](https://developers.tron.network/docs/trc20)
-- [Tron Protocol](https://github.com/tronprotocol/protocol-document)
+- [Stake 2.0 overview](https://developers.tron.network/docs/staking-20-overview)
+- [Tron Protocol Buffers](https://github.com/tronprotocol/protocol-document)
