@@ -96,7 +96,8 @@ Read that file for the exact structure, then generate a generic version with the
 - Keep the `kind()` method returning the user's chosen `VisualizerKind` variant with `display_name` as the `&'static str` argument
 
 **Generic IDL pattern only:**
-- The generic scaffold uses `build_named_accounts`, `build_parsed_fields`, `build_fallback_fields`, `append_raw_data`, `format_arg_value` — all of which work with any IDL
+- The generic scaffold uses the three helpers `dflow_aggregator` defines: `build_named_accounts`, `build_parsed_fields`, and `build_fallback_fields`. All three work with any IDL.
+- Two additional helpers — `append_raw_data` (for byte-blob args) and `format_arg_value` (for custom scalar rendering) — are not present in `dflow_aggregator`. Add them when the target IDL needs them, copying the pattern from another preset such as `kamino_vault` or `jupiter_earn`.
 - The parse function should: check `data.len() < 8`, load IDL, call `parse_instruction_with_idl`, call `build_named_accounts`, return a struct with parsed data + named accounts
 
 **Visualizer body must use the wire-data context API.** At the top of `visualize_tx_commands`:
