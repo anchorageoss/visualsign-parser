@@ -6569,6 +6569,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "parser_cli_core"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "generated",
+ "serde",
+ "serde_json",
+ "tracing",
+ "visualsign",
+]
+
+[[package]]
 name = "parser_gateway"
 version = "0.1.0"
 dependencies = [
