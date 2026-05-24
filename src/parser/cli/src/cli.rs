@@ -1,5 +1,5 @@
-use crate::chains::parse_chain;
 use clap::Parser;
+use parser_cli_core::chains::parse_chain;
 use visualsign::registry::{Chain, TransactionConverterRegistry};
 use visualsign::vsptrait::{DeveloperConfig, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
@@ -310,7 +310,7 @@ impl Cli {
             }),
         };
 
-        let raw_tx = match crate::tx_input::resolve_transaction_input(&args.transaction) {
+        let raw_tx = match parser_cli_core::tx_input::resolve_transaction_input(&args.transaction) {
             Ok(tx) => tx,
             Err(e) => {
                 eprintln!("Error: {e}");

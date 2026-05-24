@@ -12,26 +12,17 @@
 use generated::parser::ChainMetadata;
 use visualsign::registry::{Chain, TransactionConverterRegistry};
 
-/// Chain-related functionality and types.
-pub mod chains;
 /// Command-line interface functionality and types.
 pub mod cli;
 /// Ethereum-specific CLI handling: ABI mappings, network metadata.
 #[cfg(feature = "ethereum")]
 pub mod ethereum;
-/// Common mapping parser for ABI and IDL file mappings.
-pub mod mapping_parser;
 /// Solana-specific CLI handling: IDL mappings, Solana metadata.
 #[cfg(feature = "solana")]
 pub mod solana;
-/// Shared test helpers (temp file creation, etc.).
-#[cfg(test)]
-pub(crate) mod test_utils;
 /// Tron-specific CLI handling.
 #[cfg(feature = "tron")]
 pub mod tron;
-/// Resolution of the `--transaction` argument, including curl-style `@` references.
-pub mod tx_input;
 
 /// Trait for integrating a chain into the CLI.
 ///

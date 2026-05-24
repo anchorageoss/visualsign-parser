@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[features]
+# Exposes test helper utilities for use in downstream crates' test suites.
+test-utils = []
+
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }
 serde = { version = "1", features = ["derive"], default-features = false }

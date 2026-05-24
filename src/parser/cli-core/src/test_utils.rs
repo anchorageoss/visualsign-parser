@@ -2,6 +2,12 @@
 ///
 /// Filenames include the PID and a nanosecond timestamp to avoid collisions
 /// when tests run in parallel.
+///
+/// # Panics
+///
+/// Panics if the temp directory cannot be created or the file cannot be written.
+#[must_use]
+#[allow(clippy::expect_used)]
 pub fn write_temp_json(subdir: &str, name: &str, content: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(subdir);
     std::fs::create_dir_all(&dir).expect("create temp dir");

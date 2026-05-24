@@ -6,7 +6,7 @@ use generated::parser::{
 };
 use visualsign::registry::{Chain, TransactionConverterRegistry};
 
-use crate::mapping_parser;
+use parser_cli_core::mapping_parser;
 
 /// CLI arguments specific to Solana.
 #[derive(ClapArgs, Debug, Default, Clone)]
@@ -111,7 +111,7 @@ mod tests {
     use super::*;
 
     fn write_temp_json(name: &str, content: &str) -> std::path::PathBuf {
-        crate::test_utils::write_temp_json("vsp_sol_tests", name, content)
+        parser_cli_core::test_utils::write_temp_json("vsp_sol_tests", name, content)
     }
 
     #[test]

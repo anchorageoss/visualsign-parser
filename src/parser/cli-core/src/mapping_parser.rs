@@ -2,13 +2,13 @@ use std::io::Read;
 
 /// Parsed components of a mapping string: name:path:identifier
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct MappingComponents {
+pub struct MappingComponents {
     /// User-provided descriptive name for the contract/program
-    pub(crate) name: String,
+    pub name: String,
     /// File path to JSON file (ABI or IDL)
-    pub(crate) path: String,
+    pub path: String,
     /// Program ID (Solana base58) or Contract Address (Ethereum 0x hex)
-    pub(crate) identifier: String,
+    pub identifier: String,
 }
 
 /// Parse mapping format: `<Name:/path/to/file.json:Identifier>`
@@ -18,7 +18,7 @@ pub(crate) struct MappingComponents {
 /// section is the file path, and the first part is the name.
 ///
 /// Returns: `MappingComponents` { name, path, identifier }
-pub(crate) fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, String> {
+pub fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, String> {
     // Split from right to get identifier (last : separator)
     let (name_and_path, identifier) = mapping_str.rsplit_once(':').ok_or_else(|| {
         format!("Invalid mapping format (expected name:path:identifier): {mapping_str}")
@@ -53,7 +53,7 @@ pub(crate) fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, Stri
 /// duplicate identifier overwrites the previous entry (logged as a warning) but
 /// is not added to the count, so the count reflects distinct keys, not total
 /// accepted mappings.
-pub(crate) fn load_mappings<V>(
+pub fn load_mappings<V>(
     mappings: &[String],
     kind: &str,
     example: &str,
@@ -121,7 +121,7 @@ pub(crate) fn load_mappings<V>(
 const MAX_JSON_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
 /// Load and validate JSON file from path
-pub(crate) fn load_json_file(path: &str) -> Result<String, String> {
+pub fn load_json_file(path: &str) -> Result<String, String> {
     let file =
         std::fs::File::open(path).map_err(|e| format!("Failed to read file at {path}: {e}"))?;
 
@@ -147,7 +147,7 @@ pub(crate) fn load_json_file(path: &str) -> Result<String, String> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

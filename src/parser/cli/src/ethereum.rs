@@ -6,7 +6,7 @@ use visualsign::registry::{Chain, TransactionConverterRegistry};
 use visualsign_ethereum::abi_metadata::{CLI_DEV_SIGNING_KEY_SEED, sign_abi};
 use visualsign_ethereum::networks::parse_network;
 
-use crate::mapping_parser;
+use parser_cli_core::mapping_parser;
 
 /// CLI arguments specific to Ethereum.
 #[derive(ClapArgs, Debug, Default, Clone)]
@@ -289,7 +289,7 @@ mod tests {
     use super::*;
 
     fn write_temp_json(name: &str, content: &str) -> std::path::PathBuf {
-        crate::test_utils::write_temp_json("vsp_eth_tests", name, content)
+        parser_cli_core::test_utils::write_temp_json("vsp_eth_tests", name, content)
     }
 
     #[test]
