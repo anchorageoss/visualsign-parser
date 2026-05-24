@@ -53,6 +53,9 @@ hex = { workspace = true }
 [dev-dependencies]
 visualsign-solana = { path = "../chain_parsers/visualsign-solana" }
 tracing = { workspace = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process", "net", "time"] }
+
 
 [lints]
 workspace = true

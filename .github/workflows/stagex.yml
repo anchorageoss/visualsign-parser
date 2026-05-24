@@ -47,6 +47,7 @@ jobs:
           - name: parser_cli
             label: "parser_cli (Solana)"
           - name: parser_gateway
+          - name: parser_grpc_server
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -135,9 +136,10 @@ jobs:
           docker image push --all-tags "ghcr.io/anchorageoss/${{ matrix.target.name }}"
 
       - name: TVC deployment details
-        if: matrix.target.name == 'parser_app'
+        if: matrix.target.name == 'parser_app' || matrix.target.name == 'parser_gateway'
         shell: bash
         env:
+          TARGET_NAME: ${{ matrix.target.name }}
           SEMVER_TAG: ${{ steps.build.outputs.semver_tag }}
           SHA_TAG: ${{ steps.build.outputs.sha_tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -146,27 +148,39 @@ jobs:
           # the always-unique commit SHA on PR/branch builds where SEMVER
           # isn't reproducible. Both reference the same digest below.
           tvc_tag="${SEMVER_TAG:-$SHA_TAG}"
-          container_url="ghcr.io/anchorageoss/parser_app:${tvc_tag}"
+          container_url="ghcr.io/anchorageoss/${TARGET_NAME}:${tvc_tag}"
           container_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${container_url}" | cut -d '@' -f 2)
-          docker create --name tmp-extract "${container_url}" /bin/true
-          docker cp tmp-extract:/parser_app /tmp/binary
-          docker rm tmp-extract
-          digest=$(sha256sum /tmp/binary | awk '{print $1}')
+          docker create --name tmp-extract-${TARGET_NAME} "${container_url}" /bin/true
+          docker cp "tmp-extract-${TARGET_NAME}:/${TARGET_NAME}" "/tmp/${TARGET_NAME}"
+          docker rm "tmp-extract-${TARGET_NAME}"
+          digest=$(sha256sum "/tmp/${TARGET_NAME}" | awk '{print $1}')
           pinned_url="${container_url}@${container_digest}"
           # Hardcoded: TVC currently only supports this QOS version.
           qos_version="v2026.2.6"
 
-          # Build the deployment block once, then fan it out to both the run
-          # summary and (when a matching GitHub release exists) the release
-          # body. Operators reading either surface get the same paste-ready
-          # values.
-          deploy_md="${RUNNER_TEMP}/tvc_deploy.md"
+          # parser_app is the enclave-side binary (signs responses).
+          # parser_gateway is the host-side binary (verifies the signature
+          # against a pinned pubkey + handles x402 settlement). Operators
+          # need both digests pinned to actually establish the trust pair.
+          if [ "${TARGET_NAME}" = "parser_app" ]; then
+            role_note=$'\nThe enclave-side binary. Its ephemeral public key, signed by QOS during boot, becomes the gateway-side `TVC_DEMO_PINNED_PUBKEY_HEX`.'
+          else
+            role_note=$'\nThe host-side gateway. Pin the matching `parser_app` digest as the enclave it talks to; the gateway verifies every response against the enclave\'s ephemeral pubkey (pinned at boot via `TVC_DEMO_PINNED_PUBKEY_HEX` or `TVC_DEMO_PINNED_PUBKEY_FILE`).'
+          fi
+
+          deploy_md="${RUNNER_TEMP}/tvc_deploy_${TARGET_NAME}.md"
           {
-            echo "## TVC Deployment Details"
+            echo "## TVC Deployment Details — ${TARGET_NAME}"
+            echo "${role_note}"
             echo ""
             echo "- **Container Image URL**: \`${pinned_url}\`"
-            echo "- **Executable path**: \`/parser_app\`"
-            echo "- **Expected Executable Digest**: \`sha256:${digest}\`"
+            echo "- **Executable path**: \`/${TARGET_NAME}\`"
+            # Plain hex, no `sha256:` prefix — that's what QOS' Manifest schema
+            # decodes for the pivot hash, and what `tvc deploy create` then
+            # forwards verbatim into the server-side manifest. A `sha256:`
+            # prefix makes the field 71 chars (odd), tripping hex::decode in
+            # `tvc deploy approve` with `OddLength at line 8 column 85`.
+            echo "- **Expected Executable Digest**: \`${digest}\`"
             echo "- **QOS Version**: \`${qos_version}\`"
             echo ""
             echo "### Verify the executable digest"
@@ -174,7 +188,7 @@ jobs:
             echo '```bash'
             echo "export CONTAINER_URL=\"${pinned_url}\""
             echo 'cid=$(docker create "$CONTAINER_URL" /bin/true)'
-            echo 'docker cp "$cid:/parser_app" /tmp/binary'
+            echo "docker cp \"\$cid:/${TARGET_NAME}\" /tmp/binary"
             echo 'docker rm "$cid"'
             echo 'sha256sum /tmp/binary'
             echo '```'
@@ -187,8 +201,8 @@ jobs:
             echo 'tvc deploy init -o tvc-deploy.json'
             echo '# Edit tvc-deploy.json to set:'
             echo "#   \"pivotContainerImageUrl\": \"${pinned_url}\""
-            echo '#   "pivotPath": "/parser_app"'
-            echo "#   \"expectedPivotDigest\": \"sha256:${digest}\""
+            echo "#   \"pivotPath\": \"/${TARGET_NAME}\""
+            echo "#   \"expectedPivotDigest\": \"${digest}\""
             echo "#   \"qosVersion\": \"${qos_version}\""
             echo '#   "appId": "<env-specific>"'
             echo 'tvc deploy create tvc-deploy.json'
@@ -198,32 +212,28 @@ jobs:
           cat "$deploy_md" >> "$GITHUB_STEP_SUMMARY"
 
           # Mirror onto the GitHub release for this semver, when it exists.
-          # PR/branch builds have no SEMVER_TAG and no matching release;
-          # push-triggered stagex on main may race release.yml (which creates
-          # the release for the same commit); in either case just skip — the
-          # release-dispatched stagex run will populate it.
-          #
-          # Re-running stagex for the same release (manual UI re-run) must be
-          # idempotent: strip any existing block bracketed by our sentinel
-          # comments before appending the freshly-built one. The sentinels
-          # render as nothing in the release body.
+          # Each target uses its own sentinel pair so parser_app and
+          # parser_gateway can publish independently without clobbering each
+          # other when stagex runs them in parallel.
+          begin_sentinel="<!-- BEGIN_TVC_DEPLOY_${TARGET_NAME} -->"
+          end_sentinel="<!-- END_TVC_DEPLOY_${TARGET_NAME} -->"
           if [ -n "$SEMVER_TAG" ] && gh release view "$SEMVER_TAG" >/dev/null 2>&1; then
             existing_body=$(gh release view "$SEMVER_TAG" --json body --jq .body)
-            preserved=$(printf '%s\n' "$existing_body" | awk '
-              /<!-- BEGIN_TVC_DEPLOY -->/ { skipping = 1; next }
-              /<!-- END_TVC_DEPLOY -->/   { skipping = 0; next }
+            preserved=$(printf '%s\n' "$existing_body" | awk -v b="$begin_sentinel" -v e="$end_sentinel" '
+              $0 == b { skipping = 1; next }
+              $0 == e { skipping = 0; next }
               !skipping
             ')
-            new_body="${RUNNER_TEMP}/release_notes.md"
+            new_body="${RUNNER_TEMP}/release_notes_${TARGET_NAME}.md"
             {
               printf '%s\n\n' "$preserved"
-              echo "<!-- BEGIN_TVC_DEPLOY -->"
+              echo "$begin_sentinel"
               cat "$deploy_md"
-              echo "<!-- END_TVC_DEPLOY -->"
+              echo "$end_sentinel"
             } > "$new_body"
             gh release edit "$SEMVER_TAG" --notes-file "$new_body" \
               --repo "${GITHUB_REPOSITORY}"
-            echo "Updated release $SEMVER_TAG with TVC deployment details."
+            echo "Updated release $SEMVER_TAG with TVC deployment details for ${TARGET_NAME}."
           else
             echo "No release to update (SEMVER_TAG='${SEMVER_TAG:-<unset>}'); skipping release-notes update."
           fi

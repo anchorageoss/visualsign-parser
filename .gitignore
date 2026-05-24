@@ -2,3 +2,5 @@
 out
 docs/superpowers/
 .surfpool/
+node_modules/
+*.log
