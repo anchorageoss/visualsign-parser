@@ -21,6 +21,11 @@ pub mod tx_input;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
+/// Output formatting and the parse-and-display entry point.
+pub mod output;
+
+pub use output::OutputFormat;
+
 /// Trait for integrating a chain into the CLI.
 ///
 /// Implement this in a chain crate (e.g. `visualsign-ethereum::cli_plugin::EthereumPlugin`),
