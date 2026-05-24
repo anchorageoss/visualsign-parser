@@ -40,7 +40,7 @@ impl EthereumPlugin {
     }
 }
 
-impl crate::ChainPlugin for EthereumPlugin {
+impl parser_cli_core::ChainPlugin for EthereumPlugin {
     fn chain(&self) -> Chain {
         Chain::Ethereum
     }

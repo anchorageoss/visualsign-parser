@@ -9,9 +9,6 @@
 #![warn(missing_docs, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc, clippy::module_name_repetitions)]
 
-use generated::parser::ChainMetadata;
-use visualsign::registry::{Chain, TransactionConverterRegistry};
-
 /// Command-line interface functionality and types.
 pub mod cli;
 /// Ethereum-specific CLI handling: ABI mappings, network metadata.
@@ -24,30 +21,15 @@ pub mod solana;
 #[cfg(feature = "tron")]
 pub mod tron;
 
-/// Trait for integrating a chain into the CLI.
-///
-/// Implement this in a chain module, then register it in [`build_plugins`].
-pub trait ChainPlugin {
-    /// The chain this plugin handles.
-    fn chain(&self) -> Chain;
-
-    /// Register the chain's converter in the registry.
-    fn register(&self, registry: &mut TransactionConverterRegistry);
-
-    /// Build chain-specific metadata. `network` is the shared `--network` flag;
-    /// any chain-specific args (e.g. ABI or IDL mappings) are owned by the plugin.
-    fn create_metadata(&self, network: Option<String>) -> Result<Option<ChainMetadata>, String>;
-}
-
 /// Constructs all enabled chain plugins, each pre-loaded with its CLI args.
 ///
-/// **To add a new chain:** create its module, implement [`ChainPlugin`],
+/// **To add a new chain:** create its module, implement [`parser_cli_core::ChainPlugin`],
 /// then add one entry here (behind its feature flag) and one
 /// `#[command(flatten)]` field to `cli::Args`.
 #[must_use]
 #[allow(clippy::vec_init_then_push)] // cfg-gated pushes cannot be expressed as vec![...]
-pub(crate) fn build_plugins(args: &cli::Args) -> Vec<Box<dyn ChainPlugin>> {
-    let mut plugins: Vec<Box<dyn ChainPlugin>> = vec![];
+pub(crate) fn build_plugins(args: &cli::Args) -> Vec<Box<dyn parser_cli_core::ChainPlugin>> {
+    let mut plugins: Vec<Box<dyn parser_cli_core::ChainPlugin>> = vec![];
 
     #[cfg(feature = "ethereum")]
     plugins.push(Box::new(ethereum::EthereumPlugin::new(

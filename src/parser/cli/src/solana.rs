@@ -33,7 +33,7 @@ impl SolanaPlugin {
     }
 }
 
-impl crate::ChainPlugin for SolanaPlugin {
+impl parser_cli_core::ChainPlugin for SolanaPlugin {
     fn chain(&self) -> Chain {
         Chain::Solana
     }
