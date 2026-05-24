@@ -41,11 +41,11 @@ pub(crate) struct Args {
 
     #[cfg(feature = "ethereum")]
     #[command(flatten)]
-    pub(crate) ethereum: crate::ethereum::EthereumArgs,
+    pub(crate) ethereum: visualsign_ethereum::EthereumArgs,
 
     #[cfg(feature = "solana")]
     #[command(flatten)]
-    pub(crate) solana: crate::solana::SolanaArgs,
+    pub(crate) solana: visualsign_solana::SolanaArgs,
 
     #[cfg(feature = "tron")]
     #[command(flatten)]
@@ -59,7 +59,22 @@ impl Cli {
     pub fn execute() -> Result<(), String> {
         let args = Args::parse();
         let chain = parse_chain(&args.chain);
-        let plugins = crate::build_plugins(&args);
+
+        #[allow(clippy::vec_init_then_push)] // cfg-gated pushes cannot be expressed as vec![...]
+        let plugins: Vec<Box<dyn parser_cli_core::ChainPlugin>> = {
+            let mut plugins: Vec<Box<dyn parser_cli_core::ChainPlugin>> = vec![];
+            #[cfg(feature = "ethereum")]
+            plugins.push(Box::new(visualsign_ethereum::EthereumPlugin::new(
+                args.ethereum.clone(),
+            )));
+            #[cfg(feature = "solana")]
+            plugins.push(Box::new(visualsign_solana::SolanaPlugin::new(
+                args.solana.clone(),
+            )));
+            #[cfg(feature = "tron")]
+            plugins.push(Box::new(crate::tron::TronPlugin::new(args.tron.clone())));
+            plugins
+        };
 
         let mut registry = TransactionConverterRegistry::new();
         for plugin in &plugins {

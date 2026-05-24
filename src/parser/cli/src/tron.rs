@@ -10,7 +10,7 @@ use visualsign::registry::{Chain, TransactionConverterRegistry};
 #[derive(ClapArgs, Debug, Default, Clone)]
 pub struct TronArgs {}
 
-/// [`crate::ChainPlugin`] implementation for Tron.
+/// [`parser_cli_core::ChainPlugin`] implementation for Tron.
 pub struct TronPlugin {
     // `TronArgs` is currently empty, but we still hold it so adding a Tron-specific flag
     // later doesn't require a struct shape change — matches the EthereumPlugin/SolanaPlugin
@@ -27,7 +27,7 @@ impl TronPlugin {
     }
 }
 
-impl crate::ChainPlugin for TronPlugin {
+impl parser_cli_core::ChainPlugin for TronPlugin {
     fn chain(&self) -> Chain {
         Chain::Tron
     }

@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
+use crate::networks::parse_network;
 use clap::Args as ClapArgs;
 use generated::parser::{Abi, AbiType, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 use visualsign::registry::{Chain, TransactionConverterRegistry};
-use visualsign_ethereum::abi_metadata::{CLI_DEV_SIGNING_KEY_SEED, sign_abi};
-use visualsign_ethereum::networks::parse_network;
+use crate::abi_metadata::{CLI_DEV_SIGNING_KEY_SEED, sign_abi};
 
 use parser_cli_core::mapping_parser;
 
@@ -27,7 +27,7 @@ pub struct EthereumArgs {
     pub abi_proxy_mappings: Vec<String>,
 }
 
-/// [`crate::ChainPlugin`] implementation for Ethereum.
+/// [`parser_cli_core::ChainPlugin`] implementation for Ethereum.
 pub struct EthereumPlugin {
     args: EthereumArgs,
 }
@@ -46,9 +46,9 @@ impl parser_cli_core::ChainPlugin for EthereumPlugin {
     }
 
     fn register(&self, registry: &mut TransactionConverterRegistry) {
-        registry.register::<visualsign_ethereum::EthereumTransactionWrapper, _>(
+        registry.register::<crate::EthereumTransactionWrapper, _>(
             Chain::Ethereum,
-            visualsign_ethereum::EthereumVisualSignConverter::new(),
+            crate::EthereumVisualSignConverter::new(),
         );
     }
 
@@ -98,7 +98,7 @@ fn normalize_eth_address(addr: &str) -> String {
 /// checksum casing the user supplied (e.g. `0xAbCd...` and `0xabcd...` both
 /// produce the same key). The [`validate_eth_address`] validator runs first, so
 /// [`normalize_eth_address`] can safely strip the prefix without re-checking.
-fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<String, Abi>, usize) {
+fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (BTreeMap<String, Abi>, usize) {
     let (raw, count) = mapping_parser::load_mappings(
         abi_json_mappings,
         "ABI",
@@ -143,13 +143,13 @@ fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<Strin
 /// emit a louder warning when a proxy's ABI file was specified but failed to load
 /// (vs. simply never having an ABI file specified at all).
 fn apply_proxy_mappings(
-    abi_mappings: &mut HashMap<String, Abi>,
+    abi_mappings: &mut BTreeMap<String, Abi>,
     proxy_mappings: &[String],
     abi_json_mappings: &[String],
 ) {
     // Pre-compute the set of addresses that were attempted in --abi-json-mappings.
     // Used below to distinguish "ABI file was specified but failed" from "no ABI file at all".
-    let attempted_abi_addresses: HashSet<String> = abi_json_mappings
+    let attempted_abi_addresses: BTreeSet<String> = abi_json_mappings
         .iter()
         .filter_map(|m| mapping_parser::parse_mapping(m).ok())
         .filter(|c| validate_eth_address(&c.identifier).is_ok())
@@ -257,7 +257,7 @@ pub(crate) fn create_chain_metadata(
     };
 
     let mut abi_mappings = if abi_json_mappings.is_empty() {
-        HashMap::new()
+        BTreeMap::new()
     } else {
         eprintln!("Loading custom ABIs:");
         let (mappings, valid_count) = build_abi_mappings_from_files(abi_json_mappings);
@@ -278,7 +278,7 @@ pub(crate) fn create_chain_metadata(
     Ok(Some(ChainMetadata {
         metadata: Some(Metadata::Ethereum(EthereumMetadata {
             network_id: Some(network_id),
-            abi_mappings,
+            abi_mappings: abi_mappings.into_iter().collect(),
         })),
     }))
 }
@@ -518,7 +518,7 @@ mod tests {
     /// Mixed-casing between --abi-json-mappings and --abi-proxy-mappings must not
     /// silently lose the proxy link. The Copilot review comment identified a scenario
     /// where the user supplies the same address in different case across the two flags,
-    /// causing a `HashMap` miss and a synthesized empty ABI overwriting the real one.
+    /// causing a map-key miss and a synthesized empty ABI overwriting the real one.
     #[test]
     fn test_proxy_mapping_mixed_case_links_correctly() {
         // Use a freshly created pair so the uppercase vs lowercase contrast is clear.

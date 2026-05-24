@@ -1,3 +1,9 @@
+#[cfg(feature = "cli-plugin")]
+pub mod cli_plugin;
+
+#[cfg(feature = "cli-plugin")]
+pub use cli_plugin::{SolanaArgs, SolanaPlugin};
+
 mod core;
 mod idl;
 mod integrations;

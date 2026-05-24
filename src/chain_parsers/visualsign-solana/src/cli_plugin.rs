@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use clap::Args as ClapArgs;
 use generated::parser::{
@@ -20,7 +20,7 @@ pub struct SolanaArgs {
     pub idl_json_mappings: Vec<String>,
 }
 
-/// [`crate::ChainPlugin`] implementation for Solana.
+/// [`parser_cli_core::ChainPlugin`] implementation for Solana.
 pub struct SolanaPlugin {
     args: SolanaArgs,
 }
@@ -39,9 +39,9 @@ impl parser_cli_core::ChainPlugin for SolanaPlugin {
     }
 
     fn register(&self, registry: &mut TransactionConverterRegistry) {
-        registry.register::<visualsign_solana::SolanaTransactionWrapper, _>(
+        registry.register::<crate::SolanaTransactionWrapper, _>(
             Chain::Solana,
-            visualsign_solana::SolanaVisualSignConverter,
+            crate::SolanaVisualSignConverter,
         );
     }
 
@@ -50,7 +50,7 @@ impl parser_cli_core::ChainPlugin for SolanaPlugin {
     }
 }
 
-fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (HashMap<String, Idl>, usize) {
+fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (BTreeMap<String, Idl>, usize) {
     mapping_parser::load_mappings(
         idl_json_mappings,
         "IDL",
@@ -100,13 +100,13 @@ pub(crate) fn create_chain_metadata(idl_json_mappings: &[String]) -> Option<Chai
         metadata: Some(Metadata::Solana(SolanaMetadata {
             network_id: None,
             idl: None,
-            idl_mappings,
+            idl_mappings: idl_mappings.into_iter().collect(),
         })),
     })
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 
