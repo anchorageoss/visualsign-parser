@@ -6549,15 +6549,9 @@ dependencies = [
 name = "parser_cli"
 version = "0.1.0"
 dependencies = [
- "bincode",
- "borsh 1.6.0",
- "bs58 0.5.1",
  "clap",
- "generated",
  "parser_cli_core",
- "serde",
  "serde_json",
- "sha2 0.10.9",
  "similar",
  "tracing",
  "tracing-bunyan-formatter",

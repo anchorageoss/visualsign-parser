@@ -3,13 +3,20 @@ name = "visualsign-tron"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default    = ["cli-plugin"]
+cli-plugin = ["dep:clap", "dep:parser_cli_core", "dep:generated"]
+
 [dependencies]
 anychain-tron = "0.2.13"
 base64 = "0.22.1"
 bs58 = { version = "0.5.1", features = ["check"] }
 chrono = "0.4"
+clap = { version = "4.0", features = ["derive"], optional = true }
+generated = { path = "../../generated", optional = true }
 hex = "0.4.3"
 log = "0.4"
+parser_cli_core = { path = "../../parser/cli-core", optional = true }
 protobuf = "3.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -13,7 +13,7 @@ pub struct TronArgs {}
 /// [`parser_cli_core::ChainPlugin`] implementation for Tron.
 pub struct TronPlugin {
     // `TronArgs` is currently empty, but we still hold it so adding a Tron-specific flag
-    // later doesn't require a struct shape change — matches the EthereumPlugin/SolanaPlugin
+    // later doesn't require a struct shape change -- matches the EthereumPlugin/SolanaPlugin
     // convention of carrying the parsed args.
     #[allow(dead_code)]
     args: TronArgs,
@@ -33,9 +33,9 @@ impl parser_cli_core::ChainPlugin for TronPlugin {
     }
 
     fn register(&self, registry: &mut TransactionConverterRegistry) {
-        registry.register::<visualsign_tron::TronTransactionWrapper, _>(
+        registry.register::<crate::TronTransactionWrapper, _>(
             Chain::Tron,
-            visualsign_tron::TronVisualSignConverter,
+            crate::TronVisualSignConverter,
         );
     }
 

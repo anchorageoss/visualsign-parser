@@ -1,3 +1,9 @@
+#[cfg(feature = "cli-plugin")]
+pub mod cli_plugin;
+
+#[cfg(feature = "cli-plugin")]
+pub use cli_plugin::{TronArgs, TronPlugin};
+
 use anychain_tron::protocol::Tron::{Transaction as TronTransaction, transaction};
 use anychain_tron::protocol::balance_contract::{
     DelegateResourceContract, FreezeBalanceV2Contract, TransferContract,
