@@ -72,7 +72,13 @@ pub fn get_token_lookup_table() -> BTreeMap<&'static str, TokenInfo> {
 /// Maximum supported token decimals. Beyond this we cannot compute `10^decimals`
 /// in a `u64` divisor, so we fall back to the raw amount rather than panic.
 /// `10^19` fits in `u64` (`u64::MAX` is ~1.84e19); `10^20` does not.
-pub const MAX_SUPPORTED_DECIMALS: u8 = 19;
+///
+/// Test-only constant: the runtime fallback in `format_token_amount` uses
+/// `checked_pow` directly, so production code does not need to reference this
+/// bound. Kept here (rather than inlined in the test) so the documented limit
+/// stays close to the function it constrains.
+#[cfg(test)]
+const MAX_SUPPORTED_DECIMALS: u8 = 19;
 
 /// Helper function to format token amounts.
 ///
