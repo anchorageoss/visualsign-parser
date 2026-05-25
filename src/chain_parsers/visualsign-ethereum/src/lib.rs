@@ -561,8 +561,53 @@ fn convert_to_visual_sign_payload(
             }
         }
 
-        // Try dynamic ABI visualization if available
+        // Known-token short-circuit (PRS-222): if the destination is a token
+        // registered in the compiled-in ContractRegistry (e.g. USDC, USDT, WETH),
+        // dispatch to the safe built-in ERC20/ERC721 visualizer and bypass any
+        // caller-supplied ABI. This prevents a malicious dApp from supplying an
+        // ABI for a canonical token address that renames `transfer` (selector
+        // 0xa9059cbb) to `approve` (or any other label) and spoofs the UI.
+        //
+        // We deliberately consult only the global (compiled-in) layer here:
+        // a request-scoped registry is itself caller-supplied and cannot be
+        // trusted to decide the override.
+        let mut is_known_token = false;
         if input_fields.is_empty() {
+            if let Some(to_address) = transaction.to() {
+                if let Some(erc_standard) = layered_registry
+                    .global()
+                    .get_token_erc_standard(chain_id, to_address)
+                {
+                    is_known_token = true;
+                    match erc_standard {
+                        token_metadata::ErcStandard::Erc20 => {
+                            if let Some(field) =
+                                (contracts::core::ERC20Visualizer {}).visualize_tx_commands(input)
+                            {
+                                input_fields.push(field);
+                            }
+                        }
+                        token_metadata::ErcStandard::Erc721 => {
+                            if let Some(field) =
+                                (contracts::core::ERC721Visualizer {}).visualize_tx_commands(input)
+                            {
+                                input_fields.push(field);
+                            }
+                        }
+                        token_metadata::ErcStandard::Erc1155 => {
+                            // No built-in ERC1155 visualizer yet. Fall through to
+                            // the raw-hex fallback rather than the user ABI so
+                            // the attack surface stays closed.
+                        }
+                    }
+                }
+            }
+        }
+
+        // Try dynamic ABI visualization if available. Skipped for known tokens
+        // (see PRS-222 short-circuit above) so caller-supplied ABIs cannot
+        // override the safe built-in decoders for canonical tokens.
+        if input_fields.is_empty() && !is_known_token {
             if let (Some(to_address), Some(abi_reg)) = (transaction.to(), abi_registry) {
                 let chain_id_val = chain_id;
                 if let Some(abi) = abi_reg.get_abi_for_address(chain_id_val, to_address) {
@@ -622,8 +667,13 @@ pub fn transaction_string_to_visual_sign(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::contracts::core::erc20::IERC20;
+    use crate::registry::ContractRegistry;
+    use crate::token_metadata::{ErcStandard, TokenMetadata};
     use alloy_consensus::{SignableTransaction, TxLegacy, TypedTransaction};
     use alloy_primitives::{Address, Bytes, ChainId, U256};
+    use alloy_sol_types::SolCall;
+    use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata};
     use visualsign::{SignablePayloadFieldAddressV2, SignablePayloadFieldAmountV2};
 
     fn unsigned_to_hex(tx: &TypedTransaction) -> String {
@@ -815,6 +865,168 @@ mod tests {
             .unwrap();
         if let SignablePayloadField::TextV2 { text_v2, .. } = input_field {
             assert_eq!(text_v2.text, "0x12345678");
+        }
+    }
+
+    /// PRS-222 regression: caller-supplied ABIs keyed to a known token address
+    /// (e.g. USDC) must not override the safe built-in ERC20/ERC721 decoder.
+    ///
+    /// An attacker who can inject `chain_metadata.abi_mappings` could otherwise
+    /// rename selector `0xa9059cbb` (transfer) to any chosen function name and
+    /// parameter labels, spoofing the wallet UI. The fix in lib.rs prefers the
+    /// built-in visualizer for any address present in the compiled-in
+    /// ContractRegistry's token registry.
+    #[test]
+    fn test_known_token_ignores_caller_supplied_abi_for_transfer() {
+        let usdc_address: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            .parse()
+            .unwrap();
+        let victim: Address = "0x000000000000000000000000000000000000beef"
+            .parse()
+            .unwrap();
+        let amount = U256::from(1_000_000_000u64);
+
+        // Build a registry with USDC registered as a known ERC20.
+        let mut registry = ContractRegistry::new();
+        registry
+            .register_token(
+                1,
+                TokenMetadata {
+                    symbol: "USDC".to_string(),
+                    name: "USD Coin".to_string(),
+                    erc_standard: ErcStandard::Erc20,
+                    contract_address: format!("{usdc_address:?}"),
+                    decimals: 6,
+                },
+            )
+            .unwrap();
+        let converter = EthereumVisualSignConverter::with_registry(Arc::new(registry));
+
+        // Real `transfer(victim, 1_000_000_000)` calldata to USDC.
+        let call = IERC20::transferCall { to: victim, amount };
+        let calldata = Bytes::from(IERC20::transferCall::abi_encode(&call));
+
+        let tx = TypedTransaction::Legacy(TxLegacy {
+            chain_id: Some(ChainId::from(1u64)),
+            nonce: 0,
+            gas_price: 1_000_000_000u128,
+            gas_limit: 50_000,
+            to: alloy_primitives::TxKind::Call(usdc_address),
+            value: U256::ZERO,
+            input: calldata,
+        });
+
+        // Caller-supplied ABI: same selector as `transfer(address,uint256)`
+        // (which is required for the AbiRegistry dispatcher to match it), but
+        // with attacker-chosen parameter names that misrepresent what the user
+        // is signing. Without the fix, the UI would render labels controlled
+        // by the dApp ("backup_wallet", "safety_deposit") instead of the
+        // canonical "Recipient"/"Amount" from the built-in ERC20 visualizer.
+        //
+        // Note: alloy's `Function::selector()` is derived from name + input
+        // types, so the function name MUST stay `transfer`. Parameter NAMES,
+        // however, do not affect the selector and are fully attacker-controlled.
+        // This is sufficient to spoof the signing prompt.
+        let malicious_abi = r#"[
+            {
+                "type": "function",
+                "name": "transfer",
+                "inputs": [
+                    {"name": "backup_wallet", "type": "address"},
+                    {"name": "safety_deposit", "type": "uint256"}
+                ],
+                "outputs": [],
+                "stateMutability": "nonpayable"
+            }
+        ]"#;
+        // Build the fixture as a BTreeMap (crate determinism rule) and let
+        // it `.collect()` into the proto field's HashMap at the call site.
+        let abi_mappings: std::collections::BTreeMap<String, Abi> = std::iter::once((
+            format!("{usdc_address:?}"),
+            Abi {
+                value: malicious_abi.to_string(),
+                signature: None,
+            },
+        ))
+        .collect();
+
+        let options = VisualSignOptions {
+            decode_transfers: true,
+            transaction_name: None,
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                    network_id: Some("ETHEREUM_MAINNET".to_string()),
+                    abi_mappings: abi_mappings.into_iter().collect(),
+                })),
+            }),
+            developer_config: None,
+        };
+
+        let wrapper = EthereumTransactionWrapper::new(tx);
+        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
+
+        // The built-in ERC20 visualizer emits a PreviewLayout titled
+        // "ERC20 Transfer" with a "Recipient" address field and an "Amount"
+        // field. The malicious ABI would have produced an "approve" label
+        // with "spender"/"amount" labels.
+        let preview = payload
+            .fields
+            .iter()
+            .find(|f| matches!(f, SignablePayloadField::PreviewLayout { .. }))
+            .expect("expected a PreviewLayout field from the built-in ERC20 visualizer");
+
+        let SignablePayloadField::PreviewLayout {
+            common,
+            preview_layout,
+        } = preview
+        else {
+            panic!("matched discriminant changed");
+        };
+        assert_eq!(common.label, "ERC20 Transfer");
+        assert_eq!(
+            preview_layout
+                .title
+                .as_ref()
+                .map(|t| t.text.as_str())
+                .unwrap_or(""),
+            "ERC20 Transfer",
+        );
+
+        let expanded = preview_layout
+            .expanded
+            .as_ref()
+            .expect("expected expanded ListLayout for transfer details");
+        let labels: Vec<&str> = expanded
+            .fields
+            .iter()
+            .map(|f| f.signable_payload_field.label().as_str())
+            .collect();
+        assert!(
+            labels.contains(&"Recipient"),
+            "expected built-in 'Recipient' label, got {labels:?}",
+        );
+        assert!(
+            labels.contains(&"Amount"),
+            "expected built-in 'Amount' label, got {labels:?}",
+        );
+
+        // And, defensively, the attacker-chosen parameter names must not
+        // appear anywhere in the rendered payload.
+        fn assert_label_not_attacker_controlled(label: &str) {
+            assert_ne!(
+                label, "backup_wallet",
+                "caller ABI param name must not win for known token",
+            );
+            assert_ne!(
+                label, "safety_deposit",
+                "caller ABI param name must not win for known token",
+            );
+        }
+        for f in &payload.fields {
+            assert_label_not_attacker_controlled(f.label().as_str());
+        }
+        for f in &expanded.fields {
+            assert_label_not_attacker_controlled(f.signable_payload_field.label().as_str());
         }
     }
 

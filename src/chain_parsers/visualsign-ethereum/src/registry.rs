@@ -219,6 +219,28 @@ impl ContractRegistry {
             .map(|m| m.symbol.clone())
     }
 
+    /// Gets the ERC standard for a registered token on a chain
+    ///
+    /// Used by the dispatcher to recognize known tokens and route them to the
+    /// safe built-in ERC20/ERC721 visualizer, preventing caller-supplied ABIs
+    /// from overriding decoding for canonical tokens (e.g. USDC, USDT, WETH).
+    ///
+    /// # Arguments
+    /// * `chain_id` - The chain ID
+    /// * `token` - The token's contract address
+    ///
+    /// # Returns
+    /// `Some(erc_standard)` if the token is registered, `None` otherwise
+    pub fn get_token_erc_standard(
+        &self,
+        chain_id: ChainId,
+        token: Address,
+    ) -> Option<crate::token_metadata::ErcStandard> {
+        self.token_metadata
+            .get(&(chain_id, token))
+            .map(|m| m.erc_standard.clone())
+    }
+
     /// Registers a well-known address that exists on all chains at the same address
     ///
     /// # Arguments
