@@ -1314,12 +1314,16 @@ mod tests {
                 signatures: vec![],
                 message: VersionedMessage::V0(v0_message.clone()),
             };
+            #[cfg(feature = "diagnostics")]
+            let lint_config = visualsign::lint::LintConfig::default();
             convert_v0_to_visual_sign_payload(
                 &versioned_tx,
                 v0_message,
                 false,
                 None,
                 &default_options(),
+                #[cfg(feature = "diagnostics")]
+                &lint_config,
             )
         }
 
