@@ -574,20 +574,27 @@ fn convert_to_visual_sign_payload(
         // a request-scoped registry is itself caller-supplied and cannot be
         // trusted to decide the override.
         //
-        // For the registry lookup we prefer `transaction.chain_id()` over the
-        // resolved `chain_id`: `resolve_chain_id` gives metadata priority and
-        // metadata is caller-controlled in this threat model, so an attacker
-        // could mismatch `network_id` against a real mainnet tx and dodge the
-        // canonical-token lookup. Falling back to the resolved `chain_id`
-        // covers legacy transactions that don't carry an EIP-155 chain id.
-        let lookup_chain_id = transaction.chain_id().unwrap_or(chain_id);
+        // The registry lookup keys off `transaction.chain_id()` and never the
+        // resolved `chain_id`. `resolve_chain_id` gives metadata priority and
+        // metadata is caller-controlled in this threat model, so feeding it
+        // into a security decision would let an attacker mismatch `network_id`
+        // and dodge the canonical-token lookup. For pre-EIP-155 legacy txs
+        // that don't carry a chain id of their own we fall back to an
+        // address-only any-chain lookup rather than the metadata-derived
+        // chain id: any canonical-token address on any chain still wins over
+        // a caller-supplied ABI.
         let mut is_known_token = false;
         if input_fields.is_empty() {
             if let Some(to_address) = transaction.to() {
-                if let Some(erc_standard) = layered_registry
-                    .global()
-                    .get_token_erc_standard(lookup_chain_id, to_address)
-                {
+                let erc_standard = match transaction.chain_id() {
+                    Some(tx_chain_id) => layered_registry
+                        .global()
+                        .get_token_erc_standard(tx_chain_id, to_address),
+                    None => layered_registry
+                        .global()
+                        .get_token_erc_standard_any_chain(to_address),
+                };
+                if let Some(erc_standard) = erc_standard {
                     is_known_token = true;
                     match erc_standard {
                         token_metadata::ErcStandard::Erc20 => {
@@ -1142,6 +1149,111 @@ mod tests {
         assert_eq!(
             common.label, "ERC20 Transfer",
             "tx chain_id must win over caller metadata for the canonical-token lookup",
+        );
+    }
+
+    /// PRS-222 round-3: pre-EIP-155 legacy transactions don't carry a chain id
+    /// of their own, so the canonical-token short-circuit must not fall back to
+    /// the resolved (metadata-derived) chain id. Otherwise an attacker can
+    /// supply a legacy tx to USDC's mainnet address with `network_id` pointing
+    /// at a chain where USDC isn't registered, the global lookup misses, and a
+    /// caller-supplied ABI gets to bind to a canonical token. We expect the
+    /// dispatcher to do an address-only any-chain lookup in that case.
+    #[test]
+    fn test_known_token_short_circuit_handles_chain_id_less_legacy_tx() {
+        let usdc_address: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            .parse()
+            .unwrap();
+        let victim: Address = "0x000000000000000000000000000000000000beef"
+            .parse()
+            .unwrap();
+        let amount = U256::from(1_000_000_000u64);
+
+        // USDC registered on mainnet (chain id 1) only.
+        let mut registry = ContractRegistry::new();
+        registry
+            .register_token(
+                1,
+                TokenMetadata {
+                    symbol: "USDC".to_string(),
+                    name: "USD Coin".to_string(),
+                    erc_standard: ErcStandard::Erc20,
+                    contract_address: usdc_address.to_string(),
+                    decimals: 6,
+                },
+            )
+            .unwrap();
+        let converter = EthereumVisualSignConverter::with_registry(Arc::new(registry));
+
+        // Pre-EIP-155 legacy tx: `chain_id == None`. Calldata is a real
+        // `transfer(victim, 1_000_000_000)` against the USDC mainnet address.
+        let call = IERC20::transferCall { to: victim, amount };
+        let calldata = Bytes::from(IERC20::transferCall::abi_encode(&call));
+        let tx = TypedTransaction::Legacy(TxLegacy {
+            chain_id: None,
+            nonce: 0,
+            gas_price: 1_000_000_000u128,
+            gas_limit: 50_000,
+            to: alloy_primitives::TxKind::Call(usdc_address),
+            value: U256::ZERO,
+            input: calldata,
+        });
+
+        let malicious_abi = r#"[
+            {
+                "type": "function",
+                "name": "transfer",
+                "inputs": [
+                    {"name": "backup_wallet", "type": "address"},
+                    {"name": "safety_deposit", "type": "uint256"}
+                ],
+                "outputs": [],
+                "stateMutability": "nonpayable"
+            }
+        ]"#;
+        let abi_mappings: std::collections::BTreeMap<String, Abi> = std::iter::once((
+            usdc_address.to_string(),
+            Abi {
+                value: malicious_abi.to_string(),
+                signature: None,
+            },
+        ))
+        .collect();
+
+        // Attacker points `network_id` at Polygon (no USDC entry in our local
+        // registry) so any chain-id-based lookup that trusts metadata misses.
+        let options = VisualSignOptions {
+            decode_transfers: true,
+            transaction_name: None,
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                    network_id: Some("POLYGON_MAINNET".to_string()),
+                    abi_mappings: abi_mappings.into_iter().collect(),
+                })),
+            }),
+            developer_config: None,
+        };
+
+        let wrapper = EthereumTransactionWrapper::new(tx);
+        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
+
+        let preview = payload
+            .fields
+            .iter()
+            .find(|f| matches!(f, SignablePayloadField::PreviewLayout { .. }))
+            .expect("expected a PreviewLayout from the built-in ERC20 visualizer");
+        let SignablePayloadField::PreviewLayout { common, .. } = preview else {
+            panic!("matched discriminant changed");
+        };
+        assert_eq!(
+            common.label, "ERC20 Transfer",
+            "chain-id-less legacy tx to a canonical token must still hit the built-in decoder",
+        );
+
+        let rendered = format!("{payload:?}");
+        assert!(
+            !rendered.contains("backup_wallet") && !rendered.contains("safety_deposit"),
+            "caller ABI param name must not appear anywhere in the rendered payload: {rendered}",
         );
     }
 

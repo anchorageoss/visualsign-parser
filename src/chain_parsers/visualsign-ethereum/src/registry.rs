@@ -241,6 +241,29 @@ impl ContractRegistry {
             .map(|m| m.erc_standard.clone())
     }
 
+    /// Address-only lookup across all chains for the canonical-token short-circuit.
+    ///
+    /// Used by the dispatcher (PRS-222) for pre-EIP-155 legacy transactions that
+    /// don't carry a chain_id of their own. In that case we deliberately ignore
+    /// the resolved chain_id (which is metadata-derived and caller-controlled)
+    /// and instead match on address alone: if the destination is a canonical
+    /// token on *any* chain in the compiled-in registry, route to the safe
+    /// built-in decoder rather than letting a caller-supplied ABI bind.
+    ///
+    /// If the same address is registered as different ERC standards on different
+    /// chains (effectively impossible for canonical tokens), the first match
+    /// wins. The set of compiled-in tokens is small, so the linear scan is
+    /// cheap and runs only on the chain-id-less legacy path.
+    pub fn get_token_erc_standard_any_chain(
+        &self,
+        token: Address,
+    ) -> Option<crate::token_metadata::ErcStandard> {
+        self.token_metadata
+            .iter()
+            .find(|((_, addr), _)| *addr == token)
+            .map(|(_, m)| m.erc_standard.clone())
+    }
+
     /// Registers a well-known address that exists on all chains at the same address
     ///
     /// # Arguments
