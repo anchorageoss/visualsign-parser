@@ -508,8 +508,10 @@ mod tests {
 
     #[test]
     fn test_visualize_permit_with_uint48_max_expiration_does_not_panic() {
-        // Build a Permit2 permit call with expiration and sigDeadline at
-        // their respective maxes to exercise both formatting paths.
+        // Build a Permit2 permit call with `expiration` at the uint48 max
+        // (the value that previously panicked) and `sigDeadline` at
+        // `u64::MAX` to exercise both formatting paths without straying
+        // into the separate uint256 overflow case covered below.
         let uint48_max = U48::from((1u64 << 48) - 1);
         let permit_single = PermitSingle {
             details: PermitDetails {
