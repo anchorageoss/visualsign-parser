@@ -111,10 +111,12 @@ impl IdlRegistry {
     /// Caller-supplied IDLs targeting a built-in program ID (System Program, SPL Token,
     /// Associated Token Account, Compute Budget, Memo, plus every program listed in
     /// `solana_parser::ProgramType` and every program covered by a registered preset)
-    /// are silently dropped from the `configs` map. Allowing those overrides would let
-    /// a caller relabel native SOL transfers or SPL Token operations and spoof the
-    /// signed UI (PRS-223). The user-provided `program_name` is left in `names` so the
-    /// separate display-name override path (tracked by PRS-237) stays unaffected.
+    /// are dropped from the `configs` map and a `warn!` is logged with the offending
+    /// `program_id` (a bounded base58 string) so operators can spot attempts in
+    /// telemetry. Allowing those overrides would let a caller relabel native SOL
+    /// transfers or SPL Token operations and spoof the signed UI (PRS-223). The
+    /// user-provided `program_name` is left in `names` so the separate display-name
+    /// override path (tracked by PRS-237) stays unaffected.
     ///
     /// # Returns
     /// * `Ok(IdlRegistry)` with non-builtin custom IDLs configured to override
