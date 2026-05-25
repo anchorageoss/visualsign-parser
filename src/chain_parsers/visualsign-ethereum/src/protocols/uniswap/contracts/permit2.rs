@@ -39,13 +39,21 @@ sol! {
     }
 }
 
-/// Formats a uint48 unix timestamp for display.
+/// Formats a unix timestamp (seconds since epoch) for display.
 ///
-/// Returns "never" for `u64::MAX`. For values inside chrono's representable
-/// range, returns the UTC datetime. For values above chrono's max year
-/// (year 9999), which uint48 can reach (max ~year 8,925,512), returns
-/// "unix:<value>" rather than panicking.
-fn format_uint48_timestamp(value: u64) -> String {
+/// Used for both `uint48` fields (`expiration`) and the `uint256`
+/// `sigDeadline` (after a checked narrowing to `u64`), so this helper is
+/// intentionally type-agnostic over the source width and operates on a
+/// plain `u64`.
+///
+/// Behavior:
+/// - `u64::MAX` is treated as a "never" sentinel.
+/// - Values inside chrono's representable range render as
+///   `"YYYY-MM-DD HH:MM UTC"`.
+/// - Values above chrono's max year (year 9999), which `uint48` can reach
+///   (max ~year 8,925,512), render as `"unix:<value>"` rather than
+///   panicking.
+fn format_unix_timestamp_seconds_u64(value: u64) -> String {
     if value == u64::MAX {
         return "never".to_string();
     }
@@ -151,7 +159,7 @@ impl Permit2Visualizer {
 
         // Format expiration timestamp
         let expiration_u64: u64 = call.expiration.to_string().parse().unwrap_or(0);
-        let expiration_str = format_uint48_timestamp(expiration_u64);
+        let expiration_str = format_unix_timestamp_seconds_u64(expiration_u64);
 
         let text = format!(
             "Approve {} {} {} to spend {} (expires: {})",
@@ -203,16 +211,16 @@ impl Permit2Visualizer {
             .to_string()
             .parse()
             .unwrap_or(0);
-        let expiration_str = format_uint48_timestamp(expiration_u64);
+        let expiration_str = format_unix_timestamp_seconds_u64(expiration_u64);
 
-        // Format sig deadline timestamp
-        let sig_deadline_u64: u64 = call
-            .permitSingle
-            .sigDeadline
-            .to_string()
-            .parse()
-            .unwrap_or(0);
-        let sig_deadline_str = format_uint48_timestamp(sig_deadline_u64);
+        // Format sig deadline timestamp. `sigDeadline` is `uint256`; use a
+        // checked narrowing so a value above `u64::MAX` renders as
+        // `unix:<original>` rather than silently collapsing to 0 (which
+        // would display as the Unix epoch).
+        let sig_deadline_str = match u64::try_from(call.permitSingle.sigDeadline) {
+            Ok(v) => format_unix_timestamp_seconds_u64(v),
+            Err(_) => format!("unix:{}", call.permitSingle.sigDeadline),
+        };
 
         // Determine if amount is "unlimited" (max u160)
         let amount_display = if call.permitSingle.details.amount == U160::MAX {
@@ -435,33 +443,33 @@ mod tests {
     }
 
     #[test]
-    fn test_format_uint48_timestamp_never() {
+    fn test_format_unix_timestamp_seconds_u64_never() {
         // u64::MAX should be the "never" sentinel.
-        assert_eq!(format_uint48_timestamp(u64::MAX), "never");
+        assert_eq!(format_unix_timestamp_seconds_u64(u64::MAX), "never");
     }
 
     #[test]
-    fn test_format_uint48_timestamp_normal() {
+    fn test_format_unix_timestamp_seconds_u64_normal() {
         // 2024-01-01T00:00:00 UTC = 1704067200.
         assert_eq!(
-            format_uint48_timestamp(1_704_067_200),
+            format_unix_timestamp_seconds_u64(1_704_067_200),
             "2024-01-01 00:00 UTC"
         );
     }
 
     #[test]
-    fn test_format_uint48_timestamp_epoch() {
-        assert_eq!(format_uint48_timestamp(0), "1970-01-01 00:00 UTC");
+    fn test_format_unix_timestamp_seconds_u64_epoch() {
+        assert_eq!(format_unix_timestamp_seconds_u64(0), "1970-01-01 00:00 UTC");
     }
 
     #[test]
-    fn test_format_uint48_timestamp_uint48_max_does_not_panic() {
+    fn test_format_unix_timestamp_seconds_u64_uint48_max_does_not_panic() {
         // uint48 max = 2^48 - 1 = 281_474_976_710_655, which corresponds to
         // ~year 8,925,512, well beyond chrono's max year (9999). The old
         // implementation panicked here via unwrap(); the new helper must
         // return a non-panicking representation.
         let uint48_max: u64 = (1u64 << 48) - 1;
-        let formatted = format_uint48_timestamp(uint48_max);
+        let formatted = format_unix_timestamp_seconds_u64(uint48_max);
         assert_eq!(formatted, format!("unix:{uint48_max}"));
     }
 
@@ -483,7 +491,8 @@ mod tests {
             .visualize_tx_commands(&input, 1, None)
             .expect("approve should decode");
 
-        // Sanity check that the rendered text contains the saturated marker.
+        // Sanity check that the rendered text contains the out-of-range
+        // fallback (`unix:<value>`) rather than a chrono-formatted date.
         match field {
             SignablePayloadField::TextV2 { text_v2, .. } => {
                 assert!(
@@ -523,5 +532,51 @@ mod tests {
         let _field = visualizer
             .visualize_tx_commands(&input, 1, None)
             .expect("permit should decode");
+    }
+
+    #[test]
+    fn test_visualize_permit_with_sig_deadline_above_u64_max_renders_fallback() {
+        // `sigDeadline` is `uint256`; values above `u64::MAX` previously
+        // collapsed to 0 via `to_string().parse::<u64>().unwrap_or(0)` and
+        // rendered as the Unix epoch. They should now render the original
+        // value via the `unix:<value>` fallback.
+        let big_deadline = U256::from(u64::MAX) + U256::from(1u64);
+        let permit_single = PermitSingle {
+            details: PermitDetails {
+                token: [0x33u8; 20].into(),
+                amount: U160::from(1_000u64),
+                expiration: U48::from(1_704_067_200u64),
+                nonce: U48::from(0u64),
+            },
+            spender: [0x44u8; 20].into(),
+            sigDeadline: big_deadline,
+        };
+        let call = IPermit2::permitCall {
+            owner: [0x55u8; 20].into(),
+            permitSingle: permit_single,
+            signature: alloy_primitives::Bytes::default(),
+        };
+        let input = IPermit2::permitCall::abi_encode(&call);
+
+        let visualizer = Permit2Visualizer;
+        let field = visualizer
+            .visualize_tx_commands(&input, 1, None)
+            .expect("permit should decode");
+
+        // The expanded fields include a "Sig Deadline" entry; the preview/
+        // title text doesn't carry it. Walk the field tree and assert the
+        // fallback rendering shows the original U256 string.
+        let expected = format!("unix:{big_deadline}");
+        let json = serde_json::to_string(&field).expect("serializable");
+        assert!(
+            json.contains(&expected),
+            "expected `{expected}` in rendered field, got: {json}"
+        );
+        // And no 1970 epoch rendering, which would be the old broken
+        // behavior.
+        assert!(
+            !json.contains("1970-01-01"),
+            "did not expect 1970 epoch fallback in rendered field, got: {json}"
+        );
     }
 }
