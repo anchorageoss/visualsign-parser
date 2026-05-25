@@ -117,7 +117,7 @@ The metadata bag must contain at least `algorithm` (set to `"secp256k1"`) and `p
 
 Signing proves the ABI was not modified after you signed it. It does **not** prove who signed it; the parser accepts any well-formed signature from any key. To establish identity, wallets verify your public key against an allowlist they maintain (a static config, a registry of audited dApps, or whatever fits their threat model). Publish your signing key alongside your contracts so wallets can pin it.
 
-If signature validation fails, the parser logs a warning and **silently skips that ABI entry**, falling back to raw-hex rendering for calls to that contract. That means a wrong signature is worse than no signature: users see less information, not more. Ship unsigned ABIs until you're confident the signing pipeline is stable, then add signatures once your wallet integrators are ready to verify them.
+If signature validation fails, the parser logs a warning and **skips that ABI entry**, falling back to raw-hex rendering for calls to that contract. That means a wrong signature is worse than no signature: users see less information, not more. Ship unsigned ABIs until you're confident the signing pipeline is stable, then add signatures once your wallet integrators are ready to verify them.
 
 ## Design calldata that visualizes well
 
