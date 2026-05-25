@@ -608,10 +608,15 @@ fn convert_to_visual_sign_payload(
                             // `ERC721Visualizer::visualize_tx_commands` currently
                             // returns `None` for all inputs (no built-in ERC721
                             // decoding yet). That's fine for the PRS-222 fix:
-                            // the call below is a no-op and we fall through to
-                            // the raw-hex fallback rather than the caller ABI,
-                            // so the attack surface stays closed even with no
-                            // ERC721 decoder. A follow-up can add minimal
+                            // the call below is a no-op, and because
+                            // `is_known_token` is set we also skip both the
+                            // caller-ABI path and the ERC20 `decode_transfers`
+                            // fallback below, so the call lands on raw-hex.
+                            // This matters because `approve(address,uint256)`
+                            // shares a selector across ERC20/ERC721, so without
+                            // the ERC20-fallback guard we'd mis-render an ERC721
+                            // approval as an ERC20 approval.
+                            // A follow-up can add minimal
                             // transferFrom/safeTransferFrom decoding for UX.
                             if let Some(field) =
                                 (contracts::core::ERC721Visualizer {}).visualize_tx_commands(input)
@@ -620,9 +625,10 @@ fn convert_to_visual_sign_payload(
                             }
                         }
                         token_metadata::ErcStandard::Erc1155 => {
-                            // No built-in ERC1155 visualizer yet. Fall through to
-                            // the raw-hex fallback rather than the user ABI so
-                            // the attack surface stays closed.
+                            // No built-in ERC1155 visualizer yet. `is_known_token`
+                            // is set so we skip both the caller-ABI path and the
+                            // ERC20 `decode_transfers` fallback, landing on
+                            // raw-hex. Same threat model as the ERC721 branch.
                         }
                     }
                 }
@@ -645,8 +651,14 @@ fn convert_to_visual_sign_payload(
             }
         }
 
-        // Fallback: Try ERC20 if decode_transfers is enabled
-        if input_fields.is_empty() && options.decode_transfers {
+        // Fallback: Try ERC20 if decode_transfers is enabled. Skipped for
+        // known tokens of any standard: `approve(address,uint256)` and
+        // `transfer(address,uint256)` share selectors across ERC20/ERC721,
+        // so without this guard a known ERC721 (or ERC1155) call would be
+        // mis-rendered as an ERC20 op once its own visualizer returns `None`,
+        // contradicting the PRS-222 "canonical-token short-circuit wins over
+        // any other decoder" property.
+        if input_fields.is_empty() && options.decode_transfers && !is_known_token {
             if let Some(field) = (contracts::core::ERC20Visualizer {}).visualize_tx_commands(input)
             {
                 input_fields.push(field);
@@ -1250,10 +1262,105 @@ mod tests {
             "chain-id-less legacy tx to a canonical token must still hit the built-in decoder",
         );
 
-        let rendered = format!("{payload:?}");
+        // Mirror the substring scan used earlier in this file: serialize the
+        // whole payload to JSON so we cover every text-bearing field, not just
+        // those `Debug` happens to print.
+        let rendered = serde_json::to_string(&payload).unwrap();
         assert!(
             !rendered.contains("backup_wallet") && !rendered.contains("safety_deposit"),
             "caller ABI param name must not appear anywhere in the rendered payload: {rendered}",
+        );
+    }
+
+    /// PRS-222 round-4: a known ERC721 token called with the ERC20/ERC721
+    /// shared `approve(address,uint256)` selector must not be mis-rendered as
+    /// an ERC20 approval. The dispatch order is:
+    ///
+    ///   1. ERC721 short-circuit fires (no built-in ERC721 decoder yet, returns None).
+    ///   2. Caller-ABI path skipped (`is_known_token`).
+    ///   3. ERC20 `decode_transfers` fallback must also be skipped
+    ///      (`is_known_token`), or it would decode `approve` as an ERC20 op.
+    ///   4. Raw-hex fallback wins.
+    ///
+    /// Without the `is_known_token` guard on the ERC20 fallback this regresses
+    /// to "ERC20 Approve" output, which is the exact spoofing surface PRS-222
+    /// is closing.
+    #[test]
+    fn test_known_erc721_token_skips_erc20_fallback_on_shared_selector() {
+        // Address-only fixture, the actual contract standard is decided by the
+        // registry entry below.
+        let nft_address: Address = "0xb0b0000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let spender: Address = "0x000000000000000000000000000000000000beef"
+            .parse()
+            .unwrap();
+        let token_id = U256::from(42u64);
+
+        // Register the address as an ERC721 token on mainnet.
+        let mut registry = ContractRegistry::new();
+        registry
+            .register_token(
+                1,
+                TokenMetadata {
+                    symbol: "NFT".to_string(),
+                    name: "Test NFT".to_string(),
+                    erc_standard: ErcStandard::Erc721,
+                    contract_address: nft_address.to_string(),
+                    decimals: 0,
+                },
+            )
+            .unwrap();
+        let converter = EthereumVisualSignConverter::with_registry(Arc::new(registry));
+
+        // ERC721 `approve(spender, tokenId)` shares its 4-byte selector with
+        // ERC20 `approve(address,uint256)`.
+        let call = IERC20::approveCall {
+            spender,
+            amount: token_id,
+        };
+        let calldata = Bytes::from(IERC20::approveCall::abi_encode(&call));
+        let tx = TypedTransaction::Legacy(TxLegacy {
+            chain_id: Some(ChainId::from(1u64)),
+            nonce: 0,
+            gas_price: 1_000_000_000u128,
+            gas_limit: 50_000,
+            to: alloy_primitives::TxKind::Call(nft_address),
+            value: U256::ZERO,
+            input: calldata,
+        });
+
+        let options = VisualSignOptions {
+            decode_transfers: true,
+            transaction_name: None,
+            metadata: None,
+            developer_config: None,
+        };
+
+        let wrapper = EthereumTransactionWrapper::new(tx);
+        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
+
+        // No PreviewLayout should be emitted: ERC721 has no decoder, the
+        // ERC20 fallback is skipped for known non-ERC20 tokens, and the
+        // raw-hex fallback produces a RawData field, not a PreviewLayout.
+        let preview = payload
+            .fields
+            .iter()
+            .find(|f| matches!(f, SignablePayloadField::PreviewLayout { .. }));
+        assert!(
+            preview.is_none(),
+            "known ERC721 + ERC20-shared selector must not produce a PreviewLayout: {payload:?}",
+        );
+
+        // And, defensively, no ERC20-decoder text should appear anywhere in
+        // the serialized payload. Use serde_json so we scan every text-bearing
+        // field, not just what `Debug` prints. The ERC20 approve visualizer
+        // emits the label "ERC20 Approve" and a "Spender" field, both of
+        // which are the regression signals.
+        let rendered = serde_json::to_string(&payload).unwrap();
+        assert!(
+            !rendered.contains("ERC20 Approve") && !rendered.contains("Spender"),
+            "known ERC721 must not be mis-rendered as an ERC20 approval: {rendered}",
         );
     }
 
