@@ -47,6 +47,10 @@ pub(crate) struct Args {
     #[cfg(feature = "solana")]
     #[command(flatten)]
     pub(crate) solana: crate::solana::SolanaArgs,
+
+    #[cfg(feature = "tron")]
+    #[command(flatten)]
+    pub(crate) tron: crate::tron::TronArgs,
 }
 
 #[derive(Debug, Clone, Copy)]
