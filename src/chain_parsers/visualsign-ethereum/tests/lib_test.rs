@@ -293,7 +293,7 @@ fn test_chain_id_mismatch_rejected_prs_225() {
     let tx_hex = format!("0x{}", hex::encode(&buf));
 
     // Metadata claims POLYGON_MAINNET (chain_id = 137), which disagrees with
-    // the signed transaction. Parser must refuse.
+    // the tx-declared chain_id in the transaction bytes. Parser must refuse.
     let options = VisualSignOptions {
         decode_transfers: true,
         transaction_name: None,
@@ -309,7 +309,7 @@ fn test_chain_id_mismatch_rejected_prs_225() {
     let converter = EthereumVisualSignConverter::new();
     let err = converter
         .to_visual_sign_payload_from_string(&tx_hex, options)
-        .expect_err("mismatched network_id vs signed chain_id must be rejected");
+        .expect_err("mismatched network_id vs tx-declared chain_id must be rejected");
 
     let msg = err.to_string();
     assert!(
@@ -321,7 +321,7 @@ fn test_chain_id_mismatch_rejected_prs_225() {
     // identifies the tx-declared id, "chain_id 137" the metadata-derived id.
     assert!(
         msg.contains("chain_id 1 "),
-        "error should reference signed chain_id 1, got: {msg}"
+        "error should reference tx-declared chain_id 1, got: {msg}"
     );
     assert!(
         msg.contains("chain_id 137"),
