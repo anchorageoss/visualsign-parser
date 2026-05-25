@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use clap::Args as ClapArgs;
 use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 use visualsign::registry::{Chain, TransactionConverterRegistry};
+use visualsign_ethereum::abi_metadata::{CLI_DEV_SIGNING_KEY_SEED, sign_abi};
 use visualsign_ethereum::networks::parse_network;
 
 use crate::mapping_parser;
@@ -72,9 +73,23 @@ fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<Strin
             }
             Ok(())
         },
-        |_components, json| Abi {
-            value: json,
-            signature: None,
+        |_components, json| {
+            // The metadata-ABI extraction path rejects unsigned entries (PRS-236),
+            // so the CLI attaches an integrity signature using a deterministic local
+            // dev key. This is integrity, not identity, the CLI is a local dev tool
+            // that already trusts its input files; production trust comes from the
+            // gRPC caller verifying the public key against an allowlist.
+            let signature = match sign_abi(&json, &CLI_DEV_SIGNING_KEY_SEED) {
+                Ok(sig) => Some(sig),
+                Err(e) => {
+                    eprintln!("  Warning: Failed to sign ABI: {e}");
+                    None
+                }
+            };
+            Abi {
+                value: json,
+                signature,
+            }
         },
     )
 }
@@ -200,7 +215,12 @@ mod tests {
             .get("0xdAC17F958D2ee523a2206206994597C13D831ec7")
             .expect("mapping present");
         assert!(abi.value.contains("swap"));
-        assert!(abi.signature.is_none());
+        // PRS-236: CLI signs locally-loaded ABIs so the metadata-ABI extractor
+        // (which rejects unsigned entries) can register them.
+        assert!(
+            abi.signature.is_some(),
+            "CLI should attach a dev-key signature to locally-loaded ABIs"
+        );
     }
 
     #[test]

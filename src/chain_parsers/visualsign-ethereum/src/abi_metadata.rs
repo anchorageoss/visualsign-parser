@@ -7,7 +7,8 @@ use crate::abi_registry::AbiRegistry;
 use crate::embedded_abis::register_embedded_abi;
 use generated::parser::{ChainMetadata, chain_metadata};
 use k256::EncodedPoint;
-use k256::ecdsa::signature::hazmat::PrehashVerifier;
+use k256::ecdsa::SigningKey;
+use k256::ecdsa::signature::hazmat::{PrehashSigner, PrehashVerifier};
 use k256::ecdsa::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
 
@@ -210,6 +211,56 @@ fn validate_abi_signature(
     })?;
 
     Ok(())
+}
+
+/// Deterministic 32-byte secp256k1 seed used to sign ABI JSON in local dev tooling
+/// (e.g. the `parser_cli --abi-json-mappings` flow). Not a production key. Any caller
+/// that trusts identity (rather than integrity) must verify the public key against an
+/// allowlist; see `try_extract_from_chain_metadata` security notes.
+pub const CLI_DEV_SIGNING_KEY_SEED: [u8; 32] = [0x42u8; 32];
+
+/// Sign `abi_json` with the given 32-byte secp256k1 seed and return a proto
+/// `SignatureMetadata` ready to drop into `Abi.signature`.
+///
+/// Used by the CLI to attach an integrity signature to locally-loaded ABI files so
+/// the metadata-ABI extraction path (which rejects unsigned entries per PRS-236) can
+/// register them. Signing is over the SHA-256 hash of `abi_json` using secp256k1; the
+/// signature is DER-encoded and hex-stringified, matching the verifier in
+/// [`validate_abi_signature`].
+///
+/// # Errors
+/// Returns `Err` if the seed does not form a valid secp256k1 scalar or signing fails.
+pub fn sign_abi(
+    abi_json: &str,
+    signing_key_seed: &[u8; 32],
+) -> Result<generated::parser::SignatureMetadata, String> {
+    let signing_key = SigningKey::from_bytes(signing_key_seed)
+        .map_err(|e| format!("invalid secp256k1 signing key seed: {e}"))?;
+    let verifying_key = VerifyingKey::from(&signing_key);
+
+    let mut hasher = Sha256::new();
+    hasher.update(abi_json.as_bytes());
+    let hash: [u8; 32] = hasher.finalize().into();
+
+    let signature: Signature = signing_key
+        .sign_prehash(&hash)
+        .map_err(|e| format!("failed to sign ABI hash: {e}"))?;
+    let signature_hex = hex::encode(signature.to_der().as_bytes());
+    let public_key_hex = hex::encode(verifying_key.to_encoded_point(false).as_bytes());
+
+    Ok(generated::parser::SignatureMetadata {
+        value: signature_hex,
+        metadata: vec![
+            generated::parser::Metadata {
+                key: "algorithm".to_string(),
+                value: SUPPORTED_ALGORITHM.to_string(),
+            },
+            generated::parser::Metadata {
+                key: "public_key".to_string(),
+                value: public_key_hex,
+            },
+        ],
+    })
 }
 
 #[cfg(test)]
