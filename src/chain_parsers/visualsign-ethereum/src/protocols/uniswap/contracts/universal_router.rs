@@ -394,6 +394,27 @@ impl UniversalRouterVisualizer {
         })
     }
 
+    /// Decodes a Uniswap V3 swap path.
+    ///
+    /// Paths are encoded as: tokenIn(20) | fee(3) | nextToken(20) | fee(3) | ... | tokenOut(20).
+    /// A valid N-hop path therefore has length 20 + N * 23.
+    ///
+    /// Returns (token_in, token_out, first_hop_fee, hop_count) or None for malformed paths.
+    /// The output token is always read from the FINAL 20 bytes of the path so that multi-hop
+    /// swaps display the actual destination token, not the first intermediate hop.
+    fn decode_v3_path(path: &[u8]) -> Option<(Address, Address, u32, usize)> {
+        // Single hop minimum: 20 + 23 = 43 bytes. Each additional hop adds 23 bytes.
+        if path.len() < 43 || (path.len() - 20) % 23 != 0 {
+            return None;
+        }
+        let token_in = Address::from_slice(&path[0..20]);
+        let first_fee = u32::from_be_bytes([0, path[20], path[21], path[22]]);
+        let token_out_start = path.len() - 20;
+        let token_out = Address::from_slice(&path[token_out_start..]);
+        let hops = (path.len() - 20) / 23;
+        Some((token_in, token_out, first_fee, hops))
+    }
+
     /// Decodes V3_SWAP_EXACT_IN command parameters
     /// Uses abi_decode_params for proper ABI decoding of raw calldata bytes
     fn decode_v3_swap_exact_in(
@@ -423,23 +444,23 @@ impl UniversalRouterVisualizer {
 
         let (_recipient, amount_in, amount_out_min, path, _payer_is_user) = params;
 
-        // Validate path length (minimum 43 bytes for single hop: token + fee + token)
-        if path.len() < 43 {
-            return SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: "V3 Swap Exact In: Invalid path".to_string(),
-                    label: "V3 Swap Exact In".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 {
-                    text: format!("Path length: {} bytes (expected >=43)", path.len()),
-                },
-            };
-        }
-
-        // Extract token addresses and fee from path
-        let token_in = Address::from_slice(&path[0..20]);
-        let fee = u32::from_be_bytes([0, path[20], path[21], path[22]]);
-        let token_out = Address::from_slice(&path[23..43]);
+        // Decode V3 path. For multi-hop paths, the output token MUST be read from the
+        // FINAL 20 bytes, not from offset 23..43 (which is the first intermediate token).
+        // See PRS-229.
+        let (token_in, token_out, fee, hops) = match Self::decode_v3_path(&path) {
+            Some(decoded) => decoded,
+            None => {
+                return SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: "V3 Swap Exact In: Invalid path".to_string(),
+                        label: "V3 Swap Exact In".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("Path length: {} bytes (expected 20 + N*23)", path.len()),
+                    },
+                };
+            }
+        };
 
         // Resolve token symbols
         let token_in_symbol = registry
@@ -461,11 +482,18 @@ impl UniversalRouterVisualizer {
             .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_min_u128))
             .unwrap_or_else(|| (amount_out_min.to_string(), token_out_symbol.clone()));
 
-        // Calculate fee percentage
+        // Calculate first-hop fee percentage. For multi-hop paths each hop may use a
+        // different fee tier; we surface the first one and disclose the hop count.
         let fee_pct = fee as f64 / 10000.0;
-        let text = format!(
-            "Swap {amount_in_str} {token_in_symbol} for >={amount_out_min_str} {token_out_symbol} via V3 ({fee_pct}% fee)"
-        );
+        let text = if hops == 1 {
+            format!(
+                "Swap {amount_in_str} {token_in_symbol} for >={amount_out_min_str} {token_out_symbol} via V3 ({fee_pct}% fee)"
+            )
+        } else {
+            format!(
+                "Swap {amount_in_str} {token_in_symbol} for >={amount_out_min_str} {token_out_symbol} via V3 ({hops} hops, first fee {fee_pct}%)"
+            )
+        };
 
         // Create individual parameter fields
         let fields = vec![
@@ -764,23 +792,23 @@ impl UniversalRouterVisualizer {
 
         let (_recipient, amount_out, amount_in_max, path, _payer_is_user) = params;
 
-        // Validate path length (minimum 43 bytes for single hop: token + fee + token)
-        if path.len() < 43 {
-            return SignablePayloadField::TextV2 {
-                common: SignablePayloadFieldCommon {
-                    fallback_text: "V3 Swap Exact Out: Invalid path".to_string(),
-                    label: "V3 Swap Exact Out".to_string(),
-                },
-                text_v2: SignablePayloadFieldTextV2 {
-                    text: format!("Path length: {} bytes (expected >=43)", path.len()),
-                },
-            };
-        }
-
-        // Extract token addresses and fee from path
-        let token_in = Address::from_slice(&path[0..20]);
-        let fee = u32::from_be_bytes([0, path[20], path[21], path[22]]);
-        let token_out = Address::from_slice(&path[23..43]);
+        // Decode V3 path. For multi-hop paths, the output token MUST be read from the
+        // FINAL 20 bytes, not from offset 23..43 (which is the first intermediate token).
+        // See PRS-229.
+        let (token_in, token_out, fee, hops) = match Self::decode_v3_path(&path) {
+            Some(decoded) => decoded,
+            None => {
+                return SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: "V3 Swap Exact Out: Invalid path".to_string(),
+                        label: "V3 Swap Exact Out".to_string(),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!("Path length: {} bytes (expected 20 + N*23)", path.len()),
+                    },
+                };
+            }
+        };
 
         // Resolve token symbols
         let token_in_symbol = registry
@@ -803,11 +831,18 @@ impl UniversalRouterVisualizer {
             .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_max_u128))
             .unwrap_or_else(|| (amount_in_max.to_string(), token_in_symbol.clone()));
 
-        // Calculate fee percentage
+        // Calculate first-hop fee percentage. For multi-hop paths each hop may use a
+        // different fee tier; we surface the first one and disclose the hop count.
         let fee_pct = fee as f64 / 10000.0;
-        let text = format!(
-            "Swap <={amount_in_max_str} {token_in_symbol} for {amount_out_str} {token_out_symbol} via V3 ({fee_pct}% fee)"
-        );
+        let text = if hops == 1 {
+            format!(
+                "Swap <={amount_in_max_str} {token_in_symbol} for {amount_out_str} {token_out_symbol} via V3 ({fee_pct}% fee)"
+            )
+        } else {
+            format!(
+                "Swap <={amount_in_max_str} {token_in_symbol} for {amount_out_str} {token_out_symbol} via V3 ({hops} hops, first fee {fee_pct}%)"
+            )
+        };
 
         // Create individual parameter fields
         let fields = vec![
@@ -2246,6 +2281,276 @@ mod tests {
                 );
             }
             _ => panic!("Expected TextV2 field"),
+        }
+    }
+
+    // Helper: build a V3 path from an interleaved list of tokens and fees.
+    // tokens.len() must be fees.len() + 1. Encoding: token | fee(u24 big-endian) | token | ...
+    fn build_v3_path(tokens: &[Address], fees: &[u32]) -> Vec<u8> {
+        assert_eq!(tokens.len(), fees.len() + 1);
+        let mut out = Vec::with_capacity(20 + fees.len() * 23);
+        out.extend_from_slice(tokens[0].as_slice());
+        for (i, fee) in fees.iter().enumerate() {
+            let fee_bytes = fee.to_be_bytes();
+            // Take the low 3 bytes as a u24
+            out.extend_from_slice(&fee_bytes[1..4]);
+            out.extend_from_slice(tokens[i + 1].as_slice());
+        }
+        out
+    }
+
+    #[test]
+    fn test_decode_v3_path_single_hop() {
+        let token_in: Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        let token_out: Address = "0x2222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
+        let path = build_v3_path(&[token_in, token_out], &[3000]);
+        assert_eq!(path.len(), 43);
+
+        let (in_, out_, fee, hops) =
+            UniversalRouterVisualizer::decode_v3_path(&path).expect("valid single-hop path");
+        assert_eq!(in_, token_in);
+        assert_eq!(out_, token_out);
+        assert_eq!(fee, 3000);
+        assert_eq!(hops, 1);
+    }
+
+    #[test]
+    fn test_decode_v3_path_multi_hop_reads_final_token() {
+        // PRS-229 regression: the output token must be the LAST 20 bytes, not path[23..43].
+        let token_in: Address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            .parse()
+            .unwrap();
+        let token_mid: Address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            .parse()
+            .unwrap();
+        let token_out: Address = "0xcccccccccccccccccccccccccccccccccccccccc"
+            .parse()
+            .unwrap();
+
+        let path = build_v3_path(&[token_in, token_mid, token_out], &[500, 3000]);
+        // 20 + 2*23 = 66 bytes
+        assert_eq!(path.len(), 66);
+
+        let (in_, out_, fee, hops) =
+            UniversalRouterVisualizer::decode_v3_path(&path).expect("valid two-hop path");
+        assert_eq!(in_, token_in);
+        // Critical: this must be the FINAL token, not the intermediate.
+        assert_eq!(out_, token_out);
+        assert_ne!(out_, token_mid, "regression: must not return intermediate");
+        assert_eq!(fee, 500);
+        assert_eq!(hops, 2);
+    }
+
+    #[test]
+    fn test_decode_v3_path_three_hop() {
+        let t0: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let t1: Address = "0x0000000000000000000000000000000000000002"
+            .parse()
+            .unwrap();
+        let t2: Address = "0x0000000000000000000000000000000000000003"
+            .parse()
+            .unwrap();
+        let t3: Address = "0x0000000000000000000000000000000000000004"
+            .parse()
+            .unwrap();
+        let path = build_v3_path(&[t0, t1, t2, t3], &[100, 500, 10000]);
+        // 20 + 3*23 = 89
+        assert_eq!(path.len(), 89);
+
+        let (in_, out_, fee, hops) =
+            UniversalRouterVisualizer::decode_v3_path(&path).expect("valid three-hop path");
+        assert_eq!(in_, t0);
+        assert_eq!(out_, t3);
+        assert_eq!(fee, 100);
+        assert_eq!(hops, 3);
+    }
+
+    #[test]
+    fn test_decode_v3_path_rejects_malformed_length() {
+        // Too short
+        assert!(UniversalRouterVisualizer::decode_v3_path(&[0u8; 42]).is_none());
+        // 44 bytes: passes the old `>= 43` check but is not 20 + N*23
+        assert!(UniversalRouterVisualizer::decode_v3_path(&[0u8; 44]).is_none());
+        // 65 bytes: between one-hop (43) and two-hop (66), still malformed
+        assert!(UniversalRouterVisualizer::decode_v3_path(&[0u8; 65]).is_none());
+        // 43 bytes: exactly one hop, valid
+        assert!(UniversalRouterVisualizer::decode_v3_path(&[0u8; 43]).is_some());
+        // 66 bytes: exactly two hops, valid
+        assert!(UniversalRouterVisualizer::decode_v3_path(&[0u8; 66]).is_some());
+    }
+
+    #[test]
+    fn test_decode_v3_swap_exact_in_multi_hop_displays_final_token() {
+        // PRS-229 end-to-end: the Output Token subfield must reflect the final token
+        // for a multi-hop V3 path, not the first intermediate.
+        let recipient: Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        let token_in: Address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            .parse()
+            .unwrap();
+        let token_mid: Address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            .parse()
+            .unwrap();
+        let token_out: Address = "0xcccccccccccccccccccccccccccccccccccccccc"
+            .parse()
+            .unwrap();
+
+        let path = build_v3_path(&[token_in, token_mid, token_out], &[500, 3000]);
+
+        type V3InTuple = (Address, U256, U256, Bytes, bool);
+        let encoded: Vec<u8> = <V3InTuple as SolValue>::abi_encode_params(&(
+            recipient,
+            U256::from(1_000_000u64),
+            U256::from(900_000u64),
+            Bytes::from(path),
+            true,
+        ));
+
+        let field = UniversalRouterVisualizer::decode_v3_swap_exact_in(&encoded, 1, None);
+
+        match field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+                let subtitle = preview_layout
+                    .subtitle
+                    .as_ref()
+                    .expect("subtitle present")
+                    .text
+                    .clone();
+                assert!(
+                    subtitle.contains(&format!("{token_out:?}")),
+                    "subtitle must reference final output token, got: {subtitle}"
+                );
+                assert!(
+                    !subtitle.contains(&format!("{token_mid:?}")),
+                    "subtitle must NOT reference intermediate token, got: {subtitle}"
+                );
+                assert!(
+                    subtitle.contains("2 hops"),
+                    "subtitle should disclose hop count, got: {subtitle}"
+                );
+
+                let expanded = preview_layout.expanded.expect("expanded present");
+                // Find the "Output Token" field.
+                let output_token_text = expanded
+                    .fields
+                    .iter()
+                    .find_map(|f| match &f.signable_payload_field {
+                        SignablePayloadField::TextV2 { common, text_v2 }
+                            if common.label == "Output Token" =>
+                        {
+                            Some(text_v2.text.clone())
+                        }
+                        _ => None,
+                    })
+                    .expect("Output Token field present");
+                assert_eq!(output_token_text, format!("{token_out:?}"));
+                assert_ne!(output_token_text, format!("{token_mid:?}"));
+            }
+            _ => panic!("Expected PreviewLayout for V3 Swap Exact In"),
+        }
+    }
+
+    #[test]
+    fn test_decode_v3_swap_exact_out_multi_hop_displays_final_token() {
+        // PRS-229 end-to-end for the exact-out variant.
+        let recipient: Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        let token_in: Address = "0xdddddddddddddddddddddddddddddddddddddddd"
+            .parse()
+            .unwrap();
+        let token_mid: Address = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            .parse()
+            .unwrap();
+        let token_out: Address = "0xffffffffffffffffffffffffffffffffffffffff"
+            .parse()
+            .unwrap();
+
+        let path = build_v3_path(&[token_in, token_mid, token_out], &[100, 10000]);
+
+        type V3OutTuple = (Address, U256, U256, Bytes, bool);
+        let encoded: Vec<u8> = <V3OutTuple as SolValue>::abi_encode_params(&(
+            recipient,
+            U256::from(2_000_000u64),
+            U256::from(3_000_000u64),
+            Bytes::from(path),
+            true,
+        ));
+
+        let field = UniversalRouterVisualizer::decode_v3_swap_exact_out(&encoded, 1, None);
+
+        match field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+                let subtitle = preview_layout
+                    .subtitle
+                    .as_ref()
+                    .expect("subtitle present")
+                    .text
+                    .clone();
+                assert!(
+                    subtitle.contains(&format!("{token_out:?}")),
+                    "subtitle must reference final output token, got: {subtitle}"
+                );
+                assert!(
+                    !subtitle.contains(&format!("{token_mid:?}")),
+                    "subtitle must NOT reference intermediate token, got: {subtitle}"
+                );
+                assert!(
+                    subtitle.contains("2 hops"),
+                    "subtitle should disclose hop count, got: {subtitle}"
+                );
+
+                let expanded = preview_layout.expanded.expect("expanded present");
+                let output_token_text = expanded
+                    .fields
+                    .iter()
+                    .find_map(|f| match &f.signable_payload_field {
+                        SignablePayloadField::TextV2 { common, text_v2 }
+                            if common.label == "Output Token" =>
+                        {
+                            Some(text_v2.text.clone())
+                        }
+                        _ => None,
+                    })
+                    .expect("Output Token field present");
+                assert_eq!(output_token_text, format!("{token_out:?}"));
+                assert_ne!(output_token_text, format!("{token_mid:?}"));
+            }
+            _ => panic!("Expected PreviewLayout for V3 Swap Exact Out"),
+        }
+    }
+
+    #[test]
+    fn test_decode_v3_swap_exact_in_rejects_malformed_path() {
+        // 44-byte path passes the legacy `>= 43` check but is not a valid V3 path
+        // (not 20 + N*23). Must surface an "Invalid path" error rather than silently
+        // synthesizing addresses from junk bytes.
+        let recipient: Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        type V3InTuple = (Address, U256, U256, Bytes, bool);
+        let encoded: Vec<u8> = <V3InTuple as SolValue>::abi_encode_params(&(
+            recipient,
+            U256::from(1u64),
+            U256::from(1u64),
+            Bytes::from(vec![0u8; 44]),
+            true,
+        ));
+
+        let field = UniversalRouterVisualizer::decode_v3_swap_exact_in(&encoded, 1, None);
+        match field {
+            SignablePayloadField::TextV2 { common, text_v2 } => {
+                assert!(common.fallback_text.contains("Invalid path"));
+                assert!(text_v2.text.contains("44 bytes"));
+            }
+            _ => panic!("Expected TextV2 for malformed path"),
         }
     }
 }
