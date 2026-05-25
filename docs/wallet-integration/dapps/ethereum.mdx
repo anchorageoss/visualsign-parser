@@ -26,7 +26,7 @@ A custom parser lives in [`src/chain_parsers/visualsign-ethereum/src/protocols/`
 | Token resolution | Resolves token addresses from calldata into symbols and decimal-formatted amounts (e.g. `1.5 USDC`) | Renders raw addresses and on-chain integers |
 | Domain semantics | Labels match your protocol vocabulary ("Swap path", "Recipient", "Fee bips") | Labels come from raw ABI parameter names |
 | Wallet integration cost | Zero per-wallet work after the PR merges | Each wallet must fetch, verify, and pin your ABI |
-| Trust model | Code reviewed by the OSS maintainers, runs inside the wallet's signing TEE | Wallet has to decide whether to trust the ABI source |
+| Trust model | Code reviewed by the OSS maintainers, runs in the wallet's parsing environment (attestation-verified TEE in production, library or gRPC server in other deployment modes) | Wallet has to decide whether to trust the ABI source |
 
 Take the Uniswap decoder as a concrete example: a Universal Router `execute` call with four commands renders as four nested layouts (two V3 swaps, a fee payment, a WETH unwrap), each with token symbols and human-readable amounts. The same call decoded from a generic ABI would render as one `bytes commands` blob and one `bytes[] inputs` blob. The custom decoder is the difference between a user understanding what they're signing and not.
 

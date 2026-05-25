@@ -29,7 +29,7 @@ The Ethereum parser handles:
 ## Transaction types
 
 ### 1. Simple transfer
-Basic ETH transfer between addresses with gas calculation. Supported transaction envelopes: Legacy and EIP-1559. EIP-2930, EIP-4844, and EIP-7702 currently return an `"Unsupported transaction type: ..."` error (via `EthereumParserError::UnsupportedTransactionType`).
+Basic ETH transfer between addresses with gas calculation. Supported transaction envelopes: Legacy and EIP-1559. EIP-2930, EIP-4844, and EIP-7702 currently return a parse error with the message `"Unsupported transaction type: eip-2930"` (and so on for the other types).
 
 ### 2. Token operations
 - **ERC-20**: Transfer, Approve, TransferFrom are decoded automatically.
