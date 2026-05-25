@@ -127,7 +127,6 @@ mod tests {
     use std::collections::HashMap;
     use visualsign::vsptrait::{
         Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
-        VisualSignError,
     };
     use visualsign::{
         SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
@@ -396,7 +395,7 @@ mod tests {
         let key = P256Pair::generate().expect("generate ephemeral key");
         let err = parse_with_registry(&stub_request(), &key, &registry).expect_err(
             "parse_with_registry must reject non-ASCII payloads even when the \
-             converter validates internally",
+             converter skips its inner validate_charset call",
         );
         assert_eq!(err.code, Code::InvalidArgument);
     }
