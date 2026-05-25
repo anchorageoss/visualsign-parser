@@ -99,10 +99,11 @@ docker run -p 44020:44020 \
 ```
 
 <Warning>
-Do not bake the checked-in `integration/fixtures/ephemeral.secret` into your
-image. That fixture is public; any reader of the repo can forge signatures
-that look authentic to wallets. Generate your own P-256 key file per
-deployment and provision it via a secrets manager.
+Do not bake the checked-in `src/integration/fixtures/ephemeral.secret` (path
+relative to the repo root) into your image. That fixture is public; any
+reader of the repo can forge signatures that look authentic to wallets.
+Generate your own P-256 key file per deployment and provision it via a
+secrets manager.
 </Warning>
 
 ## Kubernetes deployment

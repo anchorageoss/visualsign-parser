@@ -17,6 +17,7 @@ use generated::parser::{
 use generated::tonic::{self, Request, Response, Status};
 use parser_app::routes::parse::parse;
 use qos_core::handles::EphemeralKeyHandle;
+use qos_core::protocol::ProtocolError;
 use qos_p256::P256Pair;
 use std::net::SocketAddr;
 
@@ -24,6 +25,9 @@ use std::net::SocketAddr;
 const EPHEMERAL_FILE_ENV: &str = "EPHEMERAL_FILE";
 
 /// Error returned when the operator forgot to point the server at a real key.
+///
+/// Covers all "no usable path" cases: env var unset, set to an empty string,
+/// or set to a value the OS rejects as non-unicode.
 #[derive(Debug)]
 struct MissingEphemeralFile;
 
@@ -31,14 +35,38 @@ impl std::fmt::Display for MissingEphemeralFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{EPHEMERAL_FILE_ENV} is not set; refusing to start. \
-             Point it at an operator-provisioned ephemeral key file. \
-             Do not reuse the checked-in test fixture in production."
+            "{EPHEMERAL_FILE_ENV} is unset, empty, or not valid unicode; \
+             refusing to start. Point it at an operator-provisioned \
+             ephemeral key file. Do not reuse the checked-in test fixture \
+             in production."
         )
     }
 }
 
 impl std::error::Error for MissingEphemeralFile {}
+
+/// Error returned when loading the ephemeral key file fails.
+///
+/// Preserves the underlying [`ProtocolError`] via [`std::error::Error::source`]
+/// so callers / logs can walk the chain for the root cause instead of getting
+/// a flattened string.
+#[derive(Debug)]
+struct EphemeralKeyLoadError {
+    path: String,
+    source: ProtocolError,
+}
+
+impl std::fmt::Display for EphemeralKeyLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "failed to load ephemeral key from {}", self.path)
+    }
+}
+
+impl std::error::Error for EphemeralKeyLoadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
 
 /// Resolve the ephemeral key file path from an environment lookup result.
 ///
@@ -63,11 +91,14 @@ struct GrpcService {
 struct HealthService;
 
 impl GrpcService {
-    fn new(ephemeral_file: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    fn new(ephemeral_file: &str) -> Result<Self, EphemeralKeyLoadError> {
         let handle = EphemeralKeyHandle::new(ephemeral_file.to_string());
         let ephemeral_key = handle
             .get_ephemeral_key()
-            .map_err(|e| format!("failed to load ephemeral key from {ephemeral_file}: {e:?}"))?;
+            .map_err(|source| EphemeralKeyLoadError {
+                path: ephemeral_file.to_string(),
+                source,
+            })?;
         Ok(Self { ephemeral_key })
     }
 }
@@ -111,9 +142,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = "0.0.0.0:44020".parse()?;
 
     // Refuse to start without an explicit ephemeral key path. The repo ships a
-    // P-256 fixture under `integration/fixtures/ephemeral.secret`; falling back
-    // to it would mean every default deployment signs with a key any reader of
-    // the repo can forge (PRS-233). Operators must opt in via EPHEMERAL_FILE.
+    // P-256 fixture under `src/integration/fixtures/ephemeral.secret`; falling
+    // back to it would mean every default deployment signs with a key any
+    // reader of the repo can forge (PRS-233). Operators must opt in via
+    // EPHEMERAL_FILE.
     let ephemeral_file = resolve_ephemeral_file(std::env::var(EPHEMERAL_FILE_ENV))?;
 
     let svc = GrpcService::new(&ephemeral_file)?;
