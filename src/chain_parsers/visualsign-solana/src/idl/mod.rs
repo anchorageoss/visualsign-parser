@@ -120,8 +120,15 @@ impl IdlRegistry {
     ///
     /// # Returns
     /// * `Ok(IdlRegistry)` with non-builtin custom IDLs configured to override
-    ///   any non-builtin IDL `solana_parser` may ship
-    /// * `Err` if any IDL JSON is invalid
+    ///   any non-builtin IDL `solana_parser` may ship.
+    ///
+    /// Invalid IDL JSON is tolerated at construction time: the metadata-name
+    /// extraction is best-effort (`serde_json::from_str` failures are
+    /// ignored), and `CustomIdlConfig::from_json` stores the JSON without
+    /// parsing it. Actual IDL decoding happens lazily in `get_idl` via
+    /// `solana_parser::decode_idl_data`, where parse errors surface as
+    /// `None`. The `Result` return type is retained so callers don't churn
+    /// if we later add strict construction-time validation.
     pub fn from_idl_mappings(
         idl_mappings: BTreeMap<String, (String, String)>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
