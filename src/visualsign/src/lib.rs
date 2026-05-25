@@ -2732,9 +2732,10 @@ mod tests {
             let payload = payload_with_text(text);
             let json = payload.to_json().expect("serialization should succeed");
             // Sanity-check: serde_json's CompactFormatter emits the specific
-            // short-form escape (not e.g. `	`). If it ever switched to
-            // a long-form `\uXXXX` escape, this assertion would catch it,
-            // since the old validator only blocked `\u` (not the short form).
+            // short-form escape (not a literal control byte, e.g. U+0009). If
+            // it ever switched to a long-form `\uXXXX` escape, this assertion
+            // would catch it, since the old validator only blocked `\u` (not
+            // the short form).
             assert!(
                 json.contains(expected_escape),
                 "{label}: expected serialized JSON to contain `{expected_escape}`, got: {json}",
