@@ -12,6 +12,7 @@ use generated::{
 use qos_crypto::sha_256;
 use qos_p256::P256Pair;
 
+use visualsign::errors::VisualSignError;
 use visualsign::registry::{Chain as VisualSignRegistryChain, TransactionConverterRegistry};
 use visualsign::vsptrait::VisualSignOptions;
 
@@ -66,9 +67,17 @@ pub(crate) fn parse_with_registry(
     // Caller-supplied metadata (Ethereum `abi_mappings`, Solana `idl_mappings`)
     // could otherwise smuggle bidi controls or zero-width characters into the
     // displayed strings.
-    signable_payload
-        .validate_charset()
-        .map_err(|e| GrpcError::new(Code::InvalidArgument, &format!("{e}")))?;
+    //
+    // `validate_charset` may also return non-validation errors (e.g.
+    // `SerializationError` if internal JSON serialization fails). Those are
+    // server-side bugs, not client input problems, so map them to `Internal`
+    // and reserve `InvalidArgument` for genuine validation rejections.
+    signable_payload.validate_charset().map_err(|e| match e {
+        VisualSignError::ValidationError(_) => {
+            GrpcError::new(Code::InvalidArgument, &format!("{e}"))
+        }
+        _ => GrpcError::new(Code::Internal, &format!("{e}")),
+    })?;
 
     // Convert SignablePayload to String (assuming you want JSON)
     let parsed_payload_str = serde_json::to_string(&signable_payload).map_err(|e| {
@@ -203,10 +212,14 @@ mod tests {
     }
 
     /// Stub converter that emits a `SignablePayload` whose label contains
-    /// the configured marker string. Crucially, this converter uses the
-    /// default `to_visual_sign_payload_from_string` impl from
-    /// `VisualSignConverterFromString`, which validates charset. The
-    /// regression test for the bypass case overrides that method below.
+    /// the configured marker string. Uses the default
+    /// `to_visual_sign_payload_from_string` impl (so the default
+    /// `VisualSignConverterFromString` path is exercised) but overrides
+    /// `to_validated_visual_sign_payload` below to skip its inner
+    /// `validate_charset` call. This is a different bypass surface than
+    /// `BypassingConverter`, which overrides `to_visual_sign_payload_from_string`
+    /// itself, and makes the regression test fail closed if the unconditional
+    /// check in `parse_with_registry` is removed.
     struct StubConverter {
         label_text: String,
     }
@@ -232,6 +245,18 @@ mod tests {
                 }],
                 "StubTx".to_string(),
             ))
+        }
+
+        /// Intentionally skips the default's `validate_charset()` call so the
+        /// default `to_visual_sign_payload_from_string` path delivers an
+        /// unvalidated payload to `parse_with_registry`. Without the
+        /// unconditional check there, the poisoned payload would reach signing.
+        fn to_validated_visual_sign_payload(
+            &self,
+            transaction: StubTransaction,
+            options: VisualSignOptions,
+        ) -> Result<SignablePayload, VisualSignError> {
+            self.to_visual_sign_payload(transaction, options)
         }
     }
 
@@ -348,11 +373,14 @@ mod tests {
         assert!(response.parsed_transaction.is_some());
     }
 
-    /// PRS-230 regression: the unconditional check also fires for converters
-    /// that use the default `to_visual_sign_payload_from_string` impl. This
-    /// is double-validation by design (belt and suspenders), and verifying
-    /// it here guards against any future refactor that removes the default's
-    /// own validation call.
+    /// PRS-230 regression: covers a second bypass surface. `StubConverter`
+    /// uses the default `to_visual_sign_payload_from_string` impl but
+    /// overrides `to_validated_visual_sign_payload` to skip the inner
+    /// `validate_charset` call. Without the unconditional check in
+    /// `parse_with_registry`, the poisoned payload would reach signing
+    /// through this path. Pairs with the `BypassingConverter` test, which
+    /// covers the other bypass surface (overriding
+    /// `to_visual_sign_payload_from_string` itself).
     #[test]
     fn parse_rejects_non_ascii_payload_via_default_converter_path() {
         let poisoned = "transfer\u{202E}approve";
