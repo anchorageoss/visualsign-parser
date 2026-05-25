@@ -87,6 +87,10 @@ fn resolve_receiver(
 /// references command 0) or an arbitrarily deep chain. Either case would
 /// blow the Tokio worker stack (default 2 MiB) and abort the parser process.
 /// A fixed budget catches both shapes without needing a visited set.
+///
+/// The budget counts reference hops (`Result` / `NestedResult` indirections).
+/// A chain of exactly `MAX_RESOLVE_OBJECT_DEPTH` reference hops terminating
+/// on `GasCoin` or `Input` still resolves; one more hop bails.
 const MAX_RESOLVE_OBJECT_DEPTH: usize = 32;
 
 fn resolve_object(
@@ -95,7 +99,8 @@ fn resolve_object(
     object_argument: SuiArgument,
 ) -> Result<CoinObject, VisualSignError> {
     let mut current = object_argument;
-    for _ in 0..MAX_RESOLVE_OBJECT_DEPTH {
+    let mut hops_remaining = MAX_RESOLVE_OBJECT_DEPTH;
+    loop {
         match current {
             SuiArgument::GasCoin => return Ok(CoinObject::Sui),
             SuiArgument::Input(index) => {
@@ -118,6 +123,12 @@ fn resolve_object(
             }
             SuiArgument::Result(command_index)
             | SuiArgument::NestedResult(command_index, _) => {
+                if hops_remaining == 0 {
+                    return Err(VisualSignError::ValidationError(format!(
+                        "Sui coin reference chain exceeded max depth of {MAX_RESOLVE_OBJECT_DEPTH} hops (possible cycle)"
+                    )));
+                }
+                hops_remaining -= 1;
                 match commands.get(command_index as usize).ok_or(
                     VisualSignError::MissingData("Result command not found".into()),
                 )? {
@@ -141,10 +152,6 @@ fn resolve_object(
             }
         }
     }
-
-    Err(VisualSignError::ValidationError(format!(
-        "Sui coin reference chain exceeded max depth of {MAX_RESOLVE_OBJECT_DEPTH} commands (possible cycle)"
-    )))
 }
 
 fn resolve_amount(
@@ -414,7 +421,7 @@ mod tests {
         // for i in 0..N, last one points to GasCoin would terminate. Instead,
         // make the chain longer than MAX_RESOLVE_OBJECT_DEPTH so it must bail.
         let chain_len = MAX_RESOLVE_OBJECT_DEPTH + 5;
-        let mut commands: Vec<SuiCommand> = (0..chain_len)
+        let commands: Vec<SuiCommand> = (0..chain_len)
             .map(|i| {
                 // Last command terminates on GasCoin so the chain is acyclic;
                 // every other command refers to the next index.
@@ -428,8 +435,6 @@ mod tests {
             .collect();
         // Sanity: we constructed exactly chain_len commands.
         assert_eq!(commands.len(), chain_len);
-        // Mutate-no-op to silence unused_mut lint paths if any.
-        let _ = commands.first_mut();
 
         let err = resolve_object(&commands, &[], SuiArgument::Result(0))
             .expect_err("chain longer than budget must not resolve");
@@ -459,5 +464,55 @@ mod tests {
             .expect("short legal chain must resolve");
 
         assert_eq!(resolved, crate::utils::CoinObject::Sui);
+    }
+
+    #[test]
+    fn test_resolve_object_chain_at_exact_budget_resolves() {
+        // Boundary case: a chain of exactly MAX_RESOLVE_OBJECT_DEPTH reference
+        // hops terminating on GasCoin must resolve. The doc-comment advertises
+        // this as the maximum resolvable depth; this guards the off-by-one.
+        // commands[0..MAX-1] each reference the next index, commands[MAX-1]
+        // terminates on GasCoin. Starting from Result(0) that is exactly
+        // MAX_RESOLVE_OBJECT_DEPTH reference follows before the terminal.
+        let chain_len = MAX_RESOLVE_OBJECT_DEPTH;
+        let commands: Vec<SuiCommand> = (0..chain_len)
+            .map(|i| {
+                let next = if i + 1 < chain_len {
+                    SuiArgument::Result(u16::try_from(i + 1).unwrap())
+                } else {
+                    SuiArgument::GasCoin
+                };
+                SuiCommand::SplitCoins(next, vec![])
+            })
+            .collect();
+
+        let resolved = resolve_object(&commands, &[], SuiArgument::Result(0))
+            .expect("chain at exact budget must resolve");
+
+        assert_eq!(resolved, crate::utils::CoinObject::Sui);
+    }
+
+    #[test]
+    fn test_resolve_object_chain_one_past_budget_bails() {
+        // Boundary case: one more hop than the budget must bail.
+        let chain_len = MAX_RESOLVE_OBJECT_DEPTH + 1;
+        let commands: Vec<SuiCommand> = (0..chain_len)
+            .map(|i| {
+                let next = if i + 1 < chain_len {
+                    SuiArgument::Result(u16::try_from(i + 1).unwrap())
+                } else {
+                    SuiArgument::GasCoin
+                };
+                SuiCommand::SplitCoins(next, vec![])
+            })
+            .collect();
+
+        let err = resolve_object(&commands, &[], SuiArgument::Result(0))
+            .expect_err("chain one past budget must bail");
+
+        assert!(
+            matches!(err, VisualSignError::ValidationError(_)),
+            "expected ValidationError, got {err:?}"
+        );
     }
 }
