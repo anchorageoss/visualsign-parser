@@ -86,13 +86,13 @@ Of those, the **built-in token metadata** ships only for five chains:
 - `OPTIMISM_MAINNET` (chain ID 10)
 - `BASE_MAINNET` (chain ID 8453)
 
-On other recognized chains, the parser still labels the network and decodes calldata; token symbols and decimals come from whatever the wallet supplies in `chain_metadata`. Pass the actual `network_id` for the chain you're parsing; the metadata value overrides the transaction's embedded chain ID, so reusing an unrelated `network_id` will mislabel the network and may affect protocol address matching.
+On other recognized chains, the parser still labels the network and decodes calldata; token symbol and decimal resolution is limited to the built-in registry (wallet-supplied token metadata via `chain_metadata` is not yet supported). Pass the actual `network_id` for the chain you're parsing; the metadata value overrides the transaction's embedded chain ID, so reusing an unrelated `network_id` will mislabel the network and may affect protocol address matching.
 
 ## Example outputs
 
 - **ETH Transfer** - Shows sender, recipient, amount, and gas fee in a clear layout
 - **Token Swap** - Displays input/output tokens, exchange rate, slippage, and protocol used
-- **NFT Transfer** - Shows collection name, token ID, visual preview (if available), and recipient
+- **ERC-721 / NFT Transfer** - Not yet decoded; renders as raw hex calldata until ERC-721 support lands
 
 ## Resources
 

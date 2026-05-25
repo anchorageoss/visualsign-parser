@@ -14,7 +14,7 @@ For deployment options (Turnkey-hosted, self-hosted TEE, library, or gRPC), see 
 
 ## Quick path
 
-For known protocols and standard token transfers, no ABI is required. The parser ships with built-in decoders and a registry of well-known tokens. The minimum request is the raw transaction plus the chain and network identifier:
+For known protocols and standard token transfers, no ABI is required. The parser ships with built-in decoders and a registry of well-known tokens. A common request includes the raw transaction and a `network_id` to help the parser label the network and resolve chain-specific token metadata. Both `ChainMetadata` and `network_id` are optional — the parser falls back to the chain ID embedded in the transaction when neither is supplied:
 
 ```go
 request := &pb.ParseRequest{
@@ -47,7 +47,7 @@ Built-in token metadata (WETH, plus stablecoins on mainnet) is preloaded for the
 | `OPTIMISM_MAINNET` | 10 |
 | `BASE_MAINNET` | 8453 |
 
-The parser itself **recognizes many more `network_id` values** (Ethereum testnets, BSC, Avalanche, Gnosis, Celo, Fantom, Blast, Mantle, World Chain, zkSync Era, Linea, Scroll, Zora, Unichain, and L2 testnets) for the purpose of labeling the network and resolving the chain ID. The authoritative list lives in [`src/chain_parsers/visualsign-ethereum/src/networks.rs`](https://github.com/anchorageoss/visualsign-parser/blob/main/src/chain_parsers/visualsign-ethereum/src/networks.rs). The five chains above are the subset that ships with token metadata baked in; on the others, token resolution falls back to whatever the wallet supplies via `chain_metadata`.
+The parser itself **recognizes many more `network_id` values** (Ethereum testnets, BSC, Avalanche, Gnosis, Celo, Fantom, Blast, Mantle, World Chain, zkSync Era, Linea, Scroll, Zora, Unichain, and L2 testnets) for the purpose of labeling the network and resolving the chain ID. The authoritative list lives in [`src/chain_parsers/visualsign-ethereum/src/networks.rs`](https://github.com/anchorageoss/visualsign-parser/blob/main/src/chain_parsers/visualsign-ethereum/src/networks.rs). The five chains above are the subset that ships with token metadata baked in; on the others, token symbol and decimal resolution is limited to the built-in registry (wallet-supplied token metadata via `chain_metadata` is not yet supported).
 
 ### How `network_id` resolves to a chain ID
 
