@@ -162,6 +162,52 @@ pub fn register_all(
    - If no specific visualizer handles the call
    - Use `FallbackVisualizer` to display raw hex
 
+## EIP-712 Typed-Data Path
+
+`EthereumVisualSignConverter::to_visual_sign_payload_from_string` peeks each JSON
+input with `eth_json::peek_json_kind`. Envelopes with `"type": "typedData"` are
+routed to `eip712::Eip712VisualSignConverter`, so the single `Chain::Ethereum`
+registry entry handles both transaction and signing-request inputs.
+
+```
+JSON input
+  └─ peek_json_kind
+        ├─ Transaction  -> EthereumVisualSignConverter (existing path)
+        └─ TypedData    -> Eip712VisualSignConverter
+                              ├─ Eip712Payload::from_json (spec-aligned parse)
+                              ├─ LayeredErc7730Registry::find_for_payload
+                              │     └─ embedded layer  (~190 LedgerHQ descriptors,
+                              │           emitted by `build.rs` into `descriptor/embedded.rs`)
+                              │     (note: wallets do not ship ERC-7730 descriptors over
+                              │      the wire — `EthereumMetadata` only carries `abi_mappings`.
+                              │      The `RequestDescriptorLayer` type is kept for in-process
+                              │      test composition only.)
+                              ├─ Type-shape verification (defense vs spoofing)
+                              ├─ ERC-7730 format renderers (10: raw, amount,
+                              │     tokenAmount, nft, date, duration, unit,
+                              │     enum, address-name, calldata)
+                              └─ Fallback: structured tree-walk render of the
+                                    full message when no descriptor matches or
+                                    a renderer errors mid-stream.
+```
+
+Key invariants:
+
+- **Two-pass embedded lookup.** Deployment-specific descriptors (`(chainId,
+  verifyingContract, primaryType)` match) win first; generic ERC descriptors
+  (no `deployments` declared) match by `primaryType` alone as a fallback.
+- **No wallet-supplied descriptors.** `EthereumMetadata` only carries
+  `abi_mappings`. When the embedded registry has no match for a typed-data
+  payload, the visualizer falls through to the structured tree walk rather than
+  reading descriptors from the request.
+- **Path roots.** `#.` = message, `$.` = domain, `@` = verifyingContract address
+  (synthesized as a struct with `to`/`token`/`address` aliases so common ERC-7730
+  idioms like `@.to` resolve). Paths without a root prefix are treated as
+  message-relative for tolerance with real-world descriptors.
+- **No `unsafe`, no panics on hot paths.** Renderers return `Err` and the
+  visualizer falls back to the tree walk plus a single warning row.
+- **ASCII-only output.** Status indicators and unit symbols use ASCII forms.
+
 ## Scope and Limitations
 
 ### Calldata Decoding vs Transaction Simulation

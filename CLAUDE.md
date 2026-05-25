@@ -68,6 +68,15 @@ Raw tx bytes → ChainPlugin (CLI) or gRPC request
 - **Field builders** (`visualsign::field_builders`) — Always use `create_text_field`, `create_amount_field`, `create_number_field`, `create_address_field`, `create_raw_data_field` instead of constructing field structs directly
 - **ASCII only** — Use `>=` not `≥`, `->` not `→` (terminal compatibility)
 
+### EIP-712 + ERC-7730 Typed-Data Path
+
+- **Input routing** — `EthereumVisualSignConverter::to_visual_sign_payload_from_string` peeks via `eth_json::peek_json_kind`. Envelopes with `"type": "typedData"` dispatch to `eip712::Eip712VisualSignConverter` automatically; the single `Chain::Ethereum` registry entry handles both kinds.
+- **Embedded ERC-7730 registry** — `build.rs` walks the `static/eip7730/` submodule, schema-validates, and emits `eip712/descriptor/embedded.rs` (one static table of ~190 descriptors). Two-pass match: deployment-specific first, then generic ERC descriptors by `primaryType`.
+- **No wallet-supplied descriptors** — `EthereumMetadata` carries only `abi_mappings`. When the embedded registry misses, fall through to the existing rendering paths (tree walk for typed-data) rather than reading ERC-7730 from the request.
+- **Path roots** — `#.` = message, `$.` = domain, `@` = verifyingContract (synthesized struct with `to`/`token`/`address` aliases). Bare paths are treated as message-relative.
+- **Fallback** — When no descriptor matches or a renderer errors, the visualizer falls back to a structured tree walk that still renders header rows + every leaf field. Never panics on the hot path.
+- **Adding descriptors** — Drop a JSON file into `static/eip7730/` and re-run `make build`. No code changes needed.
+
 ### Testing Patterns
 
 - Fixture-based snapshot tests: `tests/fixtures/{name}.input` + `{name}.expected` pairs per chain crate

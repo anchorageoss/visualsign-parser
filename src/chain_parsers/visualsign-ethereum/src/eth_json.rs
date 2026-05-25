@@ -22,12 +22,41 @@ const ERROR_PREVIEW_LEN: usize = 64;
 
 /// Tagged envelope for JSON transaction input.
 /// Extensible for future JSON entry types (EIP-712 typed data, ERC-7730 clear signing).
+/// Typed-data inputs are routed *around* this envelope via `peek_json_kind` and
+/// dispatched directly to `eip712::Eip712VisualSignConverter`, so this enum
+/// itself only carries the transaction variant.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 #[non_exhaustive]
 pub(crate) enum EthJsonInput {
     #[serde(rename = "transaction")]
     Transaction(EthJsonTransaction),
+}
+
+/// Discriminator for routing JSON input to the right converter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EthJsonKind {
+    Transaction,
+    TypedData,
+}
+
+/// Cheap top-level peek at the `"type"` field. Returns `None` for non-JSON,
+/// missing/unknown discriminator, or malformed JSON.
+pub(crate) fn peek_json_kind(data: &str) -> Option<EthJsonKind> {
+    if !is_json_input(data) {
+        return None;
+    }
+    #[derive(Deserialize)]
+    struct Peek {
+        #[serde(rename = "type")]
+        ty: String,
+    }
+    let p: Peek = serde_json::from_str(data).ok()?;
+    match p.ty.as_str() {
+        "transaction" => Some(EthJsonKind::Transaction),
+        "typedData" => Some(EthJsonKind::TypedData),
+        _ => None,
+    }
 }
 
 /// Ethereum transaction fields matching JSON-RPC `eth_sendTransaction` format.
@@ -486,6 +515,29 @@ mod tests {
         assert!(!is_json_input("0x02f903f8"));
         assert!(!is_json_input("SGVsbG8="));
         assert!(!is_json_input(""));
+    }
+
+    #[test]
+    fn peek_kind_transaction() {
+        let json = r#"{"type": "transaction", "chainId": "0x1"}"#;
+        assert_eq!(peek_json_kind(json), Some(EthJsonKind::Transaction));
+    }
+
+    #[test]
+    fn peek_kind_typed_data() {
+        let json = r#"{"type": "typedData", "domain": {"chainId": "0x1"}, "primaryType": "Permit", "types": {}, "message": {}}"#;
+        assert_eq!(peek_json_kind(json), Some(EthJsonKind::TypedData));
+    }
+
+    #[test]
+    fn peek_kind_unknown_returns_none() {
+        let json = r#"{"type": "bogus"}"#;
+        assert_eq!(peek_json_kind(json), None);
+    }
+
+    #[test]
+    fn peek_kind_non_json_returns_none() {
+        assert_eq!(peek_json_kind("0xabc"), None);
     }
 
     #[test]

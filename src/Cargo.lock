@@ -14073,11 +14073,13 @@ dependencies = [
  "log",
  "num_enum 0.7.5",
  "phf 0.13.1",
+ "regex",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.17",
  "visualsign",
+ "walkdir",
 ]
 
 [[package]]
