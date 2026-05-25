@@ -262,3 +262,109 @@ fn test_abi_from_metadata_decodes_function() {
         "Raw selector should not appear when ABI is decoded, got: {json}"
     );
 }
+
+/// Regression test for PRS-225.
+///
+/// A wallet-supplied `chain_metadata.network_id` must not override the chain_id
+/// encoded in the signed transaction. If the two disagree, the parser refuses
+/// to produce a signed attestation -- otherwise an attacker could trick a wallet
+/// into displaying "Polygon, 1 POL" while the signed bytes actually transfer
+/// 1 ETH on Ethereum mainnet.
+#[test]
+fn test_chain_id_mismatch_rejected_prs_225() {
+    // Transaction is signed for Ethereum mainnet (chain_id = 1).
+    let tx = TxEip1559 {
+        chain_id: 1,
+        nonce: 0,
+        gas_limit: 21_000,
+        max_fee_per_gas: 20_000_000_000,
+        max_priority_fee_per_gas: 1_000_000_000,
+        to: alloy_primitives::TxKind::Call(
+            "0x000000000000000000000000000000000000dEaD"
+                .parse()
+                .unwrap(),
+        ),
+        value: U256::from(1_000_000_000_000_000_000u64), // 1 ETH
+        ..Default::default()
+    };
+    let mut buf = Vec::new();
+    buf.push(0x02); // EIP-1559 type byte
+    tx.encode(&mut buf);
+    let tx_hex = format!("0x{}", hex::encode(&buf));
+
+    // Metadata claims POLYGON_MAINNET (chain_id = 137), which disagrees with
+    // the signed transaction. Parser must refuse.
+    let options = VisualSignOptions {
+        decode_transfers: true,
+        transaction_name: None,
+        metadata: Some(ChainMetadata {
+            metadata: Some(Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("POLYGON_MAINNET".to_string()),
+                abi_mappings: Default::default(),
+            })),
+        }),
+        developer_config: None,
+    };
+
+    let converter = EthereumVisualSignConverter::new();
+    let err = converter
+        .to_visual_sign_payload_from_string(&tx_hex, options)
+        .expect_err("mismatched network_id vs signed chain_id must be rejected");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("chain_id mismatch"),
+        "error should mention chain_id mismatch, got: {msg}"
+    );
+    assert!(
+        msg.contains('1') && msg.contains("137"),
+        "error should mention both chain ids (1 and 137), got: {msg}"
+    );
+}
+
+/// Sibling to `test_chain_id_mismatch_rejected_prs_225`: when metadata agrees
+/// with the signed chain_id, parsing succeeds. Guards against an over-eager
+/// rejection regression.
+#[test]
+fn test_chain_id_matching_metadata_succeeds_prs_225() {
+    let tx = TxEip1559 {
+        chain_id: 137,
+        nonce: 0,
+        gas_limit: 21_000,
+        max_fee_per_gas: 20_000_000_000,
+        max_priority_fee_per_gas: 1_000_000_000,
+        to: alloy_primitives::TxKind::Call(
+            "0x000000000000000000000000000000000000dEaD"
+                .parse()
+                .unwrap(),
+        ),
+        value: U256::from(1_000_000_000_000_000_000u64),
+        ..Default::default()
+    };
+    let mut buf = Vec::new();
+    buf.push(0x02);
+    tx.encode(&mut buf);
+    let tx_hex = format!("0x{}", hex::encode(&buf));
+
+    let options = VisualSignOptions {
+        decode_transfers: true,
+        transaction_name: None,
+        metadata: Some(ChainMetadata {
+            metadata: Some(Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("POLYGON_MAINNET".to_string()),
+                abi_mappings: Default::default(),
+            })),
+        }),
+        developer_config: None,
+    };
+
+    let converter = EthereumVisualSignConverter::new();
+    let payload = converter
+        .to_visual_sign_payload_from_string(&tx_hex, options)
+        .expect("matching network_id and chain_id should parse cleanly");
+    let json = payload.to_json().unwrap();
+    assert!(
+        json.contains("Polygon Mainnet"),
+        "Polygon network label should be rendered when both inputs agree, got: {json}"
+    );
+}
