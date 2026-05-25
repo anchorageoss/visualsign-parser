@@ -351,6 +351,63 @@ fn convert_versioned_to_visual_sign_payload(
     }
 }
 
+/// Reject a V0 transaction when at least one instruction references a
+/// program_id or account that lives behind an address lookup table.
+///
+/// Rationale (PRS-226): VisualSign converts raw bytes; it has no RPC and cannot
+/// resolve ALT entries. Without resolution, the only safe choice is to refuse
+/// to render -- otherwise the displayed payload would omit instructions or
+/// account references that the validator will still execute, and a malicious
+/// instruction could be hidden behind an ALT entry while the user signs a
+/// benign-looking display.
+///
+/// When `address_table_lookups` is empty, any out-of-bounds index is a
+/// malformed transaction (not an ALT reference) and we keep the existing
+/// "render as `unresolved(N)` placeholder + diagnostic" behavior intact.
+fn reject_v0_if_any_ix_references_alts(
+    v0_message: &solana_sdk::message::v0::Message,
+) -> Result<(), VisualSignError> {
+    if v0_message.address_table_lookups.is_empty() {
+        return Ok(());
+    }
+
+    let static_len = v0_message.account_keys.len();
+    let mut offenders: Vec<String> = Vec::new();
+
+    for (i, ci) in v0_message.instructions.iter().enumerate() {
+        if (ci.program_id_index as usize) >= static_len {
+            offenders.push(format!(
+                "instruction {i}: program_id_index {} references an ALT entry",
+                ci.program_id_index
+            ));
+        }
+        let oob_accounts: Vec<u8> = ci
+            .accounts
+            .iter()
+            .copied()
+            .filter(|&idx| (idx as usize) >= static_len)
+            .collect();
+        if !oob_accounts.is_empty() {
+            offenders.push(format!(
+                "instruction {i}: account indices {oob_accounts:?} reference ALT entries"
+            ));
+        }
+    }
+
+    if offenders.is_empty() {
+        return Ok(());
+    }
+
+    Err(VisualSignError::DecodeError(format!(
+        "Cannot render V0 transaction: {n_alt} address lookup table(s) present and {n_offenders} unresolved reference(s) into them ({static_len} static account keys). \
+         Resolving ALT contents requires an on-chain lookup that the parser does not perform. \
+         Refusing to display a partial transaction. Details: {details}",
+        n_alt = v0_message.address_table_lookups.len(),
+        n_offenders = offenders.len(),
+        details = offenders.join("; ")
+    )))
+}
+
 /// Convert V0 transaction to visual sign payload
 fn convert_v0_to_visual_sign_payload(
     versioned_tx: &VersionedTransaction,
@@ -360,6 +417,16 @@ fn convert_v0_to_visual_sign_payload(
     options: &VisualSignOptions,
     #[cfg(feature = "diagnostics")] lint_config: &visualsign::lint::LintConfig,
 ) -> Result<SignablePayload, VisualSignError> {
+    // SECURITY (PRS-226): the parser does not perform on-chain ALT resolution,
+    // so any instruction or account that references an entry in
+    // `address_table_lookups` is unresolvable here. Historically those
+    // references were silently dropped from the displayed payload, letting an
+    // attacker hide malicious instructions behind ALTs while the user signed a
+    // benign-looking display. Reject the transaction instead -- we can either
+    // resolve ALTs and surface their contents, or refuse to render. We do the
+    // latter.
+    reject_v0_if_any_ix_references_alts(v0_message)?;
+
     // Create IDL registry from options metadata
     let idl_registry = create_idl_registry_from_options(options)?;
 
@@ -1202,5 +1269,194 @@ mod tests {
             note.contains("no account keys"),
             "note should propagate underlying error: {note}"
         );
+    }
+
+    // Regression tests for PRS-226: a V0 transaction that references an
+    // address lookup table entry (program_id or account index past the static
+    // keys, while `address_table_lookups` is non-empty) MUST be rejected, not
+    // silently rendered with the ALT-resolved data missing.
+    mod prs_226_alt_rejection {
+        use super::*;
+        use solana_sdk::instruction::CompiledInstruction;
+        use solana_sdk::message::MessageHeader;
+        use solana_sdk::message::v0::{Message as V0Message, MessageAddressTableLookup};
+        use solana_sdk::pubkey::Pubkey;
+
+        fn make_v0(
+            account_keys: Vec<Pubkey>,
+            instructions: Vec<CompiledInstruction>,
+            address_table_lookups: Vec<MessageAddressTableLookup>,
+        ) -> V0Message {
+            V0Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 0,
+                },
+                account_keys,
+                recent_blockhash: solana_sdk::hash::Hash::default(),
+                instructions,
+                address_table_lookups,
+            }
+        }
+
+        fn default_options() -> VisualSignOptions {
+            VisualSignOptions {
+                metadata: None,
+                decode_transfers: false,
+                transaction_name: Some("V0 ALT Regression".to_string()),
+                developer_config: None,
+            }
+        }
+
+        fn convert(v0_message: &V0Message) -> Result<SignablePayload, VisualSignError> {
+            let versioned_tx = VersionedTransaction {
+                signatures: vec![],
+                message: VersionedMessage::V0(v0_message.clone()),
+            };
+            convert_v0_to_visual_sign_payload(
+                &versioned_tx,
+                v0_message,
+                false,
+                None,
+                &default_options(),
+            )
+        }
+
+        #[test]
+        fn rejects_v0_when_program_id_lives_behind_an_alt() {
+            // 2 static account keys, 1 ALT supplying extra accounts, one
+            // benign instruction in-range, one instruction whose program_id
+            // points past the static keys (= ALT resolved).
+            let key0 = Pubkey::new_unique();
+            let key1 = Pubkey::new_unique();
+            let alt = MessageAddressTableLookup {
+                account_key: Pubkey::new_unique(),
+                writable_indexes: vec![0, 1, 2],
+                readonly_indexes: vec![3],
+            };
+            let benign = CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0],
+                data: vec![0xAA],
+            };
+            let malicious_via_alt = CompiledInstruction {
+                program_id_index: 5, // beyond the 2 static keys -> resolved via ALT
+                accounts: vec![0],
+                data: vec![0xBB],
+            };
+            let msg = make_v0(vec![key0, key1], vec![benign, malicious_via_alt], vec![alt]);
+
+            let err = convert(&msg).expect_err("must reject ALT-referenced instructions");
+            let VisualSignError::DecodeError(text) = err else {
+                panic!("expected DecodeError, got {err:?}");
+            };
+            assert!(
+                text.contains("Cannot render V0 transaction"),
+                "error should explain why: {text}"
+            );
+            assert!(
+                text.contains("program_id_index 5"),
+                "error should name the offending index: {text}"
+            );
+            assert!(
+                text.contains("instruction 1"),
+                "error should name the offending instruction index: {text}"
+            );
+        }
+
+        #[test]
+        fn rejects_v0_when_account_index_lives_behind_an_alt() {
+            // Instruction's program_id is in-range, but one of its accounts
+            // points past the static keys, i.e. it lives in an ALT.
+            let key0 = Pubkey::new_unique();
+            let key1 = Pubkey::new_unique();
+            let alt = MessageAddressTableLookup {
+                account_key: Pubkey::new_unique(),
+                writable_indexes: vec![0],
+                readonly_indexes: vec![],
+            };
+            let ix = CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0, 7, 9],
+                data: vec![0xCC],
+            };
+            let msg = make_v0(vec![key0, key1], vec![ix], vec![alt]);
+
+            let err = convert(&msg).expect_err("must reject ALT-referenced accounts");
+            let VisualSignError::DecodeError(text) = err else {
+                panic!("expected DecodeError, got {err:?}");
+            };
+            assert!(
+                text.contains("account indices"),
+                "error should mention account indices: {text}"
+            );
+            assert!(
+                text.contains('7') && text.contains('9'),
+                "error should enumerate the offending indices: {text}"
+            );
+        }
+
+        #[test]
+        fn allows_v0_with_alt_when_no_instruction_references_alt_contents() {
+            // ALTs are present in the wire format (e.g. for future inner-CPIs
+            // a wallet pre-attached), but every compiled instruction's
+            // program_id and accounts resolve against the static keys. This is
+            // safe to render -- nothing about the displayed instructions is
+            // hidden by an ALT. The presence of `address_table_lookups` alone
+            // is not the threat; an unresolved reference into one is.
+            let key0 = Pubkey::new_unique();
+            let key1 = Pubkey::new_unique();
+            let alt = MessageAddressTableLookup {
+                account_key: Pubkey::new_unique(),
+                writable_indexes: vec![0],
+                readonly_indexes: vec![1],
+            };
+            let ix = CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0],
+                data: vec![0xDD],
+            };
+            let msg = make_v0(vec![key0, key1], vec![ix], vec![alt]);
+
+            let payload =
+                convert(&msg).expect("V0 with ALTs but only static-key references should render");
+            assert_eq!(payload.payload_type, "SolanaTx");
+            // Confirm the ALT itself is surfaced in the displayed payload.
+            let has_alt_field = payload
+                .fields
+                .iter()
+                .any(|f| matches!(f, SignablePayloadField::PreviewLayout { common, .. } if common.label == "Address Lookup Tables"));
+            assert!(
+                has_alt_field,
+                "Address Lookup Tables field must be present in payload"
+            );
+        }
+
+        #[test]
+        fn malformed_v0_without_alts_keeps_existing_behavior() {
+            // No ALTs: an OOB index here is just a malformed transaction, not
+            // a hidden-behind-ALT attack. The fix MUST NOT change behavior on
+            // this path -- the existing pipeline renders it with placeholders
+            // / diagnostics rather than rejecting.
+            let key0 = Pubkey::new_unique();
+            let ix = CompiledInstruction {
+                program_id_index: 99,
+                accounts: vec![0, 50],
+                data: vec![0xEE],
+            };
+            let msg = make_v0(vec![key0], vec![ix], vec![]);
+            // We don't assert success vs. failure of conversion here (other
+            // unrelated decode paths may still error on malformed input); we
+            // only assert it isn't being caught by the PRS-226 reject branch,
+            // which would produce the new "Cannot render V0 transaction"
+            // message.
+            if let Err(VisualSignError::DecodeError(text)) = convert(&msg) {
+                assert!(
+                    !text.contains("Cannot render V0 transaction"),
+                    "malformed-without-ALT path must not hit PRS-226 reject branch: {text}"
+                );
+            }
+        }
     }
 }
