@@ -269,7 +269,13 @@ impl VisualSignConverterFromString<EthereumTransactionWrapper> for EthereumVisua
             options.developer_config.as_ref(),
         )
         .map_err(VisualSignError::ParseError)?;
-        self.to_visual_sign_payload(wrapper, options)
+        // Use the validated variant so any wallet-supplied or caller-supplied
+        // string that reaches a rendered field is screened for non-ASCII,
+        // unicode escapes, and non-printable characters. Matches the default
+        // impl every other chain converter inherits, and preserves the
+        // invariant that every payload returned by the converter has been
+        // charset-validated regardless of which chain produced it.
+        self.to_validated_visual_sign_payload(wrapper, options)
     }
 }
 
