@@ -910,9 +910,11 @@ fn visualize_inner_instruction(
     let idl_registry = crate::idl::IdlRegistry::new();
     // Carry depth across the trait boundary: if the inner visualizer is swig
     // itself, the next entry into visualize_tx_commands sees parent_depth + 1
-    // and bails before recursing further.
+    // and bails before recursing further. Saturating add so a maliciously
+    // constructed parent context with depth near usize::MAX can't wrap to 0
+    // and slip past the MAX_SWIG_INNER_DEPTH guard.
     let context = VisualizerContext::new(&sender, &compiled, &account_keys, &idl_registry, 0)
-        .with_depth(parent_depth + 1);
+        .with_depth(parent_depth.saturating_add(1));
 
     visualize_with_any(&visualizer_refs, &context)
         .and_then(|result| result.ok())
