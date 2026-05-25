@@ -2,8 +2,11 @@
 //!
 //! Mirrors `visualsign-ethereum::abi_metadata` for Solana IDL mappings. The
 //! proto carries an optional `SignatureMetadata` on every `Idl` entry; when
-//! present, we validate it as a secp256k1 signature over the raw IDL JSON
-//! before accepting the entry into the registry.
+//! present, we validate it as a secp256k1 ECDSA signature over the SHA-256
+//! digest of the IDL JSON bytes (prehashed verification via
+//! `PrehashVerifier::verify_prehash`) before accepting the entry into the
+//! registry. Signers must therefore compute `SHA-256(idl_json)` and sign the
+//! 32-byte digest, not the raw JSON bytes directly.
 //!
 //! Behaviour parity with the Ethereum ABI path:
 //! - Unsigned IDLs are accepted (graceful degradation). Callers that require
@@ -69,10 +72,15 @@ pub fn convert_proto_signature(proto: &generated::parser::SignatureMetadata) -> 
     }
 }
 
-/// Validate an IDL JSON string against a secp256k1 signature.
+/// Validate an IDL JSON string against a secp256k1 ECDSA signature.
+///
+/// The signature must have been produced over the SHA-256 digest of
+/// `idl_json` (prehashed signing). This function computes
+/// `SHA-256(idl_json)` and verifies the signature against that 32-byte
+/// digest via `PrehashVerifier::verify_prehash`.
 ///
 /// # Returns
-/// * `Ok(())` if the signature verifies against the provided IDL bytes.
+/// * `Ok(())` if the signature verifies against `SHA-256(idl_json)`.
 /// * `Err(IdlSignatureError)` if any step of validation fails.
 pub fn validate_idl_signature(
     idl_json: &str,

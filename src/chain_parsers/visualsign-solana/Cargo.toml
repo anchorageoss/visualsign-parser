@@ -28,7 +28,6 @@ spl-token-2022-interface = "2.1.0"
 k256 = { version = "0.12", features = ["ecdsa"], default-features = false }
 sha2 = "0.10"
 thiserror = "2.0.12"
-log = "0.4"
 
 [dev-dependencies]
 solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "2146929", features = ["proptest"] }

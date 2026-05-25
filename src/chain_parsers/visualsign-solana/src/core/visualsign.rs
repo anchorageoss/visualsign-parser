@@ -15,13 +15,6 @@ use solana_sdk::{
 };
 use std::collections::BTreeMap;
 use std::str::FromStr;
-
-/// Maximum size for IDL JSON from proto messages (1 MB).
-///
-/// Mirrors the cap used by the Ethereum ABI metadata path: file-based IDL
-/// loading has a wider 10 MB cap, but proto-supplied IDLs arrive per-request
-/// and are deserialized on the hot path, so we apply a tighter bound here.
-const MAX_IDL_JSON_BYTES: usize = 1_024 * 1_024;
 use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
     encodings::SupportedEncodings,
@@ -30,6 +23,13 @@ use visualsign::{
         VisualSignError, VisualSignOptions,
     },
 };
+
+/// Maximum size for IDL JSON from proto messages (1 MB).
+///
+/// Mirrors the cap used by the Ethereum ABI metadata path: file-based IDL
+/// loading has a wider 10 MB cap, but proto-supplied IDLs arrive per-request
+/// and are deserialized on the hot path, so we apply a tighter bound here.
+const MAX_IDL_JSON_BYTES: usize = 1_024 * 1_024;
 
 /// Append decode errors as diagnostics and lint diagnostics to the output fields.
 /// decode::visualizer_error is intentionally not routed through LintConfig --
@@ -169,7 +169,7 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
     for (program_id, idl) in mappings {
         // 1. Validate program_id parses as a Solana Pubkey (cheap, fail fast).
         if Pubkey::from_str(program_id).is_err() {
-            log::warn!("Skipping IDL mapping with invalid program_id '{program_id}'");
+            tracing::warn!("Skipping IDL mapping with invalid program_id '{program_id}'");
             continue;
         }
 
@@ -179,7 +179,7 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
         //    value formatting). Refusing the body for trusted programs closes
         //    that gap (PRS-237).
         if let Some(canonical) = canonical_name(program_id) {
-            log::warn!(
+            tracing::warn!(
                 "Skipping IDL mapping for '{program_id}': override refused for trusted built-in '{canonical}'"
             );
             continue;
@@ -187,7 +187,7 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
 
         // 3. Reject oversized IDL JSON before any expensive operation.
         if idl.value.len() > MAX_IDL_JSON_BYTES {
-            log::warn!(
+            tracing::warn!(
                 "Skipping IDL mapping for '{program_id}': exceeds size limit ({} bytes > {MAX_IDL_JSON_BYTES})",
                 idl.value.len()
             );
@@ -199,7 +199,7 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
         if let Some(proto_sig) = idl.signature.as_ref() {
             let local_sig = convert_proto_signature(proto_sig);
             if let Err(e) = validate_idl_signature(&idl.value, &local_sig) {
-                log::warn!(
+                tracing::warn!(
                     "Skipping IDL mapping for '{program_id}': signature validation failed: {e}"
                 );
                 continue;

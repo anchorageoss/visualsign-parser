@@ -14092,7 +14092,6 @@ dependencies = [
  "hex",
  "jupiter-swap-api-client",
  "k256 0.12.0",
- "log",
  "proptest",
  "serde",
  "serde_json",
