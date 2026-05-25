@@ -46,13 +46,14 @@ sol! {
 /// intentionally type-agnostic over the source width and operates on a
 /// plain `u64`.
 ///
-/// Behavior:
+/// Behavior (out-of-range values fall back to a raw `"unix:<value>"`
+/// rendering rather than panicking or numerically clamping; the underlying
+/// timestamp passed to consumers is unchanged):
 /// - `u64::MAX` is treated as a "never" sentinel.
 /// - Values inside chrono's representable range render as
 ///   `"YYYY-MM-DD HH:MM UTC"`.
 /// - Values above chrono's max year (year 9999), which `uint48` can reach
-///   (max ~year 8,925,512), render as `"unix:<value>"` rather than
-///   panicking.
+///   (max ~year 8,925,512), fall back to `"unix:<value>"`.
 fn format_unix_timestamp_seconds_u64(value: u64) -> String {
     if value == u64::MAX {
         return "never".to_string();
