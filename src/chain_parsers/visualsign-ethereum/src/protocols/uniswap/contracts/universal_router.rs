@@ -1975,17 +1975,27 @@ mod tests {
             panic!("Expected PreviewLayout");
         };
         let expanded = preview_layout.expanded.expect("expanded section");
-        // Only one command survives filtering (Transfer); no deadline because
-        // deadline is 0.
-        assert_eq!(expanded.fields.len(), 1);
 
-        let SignablePayloadField::PreviewLayout {
-            preview_layout: transfer_preview,
-            ..
-        } = &expanded.fields[0].signable_payload_field
-        else {
-            panic!("Expected Transfer PreviewLayout");
-        };
+        // Locate the Transfer field by title rather than by positional index.
+        // This keeps the alignment assertion independent of filtering policy:
+        // if a follow-up adds `FLAG_ALLOW_REVERT` masking (so `0x80` decodes
+        // as `V3SwapExactIn` and survives), the Transfer field will move from
+        // index 0 to index 1 without breaking this test's stated purpose.
+        let transfer_preview = expanded
+            .fields
+            .iter()
+            .find_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::PreviewLayout { preview_layout, .. }
+                    if preview_layout
+                        .title
+                        .as_ref()
+                        .is_some_and(|t| t.text == "Transfer") =>
+                {
+                    Some(preview_layout)
+                }
+                _ => None,
+            })
+            .expect("Transfer field present in expanded fields");
         let subtitle_text = &transfer_preview
             .subtitle
             .as_ref()
