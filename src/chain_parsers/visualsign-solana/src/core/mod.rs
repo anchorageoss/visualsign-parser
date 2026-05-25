@@ -103,6 +103,10 @@ impl<'a> VisualizerContext<'a> {
     /// Set the recursion depth for this context. Returns the modified context
     /// so it can be chained at construction sites: `VisualizerContext::new(...)
     /// .with_depth(parent.depth() + 1)`.
+    ///
+    /// `#[must_use]`: dropping the returned context silently leaves depth at 0,
+    /// which would reintroduce unbounded recursion at the next trait boundary.
+    #[must_use]
     pub fn with_depth(mut self, depth: usize) -> Self {
         self.depth = depth;
         self

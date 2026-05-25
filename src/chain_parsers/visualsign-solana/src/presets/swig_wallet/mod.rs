@@ -1141,7 +1141,7 @@ fn nested_too_deeply_field(
     depth: usize,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     let summary = format!(
-        "Swig: Nested too deeply (depth {depth}, max {MAX_SWIG_INNER_DEPTH})"
+        "Swig: Nested too deeply (depth {depth}, limit {MAX_SWIG_INNER_DEPTH})"
     );
     let condensed = SignablePayloadFieldListLayout {
         fields: vec![make_text_field("Instruction", summary.clone())?],
@@ -1151,7 +1151,7 @@ fn nested_too_deeply_field(
             make_text_field("Instruction Type", "Nested Too Deeply")?,
             make_text_field("Nesting Depth", depth.to_string())?,
             make_text_field(
-                "Maximum Nesting Depth",
+                "Nesting Depth Limit",
                 MAX_SWIG_INNER_DEPTH.to_string(),
             )?,
         ],
