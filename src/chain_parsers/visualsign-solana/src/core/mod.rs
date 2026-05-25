@@ -73,6 +73,13 @@ pub struct VisualizerContext<'a> {
     account_keys: &'a [Pubkey],
     idl_registry: &'a crate::idl::IdlRegistry,
     instruction_index: usize,
+    /// Nesting depth for visualizers that re-enter `visualize_with_any`.
+    ///
+    /// Top-level instructions start at depth 0. Visualizers that decode and
+    /// recursively visualize inner instructions (e.g. swig_wallet's
+    /// `SignV1`/`SignV2` payloads) must increment this when building a child
+    /// context, so the recursion can be bounded at the trait boundary.
+    depth: usize,
 }
 
 impl<'a> VisualizerContext<'a> {
@@ -89,7 +96,16 @@ impl<'a> VisualizerContext<'a> {
             account_keys,
             idl_registry,
             instruction_index,
+            depth: 0,
         }
+    }
+
+    /// Set the recursion depth for this context. Returns the modified context
+    /// so it can be chained at construction sites: `VisualizerContext::new(...)
+    /// .with_depth(parent.depth() + 1)`.
+    pub fn with_depth(mut self, depth: usize) -> Self {
+        self.depth = depth;
+        self
     }
 
     pub fn idl_registry(&self) -> &crate::idl::IdlRegistry {
@@ -103,6 +119,13 @@ impl<'a> VisualizerContext<'a> {
     /// Position of this instruction in the transaction's instruction list.
     pub fn instruction_index(&self) -> usize {
         self.instruction_index
+    }
+
+    /// Recursion depth of this context. 0 for top-level instructions; child
+    /// contexts produced by inner-instruction visualizers should set
+    /// `parent.depth() + 1` via `with_depth`.
+    pub fn depth(&self) -> usize {
+        self.depth
     }
 
     /// Resolves the program_id_index. Every compiled instruction has one,
