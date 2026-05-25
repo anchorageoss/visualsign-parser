@@ -922,12 +922,10 @@ impl SignablePayload {
         // break legitimate output. Attacker-controlled strings destined for
         // field text must instead be sanitized at the insertion site (PRS-231
         // follow-up tracks the remaining sinks, e.g. Tron `parameter.type_url`).
-        // Order matters: `\/` is listed before `\\` so the defensive `\/`
-        // entry can actually attribute a rejection in the (currently
-        // unreachable with `serde_json::CompactFormatter`) case where a
-        // serializer emits `\/`. With `\\` listed first, any input containing
-        // a literal backslash would hit the `\\` rule before the loop ever
-        // checked `\/`, masking whether the `\/` guard is doing anything.
+        //
+        // List order has no runtime effect: every match returns the same
+        // generic `ValidationError`, so which entry fires first is not
+        // observable. The defensive-first ordering is purely cosmetic.
         const FORBIDDEN_JSON_ESCAPES: &[&str] =
             &["\\u", "\\t", "\\r", "\\b", "\\f", "\\\"", "\\/", "\\\\"];
 
@@ -2779,23 +2777,24 @@ mod tests {
     /// `serde_json::CompactFormatter` does not currently emit `\/`, so this
     /// test can't trigger that path through `to_json()` alone (a literal
     /// backslash in field text serializes as `\\`, which contains `\/` as a
-    /// substring only if a `/` happens to follow it). The deny-list keeps
-    /// `\/` ahead of `\\` precisely so a serialized `\\/` reaches the `\/`
-    /// rule first, documenting that a future serializer emitting bare `\/`
-    /// would also be rejected.
+    /// substring only if a `/` happens to follow it). The `\/` entry is
+    /// kept as a defensive guard against a future serializer that emits
+    /// bare `\/`.
     ///
     /// What this test actually asserts: input containing the two-character
     /// sequence `\` `/` (which serializes as `\\/`) trips the deny-list. The
     /// `\` `world` companion test
     /// (`test_validate_charset_rejects_quote_and_backslash_escapes`) covers
-    /// the pure `\\` path.
+    /// the pure `\\` path. Either the `\/` or `\\` rule rejects this input;
+    /// since both return the same generic error, which one fires is not
+    /// observable.
     #[test]
     fn test_validate_charset_rejects_backslash_slash_combination() {
         let payload = payload_with_text("path\\/to/resource");
         let json = payload.to_json().expect("serialization should succeed");
-        // The serialized JSON contains `\\/` (backslash-slash combo). With
-        // `\/` listed before `\\` in FORBIDDEN_JSON_ESCAPES, the `\/` rule
-        // fires first on this input; either way the payload must be rejected.
+        // The serialized JSON contains `\\/` (backslash-slash combo), which
+        // matches both the `\/` and `\\` entries in FORBIDDEN_JSON_ESCAPES.
+        // Either way the payload must be rejected.
         assert!(
             json.contains("\\/"),
             "expected serialized JSON to contain \\\\/, got: {json}",
