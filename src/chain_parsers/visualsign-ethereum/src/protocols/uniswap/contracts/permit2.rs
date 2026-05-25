@@ -39,6 +39,28 @@ sol! {
     }
 }
 
+/// Formats a uint48 unix timestamp for display.
+///
+/// Returns "never" for `u64::MAX`. For values inside chrono's representable
+/// range, returns the UTC datetime. For values above chrono's max year
+/// (year 9999), which uint48 can reach (max ~year 8,925,512), returns
+/// "unix:<value>" rather than panicking.
+fn format_uint48_timestamp(value: u64) -> String {
+    if value == u64::MAX {
+        return "never".to_string();
+    }
+
+    let signed = match i64::try_from(value) {
+        Ok(v) => v,
+        Err(_) => return format!("unix:{value}"),
+    };
+
+    match Utc.timestamp_opt(signed, 0).single() {
+        Some(dt) => dt.format("%Y-%m-%d %H:%M UTC").to_string(),
+        None => format!("unix:{value}"),
+    }
+}
+
 /// Visualizer for Permit2 contract calls
 ///
 /// Permit2 address: 0x000000000022D473030F116dDEE9F6B43aC78BA3
@@ -129,12 +151,7 @@ impl Permit2Visualizer {
 
         // Format expiration timestamp
         let expiration_u64: u64 = call.expiration.to_string().parse().unwrap_or(0);
-        let expiration_str = if expiration_u64 == u64::MAX {
-            "never".to_string()
-        } else {
-            let dt = Utc.timestamp_opt(expiration_u64 as i64, 0).unwrap();
-            dt.format("%Y-%m-%d %H:%M UTC").to_string()
-        };
+        let expiration_str = format_uint48_timestamp(expiration_u64);
 
         let text = format!(
             "Approve {} {} {} to spend {} (expires: {})",
@@ -186,12 +203,7 @@ impl Permit2Visualizer {
             .to_string()
             .parse()
             .unwrap_or(0);
-        let expiration_str = if expiration_u64 == u64::MAX {
-            "never".to_string()
-        } else {
-            let dt = Utc.timestamp_opt(expiration_u64 as i64, 0).unwrap();
-            dt.format("%Y-%m-%d %H:%M UTC").to_string()
-        };
+        let expiration_str = format_uint48_timestamp(expiration_u64);
 
         // Format sig deadline timestamp
         let sig_deadline_u64: u64 = call
@@ -200,12 +212,7 @@ impl Permit2Visualizer {
             .to_string()
             .parse()
             .unwrap_or(0);
-        let sig_deadline_str = if sig_deadline_u64 == u64::MAX {
-            "never".to_string()
-        } else {
-            let dt = Utc.timestamp_opt(sig_deadline_u64 as i64, 0).unwrap();
-            dt.format("%Y-%m-%d %H:%M UTC").to_string()
-        };
+        let sig_deadline_str = format_uint48_timestamp(sig_deadline_u64);
 
         // Determine if amount is "unlimited" (max u160)
         let amount_display = if call.permitSingle.details.amount == U160::MAX {
@@ -404,7 +411,12 @@ impl crate::visualizer::ContractVisualizer for Permit2ContractVisualizer {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    use alloy_primitives::U256;
+    use alloy_primitives::aliases::U48;
+    use alloy_sol_types::SolCall;
+
     use super::*;
 
     #[test]
@@ -422,5 +434,94 @@ mod tests {
         );
     }
 
-    // TODO: Add tests for Permit2 functions once implemented
+    #[test]
+    fn test_format_uint48_timestamp_never() {
+        // u64::MAX should be the "never" sentinel.
+        assert_eq!(format_uint48_timestamp(u64::MAX), "never");
+    }
+
+    #[test]
+    fn test_format_uint48_timestamp_normal() {
+        // 2024-01-01T00:00:00 UTC = 1704067200.
+        assert_eq!(
+            format_uint48_timestamp(1_704_067_200),
+            "2024-01-01 00:00 UTC"
+        );
+    }
+
+    #[test]
+    fn test_format_uint48_timestamp_epoch() {
+        assert_eq!(format_uint48_timestamp(0), "1970-01-01 00:00 UTC");
+    }
+
+    #[test]
+    fn test_format_uint48_timestamp_uint48_max_does_not_panic() {
+        // uint48 max = 2^48 - 1 = 281_474_976_710_655, which corresponds to
+        // ~year 8,925,512, well beyond chrono's max year (9999). The old
+        // implementation panicked here via unwrap(); the new helper must
+        // return a non-panicking representation.
+        let uint48_max: u64 = (1u64 << 48) - 1;
+        let formatted = format_uint48_timestamp(uint48_max);
+        assert_eq!(formatted, format!("unix:{uint48_max}"));
+    }
+
+    #[test]
+    fn test_visualize_approve_with_uint48_max_expiration_does_not_panic() {
+        // Build a Permit2 approve call with expiration = uint48 max.
+        let uint48_max = U48::from((1u64 << 48) - 1);
+        let call = IPermit2::approveCall {
+            token: [0x11u8; 20].into(),
+            spender: [0x22u8; 20].into(),
+            amount: U160::from(1_000u64),
+            expiration: uint48_max,
+        };
+        let input = IPermit2::approveCall::abi_encode(&call);
+
+        let visualizer = Permit2Visualizer;
+        // Must not panic.
+        let field = visualizer
+            .visualize_tx_commands(&input, 1, None)
+            .expect("approve should decode");
+
+        // Sanity check that the rendered text contains the saturated marker.
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                assert!(
+                    text_v2.text.contains("unix:281474976710655"),
+                    "expected unix:<value> in output, got: {}",
+                    text_v2.text
+                );
+            }
+            other => panic!("expected TextV2, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_visualize_permit_with_uint48_max_expiration_does_not_panic() {
+        // Build a Permit2 permit call with expiration and sigDeadline at
+        // their respective maxes to exercise both formatting paths.
+        let uint48_max = U48::from((1u64 << 48) - 1);
+        let permit_single = PermitSingle {
+            details: PermitDetails {
+                token: [0x33u8; 20].into(),
+                amount: U160::from(1_000u64),
+                expiration: uint48_max,
+                nonce: U48::from(0u64),
+            },
+            spender: [0x44u8; 20].into(),
+            sigDeadline: U256::from(u64::MAX),
+        };
+        let call = IPermit2::permitCall {
+            owner: [0x55u8; 20].into(),
+            permitSingle: permit_single,
+            signature: alloy_primitives::Bytes::default(),
+        };
+        let input = IPermit2::permitCall::abi_encode(&call);
+
+        let visualizer = Permit2Visualizer;
+        // Must not panic.
+        let _field = visualizer
+            .visualize_tx_commands(&input, 1, None)
+            .expect("permit should decode");
+    }
 }
