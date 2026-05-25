@@ -890,9 +890,12 @@ mod tests {
     /// (e.g. USDC) must not override the safe built-in ERC20/ERC721 decoder.
     ///
     /// An attacker who can inject `chain_metadata.abi_mappings` could otherwise
-    /// rename selector `0xa9059cbb` (transfer) to any chosen function name and
-    /// parameter labels, spoofing the wallet UI. The fix in lib.rs prefers the
-    /// built-in visualizer for any address present in the compiled-in
+    /// supply an ABI entry whose function name + input types match selector
+    /// `0xa9059cbb` (transfer) but with attacker-chosen parameter labels, then
+    /// spoof the wallet UI with those labels. (The function name itself is
+    /// fixed by the selector match; only the parameter names are
+    /// attacker-controlled here.) The fix in lib.rs prefers the built-in
+    /// visualizer for any address present in the compiled-in
     /// ContractRegistry's token registry.
     #[test]
     fn test_known_token_ignores_caller_supplied_abi_for_transfer() {
@@ -1030,23 +1033,20 @@ mod tests {
         );
 
         // And, defensively, the attacker-chosen parameter names must not
-        // appear anywhere in the rendered payload.
-        fn assert_label_not_attacker_controlled(label: &str) {
-            assert_ne!(
-                label, "backup_wallet",
-                "caller ABI param name must not win for known token",
-            );
-            assert_ne!(
-                label, "safety_deposit",
-                "caller ABI param name must not win for known token",
-            );
-        }
-        for f in &payload.fields {
-            assert_label_not_attacker_controlled(f.label().as_str());
-        }
-        for f in &expanded.fields {
-            assert_label_not_attacker_controlled(f.signable_payload_field.label().as_str());
-        }
+        // appear anywhere in the rendered payload (labels, titles, subtitles,
+        // fallback_text, or any other serialized text). Serializing the whole
+        // payload to JSON and scanning the resulting string is the simplest
+        // way to assert this property without enumerating every text-bearing
+        // field on every SignablePayloadField variant.
+        let rendered = serde_json::to_string(&payload).unwrap();
+        assert!(
+            !rendered.contains("backup_wallet"),
+            "caller ABI param name must not appear anywhere in the rendered payload: {rendered}",
+        );
+        assert!(
+            !rendered.contains("safety_deposit"),
+            "caller ABI param name must not appear anywhere in the rendered payload: {rendered}",
+        );
     }
 
     /// PRS-222 follow-up: the canonical-token short-circuit must key off the
