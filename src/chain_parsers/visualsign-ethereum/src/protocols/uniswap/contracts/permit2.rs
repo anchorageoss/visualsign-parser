@@ -39,7 +39,7 @@ sol! {
     }
 }
 
-/// Formats a unix timestamp (seconds since epoch) for display.
+/// Formats a Unix timestamp (seconds since epoch) for display.
 ///
 /// Used for both `uint48` fields (`expiration`) and the `uint256`
 /// `sigDeadline` (after a checked narrowing to `u64`), so this helper is
