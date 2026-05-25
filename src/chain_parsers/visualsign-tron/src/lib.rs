@@ -10,6 +10,7 @@ use visualsign::{
 use anychain_tron::protocol::Tron::transaction;
 use anychain_tron::protocol::balance_contract::TransferContract;
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
+use chrono::{LocalResult, TimeZone, Utc};
 use protobuf::Message;
 use sha2::{Digest, Sha256};
 
@@ -283,10 +284,50 @@ fn address_to_base58(address_bytes: &[u8]) -> String {
     base58::ToBase58::to_base58(&with_checksum[..])
 }
 
-// Helper function to format Unix timestamp (milliseconds) to human-readable format
+// Helper function to format Unix timestamp (milliseconds) to human-readable format.
+//
+// `chrono::Utc::timestamp_millis_opt` returns `LocalResult::None` for values
+// outside chrono's representable range (e.g. `i64::MAX`, `i64::MIN`). Tron
+// transaction timestamps are attacker-controlled `i64`s read straight from the
+// protobuf-decoded raw transaction, so this must never panic. We fall back to
+// a sentinel string and let the call site keep showing the raw millisecond
+// integer alongside it (see PRS-228).
 fn format_timestamp(timestamp_ms: i64) -> String {
-    use chrono::{TimeZone, Utc};
+    match Utc.timestamp_millis_opt(timestamp_ms) {
+        LocalResult::Single(datetime) => datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        // `LocalResult::None` is returned for out-of-range values. `Ambiguous`
+        // is not produced for UTC, but handle it defensively for completeness.
+        LocalResult::None | LocalResult::Ambiguous(_, _) => "invalid timestamp".to_string(),
+    }
+}
 
-    let datetime = Utc.timestamp_millis_opt(timestamp_ms).unwrap();
-    datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::format_timestamp;
+
+    #[test]
+    fn format_timestamp_known_value() {
+        // 2021-01-01 00:00:00 UTC = 1609459200000 ms.
+        assert_eq!(
+            format_timestamp(1_609_459_200_000),
+            "2021-01-01 00:00:00 UTC"
+        );
+    }
+
+    #[test]
+    fn format_timestamp_zero_epoch() {
+        assert_eq!(format_timestamp(0), "1970-01-01 00:00:00 UTC");
+    }
+
+    // Regression for PRS-228: attacker-controlled i64 must never panic.
+    #[test]
+    fn format_timestamp_i64_max_does_not_panic() {
+        assert_eq!(format_timestamp(i64::MAX), "invalid timestamp");
+    }
+
+    #[test]
+    fn format_timestamp_i64_min_does_not_panic() {
+        assert_eq!(format_timestamp(i64::MIN), "invalid timestamp");
+    }
 }
