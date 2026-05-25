@@ -396,10 +396,10 @@ fn decode_transaction(
     decode_transaction_bytes(&bytes, allow_signed)
 }
 
-/// Resolve chain ID. The chain_id encoded in the signed transaction is
+/// Resolve chain ID. The chain_id encoded in the transaction bytes is
 /// authoritative: if `chain_metadata.network_id` is also provided and resolves
-/// to a different chain, we refuse to render so the attestation can never bind
-/// a "Network: X" label to bytes that execute on chain Y (see PRS-225).
+/// to a different chain, we refuse to render so the payload can never bind a
+/// "Network: X" label to bytes that execute on chain Y (see PRS-225).
 ///
 /// Order of precedence:
 /// 1. If the transaction carries a chain_id, that wins. Metadata may agree
@@ -417,7 +417,7 @@ fn resolve_chain_id(
     match (transaction.chain_id(), metadata_chain_id) {
         (Some(tx_chain_id), Some(meta_chain_id)) if tx_chain_id != meta_chain_id => {
             Err(VisualSignError::ValidationError(format!(
-                "chain_id mismatch: signed transaction declares chain_id {tx_chain_id} but chain_metadata.network_id resolves to chain_id {meta_chain_id}. The signed transaction is authoritative; refusing to produce a signed attestation."
+                "chain_id mismatch: transaction bytes declare chain_id {tx_chain_id} but chain_metadata.network_id resolves to chain_id {meta_chain_id}. The transaction bytes are authoritative; refusing to produce a payload."
             )))
         }
         (Some(tx_chain_id), _) => Ok(tx_chain_id),

@@ -316,9 +316,16 @@ fn test_chain_id_mismatch_rejected_prs_225() {
         msg.contains("chain_id mismatch"),
         "error should mention chain_id mismatch, got: {msg}"
     );
+    // Assert on explicit "chain_id N" substrings to avoid the substring trap
+    // where "137" already contains '1'. "chain_id 1 " (trailing space) uniquely
+    // identifies the tx-declared id, "chain_id 137" the metadata-derived id.
     assert!(
-        msg.contains('1') && msg.contains("137"),
-        "error should mention both chain ids (1 and 137), got: {msg}"
+        msg.contains("chain_id 1 "),
+        "error should reference signed chain_id 1, got: {msg}"
+    );
+    assert!(
+        msg.contains("chain_id 137"),
+        "error should reference metadata chain_id 137, got: {msg}"
     );
 }
 
