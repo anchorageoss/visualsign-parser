@@ -363,7 +363,9 @@ fn convert_versioned_to_visual_sign_payload(
 ///
 /// When `address_table_lookups` is empty, any out-of-bounds index is a
 /// malformed transaction (not an ALT reference) and we keep the existing
-/// "render as `unresolved(N)` placeholder + diagnostic" behavior intact.
+/// "render as `unresolved(N)` placeholder" behavior intact. (A lint
+/// diagnostic is also emitted for that case, but only when the
+/// `diagnostics` feature is enabled.)
 fn reject_v0_if_any_ix_references_alts(
     v0_message: &solana_sdk::message::v0::Message,
 ) -> Result<(), VisualSignError> {
@@ -381,12 +383,17 @@ fn reject_v0_if_any_ix_references_alts(
                 ci.program_id_index
             ));
         }
-        let oob_accounts: Vec<u8> = ci
+        let mut oob_accounts: Vec<u8> = ci
             .accounts
             .iter()
             .copied()
             .filter(|&idx| (idx as usize) >= static_len)
             .collect();
+        // Sort + dedup so the error message is stable regardless of how the
+        // raw instruction listed its accounts (and so the same index isn't
+        // repeated when it appears twice in `accounts`).
+        oob_accounts.sort_unstable();
+        oob_accounts.dedup();
         if !oob_accounts.is_empty() {
             offenders.push(format!(
                 "instruction {i}: account indices {oob_accounts:?} reference ALT entries"
@@ -1396,8 +1403,8 @@ mod tests {
                 "error should mention account indices: {text}"
             );
             assert!(
-                text.contains('7') && text.contains('9'),
-                "error should enumerate the offending indices: {text}"
+                text.contains("[7, 9]"),
+                "error should enumerate the offending indices as `[7, 9]`: {text}"
             );
         }
 
