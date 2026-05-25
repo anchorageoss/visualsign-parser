@@ -37,8 +37,12 @@ const SET_AUTHORITY_DISCRIMINATOR: u8 = 6;
 // Maximum decimals we are willing to honor on attacker-controlled
 // `MintToChecked` / `BurnChecked` payloads. Real-world tokens cap out around
 // 18 (ERC20 convention, and Solana's `Mint::decimals` is documented to fit in
-// the same range); larger values are almost certainly malicious and would
-// cause `10_u64.pow(decimals)` to overflow.
+// the same range); larger values are almost certainly malicious. Clamping
+// here surfaces a clean decode error to the caller. `format_token_amount`
+// in `utils` also guards against out-of-range `decimals` via `checked_pow`
+// (historically `10_u64.pow(64)` wrapped to 0 and panicked on divide), but
+// rejecting up front gives a better diagnostic than silently rendering the
+// raw amount.
 const MAX_TOKEN_DECIMALS: u8 = 18;
 
 pub struct Token2022Visualizer;
