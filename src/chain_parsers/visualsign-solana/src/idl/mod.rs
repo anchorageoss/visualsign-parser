@@ -48,6 +48,17 @@ impl IdlRegistry {
     /// # Returns
     /// * `Ok(IdlRegistry)` with the custom IDLs configured to override built-ins
     /// * `Err` if any IDL JSON is invalid
+    ///
+    /// # Security
+    ///
+    /// Mappings whose `program_id` resolves to a trusted built-in are dropped:
+    /// the registry must never hold a caller-supplied IDL body for a program
+    /// with a canonical identity. The attacker-controlled body would otherwise
+    /// drive instruction decoding (arg/account names, value formatting) via
+    /// the `unknown_program` IDL path even though the displayed program name
+    /// is canonical (see PRS-237). The upstream `extract_idl_mappings` filter
+    /// is the primary defence; this filter is a registry-level invariant in
+    /// case a future caller bypasses extraction.
     pub fn from_idl_mappings(
         idl_mappings: BTreeMap<String, (String, String)>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -56,6 +67,11 @@ impl IdlRegistry {
         let mut idl_names = BTreeMap::new();
 
         for (program_id, (idl_json, program_name)) in idl_mappings {
+            // Refuse IDL overrides for trusted built-ins. See doc comment above.
+            if canonical_name(&program_id).is_some() {
+                continue;
+            }
+
             // Extract IDL name from JSON metadata
             if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&idl_json) {
                 if let Some(metadata) = json_value.get("metadata") {
@@ -268,6 +284,44 @@ mod tests {
 
         assert_eq!(registry.get_program_name(&jupiter_pk), "Jupiter Swap");
         assert_eq!(registry.get_idl_name(&jupiter_pk), None);
+    }
+
+    /// Regression test for PRS-237 follow-up.
+    ///
+    /// The canonical-name guard alone is not enough: the IDL *body* drives
+    /// instruction decoding (argument names, account names, value formatting)
+    /// via the `unknown_program` IDL fallback. The registry must therefore
+    /// drop attacker-supplied IDL bodies for trusted built-in programs so a
+    /// crafted IDL cannot relabel `lamports`, hide a destination, or fabricate
+    /// account names for, say, the System Program.
+    #[test]
+    fn test_prs237_idl_body_dropped_for_trusted_program() {
+        let system_program_id = "11111111111111111111111111111111";
+        let jupiter_id = "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB";
+        let attacker_idl = r#"{"metadata":{"name":"Phantom Wallet"},"instructions":[]}"#;
+
+        let mut mappings = BTreeMap::new();
+        mappings.insert(
+            system_program_id.to_string(),
+            (attacker_idl.to_string(), "Phantom Wallet".to_string()),
+        );
+        mappings.insert(
+            jupiter_id.to_string(),
+            (attacker_idl.to_string(), "Phantom Wallet".to_string()),
+        );
+
+        let registry = IdlRegistry::from_idl_mappings(mappings).unwrap();
+
+        // The registry must not surface any caller-supplied IDL body for a
+        // trusted program.
+        assert!(registry.get_idl(system_program_id).is_none());
+        assert!(registry.get_idl(jupiter_id).is_none());
+        assert!(registry.get_all_configs().is_empty());
+
+        // `has_idl` for Jupiter must still be true via the upstream built-in
+        // IDL path in `solana_parser`, so legitimate decoding keeps working.
+        let jupiter_pk = Pubkey::from_str(jupiter_id).unwrap();
+        assert!(registry.has_idl(&jupiter_pk));
     }
 
     /// A caller-supplied name for a program that has NO canonical identity is

@@ -5,6 +5,7 @@ use crate::core::{
     create_accounts_advanced_preview_layout, decode_accounts, decode_v0_accounts, instructions,
 };
 use crate::idl::IdlRegistry;
+use crate::idl::builtin_programs::canonical_name;
 use crate::idl::signature::{convert_proto_signature, validate_idl_signature};
 use base64::{self, Engine};
 use solana_sdk::{
@@ -135,17 +136,19 @@ impl SolanaTransactionWrapper {
 /// Mirrors `visualsign-ethereum::abi_metadata::try_extract_from_chain_metadata`:
 /// 1. The program_id must be a valid base58 Solana `Pubkey`; otherwise the
 ///    entry is skipped.
-/// 2. The IDL JSON is rejected if it exceeds `MAX_IDL_JSON_BYTES`.
-/// 3. If `Idl.signature` is present, it must verify (secp256k1 over the IDL
+/// 2. Mappings whose `program_id` resolves to a trusted built-in (i.e.
+///    `canonical_name(..)` is `Some`) are dropped outright. Beyond the name
+///    guard in `IdlRegistry`, the IDL *body* itself controls instruction
+///    decoding (argument names, account names, value formatting), so an
+///    attacker-supplied IDL for the System Program could relabel `lamports`
+///    or hide the destination via the `unknown_program` IDL decode path.
+///    Refusing the body closes that gap (see PRS-237).
+/// 3. The IDL JSON is rejected if it exceeds `MAX_IDL_JSON_BYTES`.
+/// 4. If `Idl.signature` is present, it must verify (secp256k1 over the IDL
 ///    JSON) or the entry is dropped. Unsigned IDLs are still accepted so the
 ///    feature degrades gracefully; callers that need mandatory signatures
 ///    must enforce that at the API boundary. This addresses PRS-237 by
 ///    refusing to plumb attacker-tampered IDL bodies into the registry.
-///
-/// Even if a malicious unsigned entry slips through, the registry's
-/// `get_program_name` / `get_idl_name` will refuse to surface caller-supplied
-/// names for trusted built-in program IDs, so the rendered "Program" field
-/// cannot be mislabeled.
 fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String, String)> {
     let Some(mappings) = options
         .metadata
@@ -170,7 +173,19 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
             continue;
         }
 
-        // 2. Reject oversized IDL JSON before any expensive operation.
+        // 2. Reject IDL overrides for trusted built-in programs. The name
+        //    guard in `IdlRegistry` blocks attacker-controlled labels, but the
+        //    IDL body still drives instruction decoding (arg/account names,
+        //    value formatting). Refusing the body for trusted programs closes
+        //    that gap (PRS-237).
+        if let Some(canonical) = canonical_name(program_id) {
+            log::warn!(
+                "Skipping IDL mapping for '{program_id}': override refused for trusted built-in '{canonical}'"
+            );
+            continue;
+        }
+
+        // 3. Reject oversized IDL JSON before any expensive operation.
         if idl.value.len() > MAX_IDL_JSON_BYTES {
             log::warn!(
                 "Skipping IDL mapping for '{program_id}': exceeds size limit ({} bytes > {MAX_IDL_JSON_BYTES})",
@@ -179,7 +194,7 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
             continue;
         }
 
-        // 3. If a signature is provided it must verify; unsigned IDLs are
+        // 4. If a signature is provided it must verify; unsigned IDLs are
         //    accepted (parity with the Ethereum ABI path).
         if let Some(proto_sig) = idl.signature.as_ref() {
             let local_sig = convert_proto_signature(proto_sig);
@@ -1810,5 +1825,36 @@ mod tests {
             mappings.is_empty(),
             "invalid signature should be skipped, got: {mappings:?}"
         );
+    }
+
+    /// IDL mappings targeting a trusted built-in program are dropped at
+    /// extraction time. The name guard in `IdlRegistry` blocks attacker
+    /// labels; this filter also blocks the IDL *body* from ever reaching the
+    /// registry, so the `unknown_program` IDL path cannot decode a System
+    /// Program transfer with attacker-supplied arg/account names.
+    #[test]
+    fn test_extract_idl_mappings_skips_trusted_builtin_program() {
+        // System Program and Jupiter Swap both belong to the canonical set.
+        for trusted_program_id in [
+            "11111111111111111111111111111111",
+            "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB",
+        ] {
+            let options = make_options_with_idl_mapping(
+                trusted_program_id,
+                generated::parser::Idl {
+                    value: r#"{"metadata":{"name":"Phantom Wallet"},"instructions":[]}"#
+                        .to_string(),
+                    idl_type: None,
+                    idl_version: None,
+                    signature: None,
+                    program_name: Some("Phantom Wallet".to_string()),
+                },
+            );
+            let mappings = extract_idl_mappings(&options);
+            assert!(
+                mappings.is_empty(),
+                "trusted built-in '{trusted_program_id}' should be dropped, got: {mappings:?}"
+            );
+        }
     }
 }
