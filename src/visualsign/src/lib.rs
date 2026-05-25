@@ -914,9 +914,16 @@ impl SignablePayload {
         // control bytes into the decoded field text and break single-line
         // wallet UI. `\/` is included defensively even though the compact
         // formatter does not emit it.
-        const FORBIDDEN_JSON_ESCAPES: &[&str] = &[
-            "\\u", "\\n", "\\t", "\\r", "\\b", "\\f", "\\\"", "\\\\", "\\/",
-        ];
+        //
+        // Carve-out: `\n` is the wallet's documented line separator for
+        // multi-line field text (e.g. "Program ID: X\nData: Y" used by every
+        // chain parser's instruction display). 30+ trusted call sites across
+        // the chain converters emit it deliberately. Rejecting it here would
+        // break legitimate output. Attacker-controlled strings destined for
+        // field text must instead be sanitized at the insertion site (PRS-231
+        // follow-up tracks the remaining sinks, e.g. Tron `parameter.type_url`).
+        const FORBIDDEN_JSON_ESCAPES: &[&str] =
+            &["\\u", "\\t", "\\r", "\\b", "\\f", "\\\"", "\\\\", "\\/"];
 
         let json_str = self.to_json().map_err(|e| {
             VisualSignError::SerializationError(format!("Failed to serialize for validation: {e}"))
@@ -2694,17 +2701,22 @@ mod tests {
     }
 
     /// Regression test for PRS-231: `validate_charset` must reject JSON
-    /// short-form control escapes (`\n`, `\t`, `\r`, `\b`, `\f`) that the
+    /// short-form control escapes (`\t`, `\r`, `\b`, `\f`) that the
     /// `serde_json` CompactFormatter emits for control bytes in field text.
     /// Each of these survives `is_ascii() && (is_ascii_graphic() ||
     /// is_ascii_whitespace())` on the serialized JSON but smuggles a real
     /// control byte into the wallet's decoded display string.
+    ///
+    /// `\n` is intentionally excluded, see
+    /// `test_validate_charset_accepts_newline_in_text`: it is the wallet's
+    /// documented multi-line separator and used legitimately across every
+    /// chain converter for instruction display. Untrusted strings flowing
+    /// into field text must be sanitized at the insertion site instead.
     #[test]
     fn test_validate_charset_rejects_short_form_control_escapes() {
         // (label, text-containing-control-byte). The decoded text holds a
         // real control byte; the serializer emits the short-form escape.
         let cases: &[(&str, &str)] = &[
-            ("newline", "hello\nworld"),
             ("tab", "hello\tworld"),
             ("carriage return", "hello\rworld"),
             ("backspace", "hello\u{0008}world"),
@@ -2793,5 +2805,22 @@ mod tests {
         payload
             .validate_charset()
             .expect("plain ASCII payload should validate");
+    }
+
+    /// Pins the newline carve-out: `\n` is the wallet's documented line
+    /// separator for multi-line field text. Every chain converter emits
+    /// strings like "Program ID: X\nData: Y" and "From: A\nTo: B\nAmount: N"
+    /// for instruction display, so banning it at the validator would break
+    /// legitimate output. The mitigation for the underlying attack (control
+    /// bytes smuggled in via attacker-controlled text fields) is per-sink
+    /// sanitization, not blanket validator rejection. If this test ever
+    /// starts failing, it means `\n` was added back to the deny-list, which
+    /// would silently break every chain's display contract.
+    #[test]
+    fn test_validate_charset_accepts_newline_in_text() {
+        let payload = payload_with_text("From: A\nTo: B\nAmount: 1");
+        payload.validate_charset().expect(
+            "multi-line text with \\n is the wallet's documented line separator and must validate",
+        );
     }
 }
