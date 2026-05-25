@@ -922,8 +922,14 @@ impl SignablePayload {
         // break legitimate output. Attacker-controlled strings destined for
         // field text must instead be sanitized at the insertion site (PRS-231
         // follow-up tracks the remaining sinks, e.g. Tron `parameter.type_url`).
+        // Order matters: `\/` is listed before `\\` so the defensive `\/`
+        // entry can actually attribute a rejection in the (currently
+        // unreachable with `serde_json::CompactFormatter`) case where a
+        // serializer emits `\/`. With `\\` listed first, any input containing
+        // a literal backslash would hit the `\\` rule before the loop ever
+        // checked `\/`, masking whether the `\/` guard is doing anything.
         const FORBIDDEN_JSON_ESCAPES: &[&str] =
-            &["\\u", "\\t", "\\r", "\\b", "\\f", "\\\"", "\\\\", "\\/"];
+            &["\\u", "\\t", "\\r", "\\b", "\\f", "\\\"", "\\/", "\\\\"];
 
         let json_str = self.to_json().map_err(|e| {
             VisualSignError::SerializationError(format!("Failed to serialize for validation: {e}"))
@@ -2714,24 +2720,26 @@ mod tests {
     /// into field text must be sanitized at the insertion site instead.
     #[test]
     fn test_validate_charset_rejects_short_form_control_escapes() {
-        // (label, text-containing-control-byte). The decoded text holds a
-        // real control byte; the serializer emits the short-form escape.
-        let cases: &[(&str, &str)] = &[
-            ("tab", "hello\tworld"),
-            ("carriage return", "hello\rworld"),
-            ("backspace", "hello\u{0008}world"),
-            ("form feed", "hello\u{000C}world"),
+        // (label, text-containing-control-byte, expected short-form escape).
+        // The decoded text holds a real control byte; the serializer emits
+        // the short-form escape, which is the substring we pin below.
+        let cases: &[(&str, &str, &str)] = &[
+            ("tab", "hello\tworld", "\\t"),
+            ("carriage return", "hello\rworld", "\\r"),
+            ("backspace", "hello\u{0008}world", "\\b"),
+            ("form feed", "hello\u{000C}world", "\\f"),
         ];
 
-        for (label, text) in cases {
+        for (label, text, expected_escape) in cases {
             let payload = payload_with_text(text);
             let json = payload.to_json().expect("serialization should succeed");
-            // Sanity-check: serde_json's CompactFormatter does emit the
-            // short-form escape, which is exactly what the old validator
-            // missed.
+            // Sanity-check: serde_json's CompactFormatter emits the specific
+            // short-form escape (not e.g. `	`). If it ever switched to
+            // a long-form `\uXXXX` escape, this assertion would catch it,
+            // since the old validator only blocked `\u` (not the short form).
             assert!(
-                json.contains('\\'),
-                "{label}: expected serialized JSON to contain a backslash escape, got: {json}",
+                json.contains(expected_escape),
+                "{label}: expected serialized JSON to contain `{expected_escape}`, got: {json}",
             );
             let err = payload
                 .validate_charset()
@@ -2766,23 +2774,35 @@ mod tests {
         }
     }
 
-    /// Regression test for PRS-231: reject the literal substring `\/` in
-    /// serialized JSON. The `serde_json` CompactFormatter does not currently
-    /// emit `\/`, but we guard against it defensively in case the serializer
-    /// (or a future replacement) ever does, since `\/` decodes to `/` and
-    /// could be abused for path-style spoofing in displayed text.
+    /// Regression test for PRS-231: pins that the validator rejects
+    /// serialized JSON containing the literal substring `\/`. The
+    /// `serde_json::CompactFormatter` does not currently emit `\/`, so this
+    /// test can't trigger that path through `to_json()` alone (a literal
+    /// backslash in field text serializes as `\\`, which contains `\/` as a
+    /// substring only if a `/` happens to follow it). The deny-list keeps
+    /// `\/` ahead of `\\` precisely so a serialized `\\/` reaches the `\/`
+    /// rule first, documenting that a future serializer emitting bare `\/`
+    /// would also be rejected.
+    ///
+    /// What this test actually asserts: input containing the two-character
+    /// sequence `\` `/` (which serializes as `\\/`) trips the deny-list. The
+    /// `\` `world` companion test
+    /// (`test_validate_charset_rejects_quote_and_backslash_escapes`) covers
+    /// the pure `\\` path.
     #[test]
-    fn test_validate_charset_rejects_escaped_slash_literal_in_json() {
-        // The simplest way to inject the literal substring `\/` into the
-        // serialized JSON is to put a backslash directly in front of a
-        // forward slash in field text. The `\` byte is itself escaped as
-        // `\\`, producing `\\/` in the serialized JSON; the validator's
-        // backslash rule catches that as well. This documents that any
-        // path producing `\/` (or `\\`) is rejected.
+    fn test_validate_charset_rejects_backslash_slash_combination() {
         let payload = payload_with_text("path\\/to/resource");
+        let json = payload.to_json().expect("serialization should succeed");
+        // The serialized JSON contains `\\/` (backslash-slash combo). With
+        // `\/` listed before `\\` in FORBIDDEN_JSON_ESCAPES, the `\/` rule
+        // fires first on this input; either way the payload must be rejected.
+        assert!(
+            json.contains("\\/"),
+            "expected serialized JSON to contain \\\\/, got: {json}",
+        );
         let err = payload
             .validate_charset()
-            .expect_err("validator must reject escaped slash / backslash combinations");
+            .expect_err("validator must reject backslash-slash combination");
         assert!(matches!(err, VisualSignError::ValidationError(_)));
     }
 
