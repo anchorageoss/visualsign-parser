@@ -12,6 +12,7 @@ pub use numeric::decode_number;
 pub use package::SuiPackage;
 pub use tx_args::{
     get_index, get_nested_result_value, get_object_value, get_tx_type_arg, parse_numeric_argument,
+    parse_result_command_index,
 };
 
 #[cfg(test)]

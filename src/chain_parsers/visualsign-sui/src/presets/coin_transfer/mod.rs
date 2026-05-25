@@ -1,6 +1,6 @@
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
 use crate::truncate_address;
-use crate::utils::{CoinObject, decode_number, parse_numeric_argument};
+use crate::utils::{CoinObject, decode_number, parse_numeric_argument, parse_result_command_index};
 
 use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand, SuiObjectArg};
 use sui_types::base_types::SuiAddress;
@@ -135,8 +135,11 @@ fn resolve_amount(
         return Ok(None);
     };
 
+    // `object_argument` is a `Result(N)`. Use the result-specific helper so the
+    // command index is extracted explicitly, never silently coerced via the
+    // input-index path (PRS-227).
     let command = commands
-        .get(parse_numeric_argument(object_argument)? as usize)
+        .get(parse_result_command_index(object_argument)? as usize)
         .ok_or(VisualSignError::MissingData("Command not found".into()))?;
 
     match command {
