@@ -144,11 +144,15 @@ impl SolanaTransactionWrapper {
 ///    or hide the destination via the `unknown_program` IDL decode path.
 ///    Refusing the body closes that gap (see PRS-237).
 /// 3. The IDL JSON is rejected if it exceeds `MAX_IDL_JSON_BYTES`.
-/// 4. If `Idl.signature` is present, it must verify (secp256k1 over the IDL
-///    JSON) or the entry is dropped. Unsigned IDLs are still accepted so the
-///    feature degrades gracefully; callers that need mandatory signatures
-///    must enforce that at the API boundary. This addresses PRS-237 by
-///    refusing to plumb attacker-tampered IDL bodies into the registry.
+/// 4. If `Idl.signature` is present, it must verify (secp256k1 ECDSA over
+///    `SHA-256(idl_json)` via `PrehashVerifier::verify_prehash`) or the entry
+///    is dropped. Signers must therefore compute the SHA-256 digest of the
+///    IDL JSON bytes and sign that 32-byte prehash, matching
+///    `visualsign-ethereum::abi_metadata`. Unsigned IDLs are still accepted
+///    so the feature degrades gracefully; callers that need mandatory
+///    signatures must enforce that at the API boundary. This addresses
+///    PRS-237 by refusing to plumb attacker-tampered IDL bodies into the
+///    registry.
 fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String, String)> {
     let Some(mappings) = options
         .metadata

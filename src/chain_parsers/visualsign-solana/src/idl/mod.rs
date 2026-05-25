@@ -46,7 +46,11 @@ impl IdlRegistry {
     /// * `idl_mappings` - Map of program_id (base58) to (IDL JSON string, user-provided name)
     ///
     /// # Returns
-    /// * `Ok(IdlRegistry)` with the custom IDLs configured to override built-ins
+    /// * `Ok(IdlRegistry)` populated only with mappings for programs that have
+    ///   no canonical identity (see `canonical_name`). Trusted built-ins
+    ///   (native runtime programs, core SPL, and programs with a built-in IDL
+    ///   in `solana_parser`) are intentionally not overrideable and are
+    ///   dropped here.
     /// * `Err` if any IDL JSON is invalid
     ///
     /// # Security
