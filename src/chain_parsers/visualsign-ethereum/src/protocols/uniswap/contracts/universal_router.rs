@@ -1930,7 +1930,15 @@ mod tests {
         // benign-looking transfer while a different transfer actually
         // executes. After the fix, `Transfer` is at raw index 1 and must
         // pair with `inputs[1]`.
-        const FLAG_ALLOW_REVERT_V3_SWAP_EXACT_IN: u8 = 0x80;
+        //
+        // Compose the flagged byte from its parts so the test still
+        // matches its narrative if `Command::V3SwapExactIn`'s discriminant
+        // is ever reassigned. Today the result is `0x80` and `try_from`
+        // fails, so the byte is still dropped; this regression test
+        // continues to assert alignment, not flag masking.
+        const FLAG_ALLOW_REVERT: u8 = 0x80;
+        let flag_allow_revert_v3_swap_exact_in: u8 =
+            FLAG_ALLOW_REVERT | (Command::V3SwapExactIn as u8);
 
         // Build a Transfer-shaped payload: (address from, address to,
         // uint160 amount). This is the data the on-chain Transfer actually
@@ -1954,7 +1962,7 @@ mod tests {
         // user would not see the real recipient `0x2222...` or amount 42.
         let decoy_input = vec![0xde, 0xad, 0xbe, 0xef];
 
-        let commands = vec![FLAG_ALLOW_REVERT_V3_SWAP_EXACT_IN, Command::Transfer as u8];
+        let commands = vec![flag_allow_revert_v3_swap_exact_in, Command::Transfer as u8];
         let inputs = vec![decoy_input, real_transfer_input];
         let deadline = 0u64;
         let input = encode_execute_call(&commands, inputs, deadline);
