@@ -273,8 +273,9 @@ impl VisualSignConverterFromString<EthereumTransactionWrapper> for EthereumVisua
         // string that reaches a rendered field is screened for non-ASCII,
         // unicode escapes, and non-printable characters. Matches the default
         // impl every other chain converter inherits, and preserves the
-        // invariant that every payload returned by the converter has been
-        // charset-validated regardless of which chain produced it.
+        // invariant that every payload returned by `to_visual_sign_payload_from_string`
+        // is charset-validated. Callers that go through `to_visual_sign_payload`
+        // or `transaction_to_visual_sign` still bypass this check by design.
         self.to_validated_visual_sign_payload(wrapper, options)
     }
 }
