@@ -400,6 +400,13 @@ fn reject_v0_if_any_ix_references_alts(
 
     let mut alt_offenders: Vec<String> = Vec::new();
     let mut malformed_offenders: Vec<String> = Vec::new();
+    // Track the actual number of offending index references (post-dedup),
+    // not the number of formatted offender entries. A single entry like
+    // `instruction 0: account indices [2, 3] reference ALT entries`
+    // represents two index references, so counting entries would understate
+    // the offence count and mismatch the wording "N reference(s)".
+    let mut n_alt_refs: usize = 0;
+    let mut n_mal_refs: usize = 0;
 
     let classify = |idx: usize| -> Option<&'static str> {
         if idx >= loaded_end {
@@ -413,14 +420,20 @@ fn reject_v0_if_any_ix_references_alts(
 
     for (i, ci) in v0_message.instructions.iter().enumerate() {
         match classify(ci.program_id_index as usize) {
-            Some("malformed") => malformed_offenders.push(format!(
-                "instruction {i}: program_id_index {} is out of range (static={static_len}, loaded={loaded_len})",
-                ci.program_id_index
-            )),
-            Some("alt") => alt_offenders.push(format!(
-                "instruction {i}: program_id_index {} references an ALT entry",
-                ci.program_id_index
-            )),
+            Some("malformed") => {
+                malformed_offenders.push(format!(
+                    "instruction {i}: program_id_index {} is out of range (static={static_len}, loaded={loaded_len})",
+                    ci.program_id_index
+                ));
+                n_mal_refs += 1;
+            }
+            Some("alt") => {
+                alt_offenders.push(format!(
+                    "instruction {i}: program_id_index {} references an ALT entry",
+                    ci.program_id_index
+                ));
+                n_alt_refs += 1;
+            }
             _ => {}
         }
 
@@ -441,11 +454,13 @@ fn reject_v0_if_any_ix_references_alts(
         malformed_accounts.sort_unstable();
         malformed_accounts.dedup();
         if !alt_accounts.is_empty() {
+            n_alt_refs += alt_accounts.len();
             alt_offenders.push(format!(
                 "instruction {i}: account indices {alt_accounts:?} reference ALT entries"
             ));
         }
         if !malformed_accounts.is_empty() {
+            n_mal_refs += malformed_accounts.len();
             malformed_offenders.push(format!(
                 "instruction {i}: account indices {malformed_accounts:?} are out of range (static={static_len}, loaded={loaded_len})"
             ));
@@ -469,8 +484,8 @@ fn reject_v0_if_any_ix_references_alts(
          Resolving ALT contents requires an on-chain lookup that the parser does not perform. \
          Refusing to display a partial transaction. Details: {details}",
         n_alt = v0_message.address_table_lookups.len(),
-        n_alt_off = alt_offenders.len(),
-        n_mal_off = malformed_offenders.len(),
+        n_alt_off = n_alt_refs,
+        n_mal_off = n_mal_refs,
         details = details_parts.join(" | ")
     )))
 }
@@ -1438,18 +1453,23 @@ mod tests {
 
         #[test]
         fn rejects_v0_when_account_index_lives_behind_an_alt() {
-            // Instruction's program_id is in-range, but one of its accounts
-            // points past the static keys, i.e. it lives in an ALT.
+            // Instruction's program_id is in-range, but two of its accounts
+            // point past the static keys into the ALT-loaded range. With
+            // static_len=2 and loaded_len=3 (writable=[0,1], readonly=[2])
+            // the valid resolved range is [0, 5); ALT-backed indices are
+            // [2, 5). Using accounts {2, 3} exercises the ALT-backed path
+            // (not the malformed-OOB path) and lets us assert the error
+            // surfaces them under the `ALT-backed:` section.
             let key0 = Pubkey::new_unique();
             let key1 = Pubkey::new_unique();
             let alt = MessageAddressTableLookup {
                 account_key: Pubkey::new_unique(),
-                writable_indexes: vec![0],
-                readonly_indexes: vec![],
+                writable_indexes: vec![0, 1],
+                readonly_indexes: vec![2],
             };
             let ix = CompiledInstruction {
                 program_id_index: 1,
-                accounts: vec![0, 7, 9],
+                accounts: vec![0, 2, 3],
                 data: vec![0xCC],
             };
             let msg = make_v0(vec![key0, key1], vec![ix], vec![alt]);
@@ -1459,12 +1479,20 @@ mod tests {
                 panic!("expected DecodeError, got {err:?}");
             };
             assert!(
+                text.contains("ALT-backed:"),
+                "error should classify these accounts under ALT-backed, not malformed: {text}"
+            );
+            assert!(
+                !text.contains("malformed:"),
+                "this case has no out-of-range references, only ALT-backed ones: {text}"
+            );
+            assert!(
                 text.contains("account indices"),
                 "error should mention account indices: {text}"
             );
             assert!(
-                text.contains("[7, 9]"),
-                "error should enumerate the offending indices as `[7, 9]`: {text}"
+                text.contains("[2, 3]"),
+                "error should enumerate the offending indices as `[2, 3]`: {text}"
             );
         }
 
