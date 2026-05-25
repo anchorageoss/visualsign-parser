@@ -408,11 +408,20 @@ fn reject_v0_if_any_ix_references_alts(
     let mut n_alt_refs: usize = 0;
     let mut n_mal_refs: usize = 0;
 
-    let classify = |idx: usize| -> Option<&'static str> {
+    // Use a small enum instead of string tags so the match arms below are
+    // exhaustively checked by the compiler. A stray string typo or a future
+    // tag rename would otherwise fall through `_ => {}` and silently skip
+    // rejection, which would re-introduce the very bug this function exists
+    // to prevent.
+    enum RefKind {
+        Alt,
+        Malformed,
+    }
+    let classify = |idx: usize| -> Option<RefKind> {
         if idx >= loaded_end {
-            Some("malformed")
+            Some(RefKind::Malformed)
         } else if idx >= static_len {
-            Some("alt")
+            Some(RefKind::Alt)
         } else {
             None
         }
@@ -420,30 +429,30 @@ fn reject_v0_if_any_ix_references_alts(
 
     for (i, ci) in v0_message.instructions.iter().enumerate() {
         match classify(ci.program_id_index as usize) {
-            Some("malformed") => {
+            Some(RefKind::Malformed) => {
                 malformed_offenders.push(format!(
                     "instruction {i}: program_id_index {} is out of range (static={static_len}, loaded={loaded_len})",
                     ci.program_id_index
                 ));
                 n_mal_refs += 1;
             }
-            Some("alt") => {
+            Some(RefKind::Alt) => {
                 alt_offenders.push(format!(
                     "instruction {i}: program_id_index {} references an ALT entry",
                     ci.program_id_index
                 ));
                 n_alt_refs += 1;
             }
-            _ => {}
+            None => {}
         }
 
         let mut alt_accounts: Vec<u8> = Vec::new();
         let mut malformed_accounts: Vec<u8> = Vec::new();
         for &idx in &ci.accounts {
             match classify(idx as usize) {
-                Some("malformed") => malformed_accounts.push(idx),
-                Some("alt") => alt_accounts.push(idx),
-                _ => {}
+                Some(RefKind::Malformed) => malformed_accounts.push(idx),
+                Some(RefKind::Alt) => alt_accounts.push(idx),
+                None => {}
             }
         }
         // Sort + dedup so the error message is stable regardless of how the
