@@ -86,19 +86,31 @@ impl SolanaIntegrationConfig for {PascalName}Config {
 
 ### File: `mod.rs`
 
-Use the squads_multisig preset as a template: `src/chain_parsers/visualsign-solana/src/presets/squads_multisig/mod.rs`
+Use the dflow_aggregator preset as a template: `src/chain_parsers/visualsign-solana/src/presets/dflow_aggregator/mod.rs`
 
 Read that file for the exact structure, then generate a generic version with these substitutions:
-- Replace `SquadsMultisig` / `squads_multisig` / `SQUADS_MULTISIG` with the appropriate casing of the new program name
+- Replace `DflowAggregator` / `dflow_aggregator` / `DFLOW_AGGREGATOR` with the appropriate casing of the new program name
 - Replace the program ID string with the new program address
-- Replace `"Squads Multisig"` display strings with `{display_name}`
+- Replace `"DFlow Aggregator"` display strings with `{display_name}`
 - Replace IDL file reference: `include_str!("{snake_name}.json")`
 - Keep the `kind()` method returning the user's chosen `VisualizerKind` variant with `display_name` as the `&'static str` argument
 
-**Important — generic IDL pattern only:**
-- DO NOT copy any squads-specific code (e.g. `VaultTransactionMessage` decoding, inner instruction handling)
-- The generic scaffold uses `build_named_accounts`, `build_parsed_fields`, `build_fallback_fields`, `append_raw_data`, `format_arg_value` — all of which work with any IDL
+**Generic IDL pattern only:**
+- The generic scaffold uses the three helpers `dflow_aggregator` defines: `build_named_accounts`, `build_parsed_fields`, and `build_fallback_fields`. All three work with any IDL.
+- Two additional helpers — `append_raw_data` (for byte-blob args) and `format_arg_value` (for custom scalar rendering) — are not present in `dflow_aggregator`. Add them when the target IDL needs them, copying the pattern from another preset such as `kamino_vault` or `jupiter_earn`.
 - The parse function should: check `data.len() < 8`, load IDL, call `parse_instruction_with_idl`, call `build_named_accounts`, return a struct with parsed data + named accounts
+
+**Visualizer body must use the wire-data context API.** At the top of `visualize_tx_commands`:
+```rust
+let program_id = context.resolve_program_id()?.to_string();
+let accounts = context.resolve_accounts()?;
+let data = context.data();
+```
+
+These three accessors replace the old `context.current_instruction()`. They surface
+unresolved indices as `Err(VisualSignError::DecodeError(...))` with the bad index
+named, instead of returning a generic "no instruction found" failure. Use
+`context.instruction_index()` for any "Instruction N" labels.
 
 **Required imports** (at top of module, NOT inside functions):
 ```rust
@@ -109,7 +121,9 @@ use config::{PascalName}Config;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use std::collections::HashMap;
+use solana_sdk::instruction::AccountMeta;
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -117,6 +131,8 @@ use visualsign::{
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
 };
 ```
+
+`BTreeMap` (not `HashMap`) keeps the rendered named-accounts order deterministic.
 
 **Required tests** (in `#[cfg(test)] mod tests`):
 - `test_{snake_name}_idl_loads` — IDL loads and has instructions
@@ -138,6 +154,7 @@ Follow these rules in all generated code:
 - `use` statements at top of module, never inside functions
 - Inline format strings: `format!("{variable}")` not `format!("{}", variable)`
 - Use `create_text_field` and `create_raw_data_field` from `visualsign::field_builders` — never construct field structs directly
+- For raw-data fields, pass `None` as the second arg of `create_raw_data_field` unless you already have a precomputed hex string to reuse (e.g. one you built for `fallback_text`). Do not call `hex::encode(data)` solely to populate this arg — the helper falls back to the same lowercase byte-by-byte hex on `None`.
 - ASCII only in user-visible strings: `>=` not `≥`, `->` not `→`
 - Rust edition 2024 on nightly
 
@@ -148,8 +165,12 @@ Run these commands and fix any issues:
 ```bash
 cargo fmt -p visualsign-solana
 cargo clippy -p visualsign-solana --all-targets -- -D warnings
+cargo clippy -p visualsign-solana --features diagnostics --all-targets -- -D warnings
 cargo test -p visualsign-solana
+cargo test -p visualsign-solana --features diagnostics
 make -C src test
 ```
 
-All must pass before the task is complete.
+All must pass before the task is complete. Both feature configurations
+(diagnostics on and off) need to compile and test cleanly because parser_app
+builds without `diagnostics` while parser_cli builds with it.

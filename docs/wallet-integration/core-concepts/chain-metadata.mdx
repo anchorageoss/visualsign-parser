@@ -17,7 +17,7 @@ Chain metadata helps the parser understand smart contract interactions. Without 
 
 ## Ethereum: Contract ABI
 
-For Ethereum and EVM chains, provide the contract ABI to decode function calls. ABIs are passed as a map keyed by contract address — wallets can supply one ABI per contract the transaction touches.
+For Ethereum and EVM chains, provide the contract ABI to decode function calls. ABIs are passed as a map keyed by contract address, so wallets can supply one ABI per contract the transaction touches.
 
 For an end-to-end Ethereum integration walkthrough (supported networks, what's auto-decoded, the rendered payload), see [Ethereum for Wallets](../chains/ethereum).
 
@@ -44,7 +44,7 @@ request := &pb.ParseRequest{
 
 ### Address casing
 
-`abi_mappings` keys are 0x-prefixed contract addresses. The parser parses each key into a numeric address before registration, so lookup is case-insensitive — `0xdAC17...` and `0xdac17...` resolve to the same contract. Use a consistent casing convention (all lowercase or EIP-55 checksummed) across your ABI store to avoid duplicate entries for the same address.
+`abi_mappings` keys are 0x-prefixed contract addresses. The parser parses each key into a numeric address before registration, so lookup is case-insensitive: `0xdAC17...` and `0xdac17...` resolve to the same contract. Use a consistent casing convention (all lowercase or EIP-55 checksummed) across your ABI store to avoid duplicate entries for the same address.
 
 ### ABI format
 
@@ -207,6 +207,6 @@ Data: 0x...
 
 ## Next steps
 
-- [How Parsing Works](./how-parsing-works) — Understand the parsing pipeline
-- [Error Handling](./error-handling) — Handle cases where parsing fails
-- [gRPC API Reference](/api-reference) — Full request/response formats
+- [How Parsing Works](./how-parsing-works): Understand the parsing pipeline
+- [Error Handling](./error-handling): Handle cases where parsing fails
+- [gRPC API Reference](/api-reference): Full request/response formats

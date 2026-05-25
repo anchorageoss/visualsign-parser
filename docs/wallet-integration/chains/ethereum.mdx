@@ -14,7 +14,7 @@ For deployment options (Turnkey-hosted, self-hosted TEE, library, or gRPC), see 
 
 ## Quick path
 
-For known protocols and standard token transfers, no ABI is required — the parser ships with built-in decoders and a registry of well-known tokens. The minimum request is the raw transaction plus the chain and network identifier:
+For known protocols and standard token transfers, no ABI is required. The parser ships with built-in decoders and a registry of well-known tokens. The minimum request is the raw transaction plus the chain and network identifier:
 
 ```go
 request := &pb.ParseRequest{
@@ -54,9 +54,9 @@ Other EVM-compatible chains can be parsed by passing a `network_id` value from t
 | Contract type | Built-in support | Notes |
 |---|---|---|
 | Native ETH transfers | Yes | No metadata needed. |
-| ERC-20 `transfer`, `approve`, `transferFrom` | Yes | Calldata is decoded into structured fields. Standalone ERC-20 calls always render the raw on-chain integer amount without a symbol (the ERC-20 fallback decoder does not consult the token registry). Symbol and decimals resolve only when the token address is known in context — for example, inside a Uniswap Universal Router command. |
+| ERC-20 `transfer`, `approve`, `transferFrom` | Yes | Calldata is decoded into structured fields. Standalone ERC-20 calls always render the raw on-chain integer amount without a symbol (the ERC-20 fallback decoder does not consult the token registry). Symbol and decimals resolve only when the token address is known in context (for example, inside a Uniswap Universal Router command). |
 | ERC-721 transfers and approvals | Not yet | The ERC-721 visualizer is a stub; calls fall through to raw-hex rendering. Token ID and collection name are not shown until support lands. |
-| Uniswap Universal Router (`execute`) | Yes | V2 and V3 exact-in and exact-out swaps, `WRAP_ETH` / `UNWRAP_WETH`, `PAY_PORTION`, `PERMIT2_PERMIT`, and `PERMIT2_TRANSFER_FROM`. Each command renders as a nested `PreviewLayout`. V4 swap and initialize-pool commands are recognized but not yet decoded — they fall through to raw-hex rendering until support lands. |
+| Uniswap Universal Router (`execute`) | Yes | V2 and V3 exact-in and exact-out swaps, `WRAP_ETH` / `UNWRAP_WETH`, `PAY_PORTION`, `PERMIT2_PERMIT`, and `PERMIT2_TRANSFER_FROM`. Each command renders as a nested `PreviewLayout`. V4 swap and initialize-pool commands are recognized but not yet decoded; they fall through to raw-hex rendering until support lands. |
 | Uniswap V4 PoolManager direct calls | No (yet) | The decoder exists as a stub; calls to `swap`, `modifyLiquidity`, `donate`, and `initialize` currently render through the generic fallback. Provide an ABI for the PoolManager if you want decoded fields today. |
 | Permit2 | Yes | Single allowance grants (`PERMIT`) and single signature-based transfers (`TRANSFER_FROM`). Batch variants (`PERMIT_BATCH`, `TRANSFER_FROM_BATCH`) are not yet decoded. |
 | Any other contract | Provide an ABI via `abi_mappings` | Without an ABI, calldata renders as the 4-byte selector plus raw hex parameters. |
@@ -139,7 +139,7 @@ The standard API accepts unsigned transactions only. Signed envelope decoding is
 
 The parser returns a JSON `SignablePayload` with a `Title`, optional `Subtitle`, and an array of `Fields`. For Ethereum, the top-level fields always include network, recipient, value, gas information, and nonce, followed by a decoded representation of the calldata (when applicable).
 
-Take a Uniswap Universal Router swap as a concrete example — an `execute` call with four commands (two V3 swaps, a fee payment, and a WETH unwrap). The parser produces:
+Take a Uniswap Universal Router swap as a concrete example: an `execute` call with four commands (two V3 swaps, a fee payment, and a WETH unwrap). The parser produces:
 
 ```json
 {
@@ -184,10 +184,10 @@ A few rendering rules to be aware of when building the UI:
 
 - **Every field has a `FallbackText`.** Render that string if you don't yet support the field's `Type`. New field types may be added in future versions, and `FallbackText` is the forward-compatible escape hatch.
 - **`PreviewLayout` is recursive.** Multi-step operations like Universal Router commands nest layouts. Show the `Subtitle` collapsed, and reveal the `Expanded.Fields` on user action.
-- **Amounts come pre-formatted when token metadata is known.** When the parser can resolve a token's decimals and symbol (built-in registry or wallet-supplied metadata), `AmountV2.Amount` is already scaled and `AmountV2.Abbreviation` is set — render both verbatim. When token metadata is unknown (for example, direct ERC-20 transfers to contracts outside the registry), `Amount` is the raw on-chain integer and `Abbreviation` is absent; display the raw value alongside the contract address in that case.
+- **Amounts come pre-formatted when token metadata is known.** When the parser can resolve a token's decimals and symbol (built-in registry or wallet-supplied metadata), `AmountV2.Amount` is already scaled and `AmountV2.Abbreviation` is set; render both verbatim. When token metadata is unknown (for example, direct ERC-20 transfers to contracts outside the registry), `Amount` is the raw on-chain integer and `Abbreviation` is absent; display the raw value alongside the contract address in that case.
 - **Comparison operators are ASCII.** Slippage and minimums use `>=` and `<=`, not Unicode glyphs.
 
-The full set of field types — `TextV2`, `AddressV2`, `AmountV2`, `Number`, `PreviewLayout`, `Divider` — is documented in [Field Types](/field-types). The Uniswap fixture above is checked into the repo at `src/chain_parsers/visualsign-ethereum/tests/fixtures/uniswap-v3swap.expected` and can be reproduced end-to-end with `parser_cli` (see [Parser CLI](/parser-cli)).
+The full set of field types (`TextV2`, `AddressV2`, `AmountV2`, `Number`, `PreviewLayout`, `Divider`) is documented in [Field Types](/field-types). The Uniswap fixture above is checked into the repo at `src/chain_parsers/visualsign-ethereum/tests/fixtures/uniswap-v3swap.expected` and can be reproduced end-to-end with `parser_cli` (see [Parser CLI](/parser-cli)).
 
 ## Error handling for EVM
 
@@ -202,7 +202,7 @@ Beyond the generic categories covered in [Error Handling](../core-concepts/error
 
 ## Next steps
 
-- [Ethereum for dApp Builders](../dapps/ethereum) — How contract authors make their transactions render meaningfully in your wallet.
-- [Chain Metadata](../core-concepts/chain-metadata) — Cross-chain reference for ABIs and IDLs.
-- [Attestation Verification](../self-hosted-tee/attestation) — Required for TEE deployments.
-- [Parser CLI](/parser-cli) — Reproduce parsing locally against your own fixtures.
+- [Ethereum for dApp Builders](../dapps/ethereum): How contract authors make their transactions render meaningfully in your wallet.
+- [Chain Metadata](../core-concepts/chain-metadata): Cross-chain reference for ABIs and IDLs.
+- [Attestation Verification](../self-hosted-tee/attestation): Required for TEE deployments.
+- [Parser CLI](/parser-cli): Reproduce parsing locally against your own fixtures.
