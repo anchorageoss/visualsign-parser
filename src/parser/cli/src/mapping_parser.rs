@@ -43,17 +43,20 @@ pub(crate) fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, Stri
 /// Load JSON files from CLI mapping strings and build a `HashMap`.
 ///
 /// Each mapping string is parsed, the JSON file is loaded, and `build_value` converts
-/// the loaded JSON + components into the target value type. The identifier from the
-/// mapping becomes the map key.
+/// the loaded JSON + components into the target value type. `build_value` returns a
+/// `Result` so post-load steps (e.g. signing) can reject the entry without producing a
+/// misleading "loaded" log line or inflating the success count. The identifier from
+/// the mapping becomes the map key.
 ///
-/// Returns the populated map and the count of successfully loaded entries.
+/// Returns the populated map and the count of entries that were both loaded and
+/// accepted by `build_value`.
 pub(crate) fn load_mappings<V>(
     mappings: &[String],
     kind: &str,
     example: &str,
     identifier_label: &str,
     validate_identifier: impl Fn(&str) -> Result<(), String>,
-    build_value: impl Fn(&MappingComponents, String) -> V,
+    build_value: impl Fn(&MappingComponents, String) -> Result<V, String>,
 ) -> (std::collections::HashMap<String, V>, usize) {
     let mut map = std::collections::HashMap::new();
     let mut valid_count = 0;
@@ -69,22 +72,29 @@ pub(crate) fn load_mappings<V>(
                     continue;
                 }
                 match load_json_file(&components.path) {
-                    Ok(json) => {
-                        let value = build_value(&components, json);
-                        let previous = map.insert(components.identifier.clone(), value);
-                        if previous.is_some() {
+                    Ok(json) => match build_value(&components, json) {
+                        Ok(value) => {
+                            let previous = map.insert(components.identifier.clone(), value);
+                            if previous.is_some() {
+                                eprintln!(
+                                    "  Warning: Duplicate {identifier_label} '{}' for {kind} '{}'; overwriting previous entry",
+                                    components.identifier, components.name
+                                );
+                            } else {
+                                valid_count += 1;
+                                eprintln!(
+                                    "  Loaded {kind} '{}' from {} and mapped to {}",
+                                    components.name, components.path, components.identifier
+                                );
+                            }
+                        }
+                        Err(e) => {
                             eprintln!(
-                                "  Warning: Duplicate {identifier_label} '{}' for {kind} '{}'; overwriting previous entry",
-                                components.identifier, components.name
-                            );
-                        } else {
-                            valid_count += 1;
-                            eprintln!(
-                                "  Loaded {kind} '{}' from {} and mapped to {}",
-                                components.name, components.path, components.identifier
+                                "  Warning: Skipping {kind} '{}' from '{}': {e}",
+                                components.name, components.path
                             );
                         }
-                    }
+                    },
                     Err(e) => {
                         eprintln!(
                             "  Warning: Failed to load {kind} '{}' from '{}': {e}",
@@ -234,7 +244,7 @@ mod tests {
             "example",
             "Address",
             |_| Ok(()),
-            |_comp, json| json.to_uppercase(),
+            |_comp, json| Ok(json.to_uppercase()),
         );
 
         assert_eq!(count, 2);
@@ -252,7 +262,7 @@ mod tests {
             "example",
             "Address",
             |_| Ok(()),
-            |_, json| json,
+            |_, json| Ok(json),
         );
         assert_eq!(count, 0);
         assert!(map.is_empty());
@@ -267,7 +277,7 @@ mod tests {
             "example",
             "Address",
             |_| Ok(()),
-            |_, json| json,
+            |_, json| Ok(json),
         );
         assert_eq!(count, 0);
         assert!(map.is_empty());
@@ -282,7 +292,7 @@ mod tests {
             "example",
             "Address",
             |_| Ok(()),
-            |_, json| json,
+            |_, json| Ok(json),
         );
         assert_eq!(count, 0);
         assert!(map.is_empty());
@@ -303,7 +313,7 @@ mod tests {
             "example",
             "Address",
             |_| Ok(()),
-            |_, json| json,
+            |_, json| Ok(json),
         );
         assert_eq!(count, 1);
         assert_eq!(map.len(), 1);
@@ -321,7 +331,12 @@ mod tests {
             "ex",
             "Id",
             |_| Ok(()),
-            |components, json| format!("{}|{}|{}", components.name, components.identifier, json),
+            |components, json| {
+                Ok(format!(
+                    "{}|{}|{}",
+                    components.name, components.identifier, json
+                ))
+            },
         );
 
         assert_eq!(count, 1);
@@ -339,12 +354,48 @@ mod tests {
             format!("Second:{}:0xSame", path2.display()),
         ];
 
-        let (map, count) =
-            load_mappings::<String>(&mappings, "ABI", "ex", "Addr", |_| Ok(()), |_, json| json);
+        let (map, count) = load_mappings::<String>(
+            &mappings,
+            "ABI",
+            "ex",
+            "Addr",
+            |_| Ok(()),
+            |_, json| Ok(json),
+        );
         assert_eq!(count, 1); // Duplicate not counted
         assert_eq!(map.len(), 1);
         // Last write wins
         assert!(map.get("0xSame").unwrap().contains(r#""v": 2"#));
+    }
+
+    #[test]
+    fn test_load_mappings_build_value_error_skipped() {
+        let path = write_temp_json("reject.json", r#"{"ok": true}"#);
+        let mappings = vec![
+            format!("Good:{}:0xGood", path.display()),
+            format!("Rejected:{}:0xReject", path.display()),
+        ];
+
+        let (map, count) = load_mappings::<String>(
+            &mappings,
+            "ABI",
+            "ex",
+            "Addr",
+            |_| Ok(()),
+            |components, json| {
+                if components.identifier == "0xReject" {
+                    Err("post-load rejection".to_string())
+                } else {
+                    Ok(json)
+                }
+            },
+        );
+
+        // Rejected entry is dropped, count reflects only accepted entries.
+        assert_eq!(count, 1);
+        assert_eq!(map.len(), 1);
+        assert!(map.contains_key("0xGood"));
+        assert!(!map.contains_key("0xReject"));
     }
 
     #[test]

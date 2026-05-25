@@ -79,17 +79,17 @@ fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<Strin
             // dev key. This is integrity, not identity, the CLI is a local dev tool
             // that already trusts its input files; production trust comes from the
             // gRPC caller verifying the public key against an allowlist.
-            let signature = match sign_abi(&json, &CLI_DEV_SIGNING_KEY_SEED) {
-                Ok(sig) => Some(sig),
-                Err(e) => {
-                    eprintln!("  Warning: Failed to sign ABI: {e}");
-                    None
-                }
-            };
-            Abi {
+            //
+            // If signing fails (e.g. an invalid seed in future refactors), surface
+            // the failure as a `load_mappings` rejection so the entry is skipped and
+            // the success count stays accurate, rather than emitting an unsigned
+            // `Abi` that the extractor would silently drop later.
+            let signature = sign_abi(&json, &CLI_DEV_SIGNING_KEY_SEED)
+                .map_err(|e| format!("failed to sign ABI: {e}"))?;
+            Ok(Abi {
                 value: json,
-                signature,
-            }
+                signature: Some(signature),
+            })
         },
     )
 }
