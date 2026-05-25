@@ -33,10 +33,12 @@ enum AbiSignatureError {
 ///
 /// # Security notes
 ///
-/// - **Unsigned ABIs are accepted.** If no signature is present in the mapping,
-///   the ABI is registered without validation. This is by design for graceful
-///   degradation — callers that require mandatory signatures should enforce this
-///   at the API boundary before calling this function.
+/// - **Unsigned ABIs are rejected.** Every ABI mapping must carry a signature;
+///   entries with `signature: None` are skipped with a warning. Without this check,
+///   a wallet could supply any ABI for any address and dictate the human-readable
+///   rendering of the call (PRS-236).
+/// - **Signature is validated unconditionally** when present, using secp256k1 over
+///   the SHA-256 hash of the ABI JSON.
 /// - **Any public key is accepted.** Signature validation proves the ABI was not
 ///   tampered with after signing, but does not verify the signer's identity.
 ///   To establish trust, callers should verify the public key against a known
@@ -73,15 +75,19 @@ pub fn try_extract_from_chain_metadata(
             continue;
         }
 
-        // Validate signature if present
-        if let Some(proto_sig) = abi.signature.as_ref() {
-            let signature = convert_proto_signature(proto_sig);
-            if let Err(e) = validate_abi_signature(&abi.value, &signature) {
-                log::warn!(
-                    "Skipping ABI mapping for '{address}': signature validation failed: {e}"
-                );
-                continue;
-            }
+        // Reject unsigned ABI entries unconditionally (PRS-236). Allowing
+        // signature: None would let a wallet supply arbitrary ABIs for any
+        // address and steer the human-readable rendering of the call.
+        let Some(proto_sig) = abi.signature.as_ref() else {
+            log::warn!(
+                "Skipping ABI mapping for '{address}': missing signature (unsigned ABI entries are rejected)"
+            );
+            continue;
+        };
+        let signature = convert_proto_signature(proto_sig);
+        if let Err(e) = validate_abi_signature(&abi.value, &signature) {
+            log::warn!("Skipping ABI mapping for '{address}': signature validation failed: {e}");
+            continue;
         }
 
         match register_embedded_abi(&mut registry, address, &abi.value) {
@@ -381,6 +387,28 @@ mod tests {
             .collect()
     }
 
+    /// Build a valid proto signature for `abi_json` using the deterministic test key.
+    fn signed_abi(abi_json: &str) -> Abi {
+        let (signature_hex, public_key_hex) = create_test_signature(abi_json);
+        let proto_sig = generated::parser::SignatureMetadata {
+            value: signature_hex,
+            metadata: vec![
+                generated::parser::Metadata {
+                    key: "algorithm".to_string(),
+                    value: "secp256k1".to_string(),
+                },
+                generated::parser::Metadata {
+                    key: "public_key".to_string(),
+                    value: public_key_hex,
+                },
+            ],
+        };
+        Abi {
+            value: abi_json.to_string(),
+            signature: Some(proto_sig),
+        }
+    }
+
     #[test]
     fn test_try_extract_no_metadata() {
         assert!(try_extract_from_chain_metadata(None, 1).is_none());
@@ -414,6 +442,25 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![(TEST_ADDRESS, signed_abi(VALID_ABI))])
+                    .into_iter()
+                    .collect(),
+            })),
+        };
+        let registry =
+            try_extract_from_chain_metadata(Some(&metadata), 1).expect("should contain ABI");
+        assert!(registry.list_abis().contains(&TEST_ADDRESS));
+    }
+
+    /// PRS-236 regression: an ABI mapping that omits the signature must be rejected,
+    /// even when the address and ABI JSON are otherwise valid. Without this check a
+    /// wallet could supply arbitrary ABIs for any address and dictate the parsed
+    /// payload rendering.
+    #[test]
+    fn test_try_extract_unsigned_abi_rejected() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
                 abi_mappings: make_abi_mappings(vec![(
                     TEST_ADDRESS,
                     Abi {
@@ -425,9 +472,10 @@ mod tests {
                 .collect(),
             })),
         };
-        let registry =
-            try_extract_from_chain_metadata(Some(&metadata), 1).expect("should contain ABI");
-        assert!(registry.list_abis().contains(&TEST_ADDRESS));
+        assert!(
+            try_extract_from_chain_metadata(Some(&metadata), 1).is_none(),
+            "unsigned ABI entries must be rejected (PRS-236)"
+        );
     }
 
     #[test]
@@ -529,18 +577,14 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi_mappings: make_abi_mappings(vec![(
-                    TEST_ADDRESS,
-                    Abi {
-                        value: "not valid json".to_string(),
-                        signature: None,
-                    },
-                )])
-                .into_iter()
-                .collect(),
+                abi_mappings: make_abi_mappings(vec![(TEST_ADDRESS, signed_abi("not valid json"))])
+                    .into_iter()
+                    .collect(),
             })),
         };
-        // Invalid ABI JSON is skipped; with no valid entries left, result is None
+        // Invalid ABI JSON is skipped; with no valid entries left, result is None.
+        // The signature is valid, so this exercises the JSON parse rejection path
+        // rather than short-circuiting on the unsigned check.
         assert!(try_extract_from_chain_metadata(Some(&metadata), 1).is_none());
     }
 
@@ -551,20 +595,8 @@ mod tests {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
                 abi_mappings: make_abi_mappings(vec![
-                    (
-                        "not_an_address",
-                        Abi {
-                            value: VALID_ABI.to_string(),
-                            signature: None,
-                        },
-                    ),
-                    (
-                        valid_address,
-                        Abi {
-                            value: VALID_ABI.to_string(),
-                            signature: None,
-                        },
-                    ),
+                    ("not_an_address", signed_abi(VALID_ABI)),
+                    (valid_address, signed_abi(VALID_ABI)),
                 ])
                 .into_iter()
                 .collect(),
