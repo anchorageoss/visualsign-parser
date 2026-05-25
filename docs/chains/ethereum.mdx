@@ -39,7 +39,7 @@ Basic ETH transfer between addresses with gas calculation. Supported transaction
 ### 3. Smart contract calls
 Decode function calls using a wallet-supplied ABI to show:
 - Method name and parameters
-- Token amounts in human-readable format using the token registry
+- Token amounts as raw on-chain integers (the generic ABI decoder does not scale amounts or attach symbols; that happens only in protocol-specific decoders such as the Uniswap Universal Router handler)
 
 ### 4. Auto-decoded protocols
 Built-in decoders ship for:
