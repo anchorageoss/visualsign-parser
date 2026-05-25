@@ -132,7 +132,11 @@ parser_host:
 
 .PHONY: grpc-server
 grpc-server:
-	cargo run --bin parser_grpc_server
+	@# The grpc-server binary refuses to start without EPHEMERAL_FILE (PRS-233).
+	@# For local development we point it at the checked-in test fixture; do NOT
+	@# reuse that fixture in any deployed/published environment.
+	EPHEMERAL_FILE=$(ROOT)/src/integration/fixtures/ephemeral.secret \
+		cargo run --bin parser_grpc_server
 
 .PHONY: parser_gateway
 parser_gateway:

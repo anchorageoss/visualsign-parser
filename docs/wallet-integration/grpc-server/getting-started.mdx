@@ -42,13 +42,22 @@ The parser will be available at `localhost:44020`.
 
 ### Configuration
 
-Set the `EPHEMERAL_FILE` environment variable to specify a custom signing key:
+The `EPHEMERAL_FILE` environment variable is **required**. It must point at the
+P-256 ephemeral signing key file the server should use:
 
 ```bash
 EPHEMERAL_FILE=/path/to/key.secret cargo run --bin parser_grpc_server
 ```
 
-For development, the binary defaults to `integration/fixtures/ephemeral.secret`.
+The binary refuses to start when `EPHEMERAL_FILE` is unset. There is no
+implicit default: a previous release fell back to a key fixture that ships in
+this repo, which let any reader of the repo forge `ParseResponse` signatures
+(PRS-233). Operators must provision a key path explicitly.
+
+For local development only, the `make grpc-server` target sets
+`EPHEMERAL_FILE` to the checked-in test fixture at
+`src/integration/fixtures/ephemeral.secret`. Do not reuse that fixture in any
+deployed environment.
 
 ## Building a Docker image
 
@@ -69,8 +78,10 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/src/target/release/parser_grpc_server /usr/local/bin/
-COPY --from=builder /build/src/integration/fixtures/ephemeral.secret /etc/visualsign/
 
+# EPHEMERAL_FILE must point at an operator-provisioned signing key. Mount it
+# at runtime (e.g. via a Kubernetes Secret or `docker run -v`) and set the
+# env var to its in-container path. The binary refuses to start otherwise.
 ENV EPHEMERAL_FILE=/etc/visualsign/ephemeral.secret
 
 EXPOSE 44020
@@ -78,16 +89,21 @@ EXPOSE 44020
 CMD ["parser_grpc_server"]
 ```
 
-Build and run:
+Build and run, mounting your key file into the container:
 
 ```bash
 docker build -t visualsign-grpc-server .
-docker run -p 44020:44020 visualsign-grpc-server
+docker run -p 44020:44020 \
+    -v /path/to/your/key.secret:/etc/visualsign/ephemeral.secret:ro \
+    visualsign-grpc-server
 ```
 
-<Note>
-For production, generate your own ephemeral key file rather than using the test fixture.
-</Note>
+<Warning>
+Do not bake the checked-in `integration/fixtures/ephemeral.secret` into your
+image. That fixture is public; any reader of the repo can forge signatures
+that look authentic to wallets. Generate your own P-256 key file per
+deployment and provision it via a secrets manager.
+</Warning>
 
 ## Kubernetes deployment
 
