@@ -102,7 +102,12 @@ impl<'a> VisualizerContext<'a> {
 
     /// Set the recursion depth for this context. Returns the modified context
     /// so it can be chained at construction sites: `VisualizerContext::new(...)
-    /// .with_depth(parent.depth() + 1)`.
+    /// .with_depth(parent.depth().saturating_add(1))`.
+    ///
+    /// Use `saturating_add` (not `+`) when deriving from a parent depth: an
+    /// arithmetic `+` overflows `usize` on a pathologically large parent depth
+    /// and wraps to 0 in release builds, which would reintroduce unbounded
+    /// recursion.
     ///
     /// `#[must_use]`: dropping the returned context silently leaves depth at 0,
     /// which would reintroduce unbounded recursion at the next trait boundary.
@@ -127,7 +132,8 @@ impl<'a> VisualizerContext<'a> {
 
     /// Recursion depth of this context. 0 for top-level instructions; child
     /// contexts produced by inner-instruction visualizers should set
-    /// `parent.depth() + 1` via `with_depth`.
+    /// `parent.depth().saturating_add(1)` via `with_depth` (not `+`, which
+    /// can wrap `usize` to 0 in release builds and bypass the recursion bound).
     pub fn depth(&self) -> usize {
         self.depth
     }
