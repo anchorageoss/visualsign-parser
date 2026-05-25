@@ -76,7 +76,9 @@ Full source code available at:
 
 ## Chain support
 
-The token registry ships with metadata for five networks:
+The parser recognizes a broad set of `network_id` values (Ethereum mainnet and testnets, BSC, Polygon, Avalanche, Gnosis, Celo, Fantom, Optimism, Arbitrum, Base, Blast, Mantle, World Chain, zkSync Era, Linea, Scroll, Zora, Unichain, and their testnet variants where applicable). The authoritative list is defined by `network_id_to_chain_id` in [`networks.rs`](https://github.com/anchorageoss/visualsign-parser/blob/main/src/chain_parsers/visualsign-ethereum/src/networks.rs).
+
+Of those, the **built-in token metadata** ships only for five chains:
 
 - `ETHEREUM_MAINNET` (chain ID 1)
 - `POLYGON_MAINNET` (chain ID 137)
@@ -84,7 +86,7 @@ The token registry ships with metadata for five networks:
 - `OPTIMISM_MAINNET` (chain ID 10)
 - `BASE_MAINNET` (chain ID 8453)
 
-Other EVM-compatible chains can be parsed by passing one of these `network_id` values, but token resolution is limited to the addresses known for that chain ID.
+On other recognized chains, the parser still labels the network and decodes calldata; token symbols and decimals come from whatever the wallet supplies in `chain_metadata`. Pass the actual `network_id` for the chain you're parsing; the metadata value overrides the transaction's embedded chain ID, so reusing an unrelated `network_id` will mislabel the network and may affect protocol address matching.
 
 ## Example outputs
 

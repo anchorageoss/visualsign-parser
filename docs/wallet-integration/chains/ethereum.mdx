@@ -35,7 +35,9 @@ resp, err := client.Parse(ctx, request)
 
 The response's `parsed_payload` is a JSON string conforming to the schema documented in [Field Types](/field-types). Display it to the user before signing.
 
-## Supported EVM networks
+## Built-in token metadata coverage
+
+Built-in token metadata (WETH, plus stablecoins on mainnet) is preloaded for these five chains:
 
 | `network_id` | Chain ID |
 |---|---|
@@ -45,9 +47,13 @@ The response's `parsed_payload` is a JSON string conforming to the schema docume
 | `OPTIMISM_MAINNET` | 10 |
 | `BASE_MAINNET` | 8453 |
 
-The `network_id` controls which token registry the parser uses when resolving contract addresses to symbols. If you omit it, the parser uses the chain ID embedded in the transaction (present in EIP-1559 and EIP-155 legacy transactions). It only defaults to mainnet when no chain ID is available from either source, which is only possible for pre-EIP-155 legacy transactions that carry no chain ID. Always set `network_id` explicitly so token resolution is correct regardless of transaction type.
+The parser itself **recognizes many more `network_id` values** (Ethereum testnets, BSC, Avalanche, Gnosis, Celo, Fantom, Blast, Mantle, World Chain, zkSync Era, Linea, Scroll, Zora, Unichain, and L2 testnets) for the purpose of labeling the network and resolving the chain ID. The authoritative list lives in [`src/chain_parsers/visualsign-ethereum/src/networks.rs`](https://github.com/anchorageoss/visualsign-parser/blob/main/src/chain_parsers/visualsign-ethereum/src/networks.rs). The five chains above are the subset that ships with token metadata baked in; on the others, token resolution falls back to whatever the wallet supplies via `chain_metadata`.
 
-Other EVM-compatible chains can be parsed by passing a `network_id` value from the table above whose token set matches your target chain, but token resolution will only cover the addresses known for that chain ID.
+### How `network_id` resolves to a chain ID
+
+The `network_id` you pass in metadata takes priority over the transaction's embedded chain ID (`resolve_chain_id` in `src/chain_parsers/visualsign-ethereum/src/lib.rs`). If both are present and disagree, the parser uses the metadata value and logs a warning. If you omit `network_id`, the parser uses the chain ID embedded in the transaction (present in EIP-1559 and EIP-155 legacy transactions). It only defaults to Ethereum mainnet when no chain ID is available from either source, which is only possible for pre-EIP-155 legacy transactions.
+
+To parse a transaction for a chain outside the five with built-in token metadata, pass the **actual** `network_id` for that chain (e.g. `BSC_MAINNET`, `AVALANCHE_MAINNET`) or omit `network_id` entirely and let the transaction's chain ID drive resolution. **Do not** reuse one of the five token-covered `network_id`s for an unrelated chain: it will mislabel the Network field and may change protocol address matching.
 
 ## What's auto-decoded versus what needs an ABI
 
