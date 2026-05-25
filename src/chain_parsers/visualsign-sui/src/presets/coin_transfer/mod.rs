@@ -419,7 +419,7 @@ mod tests {
                 // Last command terminates on GasCoin so the chain is acyclic;
                 // every other command refers to the next index.
                 let next = if i + 1 < chain_len {
-                    SuiArgument::Result((i + 1) as u16)
+                    SuiArgument::Result(u16::try_from(i + 1).unwrap())
                 } else {
                     SuiArgument::GasCoin
                 };
