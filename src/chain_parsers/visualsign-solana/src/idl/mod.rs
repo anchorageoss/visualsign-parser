@@ -3,6 +3,10 @@
 //! This module provides utilities for managing Anchor IDLs and integrating them
 //! with the solana_parser library for instruction decoding.
 
+pub mod builtin_programs;
+pub mod signature;
+
+use crate::idl::builtin_programs::canonical_name;
 use solana_parser::{CustomIdl, CustomIdlConfig, Idl, ProgramType, decode_idl_data};
 use solana_sdk::pubkey::Pubkey;
 use std::collections::BTreeMap;
@@ -105,29 +109,50 @@ impl IdlRegistry {
 
     /// Get a human-readable program name for known programs with built-in IDLs
     ///
-    /// Returns the program name if found, otherwise returns a truncated program ID
+    /// Returns the program name if found, otherwise returns a truncated program ID.
+    ///
+    /// # Security
+    ///
+    /// Caller-supplied IDL `program_name` values never override the canonical
+    /// name of a trusted built-in program (native runtime programs, core SPL
+    /// programs, or any program shipped with a built-in IDL in `solana_parser`).
+    /// This prevents a compromised wallet from mislabeling, for example, the
+    /// System Program as "Phantom Wallet" via crafted `idl_mappings`
+    /// (see PRS-237).
     pub fn get_program_name(&self, program_id: &Pubkey) -> String {
         let program_id_str = program_id.to_string();
 
-        // First check if we have a custom name for this program
+        // Canonical names for trusted built-ins always win. This is the
+        // primary defence against the PRS-237 mislabeling attack.
+        if let Some(name) = canonical_name(&program_id_str) {
+            return name.to_string();
+        }
+
+        // For non-trusted programs, a caller-supplied name is safe to show
+        // because there is no canonical identity to confuse a signer with.
         if let Some(name) = self.names.get(&program_id_str) {
             return name.clone();
         }
 
-        // Then check built-in IDLs
-        if let Some(program_type) = ProgramType::from_program_id(&program_id_str) {
-            program_type.program_name().to_string()
-        } else {
-            // Unknown program with no IDL or no name
-            format!("Program {}", &program_id_str[..8])
-        }
+        // Unknown program with no IDL or no name
+        format!("Program {}", &program_id_str[..8])
     }
 
     /// Get the IDL name from metadata.name in the IDL JSON
     ///
-    /// Returns the IDL name if found in metadata
+    /// Returns the IDL name if found in metadata.
+    ///
+    /// # Security
+    ///
+    /// For trusted built-in programs this returns `None` regardless of any
+    /// caller-supplied IDL `metadata.name`. The rendered "Program (name: ...)"
+    /// label must not be influenced by untrusted metadata when the program
+    /// has a canonical identity (see PRS-237).
     pub fn get_idl_name(&self, program_id: &Pubkey) -> Option<String> {
         let program_id_str = program_id.to_string();
+        if canonical_name(&program_id_str).is_some() {
+            return None;
+        }
         self.idl_names.get(&program_id_str).cloned()
     }
 
@@ -187,6 +212,84 @@ mod tests {
             registry
                 .get_program_name(&unknown_id)
                 .starts_with("Program")
+        );
+    }
+
+    /// Regression test for PRS-237.
+    ///
+    /// A caller-supplied IDL for the System Program with a custom
+    /// `program_name` must NOT replace the canonical "System Program" label.
+    /// Otherwise an attacker controlling `chain_metadata.solana.idl_mappings`
+    /// could mislabel a trusted program (e.g. as "Phantom Wallet") in the
+    /// rendered signing payload.
+    #[test]
+    fn test_prs237_user_name_does_not_override_system_program() {
+        let system_program_id = "11111111111111111111111111111111";
+        let attacker_idl = r#"{"metadata":{"name":"Phantom Wallet"},"instructions":[]}"#;
+
+        let mut mappings = BTreeMap::new();
+        mappings.insert(
+            system_program_id.to_string(),
+            (attacker_idl.to_string(), "Phantom Wallet".to_string()),
+        );
+
+        let registry = IdlRegistry::from_idl_mappings(mappings).unwrap();
+        let system_pk = Pubkey::from_str(system_program_id).unwrap();
+
+        // The canonical name must win; the attacker-supplied name must not be
+        // returned.
+        assert_eq!(registry.get_program_name(&system_pk), "System Program");
+
+        // The IDL-derived display name must also be suppressed for trusted
+        // built-ins so the "Program (name: ...)" rendering cannot leak the
+        // attacker-controlled string either.
+        assert_eq!(registry.get_idl_name(&system_pk), None);
+    }
+
+    /// Regression test for PRS-237.
+    ///
+    /// Same protection must apply to the 13 programs with built-in IDLs
+    /// shipped by `solana_parser`. Even though those programs have their own
+    /// canonical IDL, the attack vector (an `idl_mappings` override) still
+    /// reaches `get_program_name` via the `unknown_program` preset fallback.
+    #[test]
+    fn test_prs237_user_name_does_not_override_builtin_idl_program() {
+        let jupiter_id = "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB";
+        let attacker_idl = r#"{"metadata":{"name":"Phantom Wallet"}}"#;
+
+        let mut mappings = BTreeMap::new();
+        mappings.insert(
+            jupiter_id.to_string(),
+            (attacker_idl.to_string(), "Phantom Wallet".to_string()),
+        );
+
+        let registry = IdlRegistry::from_idl_mappings(mappings).unwrap();
+        let jupiter_pk = Pubkey::from_str(jupiter_id).unwrap();
+
+        assert_eq!(registry.get_program_name(&jupiter_pk), "Jupiter Swap");
+        assert_eq!(registry.get_idl_name(&jupiter_pk), None);
+    }
+
+    /// A caller-supplied name for a program that has NO canonical identity is
+    /// still allowed to render through. This preserves the legitimate wallet
+    /// use case (label a custom program that the parser has never heard of).
+    #[test]
+    fn test_user_name_allowed_for_untrusted_program() {
+        let custom_id = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+        let custom_idl = r#"{"metadata":{"name":"My Custom Program"},"instructions":[]}"#;
+
+        let mut mappings = BTreeMap::new();
+        mappings.insert(
+            custom_id.to_string(),
+            (custom_idl.to_string(), "My Custom Program".to_string()),
+        );
+
+        let registry = IdlRegistry::from_idl_mappings(mappings).unwrap();
+        let custom_pk = Pubkey::from_str(custom_id).unwrap();
+        assert_eq!(registry.get_program_name(&custom_pk), "My Custom Program");
+        assert_eq!(
+            registry.get_idl_name(&custom_pk),
+            Some("My Custom Program".to_string())
         );
     }
 }

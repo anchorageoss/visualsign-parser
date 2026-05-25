@@ -5,12 +5,22 @@ use crate::core::{
     create_accounts_advanced_preview_layout, decode_accounts, decode_v0_accounts, instructions,
 };
 use crate::idl::IdlRegistry;
+use crate::idl::signature::{convert_proto_signature, validate_idl_signature};
 use base64::{self, Engine};
 use solana_sdk::{
     message::VersionedMessage,
+    pubkey::Pubkey,
     transaction::{Transaction as SolanaTransaction, VersionedTransaction},
 };
 use std::collections::BTreeMap;
+use std::str::FromStr;
+
+/// Maximum size for IDL JSON from proto messages (1 MB).
+///
+/// Mirrors the cap used by the Ethereum ABI metadata path: file-based IDL
+/// loading has a wider 10 MB cap, but proto-supplied IDLs arrive per-request
+/// and are deserialized on the hot path, so we apply a tighter bound here.
+const MAX_IDL_JSON_BYTES: usize = 1_024 * 1_024;
 use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
     encodings::SupportedEncodings,
@@ -116,11 +126,28 @@ impl SolanaTransactionWrapper {
     }
 }
 
-/// Extract IDL mappings from VisualSignOptions metadata
+/// Extract IDL mappings from VisualSignOptions metadata.
 ///
-/// Returns a BTreeMap of program_id (base58 string) -> (IDL JSON string, program name)
+/// Returns a BTreeMap of program_id (base58 string) -> (IDL JSON string, program name).
+///
+/// # Security
+///
+/// Mirrors `visualsign-ethereum::abi_metadata::try_extract_from_chain_metadata`:
+/// 1. The program_id must be a valid base58 Solana `Pubkey`; otherwise the
+///    entry is skipped.
+/// 2. The IDL JSON is rejected if it exceeds `MAX_IDL_JSON_BYTES`.
+/// 3. If `Idl.signature` is present, it must verify (secp256k1 over the IDL
+///    JSON) or the entry is dropped. Unsigned IDLs are still accepted so the
+///    feature degrades gracefully; callers that need mandatory signatures
+///    must enforce that at the API boundary. This addresses PRS-237 by
+///    refusing to plumb attacker-tampered IDL bodies into the registry.
+///
+/// Even if a malicious unsigned entry slips through, the registry's
+/// `get_program_name` / `get_idl_name` will refuse to surface caller-supplied
+/// names for trusted built-in program IDs, so the rendered "Program" field
+/// cannot be mislabeled.
 fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String, String)> {
-    options
+    let Some(mappings) = options
         .metadata
         .as_ref()
         .and_then(|meta| meta.metadata.as_ref())
@@ -131,23 +158,47 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
                 None
             }
         })
-        .map(|mappings| {
-            mappings
-                .iter()
-                .map(|(program_id, idl)| {
-                    // Use program_name from proto if available, otherwise extract from IDL JSON
-                    let name = idl
-                        .program_name
-                        .clone()
-                        .or_else(|| extract_name_from_idl_json(&idl.value))
-                        .unwrap_or_else(|| {
-                            format!("Program {}", &program_id[..8.min(program_id.len())])
-                        });
-                    (program_id.clone(), (idl.value.clone(), name))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    else {
+        return BTreeMap::new();
+    };
+
+    let mut out: BTreeMap<String, (String, String)> = BTreeMap::new();
+    for (program_id, idl) in mappings {
+        // 1. Validate program_id parses as a Solana Pubkey (cheap, fail fast).
+        if Pubkey::from_str(program_id).is_err() {
+            log::warn!("Skipping IDL mapping with invalid program_id '{program_id}'");
+            continue;
+        }
+
+        // 2. Reject oversized IDL JSON before any expensive operation.
+        if idl.value.len() > MAX_IDL_JSON_BYTES {
+            log::warn!(
+                "Skipping IDL mapping for '{program_id}': exceeds size limit ({} bytes > {MAX_IDL_JSON_BYTES})",
+                idl.value.len()
+            );
+            continue;
+        }
+
+        // 3. If a signature is provided it must verify; unsigned IDLs are
+        //    accepted (parity with the Ethereum ABI path).
+        if let Some(proto_sig) = idl.signature.as_ref() {
+            let local_sig = convert_proto_signature(proto_sig);
+            if let Err(e) = validate_idl_signature(&idl.value, &local_sig) {
+                log::warn!(
+                    "Skipping IDL mapping for '{program_id}': signature validation failed: {e}"
+                );
+                continue;
+            }
+        }
+
+        let name = idl
+            .program_name
+            .clone()
+            .or_else(|| extract_name_from_idl_json(&idl.value))
+            .unwrap_or_else(|| format!("Program {}", &program_id[..8.min(program_id.len())]));
+        out.insert(program_id.clone(), (idl.value.clone(), name));
+    }
+    out
 }
 
 /// Extract the program name from an IDL JSON string
@@ -1629,5 +1680,135 @@ mod tests {
                 );
             }
         }
+    }
+
+    // --- PRS-237 regression tests for extract_idl_mappings ---
+
+    fn make_options_with_idl_mapping(
+        program_id: &str,
+        idl: generated::parser::Idl,
+    ) -> VisualSignOptions {
+        // Build the fixture as a `BTreeMap` (crate determinism rule) and let
+        // the call site `.into_iter().collect()` into the proto field's
+        // `HashMap`. Mirrors the Ethereum ABI metadata test helper.
+        let mut idl_mappings: BTreeMap<String, generated::parser::Idl> = BTreeMap::new();
+        idl_mappings.insert(program_id.to_string(), idl);
+        VisualSignOptions {
+            metadata: Some(generated::parser::ChainMetadata {
+                metadata: Some(generated::parser::chain_metadata::Metadata::Solana(
+                    generated::parser::SolanaMetadata {
+                        network_id: Some("SOLANA_MAINNET".to_string()),
+                        idl: None,
+                        idl_mappings: idl_mappings.into_iter().collect(),
+                    },
+                )),
+            }),
+            decode_transfers: false,
+            transaction_name: None,
+            developer_config: None,
+        }
+    }
+
+    /// Unsigned IDL mappings are still accepted (parity with the Ethereum ABI
+    /// path). The trusted-builtin-name protection in `IdlRegistry` is what
+    /// stops the attacker-controlled name from being rendered.
+    #[test]
+    fn test_extract_idl_mappings_accepts_unsigned_idl() {
+        let options = make_options_with_idl_mapping(
+            "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"Custom"},"instructions":[]}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                program_name: Some("Custom".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert_eq!(mappings.len(), 1, "unsigned IDL should be accepted");
+    }
+
+    /// IDL mappings with an invalid program_id (not parseable as a base58
+    /// Solana `Pubkey`) are dropped. Free defence in depth matching the
+    /// Ethereum ABI path's address validation.
+    #[test]
+    fn test_extract_idl_mappings_skips_invalid_program_id() {
+        let options = make_options_with_idl_mapping(
+            "not_a_base58_pubkey",
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"X"}}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                program_name: Some("X".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert!(
+            mappings.is_empty(),
+            "invalid program_id should be skipped, got: {mappings:?}"
+        );
+    }
+
+    /// IDL JSON exceeding `MAX_IDL_JSON_BYTES` is rejected before any
+    /// expensive operation.
+    #[test]
+    fn test_extract_idl_mappings_skips_oversized_idl() {
+        let mut big = String::with_capacity(MAX_IDL_JSON_BYTES + 1024);
+        big.push('"');
+        while big.len() < MAX_IDL_JSON_BYTES + 100 {
+            big.push('x');
+        }
+        big.push('"');
+        let options = make_options_with_idl_mapping(
+            "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+            generated::parser::Idl {
+                value: big,
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                program_name: Some("Custom".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert!(
+            mappings.is_empty(),
+            "oversized IDL should be skipped, got: {mappings:?}"
+        );
+    }
+
+    /// IDL with a signature that fails to verify is dropped. Mirrors the
+    /// Ethereum ABI path so callers that opt in to signing get the same
+    /// "tampered bodies are rejected" guarantee.
+    #[test]
+    fn test_extract_idl_mappings_skips_invalid_signature() {
+        let proto_sig = generated::parser::SignatureMetadata {
+            value: "deadbeef".to_string(),
+            metadata: vec![
+                generated::parser::Metadata {
+                    key: "algorithm".to_string(),
+                    value: "secp256k1".to_string(),
+                },
+                generated::parser::Metadata {
+                    key: "public_key".to_string(),
+                    value: "deadbeef".to_string(),
+                },
+            ],
+        };
+        let options = make_options_with_idl_mapping(
+            "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"Custom"},"instructions":[]}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: Some(proto_sig),
+                program_name: Some("Custom".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert!(
+            mappings.is_empty(),
+            "invalid signature should be skipped, got: {mappings:?}"
+        );
     }
 }

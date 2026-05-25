@@ -23,6 +23,12 @@ spl-stake-pool = "2.0.2"
 solana-system-interface = "1.0"
 spl-token-2022 = "10.0.0"
 spl-token-2022-interface = "2.1.0"
+# IDL signature validation (mirrors the Ethereum ABI path; see
+# `idl/signature.rs` for the secp256k1 verification logic).
+k256 = { version = "0.12", features = ["ecdsa"], default-features = false }
+sha2 = "0.10"
+thiserror = "2.0.12"
+log = "0.4"
 
 [dev-dependencies]
 solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "2146929", features = ["proptest"] }
