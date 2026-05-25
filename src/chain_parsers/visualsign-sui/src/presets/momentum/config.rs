@@ -31,11 +31,6 @@ crate::chain_config! {
                     sqrt_price_limit as SqrtPriceLimit: u128 => 4 => get_sqrt_price_limit,
                 ),
                 repay_flash_swap as RepayFlashSwap => RepayFlashSwapIndexes(),
-                flash_loan as FlashLoan => FlashLoanIndexes(
-                    amount_x as AmountX: u64 => 1 => get_amount_x,
-                    amount_y as AmountY: u64 => 2 => get_amount_y,
-                ),
-                repay_flash_loan as RepayFlashLoan => RepayFlashLoanIndexes(),
                 swap_receipt_debts as SwapReceiptDebts => SwapReceiptDebtsIndexes(),
             },
         }

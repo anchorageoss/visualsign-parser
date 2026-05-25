@@ -55,12 +55,6 @@ impl CommandVisualizer for MomentumVisualizer {
                 TradeFunctions::SwapReceiptDebts => {
                     Ok(Self::handle_trade_swap_receipt_debts(context)?)
                 }
-                TradeFunctions::FlashLoan => {
-                    todo!("Have not found tx for testing yet")
-                }
-                TradeFunctions::RepayFlashLoan => {
-                    todo!("Have not found tx for testing yet")
-                }
             },
         }
     }
@@ -704,7 +698,83 @@ mod tests {
 
     use crate::utils::{payload_from_b64, run_aggregated_fixture};
 
+    use sui_json_rpc_types::SuiArgument;
+    use sui_types::base_types::{ObjectID, SuiAddress};
     use visualsign::test_utils::assert_has_field;
+
+    /// The momentum mainnet package id, mirrored from `momentum/config.rs`.
+    /// Hard-coded here so the regression tests do not depend on the macro-private
+    /// `package_id` literal and remain stable if the config is restructured.
+    const MOMENTUM_MAINNET_PACKAGE_ID: &str =
+        "0xcf60a40f45d46fc1e828871a647c1e25a0915dec860d2662eb10fdb382c3c1d1";
+
+    fn make_move_call_context<'a>(
+        sender: &'a SuiAddress,
+        commands: &'a [SuiCommand],
+        inputs: &'a [sui_json_rpc_types::SuiCallArg],
+    ) -> VisualizerContext<'a> {
+        VisualizerContext::new(sender, 0, commands, inputs)
+    }
+
+    fn momentum_trade_move_call(function: &str) -> SuiCommand {
+        let pwc = SuiProgrammableMoveCall {
+            package: ObjectID::from_hex_literal(MOMENTUM_MAINNET_PACKAGE_ID)
+                .expect("valid momentum package id"),
+            module: "trade".to_string(),
+            function: function.to_string(),
+            type_arguments: vec![],
+            arguments: vec![SuiArgument::Input(0)],
+        };
+        SuiCommand::MoveCall(Box::new(pwc))
+    }
+
+    /// PRS-232 regression: the unsupported `flash_loan` arm previously panicked via
+    /// `todo!()`. After the fix, the momentum config no longer claims to handle this
+    /// function so `can_handle` must return `false` and `visualize_tx_commands` must
+    /// return a structured error instead of panicking.
+    #[test]
+    fn test_momentum_flash_loan_does_not_panic() {
+        let sender = SuiAddress::ZERO;
+        let commands = vec![momentum_trade_move_call("flash_loan")];
+        let inputs: Vec<sui_json_rpc_types::SuiCallArg> = vec![];
+
+        let context = make_move_call_context(&sender, &commands, &inputs);
+        let visualizer = MomentumVisualizer;
+
+        assert!(
+            !visualizer.can_handle(&context),
+            "Momentum must not claim to handle flash_loan after PRS-232"
+        );
+
+        let result = visualizer.visualize_tx_commands(&context);
+        assert!(
+            result.is_err(),
+            "flash_loan visualization must return Err, not panic. Got: {result:?}"
+        );
+    }
+
+    /// PRS-232 regression: same property as `flash_loan` for the paired
+    /// `repay_flash_loan` function. Both arms previously routed to `todo!()`.
+    #[test]
+    fn test_momentum_repay_flash_loan_does_not_panic() {
+        let sender = SuiAddress::ZERO;
+        let commands = vec![momentum_trade_move_call("repay_flash_loan")];
+        let inputs: Vec<sui_json_rpc_types::SuiCallArg> = vec![];
+
+        let context = make_move_call_context(&sender, &commands, &inputs);
+        let visualizer = MomentumVisualizer;
+
+        assert!(
+            !visualizer.can_handle(&context),
+            "Momentum must not claim to handle repay_flash_loan after PRS-232"
+        );
+
+        let result = visualizer.visualize_tx_commands(&context);
+        assert!(
+            result.is_err(),
+            "repay_flash_loan visualization must return Err, not panic. Got: {result:?}"
+        );
+    }
 
     #[test]
     fn test_momentum_remove_liquidity() {
