@@ -412,7 +412,10 @@ mod tests {
         // be present on every response, including parse errors — strict
         // consumers reject responses missing the field outright.
         let resp = error_response("oops".to_string());
-        assert_eq!(resp.boot_proof.aws_attestation_doc_b64, MOCK_BOOT_PROOF_AWS_DOC);
+        assert_eq!(
+            resp.boot_proof.aws_attestation_doc_b64,
+            MOCK_BOOT_PROOF_AWS_DOC
+        );
         assert_eq!(resp.boot_proof.enclave_app, "visualsign-parser");
         assert_eq!(resp.boot_proof.deployment_label, "local-mock");
     }
@@ -429,12 +432,14 @@ mod tests {
         let top_keys: std::collections::BTreeSet<_> =
             value.as_object().unwrap().keys().cloned().collect();
         // Top-level: bootProof, response, error (error only present when set).
-        assert!(top_keys.contains("bootProof"), "missing top-level bootProof");
+        assert!(
+            top_keys.contains("bootProof"),
+            "missing top-level bootProof"
+        );
         assert!(top_keys.contains("response"), "missing top-level response");
 
         let bp = value.get("bootProof").unwrap().as_object().unwrap();
-        let bp_keys: std::collections::BTreeSet<&str> =
-            bp.keys().map(String::as_str).collect();
+        let bp_keys: std::collections::BTreeSet<&str> = bp.keys().map(String::as_str).collect();
         let expected: std::collections::BTreeSet<&str> = [
             "awsAttestationDocB64",
             "qosManifestB64",
