@@ -518,7 +518,7 @@ impl UniversalRouterVisualizer {
             .unwrap_or_else(|| format!("{token_out:?}"));
 
         // Format amounts directly from U256 so values above u128::MAX are surfaced
-        // accurately instead of silently truncated to "0". See PRS-234.
+        // accurately instead of silently truncated to "0".
         let (amount_in_str, _) = registry
             .and_then(|r| r.format_token_amount_u256(chain_id, token_in, amount_in))
             .unwrap_or_else(|| (amount_in.to_string(), token_in_symbol.clone()));
@@ -653,7 +653,7 @@ impl UniversalRouterVisualizer {
         // Convert bips to percentage (10000 bips = 100%).
         // Bips realistically fits in u128 (Uniswap caps at 10_000), but the on-chain
         // type is uint256, so we must surface oversized values rather than silently
-        // displaying "0%" for a transfer that pays out the entire balance. See PRS-234.
+        // displaying "0%" for a transfer that pays out the entire balance.
         let percentage_str = match u128::try_from(params.bips) {
             Ok(bips_value) => {
                 let bips_pct = (bips_value as f64) / 100.0;
@@ -754,7 +754,7 @@ impl UniversalRouterVisualizer {
         // Get WETH address for this chain and format the amount.
         // WETH is registered in the token registry via UniswapConfig::register_common_tokens.
         // Format directly from U256 so values above u128::MAX surface accurately
-        // instead of being silently truncated to "0". See PRS-234.
+        // instead of being silently truncated to "0".
         let amount_min_str =
             crate::protocols::uniswap::config::UniswapConfig::weth_address(chain_id)
                 .and_then(|weth_addr| {
@@ -877,7 +877,7 @@ impl UniversalRouterVisualizer {
             .unwrap_or_else(|| format!("{token_out:?}"));
 
         // Format amounts directly from U256 so values above u128::MAX are surfaced
-        // accurately instead of silently truncated to "0". See PRS-234.
+        // accurately instead of silently truncated to "0".
         let (amount_out_str, _) = registry
             .and_then(|r| r.format_token_amount_u256(chain_id, token_out, amount_out))
             .unwrap_or_else(|| (amount_out.to_string(), token_out_symbol.clone()));
@@ -1042,7 +1042,7 @@ impl UniversalRouterVisualizer {
             .unwrap_or_else(|| format!("{token_out:?}"));
 
         // Format amounts directly from U256 so values above u128::MAX are surfaced
-        // accurately instead of silently truncated to "0". See PRS-234.
+        // accurately instead of silently truncated to "0".
         let (amount_in_str, _) = registry
             .and_then(|r| r.format_token_amount_u256(chain_id, token_in, amount_in))
             .unwrap_or_else(|| (amount_in.to_string(), token_in_symbol.clone()));
@@ -1198,7 +1198,7 @@ impl UniversalRouterVisualizer {
             .unwrap_or_else(|| format!("{token_out:?}"));
 
         // Format amounts directly from U256 so values above u128::MAX are surfaced
-        // accurately instead of silently truncated to "0". See PRS-234.
+        // accurately instead of silently truncated to "0".
         let (amount_out_str, _) = registry
             .and_then(|r| r.format_token_amount_u256(chain_id, token_out, amount_out))
             .unwrap_or_else(|| (amount_out.to_string(), token_out_symbol.clone()));
@@ -1323,7 +1323,7 @@ impl UniversalRouterVisualizer {
         // Format amount with ETH decimals (18).
         // Get WETH address for this chain to use its decimals. Format directly from
         // U256 so values above u128::MAX surface accurately instead of being silently
-        // truncated to "0". See PRS-234.
+        // truncated to "0".
         let amount_min_str =
             crate::protocols::uniswap::config::UniswapConfig::weth_address(chain_id)
                 .and_then(|weth_addr| {
@@ -1375,7 +1375,6 @@ impl UniversalRouterVisualizer {
 
         // Format amount with token decimals directly from U256 so values above
         // u128::MAX are surfaced accurately instead of silently truncated to "0".
-        // See PRS-234.
         let (amount_min_str, _) = registry
             .and_then(|r| r.format_token_amount_u256(chain_id, params.token, params.amountMinimum))
             .unwrap_or_else(|| (params.amountMinimum.to_string(), token_symbol.clone()));
@@ -2810,7 +2809,7 @@ mod tests {
         }
     }
 
-    /// PRS-234 regression: a SWEEP with an `amountMinimum` greater than `u128::MAX`
+    /// Regression: a SWEEP with an `amountMinimum` greater than `u128::MAX`
     /// must not display as "0".
     ///
     /// The previous implementation did
@@ -2853,7 +2852,7 @@ mod tests {
         }
     }
 
-    /// PRS-234 regression: a WRAP_ETH with an `amountMin` greater than `u128::MAX`
+    /// Regression: a WRAP_ETH with an `amountMin` greater than `u128::MAX`
     /// must not display as "0".
     #[test]
     fn test_decode_wrap_eth_amount_above_u128_max_is_not_zero() {

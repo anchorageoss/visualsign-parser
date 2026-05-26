@@ -612,7 +612,7 @@ mod tests {
         assert_eq!(result, Some(("0.000000".to_string(), "USDC".to_string())));
     }
 
-    /// PRS-234 regression: values larger than u128::MAX must not silently render as "0".
+    /// Regression: values larger than u128::MAX must not silently render as "0".
     ///
     /// The previous implementation in `universal_router.rs` did
     /// `value.to_string().parse::<u128>().unwrap_or(0)`, which would turn any U256
@@ -650,7 +650,7 @@ mod tests {
         assert_eq!(amount_str, expected);
     }
 
-    /// PRS-234 regression: U256::MAX must not silently render as "0" either.
+    /// Regression: U256::MAX must not silently render as "0" either.
     #[test]
     fn test_format_token_amount_u256_max_is_not_zero() {
         let mut registry = ContractRegistry::new();
@@ -675,7 +675,7 @@ mod tests {
         );
     }
 
-    /// PRS-234 regression: the U256-aware formatter must agree with the u128 path
+    /// Regression: the U256-aware formatter must agree with the u128 path
     /// for values that fit in u128, so we don't introduce a behavioural difference
     /// on the happy path.
     #[test]
