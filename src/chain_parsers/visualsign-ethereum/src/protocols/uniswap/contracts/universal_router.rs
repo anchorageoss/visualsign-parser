@@ -184,7 +184,7 @@ pub enum Command {
 /// string, which is what the Universal Router uses on-chain to index into the
 /// `inputs` array (`dispatch(commands[i], inputs[i])`). Preserving the raw
 /// index is what keeps the visualizer aligned with the on-chain dispatcher
-/// when any command byte is dropped here (PRS-235).
+/// when any command byte is dropped here (input-index misalignment bug).
 fn map_commands(raw: &[u8]) -> Vec<(usize, Command)> {
     let mut out = Vec::with_capacity(raw.len());
     for (idx, &b) in raw.iter().enumerate() {
@@ -1863,7 +1863,7 @@ mod tests {
         // `inputs[1] = 0x02` (NOT `inputs[0] = 0x01`). Pairing with the
         // post-filter index 0 would show the user `Transfer` decoded from
         // 0x01 while the on-chain dispatcher executes Transfer with the real
-        // 0x02 payload (PRS-235).
+        // 0x02 payload (input-index misalignment when skipping unrecognized bytes).
         let commands = vec![0xff, Command::Transfer as u8];
         let inputs = vec![vec![0x01], vec![0x02]];
         let deadline = 0u64;
@@ -1916,7 +1916,7 @@ mod tests {
 
     #[test]
     fn test_visualize_tx_commands_allow_revert_flag_preserves_alignment() {
-        // PRS-235 regression: the exact attack scenario from the ticket.
+        // Regression: the exact input-index misalignment attack scenario.
         //
         // `0x80` is `FLAG_ALLOW_REVERT | V3SwapExactIn (0x00)`. Today the
         // visualizer does not strip the high bit, so `Command::try_from(0x80)`
