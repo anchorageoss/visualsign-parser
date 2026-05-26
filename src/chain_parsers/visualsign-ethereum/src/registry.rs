@@ -243,7 +243,7 @@ impl ContractRegistry {
 
     /// Address-only lookup across all chains for the canonical-token short-circuit.
     ///
-    /// Used by the dispatcher (PRS-222) for pre-EIP-155 legacy transactions that
+    /// Used by the dispatcher for pre-EIP-155 legacy transactions that
     /// don't carry a chain_id of their own. In that case we deliberately ignore
     /// the resolved chain_id (which is metadata-derived and caller-controlled)
     /// and instead match on address alone: if the destination is a canonical

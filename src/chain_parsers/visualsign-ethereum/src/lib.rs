@@ -561,7 +561,7 @@ fn convert_to_visual_sign_payload(
             }
         }
 
-        // Known-token short-circuit (PRS-222): if the destination is a token
+        // Known-token short-circuit: if the destination is a token
         // registered in the compiled-in ContractRegistry (e.g. USDC, USDT, WETH),
         // dispatch to the safe built-in ERC20/ERC721 visualizer and bypass any
         // caller-supplied ABI. This prevents a malicious dApp from supplying an
@@ -607,8 +607,8 @@ fn convert_to_visual_sign_payload(
                         token_metadata::ErcStandard::Erc721 => {
                             // `ERC721Visualizer::visualize_tx_commands` currently
                             // returns `None` for all inputs (no built-in ERC721
-                            // decoding yet). That's fine for the PRS-222 fix:
-                            // the call below is a no-op, and because
+                            // decoding yet). That's fine: the call below is a
+                            // no-op, and because
                             // `is_known_token` is set we also skip both the
                             // caller-ABI path and the ERC20 `decode_transfers`
                             // fallback below, so the call lands on raw-hex.
@@ -636,7 +636,7 @@ fn convert_to_visual_sign_payload(
         }
 
         // Try dynamic ABI visualization if available. Skipped for known tokens
-        // (see PRS-222 short-circuit above) so caller-supplied ABIs cannot
+        // (see known-token short-circuit above) so caller-supplied ABIs cannot
         // override the safe built-in decoders for canonical tokens.
         if input_fields.is_empty() && !is_known_token {
             if let (Some(to_address), Some(abi_reg)) = (transaction.to(), abi_registry) {
@@ -656,8 +656,8 @@ fn convert_to_visual_sign_payload(
         // `transfer(address,uint256)` share selectors across ERC20/ERC721,
         // so without this guard a known ERC721 (or ERC1155) call would be
         // mis-rendered as an ERC20 op once its own visualizer returns `None`,
-        // contradicting the PRS-222 "canonical-token short-circuit wins over
-        // any other decoder" property.
+        // undermining the "canonical-token short-circuit wins over any other
+        // decoder" property.
         if input_fields.is_empty() && options.decode_transfers && !is_known_token {
             if let Some(field) = (contracts::core::ERC20Visualizer {}).visualize_tx_commands(input)
             {
@@ -905,7 +905,7 @@ mod tests {
         }
     }
 
-    /// PRS-222 regression: caller-supplied ABIs keyed to a known token address
+    /// Regression: caller-supplied ABIs keyed to a known token address
     /// (e.g. USDC) must not override the safe built-in ERC20/ERC721 decoder.
     ///
     /// An attacker who can inject `chain_metadata.abi_mappings` could otherwise
@@ -1068,11 +1068,11 @@ mod tests {
         );
     }
 
-    /// PRS-222 follow-up: the canonical-token short-circuit must key off the
-    /// transaction's own chain id, not the resolved `chain_id` (which gives
-    /// priority to caller-controlled metadata). Otherwise a malicious dApp
-    /// could supply a mismatched `network_id` so the global registry lookup
-    /// misses USDC and the dynamic-ABI path runs again.
+    /// The canonical-token short-circuit must key off the transaction's own
+    /// chain id, not the resolved `chain_id` (which gives priority to
+    /// caller-controlled metadata). Otherwise a malicious dApp could supply a
+    /// mismatched `network_id` so the global registry lookup misses USDC and
+    /// the dynamic-ABI path runs again.
     #[test]
     fn test_known_token_short_circuit_uses_tx_chain_id_not_metadata() {
         let usdc_address: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
@@ -1164,11 +1164,11 @@ mod tests {
         );
     }
 
-    /// PRS-222 round-3: pre-EIP-155 legacy transactions don't carry a chain id
-    /// of their own, so the canonical-token short-circuit must not fall back to
-    /// the resolved (metadata-derived) chain id. Otherwise an attacker can
-    /// supply a legacy tx to USDC's mainnet address with `network_id` pointing
-    /// at a chain where USDC isn't registered, the global lookup misses, and a
+    /// Pre-EIP-155 legacy transactions don't carry a chain id of their own, so
+    /// the canonical-token short-circuit must not fall back to the resolved
+    /// (metadata-derived) chain id. Otherwise an attacker can supply a legacy
+    /// tx to USDC's mainnet address with `network_id` pointing at a chain
+    /// where USDC isn't registered, the global lookup misses, and a
     /// caller-supplied ABI gets to bind to a canonical token. We expect the
     /// dispatcher to do an address-only any-chain lookup in that case.
     #[test]
@@ -1272,9 +1272,9 @@ mod tests {
         );
     }
 
-    /// PRS-222 round-4: a known ERC721 token called with the ERC20/ERC721
-    /// shared `approve(address,uint256)` selector must not be mis-rendered as
-    /// an ERC20 approval. The dispatch order is:
+    /// A known ERC721 token called with the ERC20/ERC721 shared
+    /// `approve(address,uint256)` selector must not be mis-rendered as an ERC20
+    /// approval. The dispatch order is:
     ///
     ///   1. ERC721 short-circuit fires (no built-in ERC721 decoder yet, returns None).
     ///   2. Caller-ABI path skipped (`is_known_token`).
@@ -1283,8 +1283,7 @@ mod tests {
     ///   4. Raw-hex fallback wins.
     ///
     /// Without the `is_known_token` guard on the ERC20 fallback this regresses
-    /// to "ERC20 Approve" output, which is the exact spoofing surface PRS-222
-    /// is closing.
+    /// to "ERC20 Approve" output, which is the spoofing surface this fix closes.
     #[test]
     fn test_known_erc721_token_skips_erc20_fallback_on_shared_selector() {
         // Address-only fixture, the actual contract standard is decided by the
