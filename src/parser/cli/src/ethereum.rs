@@ -74,7 +74,7 @@ fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<Strin
             Ok(())
         },
         |_components, json| {
-            // The metadata-ABI extraction path rejects unsigned entries (PRS-236),
+            // The metadata-ABI extraction path rejects unsigned entries,
             // so the CLI attaches an integrity signature using a deterministic local
             // dev key. This is integrity, not identity, the CLI is a local dev tool
             // that already trusts its input files; production trust comes from the
@@ -215,7 +215,7 @@ mod tests {
             .get("0xdAC17F958D2ee523a2206206994597C13D831ec7")
             .expect("mapping present");
         assert!(abi.value.contains("swap"));
-        // PRS-236: CLI signs locally-loaded ABIs so the metadata-ABI extractor
+        // CLI signs locally-loaded ABIs so the metadata-ABI extractor
         // (which rejects unsigned entries) can register them.
         assert!(
             abi.signature.is_some(),

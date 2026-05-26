@@ -18,7 +18,7 @@ use visualsign_ethereum::EthereumVisualSignConverter;
 use visualsign_ethereum::transaction_string_to_visual_sign;
 
 /// Build a valid proto `SignatureMetadata` for `abi_json` using a deterministic
-/// test key. Unsigned entries are rejected by the parser (PRS-236), so tests
+/// test key. Unsigned entries are rejected by the parser, so tests
 /// that exercise the metadata-ABI path must attach a real signature.
 fn sign_abi_for_test(abi_json: &str) -> SignatureMetadata {
     let seed: [u8; 32] = [0x42u8; 32];

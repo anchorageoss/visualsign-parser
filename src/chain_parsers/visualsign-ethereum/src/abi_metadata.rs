@@ -37,7 +37,7 @@ enum AbiSignatureError {
 /// - **Unsigned ABIs are rejected.** Every ABI mapping must carry a signature;
 ///   entries with `signature: None` are skipped with a warning. Without this check,
 ///   a wallet could supply any ABI for any address and dictate the human-readable
-///   rendering of the call (PRS-236).
+///   rendering of the call.
 /// - **Signature is validated unconditionally** when present, using secp256k1 over
 ///   the SHA-256 hash of the ABI JSON.
 /// - **Any public key is accepted.** Signature validation proves the ABI was not
@@ -76,7 +76,7 @@ pub fn try_extract_from_chain_metadata(
             continue;
         }
 
-        // Reject unsigned ABI entries unconditionally (PRS-236). Allowing
+        // Reject unsigned ABI entries unconditionally. Allowing
         // signature: None would let a wallet supply arbitrary ABIs for any
         // address and steer the human-readable rendering of the call.
         let Some(proto_sig) = abi.signature.as_ref() else {
@@ -223,7 +223,7 @@ pub const CLI_DEV_SIGNING_KEY_SEED: [u8; 32] = [0x42u8; 32];
 /// `SignatureMetadata` ready to drop into `Abi.signature`.
 ///
 /// Used by the CLI to attach an integrity signature to locally-loaded ABI files so
-/// the metadata-ABI extraction path (which rejects unsigned entries per PRS-236) can
+/// the metadata-ABI extraction path (which rejects unsigned entries) can
 /// register them. Signing is over the SHA-256 hash of `abi_json` using secp256k1; the
 /// signature is DER-encoded and hex-stringified, matching the verifier in
 /// [`validate_abi_signature`].
@@ -503,7 +503,7 @@ mod tests {
         assert!(registry.list_abis().contains(&TEST_ADDRESS));
     }
 
-    /// PRS-236 regression: an ABI mapping that omits the signature must be rejected,
+    /// Regression: an ABI mapping that omits the signature must be rejected,
     /// even when the address and ABI JSON are otherwise valid. Without this check a
     /// wallet could supply arbitrary ABIs for any address and dictate the parsed
     /// payload rendering.
@@ -525,7 +525,7 @@ mod tests {
         };
         assert!(
             try_extract_from_chain_metadata(Some(&metadata), 1).is_none(),
-            "unsigned ABI entries must be rejected (PRS-236)"
+            "unsigned ABI entries must be rejected"
         );
     }
 
