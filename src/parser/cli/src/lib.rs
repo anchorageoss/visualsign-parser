@@ -27,6 +27,9 @@ pub mod solana;
 /// Shared test helpers (temp file creation, etc.).
 #[cfg(test)]
 pub(crate) mod test_utils;
+/// Tron-specific CLI handling.
+#[cfg(feature = "tron")]
+pub mod tron;
 /// Resolution of the `--transaction` argument, including curl-style `@` references.
 pub mod tx_input;
 
@@ -62,6 +65,9 @@ pub(crate) fn build_plugins(args: &cli::Args) -> Vec<Box<dyn ChainPlugin>> {
 
     #[cfg(feature = "solana")]
     plugins.push(Box::new(solana::SolanaPlugin::new(args.solana.clone())));
+
+    #[cfg(feature = "tron")]
+    plugins.push(Box::new(tron::TronPlugin::new(args.tron.clone())));
 
     plugins
 }

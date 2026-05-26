@@ -9,6 +9,7 @@ fn chain_string_mapping() -> HashMap<&'static str, Chain> {
     mapping.insert("sui", Chain::Sui);
     mapping.insert("aptos", Chain::Aptos);
     mapping.insert("polkadot", Chain::Polkadot);
+    mapping.insert("tron", Chain::Tron);
     mapping
 }
 

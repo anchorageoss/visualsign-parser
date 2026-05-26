@@ -73,6 +73,8 @@ fn test_cli_with_fixtures() {
         "ethereum",
         #[cfg(not(feature = "solana"))]
         "solana",
+        #[cfg(not(feature = "tron"))]
+        "tron",
     ];
 
     for input_file in test_cases {

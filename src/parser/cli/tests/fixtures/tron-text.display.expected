@@ -1,0 +1,108 @@
+SignablePayload {
+    fields: [
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "Tron",
+                label: "Network",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "Tron",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "2026-05-21 16:34:12 UTC (1779381252000 ms)",
+                label: "Timestamp",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "2026-05-21 16:34:12 UTC (1779381252000 ms)",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "2026-05-22 16:34:12 UTC (1779467652000 ms)",
+                label: "Expiration",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "2026-05-22 16:34:12 UTC (1779467652000 ms)",
+            },
+        },
+        AmountV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0 TRX",
+                label: "Fee Limit",
+            },
+            amount_v2: SignablePayloadFieldAmountV2 {
+                amount: "0",
+                abbreviation: Some(
+                    "TRX",
+                ),
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "049d",
+                label: "Ref Block",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "049d",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0f1beff095be0cfd",
+                label: "Ref Block Hash",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "0f1beff095be0cfd",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "FreezeBalanceV2 (Stake)",
+                label: "Contract Type",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "FreezeBalanceV2 (Stake)",
+            },
+        },
+        AddressV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "TKfvnGvr7YMTBYz8xfx1XfgkWk2JZZgj4s",
+                label: "Owner",
+            },
+            address_v2: SignablePayloadFieldAddressV2 {
+                address: "TKfvnGvr7YMTBYz8xfx1XfgkWk2JZZgj4s",
+                name: "",
+                memo: None,
+                asset_label: "",
+                badge_text: None,
+            },
+        },
+        AmountV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0.000005 TRX",
+                label: "Frozen Balance",
+            },
+            amount_v2: SignablePayloadFieldAmountV2 {
+                amount: "0.000005",
+                abbreviation: Some(
+                    "TRX",
+                ),
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "BANDWIDTH",
+                label: "Resource",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "BANDWIDTH",
+            },
+        },
+    ],
+    payload_type: "TronTx",
+    subtitle: None,
+    title: "Tron Transaction",
+    version: "0",
+}
