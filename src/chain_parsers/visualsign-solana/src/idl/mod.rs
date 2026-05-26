@@ -114,9 +114,9 @@ impl IdlRegistry {
     /// are dropped from the `configs` map and a `warn!` is logged with the offending
     /// `program_id` (a bounded base58 string) so operators can spot attempts in
     /// telemetry. Allowing those overrides would let a caller relabel native SOL
-    /// transfers or SPL Token operations and spoof the signed UI (PRS-223). The
+    /// transfers or SPL Token operations and spoof the signed UI. The
     /// user-provided `program_name` is left in `names` so the separate display-name
-    /// override path (tracked by PRS-237) stays unaffected.
+    /// override path stays unaffected.
     ///
     /// # Returns
     /// * `Ok(IdlRegistry)` with non-builtin custom IDLs configured to override
@@ -139,11 +139,11 @@ impl IdlRegistry {
         for (program_id, (idl_json, program_name)) in idl_mappings {
             // Refuse to let caller-supplied IDLs override built-in decoders.
             // Drop the IDL but keep `program_name` so display-name behavior is
-            // untouched (PRS-237 owns the program_name override question).
+            // untouched.
             if is_builtin_program_id(&program_id) {
                 warn!(
                     program_id = %program_id,
-                    "ignoring caller-supplied IDL for built-in program (PRS-223)"
+                    "ignoring caller-supplied IDL for built-in program"
                 );
                 names.insert(program_id, program_name);
                 continue;
@@ -188,7 +188,7 @@ impl IdlRegistry {
     /// Built-in IDLs always win over caller-supplied ones for protected program
     /// IDs (System Program, SPL Token, ATA, Compute Budget, Memo, every
     /// `solana_parser::ProgramType`, and every preset-registered program).
-    /// See `from_idl_mappings` for the rationale (PRS-223).
+    /// See `from_idl_mappings` for the rationale.
     pub fn has_idl(&self, program_id: &Pubkey) -> bool {
         let program_id_str = program_id.to_string();
 
@@ -236,7 +236,7 @@ impl IdlRegistry {
 
     /// Get the parsed Idl for a program if available
     ///
-    /// Caller-supplied IDLs for built-in program IDs are never returned (PRS-223).
+    /// Caller-supplied IDLs for built-in program IDs are never returned.
     /// Built-in IDLs handled by `solana_parser::ProgramType` are not stored here
     /// and are fetched separately by the upstream parser.
     pub fn get_idl(&self, program_id: &str) -> Option<Idl> {
@@ -300,9 +300,8 @@ mod tests {
         );
     }
 
-    /// Sanity check: the protected set covers every program ID listed in the
-    /// PRS-223 ticket and matches what we expect to enumerate from the
-    /// presets + ProgramType sources.
+    /// Sanity check: the protected set covers every program ID we expect to
+    /// enumerate from the presets + ProgramType sources.
     #[test]
     fn test_protected_program_ids_contains_expected_builtins() {
         let protected = protected_program_ids();
@@ -320,7 +319,7 @@ mod tests {
     }
 
     /// Caller-supplied IDLs targeting the System Program must be dropped at
-    /// registry construction. This is the core PRS-223 invariant.
+    /// registry construction. This is the core built-in protection invariant.
     #[test]
     fn test_from_idl_mappings_drops_system_program_override() {
         let mut mappings = BTreeMap::new();

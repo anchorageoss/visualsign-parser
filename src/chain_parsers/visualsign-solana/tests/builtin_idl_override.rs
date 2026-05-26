@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! Regression tests for PRS-223: caller-supplied IDLs must NOT override
-//! built-in decoders for native Solana programs (System, SPL Token, ATA, ...)
-//! or for programs that ship a built-in IDL via `solana_parser::ProgramType`.
+//! Regression tests: caller-supplied IDLs must NOT override built-in decoders
+//! for native Solana programs (System, SPL Token, ATA, ...) or for programs
+//! that ship a built-in IDL via `solana_parser::ProgramType`.
 //!
 //! Each test submits a malicious IDL keyed to a built-in program ID, parses
 //! a real instruction for that program, and asserts that the built-in
@@ -78,9 +78,9 @@ fn build_system_transfer_tx(from: Pubkey, to: Pubkey, lamports: u64) -> SolanaTr
     SolanaTransaction::new_unsigned(Message::new(&[ix], Some(&from)))
 }
 
-/// PRS-223 core regression: an attacker submits an IDL keyed to the System
-/// Program (11111111111111111111111111111111) that relabels the transfer
-/// instruction. The wallet must still display the real built-in System
+/// Core regression: an attacker submits an IDL keyed to the System Program
+/// (11111111111111111111111111111111) that relabels the transfer instruction.
+/// The wallet must still display the real built-in System
 /// "Transfer: N lamports" view, not the attacker's labels.
 #[test]
 fn caller_idl_does_not_override_system_program_transfer() {
@@ -130,22 +130,22 @@ fn caller_idl_does_not_override_system_program_transfer() {
     // Attacker-controlled strings must NOT appear anywhere in the payload.
     assert!(
         !payload_text_contains(&payload, "ATTACKER_FAKE_TRANSFER"),
-        "attacker instruction name leaked into payload (PRS-223 regression)"
+        "attacker instruction name leaked into payload"
     );
     assert!(
         !payload_text_contains(&payload, "ATTACKER_AMOUNT_FIELD"),
-        "attacker arg name leaked into payload (PRS-223 regression)"
+        "attacker arg name leaked into payload"
     );
     assert!(
         !payload_text_contains(&payload, "ATTACKER_IDL_NAME"),
-        "attacker IDL metadata name leaked into payload (PRS-223 regression)"
+        "attacker IDL metadata name leaked into payload"
     );
 }
 
-/// PRS-223 also covers programs whose only built-in decoder is the IDL that
+/// Also covers programs whose only built-in decoder is the IDL that
 /// `solana_parser::ProgramType` ships (Drift, Raydium, etc.). For these,
-/// pre-fix the attacker IDL flowed through `unknown_program -> has_idl ->
-/// get_idl` and was used in place of the built-in. Post-fix, the registry
+/// the attacker IDL would flow through `unknown_program -> has_idl ->
+/// get_idl` and be used in place of the built-in. The registry now
 /// refuses to surface the attacker's IDL even via `get_idl`.
 #[test]
 fn caller_idl_does_not_override_program_type_idl_for_drift() {
@@ -175,11 +175,11 @@ fn caller_idl_does_not_override_program_type_idl_for_drift() {
     // (built-in IDL, raw fallback, etc.) ends up rendering.
     assert!(
         !payload_text_contains(&payload, "DRIFT_FAKE_INSTRUCTION"),
-        "attacker instruction name leaked for Drift (PRS-223 regression)"
+        "attacker instruction name leaked for Drift"
     );
     assert!(
         !payload_text_contains(&payload, "DRIFT_ATTACKER_NAME"),
-        "attacker IDL metadata name leaked for Drift (PRS-223 regression)"
+        "attacker IDL metadata name leaked for Drift"
     );
 }
 
