@@ -358,9 +358,9 @@ mod tests {
         );
     }
 
-    // Regression tests for PRS-220: resolve_object used to recurse without a
-    // depth bound or cycle check on the attacker-controlled command_index,
-    // letting a crafted Sui tx blow the worker stack and abort the parser.
+    // Regression tests for unbounded resolve_object recursion: resolve_object used
+    // to recurse without a depth bound or cycle check on the attacker-controlled
+    // command_index, letting a crafted Sui tx blow the worker stack and abort the parser.
 
     #[test]
     fn test_resolve_object_self_cycle_returns_error() {
