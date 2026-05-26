@@ -920,8 +920,8 @@ impl SignablePayload {
         // chain parser's instruction display). 30+ trusted call sites across
         // the chain converters emit it deliberately. Rejecting it here would
         // break legitimate output. Attacker-controlled strings destined for
-        // field text must instead be sanitized at the insertion site (PRS-231
-        // follow-up tracks the remaining sinks, e.g. Tron `parameter.type_url`).
+        // field text must instead be sanitized at the insertion site (remaining
+        // sinks, e.g. Tron `parameter.type_url`, tracked separately).
         //
         // List order has no runtime effect: every match returns the same
         // generic `ValidationError`, so which entry fires first is not
@@ -2704,12 +2704,12 @@ mod tests {
         )
     }
 
-    /// Regression test for PRS-231: `validate_charset` must reject JSON
-    /// short-form control escapes (`\t`, `\r`, `\b`, `\f`) that the
-    /// `serde_json` CompactFormatter emits for control bytes in field text.
-    /// Each of these survives `is_ascii() && (is_ascii_graphic() ||
-    /// is_ascii_whitespace())` on the serialized JSON but smuggles a real
-    /// control byte into the wallet's decoded display string.
+    /// `validate_charset` must reject JSON short-form control escapes (`\t`,
+    /// `\r`, `\b`, `\f`) that the `serde_json` CompactFormatter emits for
+    /// control bytes in field text. Each of these survives
+    /// `is_ascii() && (is_ascii_graphic() || is_ascii_whitespace())` on the
+    /// serialized JSON but smuggles a real control byte into the wallet's
+    /// decoded display string.
     ///
     /// `\n` is intentionally excluded, see
     /// `test_validate_charset_accepts_newline_in_text`: it is the wallet's
@@ -2750,10 +2750,10 @@ mod tests {
         }
     }
 
-    /// Regression test for PRS-231: reject `\"` (escaped double-quote) and
-    /// `\\` (escaped backslash) in serialized JSON. Embedded `"` / `\` in
-    /// display text can splice structural characters past a downstream JSON
-    /// parser or break out of single-line UI rendering.
+    /// `validate_charset` must reject `\"` (escaped double-quote) and `\\`
+    /// (escaped backslash) in serialized JSON. Embedded `"` / `\` in display
+    /// text can splice structural characters past a downstream JSON parser or
+    /// break out of single-line UI rendering.
     #[test]
     fn test_validate_charset_rejects_quote_and_backslash_escapes() {
         let cases: &[(&str, &str)] = &[
@@ -2773,9 +2773,9 @@ mod tests {
         }
     }
 
-    /// Regression test for PRS-231: pins that the validator rejects
-    /// serialized JSON containing the literal substring `\/`. The
-    /// `serde_json::CompactFormatter` does not currently emit `\/`, so this
+    /// `validate_charset` must reject serialized JSON containing the literal
+    /// substring `\/`. The `serde_json::CompactFormatter` does not currently
+    /// emit `\/`, so this
     /// test can't trigger that path through `to_json()` alone (a literal
     /// backslash in field text serializes as `\\`, which contains `\/` as a
     /// substring only if a `/` happens to follow it). The `\/` entry is
@@ -2806,9 +2806,8 @@ mod tests {
         assert!(matches!(err, VisualSignError::ValidationError(_)));
     }
 
-    /// Regression test for PRS-231: the pre-existing `\u` rule must keep
-    /// rejecting unicode escape sequences (non-ASCII code points serialize
-    /// as `\uXXXX`).
+    /// The pre-existing `\u` rule must keep rejecting unicode escape sequences
+    /// (non-ASCII code points serialize as `\uXXXX`).
     #[test]
     fn test_validate_charset_still_rejects_unicode_escape() {
         let payload = payload_with_text("caf\u{00E9}"); // "café"
