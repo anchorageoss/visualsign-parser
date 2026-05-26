@@ -86,10 +86,15 @@ import { secp256k1 } from "@noble/curves/secp256k1";
 const abiJson = JSON.stringify(abi); // canonical form; no reformat after signing
 const digest = createHash("sha256").update(abiJson).digest();
 
-const privateKey = /* your signing key, kept offline */;
-const sig = secp256k1.sign(digest, privateKey, { prehash: false }); // DER form
-console.log(sig.toDERHex());
-console.log(Buffer.from(secp256k1.getPublicKey(privateKey, false)).toString("hex"));
+// 32-byte secp256k1 private key, hex-encoded. Keep this offline; substitute your own.
+const privateKey = "0000000000000000000000000000000000000000000000000000000000000001";
+
+// sign() returns a Signature object. Call toDERHex() to get the DER-encoded hex you ship.
+const sig = secp256k1.sign(digest, privateKey, { prehash: false });
+const signatureDerHex = sig.toDERHex();
+const publicKeyHex = Buffer.from(secp256k1.getPublicKey(privateKey, false)).toString("hex");
+
+console.log({ signatureDerHex, publicKeyHex });
 ```
 
 Then ship the ABI, the signature, and the public key together so wallets can build the `Abi` message:
