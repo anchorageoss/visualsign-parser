@@ -446,7 +446,6 @@ impl UniversalRouterVisualizer {
 
         // Decode V3 path. For multi-hop paths, the output token MUST be read from the
         // FINAL 20 bytes, not from offset 23..43 (which is the first intermediate token).
-        // See PRS-229.
         let (token_in, token_out, fee, hops) = match Self::decode_v3_path(&path) {
             Some(decoded) => decoded,
             None => {
@@ -794,7 +793,6 @@ impl UniversalRouterVisualizer {
 
         // Decode V3 path. For multi-hop paths, the output token MUST be read from the
         // FINAL 20 bytes, not from offset 23..43 (which is the first intermediate token).
-        // See PRS-229.
         let (token_in, token_out, fee, hops) = match Self::decode_v3_path(&path) {
             Some(decoded) => decoded,
             None => {
@@ -2320,7 +2318,7 @@ mod tests {
 
     #[test]
     fn test_decode_v3_path_multi_hop_reads_final_token() {
-        // PRS-229 regression: the output token must be the LAST 20 bytes, not path[23..43].
+        // Regression: the output token must be the LAST 20 bytes, not path[23..43].
         let token_in: Address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             .parse()
             .unwrap();
@@ -2387,7 +2385,7 @@ mod tests {
 
     #[test]
     fn test_decode_v3_swap_exact_in_multi_hop_displays_final_token() {
-        // PRS-229 end-to-end: the Output Token subfield must reflect the final token
+        // End-to-end: the Output Token subfield must reflect the final token
         // for a multi-hop V3 path, not the first intermediate.
         let recipient: Address = "0x1111111111111111111111111111111111111111"
             .parse()
@@ -2459,7 +2457,7 @@ mod tests {
 
     #[test]
     fn test_decode_v3_swap_exact_out_multi_hop_displays_final_token() {
-        // PRS-229 end-to-end for the exact-out variant.
+        // End-to-end for the exact-out variant.
         let recipient: Address = "0x1111111111111111111111111111111111111111"
             .parse()
             .unwrap();
