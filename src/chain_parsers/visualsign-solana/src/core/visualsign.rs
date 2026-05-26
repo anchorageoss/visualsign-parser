@@ -355,7 +355,7 @@ fn convert_versioned_to_visual_sign_payload(
 /// program_id or account that lives behind an address lookup table, or that
 /// is out of range entirely.
 ///
-/// Rationale (PRS-226): VisualSign converts raw bytes; it has no RPC and cannot
+/// Rationale: VisualSign converts raw bytes; it has no RPC and cannot
 /// resolve ALT entries. Without resolution, the only safe choice is to refuse
 /// to render -- otherwise the displayed payload would omit instructions or
 /// account references that the validator will still execute, and a malicious
@@ -508,7 +508,7 @@ fn convert_v0_to_visual_sign_payload(
     options: &VisualSignOptions,
     #[cfg(feature = "diagnostics")] lint_config: &visualsign::lint::LintConfig,
 ) -> Result<SignablePayload, VisualSignError> {
-    // SECURITY (PRS-226): the parser does not perform on-chain ALT resolution,
+    // SECURITY: the parser does not perform on-chain ALT resolution,
     // so any instruction or account that references an entry in
     // `address_table_lookups` is unresolvable here. Historically those
     // references were silently dropped from the displayed payload, letting an
@@ -1362,11 +1362,11 @@ mod tests {
         );
     }
 
-    // Regression tests for PRS-226: a V0 transaction that references an
+    // Regression tests: a V0 transaction that references an
     // address lookup table entry (program_id or account index past the static
     // keys, while `address_table_lookups` is non-empty) MUST be rejected, not
     // silently rendered with the ALT-resolved data missing.
-    mod prs_226_alt_rejection {
+    mod v0_alt_rejection {
         use super::*;
         use solana_sdk::instruction::CompiledInstruction;
         use solana_sdk::message::MessageHeader;
@@ -1602,13 +1602,13 @@ mod tests {
             let msg = make_v0(vec![key0], vec![ix], vec![]);
             // We don't assert success vs. failure of conversion here (other
             // unrelated decode paths may still error on malformed input); we
-            // only assert it isn't being caught by the PRS-226 reject branch,
+            // only assert it isn't being caught by the ALT-rejection branch,
             // which would produce the new "Cannot render V0 transaction"
             // message.
             if let Err(VisualSignError::DecodeError(text)) = convert(&msg) {
                 assert!(
                     !text.contains("Cannot render V0 transaction"),
-                    "malformed-without-ALT path must not hit PRS-226 reject branch: {text}"
+                    "malformed-without-ALT path must not hit ALT-rejection branch: {text}"
                 );
             }
         }
