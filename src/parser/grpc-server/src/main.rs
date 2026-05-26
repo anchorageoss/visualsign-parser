@@ -144,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Refuse to start without an explicit ephemeral key path. The repo ships a
     // P-256 fixture under `src/integration/fixtures/ephemeral.secret`; falling
     // back to it would mean every default deployment signs with a key any
-    // reader of the repo can forge (PRS-233). Operators must opt in via
+    // reader of the repo can forge. Operators must opt in via
     // EPHEMERAL_FILE.
     let ephemeral_file = resolve_ephemeral_file(std::env::var(EPHEMERAL_FILE_ENV))?;
 

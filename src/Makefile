@@ -132,7 +132,7 @@ parser_host:
 
 .PHONY: grpc-server
 grpc-server:
-	@# The grpc-server binary refuses to start without EPHEMERAL_FILE (PRS-233).
+	@# The grpc-server binary refuses to start without EPHEMERAL_FILE.
 	@# For local development we point it at the checked-in test fixture; do NOT
 	@# reuse that fixture in any deployed/published environment.
 	EPHEMERAL_FILE=$(ROOT)/src/integration/fixtures/ephemeral.secret \
