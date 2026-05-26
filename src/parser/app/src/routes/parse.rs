@@ -176,7 +176,7 @@ mod tests {
     }
 
     // ----------------------------------------------------------------------
-    // PRS-230 regression test infrastructure
+    // Charset-bypass regression test infrastructure
     // ----------------------------------------------------------------------
     //
     // The fix under test is: `parse_with_registry` must invoke
@@ -320,7 +320,7 @@ mod tests {
         }
     }
 
-    /// PRS-230 regression: when the converter overrides
+    /// Regression: when the converter overrides
     /// `to_visual_sign_payload_from_string` to bypass charset validation (as
     /// the production Ethereum converter does), `parse_with_registry` must
     /// still reject payloads containing non-ASCII characters before signing.
@@ -372,7 +372,7 @@ mod tests {
         assert!(response.parsed_transaction.is_some());
     }
 
-    /// PRS-230 regression: covers a second bypass surface. `StubConverter`
+    /// Regression: covers a second bypass surface. `StubConverter`
     /// uses the default `to_visual_sign_payload_from_string` impl but
     /// overrides `to_validated_visual_sign_payload` to skip the inner
     /// `validate_charset` call. Without the unconditional check in
