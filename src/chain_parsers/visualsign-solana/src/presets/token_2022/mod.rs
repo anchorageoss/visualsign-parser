@@ -605,7 +605,7 @@ mod tests {
         data
     }
 
-    /// Regression for PRS-221: a crafted `MintToChecked` instruction with
+    /// Regression: a crafted `MintToChecked` instruction with
     /// `decimals = 100` used to cause the parser to compute `10_u64.pow(100)`,
     /// which wraps to `0` and triggers a divide-by-zero panic in
     /// `format_token_amount`. The fix is to reject any `decimals` value above

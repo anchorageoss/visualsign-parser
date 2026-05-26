@@ -180,7 +180,7 @@ mod tests {
         assert_eq!(format_token_amount(0, 64), "0");
     }
 
-    /// Regression for PRS-221: decimals >= 20 must not trigger a divide-by-zero
+    /// Regression: decimals >= 20 must not trigger a divide-by-zero
     /// panic. `10_u64.pow(20)` overflows in debug and wraps in release; for
     /// `decimals == 64` the wrapped value is exactly `0` because `10^64 mod
     /// 2^64 == 0`, which used to panic on division.
