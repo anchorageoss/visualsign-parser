@@ -399,7 +399,7 @@ fn decode_transaction(
 /// Resolve chain ID. The chain_id encoded in the transaction bytes is
 /// authoritative: if `chain_metadata.network_id` is also provided and resolves
 /// to a different chain, we refuse to render so the payload can never bind a
-/// "Network: X" label to bytes that execute on chain Y (see PRS-225).
+/// "Network: X" label to bytes that execute on chain Y.
 ///
 /// Order of precedence:
 /// 1. If the transaction carries a chain_id, that wins. Metadata may agree

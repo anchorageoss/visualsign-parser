@@ -263,15 +263,13 @@ fn test_abi_from_metadata_decodes_function() {
     );
 }
 
-/// Regression test for PRS-225.
-///
-/// A wallet-supplied `chain_metadata.network_id` must not override the chain_id
-/// encoded in the transaction bytes. If the two disagree, the parser refuses to
-/// produce a payload. Otherwise an attacker could trick a wallet into displaying
-/// "Polygon, 1 POL" while the transaction bytes actually transfer 1 ETH on
-/// Ethereum mainnet.
+/// Regression test: a wallet-supplied `chain_metadata.network_id` must not
+/// override the chain_id encoded in the transaction bytes. If the two disagree,
+/// the parser refuses to produce a payload. Otherwise an attacker could trick a
+/// wallet into displaying "Polygon, 1 POL" while the transaction bytes actually
+/// transfer 1 ETH on Ethereum mainnet.
 #[test]
-fn test_chain_id_mismatch_rejected_prs_225() {
+fn test_chain_id_mismatch_rejected() {
     // Transaction bytes declare chain_id = 1 (Ethereum mainnet).
     let tx = TxEip1559 {
         chain_id: 1,
@@ -329,11 +327,11 @@ fn test_chain_id_mismatch_rejected_prs_225() {
     );
 }
 
-/// Sibling to `test_chain_id_mismatch_rejected_prs_225`: when metadata agrees
-/// with the chain_id declared in the transaction bytes, parsing succeeds.
-/// Guards against an over-eager rejection regression.
+/// Sibling to `test_chain_id_mismatch_rejected`: when metadata agrees with the
+/// chain_id declared in the transaction bytes, parsing succeeds. Guards against
+/// an over-eager rejection regression.
 #[test]
-fn test_chain_id_matching_metadata_succeeds_prs_225() {
+fn test_chain_id_matching_metadata_succeeds() {
     let tx = TxEip1559 {
         chain_id: 137,
         nonce: 0,
