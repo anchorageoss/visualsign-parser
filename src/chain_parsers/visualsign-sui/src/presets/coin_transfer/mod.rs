@@ -137,7 +137,7 @@ fn resolve_amount(
 
     // `object_argument` is a `Result(N)`. Use the result-specific helper so the
     // command index is extracted explicitly, never silently coerced via the
-    // input-index path (PRS-227).
+    // input-index path.
     let command = commands
         .get(parse_result_command_index(object_argument)? as usize)
         .ok_or(VisualSignError::MissingData("Command not found".into()))?;

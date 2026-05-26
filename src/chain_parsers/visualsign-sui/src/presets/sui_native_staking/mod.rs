@@ -199,7 +199,7 @@ fn get_stake_amount(
     // argument must be a `SuiArgument::Result(N)` whose `N` indexes the
     // commands vector. Using `parse_result_command_index` keeps the semantic
     // distinction explicit and prevents `Input(N)` from being silently
-    // dereferenced against the commands vector (PRS-227).
+    // dereferenced against the commands vector.
     let stake_arg = args
         .get(1)
         .copied()

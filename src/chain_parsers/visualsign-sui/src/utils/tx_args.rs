@@ -7,7 +7,7 @@ use visualsign::errors::VisualSignError;
 /// Only `SuiArgument::Input(N)` is accepted, since the returned `u16` is used
 /// downstream to index the PTB inputs vector. `SuiArgument::Result(N)` refers
 /// to the output of a previous command and must not be silently coerced to an
-/// inputs-vector index (see PRS-227).
+/// inputs-vector index.
 pub fn get_index(sui_args: &[SuiArgument], index: Option<usize>) -> Result<u16, VisualSignError> {
     let arg: &SuiArgument = match index {
         Some(i) => sui_args
@@ -49,7 +49,7 @@ pub fn get_nested_result_value(
 /// `SuiArgument::Result(N)` is rejected because `Result(N)` references the
 /// output of a prior command, not a slot in the PTB inputs vector. Conflating
 /// the two lets a crafted PTB display an attacker-chosen inputs entry while
-/// on-chain execution uses the (unrelated) result value (PRS-227).
+/// on-chain execution uses the (unrelated) result value.
 ///
 /// Callers that legitimately want the command index inside `Result(N)` (for
 /// indexing the commands vector, not the inputs vector) must use
@@ -72,7 +72,7 @@ pub fn parse_numeric_argument(arg: SuiArgument) -> Result<u16, VisualSignError> 
 ///
 /// The returned `u16` indexes the PTB commands vector (the producer of the
 /// referenced result), never the inputs vector. Errors for any other variant
-/// so callers cannot accidentally substitute an input index (PRS-227).
+/// so callers cannot accidentally substitute an input index.
 pub fn parse_result_command_index(arg: SuiArgument) -> Result<u16, VisualSignError> {
     match arg {
         SuiArgument::Result(command_index) => Ok(command_index),
@@ -130,8 +130,8 @@ mod tests {
         assert_eq!(parsed, 7);
     }
 
-    /// Regression for PRS-227: `Result(N)` must never be silently coerced to
-    /// an inputs-vector index. `Input(N)` and `Result(N)` are semantically
+    /// Regression: `Result(N)` must never be silently coerced to an
+    /// inputs-vector index. `Input(N)` and `Result(N)` are semantically
     /// distinct and downstream lookups treat the returned index as an inputs
     /// slot.
     #[test]
@@ -171,12 +171,11 @@ mod tests {
         ));
     }
 
-    /// Regression for PRS-227: `get_object_value` must not return the
-    /// inputs-vector entry when the argument is `Result(N)`. Previously the
-    /// `Result(N)` branch was conflated with `Input(N)`, letting an attacker
-    /// craft a PTB where the displayed pool address was `sui_inputs[N]`
-    /// (attacker-chosen) while on-chain execution used the unrelated output
-    /// of a prior command.
+    /// Regression: `get_object_value` must not return the inputs-vector entry
+    /// when the argument is `Result(N)`. Previously the `Result(N)` branch was
+    /// conflated with `Input(N)`, letting an attacker craft a PTB where the
+    /// displayed pool address was `sui_inputs[N]` (attacker-chosen) while
+    /// on-chain execution used the unrelated output of a prior command.
     #[test]
     fn get_object_value_distinguishes_result_from_input() {
         let benign_object = ObjectID::random();
