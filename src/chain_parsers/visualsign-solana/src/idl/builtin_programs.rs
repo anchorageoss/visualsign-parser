@@ -12,7 +12,7 @@
 //! name returned here as authoritative. User-supplied `program_name` values
 //! from `idl_mappings` must NOT replace a canonical name -- doing so would
 //! allow a compromised wallet to mislabel a trusted program in the rendered
-//! "Program" field of the signing payload (see PRS-237).
+//! "Program" field of the signing payload.
 
 use solana_parser::ProgramType;
 

@@ -142,7 +142,7 @@ impl SolanaTransactionWrapper {
 ///    decoding (argument names, account names, value formatting), so an
 ///    attacker-supplied IDL for the System Program could relabel `lamports`
 ///    or hide the destination via the `unknown_program` IDL decode path.
-///    Refusing the body closes that gap (see PRS-237).
+///    Refusing the body closes that gap.
 /// 3. The IDL JSON is rejected if it exceeds `MAX_IDL_JSON_BYTES`.
 /// 4. If `Idl.signature` is present, it must verify (secp256k1 ECDSA over
 ///    `SHA-256(idl_json)` via `PrehashVerifier::verify_prehash`) or the entry
@@ -150,9 +150,9 @@ impl SolanaTransactionWrapper {
 ///    IDL JSON bytes and sign that 32-byte prehash, matching
 ///    `visualsign-ethereum::abi_metadata`. Unsigned IDLs are still accepted
 ///    so the feature degrades gracefully; callers that need mandatory
-///    signatures must enforce that at the API boundary. This addresses
-///    PRS-237 by refusing to plumb attacker-tampered IDL bodies into the
-///    registry.
+///    signatures must enforce that at the API boundary. Unsigned IDLs are
+///    still accepted so the feature degrades gracefully; this check refuses
+///    to plumb attacker-tampered IDL bodies into the registry.
 fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String, String)> {
     let Some(mappings) = options
         .metadata
@@ -181,7 +181,7 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
         //    guard in `IdlRegistry` blocks attacker-controlled labels, but the
         //    IDL body still drives instruction decoding (arg/account names,
         //    value formatting). Refusing the body for trusted programs closes
-        //    that gap (PRS-237).
+        //    that gap.
         if let Some(canonical) = canonical_name(program_id) {
             tracing::warn!(
                 "Skipping IDL mapping for '{program_id}': override refused for trusted built-in '{canonical}'"
@@ -1701,7 +1701,7 @@ mod tests {
         }
     }
 
-    // --- PRS-237 regression tests for extract_idl_mappings ---
+    // --- regression tests for extract_idl_mappings ---
 
     fn make_options_with_idl_mapping(
         program_id: &str,

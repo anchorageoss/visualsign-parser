@@ -60,7 +60,7 @@ impl IdlRegistry {
     /// with a canonical identity. The attacker-controlled body would otherwise
     /// drive instruction decoding (arg/account names, value formatting) via
     /// the `unknown_program` IDL path even though the displayed program name
-    /// is canonical (see PRS-237). The upstream `extract_idl_mappings` filter
+    /// is canonical. The upstream `extract_idl_mappings` filter
     /// is the primary defence; this filter is a registry-level invariant in
     /// case a future caller bypasses extraction.
     pub fn from_idl_mappings(
@@ -137,13 +137,12 @@ impl IdlRegistry {
     /// name of a trusted built-in program (native runtime programs, core SPL
     /// programs, or any program shipped with a built-in IDL in `solana_parser`).
     /// This prevents a compromised wallet from mislabeling, for example, the
-    /// System Program as "Phantom Wallet" via crafted `idl_mappings`
-    /// (see PRS-237).
+    /// System Program as "Phantom Wallet" via crafted `idl_mappings`.
     pub fn get_program_name(&self, program_id: &Pubkey) -> String {
         let program_id_str = program_id.to_string();
 
         // Canonical names for trusted built-ins always win. This is the
-        // primary defence against the PRS-237 mislabeling attack.
+        // primary defence against caller-controlled mislabeling.
         if let Some(name) = canonical_name(&program_id_str) {
             return name.to_string();
         }
@@ -167,7 +166,7 @@ impl IdlRegistry {
     /// For trusted built-in programs this returns `None` regardless of any
     /// caller-supplied IDL `metadata.name`. The rendered "Program (name: ...)"
     /// label must not be influenced by untrusted metadata when the program
-    /// has a canonical identity (see PRS-237).
+    /// has a canonical identity.
     pub fn get_idl_name(&self, program_id: &Pubkey) -> Option<String> {
         let program_id_str = program_id.to_string();
         if canonical_name(&program_id_str).is_some() {
@@ -235,15 +234,13 @@ mod tests {
         );
     }
 
-    /// Regression test for PRS-237.
-    ///
     /// A caller-supplied IDL for the System Program with a custom
     /// `program_name` must NOT replace the canonical "System Program" label.
     /// Otherwise an attacker controlling `chain_metadata.solana.idl_mappings`
     /// could mislabel a trusted program (e.g. as "Phantom Wallet") in the
     /// rendered signing payload.
     #[test]
-    fn test_prs237_user_name_does_not_override_system_program() {
+    fn test_caller_name_does_not_override_system_program() {
         let system_program_id = "11111111111111111111111111111111";
         let attacker_idl = r#"{"metadata":{"name":"Phantom Wallet"},"instructions":[]}"#;
 
@@ -266,14 +263,12 @@ mod tests {
         assert_eq!(registry.get_idl_name(&system_pk), None);
     }
 
-    /// Regression test for PRS-237.
-    ///
     /// Same protection must apply to the 13 programs with built-in IDLs
     /// shipped by `solana_parser`. Even though those programs have their own
     /// canonical IDL, the attack vector (an `idl_mappings` override) still
     /// reaches `get_program_name` via the `unknown_program` preset fallback.
     #[test]
-    fn test_prs237_user_name_does_not_override_builtin_idl_program() {
+    fn test_caller_name_does_not_override_builtin_idl_program() {
         let jupiter_id = "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB";
         let attacker_idl = r#"{"metadata":{"name":"Phantom Wallet"}}"#;
 
@@ -290,8 +285,6 @@ mod tests {
         assert_eq!(registry.get_idl_name(&jupiter_pk), None);
     }
 
-    /// Regression test for PRS-237 follow-up.
-    ///
     /// The canonical-name guard alone is not enough: the IDL *body* drives
     /// instruction decoding (argument names, account names, value formatting)
     /// via the `unknown_program` IDL fallback. The registry must therefore
@@ -299,7 +292,7 @@ mod tests {
     /// crafted IDL cannot relabel `lamports`, hide a destination, or fabricate
     /// account names for, say, the System Program.
     #[test]
-    fn test_prs237_idl_body_dropped_for_trusted_program() {
+    fn test_caller_idl_dropped_for_trusted_program() {
         let system_program_id = "11111111111111111111111111111111";
         let jupiter_id = "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB";
         let attacker_idl = r#"{"metadata":{"name":"Phantom Wallet"},"instructions":[]}"#;
