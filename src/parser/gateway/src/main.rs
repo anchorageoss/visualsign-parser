@@ -62,10 +62,58 @@ struct TurnkeyRequest {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TurnkeyResponseWrapper {
+    /// Top-level boot proof, matching the production Turnkey visualsign API
+    /// response shape that wallet integrators consume. parser_gateway always
+    /// emits a stable mock here — the gateway is only used in non-TEE local
+    /// dev/CI, never wrapping a real enclave, so production deployments never
+    /// see these values. Downstream consumers that perform real attestation
+    /// verification will reject the mock, which is correct: this is for
+    /// contract-shape testing (the field must be present), not for letting
+    /// signing actually succeed. See issue #337.
+    boot_proof: TurnkeyBootProof,
     response: TurnkeyResponse,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+}
+
+/// Boot proof object shape, matching the production Turnkey visualsign API
+/// that wallet integrators consume. The reference Go client uses the same
+/// field names — see [visualsign-turnkeyclient/api/types.go::TurnkeyBootProof][types].
+///
+/// [types]: https://github.com/anchorageoss/visualsign-turnkeyclient/blob/main/api/types.go#L128
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TurnkeyBootProof {
+    aws_attestation_doc_b64: String,
+    qos_manifest_b64: String,
+    qos_manifest_envelope_b64: String,
+    ephemeral_public_key_hex: String,
+    enclave_app: String,
+    deployment_label: String,
+}
+
+/// Stable mock used in every gateway response. The base64 sentinels decode to
+/// "TURNKEY_GATEWAY_MOCK_BOOT_PROOF" and "TURNKEY_GATEWAY_MOCK_QOS_MANIFEST*" —
+/// pure placeholders, not signed attestation. Real attestation verifiers will
+/// reject them. Kept stable so downstream test fixtures can pin against them.
+const MOCK_BOOT_PROOF_AWS_DOC: &str = "VFVSTktFWV9HQVRFV0FZX01PQ0tfQk9PVF9QUk9PRg==";
+const MOCK_BOOT_PROOF_QOS_MANIFEST: &str = "VFVSTktFWV9HQVRFV0FZX01PQ0tfUU9TX01BTklGRVNU";
+const MOCK_BOOT_PROOF_QOS_MANIFEST_ENV: &str =
+    "VFVSTktFWV9HQVRFV0FZX01PQ0tfUU9TX01BTklGRVNUX0VOVkVMT1BF";
+const MOCK_BOOT_PROOF_EPHEMERAL_PK: &str =
+    "020000000000000000000000000000000000000000000000000000000000000001";
+
+fn mock_boot_proof() -> TurnkeyBootProof {
+    TurnkeyBootProof {
+        aws_attestation_doc_b64: MOCK_BOOT_PROOF_AWS_DOC.to_string(),
+        qos_manifest_b64: MOCK_BOOT_PROOF_QOS_MANIFEST.to_string(),
+        qos_manifest_envelope_b64: MOCK_BOOT_PROOF_QOS_MANIFEST_ENV.to_string(),
+        ephemeral_public_key_hex: MOCK_BOOT_PROOF_EPHEMERAL_PK.to_string(),
+        enclave_app: "visualsign-parser".to_string(),
+        deployment_label: "local-mock".to_string(),
+    }
 }
 
 #[derive(Serialize)]
@@ -242,6 +290,7 @@ async fn parse_handler(
     (
         StatusCode::OK,
         Json(TurnkeyResponseWrapper {
+            boot_proof: mock_boot_proof(),
             response: TurnkeyResponse {
                 parsed_transaction: TurnkeyParsedTransaction {
                     payload: TurnkeyPayload {
@@ -262,6 +311,7 @@ const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495
 
 fn error_response(msg: String) -> TurnkeyResponseWrapper {
     TurnkeyResponseWrapper {
+        boot_proof: mock_boot_proof(),
         response: TurnkeyResponse {
             parsed_transaction: TurnkeyParsedTransaction {
                 payload: TurnkeyPayload {
@@ -348,6 +398,51 @@ mod tests {
         assert_eq!(payload.input_payload_digest, EMPTY_SHA256);
         assert!(payload.signable_payload.is_empty());
         assert_eq!(resp.error.as_deref(), Some("something broke"));
+    }
+
+    #[test]
+    fn error_response_carries_mock_boot_proof() {
+        // The wallet-integration contract (see issue #337) requires bootProof
+        // be present on every response, including parse errors — strict
+        // consumers reject responses missing the field outright.
+        let resp = error_response("oops".to_string());
+        assert_eq!(resp.boot_proof.aws_attestation_doc_b64, MOCK_BOOT_PROOF_AWS_DOC);
+        assert_eq!(resp.boot_proof.enclave_app, "visualsign-parser");
+        assert_eq!(resp.boot_proof.deployment_label, "local-mock");
+    }
+
+    #[test]
+    fn mock_boot_proof_matches_production_wire_shape() {
+        // Wire-shape parity with the production response that wallet
+        // integrators consume. Field set and JSON keys mirror
+        // visualsign-turnkeyclient/api/types.go: TurnkeyVisualSignResponse
+        // (bootProof at top level) and TurnkeyBootProof (six camelCase keys).
+        let resp = error_response("x".to_string());
+        let value: serde_json::Value = serde_json::to_value(&resp).unwrap();
+
+        let top_keys: std::collections::BTreeSet<_> =
+            value.as_object().unwrap().keys().cloned().collect();
+        // Top-level: bootProof, response, error (error only present when set).
+        assert!(top_keys.contains("bootProof"), "missing top-level bootProof");
+        assert!(top_keys.contains("response"), "missing top-level response");
+
+        let bp = value.get("bootProof").unwrap().as_object().unwrap();
+        let bp_keys: std::collections::BTreeSet<&str> =
+            bp.keys().map(String::as_str).collect();
+        let expected: std::collections::BTreeSet<&str> = [
+            "awsAttestationDocB64",
+            "qosManifestB64",
+            "qosManifestEnvelopeB64",
+            "ephemeralPublicKeyHex",
+            "enclaveApp",
+            "deploymentLabel",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            bp_keys, expected,
+            "bootProof field set must match production wire shape exactly"
+        );
     }
 
     #[test]
