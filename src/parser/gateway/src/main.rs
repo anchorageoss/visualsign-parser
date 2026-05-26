@@ -352,9 +352,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         health_client,
     };
 
+    // Mount the same handler under both v1 and v2 URLs for local parity with
+    // the production Turnkey visualsign API, which serves /api/v1/parse and
+    // /api/v2/parse from the same backend. The response shape already carries
+    // both v1 fields (signablePayload) and v2 fields (metadataDigest,
+    // inputPayloadDigest) since #287, so a single handler covers both.
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/visualsign/api/v1/parse", post(parse_handler))
+        .route("/visualsign/api/v2/parse", post(parse_handler))
         .layer(DefaultBodyLimit::max(GRPC_MAX_RECV_MSG_SIZE))
         .with_state(state);
 
