@@ -2736,7 +2736,7 @@ mod tests {
         }));
     }
 
-    /// Regression test for PRS-218.
+    /// Regression test: unbounded swig_wallet inner-instruction recursion DoS.
     ///
     /// `SwigWalletVisualizer::visualize_tx_commands` recurses into itself when a
     /// `SignV1` instruction wraps another `SignV1` instruction targeting the swig
