@@ -57,7 +57,6 @@ fn main() {
         metadata: Some(ChainMetadata {
             metadata: Some(Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()), // Ethereum Mainnet
-                abi: None,
                 abi_mappings: Default::default(),
             })),
         }),
@@ -158,14 +157,13 @@ let options = VisualSignOptions {
     metadata: Some(ChainMetadata {
         metadata: Some(Metadata::Ethereum(EthereumMetadata {
             network_id: Some("ETHEREUM_MAINNET".to_string()),
-            abi: None,
             abi_mappings,
         })),
     }),
     ..Default::default()
 };
 
-// Parse using the standard registry — ABIs are extracted from metadata automatically
+// Parse using the standard registry; ABIs are extracted from metadata automatically
 let registry = create_registry();
 let payload = registry.convert_transaction(&Chain::Ethereum, raw_tx, options)
     .expect("failed to parse transaction");
@@ -238,6 +236,6 @@ cargo run -p library_integration_test
 
 ## Next steps
 
-- [Chain Metadata](../core-concepts/chain-metadata) — Providing ABIs and IDLs for better parsing
-- [Error Handling](../core-concepts/error-handling) — Handling parse failures gracefully
-- [Field Types](/field-types) — Understanding the SignablePayload schema
+- [Chain Metadata](../core-concepts/chain-metadata): Providing ABIs and IDLs for better parsing
+- [Error Handling](../core-concepts/error-handling): Handling parse failures gracefully
+- [Field Types](/field-types): Understanding the SignablePayload schema

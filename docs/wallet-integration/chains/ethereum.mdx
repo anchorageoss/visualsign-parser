@@ -1,0 +1,214 @@
+---
+title: Ethereum for Wallets
+description: Integrate the VisualSign parser for Ethereum and EVM-compatible chains
+---
+
+This page covers what an EVM wallet needs to integrate the VisualSign parser: which networks are supported, what gets decoded automatically, when to provide an ABI, and what the rendered output looks like.
+
+For deployment options (Turnkey-hosted, self-hosted TEE, library, or gRPC), see [Choosing a Deployment Model](../overview). For the chain-agnostic API shape, see the [gRPC API Reference](/api-reference).
+
+## Prerequisites
+
+- A deployment of the parser (see [overview](../overview)).
+- The raw unsigned transaction as hex (with or without `0x` prefix) or base64.
+
+## Quick path
+
+For known protocols and standard token transfers, no ABI is required. The parser ships with built-in decoders and a registry of well-known tokens. A common request includes the raw transaction and a `network_id` to help the parser label the network and resolve chain-specific token metadata. Both `ChainMetadata` and `network_id` are optional; the parser falls back to the chain ID embedded in the transaction when neither is supplied:
+
+```go
+request := &pb.ParseRequest{
+    UnsignedPayload: rawTxHex,
+    Chain:           pb.Chain_CHAIN_ETHEREUM,
+    ChainMetadata: &pb.ChainMetadata{
+        Metadata: &pb.ChainMetadata_Ethereum{
+            Ethereum: &pb.EthereumMetadata{
+                NetworkId: proto.String("ETHEREUM_MAINNET"),
+            },
+        },
+    },
+}
+
+resp, err := client.Parse(ctx, request)
+// resp.ParsedTransaction.Payload.ParsedPayload is a JSON string.
+```
+
+The response's `parsed_payload` is a JSON string conforming to the schema documented in [Field Types](/field-types). Display it to the user before signing.
+
+## Built-in token metadata coverage
+
+Built-in token metadata (WETH on all five chains, plus USDC, USDT, DAI, and SETH on Ethereum mainnet) is preloaded for these five chains:
+
+| `network_id` | Chain ID |
+|---|---|
+| `ETHEREUM_MAINNET` | 1 |
+| `POLYGON_MAINNET` | 137 |
+| `ARBITRUM_MAINNET` | 42161 |
+| `OPTIMISM_MAINNET` | 10 |
+| `BASE_MAINNET` | 8453 |
+
+The parser itself **recognizes many more `network_id` values** (Ethereum testnets, BSC, Avalanche, Gnosis, Celo, Fantom, Blast, Mantle, World Chain, zkSync Era, Linea, Scroll, Zora, Unichain, and L2 testnets) for the purpose of labeling the network and resolving the chain ID. The authoritative list lives in [`src/chain_parsers/visualsign-ethereum/src/networks.rs`](https://github.com/anchorageoss/visualsign-parser/blob/main/src/chain_parsers/visualsign-ethereum/src/networks.rs). The five chains above are the subset that ships with token metadata baked in; on the others, token symbol and decimal resolution is limited to the built-in registry (wallet-supplied token metadata via `chain_metadata` is not yet supported).
+
+### How `network_id` resolves to a chain ID
+
+The `network_id` you pass in metadata takes priority over the transaction's embedded chain ID (`resolve_chain_id` in `src/chain_parsers/visualsign-ethereum/src/lib.rs`). If both are present and disagree, the parser uses the metadata value and logs a warning. If you omit `network_id`, the parser uses the chain ID embedded in the transaction (present in EIP-1559 and EIP-155 legacy transactions). It only defaults to Ethereum mainnet when no chain ID is available from either source, which is only possible for pre-EIP-155 legacy transactions.
+
+To parse a transaction for a chain outside the five with built-in token metadata, pass the **actual** `network_id` for that chain (e.g. `BSC_MAINNET`, `AVALANCHE_MAINNET`) or omit `network_id` entirely and let the transaction's chain ID drive resolution. **Do not** reuse one of the five token-covered `network_id`s for an unrelated chain: it will mislabel the Network field and may change protocol address matching.
+
+## What's auto-decoded versus what needs an ABI
+
+| Contract type | Built-in support | Notes |
+|---|---|---|
+| Native ETH transfers | Yes | No metadata needed. |
+| ERC-20 `transfer`, `approve`, `transferFrom` | Yes | Calldata is decoded into structured fields. Standalone ERC-20 calls always render the raw on-chain integer amount without a symbol (the ERC-20 fallback decoder does not consult the token registry). Symbol and decimals resolve only when the token address is known in context (for example, inside a Uniswap Universal Router command). |
+| ERC-721 transfers and approvals | Not yet | The ERC-721 visualizer is a stub; calls fall through to raw-hex rendering. Token ID and collection name are not shown until support lands. |
+| Uniswap Universal Router (`execute`) | Yes | V2 and V3 exact-in and exact-out swaps, `WRAP_ETH` / `UNWRAP_WETH`, `PAY_PORTION`, `PERMIT2_PERMIT`, and `PERMIT2_TRANSFER_FROM`. Each command renders as a nested `PreviewLayout`. V4 swap and initialize-pool commands are recognized but not yet fully decoded; they still render as nested `PreviewLayout` entries with the command name and hex-encoded input. |
+| Uniswap V4 PoolManager direct calls | No (yet) | The decoder exists as a stub; calls to `swap`, `modifyLiquidity`, `donate`, and `initialize` currently render through the generic fallback. Provide an ABI for the PoolManager if you want decoded fields today. |
+| Permit2 | Yes | Direct allowance grants (`approve(token, spender, amount, expiration)`), single signature-based allowance grants (`PERMIT`), and single signature-based transfers (`TRANSFER_FROM`). Batch variants (`PERMIT_BATCH`, `TRANSFER_FROM_BATCH`) are not yet decoded. |
+| Any other contract | Provide an ABI via `abi_mappings` | Without an ABI, calldata renders as a single `Input Data` field containing the full calldata hex (including the 4-byte selector). |
+
+ERC-1155 contracts are recognized as a `TokenMetadata` type but have no dedicated calldata decoder. To decode ERC-1155 `safeTransferFrom` calls into readable fields, provide the contract's ABI.
+
+## Providing ABIs
+
+For contracts outside the auto-decoded set, populate `abi_mappings` keyed by contract address. The value is the Solidity ABI JSON, optionally with a signature for provenance (see [Ethereum for dApp Builders](../dapps/ethereum) for the signing model).
+
+### gRPC
+
+```go
+request := &pb.ParseRequest{
+    UnsignedPayload: rawTxHex,
+    Chain:           pb.Chain_CHAIN_ETHEREUM,
+    ChainMetadata: &pb.ChainMetadata{
+        Metadata: &pb.ChainMetadata_Ethereum{
+            Ethereum: &pb.EthereumMetadata{
+                NetworkId: proto.String("ETHEREUM_MAINNET"),
+                AbiMappings: map[string]*pb.Abi{
+                    "0xdac17f958d2ee523a2206206994597c13d831ec7": &pb.Abi{
+                        Value: usdtAbiJSON, // Solidity ABI as a JSON string.
+                    },
+                },
+            },
+        },
+    },
+}
+```
+
+### Rust library
+
+```rust
+use std::collections::HashMap;
+use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
+use visualsign::vsptrait::VisualSignOptions;
+
+let mut abi_mappings = HashMap::new();
+abi_mappings.insert(
+    "0xdac17f958d2ee523a2206206994597c13d831ec7".to_string(),
+    Abi {
+        value: usdt_abi_json,
+        signature: None,
+    },
+);
+
+let options = VisualSignOptions {
+    metadata: Some(ChainMetadata {
+        metadata: Some(Metadata::Ethereum(EthereumMetadata {
+            network_id: Some("ETHEREUM_MAINNET".to_string()),
+            abi_mappings,
+        })),
+    }),
+    ..Default::default()
+};
+```
+
+### Address casing
+
+`abi_mappings` is a string-keyed map. The parser parses each key into a numeric `Address` before registration, so address lookup is case-insensitive and `0xdAC17...` and `0xdac17...` resolve to the same contract. That said, use a consistent casing convention (all lowercase or EIP-55 checksummed) across your wallet's ABI store to avoid duplicate entries for the same contract.
+
+## Supported transaction types
+
+The parser accepts unsigned Ethereum transactions in RLP form. Two transaction types are supported:
+
+| Type | Decoded | Notes |
+|---|---|---|
+| Legacy | Yes | Pre-EIP-1559, single `gasPrice` field. |
+| EIP-1559 (Type 2) | Yes | `maxFeePerGas` and `maxPriorityFeePerGas` render as separate fields. |
+| EIP-2930 (Type 1) | No | The parser returns an error: `"Unsupported transaction type: eip-2930"`. |
+| EIP-4844 (Type 3, blobs) | No | The parser returns an error: `"Unsupported transaction type: eip-4844"`. |
+| EIP-7702 (Type 4) | No | The parser returns an error: `"Unsupported transaction type: eip-7702"`. |
+
+If your wallet may submit unsupported types, surface the error message to the user and fall back to a raw-data display (see [Error Handling](../core-concepts/error-handling)).
+
+The standard API accepts unsigned transactions only. Signed envelope decoding is gated behind a developer flag (`DeveloperConfig::allow_signed_transactions`) intended for tooling, not production wallet flows.
+
+## The rendered payload
+
+The parser returns a JSON `SignablePayload` with a `Title`, optional `Subtitle`, and an array of `Fields`. For Ethereum, the top-level fields always include network, recipient, value, gas information, and nonce, followed by a decoded representation of the calldata (when applicable).
+
+Take a Uniswap Universal Router swap as a concrete example: an `execute` call with four commands (two V3 swaps, a fee payment, and a WETH unwrap). The parser produces:
+
+```json
+{
+  "Version": "0",
+  "PayloadType": "EthereumTx",
+  "Title": "Ethereum Transaction",
+  "Fields": [
+    { "Type": "text_v2", "Label": "Network",
+      "TextV2": { "Text": "Ethereum Mainnet" } },
+
+    { "Type": "address_v2", "Label": "To",
+      "AddressV2": { "Address": "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD",
+                     "AssetLabel": "ETH", "Name": "To" } },
+
+    { "Type": "amount_v2", "Label": "Value",
+      "AmountV2": { "Amount": "0", "Abbreviation": "ETH" } },
+
+    { "Type": "text_v2", "Label": "Gas Limit",
+      "TextV2": { "Text": "281329" } },
+
+    { "Type": "preview_layout", "Label": "Universal Router",
+      "PreviewLayout": {
+        "Title": { "Text": "Uniswap Universal Router Execute" },
+        "Subtitle": { "Text": "4 commands, deadline 2025-11-15 22:01:35 UTC" },
+        "Expanded": {
+          "Fields": [
+            { "Type": "preview_layout", "Label": "V3 Swap Exact In",
+              "PreviewLayout": {
+                "Title": { "Text": "V3 Swap Exact In" },
+                "Subtitle": { "Text": "Swap 240.000000000000000000 SETH for >=0.003573913782539750 WETH via V3 (0.3% fee)" },
+                "Expanded": { "Fields": [ /* Input Token, Input Amount, Output Token, Minimum Output, Fee Tier */ ] }
+              } },
+            /* second V3 swap, Pay Portion, Unwrap WETH commands, Deadline */
+          ]
+        }
+      } }
+  ]
+}
+```
+
+A few rendering rules to be aware of when building the UI:
+
+- **Every field has a `FallbackText`.** Render that string if you don't yet support the field's `Type`. New field types may be added in future versions, and `FallbackText` is the forward-compatible escape hatch.
+- **`PreviewLayout` is recursive.** Multi-step operations like Universal Router commands nest layouts. Show the `Subtitle` collapsed, and reveal the `Expanded.Fields` on user action.
+- **Amounts come pre-formatted when token metadata is known.** When the parser can resolve a token's decimals and symbol from the built-in registry, `AmountV2.Amount` is already scaled and `AmountV2.Abbreviation` is set; render both verbatim. When token metadata is unknown, `Amount` is the raw on-chain integer and `Abbreviation` is absent; display the raw value alongside the contract address in that case. Note: direct ERC-20 `transfer`/`approve`/`transferFrom` calls always use the raw on-chain integer (the ERC-20 fallback decoder does not consult the registry); token amounts are scaled and labeled only when a protocol-specific decoder (such as the Uniswap Universal Router decoder) handles the call.
+- **Comparison operators are ASCII.** Slippage and minimums use `>=` and `<=`, not Unicode glyphs.
+
+The full set of field types (`TextV2`, `AddressV2`, `AmountV2`, `Number`, `PreviewLayout`, `Divider`) is documented in [Field Types](/field-types). The Uniswap fixture above is checked into the repo at `src/chain_parsers/visualsign-ethereum/tests/fixtures/uniswap-v3swap.expected` and can be reproduced end-to-end with `parser_cli` (see [Parser CLI](/parser-cli)).
+
+## Error handling for EVM
+
+Beyond the generic categories covered in [Error Handling](../core-concepts/error-handling), the EVM parser surfaces a few EVM-specific failure modes:
+
+| Symptom | What happened | Recommended UI |
+|---|---|---|
+| `"Failed to decode transaction: ..."` | The bytes are not a well-formed RLP unsigned transaction. | Show "Invalid transaction format" and block signing. |
+| `"Unsupported transaction type: eip-2930"` (or eip-4844 / eip-7702) | Recognized transaction type but not yet parseable. | Show the type and offer to sign with a raw-bytes display only. Do not silently downgrade. |
+| Calldata renders as an `Input Data` field with full hex (e.g., `0xa9059cbb...`) | Contract is outside the auto-decoded set and no ABI was supplied. | Surface a warning. Consider fetching the ABI from your wallet's contract registry and retrying. |
+| Token amounts render in raw units (e.g., `1500000`) without a symbol | Either the token is not in the built-in registry, or the call was decoded by the generic ERC-20 fallback (direct `transfer`/`approve`/`transferFrom`), which always emits raw integers regardless of registry coverage. | Display the raw amount alongside the contract address. For amounts scaled and labeled by the parser, the call must go through a protocol-specific decoder (e.g., Uniswap Universal Router). |
+
+## Next steps
+
+- [Ethereum for dApp Builders](../dapps/ethereum): How contract authors make their transactions render meaningfully in your wallet.
+- [Chain Metadata](../core-concepts/chain-metadata): Cross-chain reference for ABIs and IDLs.
+- [Attestation Verification](../self-hosted-tee/attestation): Required for TEE deployments.
+- [Parser CLI](/parser-cli): Reproduce parsing locally against your own fixtures.
