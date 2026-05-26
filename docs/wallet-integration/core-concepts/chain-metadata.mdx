@@ -75,7 +75,7 @@ The ABI is standard Solidity ABI JSON:
 
 For EVM chains other than mainnet, set `network_id`. The parser recognizes a broad set of values (Ethereum mainnet and testnets, BSC, Polygon, Avalanche, Gnosis, Celo, Fantom, Optimism, Arbitrum, Base, Blast, Mantle, World Chain, zkSync Era, Linea, Scroll, Zora, Unichain, and their testnet variants where applicable). The authoritative list is defined by `network_id_to_chain_id` in [`src/chain_parsers/visualsign-ethereum/src/networks.rs`](https://github.com/anchorageoss/visualsign-parser/blob/main/src/chain_parsers/visualsign-ethereum/src/networks.rs).
 
-Built-in token metadata is preloaded only for `ETHEREUM_MAINNET`, `POLYGON_MAINNET`, `ARBITRUM_MAINNET`, `OPTIMISM_MAINNET`, and `BASE_MAINNET`. On other recognized chains, token symbol and decimal resolution is limited to the built-in registry — `chain_metadata` currently only accepts `network_id` and `abi_mappings`; wallet-supplied token metadata is not yet supported. Always pass the **actual** `network_id` for the chain you're parsing; the value overrides the transaction's chain ID and reusing an unrelated one will mislabel the Network field.
+Built-in token metadata is preloaded only for `ETHEREUM_MAINNET`, `POLYGON_MAINNET`, `ARBITRUM_MAINNET`, `OPTIMISM_MAINNET`, and `BASE_MAINNET`. On other recognized chains, token symbol and decimal resolution is limited to the built-in registry; `chain_metadata` currently only accepts `network_id` and `abi_mappings`, so wallet-supplied token metadata is not yet supported. Always pass the **actual** `network_id` for the chain you're parsing; the value overrides the transaction's chain ID and reusing an unrelated one will mislabel the Network field.
 
 ```go
 ChainMetadata: &pb.ChainMetadata{

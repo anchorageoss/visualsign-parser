@@ -14,7 +14,7 @@ For deployment options (Turnkey-hosted, self-hosted TEE, library, or gRPC), see 
 
 ## Quick path
 
-For known protocols and standard token transfers, no ABI is required. The parser ships with built-in decoders and a registry of well-known tokens. A common request includes the raw transaction and a `network_id` to help the parser label the network and resolve chain-specific token metadata. Both `ChainMetadata` and `network_id` are optional — the parser falls back to the chain ID embedded in the transaction when neither is supplied:
+For known protocols and standard token transfers, no ABI is required. The parser ships with built-in decoders and a registry of well-known tokens. A common request includes the raw transaction and a `network_id` to help the parser label the network and resolve chain-specific token metadata. Both `ChainMetadata` and `network_id` are optional; the parser falls back to the chain ID embedded in the transaction when neither is supplied:
 
 ```go
 request := &pb.ParseRequest{
@@ -37,7 +37,7 @@ The response's `parsed_payload` is a JSON string conforming to the schema docume
 
 ## Built-in token metadata coverage
 
-Built-in token metadata (WETH plus a small set of common tokens — USDC, USDT, DAI, SETH — on Ethereum mainnet) is preloaded for these five chains:
+Built-in token metadata (WETH on all five chains, plus USDC, USDT, DAI, and SETH on Ethereum mainnet) is preloaded for these five chains:
 
 | `network_id` | Chain ID |
 |---|---|
