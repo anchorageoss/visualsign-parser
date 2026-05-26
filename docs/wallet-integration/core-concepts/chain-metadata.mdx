@@ -25,7 +25,7 @@ For an end-to-end Ethereum integration walkthrough (supported networks, what's a
 
 ```go
 request := &pb.ParseRequest{
-    UnsignedPayload: txBytes,
+    UnsignedPayload: rawTxHex,
     Chain: pb.Chain_CHAIN_ETHEREUM,
     ChainMetadata: &pb.ChainMetadata{
         Metadata: &pb.ChainMetadata_Ethereum{
@@ -98,7 +98,7 @@ For Solana programs, provide the Anchor IDL to decode instructions:
 
 ```go
 request := &pb.ParseRequest{
-    UnsignedPayload: txBytes,
+    UnsignedPayload: rawTxHex,
     Chain: pb.Chain_CHAIN_SOLANA,
     ChainMetadata: &pb.ChainMetadata{
         Metadata: &pb.ChainMetadata_Solana{
