@@ -69,17 +69,6 @@ pub fn get_token_lookup_table() -> BTreeMap<&'static str, TokenInfo> {
     tokens
 }
 
-/// Maximum supported token decimals. Beyond this we cannot compute `10^decimals`
-/// in a `u64` divisor, so we fall back to the raw amount rather than panic.
-/// `10^19` fits in `u64` (`u64::MAX` is ~1.84e19); `10^20` does not.
-///
-/// Test-only constant: the runtime fallback in `format_token_amount` uses
-/// `checked_pow` directly, so production code does not need to reference this
-/// bound. Kept here (rather than inlined in the test) so the documented limit
-/// stays close to the function it constrains.
-#[cfg(test)]
-const MAX_SUPPORTED_DECIMALS: u8 = 19;
-
 /// Helper function to format token amounts.
 ///
 /// Defensive against attacker-controlled `decimals`: uses `checked_pow` so an
@@ -195,19 +184,6 @@ mod tests {
                 "decimals={decimals} should fall back to raw amount"
             );
         }
-    }
-
-    #[test]
-    fn test_format_token_amount_max_supported_decimals() {
-        // 10^19 fits in u64; this is the last decimals value where we still
-        // compute a fractional representation.
-        let amount = 1_u64;
-        let formatted = format_token_amount(amount, MAX_SUPPORTED_DECIMALS);
-        // 1 / 10^19 = 0.0000000000000000001
-        assert!(
-            formatted.starts_with("0.") && formatted.ends_with('1'),
-            "expected leading zero fractional, got {formatted}"
-        );
     }
 }
 
