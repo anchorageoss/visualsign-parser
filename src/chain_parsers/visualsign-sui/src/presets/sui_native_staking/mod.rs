@@ -3,7 +3,9 @@ mod config;
 use config::{Config, NATIVE_STAKING_CONFIG, SuiSystemFunctions};
 
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
-use crate::utils::{decode_number, get_index, parse_numeric_argument, truncate_address};
+use crate::utils::{
+    decode_number, get_index, parse_numeric_argument, parse_result_command_index, truncate_address,
+};
 
 use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand, SuiProgrammableMoveCall};
 use sui_types::base_types::SuiAddress;
@@ -193,8 +195,17 @@ fn get_stake_amount(
     inputs: &[SuiCallArg],
     args: &[SuiArgument],
 ) -> Result<Option<u64>, VisualSignError> {
+    // The stake coin is the result of a prior `SplitCoins` command, so the
+    // argument must be a `SuiArgument::Result(N)` whose `N` indexes the
+    // commands vector. Using `parse_result_command_index` keeps the semantic
+    // distinction explicit and prevents `Input(N)` from being silently
+    // dereferenced against the commands vector.
+    let stake_arg = args
+        .get(1)
+        .copied()
+        .ok_or(VisualSignError::MissingData("Stake argument missing".into()))?;
     let command = commands
-        .get(get_index(args, Some(1))? as usize)
+        .get(parse_result_command_index(stake_arg)? as usize)
         .ok_or(VisualSignError::MissingData("Command not found".into()))?;
 
     match command {
