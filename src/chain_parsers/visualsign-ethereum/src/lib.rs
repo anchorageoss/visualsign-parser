@@ -575,10 +575,13 @@ fn convert_to_visual_sign_payload(
         // trusted to decide the override.
         //
         // The registry lookup keys off `transaction.chain_id()` and never the
-        // resolved `chain_id`. `resolve_chain_id` gives metadata priority and
-        // metadata is caller-controlled in this threat model, so feeding it
-        // into a security decision would let an attacker mismatch `network_id`
-        // and dodge the canonical-token lookup. For pre-EIP-155 legacy txs
+        // resolved `chain_id`. Defense in depth: anchor security decisions on
+        // values this function can verify directly, not on the contract of
+        // upstream resolution. `resolve_chain_id` enforces tx/metadata
+        // agreement (mismatch is a `ValidationError`), so the resolved value
+        // is also safe in practice, but keeping the lookup local removes a
+        // cross-function invariant to track and makes this site robust to
+        // future changes in resolution behavior. For pre-EIP-155 legacy txs
         // that don't carry a chain id of their own we fall back to an
         // address-only any-chain lookup rather than the metadata-derived
         // chain id: any canonical-token address on any chain still wins over
