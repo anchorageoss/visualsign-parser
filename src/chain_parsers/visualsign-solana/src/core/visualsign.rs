@@ -364,9 +364,13 @@ fn convert_versioned_to_visual_sign_payload(
 ///
 /// The resolved account vector in v0 is `account_keys` followed by, for each
 /// lookup, the addresses pulled at `writable_indexes` then at
-/// `readonly_indexes`. Indices in `[static_len, static_len + loaded_len)` are
-/// ALT-backed; indices `>= static_len + loaded_len` are malformed. The error
-/// reports both classes separately, but rejects on either.
+/// `readonly_indexes`. For instruction `accounts[]`, indices in
+/// `[static_len, static_len + loaded_len)` are ALT-backed and indices
+/// `>= static_len + loaded_len` are malformed. For `program_id_index`, the
+/// V0 spec says program ids must index into the static account_keys table
+/// and cannot be loaded from an ALT, so any `program_id_index >= static_len`
+/// is malformed regardless of `loaded_len`. The error reports the two
+/// classes separately, but rejects on either.
 ///
 /// When `address_table_lookups` is empty, any out-of-bounds index is a
 /// malformed transaction (not an ALT reference) and we keep the existing
@@ -412,12 +416,13 @@ fn reject_v0_if_any_ix_references_alts(
     // exhaustively checked by the compiler. A stray string typo or a future
     // tag rename would otherwise fall through `_ => {}` and silently skip
     // rejection, which would re-introduce the very bug this function exists
-    // to prevent.
+    // to prevent. Program ids do not use this classifier (see below): per
+    // spec, no program_id_index can legitimately resolve via an ALT.
     enum RefKind {
         Alt,
         Malformed,
     }
-    let classify = |idx: usize| -> Option<RefKind> {
+    let classify_account = |idx: usize| -> Option<RefKind> {
         if idx >= loaded_end {
             Some(RefKind::Malformed)
         } else if idx >= static_len {
@@ -428,28 +433,26 @@ fn reject_v0_if_any_ix_references_alts(
     };
 
     for (i, ci) in v0_message.instructions.iter().enumerate() {
-        match classify(ci.program_id_index as usize) {
-            Some(RefKind::Malformed) => {
-                malformed_offenders.push(format!(
-                    "instruction {i}: program_id_index {} is out of range (static={static_len}, loaded={loaded_len})",
-                    ci.program_id_index
-                ));
-                n_mal_refs += 1;
-            }
-            Some(RefKind::Alt) => {
-                alt_offenders.push(format!(
-                    "instruction {i}: program_id_index {} references an ALT entry",
-                    ci.program_id_index
-                ));
-                n_alt_refs += 1;
-            }
-            None => {}
+        // Per the V0 message spec, program ids cannot be loaded via an
+        // ALT: "Program indexes must index into the list of message
+        // account_keys because program ids cannot be dynamically loaded
+        // from a lookup table." Any `program_id_index >= static_len` is
+        // therefore a spec violation, even when the index would fall
+        // within the ALT-loaded range. Classify it as malformed so the
+        // rejection message names the right defect.
+        if (ci.program_id_index as usize) >= static_len {
+            malformed_offenders.push(format!(
+                "instruction {i}: program_id_index {} cannot resolve via ALT \
+                 (program ids must index static account keys; static={static_len}, loaded={loaded_len})",
+                ci.program_id_index
+            ));
+            n_mal_refs += 1;
         }
 
         let mut alt_accounts: Vec<u8> = Vec::new();
         let mut malformed_accounts: Vec<u8> = Vec::new();
         for &idx in &ci.accounts {
-            match classify(idx as usize) {
+            match classify_account(idx as usize) {
                 Some(RefKind::Malformed) => malformed_accounts.push(idx),
                 Some(RefKind::Alt) => alt_accounts.push(idx),
                 None => {}
@@ -1419,10 +1422,14 @@ mod tests {
         }
 
         #[test]
-        fn rejects_v0_when_program_id_lives_behind_an_alt() {
+        fn rejects_v0_when_program_id_index_points_past_static_keys() {
             // 2 static account keys, 1 ALT supplying extra accounts, one
-            // benign instruction in-range, one instruction whose program_id
-            // points past the static keys (= ALT resolved).
+            // benign instruction in-range, one instruction whose
+            // program_id_index points past the static keys. Per the V0
+            // spec, program ids cannot be loaded via an ALT -- they must
+            // index into the static account_keys table -- so this is
+            // classified as `malformed:`, not `ALT-backed:`, even though
+            // the index would otherwise fall within the ALT-loaded range.
             let key0 = Pubkey::new_unique();
             let key1 = Pubkey::new_unique();
             let alt = MessageAddressTableLookup {
@@ -1435,14 +1442,14 @@ mod tests {
                 accounts: vec![0],
                 data: vec![0xAA],
             };
-            let malicious_via_alt = CompiledInstruction {
-                program_id_index: 5, // beyond the 2 static keys -> resolved via ALT
+            let malicious = CompiledInstruction {
+                program_id_index: 5, // past static_len=2; spec says this is malformed
                 accounts: vec![0],
                 data: vec![0xBB],
             };
-            let msg = make_v0(vec![key0, key1], vec![benign, malicious_via_alt], vec![alt]);
+            let msg = make_v0(vec![key0, key1], vec![benign, malicious], vec![alt]);
 
-            let err = convert(&msg).expect_err("must reject ALT-referenced instructions");
+            let err = convert(&msg).expect_err("must reject out-of-static program_id refs");
             let VisualSignError::DecodeError(text) = err else {
                 panic!("expected DecodeError, got {err:?}");
             };
@@ -1457,6 +1464,16 @@ mod tests {
             assert!(
                 text.contains("instruction 1"),
                 "error should name the offending instruction index: {text}"
+            );
+            assert!(
+                text.contains("malformed:"),
+                "program ids cannot be loaded via ALT, so the spec-violation \
+                 classification is malformed, not ALT-backed: {text}"
+            );
+            assert!(
+                !text.contains("ALT-backed:"),
+                "this case has only a spec-violating program_id ref, no \
+                 ALT-backed account refs: {text}"
             );
         }
 
