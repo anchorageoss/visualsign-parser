@@ -394,14 +394,22 @@ impl UniversalRouterVisualizer {
         })
     }
 
-    /// Decodes a Uniswap V3 swap path.
+    /// Decodes a Uniswap V3 swap path into raw byte positions.
     ///
-    /// Paths are encoded as: tokenIn(20) | fee(3) | nextToken(20) | fee(3) | ... | tokenOut(20).
+    /// Paths are encoded as: token(20) | fee(3) | token(20) | fee(3) | ... | token(20).
     /// A valid N-hop path therefore has length 20 + N * 23.
     ///
-    /// Returns (token_in, token_out, first_hop_fee, hop_count) or None for malformed paths.
-    /// The output token is always read from the FINAL 20 bytes of the path so that multi-hop
-    /// swaps display the actual destination token, not the first intermediate hop.
+    /// Returns `(first_token, last_token, first_hop_fee, hop_count)` or `None` for malformed
+    /// paths, where `first_token` is the leading 20 bytes and `last_token` is the trailing
+    /// 20 bytes. The helper is intentionally semantics-free: role assignment depends on the
+    /// caller's swap direction.
+    ///
+    /// - ExactIn paths are encoded `tokenIn || fee || ... || tokenOut`, so callers alias
+    ///   `first_token = tokenIn`, `last_token = tokenOut`.
+    /// - ExactOut paths are encoded in reverse (`tokenOut || fee || ... || tokenIn`) per
+    ///   Uniswap V3 convention (see `SwapRouter.exactOutputInternal` /
+    ///   `Path.decodeFirstPool`), so callers must alias
+    ///   `first_token = tokenOut`, `last_token = tokenIn`.
     fn decode_v3_path(path: &[u8]) -> Option<(Address, Address, u32, usize)> {
         // Single hop minimum: 20 + 23 = 43 bytes. Each additional hop adds 23 bytes.
         if path.len() < 43 || (path.len() - 20) % 23 != 0 {
@@ -791,9 +799,11 @@ impl UniversalRouterVisualizer {
 
         let (_recipient, amount_out, amount_in_max, path, _payer_is_user) = params;
 
-        // Decode V3 path. For multi-hop paths, the output token MUST be read from the
-        // FINAL 20 bytes, not from offset 23..43 (which is the first intermediate token).
-        let (token_in, token_out, fee, hops) = match Self::decode_v3_path(&path) {
+        // Decode V3 path. ExactOut paths are encoded in reverse vs ExactIn per Uniswap V3
+        // convention (see `SwapRouter.exactOutputInternal` / `Path.decodeFirstPool`): the
+        // on-chain layout is `tokenOut || fee || ... || tokenIn`. The helper returns raw
+        // byte positions, so we alias `first_token = tokenOut`, `last_token = tokenIn`.
+        let (token_out, token_in, fee, hops) = match Self::decode_v3_path(&path) {
             Some(decoded) => decoded,
             None => {
                 return SignablePayloadField::TextV2 {
@@ -2457,21 +2467,26 @@ mod tests {
 
     #[test]
     fn test_decode_v3_swap_exact_out_multi_hop_displays_final_token() {
-        // End-to-end for the exact-out variant.
+        // End-to-end for the exact-out variant. Uniswap V3 ExactOut paths are encoded in
+        // reverse vs ExactIn (`tokenOut || fee || ... || tokenIn`), so we build the test
+        // path in the same reversed shape a real Universal Router payload would carry.
         let recipient: Address = "0x1111111111111111111111111111111111111111"
             .parse()
             .unwrap();
-        let token_in: Address = "0xdddddddddddddddddddddddddddddddddddddddd"
+        // Real swap semantics: signer pays `real_token_in`, receives `real_token_out`.
+        let real_token_in: Address = "0xdddddddddddddddddddddddddddddddddddddddd"
             .parse()
             .unwrap();
         let token_mid: Address = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
             .parse()
             .unwrap();
-        let token_out: Address = "0xffffffffffffffffffffffffffffffffffffffff"
+        let real_token_out: Address = "0xffffffffffffffffffffffffffffffffffffffff"
             .parse()
             .unwrap();
 
-        let path = build_v3_path(&[token_in, token_mid, token_out], &[100, 10000]);
+        // Reversed on-chain layout: first 20 bytes = tokenOut, last 20 bytes = tokenIn.
+        // Fees are listed in the same reversed order as the tokens.
+        let path = build_v3_path(&[real_token_out, token_mid, real_token_in], &[10000, 100]);
 
         type V3OutTuple = (Address, U256, U256, Bytes, bool);
         let encoded: Vec<u8> = <V3OutTuple as SolValue>::abi_encode_params(&(
@@ -2493,8 +2508,12 @@ mod tests {
                     .text
                     .clone();
                 assert!(
-                    subtitle.contains(&format!("{token_out:?}")),
-                    "subtitle must reference final output token, got: {subtitle}"
+                    subtitle.contains(&format!("{real_token_out:?}")),
+                    "subtitle must reference real output token, got: {subtitle}"
+                );
+                assert!(
+                    subtitle.contains(&format!("{real_token_in:?}")),
+                    "subtitle must reference real input token, got: {subtitle}"
                 );
                 assert!(
                     !subtitle.contains(&format!("{token_mid:?}")),
@@ -2506,20 +2525,24 @@ mod tests {
                 );
 
                 let expanded = preview_layout.expanded.expect("expanded present");
-                let output_token_text = expanded
-                    .fields
-                    .iter()
-                    .find_map(|f| match &f.signable_payload_field {
-                        SignablePayloadField::TextV2 { common, text_v2 }
-                            if common.label == "Output Token" =>
-                        {
-                            Some(text_v2.text.clone())
-                        }
-                        _ => None,
-                    })
-                    .expect("Output Token field present");
-                assert_eq!(output_token_text, format!("{token_out:?}"));
-                assert_ne!(output_token_text, format!("{token_mid:?}"));
+                let find_field = |label: &str| -> String {
+                    expanded
+                        .fields
+                        .iter()
+                        .find_map(|f| match &f.signable_payload_field {
+                            SignablePayloadField::TextV2 { common, text_v2 }
+                                if common.label == label =>
+                            {
+                                Some(text_v2.text.clone())
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| panic!("{label} field present"))
+                };
+                // Critical: the signer must see the REAL output token as `Output Token`,
+                // not whatever happens to sit at the trailing bytes of the on-chain path.
+                assert_eq!(find_field("Output Token"), format!("{real_token_out:?}"));
+                assert_eq!(find_field("Input Token"), format!("{real_token_in:?}"));
             }
             _ => panic!("Expected PreviewLayout for V3 Swap Exact Out"),
         }
