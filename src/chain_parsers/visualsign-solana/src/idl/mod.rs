@@ -6,7 +6,7 @@
 pub mod builtin_programs;
 pub mod signature;
 
-use crate::idl::builtin_programs::canonical_name;
+use crate::idl::builtin_programs::{canonical_name, is_trusted_program};
 use solana_parser::{CustomIdl, CustomIdlConfig, Idl, ProgramType, decode_idl_data};
 use solana_sdk::pubkey::Pubkey;
 use std::collections::BTreeMap;
@@ -46,11 +46,11 @@ impl IdlRegistry {
     /// * `idl_mappings` - Map of program_id (base58) to (IDL JSON string, user-provided name)
     ///
     /// # Returns
-    /// * `Ok(IdlRegistry)` populated only with mappings for programs that have
-    ///   no canonical identity (see `canonical_name`). Trusted built-ins
-    ///   (native runtime programs, core SPL, and programs with a built-in IDL
-    ///   in `solana_parser`) are intentionally not overrideable and are
-    ///   dropped here.
+    /// * `Ok(IdlRegistry)` populated only with mappings for programs that are
+    ///   not trusted built-ins (see `is_trusted_program`). Trusted programs
+    ///   (native runtime programs, core SPL, programs with a built-in IDL in
+    ///   `solana_parser`, and any program ID registered by an in-crate preset
+    ///   visualizer) are intentionally not overrideable and are dropped here.
     /// * `Err` if any IDL JSON is invalid
     ///
     /// # Security
@@ -72,7 +72,7 @@ impl IdlRegistry {
 
         for (program_id, (idl_json, program_name)) in idl_mappings {
             // Refuse IDL overrides for trusted built-ins. See doc comment above.
-            if canonical_name(&program_id).is_some() {
+            if is_trusted_program(&program_id) {
                 continue;
             }
 
@@ -319,6 +319,46 @@ mod tests {
         // IDL path in `solana_parser`, so legitimate decoding keeps working.
         let jupiter_pk = Pubkey::from_str(jupiter_id).unwrap();
         assert!(registry.has_idl(&jupiter_pk));
+    }
+
+    /// Preset-only programs (those handled by an in-crate preset visualizer
+    /// but without a `ProgramType` or canonical-name entry) must also reject
+    /// caller IDL overrides. The preset itself drives rendering, but the
+    /// `unknown_program` IDL fallback could still consult a caller-supplied
+    /// IDL body if the preset path is bypassed (e.g. a future refactor that
+    /// changes visualizer dispatch). Defense in depth: drop the body up
+    /// front.
+    #[test]
+    fn test_caller_idl_dropped_for_preset_only_program() {
+        use crate::core::available_visualizers;
+        use crate::idl::builtin_programs::{canonical_name, is_trusted_program};
+
+        // Discover a preset-only program ID dynamically so the test stays
+        // accurate as the preset registry evolves. "Preset-only" means
+        // covered by a preset visualizer but not present in the
+        // canonical-name table or `solana_parser::ProgramType`.
+        let preset_only_id: String = available_visualizers()
+            .iter()
+            .filter_map(|v| v.get_config())
+            .flat_map(|cfg| cfg.data().programs.keys().copied().collect::<Vec<_>>())
+            .find(|id| canonical_name(id).is_none())
+            .expect("at least one preset-only program ID should be registered")
+            .to_string();
+
+        // Sanity-check the discovered ID against the predicate under test.
+        assert!(is_trusted_program(&preset_only_id));
+        assert!(canonical_name(&preset_only_id).is_none());
+
+        let attacker_idl = r#"{"metadata":{"name":"Phantom Wallet"},"instructions":[]}"#;
+        let mut mappings = BTreeMap::new();
+        mappings.insert(
+            preset_only_id.clone(),
+            (attacker_idl.to_string(), "Phantom Wallet".to_string()),
+        );
+
+        let registry = IdlRegistry::from_idl_mappings(mappings).unwrap();
+        assert!(registry.get_idl(&preset_only_id).is_none());
+        assert!(registry.get_all_configs().is_empty());
     }
 
     /// A caller-supplied name for a program that has NO canonical identity is

@@ -5,7 +5,9 @@ use crate::core::{
     create_accounts_advanced_preview_layout, decode_accounts, decode_v0_accounts, instructions,
 };
 use crate::idl::IdlRegistry;
-use crate::idl::builtin_programs::canonical_name;
+use crate::idl::builtin_programs::{
+    canonical_name, is_reserved_canonical_name, is_trusted_program,
+};
 use crate::idl::signature::{convert_proto_signature, validate_idl_signature};
 use base64::{self, Engine};
 use solana_sdk::{
@@ -136,13 +138,17 @@ impl SolanaTransactionWrapper {
 /// Mirrors `visualsign-ethereum::abi_metadata::try_extract_from_chain_metadata`:
 /// 1. The program_id must be a valid base58 Solana `Pubkey`; otherwise the
 ///    entry is skipped.
-/// 2. Mappings whose `program_id` resolves to a trusted built-in (i.e.
-///    `canonical_name(..)` is `Some`) are dropped outright. Beyond the name
-///    guard in `IdlRegistry`, the IDL *body* itself controls instruction
-///    decoding (argument names, account names, value formatting), so an
-///    attacker-supplied IDL for the System Program could relabel `lamports`
-///    or hide the destination via the `unknown_program` IDL decode path.
-///    Refusing the body closes that gap.
+/// 2. Mappings whose `program_id` is a trusted built-in (i.e.
+///    `is_trusted_program(..)` is `true`) are dropped outright. This covers
+///    programs with a canonical name (native runtime, core SPL, the 13
+///    `ProgramType` dApp IDLs) *and* every program ID registered by an
+///    in-crate preset visualizer (Kamino, Meteora, `swig_wallet`,
+///    `dflow_aggregator`, etc.). Beyond the name guard in `IdlRegistry`,
+///    the IDL *body* itself controls instruction decoding (argument names,
+///    account names, value formatting), so an attacker-supplied IDL for the
+///    System Program could relabel `lamports` or hide the destination via
+///    the `unknown_program` IDL decode path. Refusing the body closes that
+///    gap.
 /// 3. The IDL JSON is rejected if it exceeds `MAX_IDL_JSON_BYTES`.
 /// 4. If `Idl.signature` is present, it must verify (secp256k1 ECDSA over
 ///    `SHA-256(idl_json)` via `PrehashVerifier::verify_prehash`) or the entry
@@ -153,6 +159,12 @@ impl SolanaTransactionWrapper {
 ///    signatures must enforce that at the API boundary. Unsigned IDLs are
 ///    still accepted so the feature degrades gracefully; this check refuses
 ///    to plumb attacker-tampered IDL bodies into the registry.
+/// 5. The resolved `program_name` (from proto, IDL metadata, or fallback)
+///    must not be a reserved canonical name. Step 2 already rejects when
+///    the *program_id* is trusted, so by this step `program_id` has no
+///    canonical name; if the *name* itself matches a canonical label
+///    (e.g. "System Program"), it would impersonate a trusted program in
+///    the rendered "Program" field. Reject it.
 fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String, String)> {
     let Some(mappings) = options
         .metadata
@@ -181,11 +193,19 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
         //    guard in `IdlRegistry` blocks attacker-controlled labels, but the
         //    IDL body still drives instruction decoding (arg/account names,
         //    value formatting). Refusing the body for trusted programs closes
-        //    that gap.
-        if let Some(canonical) = canonical_name(program_id) {
-            tracing::warn!(
-                "Skipping IDL mapping for '{program_id}': override refused for trusted built-in '{canonical}'"
-            );
+        //    that gap. "Trusted" includes the canonical-name set
+        //    (native + core SPL + ProgramType dApps) AND every program ID
+        //    registered by an in-crate preset visualizer.
+        if is_trusted_program(program_id) {
+            // Log the canonical label when we have one (clearer telemetry).
+            match canonical_name(program_id) {
+                Some(canonical) => tracing::warn!(
+                    "Skipping IDL mapping for '{program_id}': override refused for trusted built-in '{canonical}'"
+                ),
+                None => tracing::warn!(
+                    "Skipping IDL mapping for '{program_id}': override refused (preset-registered program)"
+                ),
+            }
             continue;
         }
 
@@ -215,6 +235,19 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
             .clone()
             .or_else(|| extract_name_from_idl_json(&idl.value))
             .unwrap_or_else(|| format!("Program {}", &program_id[..8.min(program_id.len())]));
+
+        // 5. Display-name impersonation guard. `canonical_name(program_id)` is
+        //    `None` here (step 2 already drained the trusted IDs), so any name
+        //    that *matches* a canonical label belongs to a different,
+        //    canonical program; rendering it on this `program_id` would be
+        //    pure spoofing ("System Program" labeled on a malicious pubkey).
+        if is_reserved_canonical_name(&name) {
+            tracing::warn!(
+                "Skipping IDL mapping for '{program_id}': program_name '{name}' is reserved for a different canonical program"
+            );
+            continue;
+        }
+
         out.insert(program_id.clone(), (idl.value.clone(), name));
     }
     out
@@ -1860,5 +1893,110 @@ mod tests {
                 "trusted built-in '{trusted_program_id}' should be dropped, got: {mappings:?}"
             );
         }
+    }
+
+    /// Preset-registered program IDs (e.g. `swig_wallet`) are also dropped at
+    /// extraction time even when they have no canonical name in the
+    /// `NATIVE_PROGRAM_NAMES` table. Subsumes the protection PR #328 added.
+    #[test]
+    fn test_extract_idl_mappings_skips_preset_only_program() {
+        use crate::core::available_visualizers;
+        use crate::idl::builtin_programs::canonical_name as cname;
+
+        let preset_only_id: String = available_visualizers()
+            .iter()
+            .filter_map(|v| v.get_config())
+            .flat_map(|cfg| cfg.data().programs.keys().copied().collect::<Vec<_>>())
+            .find(|id| cname(id).is_none())
+            .expect("at least one preset-only program ID should be registered")
+            .to_string();
+
+        let options = make_options_with_idl_mapping(
+            &preset_only_id,
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"X"},"instructions":[]}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                program_name: Some("X".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert!(
+            mappings.is_empty(),
+            "preset-only '{preset_only_id}' should be dropped, got: {mappings:?}"
+        );
+    }
+
+    /// Display-name impersonation: an attacker submits IDL for a
+    /// non-canonical pubkey but labels it "System Program". Without the
+    /// reserved-name blocklist, `get_program_name` would surface the
+    /// attacker's "System Program" label on the attacker's pubkey. Reject
+    /// the mapping at extraction.
+    #[test]
+    fn test_extract_idl_mappings_rejects_reserved_name_on_non_canonical_pubkey() {
+        let attacker_pubkey = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+        let options = make_options_with_idl_mapping(
+            attacker_pubkey,
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"System Program"},"instructions":[]}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                // Attacker-controlled `program_name` impersonating a canonical
+                // entry. Must be refused even though `program_id` itself is
+                // not in the trusted set.
+                program_name: Some("System Program".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert!(
+            mappings.is_empty(),
+            "reserved name on non-canonical pubkey must be dropped, got: {mappings:?}"
+        );
+    }
+
+    /// The reserved-name guard also fires when the impersonating name comes
+    /// from the IDL JSON `metadata.name` rather than the proto's
+    /// `program_name`. Both paths feed `get_program_name` indirectly, so
+    /// both must be filtered.
+    #[test]
+    fn test_extract_idl_mappings_rejects_reserved_name_in_idl_metadata() {
+        let attacker_pubkey = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+        let options = make_options_with_idl_mapping(
+            attacker_pubkey,
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"Jupiter Swap"},"instructions":[]}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                program_name: None,
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert!(
+            mappings.is_empty(),
+            "reserved name in IDL metadata.name on non-canonical pubkey must be dropped, got: {mappings:?}"
+        );
+    }
+
+    /// A free-form name (not in the canonical table) on a non-canonical
+    /// pubkey must still pass through. Otherwise legitimate wallet labels
+    /// for unknown programs would be lost.
+    #[test]
+    fn test_extract_idl_mappings_allows_freeform_name() {
+        let custom_pubkey = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+        let options = make_options_with_idl_mapping(
+            custom_pubkey,
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"My Custom Program"},"instructions":[]}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                program_name: Some("My Custom Program".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert_eq!(mappings.len(), 1);
     }
 }
