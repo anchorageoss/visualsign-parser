@@ -432,6 +432,68 @@ fn extract_metadata_abi(
     abi_metadata::try_extract_from_chain_metadata(options.metadata.as_ref(), chain_id)
 }
 
+/// Known-token short-circuit: if the destination is a token registered in the
+/// compiled-in `ContractRegistry` (e.g. USDC, USDT, WETH), route to the safe
+/// built-in ERC20/ERC721 visualizer and lock out any caller-supplied ABI.
+/// This prevents a malicious dApp from supplying an ABI for a canonical token
+/// address with attacker-chosen parameter labels and spoofing the signing UI
+/// (the selector still has to match `transfer(address,uint256)` for the
+/// dispatcher to bind it, but parameter names are unconstrained).
+///
+/// We deliberately consult only the global (compiled-in) layer here: a
+/// request-scoped registry is itself caller-supplied and cannot be trusted to
+/// decide the override.
+///
+/// The lookup keys off `transaction.chain_id()` and never the resolved
+/// `chain_id`. `resolve_chain_id` gives metadata priority and metadata is
+/// caller-controlled in this threat model, so feeding it into a security
+/// decision would let an attacker mismatch `network_id` and dodge the
+/// canonical-token lookup. For pre-EIP-155 legacy txs that don't carry a chain
+/// id of their own we fall back to an address-only any-chain lookup rather
+/// than the metadata-derived chain id: any canonical-token address on any
+/// chain still wins over a caller-supplied ABI.
+///
+/// Returns `Some(vec![field])` (always non-empty) if the destination is a
+/// registered canonical token. The field is either the decoded result or a
+/// raw-hex fallback when the built-in visualizer can't decode the selector
+/// (ERC721 stub returns `None` for all inputs today; ERC1155 has no built-in
+/// visualizer yet). Returning `Some` even with a raw-hex field is what gives
+/// callers a clean "if `Some`, you're done" contract: the downstream
+/// caller-ABI path and ERC20 `decode_transfers` fallback are both gated on
+/// `input_fields.is_empty()`, so populating any field locks them out. This
+/// matters because `approve(address,uint256)` and `transfer(address,uint256)`
+/// share selectors across ERC standards; without the lock-out a known ERC721
+/// or ERC1155 call would be mis-rendered as an ERC20 op.
+///
+/// Returns `None` only when the destination is not a registered canonical
+/// token.
+fn try_known_token_dispatch(
+    layered_registry: &LayeredRegistry<registry::ContractRegistry>,
+    chain_id: Option<registry::ChainId>,
+    to_address: alloy_primitives::Address,
+    input: &[u8],
+) -> Option<Vec<SignablePayloadField>> {
+    let erc_standard = layered_registry
+        .global()
+        .get_token_erc_standard(chain_id, to_address)?;
+    let decoded = match erc_standard {
+        token_metadata::ErcStandard::Erc20 => {
+            (contracts::core::ERC20Visualizer {}).visualize_tx_commands(input)
+        }
+        // `ERC721Visualizer::visualize_tx_commands` currently returns `None`
+        // for all inputs (no built-in ERC721 decoder yet). A follow-up can add
+        // minimal transferFrom/safeTransferFrom decoding for UX.
+        token_metadata::ErcStandard::Erc721 => {
+            (contracts::core::ERC721Visualizer {}).visualize_tx_commands(input)
+        }
+        // No built-in ERC1155 visualizer yet.
+        token_metadata::ErcStandard::Erc1155 => None,
+    };
+    let field =
+        decoded.unwrap_or_else(|| contracts::core::FallbackVisualizer::new().visualize_hex(input));
+    Some(vec![field])
+}
+
 fn convert_to_visual_sign_payload(
     transaction: TypedTransaction,
     options: VisualSignOptions,
@@ -561,84 +623,31 @@ fn convert_to_visual_sign_payload(
             }
         }
 
-        // Known-token short-circuit: if the destination is a token
-        // registered in the compiled-in ContractRegistry (e.g. USDC, USDT, WETH),
-        // dispatch to the safe built-in ERC20/ERC721 visualizer and bypass any
-        // caller-supplied ABI. This prevents a malicious dApp from supplying an
-        // ABI for a canonical token address with attacker-chosen parameter
-        // labels and spoofing the signing UI (the selector still has to match
-        // `transfer(address,uint256)` for the dispatcher to bind it, but
-        // parameter names are unconstrained).
-        //
-        // We deliberately consult only the global (compiled-in) layer here:
-        // a request-scoped registry is itself caller-supplied and cannot be
-        // trusted to decide the override.
-        //
-        // The registry lookup keys off `transaction.chain_id()` and never the
-        // resolved `chain_id`. `resolve_chain_id` gives metadata priority and
-        // metadata is caller-controlled in this threat model, so feeding it
-        // into a security decision would let an attacker mismatch `network_id`
-        // and dodge the canonical-token lookup. For pre-EIP-155 legacy txs
-        // that don't carry a chain id of their own we fall back to an
-        // address-only any-chain lookup rather than the metadata-derived
-        // chain id: any canonical-token address on any chain still wins over
-        // a caller-supplied ABI.
-        let mut is_known_token = false;
+        // Known-token short-circuit: see `try_known_token_dispatch` for the
+        // full rationale (global-only consultation, `transaction.chain_id()`
+        // vs `resolve_chain_id`, pre-EIP-155 any-chain fallback, selector
+        // collisions across ERC standards). The helper guarantees a non-empty
+        // `Some` when it fires, so the `extend` flips `input_fields.is_empty()`
+        // to false and the caller-ABI path and ERC20 `decode_transfers`
+        // fallback below both skip on their existing `is_empty` gates.
         if input_fields.is_empty() {
             if let Some(to_address) = transaction.to() {
-                let erc_standard = match transaction.chain_id() {
-                    Some(tx_chain_id) => layered_registry
-                        .global()
-                        .get_token_erc_standard(tx_chain_id, to_address),
-                    None => layered_registry
-                        .global()
-                        .get_token_erc_standard_any_chain(to_address),
-                };
-                if let Some(erc_standard) = erc_standard {
-                    is_known_token = true;
-                    match erc_standard {
-                        token_metadata::ErcStandard::Erc20 => {
-                            if let Some(field) =
-                                (contracts::core::ERC20Visualizer {}).visualize_tx_commands(input)
-                            {
-                                input_fields.push(field);
-                            }
-                        }
-                        token_metadata::ErcStandard::Erc721 => {
-                            // `ERC721Visualizer::visualize_tx_commands` currently
-                            // returns `None` for all inputs (no built-in ERC721
-                            // decoding yet). That's fine: the call below is a
-                            // no-op, and because
-                            // `is_known_token` is set we also skip both the
-                            // caller-ABI path and the ERC20 `decode_transfers`
-                            // fallback below, so the call lands on raw-hex.
-                            // This matters because `approve(address,uint256)`
-                            // shares a selector across ERC20/ERC721, so without
-                            // the ERC20-fallback guard we'd mis-render an ERC721
-                            // approval as an ERC20 approval.
-                            // A follow-up can add minimal
-                            // transferFrom/safeTransferFrom decoding for UX.
-                            if let Some(field) =
-                                (contracts::core::ERC721Visualizer {}).visualize_tx_commands(input)
-                            {
-                                input_fields.push(field);
-                            }
-                        }
-                        token_metadata::ErcStandard::Erc1155 => {
-                            // No built-in ERC1155 visualizer yet. `is_known_token`
-                            // is set so we skip both the caller-ABI path and the
-                            // ERC20 `decode_transfers` fallback, landing on
-                            // raw-hex. Same threat model as the ERC721 branch.
-                        }
-                    }
+                if let Some(known_fields) = try_known_token_dispatch(
+                    layered_registry,
+                    transaction.chain_id(),
+                    to_address,
+                    input,
+                ) {
+                    input_fields.extend(known_fields);
                 }
             }
         }
 
         // Try dynamic ABI visualization if available. Skipped for known tokens
-        // (see known-token short-circuit above) so caller-supplied ABIs cannot
-        // override the safe built-in decoders for canonical tokens.
-        if input_fields.is_empty() && !is_known_token {
+        // (the short-circuit above already populated `input_fields`) so
+        // caller-supplied ABIs cannot override the safe built-in decoders for
+        // canonical tokens.
+        if input_fields.is_empty() {
             if let (Some(to_address), Some(abi_reg)) = (transaction.to(), abi_registry) {
                 let chain_id_val = chain_id;
                 if let Some(abi) = abi_reg.get_abi_for_address(chain_id_val, to_address) {
@@ -652,13 +661,14 @@ fn convert_to_visual_sign_payload(
         }
 
         // Fallback: Try ERC20 if decode_transfers is enabled. Skipped for
-        // known tokens of any standard: `approve(address,uint256)` and
-        // `transfer(address,uint256)` share selectors across ERC20/ERC721,
-        // so without this guard a known ERC721 (or ERC1155) call would be
+        // known tokens because the short-circuit above already populated
+        // `input_fields`: `approve(address,uint256)` and
+        // `transfer(address,uint256)` share selectors across ERC20/ERC721, so
+        // without this guard a known ERC721 (or ERC1155) call would be
         // mis-rendered as an ERC20 op once its own visualizer returns `None`,
         // undermining the "canonical-token short-circuit wins over any other
         // decoder" property.
-        if input_fields.is_empty() && options.decode_transfers && !is_known_token {
+        if input_fields.is_empty() && options.decode_transfers {
             if let Some(field) = (contracts::core::ERC20Visualizer {}).visualize_tx_commands(input)
             {
                 input_fields.push(field);
@@ -1276,14 +1286,15 @@ mod tests {
     /// `approve(address,uint256)` selector must not be mis-rendered as an ERC20
     /// approval. The dispatch order is:
     ///
-    ///   1. ERC721 short-circuit fires (no built-in ERC721 decoder yet, returns None).
-    ///   2. Caller-ABI path skipped (`is_known_token`).
-    ///   3. ERC20 `decode_transfers` fallback must also be skipped
-    ///      (`is_known_token`), or it would decode `approve` as an ERC20 op.
-    ///   4. Raw-hex fallback wins.
+    ///   1. `try_known_token_dispatch` fires (ERC721 visualizer returns None,
+    ///      helper substitutes a raw-hex field so its `Some` is non-empty).
+    ///   2. Caller-ABI path skipped (`input_fields.is_empty()` is now false).
+    ///   3. ERC20 `decode_transfers` fallback also skipped for the same reason,
+    ///      or it would decode `approve` as an ERC20 op.
+    ///   4. Raw-hex (from the helper) is the rendered result.
     ///
-    /// Without the `is_known_token` guard on the ERC20 fallback this regresses
-    /// to "ERC20 Approve" output, which is the spoofing surface this fix closes.
+    /// Without the helper's non-empty `Some` contract this regresses to "ERC20
+    /// Approve" output, which is the spoofing surface this fix closes.
     #[test]
     fn test_known_erc721_token_skips_erc20_fallback_on_shared_selector() {
         // Address-only fixture, the actual contract standard is decided by the
