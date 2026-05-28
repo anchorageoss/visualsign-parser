@@ -8,6 +8,14 @@ permissions:
   contents: write
   pull-requests: write
 
+# Serialize runs: this workflow pushes to the shared `cla-signers-batch` branch
+# and creates/updates a shared batch PR. Two near-simultaneous `/approve-cla`
+# comments would otherwise race on the push. Don't cancel in-progress runs --
+# each approval must complete so no signer is dropped.
+concurrency:
+  group: cla-signers-batch
+  cancel-in-progress: false
+
 jobs:
   add-user-to-cla-list:
     if: github.event.issue.pull_request
@@ -92,8 +100,10 @@ jobs:
 
           echo "Adding ${AUTHOR_USERNAME} to .cla-signed-users"
 
-          # Check if user is already in the list on main branch
-          if grep -v '^#' .cla-signed-users | grep -q -w "$AUTHOR_USERNAME"; then
+          # Check if user is already in the list on main branch.
+          # grep -Fxq: fixed-string whole-line match -- usernames like
+          # `dependabot[bot]` contain regex metacharacters that break `grep -w`.
+          if grep -v '^#' .cla-signed-users | grep -Fxq "$AUTHOR_USERNAME"; then
             echo "User is already in the list."
             gh pr comment ${{ github.event.issue.number }} --body "ℹ️ @${AUTHOR_USERNAME} is already in the CLA signers list."
             exit 0
@@ -113,8 +123,8 @@ jobs:
             git checkout -b "$BATCH_BRANCH"
           fi
 
-          # Check if user is already in the batch branch
-          if grep -v '^#' .cla-signed-users | grep -q -w "$AUTHOR_USERNAME"; then
+          # Check if user is already in the batch branch (fixed-string match).
+          if grep -v '^#' .cla-signed-users | grep -Fxq "$AUTHOR_USERNAME"; then
             echo "User is already in the batch branch."
             gh pr comment ${{ github.event.issue.number }} --body "ℹ️ @${AUTHOR_USERNAME} is already pending approval in the CLA signers batch."
             exit 0
@@ -143,6 +153,8 @@ jobs:
             gh pr comment ${{ github.event.issue.number }} --body "✅ @${AUTHOR_USERNAME} has been added to the CLA signers batch PR #${EXISTING_PR} by @${COMMENTER}. The CLA check will pass once the batch PR is merged."
           else
             echo "Creating new batch PR"
+            # `gh pr create` prints the PR URL (…/pull/<n>); take the trailing
+            # number. The old `grep '#[0-9]+'` matched nothing on a URL.
             NEW_PR=$(gh pr create \
               --title "chore: Add CLA signers batch" \
               --body "This PR adds new CLA signers in batch to comply with repository rules.
@@ -154,7 +166,7 @@ jobs:
               --head "$BATCH_BRANCH" \
               --base main \
               --label "cla" \
-              | grep -o '#[0-9]\+' | head -1 | tr -d '#')
+              | grep -oE '[0-9]+$' | head -1)
 
             echo "Created new batch PR #${NEW_PR}"
             gh pr comment ${{ github.event.issue.number }} --body "✅ @${AUTHOR_USERNAME} has been added to a new CLA signers batch PR #${NEW_PR} by @${COMMENTER}. The CLA check will pass once the batch PR is merged."
