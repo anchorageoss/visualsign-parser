@@ -399,28 +399,42 @@ impl UniversalRouterVisualizer {
     /// Paths are encoded as: token(20) | fee(3) | token(20) | fee(3) | ... | token(20).
     /// A valid N-hop path therefore has length 20 + N * 23.
     ///
-    /// Returns `(first_token, last_token, first_hop_fee, hop_count)` or `None` for malformed
-    /// paths, where `first_token` is the leading 20 bytes and `last_token` is the trailing
-    /// 20 bytes. The helper is intentionally semantics-free: role assignment depends on the
-    /// caller's swap direction.
+    /// Returns `(first_token, last_token, leading_fee, trailing_fee, hop_count)` or `None`
+    /// for malformed paths, where `first_token` is the leading 20 bytes, `last_token` is
+    /// the trailing 20 bytes, `leading_fee` is the fee immediately after `first_token`
+    /// (`path[20..23]`), and `trailing_fee` is the fee immediately before `last_token`
+    /// (`path[len-23..len-20]`). On a single-hop path the two fees coincide.
     ///
-    /// - ExactIn paths are encoded `tokenIn || fee || ... || tokenOut`, so callers alias
-    ///   `first_token = tokenIn`, `last_token = tokenOut`.
-    /// - ExactOut paths are encoded in reverse (`tokenOut || fee || ... || tokenIn`) per
-    ///   Uniswap V3 convention (see `SwapRouter.exactOutputInternal` /
-    ///   `Path.decodeFirstPool`), so callers must alias
-    ///   `first_token = tokenOut`, `last_token = tokenIn`.
-    fn decode_v3_path(path: &[u8]) -> Option<(Address, Address, u32, usize)> {
+    /// The helper is intentionally semantics-free: token and fee role assignment depends
+    /// on the caller's swap direction.
+    ///
+    /// - ExactIn paths are encoded `tokenIn || fee_0 || ... || tokenOut`, where execution
+    ///   flows left-to-right, so callers alias `first_token = tokenIn`,
+    ///   `last_token = tokenOut`, first-execution-hop fee = `leading_fee`.
+    /// - ExactOut paths are encoded in reverse (`tokenOut || fee_{N-1} || ... || tokenIn`)
+    ///   per Uniswap V3 convention (see `SwapRouter.exactOutputInternal` /
+    ///   `Path.decodeFirstPool`). Execution flows right-to-left from the signer's view,
+    ///   so callers alias `first_token = tokenOut`, `last_token = tokenIn`, and the
+    ///   first-execution-hop fee (the fee the signer's input pays first) is
+    ///   `trailing_fee`, not `leading_fee`.
+    fn decode_v3_path(path: &[u8]) -> Option<(Address, Address, u32, u32, usize)> {
         // Single hop minimum: 20 + 23 = 43 bytes. Each additional hop adds 23 bytes.
         if path.len() < 43 || (path.len() - 20) % 23 != 0 {
             return None;
         }
-        let token_in = Address::from_slice(&path[0..20]);
-        let first_fee = u32::from_be_bytes([0, path[20], path[21], path[22]]);
-        let token_out_start = path.len() - 20;
-        let token_out = Address::from_slice(&path[token_out_start..]);
+        let first_token = Address::from_slice(&path[0..20]);
+        let leading_fee = u32::from_be_bytes([0, path[20], path[21], path[22]]);
+        let last_token_start = path.len() - 20;
+        let last_token = Address::from_slice(&path[last_token_start..]);
+        let trailing_fee_start = last_token_start - 3;
+        let trailing_fee = u32::from_be_bytes([
+            0,
+            path[trailing_fee_start],
+            path[trailing_fee_start + 1],
+            path[trailing_fee_start + 2],
+        ]);
         let hops = (path.len() - 20) / 23;
-        Some((token_in, token_out, first_fee, hops))
+        Some((first_token, last_token, leading_fee, trailing_fee, hops))
     }
 
     /// Decodes V3_SWAP_EXACT_IN command parameters
@@ -454,7 +468,10 @@ impl UniversalRouterVisualizer {
 
         // Decode V3 path. For multi-hop paths, the output token MUST be read from the
         // FINAL 20 bytes, not from offset 23..43 (which is the first intermediate token).
-        let (token_in, token_out, fee, hops) = match Self::decode_v3_path(&path) {
+        // ExactIn paths flow in execution order, so the first-execution-hop fee is the
+        // leading fee. `trailing_fee` (the last execution hop's fee) is intentionally
+        // discarded here, the caller surfaces only the first-hop fee for disclosure.
+        let (token_in, token_out, fee, _trailing_fee, hops) = match Self::decode_v3_path(&path) {
             Some(decoded) => decoded,
             None => {
                 return SignablePayloadField::TextV2 {
@@ -801,9 +818,13 @@ impl UniversalRouterVisualizer {
 
         // Decode V3 path. ExactOut paths are encoded in reverse vs ExactIn per Uniswap V3
         // convention (see `SwapRouter.exactOutputInternal` / `Path.decodeFirstPool`): the
-        // on-chain layout is `tokenOut || fee || ... || tokenIn`. The helper returns raw
-        // byte positions, so we alias `first_token = tokenOut`, `last_token = tokenIn`.
-        let (token_out, token_in, fee, hops) = match Self::decode_v3_path(&path) {
+        // on-chain layout is `tokenOut || fee_{N-1} || ... || fee_0 || tokenIn`. The helper
+        // returns raw byte positions, so we alias `first_token = tokenOut`,
+        // `last_token = tokenIn`. Execution flows right-to-left from the signer's view, so
+        // the first-execution-hop fee (the fee the signer's input pays first) is the
+        // helper's `trailing_fee`, NOT `leading_fee`. The leading fee corresponds to the
+        // final hop (tokenMid -> tokenOut) and is intentionally discarded for disclosure.
+        let (token_out, token_in, _leading_fee, fee, hops) = match Self::decode_v3_path(&path) {
             Some(decoded) => decoded,
             None => {
                 return SignablePayloadField::TextV2 {
@@ -2318,11 +2339,13 @@ mod tests {
         let path = build_v3_path(&[token_in, token_out], &[3000]);
         assert_eq!(path.len(), 43);
 
-        let (in_, out_, fee, hops) =
+        let (in_, out_, leading_fee, trailing_fee, hops) =
             UniversalRouterVisualizer::decode_v3_path(&path).expect("valid single-hop path");
         assert_eq!(in_, token_in);
         assert_eq!(out_, token_out);
-        assert_eq!(fee, 3000);
+        assert_eq!(leading_fee, 3000);
+        // Single-hop path: leading and trailing fees coincide.
+        assert_eq!(trailing_fee, 3000);
         assert_eq!(hops, 1);
     }
 
@@ -2343,13 +2366,15 @@ mod tests {
         // 20 + 2*23 = 66 bytes
         assert_eq!(path.len(), 66);
 
-        let (in_, out_, fee, hops) =
+        let (in_, out_, leading_fee, trailing_fee, hops) =
             UniversalRouterVisualizer::decode_v3_path(&path).expect("valid two-hop path");
         assert_eq!(in_, token_in);
         // Critical: this must be the FINAL token, not the intermediate.
         assert_eq!(out_, token_out);
         assert_ne!(out_, token_mid, "regression: must not return intermediate");
-        assert_eq!(fee, 500);
+        assert_eq!(leading_fee, 500);
+        // Distinct fees: trailing fee is the second-to-last 3 bytes of the path.
+        assert_eq!(trailing_fee, 3000);
         assert_eq!(hops, 2);
     }
 
@@ -2371,11 +2396,14 @@ mod tests {
         // 20 + 3*23 = 89
         assert_eq!(path.len(), 89);
 
-        let (in_, out_, fee, hops) =
+        let (in_, out_, leading_fee, trailing_fee, hops) =
             UniversalRouterVisualizer::decode_v3_path(&path).expect("valid three-hop path");
         assert_eq!(in_, t0);
         assert_eq!(out_, t3);
-        assert_eq!(fee, 100);
+        assert_eq!(leading_fee, 100);
+        // Three-hop fees are [100, 500, 10000]; the trailing fee sits in the bytes
+        // immediately before the last token, i.e. the final entry of the fee list.
+        assert_eq!(trailing_fee, 10000);
         assert_eq!(hops, 3);
     }
 
@@ -2442,6 +2470,18 @@ mod tests {
                 assert!(
                     subtitle.contains("2 hops"),
                     "subtitle should disclose hop count, got: {subtitle}"
+                );
+                // ExactIn execution flows tokenIn -> tokenMid -> tokenOut; the first
+                // execution hop uses the FIRST entry in the fee list (500 = 0.05%).
+                // Anything else would mean the signer is shown a hop fee that doesn't
+                // apply to the first leg.
+                assert!(
+                    subtitle.contains("first fee 0.05%"),
+                    "subtitle should disclose first-hop fee (0.05%), got: {subtitle}"
+                );
+                assert!(
+                    !subtitle.contains("first fee 0.3%"),
+                    "subtitle must NOT disclose the second-hop fee as the first, got: {subtitle}"
                 );
 
                 let expanded = preview_layout.expanded.expect("expanded present");
@@ -2522,6 +2562,20 @@ mod tests {
                 assert!(
                     subtitle.contains("2 hops"),
                     "subtitle should disclose hop count, got: {subtitle}"
+                );
+                // ExactOut path bytes for this fixture: [real_token_out | 10000 | token_mid
+                // | 100 | real_token_in]. Execution flows real_token_in -> token_mid first
+                // (the signer's first leg, paid out of the user's input), using fee=100 =
+                // 0.01%. The leading-byte fee (10000 = 1.0%) corresponds to the FINAL
+                // execution hop. Disclosing the leading-byte fee as "first fee" misleads
+                // the signer about the hop their input touches first.
+                assert!(
+                    subtitle.contains("first fee 0.01%"),
+                    "subtitle should disclose first-execution-hop fee (0.01%), got: {subtitle}"
+                );
+                assert!(
+                    !subtitle.contains("first fee 1%"),
+                    "subtitle must NOT disclose the final-hop fee as the first, got: {subtitle}"
                 );
 
                 let expanded = preview_layout.expanded.expect("expanded present");
