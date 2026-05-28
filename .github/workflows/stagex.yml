@@ -166,7 +166,12 @@ jobs:
             echo ""
             echo "- **Container Image URL**: \`${pinned_url}\`"
             echo "- **Executable path**: \`/parser_app\`"
-            echo "- **Expected Executable Digest**: \`sha256:${digest}\`"
+            # Plain hex, no `sha256:` prefix — that's what QOS' Manifest schema
+            # decodes for the pivot hash, and what `tvc deploy create` then
+            # forwards verbatim into the server-side manifest. A `sha256:`
+            # prefix makes the field 71 chars (odd), tripping hex::decode in
+            # `tvc deploy approve` with `OddLength at line 8 column 85`.
+            echo "- **Expected Executable Digest**: \`${digest}\`"
             echo "- **QOS Version**: \`${qos_version}\`"
             echo ""
             echo "### Verify the executable digest"
@@ -188,7 +193,7 @@ jobs:
             echo '# Edit tvc-deploy.json to set:'
             echo "#   \"pivotContainerImageUrl\": \"${pinned_url}\""
             echo '#   "pivotPath": "/parser_app"'
-            echo "#   \"expectedPivotDigest\": \"sha256:${digest}\""
+            echo "#   \"expectedPivotDigest\": \"${digest}\""
             echo "#   \"qosVersion\": \"${qos_version}\""
             echo '#   "appId": "<env-specific>"'
             echo 'tvc deploy create tvc-deploy.json'

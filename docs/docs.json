@@ -61,6 +61,18 @@
             ]
           },
           {
+            "group": "Chain Guides",
+            "pages": [
+              "wallet-integration/chains/ethereum"
+            ]
+          },
+          {
+            "group": "For dApp Builders",
+            "pages": [
+              "wallet-integration/dapps/ethereum"
+            ]
+          },
+          {
             "group": "Reference",
             "pages": [
               "api-reference"

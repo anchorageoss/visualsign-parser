@@ -7,7 +7,7 @@ use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata::Me
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
-use visualsign::vsptrait::{VisualSignConverterFromString, VisualSignOptions};
+use visualsign::vsptrait::{VisualSignConverterFromString, VisualSignError, VisualSignOptions};
 use visualsign_ethereum::EthereumVisualSignConverter;
 use visualsign_ethereum::transaction_string_to_visual_sign;
 
@@ -372,4 +372,49 @@ fn test_chain_id_matching_metadata_succeeds() {
         json.contains("Polygon Mainnet"),
         "Polygon network label should be rendered when both inputs agree, got: {json}"
     );
+}
+
+#[test]
+fn test_non_ascii_payload_is_rejected_by_converter() {
+    // Regression for PRS-224: the Ethereum override of
+    // `to_visual_sign_payload_from_string` previously called the
+    // non-validated converter, so any non-ASCII text that reached the
+    // rendered payload was emitted into the signed JSON. Every other chain
+    // converter uses the default impl that runs charset validation; the
+    // Ethereum override must enforce the same invariant.
+    //
+    // The ticket's stated PoC uses wallet-supplied ABI `function.name` /
+    // parameter `input.name`. Today upstream `alloy_json_abi` validates
+    // those as Solidity identifiers and rejects U+202E before our code sees
+    // it, so we exercise the invariant via `VisualSignOptions::transaction_name`,
+    // which lands directly in `payload.title` with no upstream filtering.
+    // Either way the converter must reject non-ASCII content, since the
+    // invariant must not depend on which input field carries it.
+    let fixtures_dir = fixture_path("");
+    let input_path = fixtures_dir.join("1559.input");
+    let transaction_hex = fs::read_to_string(&input_path)
+        .expect("Failed to read 1559.input fixture")
+        .trim()
+        .to_string();
+
+    let options = VisualSignOptions {
+        decode_transfers: true,
+        transaction_name: Some("Send \u{202E}evil".to_string()),
+        metadata: None,
+        developer_config: None,
+    };
+
+    let converter = EthereumVisualSignConverter::new();
+    let result = converter.to_visual_sign_payload_from_string(&transaction_hex, options);
+
+    match result {
+        Ok(payload) => panic!(
+            "Expected non-ASCII title to be rejected by charset validation, got payload: {}",
+            payload.to_json().unwrap_or_default()
+        ),
+        Err(VisualSignError::ValidationError(_)) => {
+            // Expected: charset validation rejected the non-ASCII payload.
+        }
+        Err(other) => panic!("Expected VisualSignError::ValidationError, got: {other:?}"),
+    }
 }
