@@ -10,6 +10,7 @@ pub mod lint;
 pub mod registry;
 pub mod signing;
 pub mod test_utils;
+pub mod time_fmt;
 pub mod vsptrait;
 
 // Marker trait to ensure types implement deterministic ordering in their serialization

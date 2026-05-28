@@ -16,6 +16,7 @@ thiserror = "2.0.12"
 regex = { version = "1.11.1", default-features = false, features = ["std"] }
 sha2 = "0.10"
 hex = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tracing = { workspace = true }
 generated = { path = "../generated" }
 
