@@ -69,9 +69,22 @@ pub fn get_token_lookup_table() -> BTreeMap<&'static str, TokenInfo> {
     tokens
 }
 
-/// Helper function to format token amounts
+/// Helper function to format token amounts.
+///
+/// Defensive against attacker-controlled `decimals`: uses `checked_pow` so an
+/// out-of-range value (>= 20) returns the raw amount rather than triggering a
+/// divide-by-zero panic (10^64 wraps to 0 in `u64`, etc.). Callers that ingest
+/// `decimals` from untrusted transaction bytes should additionally validate the
+/// value up front and surface a parse error to the user.
 pub fn format_token_amount(amount: u64, decimals: u8) -> String {
-    let divisor = 10_u64.pow(decimals as u32);
+    let Some(divisor) = 10_u64.checked_pow(decimals as u32) else {
+        // decimals is out of the representable range for u64; render as raw.
+        return amount.to_string();
+    };
+    if divisor == 0 {
+        // Belt and braces: should be unreachable given checked_pow above.
+        return amount.to_string();
+    }
     let whole = amount / divisor;
     let fractional = amount % divisor;
 
@@ -127,6 +140,49 @@ pub fn get_token_info(address: &str, amount: u64) -> SwapTokenInfo {
             decimals: 0,
             amount,
             human_readable_amount: amount.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_token_amount_typical_decimals() {
+        // 9 decimals (SOL)
+        assert_eq!(format_token_amount(1_000_000_000, 9), "1");
+        assert_eq!(format_token_amount(1_500_000_000, 9), "1.5");
+        // 6 decimals (USDC)
+        assert_eq!(format_token_amount(1_000_000, 6), "1");
+        assert_eq!(format_token_amount(1_234_567, 6), "1.234567");
+        // 0 decimals
+        assert_eq!(format_token_amount(42, 0), "42");
+    }
+
+    #[test]
+    fn test_format_token_amount_zero_amount() {
+        assert_eq!(format_token_amount(0, 9), "0");
+        assert_eq!(format_token_amount(0, 0), "0");
+        // Out-of-range decimals with zero amount should still return "0", not panic.
+        assert_eq!(format_token_amount(0, 64), "0");
+    }
+
+    /// Regression: decimals >= 20 must not trigger a divide-by-zero
+    /// panic. `10_u64.pow(20)` overflows in debug and wraps in release; for
+    /// `decimals == 64` the wrapped value is exactly `0` because `10^64 mod
+    /// 2^64 == 0`, which used to panic on division.
+    #[test]
+    fn test_format_token_amount_decimals_out_of_range_does_not_panic() {
+        // Each call must return without panicking.
+        for decimals in [20u8, 21, 38, 63, 64, 100, 200, u8::MAX] {
+            let formatted = format_token_amount(12_345_678_u64, decimals);
+            // Fallback path: render the raw amount.
+            assert_eq!(
+                formatted, "12345678",
+                "decimals={decimals} should fall back to raw amount"
+            );
         }
     }
 }
