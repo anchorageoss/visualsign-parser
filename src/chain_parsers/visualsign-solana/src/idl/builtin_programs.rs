@@ -104,8 +104,16 @@ const NATIVE_PROGRAM_NAMES: &[(&str, &str)] = &[
         "Vote Program",
     ),
     (
+        "hausS13jsjafwWwGqZTUQRmWyvyxn9EQpqMwV1PBBmk",
+        "Metaplex Auction House Program",
+    ),
+    (
         "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s",
         "Metaplex Token Metadata Program",
+    ),
+    (
+        "namesLPneVptA9Z5rqUDD9tMTWEJwofgaYwp8cawRkX",
+        "SPL Name Service Program",
     ),
 ];
 
@@ -288,6 +296,22 @@ mod tests {
         assert_eq!(
             canonical_name("SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy"),
             Some("SPL Stake Pool Program"),
+        );
+    }
+
+    #[test]
+    fn metaplex_auction_house_is_trusted() {
+        assert_eq!(
+            canonical_name("hausS13jsjafwWwGqZTUQRmWyvyxn9EQpqMwV1PBBmk"),
+            Some("Metaplex Auction House Program"),
+        );
+    }
+
+    #[test]
+    fn spl_name_service_is_trusted() {
+        assert_eq!(
+            canonical_name("namesLPneVptA9Z5rqUDD9tMTWEJwofgaYwp8cawRkX"),
+            Some("SPL Name Service Program"),
         );
     }
 
