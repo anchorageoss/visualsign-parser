@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use clap::Args as ClapArgs;
 use generated::parser::{Abi, AbiType, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
@@ -123,7 +123,24 @@ fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<Strin
 /// `implementation_address` onto the proxy's `Abi`. If the proxy address has no ABI
 /// file entry, an empty (`[]`) ABI is synthesized so resolution still works off the
 /// link. Malformed links are skipped with a warning.
-fn apply_proxy_mappings(abi_mappings: &mut HashMap<String, Abi>, proxy_mappings: &[String]) {
+///
+/// `abi_json_mappings` is the original `--abi-json-mappings` list; it is used to
+/// emit a louder warning when a proxy's ABI file was specified but failed to load
+/// (vs. simply never having an ABI file specified at all).
+fn apply_proxy_mappings(
+    abi_mappings: &mut HashMap<String, Abi>,
+    proxy_mappings: &[String],
+    abi_json_mappings: &[String],
+) {
+    // Pre-compute the set of addresses that were attempted in --abi-json-mappings.
+    // Used below to distinguish "ABI file was specified but failed" from "no ABI file at all".
+    let attempted_abi_addresses: HashSet<String> = abi_json_mappings
+        .iter()
+        .filter_map(|m| mapping_parser::parse_mapping(m).ok())
+        .filter(|c| validate_eth_address(&c.identifier).is_ok())
+        .map(|c| normalize_eth_address(&c.identifier))
+        .collect();
+
     for mapping in proxy_mappings {
         let Some((proxy, implementation)) = mapping.split_once(':') else {
             eprintln!(
@@ -148,9 +165,16 @@ fn apply_proxy_mappings(abi_mappings: &mut HashMap<String, Abi>, proxy_mappings:
         let impl_key = normalize_eth_address(implementation);
 
         let entry = abi_mappings.entry(proxy_key.clone()).or_insert_with(|| {
-            eprintln!(
-                "  Note: proxy '{proxy_key}' has no ABI file; synthesizing an empty proxy ABI"
-            );
+            if attempted_abi_addresses.contains(&proxy_key) {
+                eprintln!(
+                    "  Warning: proxy '{proxy_key}' ABI file was specified but failed to load; \
+                     synthesizing an empty proxy ABI"
+                );
+            } else {
+                eprintln!(
+                    "  Note: proxy '{proxy_key}' has no ABI file; synthesizing an empty proxy ABI"
+                );
+            }
             Abi {
                 value: "[]".to_string(),
                 signature: None,
@@ -206,7 +230,7 @@ pub(crate) fn create_chain_metadata(
 
     if !abi_proxy_mappings.is_empty() {
         eprintln!("Applying proxy mappings:");
-        apply_proxy_mappings(&mut abi_mappings, abi_proxy_mappings);
+        apply_proxy_mappings(&mut abi_mappings, abi_proxy_mappings, abi_json_mappings);
         eprintln!();
     }
 
@@ -275,7 +299,7 @@ mod tests {
     fn test_create_chain_metadata_with_abi_mappings() {
         let path = write_temp_json("eth_abi.json", r#"[{"type":"function","name":"swap"}]"#);
         let mappings = vec![format!(
-            "Uniswap:{}:0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            "Token:{}:0xdAC17F958D2ee523a2206206994597C13D831ec7",
             path.display()
         )];
 

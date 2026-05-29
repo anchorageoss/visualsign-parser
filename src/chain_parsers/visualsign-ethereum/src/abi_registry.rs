@@ -20,12 +20,11 @@ pub type ChainId = u64;
 /// Classifies what kind of contract an ABI describes.
 ///
 /// Named `AbiKind` to avoid colliding with the generated proto `AbiType` enum.
-/// Extraction maps the proto `abi_type` onto this; `Unspecified` collapses into
-/// `Implementation` so the default (no type set) keeps today's behaviour.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+/// Extraction maps the proto `abi_type` onto this; `Unspecified` maps explicitly
+/// to `Implementation` in `resolve_abi_kind`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AbiKind {
     /// The ABI decodes the destination's calldata directly (today's assumption).
-    #[default]
     Implementation,
     /// The destination is a proxy that delegates to an implementation; the
     /// calldata should be decoded against the implementation's ABI.
@@ -177,6 +176,9 @@ impl AbiRegistry {
 
     /// Resolves a proxy address to its implementation: returns the implementation
     /// address and the ABI registered for it.
+    ///
+    /// Resolution is single-hop only: if the linked implementation is itself a proxy,
+    /// its registered ABI is returned as-is without following the next link.
     ///
     /// Returns `None` if the address is not a proxy, has no implementation link, or
     /// the linked implementation address has no registered ABI.
