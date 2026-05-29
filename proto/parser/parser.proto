@@ -129,6 +129,20 @@ message SolanaMetadata {
 message Abi {
   string value = 1;                         // JSON ABI definition
   optional SignatureMetadata signature = 2; // Optional ABI signature with metadata
+  optional AbiType abi_type = 3;            // Type of contract this ABI describes (defaults to implementation)
+  // For proxy ABIs, the 0x-prefixed implementation address whose ABI decodes the
+  // calldata. Expected to itself appear as an entry in abi_mappings. Ignored for
+  // non-proxy types. Not covered by the ABI signature.
+  optional string implementation_address = 4;
+}
+
+// AbiType classifies what kind of contract an ABI describes, so the parser can
+// decode proxied calls against the implementation rather than assuming the
+// destination address is the implementation directly.
+enum AbiType {
+  ABI_TYPE_UNSPECIFIED = 0;     // Treated as implementation
+  ABI_TYPE_IMPLEMENTATION = 1;
+  ABI_TYPE_PROXY = 2;
 }
 
 message Idl {

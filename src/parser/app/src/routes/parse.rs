@@ -143,6 +143,7 @@ mod tests {
             Abi {
                 value: r#"[{"name":"transfer"}]"#.to_string(),
                 signature: None,
+                ..Default::default()
             },
         );
         abi_mappings.insert(
@@ -150,6 +151,7 @@ mod tests {
             Abi {
                 value: r#"[{"name":"approve"}]"#.to_string(),
                 signature: None,
+                ..Default::default()
             },
         );
 

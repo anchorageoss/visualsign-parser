@@ -3,7 +3,7 @@
 //! Converts `ChainMetadata` ABI mappings into an `AbiRegistry` and optionally
 //! validates secp256k1 signatures attached to individual ABI entries.
 
-use crate::abi_registry::AbiRegistry;
+use crate::abi_registry::{AbiKind, AbiRegistry};
 use crate::embedded_abis::register_embedded_abi;
 use generated::parser::{ChainMetadata, chain_metadata};
 use k256::EncodedPoint;
@@ -41,6 +41,16 @@ enum AbiSignatureError {
 ///   tampered with after signing, but does not verify the signer's identity.
 ///   To establish trust, callers should verify the public key against a known
 ///   allowlist before passing metadata to this function.
+/// - **`abi_type` and `implementation_address` are NOT covered by the ABI
+///   signature.** The signature is computed over `abi.value` (the JSON ABI string)
+///   only, so a man-in-the-middle could flip a signed implementation ABI to
+///   `Proxy` or repoint `implementation_address` without invalidating the
+///   signature. This is acceptable because the whole caller-ABI decode path is
+///   untrusted and display-only: proxy resolution runs strictly after the
+///   known-token short-circuit (so canonical tokens can never be redirected), and
+///   an attacker who can tamper metadata could already swap the bound ABI itself.
+///   The full `ChainMetadata` (including these fields) is still committed to by
+///   `metadata_digest` in the signed enclave output.
 pub fn try_extract_from_chain_metadata(
     chain_metadata: Option<&ChainMetadata>,
     chain_id: u64,
@@ -84,9 +94,21 @@ pub fn try_extract_from_chain_metadata(
             }
         }
 
+        // Determine the kind of contract this ABI describes. An unset or
+        // unspecified type collapses to `Implementation`, preserving today's
+        // behaviour. `abi_type` is not covered by the ABI signature; see the
+        // module-level security notes.
+        let (abi_kind, implementation) = resolve_abi_kind(abi);
+
         match register_embedded_abi(&mut registry, address, &abi.value) {
             Ok(()) => {
-                registry.map_address(chain_id, parsed_address, address);
+                registry.map_address_with_type(
+                    chain_id,
+                    parsed_address,
+                    address,
+                    abi_kind,
+                    implementation,
+                );
             }
             Err(e) => {
                 log::warn!("Skipping ABI mapping for '{address}': {e}");
@@ -97,6 +119,48 @@ pub fn try_extract_from_chain_metadata(
         return None;
     }
     Some(registry)
+}
+
+/// Resolve the `AbiKind` and (for proxies) the implementation address from a proto
+/// `Abi` entry.
+///
+/// An unset or `ABI_TYPE_UNSPECIFIED`/`ABI_TYPE_IMPLEMENTATION` type maps to
+/// `Implementation`. `ABI_TYPE_PROXY` maps to `Proxy`; its `implementation_address`
+/// is parsed best-effort, and a missing or malformed address yields a proxy with no
+/// link (decoding falls back to the proxy's own ABI) rather than dropping the entry.
+fn resolve_abi_kind(abi: &generated::parser::Abi) -> (AbiKind, Option<alloy_primitives::Address>) {
+    let proto_type = abi
+        .abi_type
+        .and_then(generated::parser::AbiType::from_i32)
+        .unwrap_or(generated::parser::AbiType::Unspecified);
+
+    match proto_type {
+        generated::parser::AbiType::Proxy => {
+            let implementation = match abi.implementation_address.as_deref() {
+                Some(addr) => match addr.parse::<alloy_primitives::Address>() {
+                    Ok(parsed) => Some(parsed),
+                    Err(e) => {
+                        log::warn!(
+                            "Proxy ABI has invalid implementation_address '{addr}': {e}; \
+                             falling back to the proxy's own ABI"
+                        );
+                        None
+                    }
+                },
+                None => {
+                    log::warn!(
+                        "Proxy ABI has no implementation_address; \
+                         falling back to the proxy's own ABI"
+                    );
+                    None
+                }
+            };
+            (AbiKind::Proxy, implementation)
+        }
+        generated::parser::AbiType::Unspecified | generated::parser::AbiType::Implementation => {
+            (AbiKind::Implementation, None)
+        }
+    }
 }
 
 /// Convert protobuf `SignatureMetadata` (key-value pairs) to local `SignatureMetadata`.
@@ -419,6 +483,7 @@ mod tests {
                     Abi {
                         value: VALID_ABI.to_string(),
                         signature: None,
+                        ..Default::default()
                     },
                 )])
                 .into_iter()
@@ -478,6 +543,7 @@ mod tests {
                     Abi {
                         value: VALID_ABI.to_string(),
                         signature: Some(proto_sig),
+                        ..Default::default()
                     },
                 )])
                 .into_iter()
@@ -514,6 +580,7 @@ mod tests {
                     Abi {
                         value: VALID_ABI.to_string(),
                         signature: None,
+                        ..Default::default()
                     },
                 )])
                 .into_iter()
@@ -534,6 +601,7 @@ mod tests {
                     Abi {
                         value: "not valid json".to_string(),
                         signature: None,
+                        ..Default::default()
                     },
                 )])
                 .into_iter()
@@ -556,6 +624,7 @@ mod tests {
                         Abi {
                             value: VALID_ABI.to_string(),
                             signature: None,
+                            ..Default::default()
                         },
                     ),
                     (
@@ -563,6 +632,7 @@ mod tests {
                         Abi {
                             value: VALID_ABI.to_string(),
                             signature: None,
+                            ..Default::default()
                         },
                     ),
                 ])
@@ -574,5 +644,118 @@ mod tests {
         let registry = try_extract_from_chain_metadata(Some(&metadata), 1)
             .expect("should contain the valid ABI");
         assert!(registry.list_abis().contains(&valid_address));
+    }
+
+    // --- proxy / abi_type tests ---
+
+    const PROXY_ADDRESS: &str = "0x1111111111111111111111111111111111111111";
+    const IMPL_ADDRESS: &str = "0x2222222222222222222222222222222222222222";
+
+    fn parse_addr(s: &str) -> alloy_primitives::Address {
+        s.parse().expect("valid address")
+    }
+
+    #[test]
+    fn test_extract_default_type_is_implementation() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![(
+                    TEST_ADDRESS,
+                    Abi {
+                        value: VALID_ABI.to_string(),
+                        signature: None,
+                        ..Default::default()
+                    },
+                )])
+                .into_iter()
+                .collect(),
+            })),
+        };
+        let registry = try_extract_from_chain_metadata(Some(&metadata), 1).expect("has ABI");
+        assert_eq!(
+            registry.get_abi_kind(1, parse_addr(TEST_ADDRESS)),
+            Some(AbiKind::Implementation)
+        );
+    }
+
+    #[test]
+    fn test_extract_proxy_links_to_implementation() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![
+                    (
+                        PROXY_ADDRESS,
+                        Abi {
+                            value: "[]".to_string(),
+                            signature: None,
+                            abi_type: Some(generated::parser::AbiType::Proxy as i32),
+                            implementation_address: Some(IMPL_ADDRESS.to_string()),
+                        },
+                    ),
+                    (
+                        IMPL_ADDRESS,
+                        Abi {
+                            value: VALID_ABI.to_string(),
+                            signature: None,
+                            ..Default::default()
+                        },
+                    ),
+                ])
+                .into_iter()
+                .collect(),
+            })),
+        };
+        let registry = try_extract_from_chain_metadata(Some(&metadata), 1).expect("has ABIs");
+
+        assert_eq!(
+            registry.get_abi_kind(1, parse_addr(PROXY_ADDRESS)),
+            Some(AbiKind::Proxy)
+        );
+        let (impl_addr, impl_abi) = registry
+            .get_implementation_abi(1, parse_addr(PROXY_ADDRESS))
+            .expect("proxy resolves to implementation");
+        assert_eq!(impl_addr, parse_addr(IMPL_ADDRESS));
+        // Resolved ABI is the implementation's; the synthesized "[]" proxy ABI parses
+        // to an empty function set.
+        assert!(impl_abi.functions().any(|f| f.name == "transfer"));
+    }
+
+    #[test]
+    fn test_extract_proxy_with_invalid_impl_address_keeps_proxy_without_link() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![(
+                    PROXY_ADDRESS,
+                    Abi {
+                        value: VALID_ABI.to_string(),
+                        signature: None,
+                        abi_type: Some(generated::parser::AbiType::Proxy as i32),
+                        implementation_address: Some("not_an_address".to_string()),
+                    },
+                )])
+                .into_iter()
+                .collect(),
+            })),
+        };
+        let registry = try_extract_from_chain_metadata(Some(&metadata), 1).expect("has ABI");
+        // Entry is kept as a proxy, but with no resolvable implementation link.
+        assert_eq!(
+            registry.get_abi_kind(1, parse_addr(PROXY_ADDRESS)),
+            Some(AbiKind::Proxy)
+        );
+        assert!(
+            registry
+                .get_implementation_abi(1, parse_addr(PROXY_ADDRESS))
+                .is_none()
+        );
+        // The proxy's own ABI is still available for fallback decoding.
+        assert!(
+            registry
+                .get_abi_for_address(1, parse_addr(PROXY_ADDRESS))
+                .is_some()
+        );
     }
 }

@@ -12,6 +12,11 @@ const DESCRIPTOR_PATH: &str = "./generated/src/generated/descriptor.bin";
 const SERDE_DERIVE: &str = "#[cfg_attr(feature = \"serde_derive\", derive(::serde::Serialize, ::serde::Deserialize), serde(rename_all = \"camelCase\"))]";
 const SERDE_ENUM_DERIVE: &str = "#[cfg_attr(feature = \"serde_derive\", serde(untagged))]";
 const SERDE_DEFAULT: &str = "#[cfg_attr(feature = \"serde_derive\", serde(default))]";
+// Serialize/deserialize the `abi_type` enum field as its protobuf string name
+// (e.g. "ABI_TYPE_PROXY") rather than the raw i32 discriminant. `default` lets
+// callers omit the field entirely. See `abi_type_serde` in the generated crate.
+const SERDE_ABI_TYPE: &str =
+    "#[cfg_attr(feature = \"serde_derive\", serde(with = \"crate::abi_type_serde\", default))]";
 const BORSH_ENUM_DISC_ATTR: &str = "#[borsh(use_discriminant=true)]";
 const TONIC_FEATURE_GATE: &str = "#[cfg(feature = \"tonic_types\")]";
 const BORSH_DERIVE: &str = "#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]";
@@ -43,6 +48,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // serde(default) on map fields so callers can omit them when empty
         .field_attribute(".parser.EthereumMetadata.abi_mappings", SERDE_DEFAULT)
         .field_attribute(".parser.SolanaMetadata.idl_mappings", SERDE_DEFAULT)
+        // Represent the abi_type enum as its string name over JSON
+        .field_attribute(".parser.Abi.abi_type", SERDE_ABI_TYPE)
         // BORSH - Used for QOS sha256 checks
         .type_attribute(".parser.ParsedTransactionPayload", BORSH_DERIVE)
         .enum_attribute(".parser.ParsedTransactionPayload", BORSH_ENUM_DISC_ATTR)

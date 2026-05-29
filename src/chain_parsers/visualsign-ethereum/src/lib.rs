@@ -506,6 +506,66 @@ fn try_known_token_dispatch(
     Some(vec![field])
 }
 
+/// Decode calldata using a caller-supplied ABI registry, resolving proxy
+/// destinations to their implementation ABI.
+///
+/// For a `Proxy` destination, the calldata is decoded against the linked
+/// implementation's ABI (with an `Implementation` address field prepended so the
+/// signer sees where decoding came from). If the implementation ABI is missing or
+/// can't decode the selector, it falls back to the proxy's own ABI. For
+/// implementation/unspecified destinations this decodes against the ABI mapped to
+/// the address, exactly as before.
+///
+/// The caller gates this on `input_fields.is_empty()` after the known-token
+/// short-circuit, so canonical tokens are never reached here.
+fn visualize_with_abi_registry(
+    abi_reg: &abi_registry::AbiRegistry,
+    chain_id: u64,
+    to: alloy_primitives::Address,
+    input: &[u8],
+) -> Vec<SignablePayloadField> {
+    use contracts::core::DynamicAbiVisualizer;
+
+    let decode = |abi| DynamicAbiVisualizer::new(abi).visualize_calldata(input, chain_id, None);
+
+    // For proxy destinations prefer the linked implementation ABI: the calldata
+    // selector belongs to the implementation, not the proxy. If the implementation
+    // ABI is missing or can't decode the selector, fall through to the proxy's own
+    // ABI below (same path as non-proxy destinations).
+    if abi_reg.get_abi_kind(chain_id, to) == Some(abi_registry::AbiKind::Proxy) {
+        if let Some((impl_addr, impl_abi)) = abi_reg.get_implementation_abi(chain_id, to) {
+            if let Some(field) = decode(impl_abi) {
+                return vec![implementation_address_field(impl_addr), field];
+            }
+        }
+    }
+
+    // Non-proxy destinations and proxy fallback (e.g. proxy-admin calls like upgradeTo).
+    abi_reg
+        .get_abi_for_address(chain_id, to)
+        .and_then(decode)
+        .into_iter()
+        .collect()
+}
+
+/// Builds an informational `Implementation` address field shown when a proxy call
+/// was decoded against its implementation ABI.
+fn implementation_address_field(implementation: alloy_primitives::Address) -> SignablePayloadField {
+    SignablePayloadField::AddressV2 {
+        common: SignablePayloadFieldCommon {
+            fallback_text: implementation.to_string(),
+            label: "Implementation".to_string(),
+        },
+        address_v2: SignablePayloadFieldAddressV2 {
+            address: implementation.to_string(),
+            name: "Implementation".to_string(),
+            asset_label: String::new(),
+            memo: None,
+            badge_text: Some("Proxy implementation".to_string()),
+        },
+    }
+}
+
 fn convert_to_visual_sign_payload(
     transaction: TypedTransaction,
     options: VisualSignOptions,
@@ -525,6 +585,15 @@ fn convert_to_visual_sign_payload(
         text_v2: SignablePayloadFieldTextV2 { text: network_name },
     }];
     if let Some(to) = transaction.to() {
+        // Flag proxy destinations so the signer can see the call goes through a
+        // proxy. The kind is caller-supplied (unauthenticated) metadata, so this
+        // is purely informational.
+        let badge_text = match abi_registry {
+            Some(reg) if reg.get_abi_kind(chain_id, to) == Some(abi_registry::AbiKind::Proxy) => {
+                Some("Proxy".to_string())
+            }
+            _ => None,
+        };
         fields.push(SignablePayloadField::AddressV2 {
             common: SignablePayloadFieldCommon {
                 fallback_text: to.to_string(),
@@ -535,7 +604,7 @@ fn convert_to_visual_sign_payload(
                 name: "To".to_string(),
                 asset_label: fee_symbol.unwrap_or_default().to_string(),
                 memo: None,
-                badge_text: None,
+                badge_text,
             },
         });
     }
@@ -658,17 +727,15 @@ fn convert_to_visual_sign_payload(
         // Try dynamic ABI visualization if available. Skipped for known tokens
         // (the short-circuit above already populated `input_fields`) so
         // caller-supplied ABIs cannot override the safe built-in decoders for
-        // canonical tokens.
+        // canonical tokens. For proxy destinations, decode against the linked
+        // implementation ABI rather than assuming the proxy address is the
+        // implementation; this stays strictly after the known-token short-circuit,
+        // so a caller-supplied "proxy" entry can never redirect a canonical token.
         if input_fields.is_empty() {
             if let (Some(to_address), Some(abi_reg)) = (transaction.to(), abi_registry) {
-                let chain_id_val = chain_id;
-                if let Some(abi) = abi_reg.get_abi_for_address(chain_id_val, to_address) {
-                    if let Some(field) = (contracts::core::DynamicAbiVisualizer::new(abi))
-                        .visualize_calldata(input, chain_id_val, None)
-                    {
-                        input_fields.push(field);
-                    }
-                }
+                input_fields.extend(visualize_with_abi_registry(
+                    abi_reg, chain_id, to_address, input,
+                ));
             }
         }
 
@@ -1008,6 +1075,7 @@ mod tests {
             Abi {
                 value: malicious_abi.to_string(),
                 signature: None,
+                ..Default::default()
             },
         ))
         .collect();
@@ -1151,6 +1219,7 @@ mod tests {
             Abi {
                 value: malicious_abi.to_string(),
                 signature: None,
+                ..Default::default()
             },
         ))
         .collect();
@@ -1250,6 +1319,7 @@ mod tests {
             Abi {
                 value: malicious_abi.to_string(),
                 signature: None,
+                ..Default::default()
             },
         ))
         .collect();
