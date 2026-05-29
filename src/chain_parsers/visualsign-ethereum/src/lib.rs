@@ -403,31 +403,36 @@ fn decode_transaction(
     decode_transaction_bytes(&bytes, allow_signed)
 }
 
-/// Resolve chain ID with priority: metadata > transaction > default (1 for legacy).
-/// Warns if metadata and transaction chain IDs disagree.
+/// Resolve chain ID. The chain_id encoded in the transaction bytes is
+/// authoritative: if `chain_metadata.network_id` is also provided and resolves
+/// to a different chain, we refuse to render so the payload can never bind a
+/// "Network: X" label to bytes that execute on chain Y.
+///
+/// Order of precedence:
+/// 1. If the transaction carries a chain_id, that wins. Metadata may agree
+///    (no-op) but a mismatch is a hard error.
+/// 2. Otherwise (pre-EIP-155 legacy txs that omit chain_id), fall back to
+///    metadata if supplied.
+/// 3. Otherwise, default to 1 for legacy txs (historical behavior).
+/// 4. Otherwise, return an error.
 fn resolve_chain_id(
     transaction: &TypedTransaction,
     options: &VisualSignOptions,
 ) -> Result<u64, VisualSignError> {
-    if let Some(metadata_chain_id) =
-        networks::extract_chain_id_from_metadata(options.metadata.as_ref())
-    {
-        if let Some(tx_chain_id) = transaction.chain_id() {
-            if tx_chain_id != metadata_chain_id {
-                log::warn!(
-                    "Transaction chain_id ({tx_chain_id}) differs from metadata chain_id ({metadata_chain_id}). Using metadata."
-                );
-            }
+    let metadata_chain_id = networks::extract_chain_id_from_metadata(options.metadata.as_ref());
+
+    match (transaction.chain_id(), metadata_chain_id) {
+        (Some(tx_chain_id), Some(meta_chain_id)) if tx_chain_id != meta_chain_id => {
+            Err(VisualSignError::ValidationError(format!(
+                "chain_id mismatch: transaction bytes declare chain_id {tx_chain_id} but chain_metadata.network_id resolves to chain_id {meta_chain_id}. The transaction bytes are authoritative; refusing to produce a payload."
+            )))
         }
-        Ok(metadata_chain_id)
-    } else if let Some(tx_chain_id) = transaction.chain_id() {
-        Ok(tx_chain_id)
-    } else if matches!(transaction, TypedTransaction::Legacy(_)) {
-        Ok(1)
-    } else {
-        Err(VisualSignError::DecodeError(
+        (Some(tx_chain_id), _) => Ok(tx_chain_id),
+        (None, Some(meta_chain_id)) => Ok(meta_chain_id),
+        (None, None) if matches!(transaction, TypedTransaction::Legacy(_)) => Ok(1),
+        (None, None) => Err(VisualSignError::DecodeError(
             "Unable to determine chain_id: no metadata provided and transaction does not contain chain_id".to_string()
-        ))
+        )),
     }
 }
 
