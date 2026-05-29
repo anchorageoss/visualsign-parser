@@ -830,9 +830,9 @@ mod tests {
     use crate::registry::ContractRegistry;
     use crate::token_metadata::{ErcStandard, TokenMetadata};
     use alloy_consensus::{SignableTransaction, TxLegacy, TypedTransaction};
+    use alloy_primitives::keccak256;
     use alloy_primitives::{Address, Bytes, ChainId, U256};
     use alloy_sol_types::SolCall;
-    use alloy_primitives::keccak256;
     use generated::parser::{Abi, AbiType, ChainMetadata, EthereumMetadata, chain_metadata};
     use visualsign::{SignablePayloadFieldAddressV2, SignablePayloadFieldAmountV2};
 
@@ -1962,18 +1962,17 @@ mod tests {
             .parse()
             .unwrap();
 
-        let abi_mappings: std::collections::BTreeMap<String, Abi> =
-            [(
-                proxy.to_string(),
-                Abi {
-                    value: "[]".to_string(),
-                    abi_type: Some(AbiType::Proxy as i32),
-                    implementation_address: Some(impl_addr.to_string()),
-                    ..Default::default()
-                },
-            )]
-            .into_iter()
-            .collect();
+        let abi_mappings: std::collections::BTreeMap<String, Abi> = [(
+            proxy.to_string(),
+            Abi {
+                value: "[]".to_string(),
+                abi_type: Some(AbiType::Proxy as i32),
+                implementation_address: Some(impl_addr.to_string()),
+                ..Default::default()
+            },
+        )]
+        .into_iter()
+        .collect();
 
         let tx = TypedTransaction::Legacy(TxLegacy {
             chain_id: Some(ChainId::from(1u64)),

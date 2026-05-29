@@ -517,6 +517,9 @@ mod tests {
     fn abi_type_rejects_unknown_string() {
         let result: Result<Abi, _> =
             serde_json::from_str(r#"{"value":"[]","abiType":"ABI_TYPE_BOGUS"}"#);
-        assert!(result.is_err(), "expected deserialization to fail for unknown AbiType variant");
+        assert!(
+            result.is_err(),
+            "expected deserialization to fail for unknown AbiType variant"
+        );
     }
 }
