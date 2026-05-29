@@ -1090,11 +1090,11 @@ mod tests {
         );
     }
 
-    /// The canonical-token short-circuit must key off the transaction's own
-    /// chain id, not the resolved `chain_id` (which gives priority to
-    /// caller-controlled metadata). Otherwise a malicious dApp could supply a
-    /// mismatched `network_id` so the global registry lookup misses USDC and
-    /// the dynamic-ABI path runs again.
+    /// A mismatched `network_id` vs tx chain_id is rejected outright by
+    /// `resolve_chain_id`, so a malicious dApp that supplies `network_id`
+    /// pointing at a chain where a canonical token is not registered can never
+    /// reach the ABI dispatch layer — the payload is rejected before the
+    /// known-token short-circuit even runs.
     #[test]
     fn test_known_token_short_circuit_uses_tx_chain_id_not_metadata() {
         let usdc_address: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
@@ -1170,19 +1170,19 @@ mod tests {
         };
 
         let wrapper = EthereumTransactionWrapper::new(tx);
-        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
-
-        let preview = payload
-            .fields
-            .iter()
-            .find(|f| matches!(f, SignablePayloadField::PreviewLayout { .. }))
-            .expect("expected a PreviewLayout from the built-in ERC20 visualizer");
-        let SignablePayloadField::PreviewLayout { common, .. } = preview else {
-            panic!("matched discriminant changed");
+        let err = converter
+            .to_visual_sign_payload(wrapper, options)
+            .unwrap_err();
+        assert!(
+            matches!(err, VisualSignError::ValidationError(_)),
+            "mismatched tx/metadata chain_id must be rejected: {err:?}",
+        );
+        let VisualSignError::ValidationError(msg) = err else {
+            unreachable!()
         };
-        assert_eq!(
-            common.label, "ERC20 Transfer",
-            "tx chain_id must win over caller metadata for the canonical-token lookup",
+        assert!(
+            msg.contains("chain_id mismatch"),
+            "error message must describe the mismatch: {msg}",
         );
     }
 
