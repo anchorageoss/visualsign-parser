@@ -1158,11 +1158,16 @@ mod tests {
         );
     }
 
-    /// The canonical-token short-circuit must key off the transaction's own
-    /// chain id, not the resolved `chain_id` (which gives priority to
-    /// caller-controlled metadata). Otherwise a malicious dApp could supply a
-    /// mismatched `network_id` so the global registry lookup misses USDC and
-    /// the dynamic-ABI path runs again.
+    /// When the tx carries an explicit chain_id and the caller-supplied metadata
+    /// claims a different chain, the mismatch is a hard rejection. This prevents
+    /// a malicious dApp from supplying `network_id = POLYGON` against a mainnet
+    /// tx to sneak in a caller-supplied ABI: the converter refuses to produce a
+    /// payload at all, so no ABI (malicious or otherwise) gets bound.
+    ///
+    /// This test supersedes the earlier "known-token short-circuit uses tx chain_id"
+    /// variant. The security property (attacker cannot bind a malicious ABI to a
+    /// canonical token via a mismatched network_id) is still upheld -- the reject
+    /// path is strictly stronger than a proceed-with-tx-chain_id path.
     #[test]
     fn test_known_token_short_circuit_uses_tx_chain_id_not_metadata() {
         let usdc_address: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
@@ -1224,8 +1229,10 @@ mod tests {
         ))
         .collect();
 
-        // Attacker mismatches metadata to Polygon (137) so a chain_id lookup
-        // that trusts metadata would miss the mainnet USDC entry.
+        // Attacker mismatches metadata to Polygon (137). The converter must refuse
+        // outright: tx chain_id (1) is authoritative, and any mismatch with
+        // metadata is a hard error so no ABI -- malicious or otherwise -- gets
+        // bound to the payload.
         let options = VisualSignOptions {
             decode_transfers: true,
             transaction_name: None,
@@ -1239,19 +1246,21 @@ mod tests {
         };
 
         let wrapper = EthereumTransactionWrapper::new(tx);
-        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
-
-        let preview = payload
-            .fields
-            .iter()
-            .find(|f| matches!(f, SignablePayloadField::PreviewLayout { .. }))
-            .expect("expected a PreviewLayout from the built-in ERC20 visualizer");
-        let SignablePayloadField::PreviewLayout { common, .. } = preview else {
-            panic!("matched discriminant changed");
-        };
-        assert_eq!(
-            common.label, "ERC20 Transfer",
-            "tx chain_id must win over caller metadata for the canonical-token lookup",
+        let err = converter
+            .to_visual_sign_payload(wrapper, options)
+            .expect_err("chain_id mismatch (tx=1, metadata=137) must be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("chain_id mismatch"),
+            "error must mention chain_id mismatch, got: {msg}",
+        );
+        assert!(
+            msg.contains("chain_id 1 "),
+            "error must reference tx-declared chain_id 1, got: {msg}",
+        );
+        assert!(
+            msg.contains("chain_id 137"),
+            "error must reference metadata chain_id 137, got: {msg}",
         );
     }
 
