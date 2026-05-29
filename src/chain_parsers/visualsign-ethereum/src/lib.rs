@@ -1989,7 +1989,7 @@ mod tests {
             metadata: Some(ChainMetadata {
                 metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                     network_id: Some("ETHEREUM_MAINNET".to_string()),
-                    abi_mappings,
+                    abi_mappings: abi_mappings.into_iter().collect(),
                 })),
             }),
             developer_config: None,
@@ -2060,7 +2060,7 @@ mod tests {
             metadata: Some(ChainMetadata {
                 metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                     network_id: Some("ETHEREUM_MAINNET".to_string()),
-                    abi_mappings,
+                    abi_mappings: abi_mappings.into_iter().collect(),
                 })),
             }),
             developer_config: None,
@@ -2154,7 +2154,7 @@ mod tests {
             metadata: Some(ChainMetadata {
                 metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                     network_id: Some("ETHEREUM_MAINNET".to_string()),
-                    abi_mappings,
+                    abi_mappings: abi_mappings.into_iter().collect(),
                 })),
             }),
             developer_config: None,
