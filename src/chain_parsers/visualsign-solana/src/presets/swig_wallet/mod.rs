@@ -5,8 +5,8 @@ mod config;
 use std::fmt;
 
 use crate::core::{
-    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind, available_visualizers, visualize_with_any,
+    AccountRef, InstructionVisualizer, MAX_CALL_DEPTH, ProgramRef, SolanaIntegrationConfig,
+    VisualizerContext, VisualizerKind, available_visualizers, visualize_with_any,
 };
 use config::SwigWalletConfig;
 use solana_parser::solana::structs::SolanaAccount;
@@ -28,13 +28,6 @@ use visualsign::{
 
 static SWIG_WALLET_CONFIG: SwigWalletConfig = SwigWalletConfig;
 
-/// Maximum nesting depth for swig_wallet `SignV1`/`SignV2` inner-instruction
-/// chains. Real swig wallets nest 1-2 levels in practice. Anything beyond this
-/// bound is rendered as a "nested too deeply" placeholder to keep an attacker
-/// from forcing unbounded recursion (and ultimately a stack overflow) by
-/// crafting deeply nested compact-instruction payloads.
-const MAX_SWIG_INNER_DEPTH: usize = 8;
-
 pub struct SwigWalletVisualizer;
 
 impl InstructionVisualizer for SwigWalletVisualizer {
@@ -50,8 +43,8 @@ impl InstructionVisualizer for SwigWalletVisualizer {
         // inner instructions. The recursion lives at the trait boundary
         // (visualize_with_any -> SwigWalletVisualizer::visualize_tx_commands),
         // so the cheapest place to bound it is right here at entry.
-        if context.depth() >= MAX_SWIG_INNER_DEPTH {
-            return nested_too_deeply_field(instruction_number, context.depth());
+        if context.call_depth() >= MAX_CALL_DEPTH {
+            return nested_too_deeply_field(instruction_number, context.call_depth());
         }
 
         // Build AccountMeta shim for the parser.
@@ -69,7 +62,7 @@ impl InstructionVisualizer for SwigWalletVisualizer {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let decoded = parse_swig_instruction(context.data(), &accounts, context.depth())
+        let decoded = parse_swig_instruction(context.data(), &accounts, context.call_depth())
             .map_err(|err| VisualSignError::DecodeError(err.to_string()))?;
 
         let program_id_str = match context.program_id() {
@@ -908,13 +901,13 @@ fn visualize_inner_instruction(
         writable: false,
     };
     let idl_registry = crate::idl::IdlRegistry::new();
-    // Carry depth across the trait boundary: if the inner visualizer is swig
-    // itself, the next entry into visualize_tx_commands sees parent_depth + 1
-    // and bails before recursing further. Saturating add so a maliciously
-    // constructed parent context with depth near usize::MAX can't wrap to 0
-    // and slip past the MAX_SWIG_INNER_DEPTH guard.
+    // Carry call_depth across the trait boundary: if the inner visualizer is
+    // swig itself, the next entry into visualize_tx_commands sees
+    // parent_depth + 1 and bails before recursing further. Saturating add so a
+    // maliciously constructed parent context with depth near usize::MAX can't
+    // wrap to 0 and slip past the MAX_CALL_DEPTH guard.
     let context = VisualizerContext::new(&sender, &compiled, &account_keys, &idl_registry, 0)
-        .with_depth(parent_depth.saturating_add(1));
+        .with_call_depth(parent_depth.saturating_add(1));
 
     visualize_with_any(&visualizer_refs, &context)
         .and_then(|result| result.ok())
@@ -1135,15 +1128,15 @@ fn make_text_field(
 }
 
 /// Render a PreviewLayout placeholder for a swig instruction whose nesting
-/// depth exceeds `MAX_SWIG_INNER_DEPTH`. Returned in place of the normal
-/// expanded view so the caller still sees a well-formed field for each level
-/// (and no recursion happens past the bound).
+/// depth exceeds `MAX_CALL_DEPTH`. Returned in place of the normal expanded
+/// view so the caller still sees a well-formed field for each level (and no
+/// recursion happens past the bound).
 fn nested_too_deeply_field(
     instruction_number: usize,
     depth: usize,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     let summary = format!(
-        "Swig: Nested too deeply (depth {depth}, limit {MAX_SWIG_INNER_DEPTH})"
+        "Swig: Nested too deeply (depth {depth}, limit {MAX_CALL_DEPTH})"
     );
     let condensed = SignablePayloadFieldListLayout {
         fields: vec![make_text_field("Instruction", summary.clone())?],
@@ -1154,7 +1147,7 @@ fn nested_too_deeply_field(
             make_text_field("Nesting Depth", depth.to_string())?,
             make_text_field(
                 "Nesting Depth Limit",
-                MAX_SWIG_INNER_DEPTH.to_string(),
+                MAX_CALL_DEPTH.to_string(),
             )?,
         ],
     };
@@ -2743,7 +2736,7 @@ mod tests {
     /// program. Solana's compact-instruction length field (u16) lets an attacker
     /// nest thousands of these levels in a single transaction, which used to
     /// stack-overflow the parser process. After the fix, the visualizer bails out
-    /// at `MAX_SWIG_INNER_DEPTH` and renders a placeholder field instead.
+    /// at `MAX_CALL_DEPTH` and renders a placeholder field instead.
     #[test]
     fn test_deeply_nested_sign_v1_does_not_stack_overflow() {
         use crate::core::{InstructionVisualizer, VisualizerContext};
@@ -2796,9 +2789,9 @@ mod tests {
         let swig_program_id =
             Pubkey::from_str("swigypWHEksbC64pWKwah1WTeh9JXwx8H1rJHLdbQMB").expect("valid pubkey");
 
-        // Pick a level count well above MAX_SWIG_INNER_DEPTH so we exercise
-        // both the recursive and the truncation path. 32 is also small enough
-        // that we don't grow the synthetic payload past a few hundred bytes.
+        // Pick a level count well above MAX_CALL_DEPTH so we exercise both the
+        // recursive and the truncation path. 32 is also small enough that we
+        // don't grow the synthetic payload past a few hundred bytes.
         const LEVELS: usize = 32;
         let data = build_nested_sign_v1(LEVELS);
 
@@ -2862,7 +2855,7 @@ mod tests {
         // exactly the depth bound, which guarantees the placeholder branch
         // fires and produces a well-formed PreviewLayout.
         let limit_context = VisualizerContext::new(&sender, &compiled, &account_keys, &registry, 0)
-            .with_depth(super::MAX_SWIG_INNER_DEPTH);
+            .with_call_depth(crate::core::MAX_CALL_DEPTH);
         let placeholder = super::SwigWalletVisualizer
             .visualize_tx_commands(&limit_context)
             .expect("placeholder render should not error");

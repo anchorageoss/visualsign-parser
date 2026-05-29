@@ -15,6 +15,12 @@ pub use instructions::*;
 pub use txtypes::*;
 pub use visualsign::*;
 
+/// Maximum CPI nesting depth. Solana's runtime hard-caps CPI at 4 levels, so
+/// any instruction chain deeper than this cannot execute on-chain. Visualizers
+/// that recurse into inner instructions (e.g. swig_wallet, squads) should bail
+/// at this bound rather than rendering content that can't exist in production.
+pub const MAX_CALL_DEPTH: usize = 4;
+
 /// Identifier for which visualizer handled a command, categorized by dApp type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VisualizerKind {
@@ -73,13 +79,13 @@ pub struct VisualizerContext<'a> {
     account_keys: &'a [Pubkey],
     idl_registry: &'a crate::idl::IdlRegistry,
     instruction_index: usize,
-    /// Nesting depth for visualizers that re-enter `visualize_with_any`.
+    /// CPI nesting depth for visualizers that re-enter `visualize_with_any`.
     ///
     /// Top-level instructions start at depth 0. Visualizers that decode and
     /// recursively visualize inner instructions (e.g. swig_wallet's
     /// `SignV1`/`SignV2` payloads) must increment this when building a child
     /// context, so the recursion can be bounded at the trait boundary.
-    depth: usize,
+    call_depth: usize,
 }
 
 impl<'a> VisualizerContext<'a> {
@@ -96,24 +102,25 @@ impl<'a> VisualizerContext<'a> {
             account_keys,
             idl_registry,
             instruction_index,
-            depth: 0,
+            call_depth: 0,
         }
     }
 
-    /// Set the recursion depth for this context. Returns the modified context
+    /// Set the CPI call depth for this context. Returns the modified context
     /// so it can be chained at construction sites: `VisualizerContext::new(...)
-    /// .with_depth(parent.depth().saturating_add(1))`.
+    /// .with_call_depth(parent.call_depth().saturating_add(1))`.
     ///
     /// Use `saturating_add` (not `+`) when deriving from a parent depth: an
     /// arithmetic `+` overflows `usize` on a pathologically large parent depth
     /// and wraps to 0 in release builds, which would reintroduce unbounded
     /// recursion.
     ///
-    /// `#[must_use]`: dropping the returned context silently leaves depth at 0,
-    /// which would reintroduce unbounded recursion at the next trait boundary.
+    /// `#[must_use]`: dropping the returned context silently leaves call_depth
+    /// at 0, which would reintroduce unbounded recursion at the next trait
+    /// boundary.
     #[must_use]
-    pub fn with_depth(mut self, depth: usize) -> Self {
-        self.depth = depth;
+    pub fn with_call_depth(mut self, call_depth: usize) -> Self {
+        self.call_depth = call_depth;
         self
     }
 
@@ -130,12 +137,12 @@ impl<'a> VisualizerContext<'a> {
         self.instruction_index
     }
 
-    /// Recursion depth of this context. 0 for top-level instructions; child
+    /// CPI call depth of this context. 0 for top-level instructions; child
     /// contexts produced by inner-instruction visualizers should set
-    /// `parent.depth().saturating_add(1)` via `with_depth` (not `+`, which
-    /// can wrap `usize` to 0 in release builds and bypass the recursion bound).
-    pub fn depth(&self) -> usize {
-        self.depth
+    /// `parent.call_depth().saturating_add(1)` via `with_call_depth` (not `+`,
+    /// which can wrap `usize` to 0 in release builds and bypass the bound).
+    pub fn call_depth(&self) -> usize {
+        self.call_depth
     }
 
     /// Resolves the program_id_index. Every compiled instruction has one,
@@ -363,5 +370,27 @@ mod tests {
         let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry, 0);
         assert_eq!(ctx.data(), &[0xDE, 0xAD]);
         assert_eq!(ctx.num_accounts(), 3);
+    }
+
+    #[test]
+    fn test_call_depth_default_and_setter() {
+        let keys = vec![Pubkey::new_unique()];
+        let ci = CompiledInstruction {
+            program_id_index: 0,
+            accounts: vec![],
+            data: vec![],
+        };
+        let sender = SolanaAccount {
+            account_key: keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
+        let registry = crate::idl::IdlRegistry::new();
+        let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry, 0);
+        assert_eq!(ctx.call_depth(), 0);
+        let ctx = ctx.with_call_depth(MAX_CALL_DEPTH);
+        assert_eq!(ctx.call_depth(), MAX_CALL_DEPTH);
+        let ctx = ctx.with_call_depth(usize::MAX);
+        assert_eq!(ctx.call_depth(), usize::MAX);
     }
 }
