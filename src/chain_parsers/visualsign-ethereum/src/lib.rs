@@ -1248,8 +1248,14 @@ mod tests {
         let wrapper = EthereumTransactionWrapper::new(tx);
         let err = converter
             .to_visual_sign_payload(wrapper, options)
-            .expect_err("chain_id mismatch (tx=1, metadata=137) must be rejected");
-        let msg = err.to_string();
+            .unwrap_err();
+        assert!(
+            matches!(err, VisualSignError::ValidationError(_)),
+            "mismatched tx/metadata chain_id must be rejected: {err:?}",
+        );
+        let VisualSignError::ValidationError(msg) = err else {
+            unreachable!()
+        };
         assert!(
             msg.contains("chain_id mismatch"),
             "error must mention chain_id mismatch, got: {msg}",
