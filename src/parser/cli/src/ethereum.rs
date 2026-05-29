@@ -78,9 +78,27 @@ fn validate_eth_address(addr: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Normalize an Ethereum address to lowercase `0x` + 40 hex chars.
+///
+/// Callers must validate the address with [`validate_eth_address`] before calling
+/// this function. The returned string is always `0x<40 lowercase hex chars>`.
+fn normalize_eth_address(addr: &str) -> String {
+    // Strip the prefix (0x or 0X) and re-attach lowercase 0x.
+    let hex = addr
+        .strip_prefix("0x")
+        .or_else(|| addr.strip_prefix("0X"))
+        .unwrap_or(addr);
+    format!("0x{}", hex.to_ascii_lowercase())
+}
+
 /// Load ABI JSON files and build mappings for `EthereumMetadata.abi_mappings`.
+///
+/// Address keys are normalized to lowercase so they match regardless of the
+/// checksum casing the user supplied (e.g. `0xAbCd...` and `0xabcd...` both
+/// produce the same key). The [`validate_eth_address`] validator runs first, so
+/// [`normalize_eth_address`] can safely strip the prefix without re-checking.
 fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<String, Abi>, usize) {
-    mapping_parser::load_mappings(
+    let (raw, count) = mapping_parser::load_mappings(
         abi_json_mappings,
         "ABI",
         "UniswapV2:path/to/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
@@ -91,7 +109,12 @@ fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<Strin
             signature: None,
             ..Default::default()
         },
-    )
+    );
+    let normalized = raw
+        .into_iter()
+        .map(|(addr, abi)| (normalize_eth_address(&addr), abi))
+        .collect();
+    (normalized, count)
 }
 
 /// Apply `--abi-proxy-mappings` links onto the loaded ABI mappings.
@@ -119,8 +142,15 @@ fn apply_proxy_mappings(abi_mappings: &mut HashMap<String, Abi>, proxy_mappings:
             continue;
         }
 
-        let entry = abi_mappings.entry(proxy.to_string()).or_insert_with(|| {
-            eprintln!("  Note: proxy '{proxy}' has no ABI file; synthesizing an empty proxy ABI");
+        // Normalize to lowercase so the lookup matches the key written by
+        // `build_abi_mappings_from_files` regardless of checksum casing.
+        let proxy_key = normalize_eth_address(proxy);
+        let impl_key = normalize_eth_address(implementation);
+
+        let entry = abi_mappings.entry(proxy_key.clone()).or_insert_with(|| {
+            eprintln!(
+                "  Note: proxy '{proxy_key}' has no ABI file; synthesizing an empty proxy ABI"
+            );
             Abi {
                 value: "[]".to_string(),
                 signature: None,
@@ -128,8 +158,8 @@ fn apply_proxy_mappings(abi_mappings: &mut HashMap<String, Abi>, proxy_mappings:
             }
         });
         entry.abi_type = Some(AbiType::Proxy as i32);
-        entry.implementation_address = Some(implementation.to_string());
-        eprintln!("  Linked proxy '{proxy}' to implementation '{implementation}'");
+        entry.implementation_address = Some(impl_key.clone());
+        eprintln!("  Linked proxy '{proxy_key}' to implementation '{impl_key}'");
     }
 }
 
@@ -256,9 +286,10 @@ mod tests {
             panic!("expected Ethereum metadata");
         };
         assert_eq!(eth.abi_mappings.len(), 1);
+        // Address keys are normalized to lowercase regardless of input casing.
         let abi = eth
             .abi_mappings
-            .get("0xdAC17F958D2ee523a2206206994597C13D831ec7")
+            .get("0xdac17f958d2ee523a2206206994597c13d831ec7")
             .expect("mapping present");
         assert!(abi.value.contains("swap"));
         assert!(abi.signature.is_none());
@@ -300,13 +331,14 @@ mod tests {
             panic!("expected Ethereum metadata");
         };
         assert_eq!(eth.abi_mappings.len(), 2);
+        // Address keys are normalized to lowercase regardless of input casing.
         assert!(
             eth.abi_mappings
-                .contains_key("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+                .contains_key("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
         );
         assert!(
             eth.abi_mappings
-                .contains_key("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+                .contains_key("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
         );
     }
 
@@ -390,5 +422,101 @@ mod tests {
         // No proxy entry was created; only the implementation remains.
         assert_eq!(eth.abi_mappings.len(), 1);
         assert!(eth.abi_mappings.contains_key(IMPL));
+    }
+
+    /// Mixed-casing between --abi-json-mappings and --abi-proxy-mappings must not
+    /// silently lose the proxy link. The Copilot review comment identified a scenario
+    /// where the user supplies the same address in different case across the two flags,
+    /// causing a `HashMap` miss and a synthesized empty ABI overwriting the real one.
+    #[test]
+    fn test_proxy_mapping_mixed_case_links_correctly() {
+        // ABI file registered with all-lowercase hex.
+        let proxy_path = write_temp_json(
+            "proxy_mc.json",
+            r#"[{"type":"function","name":"upgradeTo"}]"#,
+        );
+        let impl_path =
+            write_temp_json("impl_mc.json", r#"[{"type":"function","name":"transfer"}]"#);
+
+        // --abi-json-mappings uses lowercase.
+        let abi_mappings = vec![
+            format!("Proxy:{}:{PROXY}", proxy_path.display()),
+            format!("Impl:{}:{IMPL}", impl_path.display()),
+        ];
+        // --abi-proxy-mappings uses a different (uppercase) representation of the same
+        // addresses to exercise the normalization path.
+        let proxy_links = vec![
+            "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+                .to_string(),
+        ];
+
+        // Use a freshly created pair so the uppercase vs lowercase contrast is clear.
+        let proxy_uc_path = write_temp_json(
+            "proxy_uc.json",
+            r#"[{"type":"function","name":"upgradeTo"}]"#,
+        );
+        let impl_uc_path =
+            write_temp_json("impl_uc.json", r#"[{"type":"function","name":"transfer"}]"#);
+
+        // Register the ABI with uppercase address in --abi-json-mappings.
+        let abi_mappings_uc = vec![
+            format!(
+                "Proxy:{}:0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                proxy_uc_path.display()
+            ),
+            format!(
+                "Impl:{}:0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+                impl_uc_path.display()
+            ),
+        ];
+        // Supply the same addresses in lowercase via --abi-proxy-mappings.
+        let proxy_links_lc = vec![
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                .to_string(),
+        ];
+
+        let meta = create_chain_metadata(None, &abi_mappings_uc, &proxy_links_lc)
+            .unwrap()
+            .expect("should return Some");
+        let Metadata::Ethereum(eth) = meta.metadata.unwrap() else {
+            panic!("expected Ethereum metadata");
+        };
+
+        // Both entries must be present; no duplicate synthetic empty entry.
+        assert_eq!(eth.abi_mappings.len(), 2);
+        // Proxy must retain its ABI file content (not the synthesized empty ABI).
+        let proxy_abi = eth
+            .abi_mappings
+            .get("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .expect("proxy entry present");
+        assert_eq!(proxy_abi.abi_type, Some(AbiType::Proxy as i32));
+        assert!(
+            proxy_abi.value.contains("upgradeTo"),
+            "proxy ABI should contain the file content, not the synthesized empty ABI"
+        );
+        assert_eq!(
+            proxy_abi.implementation_address.as_deref(),
+            Some("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        );
+
+        // The baseline case still works (lowercase in both flags).
+        let _ = (abi_mappings, proxy_links);
+    }
+
+    #[test]
+    fn test_normalize_eth_address() {
+        assert_eq!(
+            normalize_eth_address("0xdAC17F958D2ee523a2206206994597C13D831ec7"),
+            "0xdac17f958d2ee523a2206206994597c13d831ec7"
+        );
+        assert_eq!(
+            normalize_eth_address("0xABCDEF1234567890abcdef1234567890ABCDEF12"),
+            "0xabcdef1234567890abcdef1234567890abcdef12"
+        );
+        // Already lowercase is a no-op.
+        assert_eq!(
+            normalize_eth_address("0x1111111111111111111111111111111111111111"),
+            "0x1111111111111111111111111111111111111111"
+        );
     }
 }
