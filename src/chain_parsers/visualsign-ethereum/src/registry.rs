@@ -219,6 +219,41 @@ impl ContractRegistry {
             .map(|m| m.symbol.clone())
     }
 
+    /// Gets the ERC standard for a registered token.
+    ///
+    /// Used by the dispatcher to recognize known tokens and route them to the
+    /// safe built-in ERC20/ERC721 visualizer, preventing caller-supplied ABIs
+    /// from overriding decoding for canonical tokens (e.g. USDC, USDT, WETH).
+    ///
+    /// When `chain_id` is `Some(c)`, the lookup is keyed on `(c, token)`. When
+    /// `chain_id` is `None` (used for pre-EIP-155 legacy transactions that
+    /// don't carry a chain id of their own), the lookup falls back to an
+    /// address-only any-chain scan: if the destination is a canonical token on
+    /// *any* chain in the compiled-in registry, route to the safe built-in
+    /// decoder rather than letting a caller-supplied ABI bind. We deliberately
+    /// don't use the resolved chain id for the address-only path, since that's
+    /// derived from caller-controlled metadata.
+    ///
+    /// If the same address is registered as different ERC standards on
+    /// different chains (effectively impossible for canonical tokens), the
+    /// first match wins. The set of compiled-in tokens is small, so the linear
+    /// scan is cheap and runs only on the chain-id-less legacy path.
+    pub fn get_token_erc_standard(
+        &self,
+        chain_id: Option<ChainId>,
+        token: Address,
+    ) -> Option<crate::token_metadata::ErcStandard> {
+        let metadata = match chain_id {
+            Some(c) => self.token_metadata.get(&(c, token)),
+            None => self
+                .token_metadata
+                .iter()
+                .find(|((_, addr), _)| *addr == token)
+                .map(|(_, m)| m),
+        };
+        metadata.map(|m| m.erc_standard.clone())
+    }
+
     /// Registers a well-known address that exists on all chains at the same address
     ///
     /// # Arguments
