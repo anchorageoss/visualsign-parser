@@ -430,26 +430,6 @@ mod tests {
     /// causing a `HashMap` miss and a synthesized empty ABI overwriting the real one.
     #[test]
     fn test_proxy_mapping_mixed_case_links_correctly() {
-        // ABI file registered with all-lowercase hex.
-        let proxy_path = write_temp_json(
-            "proxy_mc.json",
-            r#"[{"type":"function","name":"upgradeTo"}]"#,
-        );
-        let impl_path =
-            write_temp_json("impl_mc.json", r#"[{"type":"function","name":"transfer"}]"#);
-
-        // --abi-json-mappings uses lowercase.
-        let abi_mappings = vec![
-            format!("Proxy:{}:{PROXY}", proxy_path.display()),
-            format!("Impl:{}:{IMPL}", impl_path.display()),
-        ];
-        // --abi-proxy-mappings uses a different (uppercase) representation of the same
-        // addresses to exercise the normalization path.
-        let proxy_links = vec![
-            "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
-                .to_string(),
-        ];
-
         // Use a freshly created pair so the uppercase vs lowercase contrast is clear.
         let proxy_uc_path = write_temp_json(
             "proxy_uc.json",
@@ -498,9 +478,6 @@ mod tests {
             proxy_abi.implementation_address.as_deref(),
             Some("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
         );
-
-        // The baseline case still works (lowercase in both flags).
-        let _ = (abi_mappings, proxy_links);
     }
 
     #[test]
