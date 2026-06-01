@@ -5,12 +5,18 @@ use crate::core::{
     create_accounts_advanced_preview_layout, decode_accounts, decode_v0_accounts, instructions,
 };
 use crate::idl::IdlRegistry;
+use crate::idl::builtin_programs::{
+    canonical_name, is_reserved_canonical_name, is_trusted_program,
+};
+use crate::idl::signature::{convert_proto_signature, validate_idl_signature};
 use base64::{self, Engine};
 use solana_sdk::{
     message::VersionedMessage,
+    pubkey::Pubkey,
     transaction::{Transaction as SolanaTransaction, VersionedTransaction},
 };
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
     encodings::SupportedEncodings,
@@ -19,6 +25,13 @@ use visualsign::{
         VisualSignError, VisualSignOptions,
     },
 };
+
+/// Maximum size for IDL JSON from proto messages (1 MB).
+///
+/// Mirrors the cap used by the Ethereum ABI metadata path: file-based IDL
+/// loading has a wider 10 MB cap, but proto-supplied IDLs arrive per-request
+/// and are deserialized on the hot path, so we apply a tighter bound here.
+const MAX_IDL_JSON_BYTES: usize = 1_024 * 1_024;
 
 /// Append decode errors as diagnostics and lint diagnostics to the output fields.
 /// decode::visualizer_error is intentionally not routed through LintConfig --
@@ -116,11 +129,44 @@ impl SolanaTransactionWrapper {
     }
 }
 
-/// Extract IDL mappings from VisualSignOptions metadata
+/// Extract IDL mappings from VisualSignOptions metadata.
 ///
-/// Returns a BTreeMap of program_id (base58 string) -> (IDL JSON string, program name)
+/// Returns a BTreeMap of program_id (base58 string) -> (IDL JSON string, program name).
+///
+/// # Security
+///
+/// Mirrors `visualsign-ethereum::abi_metadata::try_extract_from_chain_metadata`:
+/// 1. The program_id must be a valid base58 Solana `Pubkey`; otherwise the
+///    entry is skipped.
+/// 2. Mappings whose `program_id` is a trusted built-in (i.e.
+///    `is_trusted_program(..)` is `true`) are dropped outright. This covers
+///    programs with a canonical name (native runtime, core SPL, the 13
+///    `ProgramType` dApp IDLs) *and* every program ID registered by an
+///    in-crate preset visualizer (Kamino, Meteora, `swig_wallet`,
+///    `dflow_aggregator`, etc.). Beyond the name guard in `IdlRegistry`,
+///    the IDL *body* itself controls instruction decoding (argument names,
+///    account names, value formatting), so an attacker-supplied IDL for the
+///    System Program could relabel `lamports` or hide the destination via
+///    the `unknown_program` IDL decode path. Refusing the body closes that
+///    gap.
+/// 3. The IDL JSON is rejected if it exceeds `MAX_IDL_JSON_BYTES`.
+/// 4. If `Idl.signature` is present, it must verify (secp256k1 ECDSA over
+///    `SHA-256(idl_json)` via `PrehashVerifier::verify_prehash`) or the entry
+///    is dropped. Signers must therefore compute the SHA-256 digest of the
+///    IDL JSON bytes and sign that 32-byte prehash, matching
+///    `visualsign-ethereum::abi_metadata`. Unsigned IDLs are still accepted
+///    so the feature degrades gracefully; callers that need mandatory
+///    signatures must enforce that at the API boundary. Unsigned IDLs are
+///    still accepted so the feature degrades gracefully; this check refuses
+///    to plumb attacker-tampered IDL bodies into the registry.
+/// 5. The resolved `program_name` (from proto, IDL metadata, or fallback)
+///    must not be a reserved canonical name. Step 2 already rejects when
+///    the *program_id* is trusted, so by this step `program_id` has no
+///    canonical name; if the *name* itself matches a canonical label
+///    (e.g. "System Program"), it would impersonate a trusted program in
+///    the rendered "Program" field. Reject it.
 fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String, String)> {
-    options
+    let Some(mappings) = options
         .metadata
         .as_ref()
         .and_then(|meta| meta.metadata.as_ref())
@@ -131,23 +177,80 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
                 None
             }
         })
-        .map(|mappings| {
-            mappings
-                .iter()
-                .map(|(program_id, idl)| {
-                    // Use program_name from proto if available, otherwise extract from IDL JSON
-                    let name = idl
-                        .program_name
-                        .clone()
-                        .or_else(|| extract_name_from_idl_json(&idl.value))
-                        .unwrap_or_else(|| {
-                            format!("Program {}", &program_id[..8.min(program_id.len())])
-                        });
-                    (program_id.clone(), (idl.value.clone(), name))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    else {
+        return BTreeMap::new();
+    };
+
+    let mut out: BTreeMap<String, (String, String)> = BTreeMap::new();
+    for (program_id, idl) in mappings {
+        // 1. Validate program_id parses as a Solana Pubkey (cheap, fail fast).
+        if Pubkey::from_str(program_id).is_err() {
+            tracing::warn!("Skipping IDL mapping with invalid program_id '{program_id}'");
+            continue;
+        }
+
+        // 2. Reject IDL overrides for trusted built-in programs. The name
+        //    guard in `IdlRegistry` blocks attacker-controlled labels, but the
+        //    IDL body still drives instruction decoding (arg/account names,
+        //    value formatting). Refusing the body for trusted programs closes
+        //    that gap. "Trusted" includes the canonical-name set
+        //    (native + core SPL + ProgramType dApps) AND every program ID
+        //    registered by an in-crate preset visualizer.
+        if is_trusted_program(program_id) {
+            // Log the canonical label when we have one (clearer telemetry).
+            match canonical_name(program_id) {
+                Some(canonical) => tracing::warn!(
+                    "Skipping IDL mapping for '{program_id}': override refused for trusted built-in '{canonical}'"
+                ),
+                None => tracing::warn!(
+                    "Skipping IDL mapping for '{program_id}': override refused (preset-registered program)"
+                ),
+            }
+            continue;
+        }
+
+        // 3. Reject oversized IDL JSON before any expensive operation.
+        if idl.value.len() > MAX_IDL_JSON_BYTES {
+            tracing::warn!(
+                "Skipping IDL mapping for '{program_id}': exceeds size limit ({} bytes > {MAX_IDL_JSON_BYTES})",
+                idl.value.len()
+            );
+            continue;
+        }
+
+        // 4. If a signature is provided it must verify; unsigned IDLs are
+        //    accepted (parity with the Ethereum ABI path).
+        if let Some(proto_sig) = idl.signature.as_ref() {
+            let local_sig = convert_proto_signature(proto_sig);
+            if let Err(e) = validate_idl_signature(&idl.value, &local_sig) {
+                tracing::warn!(
+                    "Skipping IDL mapping for '{program_id}': signature validation failed: {e}"
+                );
+                continue;
+            }
+        }
+
+        let name = idl
+            .program_name
+            .clone()
+            .or_else(|| extract_name_from_idl_json(&idl.value))
+            .unwrap_or_else(|| format!("Program {}", &program_id[..8.min(program_id.len())]));
+
+        // 5. Display-name impersonation guard. `canonical_name(program_id)` is
+        //    `None` here (step 2 already drained the trusted IDs), so any name
+        //    that *matches* a canonical label belongs to a different,
+        //    canonical program; rendering it on this `program_id` would be
+        //    pure spoofing ("System Program" labeled on a malicious pubkey).
+        if is_reserved_canonical_name(&name) {
+            tracing::warn!(
+                "Skipping IDL mapping for '{program_id}': program_name '{name}' is reserved for a different canonical program"
+            );
+            continue;
+        }
+
+        out.insert(program_id.clone(), (idl.value.clone(), name));
+    }
+    out
 }
 
 /// Extract the program name from an IDL JSON string
@@ -351,6 +454,157 @@ fn convert_versioned_to_visual_sign_payload(
     }
 }
 
+/// Reject a V0 transaction when at least one instruction references a
+/// program_id or account that lives behind an address lookup table, or that
+/// is out of range entirely.
+///
+/// Rationale: VisualSign converts raw bytes; it has no RPC and cannot
+/// resolve ALT entries. Without resolution, the only safe choice is to refuse
+/// to render -- otherwise the displayed payload would omit instructions or
+/// account references that the validator will still execute, and a malicious
+/// instruction could be hidden behind an ALT entry while the user signs a
+/// benign-looking display.
+///
+/// The resolved account vector in v0 is `account_keys` followed by, for each
+/// lookup, the addresses pulled at `writable_indexes` then at
+/// `readonly_indexes`. For instruction `accounts[]`, indices in
+/// `[static_len, static_len + loaded_len)` are ALT-backed and indices
+/// `>= static_len + loaded_len` are malformed. For `program_id_index`, the
+/// V0 spec says program ids must index into the static account_keys table
+/// and cannot be loaded from an ALT, so any `program_id_index >= static_len`
+/// is malformed regardless of `loaded_len`. The error reports the two
+/// classes separately, but rejects on either.
+///
+/// When `address_table_lookups` is empty, any out-of-bounds index is a
+/// malformed transaction (not an ALT reference) and we keep the existing
+/// "render as `unresolved(N)` placeholder" behavior intact. (A lint
+/// diagnostic is also emitted for that case, but only when the
+/// `diagnostics` feature is enabled.)
+fn reject_v0_if_any_ix_references_alts(
+    v0_message: &solana_sdk::message::v0::Message,
+) -> Result<(), VisualSignError> {
+    if v0_message.address_table_lookups.is_empty() {
+        return Ok(());
+    }
+
+    let static_len = v0_message.account_keys.len();
+    // `loaded_len` is the total number of addresses the message claims to load
+    // via ALTs. In Solana v0, the resolved account vector seen by the runtime
+    // is the concatenation of `account_keys` and, for each lookup, the
+    // addresses pulled at `writable_indexes` followed by those at
+    // `readonly_indexes`. The valid instruction-index range is therefore
+    // `[0, static_len + loaded_len)`. Indices in `[static_len, static_len +
+    // loaded_len)` reference ALT-backed addresses we cannot resolve offline;
+    // indices `>= static_len + loaded_len` are malformed (out-of-range).
+    // Both are unsafe to render, but we report them separately so the error
+    // message is accurate.
+    let loaded_len: usize = v0_message
+        .address_table_lookups
+        .iter()
+        .map(|l| l.writable_indexes.len() + l.readonly_indexes.len())
+        .sum();
+    let loaded_end = static_len.saturating_add(loaded_len);
+
+    let mut alt_offenders: Vec<String> = Vec::new();
+    let mut malformed_offenders: Vec<String> = Vec::new();
+    // Track the actual number of offending index references (post-dedup),
+    // not the number of formatted offender entries. A single entry like
+    // `instruction 0: account indices [2, 3] reference ALT entries`
+    // represents two index references, so counting entries would understate
+    // the offence count and mismatch the wording "N reference(s)".
+    let mut n_alt_refs: usize = 0;
+    let mut n_mal_refs: usize = 0;
+
+    // Use a small enum instead of string tags so the match arms below are
+    // exhaustively checked by the compiler. A stray string typo or a future
+    // tag rename would otherwise fall through `_ => {}` and silently skip
+    // rejection, which would re-introduce the very bug this function exists
+    // to prevent. Program ids do not use this classifier (see below): per
+    // spec, no program_id_index can legitimately resolve via an ALT.
+    enum RefKind {
+        Alt,
+        Malformed,
+    }
+    let classify_account = |idx: usize| -> Option<RefKind> {
+        if idx >= loaded_end {
+            Some(RefKind::Malformed)
+        } else if idx >= static_len {
+            Some(RefKind::Alt)
+        } else {
+            None
+        }
+    };
+
+    for (i, ci) in v0_message.instructions.iter().enumerate() {
+        // Per the V0 message spec, program ids cannot be loaded via an
+        // ALT: "Program indexes must index into the list of message
+        // account_keys because program ids cannot be dynamically loaded
+        // from a lookup table." Any `program_id_index >= static_len` is
+        // therefore a spec violation, even when the index would fall
+        // within the ALT-loaded range. Classify it as malformed so the
+        // rejection message names the right defect.
+        if (ci.program_id_index as usize) >= static_len {
+            malformed_offenders.push(format!(
+                "instruction {i}: program_id_index {} cannot resolve via ALT \
+                 (program ids must index static account keys; static={static_len}, loaded={loaded_len})",
+                ci.program_id_index
+            ));
+            n_mal_refs += 1;
+        }
+
+        let mut alt_accounts: Vec<u8> = Vec::new();
+        let mut malformed_accounts: Vec<u8> = Vec::new();
+        for &idx in &ci.accounts {
+            match classify_account(idx as usize) {
+                Some(RefKind::Malformed) => malformed_accounts.push(idx),
+                Some(RefKind::Alt) => alt_accounts.push(idx),
+                None => {}
+            }
+        }
+        // Sort + dedup so the error message is stable regardless of how the
+        // raw instruction listed its accounts (and so the same index isn't
+        // repeated when it appears twice in `accounts`).
+        alt_accounts.sort_unstable();
+        alt_accounts.dedup();
+        malformed_accounts.sort_unstable();
+        malformed_accounts.dedup();
+        if !alt_accounts.is_empty() {
+            n_alt_refs += alt_accounts.len();
+            alt_offenders.push(format!(
+                "instruction {i}: account indices {alt_accounts:?} reference ALT entries"
+            ));
+        }
+        if !malformed_accounts.is_empty() {
+            n_mal_refs += malformed_accounts.len();
+            malformed_offenders.push(format!(
+                "instruction {i}: account indices {malformed_accounts:?} are out of range (static={static_len}, loaded={loaded_len})"
+            ));
+        }
+    }
+
+    if alt_offenders.is_empty() && malformed_offenders.is_empty() {
+        return Ok(());
+    }
+
+    let mut details_parts: Vec<String> = Vec::new();
+    if !alt_offenders.is_empty() {
+        details_parts.push(format!("ALT-backed: {}", alt_offenders.join("; ")));
+    }
+    if !malformed_offenders.is_empty() {
+        details_parts.push(format!("malformed: {}", malformed_offenders.join("; ")));
+    }
+
+    Err(VisualSignError::DecodeError(format!(
+        "Cannot render V0 transaction: {n_alt} address lookup table(s) present, {n_alt_off} unresolved ALT reference(s) and {n_mal_off} out-of-range reference(s) ({static_len} static account keys, {loaded_len} ALT-loaded). \
+         Resolving ALT contents requires an on-chain lookup that the parser does not perform. \
+         Refusing to display a partial transaction. Details: {details}",
+        n_alt = v0_message.address_table_lookups.len(),
+        n_alt_off = n_alt_refs,
+        n_mal_off = n_mal_refs,
+        details = details_parts.join(" | ")
+    )))
+}
+
 /// Convert V0 transaction to visual sign payload
 fn convert_v0_to_visual_sign_payload(
     versioned_tx: &VersionedTransaction,
@@ -360,6 +614,16 @@ fn convert_v0_to_visual_sign_payload(
     options: &VisualSignOptions,
     #[cfg(feature = "diagnostics")] lint_config: &visualsign::lint::LintConfig,
 ) -> Result<SignablePayload, VisualSignError> {
+    // SECURITY: the parser does not perform on-chain ALT resolution,
+    // so any instruction or account that references an entry in
+    // `address_table_lookups` is unresolvable here. Historically those
+    // references were silently dropped from the displayed payload, letting an
+    // attacker hide malicious instructions behind ALTs while the user signed a
+    // benign-looking display. Reject the transaction instead -- we can either
+    // resolve ALTs and surface their contents, or refuse to render. We do the
+    // latter.
+    reject_v0_if_any_ix_references_alts(v0_message)?;
+
     // Create IDL registry from options metadata
     let idl_registry = create_idl_registry_from_options(options)?;
 
@@ -1202,5 +1466,537 @@ mod tests {
             note.contains("no account keys"),
             "note should propagate underlying error: {note}"
         );
+    }
+
+    // Regression tests: a V0 transaction that references an
+    // address lookup table entry (program_id or account index past the static
+    // keys, while `address_table_lookups` is non-empty) MUST be rejected, not
+    // silently rendered with the ALT-resolved data missing.
+    mod v0_alt_rejection {
+        use super::*;
+        use solana_sdk::instruction::CompiledInstruction;
+        use solana_sdk::message::MessageHeader;
+        use solana_sdk::message::v0::{Message as V0Message, MessageAddressTableLookup};
+        use solana_sdk::pubkey::Pubkey;
+
+        fn make_v0(
+            account_keys: Vec<Pubkey>,
+            instructions: Vec<CompiledInstruction>,
+            address_table_lookups: Vec<MessageAddressTableLookup>,
+        ) -> V0Message {
+            V0Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 0,
+                },
+                account_keys,
+                recent_blockhash: solana_sdk::hash::Hash::default(),
+                instructions,
+                address_table_lookups,
+            }
+        }
+
+        fn default_options() -> VisualSignOptions {
+            VisualSignOptions {
+                metadata: None,
+                decode_transfers: false,
+                transaction_name: Some("V0 ALT Regression".to_string()),
+                developer_config: None,
+            }
+        }
+
+        fn convert(v0_message: &V0Message) -> Result<SignablePayload, VisualSignError> {
+            let versioned_tx = VersionedTransaction {
+                signatures: vec![],
+                message: VersionedMessage::V0(v0_message.clone()),
+            };
+            #[cfg(feature = "diagnostics")]
+            let lint_config = visualsign::lint::LintConfig::default();
+            convert_v0_to_visual_sign_payload(
+                &versioned_tx,
+                v0_message,
+                false,
+                None,
+                &default_options(),
+                #[cfg(feature = "diagnostics")]
+                &lint_config,
+            )
+        }
+
+        #[test]
+        fn rejects_v0_when_program_id_index_points_past_static_keys() {
+            // 2 static account keys, 1 ALT supplying extra accounts, one
+            // benign instruction in-range, one instruction whose
+            // program_id_index points past the static keys. Per the V0
+            // spec, program ids cannot be loaded via an ALT -- they must
+            // index into the static account_keys table -- so this is
+            // classified as `malformed:`, not `ALT-backed:`, even though
+            // the index would otherwise fall within the ALT-loaded range.
+            let key0 = Pubkey::new_unique();
+            let key1 = Pubkey::new_unique();
+            let alt = MessageAddressTableLookup {
+                account_key: Pubkey::new_unique(),
+                writable_indexes: vec![0, 1, 2],
+                readonly_indexes: vec![3],
+            };
+            let benign = CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0],
+                data: vec![0xAA],
+            };
+            let malicious = CompiledInstruction {
+                program_id_index: 5, // past static_len=2; spec says this is malformed
+                accounts: vec![0],
+                data: vec![0xBB],
+            };
+            let msg = make_v0(vec![key0, key1], vec![benign, malicious], vec![alt]);
+
+            let err = convert(&msg).expect_err("must reject out-of-static program_id refs");
+            let VisualSignError::DecodeError(text) = err else {
+                panic!("expected DecodeError, got {err:?}");
+            };
+            assert!(
+                text.contains("Cannot render V0 transaction"),
+                "error should explain why: {text}"
+            );
+            assert!(
+                text.contains("program_id_index 5"),
+                "error should name the offending index: {text}"
+            );
+            assert!(
+                text.contains("instruction 1"),
+                "error should name the offending instruction index: {text}"
+            );
+            assert!(
+                text.contains("malformed:"),
+                "program ids cannot be loaded via ALT, so the spec-violation \
+                 classification is malformed, not ALT-backed: {text}"
+            );
+            assert!(
+                !text.contains("ALT-backed:"),
+                "this case has only a spec-violating program_id ref, no \
+                 ALT-backed account refs: {text}"
+            );
+        }
+
+        #[test]
+        fn rejects_v0_when_account_index_lives_behind_an_alt() {
+            // Instruction's program_id is in-range, but two of its accounts
+            // point past the static keys into the ALT-loaded range. With
+            // static_len=2 and loaded_len=3 (writable=[0,1], readonly=[2])
+            // the valid resolved range is [0, 5); ALT-backed indices are
+            // [2, 5). Using accounts {2, 3} exercises the ALT-backed path
+            // (not the malformed-OOB path) and lets us assert the error
+            // surfaces them under the `ALT-backed:` section.
+            let key0 = Pubkey::new_unique();
+            let key1 = Pubkey::new_unique();
+            let alt = MessageAddressTableLookup {
+                account_key: Pubkey::new_unique(),
+                writable_indexes: vec![0, 1],
+                readonly_indexes: vec![2],
+            };
+            let ix = CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0, 2, 3],
+                data: vec![0xCC],
+            };
+            let msg = make_v0(vec![key0, key1], vec![ix], vec![alt]);
+
+            let err = convert(&msg).expect_err("must reject ALT-referenced accounts");
+            let VisualSignError::DecodeError(text) = err else {
+                panic!("expected DecodeError, got {err:?}");
+            };
+            assert!(
+                text.contains("ALT-backed:"),
+                "error should classify these accounts under ALT-backed, not malformed: {text}"
+            );
+            assert!(
+                !text.contains("malformed:"),
+                "this case has no out-of-range references, only ALT-backed ones: {text}"
+            );
+            assert!(
+                text.contains("account indices"),
+                "error should mention account indices: {text}"
+            );
+            assert!(
+                text.contains("[2, 3]"),
+                "error should enumerate the offending indices as `[2, 3]`: {text}"
+            );
+        }
+
+        #[test]
+        fn allows_v0_with_alt_when_no_instruction_references_alt_contents() {
+            // ALTs are present in the wire format (e.g. for future inner-CPIs
+            // a wallet pre-attached), but every compiled instruction's
+            // program_id and accounts resolve against the static keys. This is
+            // safe to render -- nothing about the displayed instructions is
+            // hidden by an ALT. The presence of `address_table_lookups` alone
+            // is not the threat; an unresolved reference into one is.
+            let key0 = Pubkey::new_unique();
+            let key1 = Pubkey::new_unique();
+            let alt = MessageAddressTableLookup {
+                account_key: Pubkey::new_unique(),
+                writable_indexes: vec![0],
+                readonly_indexes: vec![1],
+            };
+            let ix = CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0],
+                data: vec![0xDD],
+            };
+            let msg = make_v0(vec![key0, key1], vec![ix], vec![alt]);
+
+            let payload =
+                convert(&msg).expect("V0 with ALTs but only static-key references should render");
+            assert_eq!(payload.payload_type, "SolanaTx");
+            // Confirm the ALT itself is surfaced in the displayed payload.
+            let has_alt_field = payload
+                .fields
+                .iter()
+                .any(|f| matches!(f, SignablePayloadField::PreviewLayout { common, .. } if common.label == "Address Lookup Tables"));
+            assert!(
+                has_alt_field,
+                "Address Lookup Tables field must be present in payload"
+            );
+        }
+
+        #[test]
+        fn rejects_v0_with_malformed_index_when_alts_are_present() {
+            // ALTs are present but loaded_len=1 (one writable index). Static
+            // keys=2, so the valid resolved range is [0, 3). An instruction
+            // account index of 99 is past `static_len + loaded_len`, i.e.
+            // genuinely out-of-range / malformed, not just ALT-backed. We
+            // still reject (any unresolvable reference is unsafe to render),
+            // and the error message classifies it as malformed rather than
+            // claiming it references an ALT entry.
+            let key0 = Pubkey::new_unique();
+            let key1 = Pubkey::new_unique();
+            let alt = MessageAddressTableLookup {
+                account_key: Pubkey::new_unique(),
+                writable_indexes: vec![0],
+                readonly_indexes: vec![],
+            };
+            let ix = CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0, 99],
+                data: vec![0xFF],
+            };
+            let msg = make_v0(vec![key0, key1], vec![ix], vec![alt]);
+
+            let err =
+                convert(&msg).expect_err("must reject out-of-range indices even with ALTs present");
+            let VisualSignError::DecodeError(text) = err else {
+                panic!("expected DecodeError, got {err:?}");
+            };
+            assert!(
+                text.contains("Cannot render V0 transaction"),
+                "error should explain why: {text}"
+            );
+            assert!(
+                text.contains("malformed:"),
+                "error should classify the index as malformed, not ALT-backed: {text}"
+            );
+            assert!(
+                text.contains("[99]"),
+                "error should enumerate the offending malformed index: {text}"
+            );
+            assert!(
+                !text.contains("ALT-backed:"),
+                "this case has no ALT-backed references, only malformed ones: {text}"
+            );
+        }
+
+        #[test]
+        fn malformed_v0_without_alts_keeps_existing_behavior() {
+            // No ALTs: an OOB index here is just a malformed transaction, not
+            // a hidden-behind-ALT attack. The fix MUST NOT change behavior on
+            // this path -- the existing pipeline renders it with placeholders
+            // / diagnostics rather than rejecting.
+            let key0 = Pubkey::new_unique();
+            let ix = CompiledInstruction {
+                program_id_index: 99,
+                accounts: vec![0, 50],
+                data: vec![0xEE],
+            };
+            let msg = make_v0(vec![key0], vec![ix], vec![]);
+            // We don't assert success vs. failure of conversion here (other
+            // unrelated decode paths may still error on malformed input); we
+            // only assert it isn't being caught by the ALT-rejection branch,
+            // which would produce the new "Cannot render V0 transaction"
+            // message.
+            if let Err(VisualSignError::DecodeError(text)) = convert(&msg) {
+                assert!(
+                    !text.contains("Cannot render V0 transaction"),
+                    "malformed-without-ALT path must not hit ALT-rejection branch: {text}"
+                );
+            }
+        }
+    }
+
+    // --- regression tests for extract_idl_mappings ---
+
+    fn make_options_with_idl_mapping(
+        program_id: &str,
+        idl: generated::parser::Idl,
+    ) -> VisualSignOptions {
+        // Build the fixture as a `BTreeMap` (crate determinism rule) and let
+        // the call site `.into_iter().collect()` into the proto field's
+        // `HashMap`. Mirrors the Ethereum ABI metadata test helper.
+        let mut idl_mappings: BTreeMap<String, generated::parser::Idl> = BTreeMap::new();
+        idl_mappings.insert(program_id.to_string(), idl);
+        VisualSignOptions {
+            metadata: Some(generated::parser::ChainMetadata {
+                metadata: Some(generated::parser::chain_metadata::Metadata::Solana(
+                    generated::parser::SolanaMetadata {
+                        network_id: Some("SOLANA_MAINNET".to_string()),
+                        idl: None,
+                        idl_mappings: idl_mappings.into_iter().collect(),
+                    },
+                )),
+            }),
+            decode_transfers: false,
+            transaction_name: None,
+            developer_config: None,
+        }
+    }
+
+    /// Unsigned IDL mappings are still accepted (parity with the Ethereum ABI
+    /// path). The trusted-builtin-name protection in `IdlRegistry` is what
+    /// stops the attacker-controlled name from being rendered.
+    #[test]
+    fn test_extract_idl_mappings_accepts_unsigned_idl() {
+        let options = make_options_with_idl_mapping(
+            "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"Custom"},"instructions":[]}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                program_name: Some("Custom".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert_eq!(mappings.len(), 1, "unsigned IDL should be accepted");
+    }
+
+    /// IDL mappings with an invalid program_id (not parseable as a base58
+    /// Solana `Pubkey`) are dropped. Free defence in depth matching the
+    /// Ethereum ABI path's address validation.
+    #[test]
+    fn test_extract_idl_mappings_skips_invalid_program_id() {
+        let options = make_options_with_idl_mapping(
+            "not_a_base58_pubkey",
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"X"}}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                program_name: Some("X".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert!(
+            mappings.is_empty(),
+            "invalid program_id should be skipped, got: {mappings:?}"
+        );
+    }
+
+    /// IDL JSON exceeding `MAX_IDL_JSON_BYTES` is rejected before any
+    /// expensive operation.
+    #[test]
+    fn test_extract_idl_mappings_skips_oversized_idl() {
+        let mut big = String::with_capacity(MAX_IDL_JSON_BYTES + 1024);
+        big.push('"');
+        while big.len() < MAX_IDL_JSON_BYTES + 100 {
+            big.push('x');
+        }
+        big.push('"');
+        let options = make_options_with_idl_mapping(
+            "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+            generated::parser::Idl {
+                value: big,
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                program_name: Some("Custom".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert!(
+            mappings.is_empty(),
+            "oversized IDL should be skipped, got: {mappings:?}"
+        );
+    }
+
+    /// IDL with a signature that fails to verify is dropped. Mirrors the
+    /// Ethereum ABI path so callers that opt in to signing get the same
+    /// "tampered bodies are rejected" guarantee.
+    #[test]
+    fn test_extract_idl_mappings_skips_invalid_signature() {
+        let proto_sig = generated::parser::SignatureMetadata {
+            value: "deadbeef".to_string(),
+            metadata: vec![
+                generated::parser::Metadata {
+                    key: "algorithm".to_string(),
+                    value: "secp256k1".to_string(),
+                },
+                generated::parser::Metadata {
+                    key: "public_key".to_string(),
+                    value: "deadbeef".to_string(),
+                },
+            ],
+        };
+        let options = make_options_with_idl_mapping(
+            "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"Custom"},"instructions":[]}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: Some(proto_sig),
+                program_name: Some("Custom".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert!(
+            mappings.is_empty(),
+            "invalid signature should be skipped, got: {mappings:?}"
+        );
+    }
+
+    /// IDL mappings targeting a trusted built-in program are dropped at
+    /// extraction time. The name guard in `IdlRegistry` blocks attacker
+    /// labels; this filter also blocks the IDL *body* from ever reaching the
+    /// registry, so the `unknown_program` IDL path cannot decode a System
+    /// Program transfer with attacker-supplied arg/account names.
+    #[test]
+    fn test_extract_idl_mappings_skips_trusted_builtin_program() {
+        // System Program and Jupiter Swap both belong to the canonical set.
+        for trusted_program_id in [
+            "11111111111111111111111111111111",
+            "JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB",
+        ] {
+            let options = make_options_with_idl_mapping(
+                trusted_program_id,
+                generated::parser::Idl {
+                    value: r#"{"metadata":{"name":"Phantom Wallet"},"instructions":[]}"#
+                        .to_string(),
+                    idl_type: None,
+                    idl_version: None,
+                    signature: None,
+                    program_name: Some("Phantom Wallet".to_string()),
+                },
+            );
+            let mappings = extract_idl_mappings(&options);
+            assert!(
+                mappings.is_empty(),
+                "trusted built-in '{trusted_program_id}' should be dropped, got: {mappings:?}"
+            );
+        }
+    }
+
+    /// Preset-registered program IDs (e.g. `swig_wallet`) are also dropped at
+    /// extraction time even when they have no canonical name in the
+    /// `NATIVE_PROGRAM_NAMES` table. Subsumes the protection PR #328 added.
+    #[test]
+    fn test_extract_idl_mappings_skips_preset_only_program() {
+        use crate::core::available_visualizers;
+        use crate::idl::builtin_programs::canonical_name as cname;
+
+        let preset_only_id: String = available_visualizers()
+            .iter()
+            .filter_map(|v| v.get_config())
+            .flat_map(|cfg| cfg.data().programs.keys().copied().collect::<Vec<_>>())
+            .find(|id| cname(id).is_none())
+            .expect("at least one preset-only program ID should be registered")
+            .to_string();
+
+        let options = make_options_with_idl_mapping(
+            &preset_only_id,
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"X"},"instructions":[]}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                program_name: Some("X".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert!(
+            mappings.is_empty(),
+            "preset-only '{preset_only_id}' should be dropped, got: {mappings:?}"
+        );
+    }
+
+    /// Display-name impersonation: an attacker submits IDL for a
+    /// non-canonical pubkey but labels it "System Program". Without the
+    /// reserved-name blocklist, `get_program_name` would surface the
+    /// attacker's "System Program" label on the attacker's pubkey. Reject
+    /// the mapping at extraction.
+    #[test]
+    fn test_extract_idl_mappings_rejects_reserved_name_on_non_canonical_pubkey() {
+        let attacker_pubkey = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+        let options = make_options_with_idl_mapping(
+            attacker_pubkey,
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"System Program"},"instructions":[]}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                // Attacker-controlled `program_name` impersonating a canonical
+                // entry. Must be refused even though `program_id` itself is
+                // not in the trusted set.
+                program_name: Some("System Program".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert!(
+            mappings.is_empty(),
+            "reserved name on non-canonical pubkey must be dropped, got: {mappings:?}"
+        );
+    }
+
+    /// The reserved-name guard also fires when the impersonating name comes
+    /// from the IDL JSON `metadata.name` rather than the proto's
+    /// `program_name`. Both paths feed `get_program_name` indirectly, so
+    /// both must be filtered.
+    #[test]
+    fn test_extract_idl_mappings_rejects_reserved_name_in_idl_metadata() {
+        let attacker_pubkey = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+        let options = make_options_with_idl_mapping(
+            attacker_pubkey,
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"Jupiter Swap"},"instructions":[]}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                program_name: None,
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert!(
+            mappings.is_empty(),
+            "reserved name in IDL metadata.name on non-canonical pubkey must be dropped, got: {mappings:?}"
+        );
+    }
+
+    /// A free-form name (not in the canonical table) on a non-canonical
+    /// pubkey must still pass through. Otherwise legitimate wallet labels
+    /// for unknown programs would be lost.
+    #[test]
+    fn test_extract_idl_mappings_allows_freeform_name() {
+        let custom_pubkey = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+        let options = make_options_with_idl_mapping(
+            custom_pubkey,
+            generated::parser::Idl {
+                value: r#"{"metadata":{"name":"My Custom Program"},"instructions":[]}"#.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                program_name: Some("My Custom Program".to_string()),
+            },
+        );
+        let mappings = extract_idl_mappings(&options);
+        assert_eq!(mappings.len(), 1);
     }
 }

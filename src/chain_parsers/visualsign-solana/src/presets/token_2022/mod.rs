@@ -34,6 +34,17 @@ const PAUSABLE_RESUME_DISCRIMINATOR: u8 = 2;
 // Standard Token instruction discriminators
 const SET_AUTHORITY_DISCRIMINATOR: u8 = 6;
 
+// Maximum decimals we are willing to honor on attacker-controlled
+// `MintToChecked` / `BurnChecked` payloads. Real-world tokens cap out around
+// 18 (ERC20 convention, and Solana's `Mint::decimals` is documented to fit in
+// the same range); larger values are almost certainly malicious. Clamping
+// here surfaces a clean decode error to the caller. `format_token_amount`
+// in `utils` also guards against out-of-range `decimals` via `checked_pow`
+// (historically `10_u64.pow(64)` wrapped to 0 and panicked on divide), but
+// rejecting up front gives a better diagnostic than silently rendering the
+// raw amount.
+const MAX_TOKEN_DECIMALS: u8 = 18;
+
 pub struct Token2022Visualizer;
 
 impl InstructionVisualizer for Token2022Visualizer {
@@ -201,6 +212,11 @@ fn parse_token_2022_instruction(
                 if accounts.len() < 3 {
                     return Err("Invalid mintToChecked: insufficient accounts".to_string());
                 }
+                if decimals > MAX_TOKEN_DECIMALS {
+                    return Err(format!(
+                        "Invalid mintToChecked: decimals {decimals} exceeds maximum supported value {MAX_TOKEN_DECIMALS}"
+                    ));
+                }
 
                 return Ok(Token2022Instruction::MintToChecked {
                     amount,
@@ -213,6 +229,11 @@ fn parse_token_2022_instruction(
             TokenInstruction::BurnChecked { amount, decimals } => {
                 if accounts.len() < 3 {
                     return Err("Invalid burnChecked: insufficient accounts".to_string());
+                }
+                if decimals > MAX_TOKEN_DECIMALS {
+                    return Err(format!(
+                        "Invalid burnChecked: decimals {decimals} exceeds maximum supported value {MAX_TOKEN_DECIMALS}"
+                    ));
                 }
 
                 return Ok(Token2022Instruction::BurnChecked {
@@ -555,5 +576,81 @@ fn create_token_2022_preview_layout(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use solana_sdk::pubkey::Pubkey;
     mod fixture_test;
+
+    fn dummy_account_metas(n: usize) -> Vec<AccountMeta> {
+        (0..n)
+            .map(|_| AccountMeta::new_readonly(Pubkey::new_unique(), false))
+            .collect()
+    }
+
+    fn mint_to_checked_bytes(amount: u64, decimals: u8) -> Vec<u8> {
+        // SPL Token MintToChecked layout:
+        //   [discriminator: 14, amount: u64 LE, decimals: u8]
+        let mut data = Vec::with_capacity(10);
+        data.push(14u8);
+        data.extend_from_slice(&amount.to_le_bytes());
+        data.push(decimals);
+        data
+    }
+
+    fn burn_checked_bytes(amount: u64, decimals: u8) -> Vec<u8> {
+        // SPL Token BurnChecked layout:
+        //   [discriminator: 15, amount: u64 LE, decimals: u8]
+        let mut data = Vec::with_capacity(10);
+        data.push(15u8);
+        data.extend_from_slice(&amount.to_le_bytes());
+        data.push(decimals);
+        data
+    }
+
+    /// Regression: a crafted `MintToChecked` instruction with
+    /// `decimals = 100` used to cause the parser to compute `10_u64.pow(100)`,
+    /// which wraps to `0` and triggers a divide-by-zero panic in
+    /// `format_token_amount`. The fix is to reject any `decimals` value above
+    /// `MAX_TOKEN_DECIMALS` at parse time, surfacing a clean decode error
+    /// instead of crashing the worker.
+    #[test]
+    fn test_mint_to_checked_rejects_out_of_range_decimals() {
+        let accounts = dummy_account_metas(3);
+        for decimals in [19u8, 20, 64, 100, 200, u8::MAX] {
+            let data = mint_to_checked_bytes(1_000_000, decimals);
+            let msg = match parse_token_2022_instruction(&data, &accounts) {
+                Ok(_) => panic!("decimals={decimals} should be rejected, got Ok"),
+                Err(msg) => msg,
+            };
+            assert!(
+                msg.contains("exceeds maximum supported value"),
+                "unexpected error for decimals={decimals}: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_burn_checked_rejects_out_of_range_decimals() {
+        let accounts = dummy_account_metas(3);
+        for decimals in [19u8, 20, 64, 100, 200, u8::MAX] {
+            let data = burn_checked_bytes(1_000_000, decimals);
+            let msg = match parse_token_2022_instruction(&data, &accounts) {
+                Ok(_) => panic!("decimals={decimals} should be rejected, got Ok"),
+                Err(msg) => msg,
+            };
+            assert!(
+                msg.contains("exceeds maximum supported value"),
+                "unexpected error for decimals={decimals}: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mint_to_checked_accepts_typical_decimals() {
+        let accounts = dummy_account_metas(3);
+        for decimals in [0u8, 6, 9, 18] {
+            let data = mint_to_checked_bytes(1_000_000, decimals);
+            if let Err(msg) = parse_token_2022_instruction(&data, &accounts) {
+                panic!("decimals={decimals} should parse, got Err({msg})");
+            }
+        }
+    }
 }

@@ -1,0 +1,165 @@
+---
+title: Ethereum for dApp Builders
+description: Get your dApp's transactions rendering meaningfully in any VisualSign-enabled wallet
+---
+
+If your dApp's contracts aren't ERC-20, Permit2, or a Uniswap router, the parser cannot decode their calldata on its own. To users, that means a 4-byte selector and an opaque hex blob in the signing screen, exactly the kind of "approve this thing you can't read" UX that VisualSign exists to eliminate.
+
+You have two ways to fix this, in order of preference:
+
+1. **Contribute a custom parser to this repo (recommended).** Every wallet that ships VisualSign will then render your contract calls with rich, nested, token-aware fields, for free, no per-wallet integration work.
+2. **Ship a signed ABI as fallback.** Generic ABI decoding always works but produces flatter, less-readable output and requires every wallet to fetch and trust your ABI independently.
+
+The ideal end state is that every dApp users sign for has a custom parser checked into this repo. ERC-20, Permit2, and Uniswap Universal Router already do; yours can be next.
+
+The companion to this page is [Ethereum for Wallets](../chains/ethereum), which describes what wallets do with the output you ship.
+
+## Best path: contribute a custom parser
+
+A custom parser lives in [`src/chain_parsers/visualsign-ethereum/src/protocols/`](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-ethereum/src/protocols) alongside the existing Uniswap decoder. It's a small Rust module (typically 100 to 400 lines) that decodes your contract's calldata into structured `SignablePayload` fields. Once merged, the next release of the parser ships with your decoder built in, and every wallet that updates picks it up automatically.
+
+### Why this beats a generic ABI
+
+| | Custom parser | Generic ABI |
+|---|---|---|
+| Multi-step intent (e.g. wrap, swap, send in one call) | Renders as nested `PreviewLayout` fields, one per step | One flat list of raw parameters |
+| Token resolution | Resolves token addresses from calldata into symbols and decimal-formatted amounts (e.g. `1.5 USDC`) | Renders raw addresses and on-chain integers |
+| Domain semantics | Labels match your protocol vocabulary ("Swap path", "Recipient", "Fee bips") | Labels come from raw ABI parameter names |
+| Wallet integration cost | Zero per-wallet work after the PR merges | Each wallet must fetch, verify, and pin your ABI |
+| Trust model | Code reviewed by the OSS maintainers, runs in the wallet's parsing environment (attestation-verified TEE in production, library or gRPC server in other deployment modes) | Wallet has to decide whether to trust the ABI source |
+
+Take the Uniswap decoder as a concrete example: a Universal Router `execute` call with four commands renders as four nested layouts (two V3 swaps, a fee payment, a WETH unwrap), each with token symbols and human-readable amounts. The same call decoded from a generic ABI would render as one `bytes commands` blob and one `bytes[] inputs` blob. The custom decoder is the difference between a user understanding what they're signing and not.
+
+### How to contribute
+
+1. **Read the guide.** [`DECODER_GUIDE.md`](https://github.com/anchorageoss/visualsign-parser/blob/main/src/chain_parsers/visualsign-ethereum/DECODER_GUIDE.md) walks through the four-step decoder pattern (decode with `sol!` macro, resolve tokens via the registry, format amounts, return fields).
+2. **Use Uniswap as the reference.** The [`protocols/uniswap/`](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-ethereum/src/protocols/uniswap) directory shows the full layout: `config.rs` for addresses, `contracts/` for per-command decoders, `mod.rs` to register everything. Copy the structure for your protocol.
+3. **Write fixture-based tests.** Drop a raw transaction hex in `tests/fixtures/your-protocol.input` and the expected rendered output in `tests/fixtures/your-protocol.expected`. The test harness diffs them automatically. See the existing Uniswap fixtures for examples.
+4. **Open a PR.** The maintainers review for correctness, security (no panics, no `unwrap`, no `unsafe`), and that your fixtures exercise the meaningful paths through your decoder. Once merged, your decoder ships in the next release.
+
+If your protocol spans multiple chains, register chain-specific addresses through the registry (see how Uniswap registers Universal Router and Permit2 across Ethereum, Optimism, Polygon, Base, and Arbitrum in `protocols/uniswap/config.rs`).
+
+### When a custom parser might not fit
+
+Sometimes the OSS path isn't the right one (yet):
+
+- Your protocol is pre-launch or pre-audit and the surface is still changing weekly. Wait for stable interfaces.
+- Your contract is private or permissioned and isn't a public good. The OSS repo aims to render public smart contracts; private ones belong in a wallet operator's private build.
+- You need a fix shipped in days, not weeks. Ship an ABI now (next section), then upstream a custom parser once the urgency passes.
+
+In all three cases the ABI fallback below gets you decoded output today.
+
+## Fallback: ship a signed ABI
+
+If a custom parser isn't viable, providing a contract ABI lets the generic decoder render your calldata as a flat list of labeled, typed fields. It's worse UX than a custom parser but a strict improvement over raw hex.
+
+### How wallets find your ABI
+
+VisualSign does not host an ABI registry. Wallets that want to render your contract calls fetch your ABI from somewhere (Etherscan and other block explorers, your documentation site, a well-known URL on your domain, a community-maintained registry, or a private store the wallet operator curates), then pass it to the parser as part of `EthereumMetadata.abi_mappings`, keyed by contract address.
+
+Your job as a dApp author is to make the ABI easy to find, easy to verify, and stable across deployments:
+
+- **Verify your contracts on the relevant block explorer** (Etherscan, Polygonscan, Arbiscan, and so on). Verified contracts publish their ABI on a well-known surface that almost every wallet already consults.
+- **Publish the canonical ABI alongside your contract source.** A `contracts/abi/<contract>.json` file in your repo, mirrored on your documentation site, gives wallets a stable URL to fetch from when they're not relying on an explorer.
+- **Use stable contract addresses.** Proxy patterns are fine (wallets resolve the implementation off-chain), but a contract whose address changes every deploy forces every wallet to re-fetch your ABI continuously.
+- **Version your ABI when interfaces change.** Wallets cache. If your function signatures change without a version bump, users will see decoded fields that no longer match what your contract does.
+
+### Sign your ABI
+
+The `Abi` message includes an optional `signature` field. Signing your ABI lets a wallet cryptographically verify that the ABI it loaded matches the one you published, without trusting whoever served the file.
+
+Signature validation in the parser today:
+
+- **Algorithm**: `secp256k1` (no other algorithms are accepted).
+- **Hash**: SHA-256 over the raw ABI JSON string, byte for byte.
+- **Format**: DER-encoded signature, hex-encoded as the `value`.
+- **Public key**: hex-encoded secp256k1 point, passed in `metadata` under the key `public_key`.
+
+#### A signing example
+
+The signing operation is straightforward: sign the SHA-256 of the canonical ABI JSON. In Node.js:
+
+```javascript
+import { createHash } from "node:crypto";
+import { secp256k1 } from "@noble/curves/secp256k1";
+
+const abiJson = JSON.stringify(abi); // canonical form; no reformat after signing
+const digest = createHash("sha256").update(abiJson).digest();
+
+// 32-byte secp256k1 private key, hex-encoded. Keep this offline; substitute your own.
+const privateKey = "0000000000000000000000000000000000000000000000000000000000000001";
+
+// sign() returns a Signature object. Call toDERHex() to get the DER-encoded hex you ship.
+const sig = secp256k1.sign(digest, privateKey, { prehash: false });
+const signatureDerHex = sig.toDERHex();
+const publicKeyHex = Buffer.from(secp256k1.getPublicKey(privateKey, false)).toString("hex");
+
+console.log({ signatureDerHex, publicKeyHex });
+```
+
+Then ship the ABI, the signature, and the public key together so wallets can build the `Abi` message:
+
+```protobuf
+message Abi {
+  string value = 1;                         // The exact JSON bytes you hashed.
+  optional SignatureMetadata signature = 2;
+}
+
+message SignatureMetadata {
+  string value = 1;                         // DER signature, hex-encoded.
+  repeated Metadata metadata = 2;
+}
+
+message Metadata {
+  string key = 1;                           // e.g. "algorithm", "public_key", "issuer", "timestamp".
+  string value = 2;
+}
+```
+
+The metadata bag must contain at least `algorithm` (set to `"secp256k1"`) and `public_key` (hex-encoded). `issuer` and `timestamp` are preserved but not used in validation.
+
+#### Trust model
+
+Signing proves the ABI was not modified after you signed it. It does **not** prove who signed it; the parser accepts any well-formed signature from any key. To establish identity, wallets verify your public key against an allowlist they maintain (a static config, a registry of audited dApps, or whatever fits their threat model). Publish your signing key alongside your contracts so wallets can pin it.
+
+If signature validation fails, the parser logs a warning and **skips that ABI entry**, falling back to raw-hex rendering for calls to that contract. That means a wrong signature is worse than no signature: users see less information, not more. Ship unsigned ABIs until you're confident the signing pipeline is stable, then add signatures once your wallet integrators are ready to verify them.
+
+## Design calldata that visualizes well
+
+Whether you ship a custom parser or an ABI, the parser only sees what's in your transaction's calldata. It does not simulate execution, read event logs, or query state. A few patterns make the difference between a clear preview and a wall of hex:
+
+- **Use canonical interfaces wherever possible.** Calls to `transfer(address,uint256)`, `approve(address,uint256)`, Permit2, and Uniswap routers are decoded automatically with no ABI required. ERC-721 support is not yet implemented (calls fall back to raw-hex rendering). If your contract's functions can be expressed in terms of standard interfaces, do so.
+- **Prefer typed parameters over `bytes` blobs.** A function that takes `(address recipient, uint256 amount, uint8 tier)` decodes into three named, typed fields. The same data passed as `bytes data` decodes as one opaque hex string. Reserve `bytes` for genuinely opaque payloads (signatures, encrypted notes) and use typed parameters for anything you want users to see.
+- **Encode multi-step intent as commands, not as a single opaque blob.** Uniswap's Universal Router is the canonical example: a list of typed commands becomes a list of nested `PreviewLayout` fields, one per step. A contract that bundles "wrap, swap, send" as three command codes plus their parameters renders more clearly than a contract that takes a single `bytes payload` and parses it internally.
+- **Don't encode semantic meaning only in event logs.** Logs are not available to the parser; they only exist after execution. If a user needs to know "this call transfers X tokens to Y", the X and Y must be visible in the calldata, not just emitted on success.
+- **Name your function parameters.** Solidity preserves parameter names in the ABI, and the parser uses them as field labels. `swap(address tokenIn, address tokenOut, uint256 amountIn)` renders far better than `swap(address, address, uint256)`.
+
+## EIP-712 typed data
+
+This parser is transaction-focused: it reads RLP-encoded EVM transactions, not EIP-712 typed-data signatures. If your dApp asks users to sign permits, orders, or other off-chain structured messages, that flow is out of scope for the current Ethereum parser. The same wallet team handling EIP-712 rendering on their side may follow up with first-class support; track repo issues for status.
+
+## Verify what users will see
+
+Before announcing a contract to wallet integrators, render a real transaction against your ABI locally with `parser_cli`:
+
+```bash
+cargo run --bin parser_cli -- \
+  --chain ethereum \
+  --network ETHEREUM_MAINNET \
+  --output human \
+  --abi-json-mappings "MyContract:path/to/your-abi.json:0xYourContractAddress" \
+  -t <raw-unsigned-tx-hex>
+```
+
+The `--abi-json-mappings` flag can be passed multiple times if your transaction touches several of your contracts.
+
+The `human` output is what a wallet user will see; the `json` output is the exact `SignablePayload` your integrators will render. See [Parser CLI](/parser-cli) for the full set of flags.
+
+A short loop of (modify ABI, render, adjust function names and types, re-render) catches almost every "users will see something confusing" problem before it ships. If you're writing a custom parser, the same loop applies against your fixtures.
+
+## Next steps
+
+- [Decoder Guide](https://github.com/anchorageoss/visualsign-parser/blob/main/src/chain_parsers/visualsign-ethereum/DECODER_GUIDE.md): The four-step pattern for contributing a custom parser.
+- [Ethereum for Wallets](../chains/ethereum): Confirm your assumptions about how wallets will integrate.
+- [Field Types](/field-types): The full `SignablePayload` schema, so you can mentally map your calldata to what users see.
+- [Parser CLI](/parser-cli): The local rendering loop in detail.

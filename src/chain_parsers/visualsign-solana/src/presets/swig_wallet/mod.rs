@@ -5,8 +5,8 @@ mod config;
 use std::fmt;
 
 use crate::core::{
-    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind, available_visualizers, visualize_with_any,
+    AccountRef, InstructionVisualizer, MAX_CALL_DEPTH, ProgramRef, SolanaIntegrationConfig,
+    VisualizerContext, VisualizerKind, available_visualizers, visualize_with_any,
 };
 use config::SwigWalletConfig;
 use solana_parser::solana::structs::SolanaAccount;
@@ -35,6 +35,18 @@ impl InstructionVisualizer for SwigWalletVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
+        // Convert 0-based index to 1-based instruction number for user-facing labels
+        // (e.g., "Instruction 1" instead of "Instruction 0")
+        let instruction_number = context.instruction_index() + 1;
+
+        // Guard against attacker-crafted recursion through SignV1/SignV2
+        // inner instructions. The recursion lives at the trait boundary
+        // (visualize_with_any -> SwigWalletVisualizer::visualize_tx_commands),
+        // so the cheapest place to bound it is right here at entry.
+        if context.call_depth() >= MAX_CALL_DEPTH {
+            return nested_too_deeply_field(instruction_number, context.call_depth());
+        }
+
         // Build AccountMeta shim for the parser.
         // Unresolved accounts are rejected rather than substituted with
         // Pubkey::default(), which would render as a valid-looking address.
@@ -50,10 +62,7 @@ impl InstructionVisualizer for SwigWalletVisualizer {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Convert 0-based index to 1-based instruction number for user-facing labels
-        // (e.g., "Instruction 1" instead of "Instruction 0")
-        let instruction_number = context.instruction_index() + 1;
-        let decoded = parse_swig_instruction(context.data(), &accounts)
+        let decoded = parse_swig_instruction(context.data(), &accounts, context.call_depth())
             .map_err(|err| VisualSignError::DecodeError(err.to_string()))?;
 
         let program_id_str = match context.program_id() {
@@ -375,6 +384,7 @@ impl std::error::Error for SwigParseError {}
 fn parse_swig_instruction(
     data: &[u8],
     accounts: &[AccountMeta],
+    depth: usize,
 ) -> Result<SwigInstructionDecoded, SwigParseError> {
     if data.len() < 2 {
         return Err(SwigParseError::DataTooShort("missing discriminator"));
@@ -398,18 +408,18 @@ fn parse_swig_instruction(
         SwigInstructionKind::RemoveAuthorityV1 => parse_remove_authority_v1(data),
         SwigInstructionKind::UpdateAuthorityV1 => parse_update_authority_v1(data),
         SwigInstructionKind::SignV1 => {
-            let sign = parse_sign_instruction(data, 8, accounts)?;
+            let sign = parse_sign_instruction(data, 8, accounts, depth)?;
             Ok(SwigInstructionDecoded::SignV1(sign))
         }
         SwigInstructionKind::SignV2 => {
-            let sign = parse_sign_instruction(data, 8, accounts)?;
+            let sign = parse_sign_instruction(data, 8, accounts, depth)?;
             Ok(SwigInstructionDecoded::SignV2(sign))
         }
         SwigInstructionKind::CreateSessionV1 => parse_create_session_v1(data),
         SwigInstructionKind::CreateSubAccountV1 => parse_create_sub_account_v1(data),
         SwigInstructionKind::WithdrawFromSubAccountV1 => parse_withdraw_from_sub_account(data),
         SwigInstructionKind::SubAccountSignV1 => {
-            let sign = parse_sign_instruction(data, 16, accounts)?;
+            let sign = parse_sign_instruction(data, 16, accounts, depth)?;
             Ok(SwigInstructionDecoded::SubAccountSignV1(sign))
         }
         SwigInstructionKind::ToggleSubAccountV1 => parse_toggle_sub_account(data),
@@ -562,6 +572,7 @@ fn parse_sign_instruction(
     data: &[u8],
     header_len: usize,
     accounts: &[AccountMeta],
+    depth: usize,
 ) -> Result<SignInstructionDecoded, SwigParseError> {
     if data.len() < header_len {
         return Err(SwigParseError::DataTooShort("sign header"));
@@ -578,7 +589,7 @@ fn parse_sign_instruction(
     let payload_end = payload_start + instruction_payload_len;
     let instruction_payload = &data[payload_start..payload_end];
     let authority_payload = data[payload_end..].to_vec();
-    let inner_instructions = decode_compact_instructions(instruction_payload, accounts)?;
+    let inner_instructions = decode_compact_instructions(instruction_payload, accounts, depth)?;
 
     Ok(SignInstructionDecoded {
         role_id,
@@ -695,6 +706,7 @@ fn parse_transfer_assets(data: &[u8]) -> Result<SwigInstructionDecoded, SwigPars
 fn decode_compact_instructions(
     payload: &[u8],
     accounts: &[AccountMeta],
+    parent_depth: usize,
 ) -> Result<Vec<DecodedInnerInstruction>, SwigParseError> {
     if payload.is_empty() {
         return Ok(Vec::new());
@@ -756,6 +768,7 @@ fn decode_compact_instructions(
             &program_meta.display,
             &data_slice,
             &inner_accounts,
+            parent_depth,
         );
         instructions.push(DecodedInnerInstruction {
             program_id: program_meta.pubkey,
@@ -799,6 +812,7 @@ fn describe_inner_instruction(
     program_display: &str,
     data: &[u8],
     accounts: &[InnerAccountMeta],
+    parent_depth: usize,
 ) -> String {
     let fallback = || {
         let byte_len = data.len();
@@ -810,7 +824,7 @@ fn describe_inner_instruction(
     };
 
     if let Some(instruction) = build_inner_instruction(program_id, accounts, data) {
-        if let Some(summary) = visualize_inner_instruction(instruction) {
+        if let Some(summary) = visualize_inner_instruction(instruction, parent_depth) {
             return summary;
         }
     }
@@ -857,7 +871,10 @@ fn build_inner_instruction(
     })
 }
 
-fn visualize_inner_instruction(instruction: Instruction) -> Option<String> {
+fn visualize_inner_instruction(
+    instruction: Instruction,
+    parent_depth: usize,
+) -> Option<String> {
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
     let visualizer_refs: Vec<&dyn InstructionVisualizer> =
         visualizers.iter().map(|viz| viz.as_ref()).collect();
@@ -884,7 +901,13 @@ fn visualize_inner_instruction(instruction: Instruction) -> Option<String> {
         writable: false,
     };
     let idl_registry = crate::idl::IdlRegistry::new();
-    let context = VisualizerContext::new(&sender, &compiled, &account_keys, &idl_registry, 0);
+    // Carry call_depth across the trait boundary: if the inner visualizer is
+    // swig itself, the next entry into visualize_tx_commands sees
+    // parent_depth + 1 and bails before recursing further. Saturating add so a
+    // maliciously constructed parent context with depth near usize::MAX can't
+    // wrap to 0 and slip past the MAX_CALL_DEPTH guard.
+    let context = VisualizerContext::new(&sender, &compiled, &account_keys, &idl_registry, 0)
+        .with_call_depth(parent_depth.saturating_add(1));
 
     visualize_with_any(&visualizer_refs, &context)
         .and_then(|result| result.ok())
@@ -1102,6 +1125,54 @@ fn make_text_field(
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     let text = value.into();
     create_text_field(label, &text)
+}
+
+/// Render a PreviewLayout placeholder for a swig instruction whose nesting
+/// depth exceeds `MAX_CALL_DEPTH`. Returned in place of the normal expanded
+/// view so the caller still sees a well-formed field for each level (and no
+/// recursion happens past the bound).
+fn nested_too_deeply_field(
+    instruction_number: usize,
+    depth: usize,
+) -> Result<AnnotatedPayloadField, VisualSignError> {
+    let summary = format!(
+        "Swig: Nested too deeply (depth {depth}, limit {MAX_CALL_DEPTH})"
+    );
+    let condensed = SignablePayloadFieldListLayout {
+        fields: vec![make_text_field("Instruction", summary.clone())?],
+    };
+    let expanded = SignablePayloadFieldListLayout {
+        fields: vec![
+            make_text_field("Instruction Type", "Nested Too Deeply")?,
+            make_text_field("Nesting Depth", depth.to_string())?,
+            make_text_field(
+                "Nesting Depth Limit",
+                MAX_CALL_DEPTH.to_string(),
+            )?,
+        ],
+    };
+    let preview_layout = SignablePayloadFieldPreviewLayout {
+        title: Some(SignablePayloadFieldTextV2 {
+            text: summary.clone(),
+        }),
+        subtitle: Some(SignablePayloadFieldTextV2 {
+            text: "Swig wallet instruction".to_string(),
+        }),
+        condensed: Some(condensed),
+        expanded: Some(expanded),
+    };
+
+    Ok(AnnotatedPayloadField {
+        static_annotation: None,
+        dynamic_annotation: None,
+        signable_payload_field: SignablePayloadField::PreviewLayout {
+            common: SignablePayloadFieldCommon {
+                label: format!("Instruction {instruction_number}"),
+                fallback_text: summary,
+            },
+            preview_layout,
+        },
+    })
 }
 
 fn build_variant_fields(
@@ -2656,5 +2727,151 @@ mod tests {
         assert!(rows.iter().any(|(label, value)| {
             label == "Updated Actions (hex)" && *value == hex::encode(&action_bytes)
         }));
+    }
+
+    /// Regression test: unbounded swig_wallet inner-instruction recursion DoS.
+    ///
+    /// `SwigWalletVisualizer::visualize_tx_commands` recurses into itself when a
+    /// `SignV1` instruction wraps another `SignV1` instruction targeting the swig
+    /// program. Solana's compact-instruction length field (u16) lets an attacker
+    /// nest thousands of these levels in a single transaction, which used to
+    /// stack-overflow the parser process. After the fix, the visualizer bails out
+    /// at `MAX_CALL_DEPTH` and renders a placeholder field instead.
+    #[test]
+    fn test_deeply_nested_sign_v1_does_not_stack_overflow() {
+        use crate::core::{InstructionVisualizer, VisualizerContext};
+        use crate::idl::IdlRegistry;
+        use solana_parser::solana::structs::SolanaAccount;
+        use solana_sdk::instruction::CompiledInstruction;
+        use solana_sdk::pubkey::Pubkey;
+        use std::str::FromStr;
+        use visualsign::SignablePayloadField;
+
+        // Construct a SignV1 swig payload nested `levels` times. Each level
+        // wraps a single inner compact instruction whose program is swig and
+        // whose first account is swig again, so the recursion can keep
+        // descending until depth-bounded.
+        fn build_nested_sign_v1(levels: usize) -> Vec<u8> {
+            // Innermost: SignV1 with an empty inner-instruction list
+            // (instr_count=0 byte, no entries).
+            //
+            // Layout per level:
+            //   [disc(2)=0x04 0x00, payload_len(2 le), role_id(4 le)=0,
+            //    instr_count(1)=1,
+            //    program_index(1)=0,
+            //    account_count(1)=1,
+            //    account_byte(1)=0,
+            //    data_len(2 le)=len(inner_data),
+            //    data(inner_data)]
+            let mut data: Vec<u8> = vec![0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+            for _ in 0..levels {
+                let inner_len = u16::try_from(data.len())
+                    .expect("nested payload exceeds u16 bound");
+                let mut next = Vec::with_capacity(data.len() + 14);
+                // SignV1 header: payload_len = 6 + inner_len (compact bytes wrapping `data`).
+                let payload_len = 6u16 + inner_len;
+                next.extend_from_slice(&[0x04, 0x00]);
+                next.extend_from_slice(&payload_len.to_le_bytes());
+                next.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // role_id = 0
+                // Inner compact payload: one instruction, program_index=0,
+                // account_count=1, account_byte=0, data_len=inner_len, data=...
+                next.push(0x01); // instr_count
+                next.push(0x00); // program_index -> accounts[0] = swig
+                next.push(0x01); // account_count
+                next.push(0x00); // account index -> accounts[0] = swig
+                next.extend_from_slice(&inner_len.to_le_bytes());
+                next.extend_from_slice(&data);
+                data = next;
+            }
+            data
+        }
+
+        let swig_program_id =
+            Pubkey::from_str("swigypWHEksbC64pWKwah1WTeh9JXwx8H1rJHLdbQMB").expect("valid pubkey");
+
+        // Pick a level count well above MAX_CALL_DEPTH so we exercise both the
+        // recursive and the truncation path. 32 is also small enough that we
+        // don't grow the synthetic payload past a few hundred bytes.
+        const LEVELS: usize = 32;
+        let data = build_nested_sign_v1(LEVELS);
+
+        let account_keys = vec![swig_program_id];
+        let compiled = CompiledInstruction {
+            program_id_index: 0,
+            accounts: vec![0],
+            data,
+        };
+        let sender = SolanaAccount {
+            account_key: swig_program_id.to_string(),
+            signer: false,
+            writable: false,
+        };
+        let registry = IdlRegistry::new();
+        let context = VisualizerContext::new(&sender, &compiled, &account_keys, &registry, 0);
+
+        // The actual regression check: this used to stack-overflow.
+        let field = super::SwigWalletVisualizer
+            .visualize_tx_commands(&context)
+            .expect("nested swig should not error");
+
+        // The outer level must still render as a normal swig SignV1 preview.
+        let preview = match &field.signable_payload_field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => preview_layout,
+            other => panic!("Expected PreviewLayout, got {other:?}"),
+        };
+        let title = preview.title.as_ref().expect("title present").text.clone();
+        assert!(
+            title.starts_with("Swig: Sign v1"),
+            "outer level should render normally, got: {title}"
+        );
+
+        // Walk through expanded fields and confirm the deeply-nested inner
+        // instruction summary surfaces the depth-limit placeholder rather than
+        // recursing without bound.
+        let expanded = preview
+            .expanded
+            .as_ref()
+            .expect("expanded layout present")
+            .fields
+            .clone();
+        let summary_text = expanded
+            .iter()
+            .find_map(|f| match &f.signable_payload_field {
+                SignablePayloadField::TextV2 { common, text_v2 }
+                    if common.label == "Inner Instruction 1 Summary" =>
+                {
+                    Some(text_v2.text.clone())
+                }
+                _ => None,
+            })
+            .expect("inner instruction 1 summary present");
+        assert!(
+            summary_text.contains("Swig: Sign v1") || summary_text.contains("Nested too deeply"),
+            "inner summary should reference a deeper swig level or the depth-limit placeholder, got: {summary_text}"
+        );
+
+        // The placeholder must trigger somewhere on the recursion chain. We
+        // also assert it directly by invoking the visualizer with a context at
+        // exactly the depth bound, which guarantees the placeholder branch
+        // fires and produces a well-formed PreviewLayout.
+        let limit_context = VisualizerContext::new(&sender, &compiled, &account_keys, &registry, 0)
+            .with_call_depth(crate::core::MAX_CALL_DEPTH);
+        let placeholder = super::SwigWalletVisualizer
+            .visualize_tx_commands(&limit_context)
+            .expect("placeholder render should not error");
+        let placeholder_preview = match &placeholder.signable_payload_field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => preview_layout,
+            other => panic!("Expected PreviewLayout, got {other:?}"),
+        };
+        let placeholder_title = placeholder_preview
+            .title
+            .as_ref()
+            .expect("title present")
+            .text
+            .clone();
+        assert!(
+            placeholder_title.contains("Nested too deeply"),
+            "depth-bounded context should render the placeholder, got: {placeholder_title}"
+        );
     }
 }
