@@ -192,6 +192,7 @@ fn test_ethereum_abi_with_secp256k1_signature() {
     let abi = Abi {
         value: abi_json.to_string(),
         signature: Some(signature_metadata.clone()),
+        ..Default::default()
     };
 
     // Create ParseRequest with EthereumMetadata containing signed ABI in abi_mappings
@@ -363,6 +364,7 @@ fn test_signature_tampering_detection() {
     let abi = Abi {
         value: original_abi.to_string(),
         signature: Some(signature_metadata.clone()),
+        ..Default::default()
     };
 
     let mut abi_mappings = std::collections::HashMap::new();

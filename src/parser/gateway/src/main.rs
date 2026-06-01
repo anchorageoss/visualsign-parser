@@ -394,7 +394,7 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use generated::parser::{EthereumMetadata, SolanaMetadata};
+    use generated::parser::{Abi, AbiType, EthereumMetadata, SolanaMetadata};
 
     #[test]
     fn error_response_has_empty_sha256_digests() {
@@ -482,5 +482,44 @@ mod tests {
         let json = r#"{"networkId":"SOLANA_MAINNET"}"#;
         let parsed: SolanaMetadata = serde_json::from_str(json).unwrap();
         assert!(parsed.idl_mappings.is_empty());
+    }
+
+    #[test]
+    fn abi_type_deserializes_from_string_name() {
+        let json = r#"{"value":"[]","abiType":"ABI_TYPE_PROXY","implementationAddress":"0x2222222222222222222222222222222222222222"}"#;
+        let abi: Abi = serde_json::from_str(json).unwrap();
+        assert_eq!(abi.abi_type, Some(AbiType::Proxy as i32));
+        assert_eq!(
+            abi.implementation_address.as_deref(),
+            Some("0x2222222222222222222222222222222222222222")
+        );
+    }
+
+    #[test]
+    fn abi_type_serializes_as_string_name() {
+        let abi = Abi {
+            value: "[]".to_string(),
+            signature: None,
+            abi_type: Some(AbiType::Proxy as i32),
+            implementation_address: None,
+        };
+        let value = serde_json::to_value(&abi).unwrap();
+        assert_eq!(value.get("abiType").unwrap(), "ABI_TYPE_PROXY");
+    }
+
+    #[test]
+    fn abi_type_defaults_to_none_when_omitted() {
+        let abi: Abi = serde_json::from_str(r#"{"value":"[]"}"#).unwrap();
+        assert_eq!(abi.abi_type, None);
+    }
+
+    #[test]
+    fn abi_type_rejects_unknown_string() {
+        let result: Result<Abi, _> =
+            serde_json::from_str(r#"{"value":"[]","abiType":"ABI_TYPE_BOGUS"}"#);
+        assert!(
+            result.is_err(),
+            "expected deserialization to fail for unknown AbiType variant"
+        );
     }
 }

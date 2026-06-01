@@ -506,6 +506,99 @@ fn try_known_token_dispatch(
     Some(vec![field])
 }
 
+/// Decode calldata using a caller-supplied ABI registry, resolving proxy
+/// destinations to their implementation ABI.
+///
+/// For a `Proxy` destination, the calldata is decoded against the linked
+/// implementation's ABI (with an `Implementation` address field prepended so the
+/// signer sees where decoding came from). If the implementation ABI is missing or
+/// can't decode the selector, it falls back to the proxy's own ABI. For
+/// implementation/unspecified destinations this decodes against the ABI mapped to
+/// the address, exactly as before.
+///
+/// The caller gates this on `input_fields.is_empty()` after the known-token
+/// short-circuit, so canonical tokens are never reached here.
+fn visualize_with_abi_registry(
+    abi_reg: &abi_registry::AbiRegistry,
+    chain_id: u64,
+    to: alloy_primitives::Address,
+    input: &[u8],
+) -> Vec<SignablePayloadField> {
+    use contracts::core::DynamicAbiVisualizer;
+
+    let decode = |abi| DynamicAbiVisualizer::new(abi).visualize_calldata(input, chain_id, None);
+
+    // For proxy destinations prefer the linked implementation ABI: the calldata
+    // selector belongs to the implementation, not the proxy. Three paths:
+    //   1. Impl ABI present and decodes selector → [implementation_address_field, decoded_field]
+    //   2. Impl ABI present but selector not found → [unresolved_implementation_field]
+    //      + best-effort proxy-own-ABI decode (or raw hex if that also misses)
+    //   3. No impl ABI linked → fall through to proxy's own ABI (non-proxy path below)
+    if abi_reg.get_abi_kind(chain_id, to) == Some(abi_registry::AbiKind::Proxy) {
+        if let Some((impl_addr, impl_abi)) = abi_reg.get_implementation_abi(chain_id, to) {
+            if let Some(field) = decode(impl_abi) {
+                return vec![implementation_address_field(impl_addr), field];
+            }
+            // impl ABI present but selector not found — still surface the implementation
+            // address (as unresolved) and attempt proxy's own ABI as the decode fallback.
+            // If neither ABI matches, append raw hex so the signer always sees the
+            // calldata bytes even when the function is unrecognized.
+            let mut fields = vec![unresolved_implementation_field(impl_addr)];
+            if let Some(field) = abi_reg.get_abi_for_address(chain_id, to).and_then(decode) {
+                fields.push(field);
+            } else {
+                fields.push(contracts::core::FallbackVisualizer::new().visualize_hex(input));
+            }
+            return fields;
+        }
+    }
+
+    // Non-proxy destinations and proxy fallback without a linked implementation address.
+    abi_reg
+        .get_abi_for_address(chain_id, to)
+        .and_then(decode)
+        .into_iter()
+        .collect()
+}
+
+/// Builds an informational `Implementation` address field shown when a proxy call
+/// was decoded against its implementation ABI.
+fn implementation_address_field(implementation: alloy_primitives::Address) -> SignablePayloadField {
+    SignablePayloadField::AddressV2 {
+        common: SignablePayloadFieldCommon {
+            fallback_text: implementation.to_string(),
+            label: "Implementation".to_string(),
+        },
+        address_v2: SignablePayloadFieldAddressV2 {
+            address: implementation.to_string(),
+            name: "Implementation".to_string(),
+            asset_label: String::new(),
+            memo: None,
+            badge_text: Some("Proxy implementation".to_string()),
+        },
+    }
+}
+
+/// Builds an `Implementation` address field for the case where the implementation
+/// ABI was found but could not decode the call selector.
+fn unresolved_implementation_field(
+    implementation: alloy_primitives::Address,
+) -> SignablePayloadField {
+    SignablePayloadField::AddressV2 {
+        common: SignablePayloadFieldCommon {
+            fallback_text: implementation.to_string(),
+            label: "Implementation".to_string(),
+        },
+        address_v2: SignablePayloadFieldAddressV2 {
+            address: implementation.to_string(),
+            name: "Implementation".to_string(),
+            asset_label: String::new(),
+            memo: None,
+            badge_text: Some("Proxy implementation (unresolved)".to_string()),
+        },
+    }
+}
+
 fn convert_to_visual_sign_payload(
     transaction: TypedTransaction,
     options: VisualSignOptions,
@@ -525,6 +618,15 @@ fn convert_to_visual_sign_payload(
         text_v2: SignablePayloadFieldTextV2 { text: network_name },
     }];
     if let Some(to) = transaction.to() {
+        // Flag proxy destinations so the signer can see the call goes through a
+        // proxy. The kind is caller-supplied (unauthenticated) metadata, so this
+        // is purely informational.
+        let badge_text = match abi_registry {
+            Some(reg) if reg.get_abi_kind(chain_id, to) == Some(abi_registry::AbiKind::Proxy) => {
+                Some("Proxy".to_string())
+            }
+            _ => None,
+        };
         fields.push(SignablePayloadField::AddressV2 {
             common: SignablePayloadFieldCommon {
                 fallback_text: to.to_string(),
@@ -535,7 +637,7 @@ fn convert_to_visual_sign_payload(
                 name: "To".to_string(),
                 asset_label: fee_symbol.unwrap_or_default().to_string(),
                 memo: None,
-                badge_text: None,
+                badge_text,
             },
         });
     }
@@ -658,17 +760,15 @@ fn convert_to_visual_sign_payload(
         // Try dynamic ABI visualization if available. Skipped for known tokens
         // (the short-circuit above already populated `input_fields`) so
         // caller-supplied ABIs cannot override the safe built-in decoders for
-        // canonical tokens.
+        // canonical tokens. For proxy destinations, decode against the linked
+        // implementation ABI rather than assuming the proxy address is the
+        // implementation; this stays strictly after the known-token short-circuit,
+        // so a caller-supplied "proxy" entry can never redirect a canonical token.
         if input_fields.is_empty() {
             if let (Some(to_address), Some(abi_reg)) = (transaction.to(), abi_registry) {
-                let chain_id_val = chain_id;
-                if let Some(abi) = abi_reg.get_abi_for_address(chain_id_val, to_address) {
-                    if let Some(field) = (contracts::core::DynamicAbiVisualizer::new(abi))
-                        .visualize_calldata(input, chain_id_val, None)
-                    {
-                        input_fields.push(field);
-                    }
-                }
+                input_fields.extend(visualize_with_abi_registry(
+                    abi_reg, chain_id, to_address, input,
+                ));
             }
         }
 
@@ -730,9 +830,10 @@ mod tests {
     use crate::registry::ContractRegistry;
     use crate::token_metadata::{ErcStandard, TokenMetadata};
     use alloy_consensus::{SignableTransaction, TxLegacy, TypedTransaction};
+    use alloy_primitives::keccak256;
     use alloy_primitives::{Address, Bytes, ChainId, U256};
     use alloy_sol_types::SolCall;
-    use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata};
+    use generated::parser::{Abi, AbiType, ChainMetadata, EthereumMetadata, chain_metadata};
     use visualsign::{SignablePayloadFieldAddressV2, SignablePayloadFieldAmountV2};
 
     fn unsigned_to_hex(tx: &TypedTransaction) -> String {
@@ -1008,6 +1109,7 @@ mod tests {
             Abi {
                 value: malicious_abi.to_string(),
                 signature: None,
+                ..Default::default()
             },
         ))
         .collect();
@@ -1090,11 +1192,16 @@ mod tests {
         );
     }
 
-    /// A mismatched `network_id` vs tx chain_id is rejected outright by
-    /// `resolve_chain_id`, so a malicious dApp that supplies `network_id`
-    /// pointing at a chain where a canonical token is not registered can never
-    /// reach the ABI dispatch layer — the payload is rejected before the
-    /// known-token short-circuit even runs.
+    /// When the tx carries an explicit chain_id and the caller-supplied metadata
+    /// claims a different chain, the mismatch is a hard rejection. This prevents
+    /// a malicious dApp from supplying `network_id = POLYGON` against a mainnet
+    /// tx to sneak in a caller-supplied ABI: the converter refuses to produce a
+    /// payload at all, so no ABI (malicious or otherwise) gets bound.
+    ///
+    /// This test supersedes the earlier "known-token short-circuit uses tx chain_id"
+    /// variant. The security property (attacker cannot bind a malicious ABI to a
+    /// canonical token via a mismatched network_id) is still upheld -- the reject
+    /// path is strictly stronger than a proceed-with-tx-chain_id path.
     #[test]
     fn test_known_token_short_circuit_uses_tx_chain_id_not_metadata() {
         let usdc_address: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
@@ -1151,12 +1258,15 @@ mod tests {
             Abi {
                 value: malicious_abi.to_string(),
                 signature: None,
+                ..Default::default()
             },
         ))
         .collect();
 
-        // Attacker mismatches metadata to Polygon (137) so a chain_id lookup
-        // that trusts metadata would miss the mainnet USDC entry.
+        // Attacker mismatches metadata to Polygon (137). The converter must refuse
+        // outright: tx chain_id (1) is authoritative, and any mismatch with
+        // metadata is a hard error so no ABI -- malicious or otherwise -- gets
+        // bound to the payload.
         let options = VisualSignOptions {
             decode_transfers: true,
             transaction_name: None,
@@ -1182,7 +1292,15 @@ mod tests {
         };
         assert!(
             msg.contains("chain_id mismatch"),
-            "error message must describe the mismatch: {msg}",
+            "error must mention chain_id mismatch, got: {msg}",
+        );
+        assert!(
+            msg.contains("chain_id 1 "),
+            "error must reference tx-declared chain_id 1, got: {msg}",
+        );
+        assert!(
+            msg.contains("chain_id 137"),
+            "error must reference metadata chain_id 137, got: {msg}",
         );
     }
 
@@ -1250,6 +1368,7 @@ mod tests {
             Abi {
                 value: malicious_abi.to_string(),
                 signature: None,
+                ..Default::default()
             },
         ))
         .collect();
@@ -1827,5 +1946,244 @@ mod tests {
         // Verify we extracted the correct unsigned transaction fields
         assert_eq!(tx.chain_id(), Some(1)); // Mainnet
         assert_eq!(tx.nonce(), 88);
+    }
+
+    #[test]
+    fn test_proxy_with_unregistered_impl_produces_no_implementation_field() {
+        // Proxy is registered and points to an implementation address, but
+        // no ABI is registered for that implementation address. The registry
+        // returns None from get_implementation_abi, so the code falls through
+        // to the proxy's own ABI (here empty). End-to-end: no Implementation
+        // field should be emitted.
+        let proxy: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let impl_addr: Address = "0x0000000000000000000000000000000000000002"
+            .parse()
+            .unwrap();
+
+        let abi_mappings: std::collections::BTreeMap<String, Abi> = [(
+            proxy.to_string(),
+            Abi {
+                value: "[]".to_string(),
+                abi_type: Some(AbiType::Proxy as i32),
+                implementation_address: Some(impl_addr.to_string()),
+                ..Default::default()
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        let tx = TypedTransaction::Legacy(TxLegacy {
+            chain_id: Some(ChainId::from(1u64)),
+            nonce: 0,
+            gas_price: 1_000_000_000u128,
+            gas_limit: 50_000,
+            to: alloy_primitives::TxKind::Call(proxy),
+            value: U256::ZERO,
+            input: Bytes::from(vec![0xde, 0xad, 0xbe, 0xef]),
+        });
+        let options = VisualSignOptions {
+            decode_transfers: false,
+            transaction_name: None,
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                    network_id: Some("ETHEREUM_MAINNET".to_string()),
+                    abi_mappings: abi_mappings.into_iter().collect(),
+                })),
+            }),
+            developer_config: None,
+        };
+
+        let converter = EthereumVisualSignConverter::new();
+        let payload = converter
+            .to_visual_sign_payload(EthereumTransactionWrapper::new(tx), options)
+            .unwrap();
+
+        assert!(
+            !payload.fields.iter().any(|f| f.label() == "Implementation"),
+            "no Implementation field expected when impl ABI is unregistered",
+        );
+    }
+
+    #[test]
+    fn test_proxy_impl_abi_selector_mismatch_emits_unresolved_implementation() {
+        // Proxy registered with a real implementation ABI. The calldata selector
+        // does not match any function in that ABI. After the fallback the
+        // Implementation field must still be emitted — marked as unresolved —
+        // so the signer can see where the call would delegate.
+        let proxy: Address = "0x0000000000000000000000000000000000000010"
+            .parse()
+            .unwrap();
+        let impl_addr: Address = "0x0000000000000000000000000000000000000011"
+            .parse()
+            .unwrap();
+
+        let impl_abi = r#"[{"type":"function","name":"transfer",
+            "inputs":[{"name":"to","type":"address"},{"name":"amount","type":"uint256"}],
+            "outputs":[{"name":"","type":"bool"}],"stateMutability":"nonpayable"}]"#;
+
+        let abi_mappings: std::collections::BTreeMap<String, Abi> = [
+            (
+                proxy.to_string(),
+                Abi {
+                    value: "[]".to_string(),
+                    abi_type: Some(AbiType::Proxy as i32),
+                    implementation_address: Some(impl_addr.to_string()),
+                    ..Default::default()
+                },
+            ),
+            (
+                impl_addr.to_string(),
+                Abi {
+                    value: impl_abi.to_string(),
+                    ..Default::default()
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        // Selector that does not match `transfer(address,uint256)` (0xa9059cbb).
+        let tx = TypedTransaction::Legacy(TxLegacy {
+            chain_id: Some(ChainId::from(1u64)),
+            nonce: 0,
+            gas_price: 1_000_000_000u128,
+            gas_limit: 50_000,
+            to: alloy_primitives::TxKind::Call(proxy),
+            value: U256::ZERO,
+            input: Bytes::from(vec![0x00, 0x01, 0x02, 0x03]),
+        });
+        let options = VisualSignOptions {
+            decode_transfers: false,
+            transaction_name: None,
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                    network_id: Some("ETHEREUM_MAINNET".to_string()),
+                    abi_mappings: abi_mappings.into_iter().collect(),
+                })),
+            }),
+            developer_config: None,
+        };
+
+        let converter = EthereumVisualSignConverter::new();
+        let payload = converter
+            .to_visual_sign_payload(EthereumTransactionWrapper::new(tx), options)
+            .unwrap();
+
+        let impl_field = payload
+            .fields
+            .iter()
+            .find(|f| f.label() == "Implementation")
+            .expect("Implementation field must be present even when impl ABI did not decode");
+        let SignablePayloadField::AddressV2 { address_v2, .. } = impl_field else {
+            panic!("Implementation field is not AddressV2");
+        };
+        assert_eq!(address_v2.address, impl_addr.to_string());
+        assert_eq!(
+            address_v2.badge_text.as_deref(),
+            Some("Proxy implementation (unresolved)"),
+        );
+    }
+
+    #[test]
+    fn test_proxy_resolution_is_single_hop() {
+        // A -> B where B is also registered as a proxy pointing to C.
+        // Resolution must stop at B (single hop): the calldata is the selector
+        // for C's `doThing()` function, but C's ABI must never be consulted.
+        let proxy_a: Address = "0x0000000000000000000000000000000000000020"
+            .parse()
+            .unwrap();
+        let proxy_b: Address = "0x0000000000000000000000000000000000000021"
+            .parse()
+            .unwrap();
+        let impl_c: Address = "0x0000000000000000000000000000000000000022"
+            .parse()
+            .unwrap();
+
+        let c_abi = r#"[{"type":"function","name":"doThing","inputs":[],"outputs":[],"stateMutability":"nonpayable"}]"#;
+        let abi_mappings: std::collections::BTreeMap<String, Abi> = [
+            (
+                proxy_a.to_string(),
+                Abi {
+                    value: "[]".to_string(),
+                    abi_type: Some(AbiType::Proxy as i32),
+                    implementation_address: Some(proxy_b.to_string()),
+                    ..Default::default()
+                },
+            ),
+            (
+                proxy_b.to_string(),
+                Abi {
+                    value: "[]".to_string(),
+                    abi_type: Some(AbiType::Proxy as i32),
+                    implementation_address: Some(impl_c.to_string()),
+                    ..Default::default()
+                },
+            ),
+            (
+                impl_c.to_string(),
+                Abi {
+                    value: c_abi.to_string(),
+                    ..Default::default()
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        let do_thing_hash = keccak256(b"doThing()");
+        let do_thing_selector = [
+            do_thing_hash[0],
+            do_thing_hash[1],
+            do_thing_hash[2],
+            do_thing_hash[3],
+        ];
+        let tx = TypedTransaction::Legacy(TxLegacy {
+            chain_id: Some(ChainId::from(1u64)),
+            nonce: 0,
+            gas_price: 1_000_000_000u128,
+            gas_limit: 50_000,
+            to: alloy_primitives::TxKind::Call(proxy_a),
+            value: U256::ZERO,
+            input: Bytes::from(do_thing_selector.to_vec()),
+        });
+        let options = VisualSignOptions {
+            decode_transfers: false,
+            transaction_name: None,
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                    network_id: Some("ETHEREUM_MAINNET".to_string()),
+                    abi_mappings: abi_mappings.into_iter().collect(),
+                })),
+            }),
+            developer_config: None,
+        };
+
+        let converter = EthereumVisualSignConverter::new();
+        let payload = converter
+            .to_visual_sign_payload(EthereumTransactionWrapper::new(tx), options)
+            .unwrap();
+
+        // C's ABI must not have been used — single-hop stops at B.
+        let rendered = serde_json::to_string(&payload).unwrap();
+        assert!(
+            !rendered.contains("doThing"),
+            "C's ABI must not be used under single-hop resolution; rendered: {rendered}",
+        );
+        // B is the unresolved implementation (B's empty ABI didn't decode the selector).
+        let impl_field = payload
+            .fields
+            .iter()
+            .find(|f| f.label() == "Implementation")
+            .expect("expected unresolved Implementation field pointing at B");
+        let SignablePayloadField::AddressV2 { address_v2, .. } = impl_field else {
+            panic!("Implementation is not AddressV2");
+        };
+        assert_eq!(address_v2.address, proxy_b.to_string());
+        assert_eq!(
+            address_v2.badge_text.as_deref(),
+            Some("Proxy implementation (unresolved)"),
+        );
     }
 }

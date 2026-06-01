@@ -235,6 +235,15 @@ pub struct Abi {
     /// Optional ABI signature with metadata
     #[prost(message, optional, tag = "2")]
     pub signature: ::core::option::Option<SignatureMetadata>,
+    /// Type of contract this ABI describes (defaults to implementation)
+    #[prost(enumeration = "AbiType", optional, tag = "3")]
+    #[cfg_attr(feature = "serde_derive", serde(with = "crate::abi_type_serde", default))]
+    pub abi_type: ::core::option::Option<i32>,
+    /// For proxy ABIs, the 0x-prefixed implementation address whose ABI decodes the
+    /// calldata. Expected to itself appear as an entry in abi_mappings. Ignored for
+    /// non-proxy types. Not covered by the ABI signature.
+    #[prost(string, optional, tag = "4")]
+    pub implementation_address: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[cfg_attr(
     feature = "serde_derive",
@@ -331,6 +340,39 @@ impl SignatureScheme {
             "SIGNATURE_SCHEME_TURNKEY_P256_EPHEMERAL_KEY" => {
                 Some(Self::TurnkeyP256EphemeralKey)
             }
+            _ => None,
+        }
+    }
+}
+/// AbiType classifies what kind of contract an ABI describes, so the parser can
+/// decode proxied calls against the implementation rather than assuming the
+/// destination address is the implementation directly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum AbiType {
+    /// Treated as implementation
+    Unspecified = 0,
+    Implementation = 1,
+    Proxy = 2,
+}
+impl AbiType {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            AbiType::Unspecified => "ABI_TYPE_UNSPECIFIED",
+            AbiType::Implementation => "ABI_TYPE_IMPLEMENTATION",
+            AbiType::Proxy => "ABI_TYPE_PROXY",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "ABI_TYPE_UNSPECIFIED" => Some(Self::Unspecified),
+            "ABI_TYPE_IMPLEMENTATION" => Some(Self::Implementation),
+            "ABI_TYPE_PROXY" => Some(Self::Proxy),
             _ => None,
         }
     }

@@ -227,6 +227,7 @@ fn test_abi_from_metadata_decodes_function() {
         Abi {
             value: abi_json.to_string(),
             signature: None,
+            ..Default::default()
         },
     );
 
@@ -260,6 +261,191 @@ fn test_abi_from_metadata_decodes_function() {
     assert!(
         !json.contains("a9059cbb"),
         "Raw selector should not appear when ABI is decoded, got: {json}"
+    );
+}
+
+#[test]
+fn test_proxy_decodes_via_implementation_abi() {
+    // A transaction to a proxy address should be decoded against the linked
+    // implementation's ABI, surface a "Proxy" badge on the To field, and show the
+    // resolved implementation address.
+    sol! {
+        function transfer(address to, uint256 amount) external returns (bool);
+    }
+
+    let recipient: alloy_primitives::Address = "0x000000000000000000000000000000000000dEaD"
+        .parse()
+        .unwrap();
+    let calldata = transferCall {
+        to: recipient,
+        amount: U256::from(1_000_000u64),
+    }
+    .abi_encode();
+
+    let proxy: alloy_primitives::Address = "0x1111111111111111111111111111111111111111"
+        .parse()
+        .unwrap();
+    let implementation: alloy_primitives::Address = "0x2222222222222222222222222222222222222222"
+        .parse()
+        .unwrap();
+
+    let tx = TxEip1559 {
+        chain_id: 1,
+        nonce: 0,
+        gas_limit: 100_000,
+        max_fee_per_gas: 1_000_000_000,
+        max_priority_fee_per_gas: 1_000_000,
+        to: alloy_primitives::TxKind::Call(proxy),
+        input: calldata.into(),
+        ..Default::default()
+    };
+    let mut buf = Vec::new();
+    buf.push(0x02);
+    tx.encode(&mut buf);
+    let tx_hex = format!("0x{}", hex::encode(&buf));
+
+    let impl_abi_json = r#"[{
+        "type": "function",
+        "name": "transfer",
+        "inputs": [
+            {"name": "to", "type": "address"},
+            {"name": "amount", "type": "uint256"}
+        ],
+        "outputs": [{"name": "", "type": "bool"}],
+        "stateMutability": "nonpayable"
+    }]"#;
+
+    // Proxy entry carries an empty ABI plus the implementation link; the
+    // implementation entry carries the real decoding ABI.
+    let mut abi_mappings = BTreeMap::new();
+    abi_mappings.insert(
+        proxy.to_string(),
+        Abi {
+            value: "[]".to_string(),
+            signature: None,
+            abi_type: Some(generated::parser::AbiType::Proxy as i32),
+            implementation_address: Some(implementation.to_string()),
+        },
+    );
+    abi_mappings.insert(
+        implementation.to_string(),
+        Abi {
+            value: impl_abi_json.to_string(),
+            signature: None,
+            ..Default::default()
+        },
+    );
+
+    let options = VisualSignOptions {
+        decode_transfers: true,
+        transaction_name: None,
+        metadata: Some(ChainMetadata {
+            metadata: Some(Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: abi_mappings.into_iter().collect(),
+            })),
+        }),
+        developer_config: None,
+    };
+
+    let converter = EthereumVisualSignConverter::new();
+    let json = converter
+        .to_visual_sign_payload_from_string(&tx_hex, options)
+        .unwrap()
+        .to_json()
+        .unwrap();
+
+    assert!(
+        json.contains("transfer"),
+        "Proxy call should decode the implementation function 'transfer', got: {json}"
+    );
+    assert!(
+        json.contains("Proxy"),
+        "Proxy destination should carry a 'Proxy' badge, got: {json}"
+    );
+    assert!(
+        json.contains(&implementation.to_string()),
+        "Output should show the resolved implementation address, got: {json}"
+    );
+    assert!(
+        !json.contains("a9059cbb"),
+        "Raw selector should not appear when the implementation ABI decodes, got: {json}"
+    );
+}
+
+#[test]
+fn test_proxy_entry_cannot_override_canonical_token() {
+    // A caller-supplied "proxy" entry mapped onto a canonical token address (USDC)
+    // must NOT redirect decoding: the known-token short-circuit runs first and wins.
+    sol! {
+        function evil(address spender, uint256 amount) external;
+    }
+
+    let usdc: alloy_primitives::Address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+        .parse()
+        .unwrap();
+    let attacker_impl: alloy_primitives::Address = "0x3333333333333333333333333333333333333333"
+        .parse()
+        .unwrap();
+
+    // The protection keys off the destination ADDRESS (USDC is in the global
+    // canonical-token registry), not the selector: `evilCall` has its own selector
+    // the built-in ERC20 visualizer does not recognize, so the known-token
+    // short-circuit emits a raw-hex fallback and locks out the caller proxy ABI.
+    let calldata = evilCall {
+        spender: attacker_impl,
+        amount: U256::from(1u64),
+    }
+    .abi_encode();
+
+    let tx = TxEip1559 {
+        chain_id: 1,
+        nonce: 0,
+        gas_limit: 100_000,
+        max_fee_per_gas: 1_000_000_000,
+        max_priority_fee_per_gas: 1_000_000,
+        to: alloy_primitives::TxKind::Call(usdc),
+        input: calldata.into(),
+        ..Default::default()
+    };
+    let mut buf = Vec::new();
+    buf.push(0x02);
+    tx.encode(&mut buf);
+    let tx_hex = format!("0x{}", hex::encode(&buf));
+
+    let mut abi_mappings = BTreeMap::new();
+    abi_mappings.insert(
+        usdc.to_string(),
+        Abi {
+            value: r#"[{"type":"function","name":"evil","inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"outputs":[],"stateMutability":"nonpayable"}]"#.to_string(),
+            signature: None,
+            abi_type: Some(generated::parser::AbiType::Proxy as i32),
+            implementation_address: Some(attacker_impl.to_string()),
+        },
+    );
+
+    let options = VisualSignOptions {
+        decode_transfers: true,
+        transaction_name: None,
+        metadata: Some(ChainMetadata {
+            metadata: Some(Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: abi_mappings.into_iter().collect(),
+            })),
+        }),
+        developer_config: None,
+    };
+
+    let converter = EthereumVisualSignConverter::new();
+    let json = converter
+        .to_visual_sign_payload_from_string(&tx_hex, options)
+        .unwrap()
+        .to_json()
+        .unwrap();
+
+    assert!(
+        !json.contains("evil"),
+        "Canonical token must not be decoded with a caller-supplied proxy ABI, got: {json}"
     );
 }
 
