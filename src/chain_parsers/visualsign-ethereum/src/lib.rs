@@ -842,6 +842,19 @@ mod tests {
         format!("0x{}", hex::encode(&encoded))
     }
 
+    /// Build a signed `Abi` for tests that exercise the metadata-ABI extraction
+    /// path, which rejects unsigned entries. Proxy entries layer `abi_type` and
+    /// `implementation_address` on top via struct-update (`..signed_abi(...)`).
+    fn signed_abi(value: &str) -> Abi {
+        Abi {
+            value: value.to_string(),
+            signature: Some(
+                abi_metadata::sign_abi(value, &abi_metadata::CLI_DEV_SIGNING_KEY_SEED).unwrap(),
+            ),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn test_transaction_to_visual_sign_basic() {
         // Create a dummy Ethereum transaction
@@ -2027,19 +2040,12 @@ mod tests {
             (
                 proxy.to_string(),
                 Abi {
-                    value: "[]".to_string(),
                     abi_type: Some(AbiType::Proxy as i32),
                     implementation_address: Some(impl_addr.to_string()),
-                    ..Default::default()
+                    ..signed_abi("[]")
                 },
             ),
-            (
-                impl_addr.to_string(),
-                Abi {
-                    value: impl_abi.to_string(),
-                    ..Default::default()
-                },
-            ),
+            (impl_addr.to_string(), signed_abi(impl_abi)),
         ]
         .into_iter()
         .collect();
@@ -2106,28 +2112,20 @@ mod tests {
             (
                 proxy_a.to_string(),
                 Abi {
-                    value: "[]".to_string(),
                     abi_type: Some(AbiType::Proxy as i32),
                     implementation_address: Some(proxy_b.to_string()),
-                    ..Default::default()
+                    ..signed_abi("[]")
                 },
             ),
             (
                 proxy_b.to_string(),
                 Abi {
-                    value: "[]".to_string(),
                     abi_type: Some(AbiType::Proxy as i32),
                     implementation_address: Some(impl_c.to_string()),
-                    ..Default::default()
+                    ..signed_abi("[]")
                 },
             ),
-            (
-                impl_c.to_string(),
-                Abi {
-                    value: c_abi.to_string(),
-                    ..Default::default()
-                },
-            ),
+            (impl_c.to_string(), signed_abi(c_abi)),
         ]
         .into_iter()
         .collect();

@@ -68,12 +68,14 @@ fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (HashMap<Strin
             }
             Ok(())
         },
-        |components, json| Idl {
-            value: json,
-            idl_type: Some(SolanaIdlType::Anchor as i32),
-            idl_version: None,
-            signature: None,
-            program_name: Some(components.name.clone()),
+        |components, json| {
+            Ok(Idl {
+                value: json,
+                idl_type: Some(SolanaIdlType::Anchor as i32),
+                idl_version: None,
+                signature: None,
+                program_name: Some(components.name.clone()),
+            })
         },
     )
 }

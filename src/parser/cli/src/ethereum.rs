@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use clap::Args as ClapArgs;
 use generated::parser::{Abi, AbiType, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 use visualsign::registry::{Chain, TransactionConverterRegistry};
+use visualsign_ethereum::abi_metadata::{CLI_DEV_SIGNING_KEY_SEED, sign_abi};
 use visualsign_ethereum::networks::parse_network;
 
 use crate::mapping_parser;
@@ -104,10 +105,24 @@ fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<Strin
         "UniswapV2:path/to/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
         "ContractAddress",
         validate_eth_address,
-        |_components, json| Abi {
-            value: json,
-            signature: None,
-            ..Default::default()
+        |_components, json| {
+            // The metadata-ABI extraction path rejects unsigned entries,
+            // so the CLI attaches an integrity signature using a deterministic local
+            // dev key. This is integrity, not identity, the CLI is a local dev tool
+            // that already trusts its input files; production trust comes from the
+            // gRPC caller verifying the public key against an allowlist.
+            //
+            // If signing fails (e.g. an invalid seed in future refactors), surface
+            // the failure as a `load_mappings` rejection so the entry is skipped and
+            // the success count stays accurate, rather than emitting an unsigned
+            // `Abi` that the extractor would silently drop later.
+            let signature = sign_abi(&json, &CLI_DEV_SIGNING_KEY_SEED)
+                .map_err(|e| format!("failed to sign ABI: {e}"))?;
+            Ok(Abi {
+                value: json,
+                signature: Some(signature),
+                ..Default::default()
+            })
         },
     );
     let normalized = raw
@@ -164,7 +179,12 @@ fn apply_proxy_mappings(
         let proxy_key = normalize_eth_address(proxy);
         let impl_key = normalize_eth_address(implementation);
 
-        let entry = abi_mappings.entry(proxy_key.clone()).or_insert_with(|| {
+        // Ensure the proxy has an entry to stamp. If it has no own ABI file, synthesize
+        // an empty "[]" ABI. The metadata-ABI extraction path rejects unsigned entries,
+        // so the synthesized ABI is signed with the same dev key used for file-loaded
+        // ABIs; otherwise the extractor would silently drop the proxy and the
+        // proxy->implementation link would be lost.
+        if !abi_mappings.contains_key(&proxy_key) {
             if attempted_abi_addresses.contains(&proxy_key) {
                 eprintln!(
                     "  Warning: proxy '{proxy_key}' ABI file was specified but failed to load; \
@@ -175,12 +195,33 @@ fn apply_proxy_mappings(
                     "  Note: proxy '{proxy_key}' has no ABI file; synthesizing an empty proxy ABI"
                 );
             }
-            Abi {
-                value: "[]".to_string(),
-                signature: None,
-                ..Default::default()
-            }
-        });
+            let empty_abi = "[]".to_string();
+            let signature = match sign_abi(&empty_abi, &CLI_DEV_SIGNING_KEY_SEED) {
+                Ok(sig) => sig,
+                Err(e) => {
+                    eprintln!(
+                        "  Warning: Skipping proxy mapping '{mapping}': \
+                         failed to sign synthesized proxy ABI: {e}"
+                    );
+                    continue;
+                }
+            };
+            abi_mappings.insert(
+                proxy_key.clone(),
+                Abi {
+                    value: empty_abi,
+                    signature: Some(signature),
+                    ..Default::default()
+                },
+            );
+        }
+
+        let Some(entry) = abi_mappings.get_mut(&proxy_key) else {
+            // Unreachable: the key was just ensured to exist. Skip rather than
+            // panic so a future refactor that breaks this invariant degrades
+            // gracefully instead of crashing the CLI.
+            continue;
+        };
         entry.abi_type = Some(AbiType::Proxy as i32);
         entry.implementation_address = Some(impl_key.clone());
         eprintln!("  Linked proxy '{proxy_key}' to implementation '{impl_key}'");
@@ -316,7 +357,12 @@ mod tests {
             .get("0xdac17f958d2ee523a2206206994597c13d831ec7")
             .expect("mapping present");
         assert!(abi.value.contains("swap"));
-        assert!(abi.signature.is_none());
+        // CLI signs locally-loaded ABIs so the metadata-ABI extractor
+        // (which rejects unsigned entries) can register them.
+        assert!(
+            abi.signature.is_some(),
+            "CLI should attach a dev-key signature to locally-loaded ABIs"
+        );
     }
 
     #[test]
@@ -428,6 +474,27 @@ mod tests {
         assert_eq!(proxy_abi.value, "[]");
         assert_eq!(proxy_abi.abi_type, Some(AbiType::Proxy as i32));
         assert_eq!(proxy_abi.implementation_address.as_deref(), Some(IMPL));
+        // Regression guard: the synthesized proxy ABI must be signed. The
+        // metadata-ABI extraction path rejects unsigned entries, so an unsigned
+        // synthesized proxy would be silently dropped and the proxy->impl link lost.
+        assert!(
+            proxy_abi.signature.is_some(),
+            "synthesized proxy ABI must be signed so the extractor accepts it",
+        );
+
+        // End-to-end: the signed synthesized proxy survives extraction. `list_abis`
+        // returns each registered entry's address string; the proxy being present
+        // proves it cleared the unsigned-rejection gate.
+        let extracted = ChainMetadata {
+            metadata: Some(Metadata::Ethereum(eth)),
+        };
+        let registry =
+            visualsign_ethereum::abi_metadata::try_extract_from_chain_metadata(Some(&extracted), 1)
+                .expect("metadata with a signed synthesized proxy must extract");
+        assert!(
+            registry.list_abis().contains(&PROXY),
+            "signed synthesized proxy must survive extraction (unsigned would be dropped)",
+        );
     }
 
     #[test]
