@@ -38,8 +38,9 @@ enum AbiSignatureError {
 ///   entries with `signature: None` are skipped with a warning. Without this check,
 ///   a wallet could supply any ABI for any address and dictate the human-readable
 ///   rendering of the call.
-/// - **Signature is validated unconditionally** when present, using secp256k1 over
-///   the SHA-256 hash of the ABI JSON.
+/// - **Every accepted entry's signature is validated**, using secp256k1 over
+///   the SHA-256 hash of the ABI JSON. Since unsigned entries are rejected above,
+///   no ABI reaches the registry without a verified signature.
 /// - **Any public key is accepted.** Signature validation proves the ABI was not
 ///   tampered with after signing, but does not verify the signer's identity.
 ///   To establish trust, callers should verify the public key against a known
