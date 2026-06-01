@@ -1,5 +1,5 @@
 use crate::token_metadata::{ChainMetadata, TokenMetadata, parse_network_id};
-use alloy_primitives::{Address, utils::format_units};
+use alloy_primitives::{Address, U256, utils::format_units};
 use std::collections::BTreeMap;
 
 /// Type alias for chain ID to avoid depending on external chain types
@@ -364,6 +364,37 @@ impl ContractRegistry {
         Some((formatted, metadata.symbol.clone()))
     }
 
+    /// Formats a raw `U256` token amount with the proper number of decimal places.
+    ///
+    /// This is the U256-aware counterpart of [`format_token_amount`]. It exists because
+    /// on-chain integer types in Solidity are typically `uint256`, and silently
+    /// truncating them to `u128` (as a previous version of this code did via
+    /// `value.to_string().parse::<u128>().unwrap_or(0)`) can render a transfer that
+    /// moves billions of tokens as the string "0", hiding the real amount the user
+    /// is about to sign.
+    ///
+    /// # Arguments
+    /// * `chain_id` - The chain ID
+    /// * `token` - The token's contract address
+    /// * `raw_amount` - The raw amount as a `U256` in the token's smallest units
+    ///
+    /// # Returns
+    /// `Some((formatted_amount, symbol))` if the token is registered and formatting succeeds.
+    /// `None` if the token is not registered or `format_units` rejects the decimals.
+    pub fn format_token_amount_u256(
+        &self,
+        chain_id: ChainId,
+        token: Address,
+        raw_amount: U256,
+    ) -> Option<(String, String)> {
+        let metadata = self.token_metadata.get(&(chain_id, token))?;
+
+        // Use Alloy's format_units, which accepts U256 directly (via Into<ParseUnits>).
+        let formatted = format_units(raw_amount, metadata.decimals).ok()?;
+
+        Some((formatted, metadata.symbol.clone()))
+    }
+
     /// Loads token metadata from wallet ChainMetadata structure
     ///
     /// This method parses network_id to determine the chain ID and registers
@@ -579,6 +610,90 @@ mod tests {
         // Test: 0 USDC
         let result = registry.format_token_amount(1, usdc_address(), 0);
         assert_eq!(result, Some(("0.000000".to_string(), "USDC".to_string())));
+    }
+
+    /// Regression: values larger than u128::MAX must not silently render as "0".
+    ///
+    /// The previous implementation in `universal_router.rs` did
+    /// `value.to_string().parse::<u128>().unwrap_or(0)`, which would turn any U256
+    /// above `u128::MAX` into the string "0". `format_token_amount_u256` formats
+    /// directly from U256 and must surface the true amount.
+    #[test]
+    fn test_format_token_amount_u256_above_u128_max_is_not_zero() {
+        let mut registry = ContractRegistry::new();
+        let usdc = create_token_metadata(
+            "USDC",
+            "USD Coin",
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            6,
+        );
+        registry.register_token(1, usdc).unwrap();
+
+        // u128::MAX + 1, well above what the old u128 parse path could represent.
+        let above_u128 = U256::from(u128::MAX) + U256::from(1u64);
+        let (amount_str, symbol) = registry
+            .format_token_amount_u256(1, usdc_address(), above_u128)
+            .expect("registered token should format");
+
+        assert_eq!(symbol, "USDC");
+        // The bug rendered this as "0.000000". The fix must render the real value.
+        assert_ne!(amount_str, "0.000000");
+        assert_ne!(amount_str, "0");
+        assert!(
+            !amount_str.starts_with("0."),
+            "amount above u128::MAX rendered as fractional zero: {amount_str}"
+        );
+
+        // Sanity: confirm the exact rendering matches what format_units produces
+        // for (u128::MAX + 1) with 6 decimals.
+        let expected = format_units(above_u128, 6).expect("format_units U256");
+        assert_eq!(amount_str, expected);
+    }
+
+    /// Regression: U256::MAX must not silently render as "0" either.
+    #[test]
+    fn test_format_token_amount_u256_max_is_not_zero() {
+        let mut registry = ContractRegistry::new();
+        let weth = create_token_metadata(
+            "WETH",
+            "Wrapped Ether",
+            "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+            18,
+        );
+        registry.register_token(1, weth).unwrap();
+
+        let (amount_str, symbol) = registry
+            .format_token_amount_u256(1, weth_address(), U256::MAX)
+            .expect("registered token should format");
+
+        assert_eq!(symbol, "WETH");
+        assert_ne!(amount_str, "0.000000000000000000");
+        assert_ne!(amount_str, "0");
+        assert!(
+            !amount_str.starts_with("0."),
+            "U256::MAX rendered as fractional zero: {amount_str}"
+        );
+    }
+
+    /// Regression: the U256-aware formatter must agree with the u128 path
+    /// for values that fit in u128, so we don't introduce a behavioural difference
+    /// on the happy path.
+    #[test]
+    fn test_format_token_amount_u256_matches_u128_in_range() {
+        let mut registry = ContractRegistry::new();
+        let usdc = create_token_metadata(
+            "USDC",
+            "USD Coin",
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            6,
+        );
+        registry.register_token(1, usdc).unwrap();
+
+        let raw_u128: u128 = 1_500_000;
+        let u128_result = registry.format_token_amount(1, usdc_address(), raw_u128);
+        let u256_result =
+            registry.format_token_amount_u256(1, usdc_address(), U256::from(raw_u128));
+        assert_eq!(u128_result, u256_result);
     }
 
     #[test]

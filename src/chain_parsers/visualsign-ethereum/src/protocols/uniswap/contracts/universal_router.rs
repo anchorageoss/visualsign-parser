@@ -517,16 +517,14 @@ impl UniversalRouterVisualizer {
             .and_then(|r| r.get_token_symbol(chain_id, token_out))
             .unwrap_or_else(|| format!("{token_out:?}"));
 
-        // Format amounts
-        let amount_in_u128: u128 = amount_in.to_string().parse().unwrap_or(0);
-        let amount_out_min_u128: u128 = amount_out_min.to_string().parse().unwrap_or(0);
-
+        // Format amounts directly from U256 so values above u128::MAX are surfaced
+        // accurately instead of silently truncated to "0".
         let (amount_in_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_u128))
+            .and_then(|r| r.format_token_amount_u256(chain_id, token_in, amount_in))
             .unwrap_or_else(|| (amount_in.to_string(), token_in_symbol.clone()));
 
         let (amount_out_min_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_min_u128))
+            .and_then(|r| r.format_token_amount_u256(chain_id, token_out, amount_out_min))
             .unwrap_or_else(|| (amount_out_min.to_string(), token_out_symbol.clone()));
 
         // Calculate first-hop fee percentage. For multi-hop paths each hop may use a
@@ -652,13 +650,20 @@ impl UniversalRouterVisualizer {
             .and_then(|r| r.get_token_symbol(chain_id, params.token))
             .unwrap_or_else(|| format!("{:?}", params.token));
 
-        // Convert bips to percentage (10000 bips = 100%)
-        let bips_value: u128 = params.bips.to_string().parse().unwrap_or(0);
-        let bips_pct = (bips_value as f64) / 100.0;
-        let percentage_str = if bips_pct >= 1.0 {
-            format!("{bips_pct:.2}%")
-        } else {
-            format!("{bips_pct:.4}%")
+        // Convert bips to percentage (10000 bips = 100%).
+        // Bips realistically fits in u128 (Uniswap caps at 10_000), but the on-chain
+        // type is uint256, so we must surface oversized values rather than silently
+        // displaying "0%" for a transfer that pays out the entire balance.
+        let percentage_str = match u128::try_from(params.bips) {
+            Ok(bips_value) => {
+                let bips_pct = (bips_value as f64) / 100.0;
+                if bips_pct >= 1.0 {
+                    format!("{bips_pct:.2}%")
+                } else {
+                    format!("{bips_pct:.4}%")
+                }
+            }
+            Err(_) => format!("{} bips (raw)", params.bips),
         };
 
         // Create individual parameter fields
@@ -746,15 +751,16 @@ impl UniversalRouterVisualizer {
             }
         };
 
-        // Get WETH address for this chain and format the amount
-        // WETH is registered in the token registry via UniswapConfig::register_common_tokens
+        // Get WETH address for this chain and format the amount.
+        // WETH is registered in the token registry via UniswapConfig::register_common_tokens.
+        // Format directly from U256 so values above u128::MAX surface accurately
+        // instead of being silently truncated to "0".
         let amount_min_str =
             crate::protocols::uniswap::config::UniswapConfig::weth_address(chain_id)
                 .and_then(|weth_addr| {
-                    let amount_min_u128: u128 =
-                        params.amountMinimum.to_string().parse().unwrap_or(0);
-                    registry
-                        .and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_min_u128))
+                    registry.and_then(|r| {
+                        r.format_token_amount_u256(chain_id, weth_addr, params.amountMinimum)
+                    })
                 })
                 .map(|(amt, _)| amt)
                 .unwrap_or_else(|| params.amountMinimum.to_string());
@@ -870,17 +876,14 @@ impl UniversalRouterVisualizer {
             .and_then(|r| r.get_token_symbol(chain_id, token_out))
             .unwrap_or_else(|| format!("{token_out:?}"));
 
-        // Convert amounts to u128 for formatting
-        let amount_out_u128: u128 = amount_out.to_string().parse().unwrap_or(0);
-        let amount_in_max_u128: u128 = amount_in_max.to_string().parse().unwrap_or(0);
-
-        // Format amounts with token decimals
+        // Format amounts directly from U256 so values above u128::MAX are surfaced
+        // accurately instead of silently truncated to "0".
         let (amount_out_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_u128))
+            .and_then(|r| r.format_token_amount_u256(chain_id, token_out, amount_out))
             .unwrap_or_else(|| (amount_out.to_string(), token_out_symbol.clone()));
 
         let (amount_in_max_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_max_u128))
+            .and_then(|r| r.format_token_amount_u256(chain_id, token_in, amount_in_max))
             .unwrap_or_else(|| (amount_in_max.to_string(), token_in_symbol.clone()));
 
         // Calculate first-hop fee percentage. For multi-hop paths each hop may use a
@@ -1038,15 +1041,14 @@ impl UniversalRouterVisualizer {
             .and_then(|r| r.get_token_symbol(chain_id, token_out))
             .unwrap_or_else(|| format!("{token_out:?}"));
 
-        let amount_in_u128: u128 = amount_in.to_string().parse().unwrap_or(0);
-        let amount_out_min_u128: u128 = amount_out_minimum.to_string().parse().unwrap_or(0);
-
+        // Format amounts directly from U256 so values above u128::MAX are surfaced
+        // accurately instead of silently truncated to "0".
         let (amount_in_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_u128))
+            .and_then(|r| r.format_token_amount_u256(chain_id, token_in, amount_in))
             .unwrap_or_else(|| (amount_in.to_string(), token_in_symbol.clone()));
 
         let (amount_out_min_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_min_u128))
+            .and_then(|r| r.format_token_amount_u256(chain_id, token_out, amount_out_minimum))
             .unwrap_or_else(|| (amount_out_minimum.to_string(), token_out_symbol.clone()));
 
         let hops = path.len() - 1;
@@ -1195,15 +1197,14 @@ impl UniversalRouterVisualizer {
             .and_then(|r| r.get_token_symbol(chain_id, token_out))
             .unwrap_or_else(|| format!("{token_out:?}"));
 
-        let amount_out_u128: u128 = amount_out.to_string().parse().unwrap_or(0);
-        let amount_in_max_u128: u128 = amount_in_maximum.to_string().parse().unwrap_or(0);
-
+        // Format amounts directly from U256 so values above u128::MAX are surfaced
+        // accurately instead of silently truncated to "0".
         let (amount_out_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_out, amount_out_u128))
+            .and_then(|r| r.format_token_amount_u256(chain_id, token_out, amount_out))
             .unwrap_or_else(|| (amount_out.to_string(), token_out_symbol.clone()));
 
         let (amount_in_max_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token_in, amount_in_max_u128))
+            .and_then(|r| r.format_token_amount_u256(chain_id, token_in, amount_in_maximum))
             .unwrap_or_else(|| (amount_in_maximum.to_string(), token_in_symbol.clone()));
 
         let hops = path.len() - 1;
@@ -1319,14 +1320,16 @@ impl UniversalRouterVisualizer {
             }
         };
 
-        // Format amount with ETH decimals (18)
-        // Get WETH address for this chain to use its decimals
+        // Format amount with ETH decimals (18).
+        // Get WETH address for this chain to use its decimals. Format directly from
+        // U256 so values above u128::MAX surface accurately instead of being silently
+        // truncated to "0".
         let amount_min_str =
             crate::protocols::uniswap::config::UniswapConfig::weth_address(chain_id)
                 .and_then(|weth_addr| {
-                    let amount_min_u128: u128 = params.amountMin.to_string().parse().unwrap_or(0);
-                    registry
-                        .and_then(|r| r.format_token_amount(chain_id, weth_addr, amount_min_u128))
+                    registry.and_then(|r| {
+                        r.format_token_amount_u256(chain_id, weth_addr, params.amountMin)
+                    })
                 })
                 .map(|(amt, _)| amt)
                 .unwrap_or_else(|| {
@@ -1370,10 +1373,10 @@ impl UniversalRouterVisualizer {
             .and_then(|r| r.get_token_symbol(chain_id, params.token))
             .unwrap_or_else(|| format!("{:?}", params.token));
 
-        // Format amount with token decimals
-        let amount_min_u128: u128 = params.amountMinimum.to_string().parse().unwrap_or(0);
+        // Format amount with token decimals directly from U256 so values above
+        // u128::MAX are surfaced accurately instead of silently truncated to "0".
         let (amount_min_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, params.token, amount_min_u128))
+            .and_then(|r| r.format_token_amount_u256(chain_id, params.token, params.amountMinimum))
             .unwrap_or_else(|| (params.amountMinimum.to_string(), token_symbol.clone()));
 
         let text = format!(
@@ -2803,6 +2806,125 @@ mod tests {
                 assert!(text_v2.text.contains("44 bytes"));
             }
             _ => panic!("Expected TextV2 for malformed path"),
+        }
+    }
+
+    /// Regression: a SWEEP with an `amountMinimum` greater than `u128::MAX`
+    /// must not display as "0".
+    ///
+    /// The previous implementation did
+    /// `params.amountMinimum.to_string().parse::<u128>().unwrap_or(0)`, so any
+    /// adversarially-large amount became "0" and the wallet would happily show
+    /// "Sweep >=0 WETH ...". This test fails on the old code, passes on the fix.
+    #[test]
+    fn test_decode_sweep_amount_above_u128_max_is_not_zero() {
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        // WETH on mainnet, present in the default registry with 18 decimals.
+        let token: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let recipient: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        // u128::MAX + 1, the smallest U256 that the old u128 parse path could not represent.
+        let amount_min = U256::from(u128::MAX) + U256::from(1u64);
+
+        let encoded = (token, recipient, amount_min).abi_encode();
+        let field = UniversalRouterVisualizer::decode_sweep(&encoded, 1, Some(&registry));
+
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                // The bug: ">=0 WETH". The fix must surface the real (huge) amount.
+                assert!(
+                    !text_v2.text.contains(">=0 WETH")
+                        && !text_v2.text.contains(">=0.000000000000000000 WETH"),
+                    "Amount above u128::MAX rendered as zero: {}",
+                    text_v2.text
+                );
+                assert!(
+                    text_v2.text.contains("WETH"),
+                    "Expected WETH symbol, got: {}",
+                    text_v2.text
+                );
+            }
+            _ => panic!("Expected TextV2 field"),
+        }
+    }
+
+    /// Regression: a WRAP_ETH with an `amountMin` greater than `u128::MAX`
+    /// must not display as "0".
+    #[test]
+    fn test_decode_wrap_eth_amount_above_u128_max_is_not_zero() {
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        let recipient: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let amount_min = U256::from(u128::MAX) + U256::from(1u64);
+
+        let encoded = (recipient, amount_min).abi_encode();
+        let field = UniversalRouterVisualizer::decode_wrap_eth(&encoded, 1, Some(&registry));
+
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                // The bug: "Wrap >=0 ETH to WETH".
+                assert!(
+                    !text_v2.text.contains(">=0 ETH")
+                        && !text_v2.text.contains(">=0.000000000000000000 ETH"),
+                    "Amount above u128::MAX rendered as zero: {}",
+                    text_v2.text
+                );
+            }
+            _ => panic!("Expected TextV2 field"),
+        }
+    }
+
+    /// Regression: a PAY_PORTION with `bips` greater than `u128::MAX` must not
+    /// silently render as "0%". `bips` is a `uint256` on-chain, so an adversarial
+    /// value above `u128::MAX` must surface as a raw figure rather than a
+    /// percentage that would tell the signer they are paying out nothing.
+    #[test]
+    fn test_decode_pay_portion_bips_above_u128_max_is_not_zero() {
+        let token: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let recipient: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        // u128::MAX + 1: the smallest U256 the old u128 conversion could not represent.
+        let bips = U256::from(u128::MAX) + U256::from(1u64);
+
+        let encoded = (token, recipient, bips).abi_encode();
+        let field = UniversalRouterVisualizer::decode_pay_portion(&encoded, 1, None);
+
+        match field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+                let percentage = preview_layout
+                    .expanded
+                    .expect("expanded present")
+                    .fields
+                    .iter()
+                    .find_map(|f| match &f.signable_payload_field {
+                        SignablePayloadField::TextV2 { common, text_v2 }
+                            if common.label == "Percentage" =>
+                        {
+                            Some(text_v2.text.clone())
+                        }
+                        _ => None,
+                    })
+                    .expect("Percentage field present");
+                // The bug: "0%" / "0.0000%". The fix must surface the raw bips value.
+                assert!(
+                    !percentage.starts_with('0'),
+                    "bips above u128::MAX rendered as a near-zero percentage: {percentage}"
+                );
+                assert!(
+                    percentage.contains("bips (raw)"),
+                    "oversized bips must surface as a raw figure, got: {percentage}"
+                );
+            }
+            _ => panic!("Expected PreviewLayout for Pay Portion"),
         }
     }
 }
