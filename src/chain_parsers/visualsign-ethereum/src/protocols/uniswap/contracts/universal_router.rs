@@ -2879,4 +2879,52 @@ mod tests {
             _ => panic!("Expected TextV2 field"),
         }
     }
+
+    /// Regression: a PAY_PORTION with `bips` greater than `u128::MAX` must not
+    /// silently render as "0%". `bips` is a `uint256` on-chain, so an adversarial
+    /// value above `u128::MAX` must surface as a raw figure rather than a
+    /// percentage that would tell the signer they are paying out nothing.
+    #[test]
+    fn test_decode_pay_portion_bips_above_u128_max_is_not_zero() {
+        let token: Address = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap();
+        let recipient: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        // u128::MAX + 1: the smallest U256 the old u128 conversion could not represent.
+        let bips = U256::from(u128::MAX) + U256::from(1u64);
+
+        let encoded = (token, recipient, bips).abi_encode();
+        let field = UniversalRouterVisualizer::decode_pay_portion(&encoded, 1, None);
+
+        match field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+                let percentage = preview_layout
+                    .expanded
+                    .expect("expanded present")
+                    .fields
+                    .iter()
+                    .find_map(|f| match &f.signable_payload_field {
+                        SignablePayloadField::TextV2 { common, text_v2 }
+                            if common.label == "Percentage" =>
+                        {
+                            Some(text_v2.text.clone())
+                        }
+                        _ => None,
+                    })
+                    .expect("Percentage field present");
+                // The bug: "0%" / "0.0000%". The fix must surface the raw bips value.
+                assert!(
+                    !percentage.starts_with('0'),
+                    "bips above u128::MAX rendered as a near-zero percentage: {percentage}"
+                );
+                assert!(
+                    percentage.contains("bips (raw)"),
+                    "oversized bips must surface as a raw figure, got: {percentage}"
+                );
+            }
+            _ => panic!("Expected PreviewLayout for Pay Portion"),
+        }
+    }
 }
