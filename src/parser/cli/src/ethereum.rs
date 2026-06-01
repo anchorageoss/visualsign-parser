@@ -217,8 +217,9 @@ fn apply_proxy_mappings(
         }
 
         let Some(entry) = abi_mappings.get_mut(&proxy_key) else {
-            // Unreachable: the key was just ensured to exist. Guard without panicking
-            // to satisfy the crate's no-unwrap/expect lint policy.
+            // Unreachable: the key was just ensured to exist. Skip rather than
+            // panic so a future refactor that breaks this invariant degrades
+            // gracefully instead of crashing the CLI.
             continue;
         };
         entry.abi_type = Some(AbiType::Proxy as i32);

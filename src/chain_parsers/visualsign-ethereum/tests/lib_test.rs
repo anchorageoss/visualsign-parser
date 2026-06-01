@@ -4,12 +4,8 @@ use alloy_primitives::U256;
 use alloy_rlp::Encodable;
 use alloy_sol_types::{SolCall, sol};
 use generated::parser::{
-    Abi, ChainMetadata, EthereumMetadata, Metadata as ProtoMetadata, SignatureMetadata,
-    chain_metadata::Metadata,
+    Abi, ChainMetadata, EthereumMetadata, SignatureMetadata, chain_metadata::Metadata,
 };
-use k256::ecdsa::SigningKey;
-use k256::ecdsa::signature::hazmat::PrehashSigner;
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
@@ -20,32 +16,15 @@ use visualsign_ethereum::transaction_string_to_visual_sign;
 /// Build a valid proto `SignatureMetadata` for `abi_json` using a deterministic
 /// test key. Unsigned entries are rejected by the parser, so tests
 /// that exercise the metadata-ABI path must attach a real signature.
+///
+/// Delegates to the production signing routine so the test never drifts from the
+/// real signature format that `validate_abi_signature` verifies.
 fn sign_abi_for_test(abi_json: &str) -> SignatureMetadata {
-    let seed: [u8; 32] = [0x42u8; 32];
-    let signing_key = SigningKey::from_bytes(&seed).expect("valid signing key");
-    let verifying_key = k256::ecdsa::VerifyingKey::from(&signing_key);
-
-    let mut hasher = Sha256::new();
-    hasher.update(abi_json.as_bytes());
-    let hash: [u8; 32] = hasher.finalize().into();
-    let signature: k256::ecdsa::Signature =
-        signing_key.sign_prehash(&hash).expect("sign succeeded");
-    let signature_hex = hex::encode(signature.to_der().as_bytes());
-    let public_key_hex = hex::encode(verifying_key.to_encoded_point(false).as_bytes());
-
-    SignatureMetadata {
-        value: signature_hex,
-        metadata: vec![
-            ProtoMetadata {
-                key: "algorithm".to_string(),
-                value: "secp256k1".to_string(),
-            },
-            ProtoMetadata {
-                key: "public_key".to_string(),
-                value: public_key_hex,
-            },
-        ],
-    }
+    visualsign_ethereum::abi_metadata::sign_abi(
+        abi_json,
+        &visualsign_ethereum::abi_metadata::CLI_DEV_SIGNING_KEY_SEED,
+    )
+    .expect("signing with the dev seed should succeed")
 }
 
 // Helper function to get fixture path

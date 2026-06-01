@@ -48,8 +48,11 @@ pub(crate) fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, Stri
 /// misleading "loaded" log line or inflating the success count. The identifier from
 /// the mapping becomes the map key.
 ///
-/// Returns the populated map and the count of entries that were both loaded and
-/// accepted by `build_value`.
+/// Returns the populated map and the count of newly-inserted entries: those
+/// loaded, accepted by `build_value`, and mapped to a fresh identifier. A
+/// duplicate identifier overwrites the previous entry (logged as a warning) but
+/// is not added to the count, so the count reflects distinct keys, not total
+/// accepted mappings.
 pub(crate) fn load_mappings<V>(
     mappings: &[String],
     kind: &str,
