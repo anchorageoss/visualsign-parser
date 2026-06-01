@@ -80,47 +80,75 @@ fn resolve_receiver(
     }
 }
 
+/// Maximum number of `SplitCoins`/`MergeCoins` references that `resolve_object`
+/// will follow before bailing out. `command_index` in `SuiArgument::Result` /
+/// `SuiArgument::NestedResult` is attacker-controlled, so an unbounded walk
+/// can be steered into a cycle (e.g. command 0 references command 1 which
+/// references command 0) or an arbitrarily deep chain. Either case would
+/// blow the Tokio worker stack (default 2 MiB) and abort the parser process.
+/// A fixed budget catches both shapes without needing a visited set.
+///
+/// The budget counts reference hops (`Result` / `NestedResult` indirections).
+/// A chain of exactly `MAX_RESOLVE_OBJECT_DEPTH` reference hops terminating
+/// on `GasCoin` or `Input` still resolves; one more hop bails.
+const MAX_RESOLVE_OBJECT_DEPTH: usize = 32;
+
 fn resolve_object(
     commands: &[SuiCommand],
     inputs: &[SuiCallArg],
     object_argument: SuiArgument,
 ) -> Result<CoinObject, VisualSignError> {
-    match object_argument {
-        SuiArgument::GasCoin => Ok(CoinObject::Sui),
-        SuiArgument::Input(index) => {
-            match inputs
-                .get(index as usize)
-                .ok_or(VisualSignError::MissingData("Input not found".into()))?
-            {
-                SuiCallArg::Object(e) => match e {
-                    SuiObjectArg::ImmOrOwnedObject { object_id, .. }
-                    | SuiObjectArg::SharedObject { object_id, .. }
-                    | SuiObjectArg::Receiving { object_id, .. } => {
-                        Ok(CoinObject::UnknownObject(object_id.to_hex()))
-                    }
-                },
-                SuiCallArg::Pure(_) => Err(TransactionParseError::UnsupportedVersion(
-                    "Parsing Sui native transfer input expected `Object`".into(),
-                )
-                .into()),
+    let mut current = object_argument;
+    let mut hops_remaining = MAX_RESOLVE_OBJECT_DEPTH;
+    loop {
+        match current {
+            SuiArgument::GasCoin => return Ok(CoinObject::Sui),
+            SuiArgument::Input(index) => {
+                return match inputs
+                    .get(index as usize)
+                    .ok_or(VisualSignError::MissingData("Input not found".into()))?
+                {
+                    SuiCallArg::Object(e) => match e {
+                        SuiObjectArg::ImmOrOwnedObject { object_id, .. }
+                        | SuiObjectArg::SharedObject { object_id, .. }
+                        | SuiObjectArg::Receiving { object_id, .. } => {
+                            Ok(CoinObject::UnknownObject(object_id.to_hex()))
+                        }
+                    },
+                    SuiCallArg::Pure(_) => Err(TransactionParseError::UnsupportedVersion(
+                        "Parsing Sui native transfer input expected `Object`".into(),
+                    )
+                    .into()),
+                };
             }
-        }
-        SuiArgument::Result(command_index) | SuiArgument::NestedResult(command_index, _) => {
-            match commands
-                .get(command_index as usize)
-                .ok_or(VisualSignError::MissingData(
-                    "Result command not found".into(),
-                ))? {
-                SuiCommand::SplitCoins(coin_type, _) | SuiCommand::MergeCoins(coin_type, _) => {
-                    resolve_object(commands, inputs, *coin_type)
+            SuiArgument::Result(command_index)
+            | SuiArgument::NestedResult(command_index, _) => {
+                if hops_remaining == 0 {
+                    return Err(VisualSignError::ValidationError(format!(
+                        "Sui coin reference chain exceeded max depth of {MAX_RESOLVE_OBJECT_DEPTH} hops (possible cycle)"
+                    )));
                 }
-                // TODO: extended chain_config to parse return results from transaction like this:
-                // https://suivision.xyz/txblock/5QMTpn34NuBvMMAU1LeKhWKSNTMoJEriEier3DA8tjNU
-                SuiCommand::MoveCall(_) => Ok(CoinObject::UnknownObject("Unknown".into())),
-                _ => Err(TransactionParseError::UnsupportedVersion(
-                    "Parsing Sui native transfer expected `SplitCoins` or `MergeCoins`".into(),
-                )
-                .into()),
+                hops_remaining -= 1;
+                match commands.get(command_index as usize).ok_or(
+                    VisualSignError::MissingData("Result command not found".into()),
+                )? {
+                    SuiCommand::SplitCoins(coin_type, _)
+                    | SuiCommand::MergeCoins(coin_type, _) => {
+                        current = *coin_type;
+                    }
+                    // TODO: extended chain_config to parse return results from transaction like this:
+                    // https://suivision.xyz/txblock/5QMTpn34NuBvMMAU1LeKhWKSNTMoJEriEier3DA8tjNU
+                    SuiCommand::MoveCall(_) => {
+                        return Ok(CoinObject::UnknownObject("Unknown".into()));
+                    }
+                    _ => {
+                        return Err(TransactionParseError::UnsupportedVersion(
+                            "Parsing Sui native transfer expected `SplitCoins` or `MergeCoins`"
+                                .into(),
+                        )
+                        .into());
+                    }
+                }
             }
         }
     }
@@ -245,10 +273,15 @@ fn visualize_transfer_command(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    use super::{MAX_RESOLVE_OBJECT_DEPTH, resolve_object};
     use crate::utils::payload_from_b64;
 
+    use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
+
     use visualsign::SignablePayloadField;
+    use visualsign::errors::VisualSignError;
     use visualsign::test_utils::assert_has_field;
 
     #[test]
@@ -322,6 +355,164 @@ mod tests {
             transfer_commands.len(),
             4,
             "Should have four Transfer Command fields"
+        );
+    }
+
+    // Regression tests for unbounded resolve_object recursion: resolve_object used
+    // to recurse without a depth bound or cycle check on the attacker-controlled
+    // command_index, letting a crafted Sui tx blow the worker stack and abort the parser.
+
+    #[test]
+    fn test_resolve_object_self_cycle_returns_error() {
+        // commands[0] = SplitCoins(Result(0), []) — self-loop.
+        let commands = vec![SuiCommand::SplitCoins(SuiArgument::Result(0), vec![])];
+        let inputs: Vec<SuiCallArg> = vec![];
+
+        let err = resolve_object(&commands, &inputs, SuiArgument::Result(0))
+            .expect_err("self-cycle must not resolve");
+
+        assert!(
+            matches!(err, VisualSignError::ValidationError(_)),
+            "expected ValidationError, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_object_two_command_cycle_returns_error() {
+        // commands[0] = SplitCoins(Result(1), []), commands[1] = SplitCoins(Result(0), []).
+        // Walking either index loops forever in the unfixed code.
+        let commands = vec![
+            SuiCommand::SplitCoins(SuiArgument::Result(1), vec![]),
+            SuiCommand::SplitCoins(SuiArgument::Result(0), vec![]),
+        ];
+        let inputs: Vec<SuiCallArg> = vec![];
+
+        let err = resolve_object(&commands, &inputs, SuiArgument::Result(0))
+            .expect_err("two-command cycle must not resolve");
+
+        assert!(
+            matches!(err, VisualSignError::ValidationError(_)),
+            "expected ValidationError, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_object_nested_result_cycle_returns_error() {
+        // Same shape as the self-cycle but via NestedResult, which the recursive
+        // branch also followed unconditionally.
+        let commands = vec![SuiCommand::SplitCoins(
+            SuiArgument::NestedResult(0, 0),
+            vec![],
+        )];
+        let inputs: Vec<SuiCallArg> = vec![];
+
+        let err = resolve_object(&commands, &inputs, SuiArgument::NestedResult(0, 0))
+            .expect_err("NestedResult self-cycle must not resolve");
+
+        assert!(
+            matches!(err, VisualSignError::ValidationError(_)),
+            "expected ValidationError, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_object_deep_acyclic_chain_exceeds_budget() {
+        // Acyclic but longer than the budget: command i points to command i+1
+        // for i in 0..N, last one points to GasCoin would terminate. Instead,
+        // make the chain longer than MAX_RESOLVE_OBJECT_DEPTH so it must bail.
+        let chain_len = MAX_RESOLVE_OBJECT_DEPTH + 5;
+        let commands: Vec<SuiCommand> = (0..chain_len)
+            .map(|i| {
+                // Last command terminates on GasCoin so the chain is acyclic;
+                // every other command refers to the next index.
+                let next = if i + 1 < chain_len {
+                    SuiArgument::Result(u16::try_from(i + 1).unwrap())
+                } else {
+                    SuiArgument::GasCoin
+                };
+                SuiCommand::SplitCoins(next, vec![])
+            })
+            .collect();
+        // Sanity: we constructed exactly chain_len commands.
+        assert_eq!(commands.len(), chain_len);
+
+        let err = resolve_object(&commands, &[], SuiArgument::Result(0))
+            .expect_err("chain longer than budget must not resolve");
+
+        assert!(
+            matches!(err, VisualSignError::ValidationError(_)),
+            "expected ValidationError, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_object_short_legal_chain_still_resolves() {
+        // Guards against an off-by-one in the bound: a chain of 5 SplitCoins
+        // commands terminating on GasCoin must still resolve to Sui.
+        let commands: Vec<SuiCommand> = (0..5)
+            .map(|i| {
+                let next = if i + 1 < 5 {
+                    SuiArgument::Result(i + 1)
+                } else {
+                    SuiArgument::GasCoin
+                };
+                SuiCommand::SplitCoins(next, vec![])
+            })
+            .collect();
+
+        let resolved = resolve_object(&commands, &[], SuiArgument::Result(0))
+            .expect("short legal chain must resolve");
+
+        assert_eq!(resolved, crate::utils::CoinObject::Sui);
+    }
+
+    #[test]
+    fn test_resolve_object_chain_at_exact_budget_resolves() {
+        // Boundary case: a chain of exactly MAX_RESOLVE_OBJECT_DEPTH reference
+        // hops terminating on GasCoin must resolve. The doc-comment advertises
+        // this as the maximum resolvable depth; this guards the off-by-one.
+        // commands[0..MAX-1] each reference the next index, commands[MAX-1]
+        // terminates on GasCoin. Starting from Result(0) that is exactly
+        // MAX_RESOLVE_OBJECT_DEPTH reference follows before the terminal.
+        let chain_len = MAX_RESOLVE_OBJECT_DEPTH;
+        let commands: Vec<SuiCommand> = (0..chain_len)
+            .map(|i| {
+                let next = if i + 1 < chain_len {
+                    SuiArgument::Result(u16::try_from(i + 1).unwrap())
+                } else {
+                    SuiArgument::GasCoin
+                };
+                SuiCommand::SplitCoins(next, vec![])
+            })
+            .collect();
+
+        let resolved = resolve_object(&commands, &[], SuiArgument::Result(0))
+            .expect("chain at exact budget must resolve");
+
+        assert_eq!(resolved, crate::utils::CoinObject::Sui);
+    }
+
+    #[test]
+    fn test_resolve_object_chain_one_past_budget_bails() {
+        // Boundary case: one more hop than the budget must bail.
+        let chain_len = MAX_RESOLVE_OBJECT_DEPTH + 1;
+        let commands: Vec<SuiCommand> = (0..chain_len)
+            .map(|i| {
+                let next = if i + 1 < chain_len {
+                    SuiArgument::Result(u16::try_from(i + 1).unwrap())
+                } else {
+                    SuiArgument::GasCoin
+                };
+                SuiCommand::SplitCoins(next, vec![])
+            })
+            .collect();
+
+        let err = resolve_object(&commands, &[], SuiArgument::Result(0))
+            .expect_err("chain one past budget must bail");
+
+        assert!(
+            matches!(err, VisualSignError::ValidationError(_)),
+            "expected ValidationError, got {err:?}"
         );
     }
 }
