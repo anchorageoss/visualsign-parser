@@ -93,8 +93,8 @@ pub(crate) fn load_mappings<V>(
                         }
                         Err(e) => {
                             eprintln!(
-                                "  Warning: Skipping {kind} '{}' from '{}': {e}",
-                                components.name, components.path
+                                "  Warning: Skipping {kind} '{}' ({identifier_label} '{}') from '{}': {e}",
+                                components.name, components.identifier, components.path
                             );
                         }
                     },
