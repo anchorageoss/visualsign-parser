@@ -7,7 +7,7 @@
 
 #![allow(unused_imports)]
 
-use alloy_primitives::{Address, U160};
+use alloy_primitives::{Address, U160, U256};
 use alloy_sol_types::{SolCall, sol};
 use chrono::{TimeZone, Utc};
 use visualsign::{
@@ -152,10 +152,11 @@ impl Permit2Visualizer {
             .and_then(|r| r.get_token_symbol(chain_id, call.token))
             .unwrap_or_else(|| format!("{:?}", call.token));
 
-        // Format amount with proper decimals
-        let amount_u128: u128 = call.amount.to_string().parse().unwrap_or(0);
+        // Format amount with proper decimals. The amount is a uint160, which can
+        // exceed u128::MAX, so format it from the full-width value rather than
+        // narrowing to u128 first (which would collapse large amounts to "0").
         let (amount_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, call.token, amount_u128))
+            .and_then(|r| r.format_token_amount_u256(chain_id, call.token, U256::from(call.amount)))
             .unwrap_or_else(|| (call.amount.to_string(), token_symbol.clone()));
 
         // Format expiration timestamp
@@ -187,16 +188,17 @@ impl Permit2Visualizer {
             .and_then(|r| r.get_token_symbol(chain_id, token))
             .unwrap_or_else(|| format!("{token:?}"));
 
-        // Format amount with proper decimals
-        let amount_u128: u128 = call
-            .permitSingle
-            .details
-            .amount
-            .to_string()
-            .parse()
-            .unwrap_or(0);
+        // Format amount with proper decimals. The amount is a uint160, which can
+        // exceed u128::MAX, so format it from the full-width value rather than
+        // narrowing to u128 first (which would collapse large amounts to "0").
         let (amount_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, token, amount_u128))
+            .and_then(|r| {
+                r.format_token_amount_u256(
+                    chain_id,
+                    token,
+                    U256::from(call.permitSingle.details.amount),
+                )
+            })
             .unwrap_or_else(|| {
                 (
                     call.permitSingle.details.amount.to_string(),
@@ -335,10 +337,11 @@ impl Permit2Visualizer {
             .and_then(|r| r.get_token_symbol(chain_id, call.token))
             .unwrap_or_else(|| format!("{:?}", call.token));
 
-        // Format amount with proper decimals
-        let amount_u128: u128 = call.amount.to_string().parse().unwrap_or(0);
+        // Format amount with proper decimals. The amount is a uint160, which can
+        // exceed u128::MAX, so format it from the full-width value rather than
+        // narrowing to u128 first (which would collapse large amounts to "0").
         let (amount_str, _) = registry
-            .and_then(|r| r.format_token_amount(chain_id, call.token, amount_u128))
+            .and_then(|r| r.format_token_amount_u256(chain_id, call.token, U256::from(call.amount)))
             .unwrap_or_else(|| (call.amount.to_string(), token_symbol.clone()));
 
         let text = format!(
@@ -581,5 +584,149 @@ mod tests {
             !json.contains("1970-01-01"),
             "did not expect 1970 epoch fallback in rendered field, got: {json}"
         );
+    }
+
+    /// WETH is present in the default registry with 18 decimals, so a uint160
+    /// amount above `u128::MAX` exercises the registered-token path where the
+    /// old `to_string().parse::<u128>().unwrap_or(0)` narrowing collapsed the
+    /// amount to a fractional zero.
+    fn weth_mainnet_address() -> Address {
+        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+            .parse()
+            .unwrap()
+    }
+
+    /// Regression: a Permit2 `approve` with `amount` above `u128::MAX` on a
+    /// registered token must not render as "0". The amount is a uint160, which
+    /// can exceed u128::MAX; the old narrowing path collapsed it to zero.
+    #[test]
+    fn test_visualize_approve_amount_above_u128_max_is_not_zero() {
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        // u128::MAX + 1: the smallest uint160 the old u128 narrowing could not
+        // represent. Well below U160::MAX, so this is a concrete (not unlimited)
+        // amount.
+        let amount = U160::from(u128::MAX) + U160::from(1u64);
+        let call = IPermit2::approveCall {
+            token: weth_mainnet_address(),
+            spender: [0x22u8; 20].into(),
+            amount,
+            expiration: U48::from(1_704_067_200u64),
+        };
+        let input = IPermit2::approveCall::abi_encode(&call);
+
+        let visualizer = Permit2Visualizer;
+        let field = visualizer
+            .visualize_tx_commands(&input, 1, Some(&registry))
+            .expect("approve should decode");
+
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                // The bug rendered the amount as "0.000000000000000000" (WETH
+                // has 18 decimals). The fix must surface the real amount.
+                assert!(
+                    !text_v2.text.contains("0.000000000000000000"),
+                    "amount above u128::MAX rendered as fractional zero: {}",
+                    text_v2.text
+                );
+                assert!(
+                    text_v2.text.contains("WETH"),
+                    "expected WETH symbol, got: {}",
+                    text_v2.text
+                );
+            }
+            other => panic!("expected TextV2, got {other:?}"),
+        }
+    }
+
+    /// Regression: a Permit2 `permit` with `details.amount` above `u128::MAX`
+    /// on a registered token must not render as "0" in the subtitle. The
+    /// subtitle is fed by the formatted amount, which the old narrowing path
+    /// collapsed to a fractional zero.
+    #[test]
+    fn test_visualize_permit_amount_above_u128_max_is_not_zero() {
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        let amount = U160::from(u128::MAX) + U160::from(1u64);
+        let permit_single = PermitSingle {
+            details: PermitDetails {
+                token: weth_mainnet_address(),
+                amount,
+                expiration: U48::from(1_704_067_200u64),
+                nonce: U48::from(0u64),
+            },
+            spender: [0x44u8; 20].into(),
+            sigDeadline: U256::from(u64::MAX),
+        };
+        let call = IPermit2::permitCall {
+            owner: [0x55u8; 20].into(),
+            permitSingle: permit_single,
+            signature: alloy_primitives::Bytes::default(),
+        };
+        let input = IPermit2::permitCall::abi_encode(&call);
+
+        let visualizer = Permit2Visualizer;
+        let field = visualizer
+            .visualize_tx_commands(&input, 1, Some(&registry))
+            .expect("permit should decode");
+
+        // The expanded "Amount" field always renders the raw uint160 integer,
+        // so a "contains the big number" check would pass even on broken code.
+        // The discriminating signal is the subtitle, where the formatted amount
+        // collapsed to "0.000000000000000000" (WETH has 18 decimals) under the
+        // bug. Assert its absence; the subtitle now carries the decimal-scaled
+        // amount instead.
+        let json = serde_json::to_string(&field).expect("serializable");
+        assert!(
+            !json.contains("0.000000000000000000"),
+            "amount above u128::MAX rendered as fractional zero: {json}"
+        );
+        // The decimal-scaled amount (18 decimals) must be present in the
+        // subtitle: u128::MAX + 1 == 340282366920938463463374607431768211456,
+        // which scales to 340282366920938463463.374607431768211456.
+        assert!(
+            json.contains("340282366920938463463.374607431768211456"),
+            "expected decimal-scaled amount in subtitle, got: {json}"
+        );
+    }
+
+    /// Regression: a Permit2 `transferFrom` with `amount` above `u128::MAX` on
+    /// a registered token must not render as "0". The amount is a uint160; the
+    /// old narrowing path collapsed it to zero.
+    #[test]
+    fn test_visualize_transfer_from_amount_above_u128_max_is_not_zero() {
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+
+        let amount = U160::from(u128::MAX) + U160::from(1u64);
+        let call = IPermit2::transferFromCall {
+            from: [0x11u8; 20].into(),
+            to: [0x22u8; 20].into(),
+            amount,
+            token: weth_mainnet_address(),
+        };
+        let input = IPermit2::transferFromCall::abi_encode(&call);
+
+        let visualizer = Permit2Visualizer;
+        let field = visualizer
+            .visualize_tx_commands(&input, 1, Some(&registry))
+            .expect("transferFrom should decode");
+
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                // The bug rendered the amount as "0.000000000000000000" (WETH
+                // has 18 decimals). The fix must surface the real amount.
+                assert!(
+                    !text_v2.text.contains("0.000000000000000000"),
+                    "amount above u128::MAX rendered as fractional zero: {}",
+                    text_v2.text
+                );
+                assert!(
+                    text_v2.text.contains("WETH"),
+                    "expected WETH symbol, got: {}",
+                    text_v2.text
+                );
+            }
+            other => panic!("expected TextV2, got {other:?}"),
+        }
     }
 }
