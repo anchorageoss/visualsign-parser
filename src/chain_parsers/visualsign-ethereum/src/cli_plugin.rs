@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::abi_metadata::{CLI_DEV_SIGNING_KEY_SEED, sign_abi};
 use crate::networks::parse_network;
 use clap::Args as ClapArgs;
 use generated::parser::{Abi, AbiType, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 use visualsign::registry::{Chain, TransactionConverterRegistry};
-use crate::abi_metadata::{CLI_DEV_SIGNING_KEY_SEED, sign_abi};
 
 use parser_cli_core::mapping_parser;
 
@@ -488,9 +488,8 @@ mod tests {
         let extracted = ChainMetadata {
             metadata: Some(Metadata::Ethereum(eth)),
         };
-        let registry =
-            visualsign_ethereum::abi_metadata::try_extract_from_chain_metadata(Some(&extracted), 1)
-                .expect("metadata with a signed synthesized proxy must extract");
+        let registry = crate::abi_metadata::try_extract_from_chain_metadata(Some(&extracted), 1)
+            .expect("metadata with a signed synthesized proxy must extract");
         assert!(
             registry.list_abis().contains(&PROXY),
             "signed synthesized proxy must survive extraction (unsigned would be dropped)",
