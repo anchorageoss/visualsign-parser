@@ -468,8 +468,9 @@ fn extract_metadata_abi(
 /// Returns `Some(vec![field])` (always non-empty) if the destination is a
 /// registered canonical token. The field is either the decoded result or a
 /// raw-hex fallback when the built-in visualizer can't decode the selector
-/// (ERC721 stub returns `None` for all inputs today; ERC1155 has no built-in
-/// visualizer yet). Returning `Some` even with a raw-hex field is what gives
+/// (ERC721 stub returns `None` for all inputs today; the ERC1155 decoder
+/// handles its transfer selectors and returns `None` otherwise). Returning
+/// `Some` even with a raw-hex field is what gives
 /// callers a clean "if `Some`, you're done" contract: the downstream
 /// caller-ABI path and ERC20 `decode_transfers` fallback are both gated on
 /// `input_fields.is_empty()`, so populating any field locks them out. This
@@ -498,8 +499,12 @@ fn try_known_token_dispatch(
         token_metadata::ErcStandard::Erc721 => {
             (contracts::core::ERC721Visualizer {}).visualize_tx_commands(input)
         }
-        // No built-in ERC1155 visualizer yet.
-        token_metadata::ErcStandard::Erc1155 => None,
+        // `ERC1155Visualizer` decodes safeTransferFrom/safeBatchTransferFrom;
+        // it returns `None` for any other selector or on decode failure, so the
+        // raw-hex fallback below still applies.
+        token_metadata::ErcStandard::Erc1155 => {
+            (contracts::core::ERC1155Visualizer {}).visualize_tx_commands(input)
+        }
     };
     let field =
         decoded.unwrap_or_else(|| contracts::core::FallbackVisualizer::new().visualize_hex(input));
@@ -775,9 +780,10 @@ fn convert_to_visual_sign_payload(
         // Fallback: Try ERC20 if decode_transfers is enabled. Skipped for
         // known tokens because the short-circuit above already populated
         // `input_fields`: `approve(address,uint256)` and
-        // `transfer(address,uint256)` share selectors across ERC20/ERC721, so
-        // without this guard a known ERC721 (or ERC1155) call would be
-        // mis-rendered as an ERC20 op once its own visualizer returns `None`,
+        // `transfer(address,uint256)` share selectors across ERC standards, so
+        // without this guard a known ERC721 or ERC1155 call would be
+        // mis-rendered as an ERC20 op whenever its own visualizer returns
+        // `None` (e.g. a selector the built-in decoder doesn't recognize),
         // undermining the "canonical-token short-circuit wins over any other
         // decoder" property.
         if input_fields.is_empty() && options.decode_transfers {
@@ -1515,6 +1521,119 @@ mod tests {
         assert!(
             !rendered.contains("ERC20 Approve") && !rendered.contains("Spender"),
             "known ERC721 must not be mis-rendered as an ERC20 approval: {rendered}",
+        );
+    }
+
+    /// Inverse of the ERC721 shared-selector test: a known ERC1155 token called
+    /// with `safeTransferFrom(address,address,uint256,uint256,bytes)` must hit
+    /// the built-in ERC1155 decoder and render a structured field, not raw hex.
+    ///
+    /// `safeTransferFrom` has a unique selector (no ERC20 collision), so there
+    /// is no shared-selector subtlety here; the assertion is simply that the
+    /// canonical-token dispatch routes to the ERC1155 visualizer.
+    #[test]
+    fn test_known_erc1155_token_decodes_safe_transfer_from() {
+        use crate::contracts::core::erc1155::IERC1155;
+
+        // Address-only fixture; the contract standard is decided by the
+        // registry entry below.
+        let token_address: Address = "0xc0c0000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let from: Address = "0x00000000000000000000000000000000000000a1"
+            .parse()
+            .unwrap();
+        let to: Address = "0x00000000000000000000000000000000000000b2"
+            .parse()
+            .unwrap();
+        let token_id = U256::from(42u64);
+        let amount = U256::from(7u64);
+
+        // Register the address as an ERC1155 token on mainnet.
+        let mut registry = ContractRegistry::new();
+        registry
+            .register_token(
+                1,
+                TokenMetadata {
+                    symbol: "MULTI".to_string(),
+                    name: "Test Multi Token".to_string(),
+                    erc_standard: ErcStandard::Erc1155,
+                    contract_address: token_address.to_string(),
+                    decimals: 0,
+                },
+            )
+            .unwrap();
+        let converter = EthereumVisualSignConverter::with_registry(Arc::new(registry));
+
+        let call = IERC1155::safeTransferFromCall {
+            from,
+            to,
+            id: token_id,
+            value: amount,
+            data: Bytes::default(),
+        };
+        let calldata = Bytes::from(IERC1155::safeTransferFromCall::abi_encode(&call));
+        let tx = TypedTransaction::Legacy(TxLegacy {
+            chain_id: Some(ChainId::from(1u64)),
+            nonce: 0,
+            gas_price: 1_000_000_000u128,
+            gas_limit: 80_000,
+            to: alloy_primitives::TxKind::Call(token_address),
+            value: U256::ZERO,
+            input: calldata,
+        });
+
+        let options = VisualSignOptions {
+            decode_transfers: true,
+            transaction_name: None,
+            metadata: None,
+            developer_config: None,
+        };
+
+        let wrapper = EthereumTransactionWrapper::new(tx);
+        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
+
+        // A PreviewLayout from the built-in ERC1155 decoder is expected, not a
+        // raw-hex fallback.
+        let preview = payload
+            .fields
+            .iter()
+            .find(|f| matches!(f, SignablePayloadField::PreviewLayout { .. }))
+            .expect("expected a PreviewLayout from the built-in ERC1155 visualizer");
+        let SignablePayloadField::PreviewLayout { common, .. } = preview else {
+            panic!("matched discriminant changed");
+        };
+        assert_eq!(common.label, "ERC1155 Transfer");
+
+        // Serialize the whole payload so the scan covers every text-bearing
+        // field, and assert the structured ERC1155 output (label, addresses,
+        // token id and amount) is present.
+        let rendered = serde_json::to_string(&payload).unwrap();
+        assert!(rendered.contains("ERC1155"), "rendered: {rendered}");
+        assert!(
+            rendered.contains(&format!("{from:?}")),
+            "expected from address: {rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("{to:?}")),
+            "expected to address: {rendered}"
+        );
+        assert!(
+            rendered.contains("\"Label\":\"Token ID\""),
+            "expected token id field: {rendered}"
+        );
+        assert!(
+            rendered.contains("\"Label\":\"Amount\""),
+            "expected amount field: {rendered}"
+        );
+        // The token id (42) and amount (7) values must appear in the output.
+        assert!(
+            rendered.contains("42"),
+            "expected token id value: {rendered}"
+        );
+        assert!(
+            rendered.contains("\"7\""),
+            "expected amount value: {rendered}"
         );
     }
 
