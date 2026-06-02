@@ -2,10 +2,14 @@
 //!
 //! Mirrors `visualsign-ethereum::abi_metadata` for Solana IDL mappings. The
 //! proto carries an optional `SignatureMetadata` on every `Idl` entry; when
-//! present, we validate it as a secp256k1 ECDSA signature over the SHA-256
-//! digest of the IDL JSON bytes (prehashed verification via
-//! `PrehashVerifier::verify_prehash`) before accepting the entry into the
-//! registry. Signers must therefore compute `SHA-256(idl_json)` and sign the
+//! present, we validate it as a secp256k1 ECDSA signature over a
+//! domain-separated prehash that binds the program id to the IDL JSON bytes
+//! (prehashed verification via `PrehashVerifier::verify_prehash`) before
+//! accepting the entry into the registry. The prehash is the shared v1
+//! construction in [`visualsign::signing`]:
+//! `SHA-256(DOMAIN \0 "solana" \0 program_id \0 idl_json)`. Signers must
+//! therefore reproduce that exact construction via
+//! [`visualsign::signing::solana_metadata_prehash`] and sign the resulting
 //! 32-byte digest, not the raw JSON bytes directly.
 //!
 //! Behaviour parity with the Ethereum ABI path:
@@ -14,14 +18,17 @@
 //! - Algorithm must be `secp256k1`. The proto is algorithm-agnostic, but we
 //!   only accept secp256k1 today so that wallets can rotate to a single trust
 //!   anchor shared with the Ethereum ABI path.
+//! - Signatures bind the program id. The prehash commits to the program id the
+//!   IDL describes, so a signature minted for an IDL at one program id no
+//!   longer verifies when replayed under a different program. Existing
+//!   signatures must be re-issued.
 //! - Any public key is accepted; signatures prove the IDL was not tampered
-//!   with after signing, not who the signer is. Identity must be established
-//!   via an allowlist outside this module.
+//!   with after signing and is bound to this program id, not who the signer is.
+//!   Identity must be established via an allowlist outside this module.
 
 use k256::EncodedPoint;
 use k256::ecdsa::signature::hazmat::PrehashVerifier;
 use k256::ecdsa::{Signature, VerifyingKey};
-use sha2::{Digest, Sha256};
 
 /// The only supported signature algorithm.
 const SUPPORTED_ALGORITHM: &str = "secp256k1";
@@ -74,16 +81,24 @@ pub fn convert_proto_signature(proto: &generated::parser::SignatureMetadata) -> 
 
 /// Validate an IDL JSON string against a secp256k1 ECDSA signature.
 ///
-/// The signature must have been produced over the SHA-256 digest of
-/// `idl_json` (prehashed signing). This function computes
-/// `SHA-256(idl_json)` and verifies the signature against that 32-byte
-/// digest via `PrehashVerifier::verify_prehash`.
+/// The signature must have been produced over the shared domain-separated
+/// prehash that binds `program_id` to `idl_json` (see
+/// [`visualsign::signing::solana_metadata_prehash`]). This function recomputes
+/// that prehash and verifies the signature against the resulting 32-byte digest
+/// via `PrehashVerifier::verify_prehash`. A signature is therefore valid only
+/// for the exact program id it was produced for.
+///
+/// # Arguments
+/// * `idl_json` - The IDL JSON string that was signed.
+/// * `program_id` - The 32-byte program id the IDL is bound to.
+/// * `signature` - Signature and metadata for validation.
 ///
 /// # Returns
-/// * `Ok(())` if the signature verifies against `SHA-256(idl_json)`.
+/// * `Ok(())` if the signature verifies against the program-id-bound prehash.
 /// * `Err(IdlSignatureError)` if any step of validation fails.
 pub fn validate_idl_signature(
     idl_json: &str,
+    program_id: &[u8; 32],
     signature: &SignatureMetadata,
 ) -> Result<(), IdlSignatureError> {
     let algorithm = signature
@@ -102,9 +117,7 @@ pub fn validate_idl_signature(
         .as_deref()
         .ok_or_else(|| IdlSignatureError::Validation("Missing public_key".to_string()))?;
 
-    let mut hasher = Sha256::new();
-    hasher.update(idl_json.as_bytes());
-    let hash: [u8; 32] = hasher.finalize().into();
+    let hash = visualsign::signing::solana_metadata_prehash(program_id, idl_json.as_bytes());
 
     let sig_hex = signature
         .value
@@ -143,14 +156,20 @@ mod tests {
 
     const SAMPLE_IDL: &str = r#"{"metadata":{"name":"Real Program"},"instructions":[]}"#;
 
-    fn create_test_signature(content: &str) -> (String, String) {
+    /// Fixed 32-byte test program id used by signing-path tests.
+    const TEST_PROGRAM_ID: [u8; 32] = [7u8; 32];
+
+    /// Helper to create a valid signature for testing.
+    ///
+    /// The signature is over the shared domain-separated prehash binding
+    /// `program_id` to `idl_json`, matching what [`validate_idl_signature`]
+    /// verifies.
+    fn create_test_signature(idl_json: &str, program_id: &[u8; 32]) -> (String, String) {
         let seed: [u8; 32] = [0x42u8; 32];
         let signing_key = SigningKey::from_bytes(&seed).expect("valid key");
         let verifying_key = VerifyingKey::from(&signing_key);
 
-        let mut hasher = Sha256::new();
-        hasher.update(content.as_bytes());
-        let hash: [u8; 32] = hasher.finalize().into();
+        let hash = visualsign::signing::solana_metadata_prehash(program_id, idl_json.as_bytes());
 
         let signature: Signature = signing_key.sign_prehash(&hash).expect("signing failed");
         let signature_hex = hex::encode(signature.to_der().as_bytes());
@@ -161,7 +180,7 @@ mod tests {
 
     #[test]
     fn valid_signature_verifies() {
-        let (sig_hex, pk_hex) = create_test_signature(SAMPLE_IDL);
+        let (sig_hex, pk_hex) = create_test_signature(SAMPLE_IDL, &TEST_PROGRAM_ID);
         let sig = SignatureMetadata {
             value: sig_hex,
             algorithm: Some("secp256k1".to_string()),
@@ -169,12 +188,41 @@ mod tests {
             issuer: None,
             timestamp: None,
         };
-        assert!(validate_idl_signature(SAMPLE_IDL, &sig).is_ok());
+        assert!(validate_idl_signature(SAMPLE_IDL, &TEST_PROGRAM_ID, &sig).is_ok());
+    }
+
+    /// Core regression for this change: a signature is valid only for the exact
+    /// program id it was produced for. Signing SAMPLE_IDL for program id A must
+    /// verify under A but fail under a different program id B.
+    #[test]
+    fn validate_idl_signature_bound_to_program_id_rejects_replay() {
+        let program_id_a: [u8; 32] = [7u8; 32];
+        let program_id_b: [u8; 32] = [8u8; 32];
+
+        let (sig_hex, pk_hex) = create_test_signature(SAMPLE_IDL, &program_id_a);
+        let sig = SignatureMetadata {
+            value: sig_hex,
+            algorithm: Some("secp256k1".to_string()),
+            public_key: Some(pk_hex),
+            issuer: None,
+            timestamp: None,
+        };
+
+        // Valid for the exact program id it was produced for.
+        assert!(
+            validate_idl_signature(SAMPLE_IDL, &program_id_a, &sig).is_ok(),
+            "signature must verify for the bound program id"
+        );
+        // Different program id: rejected.
+        assert!(
+            validate_idl_signature(SAMPLE_IDL, &program_id_b, &sig).is_err(),
+            "signature must not verify when replayed under a different program id"
+        );
     }
 
     #[test]
     fn tampered_idl_rejected() {
-        let (sig_hex, pk_hex) = create_test_signature(SAMPLE_IDL);
+        let (sig_hex, pk_hex) = create_test_signature(SAMPLE_IDL, &TEST_PROGRAM_ID);
         let sig = SignatureMetadata {
             value: sig_hex,
             algorithm: Some("secp256k1".to_string()),
@@ -183,7 +231,7 @@ mod tests {
             timestamp: None,
         };
         let tampered = r#"{"metadata":{"name":"Phantom Wallet"},"instructions":[]}"#;
-        assert!(validate_idl_signature(tampered, &sig).is_err());
+        assert!(validate_idl_signature(tampered, &TEST_PROGRAM_ID, &sig).is_err());
     }
 
     #[test]
@@ -195,7 +243,7 @@ mod tests {
             issuer: None,
             timestamp: None,
         };
-        let err = validate_idl_signature(SAMPLE_IDL, &sig).unwrap_err();
+        let err = validate_idl_signature(SAMPLE_IDL, &TEST_PROGRAM_ID, &sig).unwrap_err();
         assert!(err.to_string().contains("Missing algorithm"));
     }
 
@@ -208,7 +256,7 @@ mod tests {
             issuer: None,
             timestamp: None,
         };
-        let err = validate_idl_signature(SAMPLE_IDL, &sig).unwrap_err();
+        let err = validate_idl_signature(SAMPLE_IDL, &TEST_PROGRAM_ID, &sig).unwrap_err();
         assert!(err.to_string().contains("Missing public_key"));
     }
 
@@ -221,7 +269,7 @@ mod tests {
             issuer: None,
             timestamp: None,
         };
-        let err = validate_idl_signature(SAMPLE_IDL, &sig).unwrap_err();
+        let err = validate_idl_signature(SAMPLE_IDL, &TEST_PROGRAM_ID, &sig).unwrap_err();
         assert!(err.to_string().contains("Unsupported algorithm"));
     }
 

@@ -150,15 +150,17 @@ impl SolanaTransactionWrapper {
 ///    the `unknown_program` IDL decode path. Refusing the body closes that
 ///    gap.
 /// 3. The IDL JSON is rejected if it exceeds `MAX_IDL_JSON_BYTES`.
-/// 4. If `Idl.signature` is present, it must verify (secp256k1 ECDSA over
-///    `SHA-256(idl_json)` via `PrehashVerifier::verify_prehash`) or the entry
-///    is dropped. Signers must therefore compute the SHA-256 digest of the
-///    IDL JSON bytes and sign that 32-byte prehash, matching
-///    `visualsign-ethereum::abi_metadata`. Unsigned IDLs are still accepted
-///    so the feature degrades gracefully; callers that need mandatory
-///    signatures must enforce that at the API boundary. Unsigned IDLs are
-///    still accepted so the feature degrades gracefully; this check refuses
-///    to plumb attacker-tampered IDL bodies into the registry.
+/// 4. If `Idl.signature` is present, it must verify (secp256k1 ECDSA over the
+///    shared domain-separated prehash that binds the program id to the IDL JSON
+///    via `PrehashVerifier::verify_prehash`) or the entry is dropped. Signers
+///    must therefore reproduce that prehash via
+///    `visualsign::signing::solana_metadata_prehash` and sign the resulting
+///    32-byte digest, matching `visualsign-ethereum::abi_metadata`. Because the
+///    prehash commits to the program id, a signature is valid only for the
+///    exact program it was produced for. Unsigned IDLs are still accepted so
+///    the feature degrades gracefully; callers that need mandatory signatures
+///    must enforce that at the API boundary. This check refuses to plumb
+///    attacker-tampered IDL bodies into the registry.
 /// 5. The resolved `program_name` (from proto, IDL metadata, or fallback)
 ///    must not be a reserved canonical name. Step 2 already rejects when
 ///    the *program_id* is trusted, so by this step `program_id` has no
@@ -184,10 +186,15 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
     let mut out: BTreeMap<String, (String, String)> = BTreeMap::new();
     for (program_id, idl) in mappings {
         // 1. Validate program_id parses as a Solana Pubkey (cheap, fail fast).
-        if Pubkey::from_str(program_id).is_err() {
-            tracing::warn!("Skipping IDL mapping with invalid program_id '{program_id}'");
-            continue;
-        }
+        //    Keep the parsed key: its 32 bytes bind the IDL signature prehash
+        //    in step 4.
+        let pubkey = match Pubkey::from_str(program_id) {
+            Ok(pk) => pk,
+            Err(_) => {
+                tracing::warn!("Skipping IDL mapping with invalid program_id '{program_id}'");
+                continue;
+            }
+        };
 
         // 2. Reject IDL overrides for trusted built-in programs. The name
         //    guard in `IdlRegistry` blocks attacker-controlled labels, but the
@@ -222,7 +229,7 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
         //    accepted (parity with the Ethereum ABI path).
         if let Some(proto_sig) = idl.signature.as_ref() {
             let local_sig = convert_proto_signature(proto_sig);
-            if let Err(e) = validate_idl_signature(&idl.value, &local_sig) {
+            if let Err(e) = validate_idl_signature(&idl.value, &pubkey.to_bytes(), &local_sig) {
                 tracing::warn!(
                     "Skipping IDL mapping for '{program_id}': signature validation failed: {e}"
                 );
