@@ -223,8 +223,15 @@ mod tests {
         assert!(json.contains("ERC1155 Transfer"), "got: {json}");
         assert!(json.contains(&format!("{:?}", call.from)), "got: {json}");
         assert!(json.contains(&format!("{:?}", call.to)), "got: {json}");
-        // Token id and amount.
-        assert!(json.contains('7'), "expected token id in output: {json}");
+        // Token id and amount: assert on the label+value pair, not just a bare digit.
+        assert!(
+            json.contains("Token ID"),
+            "expected Token ID label in output: {json}"
+        );
+        assert!(
+            json.contains("\"7\""),
+            "expected token id value in output: {json}"
+        );
         assert!(json.contains("12345"), "expected amount in output: {json}");
     }
 
