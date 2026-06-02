@@ -1,0 +1,248 @@
+name: Code Coverage Analysis
+
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'src/**/*.rs'
+      - 'src/**/Cargo.toml'
+      - '.github/workflows/coverage.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/**/*.rs'
+      - 'src/**/Cargo.toml'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  detect-changes:
+    name: Detect Changed Packages
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.detect.outputs.packages }}
+      dependents: ${{ steps.detect.outputs.dependents }}
+      all_affected: ${{ steps.detect.outputs.all_affected }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed packages and dependents
+        id: detect
+        run: |
+          chmod +x .github/scripts/detect-changed-packages.sh
+          .github/scripts/detect-changed-packages.sh
+
+  coverage:
+    name: Coverage - ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.all_affected != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.detect-changes.outputs.all_affected) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache target directory
+        uses: actions/cache@v4
+        with:
+          path: src/target
+          key: ${{ runner.os }}-target-${{ matrix.package }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-target-${{ matrix.package }}-
+
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+
+      - name: Generate coverage for ${{ matrix.package }}
+        id: coverage
+        run: |
+          cd src
+
+          # Generate coverage with lcov format
+          cargo llvm-cov --package ${{ matrix.package }} \
+            --lcov \
+            --output-path ../coverage-${{ matrix.package }}.lcov \
+            || echo "coverage_failed=true" >> $GITHUB_OUTPUT
+
+          # Generate human-readable report
+          if [ -f ../coverage-${{ matrix.package }}.lcov ]; then
+            cargo llvm-cov --package ${{ matrix.package }} report > ../coverage-${{ matrix.package }}.txt || true
+          fi
+        continue-on-error: true
+
+      - name: Parse coverage stats
+        id: stats
+        run: |
+          chmod +x .github/scripts/parse-coverage.sh
+          .github/scripts/parse-coverage.sh coverage-${{ matrix.package }}.lcov ${{ matrix.package }}
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.package }}
+          path: |
+            coverage-${{ matrix.package }}.lcov
+            coverage-${{ matrix.package }}.txt
+            coverage-${{ matrix.package }}-stats.json
+          retention-days: 30
+
+      - name: Upload to codecov (optional)
+        uses: codecov/codecov-action@v4
+        if: always() && github.event_name == 'push'
+        with:
+          files: coverage-${{ matrix.package }}.lcov
+          flags: ${{ matrix.package }}
+          name: ${{ matrix.package }}
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  coverage-report:
+    name: Generate Coverage Report
+    runs-on: ubuntu-latest
+    needs: [detect-changes, coverage]
+    if: always() && github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: coverage-artifacts
+
+      - name: Get base branch coverage (from cache or generate)
+        id: base-coverage
+        run: |
+          chmod +x .github/scripts/get-base-coverage.sh
+          .github/scripts/get-base-coverage.sh ${{ github.base_ref }}
+
+      - name: Generate coverage diff report
+        id: diff
+        run: |
+          chmod +x .github/scripts/generate-coverage-diff.sh
+          .github/scripts/generate-coverage-diff.sh
+
+      - name: Post coverage comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = 'coverage-report.md';
+
+            if (!fs.existsSync(reportPath)) {
+              console.log('No coverage report found');
+              return;
+            }
+
+            const report = fs.readFileSync(reportPath, 'utf8');
+
+            // Find existing coverage comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('📊 Code Coverage Report')
+            );
+
+            const commentBody = report;
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: commentBody
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody
+              });
+            }
+
+      - name: Check coverage thresholds
+        id: threshold
+        run: |
+          chmod +x .github/scripts/check-coverage-thresholds.sh
+          .github/scripts/check-coverage-thresholds.sh
+        continue-on-error: true
+
+      - name: Upload final report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage-report.md
+            coverage-summary.json
+          retention-days: 90
+
+  coverage-status:
+    name: Coverage Status Check
+    runs-on: ubuntu-latest
+    needs: [coverage-report]
+    if: always() && github.event_name == 'pull_request'
+    steps:
+      - name: Download coverage summary
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: .
+        continue-on-error: true
+
+      - name: Check status
+        run: |
+          if [ -f coverage-summary.json ]; then
+            # Check if any package dropped below threshold
+            dropped=$(jq -r '.failed // false' coverage-summary.json)
+            if [ "$dropped" = "true" ]; then
+              echo "❌ Coverage dropped below threshold for some packages"
+              exit 1
+            else
+              echo "✅ Coverage thresholds met"
+            fi
+          else
+            echo "⚠️ No coverage summary found"
+          fi

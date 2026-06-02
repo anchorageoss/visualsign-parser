@@ -1,0 +1,230 @@
+#!/bin/bash
+set -euo pipefail
+
+# Generate a markdown report comparing coverage between base and current PR
+# Reads from coverage-artifacts/ and base-coverage/
+
+echo "📊 Generating coverage diff report..."
+
+REPORT_FILE="coverage-report.md"
+SUMMARY_FILE="coverage-summary.json"
+
+# Initialize report
+cat > "$REPORT_FILE" <<'EOF'
+# 📊 Code Coverage Report
+
+This PR affects the following packages. Coverage changes are shown below.
+
+EOF
+
+# Initialize summary
+echo "{" > "$SUMMARY_FILE"
+echo "  \"packages\": []," >> "$SUMMARY_FILE"
+echo "  \"failed\": false" >> "$SUMMARY_FILE"
+
+# Track if any package failed threshold
+THRESHOLD_FAILED=false
+
+# Collect all current coverage stats
+declare -A CURRENT_COVERAGE
+declare -A BASE_COVERAGE
+
+# Read current coverage
+if [ -d "coverage-artifacts" ]; then
+  for artifact_dir in coverage-artifacts/coverage-*; do
+    if [ -d "$artifact_dir" ]; then
+      pkg_name=$(basename "$artifact_dir" | sed 's/^coverage-//')
+      stats_file="$artifact_dir/coverage-${pkg_name}-stats.json"
+
+      if [ -f "$stats_file" ]; then
+        coverage=$(jq -r '.coverage_pct' "$stats_file")
+        CURRENT_COVERAGE[$pkg_name]=$coverage
+      fi
+    fi
+  done
+fi
+
+# Read base coverage
+if [ -d "base-coverage" ] && [ ! -f "base-coverage/.no-base-coverage" ]; then
+  for artifact_dir in base-coverage/coverage-*; do
+    if [ -d "$artifact_dir" ]; then
+      pkg_name=$(basename "$artifact_dir" | sed 's/^coverage-//')
+      stats_file="$artifact_dir/coverage-${pkg_name}-stats.json"
+
+      if [ -f "$stats_file" ]; then
+        coverage=$(jq -r '.coverage_pct' "$stats_file")
+        BASE_COVERAGE[$pkg_name]=$coverage
+      fi
+    fi
+  done
+fi
+
+# Check if we have base coverage
+HAS_BASE_COVERAGE=false
+if [ ${#BASE_COVERAGE[@]} -gt 0 ]; then
+  HAS_BASE_COVERAGE=true
+fi
+
+# Generate package-by-package report
+cat >> "$REPORT_FILE" <<EOF
+## 📦 Package Coverage
+
+| Package | Coverage | Change | Status |
+|---------|----------|--------|--------|
+EOF
+
+PACKAGE_JSON_ARRAY="["
+
+for pkg in "${!CURRENT_COVERAGE[@]}"; do
+  current="${CURRENT_COVERAGE[$pkg]}"
+  base="${BASE_COVERAGE[$pkg]:-}"
+
+  # Calculate diff
+  if [ -n "$base" ]; then
+    diff=$(awk "BEGIN {printf \"%.2f\", $current - $base}")
+
+    # Format diff with sign and arrow
+    if (( $(echo "$diff > 0" | bc -l) )); then
+      diff_str="📈 +${diff}%"
+      emoji="✅"
+    elif (( $(echo "$diff < 0" | bc -l) )); then
+      diff_str="📉 ${diff}%"
+      emoji="⚠️"
+
+      # Check if drop is significant
+      if (( $(echo "$diff < -5" | bc -l) )); then
+        emoji="🔴"
+        THRESHOLD_FAILED=true
+      fi
+    else
+      diff_str="➡️ ${diff}%"
+      emoji="✅"
+    fi
+  else
+    diff_str="🆕 New"
+    emoji="ℹ️"
+  fi
+
+  # Determine status based on coverage
+  if (( $(echo "$current >= 80" | bc -l) )); then
+    status="✅ Excellent"
+  elif (( $(echo "$current >= 70" | bc -l) )); then
+    status="🟢 Good"
+  elif (( $(echo "$current >= 50" | bc -l) )); then
+    status="🟡 Needs Work"
+  else
+    status="🔴 Critical"
+    if (( $(echo "$current < 50" | bc -l) )); then
+      THRESHOLD_FAILED=true
+    fi
+  fi
+
+  # Add to report
+  echo "| **$pkg** | ${current}% | $diff_str | $status |" >> "$REPORT_FILE"
+
+  # Add to JSON array
+  if [ "$PACKAGE_JSON_ARRAY" != "[" ]; then
+    PACKAGE_JSON_ARRAY="$PACKAGE_JSON_ARRAY,"
+  fi
+  PACKAGE_JSON_ARRAY="$PACKAGE_JSON_ARRAY{\"package\":\"$pkg\",\"coverage\":$current,\"base\":${base:-null},\"diff\":${diff:-null}}"
+done
+
+PACKAGE_JSON_ARRAY="$PACKAGE_JSON_ARRAY]"
+
+# Add summary section
+cat >> "$REPORT_FILE" <<EOF
+
+## 📈 Summary
+
+EOF
+
+if [ "$HAS_BASE_COVERAGE" = true ]; then
+  cat >> "$REPORT_FILE" <<EOF
+This PR's coverage was compared against the base branch.
+
+EOF
+else
+  cat >> "$REPORT_FILE" <<EOF
+⚠️ **Note:** Base branch coverage data not available for comparison.
+This report shows current coverage only.
+
+EOF
+fi
+
+# Add module-level details if available
+cat >> "$REPORT_FILE" <<EOF
+<details>
+<summary>📋 Detailed Coverage by Module</summary>
+
+EOF
+
+for pkg in "${!CURRENT_COVERAGE[@]}"; do
+  txt_file="coverage-artifacts/coverage-${pkg}/coverage-${pkg}.txt"
+
+  if [ -f "$txt_file" ]; then
+    cat >> "$REPORT_FILE" <<EOF
+
+### $pkg
+
+\`\`\`
+$(cat "$txt_file")
+\`\`\`
+
+EOF
+  fi
+done
+
+cat >> "$REPORT_FILE" <<EOF
+</details>
+
+## 🎯 Coverage Thresholds
+
+| Level | Threshold | Requirement |
+|-------|-----------|-------------|
+| **Critical** | < 50% | ❌ Must improve |
+| **Needs Work** | 50-69% | ⚠️ Should improve |
+| **Good** | 70-79% | 🟢 Acceptable |
+| **Excellent** | ≥ 80% | ✅ Great! |
+
+EOF
+
+if [ "$THRESHOLD_FAILED" = true ]; then
+  cat >> "$REPORT_FILE" <<EOF
+---
+
+⚠️ **Warning:** Some packages have coverage below acceptable thresholds or have dropped significantly.
+Please consider adding more tests before merging.
+
+EOF
+else
+  cat >> "$REPORT_FILE" <<EOF
+---
+
+✅ All packages meet coverage thresholds!
+
+EOF
+fi
+
+# Add footer
+cat >> "$REPORT_FILE" <<EOF
+---
+
+<sub>Generated by [Code Coverage Analysis](../.github/workflows/coverage.yml) • Updated $(date -u '+%Y-%m-%d %H:%M:%S UTC')</sub>
+EOF
+
+# Update summary JSON
+cat > "$SUMMARY_FILE" <<EOF
+{
+  "packages": $PACKAGE_JSON_ARRAY,
+  "failed": $THRESHOLD_FAILED,
+  "has_base_coverage": $HAS_BASE_COVERAGE,
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+
+echo "✅ Report generated: $REPORT_FILE"
+echo "✅ Summary generated: $SUMMARY_FILE"
+
+if [ "$THRESHOLD_FAILED" = true ]; then
+  echo "⚠️  Some packages failed coverage thresholds"
+fi
