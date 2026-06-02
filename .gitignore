@@ -2,3 +2,14 @@
 out
 docs/superpowers/
 .surfpool/
+
+# Claude Code private/working files. The shared team config under .claude/
+# (settings.json, hooks/, skills/) IS tracked and intentionally not matched
+# here; everything below is per-user/agent scratch that must never be committed
+# (a plan doc slipped into a PR once -- see the trust-model PR).
+.claude/plans/
+.claude/projects/
+.claude/todos/
+.claude/shell-snapshots/
+.claude/statsig/
+.claude/settings.local.json
