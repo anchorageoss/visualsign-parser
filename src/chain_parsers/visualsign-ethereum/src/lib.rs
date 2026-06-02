@@ -1637,6 +1637,461 @@ mod tests {
         );
     }
 
+    // NOTE: the chain-id-less fallback case
+    // (`test_known_token_short_circuit_handles_chain_id_less_legacy_tx`) is
+    // legacy-only and intentionally NOT mirrored as an EIP-1559 variant:
+    // EIP-1559 transactions always carry a `chain_id` (it's a required field,
+    // not embedded in `v`), so the `chain_id == None` path it exercises is
+    // unreachable for EIP-1559 and there is nothing to mirror.
+
+    /// EIP-1559 mirror of `test_known_token_ignores_caller_supplied_abi_for_transfer`.
+    ///
+    /// The dispatcher is tx-type-agnostic, but EIP-1559 reaches it through a
+    /// structurally different decode path (`chain_id` is a dedicated field
+    /// rather than being recovered from a legacy `v`), so the security property
+    /// (a caller-supplied ABI must never relabel a known token) is asserted
+    /// independently for this tx type. Identical to the legacy original except
+    /// for the `TypedTransaction::Eip1559` construction.
+    #[test]
+    fn test_known_token_ignores_caller_supplied_abi_for_transfer_eip1559() {
+        let usdc_address: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            .parse()
+            .unwrap();
+        let victim: Address = "0x000000000000000000000000000000000000beef"
+            .parse()
+            .unwrap();
+        let amount = U256::from(1_000_000_000u64);
+
+        // Build a registry with USDC registered as a known ERC20.
+        let mut registry = ContractRegistry::new();
+        registry
+            .register_token(
+                1,
+                TokenMetadata {
+                    symbol: "USDC".to_string(),
+                    name: "USD Coin".to_string(),
+                    erc_standard: ErcStandard::Erc20,
+                    contract_address: usdc_address.to_string(),
+                    decimals: 6,
+                },
+            )
+            .unwrap();
+        let converter = EthereumVisualSignConverter::with_registry(Arc::new(registry));
+
+        // Real `transfer(victim, 1_000_000_000)` calldata to USDC.
+        let call = IERC20::transferCall { to: victim, amount };
+        let calldata = Bytes::from(IERC20::transferCall::abi_encode(&call));
+
+        let tx = TypedTransaction::Eip1559(alloy_consensus::TxEip1559 {
+            chain_id: ChainId::from(1u64),
+            nonce: 0,
+            gas_limit: 50_000,
+            max_fee_per_gas: 30_000_000_000u128,
+            max_priority_fee_per_gas: 2_000_000_000u128,
+            to: alloy_primitives::TxKind::Call(usdc_address),
+            value: U256::ZERO,
+            access_list: Default::default(),
+            input: calldata,
+        });
+
+        // Caller-supplied ABI: same selector as `transfer(address,uint256)`
+        // (which is required for the AbiRegistry dispatcher to match it), but
+        // with attacker-chosen parameter names that misrepresent what the user
+        // is signing. Without the fix, the UI would render labels controlled
+        // by the dApp ("backup_wallet", "safety_deposit") instead of the
+        // canonical "Recipient"/"Amount" from the built-in ERC20 visualizer.
+        //
+        // Note: alloy's `Function::selector()` is derived from name + input
+        // types, so the function name MUST stay `transfer`. Parameter NAMES,
+        // however, do not affect the selector and are fully attacker-controlled.
+        // This is sufficient to spoof the signing prompt.
+        let malicious_abi = r#"[
+            {
+                "type": "function",
+                "name": "transfer",
+                "inputs": [
+                    {"name": "backup_wallet", "type": "address"},
+                    {"name": "safety_deposit", "type": "uint256"}
+                ],
+                "outputs": [],
+                "stateMutability": "nonpayable"
+            }
+        ]"#;
+        // Build the fixture as a BTreeMap (crate determinism rule) and let
+        // it `.collect()` into the proto field's HashMap at the call site.
+        let abi_mappings: std::collections::BTreeMap<String, Abi> = std::iter::once((
+            usdc_address.to_string(),
+            Abi {
+                value: malicious_abi.to_string(),
+                signature: None,
+                ..Default::default()
+            },
+        ))
+        .collect();
+
+        let options = VisualSignOptions {
+            decode_transfers: true,
+            transaction_name: None,
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                    network_id: Some("ETHEREUM_MAINNET".to_string()),
+                    abi_mappings: abi_mappings.into_iter().collect(),
+                })),
+            }),
+            developer_config: None,
+        };
+
+        let wrapper = EthereumTransactionWrapper::new(tx);
+        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
+
+        // The built-in ERC20 visualizer emits a PreviewLayout titled
+        // "ERC20 Transfer" with a "Recipient" address field and an "Amount"
+        // field. Without the fix, the malicious ABI would have produced
+        // attacker-chosen labels ("backup_wallet"/"safety_deposit") on the
+        // same selector, spoofing the signing prompt.
+        let preview = payload
+            .fields
+            .iter()
+            .find(|f| matches!(f, SignablePayloadField::PreviewLayout { .. }))
+            .expect("expected a PreviewLayout field from the built-in ERC20 visualizer");
+
+        let SignablePayloadField::PreviewLayout {
+            common,
+            preview_layout,
+        } = preview
+        else {
+            panic!("matched discriminant changed");
+        };
+        assert_eq!(common.label, "ERC20 Transfer");
+        assert_eq!(
+            preview_layout
+                .title
+                .as_ref()
+                .map(|t| t.text.as_str())
+                .unwrap_or(""),
+            "ERC20 Transfer",
+        );
+
+        let expanded = preview_layout
+            .expanded
+            .as_ref()
+            .expect("expected expanded ListLayout for transfer details");
+        let labels: Vec<&str> = expanded
+            .fields
+            .iter()
+            .map(|f| f.signable_payload_field.label().as_str())
+            .collect();
+        assert!(
+            labels.contains(&"Recipient"),
+            "expected built-in 'Recipient' label, got {labels:?}",
+        );
+        assert!(
+            labels.contains(&"Amount"),
+            "expected built-in 'Amount' label, got {labels:?}",
+        );
+
+        // And, defensively, the attacker-chosen parameter names must not
+        // appear anywhere in the rendered payload (labels, titles, subtitles,
+        // fallback_text, or any other serialized text). Serializing the whole
+        // payload to JSON and scanning the resulting string is the simplest
+        // way to assert this property without enumerating every text-bearing
+        // field on every SignablePayloadField variant.
+        let rendered = serde_json::to_string(&payload).unwrap();
+        assert!(
+            !rendered.contains("backup_wallet"),
+            "caller ABI param name must not appear anywhere in the rendered payload: {rendered}",
+        );
+        assert!(
+            !rendered.contains("safety_deposit"),
+            "caller ABI param name must not appear anywhere in the rendered payload: {rendered}",
+        );
+    }
+
+    /// EIP-1559 mirror of
+    /// `test_known_token_short_circuit_uses_tx_chain_id_not_metadata`.
+    ///
+    /// Same security property: when the tx carries an explicit chain_id and the
+    /// caller-supplied metadata claims a different chain, the mismatch is a hard
+    /// rejection, so no caller ABI gets bound. Identical to the legacy original
+    /// except for the `TypedTransaction::Eip1559` construction (which keeps the
+    /// tx chain_id at 1 so the `"chain_id 1"` / `"chain_id 137"` assertions hold).
+    #[test]
+    fn test_known_token_short_circuit_uses_tx_chain_id_not_metadata_eip1559() {
+        let usdc_address: Address = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            .parse()
+            .unwrap();
+        let victim: Address = "0x000000000000000000000000000000000000beef"
+            .parse()
+            .unwrap();
+        let amount = U256::from(1_000_000_000u64);
+
+        // USDC registered on mainnet (chain id 1) only.
+        let mut registry = ContractRegistry::new();
+        registry
+            .register_token(
+                1,
+                TokenMetadata {
+                    symbol: "USDC".to_string(),
+                    name: "USD Coin".to_string(),
+                    erc_standard: ErcStandard::Erc20,
+                    contract_address: usdc_address.to_string(),
+                    decimals: 6,
+                },
+            )
+            .unwrap();
+        let converter = EthereumVisualSignConverter::with_registry(Arc::new(registry));
+
+        // Real `transfer(victim, 1_000_000_000)` against mainnet USDC.
+        let call = IERC20::transferCall { to: victim, amount };
+        let calldata = Bytes::from(IERC20::transferCall::abi_encode(&call));
+        let tx = TypedTransaction::Eip1559(alloy_consensus::TxEip1559 {
+            chain_id: ChainId::from(1u64),
+            nonce: 0,
+            gas_limit: 50_000,
+            max_fee_per_gas: 30_000_000_000u128,
+            max_priority_fee_per_gas: 2_000_000_000u128,
+            to: alloy_primitives::TxKind::Call(usdc_address),
+            value: U256::ZERO,
+            access_list: Default::default(),
+            input: calldata,
+        });
+
+        let malicious_abi = r#"[
+            {
+                "type": "function",
+                "name": "transfer",
+                "inputs": [
+                    {"name": "backup_wallet", "type": "address"},
+                    {"name": "safety_deposit", "type": "uint256"}
+                ],
+                "outputs": [],
+                "stateMutability": "nonpayable"
+            }
+        ]"#;
+        let abi_mappings: std::collections::BTreeMap<String, Abi> = std::iter::once((
+            usdc_address.to_string(),
+            Abi {
+                value: malicious_abi.to_string(),
+                signature: None,
+                ..Default::default()
+            },
+        ))
+        .collect();
+
+        // Attacker mismatches metadata to Polygon (137). The converter must refuse
+        // outright: tx chain_id (1) is authoritative, and any mismatch with
+        // metadata is a hard error so no ABI -- malicious or otherwise -- gets
+        // bound to the payload.
+        let options = VisualSignOptions {
+            decode_transfers: true,
+            transaction_name: None,
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                    network_id: Some("POLYGON_MAINNET".to_string()),
+                    abi_mappings: abi_mappings.into_iter().collect(),
+                })),
+            }),
+            developer_config: None,
+        };
+
+        let wrapper = EthereumTransactionWrapper::new(tx);
+        let err = converter
+            .to_visual_sign_payload(wrapper, options)
+            .unwrap_err();
+        assert!(
+            matches!(err, VisualSignError::ValidationError(_)),
+            "mismatched tx/metadata chain_id must be rejected: {err:?}",
+        );
+        let VisualSignError::ValidationError(msg) = err else {
+            unreachable!()
+        };
+        assert!(
+            msg.contains("chain_id mismatch"),
+            "error must mention chain_id mismatch, got: {msg}",
+        );
+        assert!(
+            msg.contains("chain_id 1 "),
+            "error must reference tx-declared chain_id 1, got: {msg}",
+        );
+        assert!(
+            msg.contains("chain_id 137"),
+            "error must reference metadata chain_id 137, got: {msg}",
+        );
+    }
+
+    /// EIP-1559 mirror of
+    /// `test_known_erc721_token_skips_erc20_fallback_on_shared_selector`.
+    ///
+    /// Same security property: a known ERC721 token called with the
+    /// ERC20/ERC721 shared `approve(address,uint256)` selector must not be
+    /// mis-rendered as an ERC20 approval, and must fall through to raw hex.
+    /// Identical to the legacy original except for the
+    /// `TypedTransaction::Eip1559` construction.
+    #[test]
+    fn test_known_erc721_token_skips_erc20_fallback_on_shared_selector_eip1559() {
+        // Address-only fixture, the actual contract standard is decided by the
+        // registry entry below.
+        let nft_address: Address = "0xb0b0000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let spender: Address = "0x000000000000000000000000000000000000beef"
+            .parse()
+            .unwrap();
+        let token_id = U256::from(42u64);
+
+        // Register the address as an ERC721 token on mainnet.
+        let mut registry = ContractRegistry::new();
+        registry
+            .register_token(
+                1,
+                TokenMetadata {
+                    symbol: "NFT".to_string(),
+                    name: "Test NFT".to_string(),
+                    erc_standard: ErcStandard::Erc721,
+                    contract_address: nft_address.to_string(),
+                    decimals: 0,
+                },
+            )
+            .unwrap();
+        let converter = EthereumVisualSignConverter::with_registry(Arc::new(registry));
+
+        // ERC721 `approve(spender, tokenId)` shares its 4-byte selector with
+        // ERC20 `approve(address,uint256)`.
+        let call = IERC20::approveCall {
+            spender,
+            amount: token_id,
+        };
+        let calldata = Bytes::from(IERC20::approveCall::abi_encode(&call));
+        let tx = TypedTransaction::Eip1559(alloy_consensus::TxEip1559 {
+            chain_id: ChainId::from(1u64),
+            nonce: 0,
+            gas_limit: 50_000,
+            max_fee_per_gas: 30_000_000_000u128,
+            max_priority_fee_per_gas: 2_000_000_000u128,
+            to: alloy_primitives::TxKind::Call(nft_address),
+            value: U256::ZERO,
+            access_list: Default::default(),
+            input: calldata,
+        });
+
+        let options = VisualSignOptions {
+            decode_transfers: true,
+            transaction_name: None,
+            metadata: None,
+            developer_config: None,
+        };
+
+        let wrapper = EthereumTransactionWrapper::new(tx);
+        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
+
+        // No PreviewLayout should be emitted: ERC721 has no decoder, the
+        // ERC20 fallback is skipped for known non-ERC20 tokens, and the
+        // raw-hex fallback produces a RawData field, not a PreviewLayout.
+        let preview = payload
+            .fields
+            .iter()
+            .find(|f| matches!(f, SignablePayloadField::PreviewLayout { .. }));
+        assert!(
+            preview.is_none(),
+            "known ERC721 + ERC20-shared selector must not produce a PreviewLayout: {payload:?}",
+        );
+
+        // And, defensively, no ERC20-decoder text should appear anywhere in
+        // the serialized payload. Use serde_json so we scan every text-bearing
+        // field, not just what `Debug` prints. The ERC20 approve visualizer
+        // emits the label "ERC20 Approve" and a "Spender" field, both of
+        // which are the regression signals.
+        let rendered = serde_json::to_string(&payload).unwrap();
+        assert!(
+            !rendered.contains("ERC20 Approve") && !rendered.contains("Spender"),
+            "known ERC721 must not be mis-rendered as an ERC20 approval: {rendered}",
+        );
+    }
+
+    /// The canonical-token dispatch reads the ERC standard via
+    /// `layered_registry.global()` (the compiled-in layer) and deliberately
+    /// NEVER the caller-supplied request layer. That choice is the load-bearing
+    /// invariant that stops caller-provided metadata from poisoning the
+    /// known-token lookup. No public path builds a request layer today, so this
+    /// drives the private `try_known_token_dispatch` directly.
+    ///
+    /// This locks the `.global()` choice: a future refactor that switched the
+    /// lookup to `.lookup()`/`.request()` would consult the poisoned request
+    /// entry (Erc721) first, route to the ERC721 visualizer (which returns
+    /// None), fall back to raw hex, and so drop the "Recipient"/"Amount"
+    /// rendering this test asserts -- failing the test.
+    #[test]
+    fn test_known_token_dispatch_ignores_poisoned_request_layer() {
+        let token_addr: Address = "0xc0c0000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
+        let recipient: Address = "0x000000000000000000000000000000000000beef"
+            .parse()
+            .unwrap();
+        let amount = U256::from(1_000_000_000u64);
+
+        // GLOBAL (compiled-in) layer: token is a known ERC20 on chain 1.
+        let mut global = ContractRegistry::new();
+        global
+            .register_token(
+                1,
+                TokenMetadata {
+                    symbol: "USDC".to_string(),
+                    name: "USD Coin".to_string(),
+                    erc_standard: ErcStandard::Erc20,
+                    contract_address: token_addr.to_string(),
+                    decimals: 6,
+                },
+            )
+            .unwrap();
+
+        // REQUEST (caller-supplied) layer: POISON the SAME address on the SAME
+        // chain (1) as ERC721. Registering on chain 1 is load-bearing: a
+        // hypothetical `.request()`-first lookup keyed on `(1, token_addr)` must
+        // be able to find this entry, otherwise the test would pass even under
+        // the refactor it's meant to guard against.
+        let mut request = ContractRegistry::new();
+        request
+            .register_token(
+                1,
+                TokenMetadata {
+                    symbol: "EVIL".to_string(),
+                    name: "Poisoned Entry".to_string(),
+                    erc_standard: ErcStandard::Erc721,
+                    contract_address: token_addr.to_string(),
+                    decimals: 0,
+                },
+            )
+            .unwrap();
+
+        let layered = LayeredRegistry::with_request(Arc::new(global), request);
+
+        // Real ERC20 `transfer(recipient, amount)` calldata.
+        let call = IERC20::transferCall {
+            to: recipient,
+            amount,
+        };
+        let calldata = Bytes::from(IERC20::transferCall::abi_encode(&call));
+
+        let fields =
+            try_known_token_dispatch(&layered, Some(ChainId::from(1u64)), token_addr, &calldata)
+                .expect("known token must short-circuit to Some(..)");
+        assert_eq!(fields.len(), 1, "dispatch returns exactly one field");
+
+        // Because the GLOBAL layer says Erc20, the dispatch must route to the
+        // ERC20 visualizer and emit its "Recipient"/"Amount" rendering, NOT the
+        // ERC721/raw-hex fallback the poisoned request entry would force.
+        let rendered = serde_json::to_string(&fields).unwrap();
+        assert!(
+            rendered.contains("Recipient"),
+            "expected built-in ERC20 'Recipient' rendering (global Erc20 won): {rendered}",
+        );
+        assert!(
+            rendered.contains("Amount"),
+            "expected built-in ERC20 'Amount' rendering (global Erc20 won): {rendered}",
+        );
+    }
+
     #[test]
     fn test_transaction_with_custom_title() {
         let tx = TypedTransaction::Legacy(TxLegacy {
