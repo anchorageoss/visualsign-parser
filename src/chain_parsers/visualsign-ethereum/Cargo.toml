@@ -5,7 +5,17 @@ edition = "2024"
 
 [features]
 # Dev-only ABI signing helpers (CLI_DEV_SIGNING_KEY_SEED, sign_abi). Off by
-# default so enclave/server builds never link the dev key. The CLI enables it.
+# default so production builds never link the dev key and `authorized_abi_signers`
+# never allowlists the well-known dev pubkey. Only parser_cli enables this.
+#
+# Keep-out-of-prod, mirroring parser_app's `diagnostics` feature: Cargo unifies
+# features per invocation, so a build that compiles parser_cli AND parser_app in the
+# same graph (a bare `cargo build` / `cargo build --workspace` from src/) turns
+# dev-signing ON for parser_app too, which would allowlist the public dev seed there.
+# Shippable parser_app binaries are built package-scoped (the Containerfile builds
+# from parser/app; the Makefile uses `cargo build --workspace --exclude parser_cli`
+# then `cargo build -p parser_cli`), which keeps this OFF for parser_app. Do not
+# build a production parser_app with a bare workspace build.
 dev-signing = []
 
 [dependencies]
