@@ -4,8 +4,12 @@
 //! - `@-` reads it from stdin.
 //! - Anything else is returned unchanged.
 //!
-//! In all `@` cases, leading and trailing whitespace is trimmed since the
-//! transaction string itself (hex / base64) cannot legitimately contain it.
+//! In all `@` cases, ASCII whitespace (spaces, tabs, CR, LF) is stripped from
+//! the buffer since the transaction string itself (hex / base64) cannot
+//! legitimately contain it — this lets users paste line-wrapped hex from
+//! block explorers or terminal emulators without manual cleanup. The 10 MB
+//! size limit is applied to the raw read so a whitespace-padded file can't
+//! bypass it.
 
 use std::io::Read;
 
@@ -32,7 +36,15 @@ pub fn resolve_transaction_input(input: &str) -> Result<String, String> {
         }
     };
 
-    Ok(raw.trim().to_string())
+    Ok(strip_ascii_whitespace(&raw))
+}
+
+/// Remove every ASCII-whitespace byte from `input`. We intentionally use the
+/// ASCII variant (not `split_whitespace`) so exotic Unicode-whitespace bytes
+/// such as NBSP stay in the buffer and surface as decode errors rather than
+/// being silently swallowed.
+fn strip_ascii_whitespace(input: &str) -> String {
+    input.split_ascii_whitespace().collect()
 }
 
 fn read_bounded<R: Read>(reader: R, source: &str) -> Result<String, String> {
@@ -67,6 +79,26 @@ mod tests {
         let path = write_temp_json("vsp_tx_input_tests", "tx.hex", "  0xdeadbeef\n\n");
         let arg = format!("@{}", path.display());
         assert_eq!(resolve_transaction_input(&arg).unwrap(), "0xdeadbeef");
+    }
+
+    #[test]
+    fn reads_from_file_and_strips_internal_whitespace() {
+        // Line-wrapped hex (with stray internal space and tab) as a user
+        // might paste from a block explorer or wrapped terminal output.
+        let wrapped = "0a8a010a020793\n2208e4e3a4d46f74\td763\r\n   ";
+        let path = write_temp_json("vsp_tx_input_tests", "tx_wrapped.hex", wrapped);
+        let arg = format!("@{}", path.display());
+        assert_eq!(
+            resolve_transaction_input(&arg).unwrap(),
+            "0a8a010a0207932208e4e3a4d46f74d763",
+        );
+    }
+
+    #[test]
+    fn strip_ascii_whitespace_preserves_non_ascii() {
+        // Multi-byte UTF-8 (e.g. en dash) must pass through unchanged so we
+        // never silently corrupt input that happens to land in `@file` mode.
+        assert_eq!(strip_ascii_whitespace("a b\tc\nd \u{2013}"), "abcd\u{2013}");
     }
 
     #[test]
