@@ -22,6 +22,12 @@ use visualsign::{
     },
 };
 
+#[cfg(feature = "cli-plugin")]
+pub mod cli_plugin;
+
+#[cfg(feature = "cli-plugin")]
+pub use cli_plugin::{EthereumArgs, EthereumPlugin};
+
 pub mod abi_decoder;
 pub mod abi_metadata;
 pub mod abi_registry;

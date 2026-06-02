@@ -6549,14 +6549,9 @@ dependencies = [
 name = "parser_cli"
 version = "0.1.0"
 dependencies = [
- "bincode",
- "borsh 1.6.0",
- "bs58 0.5.1",
  "clap",
- "generated",
- "serde",
+ "parser_cli_core",
  "serde_json",
- "sha2 0.10.9",
  "similar",
  "tracing",
  "tracing-bunyan-formatter",
@@ -6566,6 +6561,18 @@ dependencies = [
  "visualsign-ethereum",
  "visualsign-solana",
  "visualsign-tron",
+]
+
+[[package]]
+name = "parser_cli_core"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "generated",
+ "serde",
+ "serde_json",
+ "tracing",
+ "visualsign",
 ]
 
 [[package]]
@@ -14067,11 +14074,13 @@ dependencies = [
  "alloy-sol-types",
  "base64 0.22.1",
  "chrono",
+ "clap",
  "generated",
  "hex",
  "k256 0.12.0",
  "log",
  "num_enum 0.7.5",
+ "parser_cli_core",
  "phf 0.13.1",
  "serde",
  "serde_json",
@@ -14088,10 +14097,12 @@ dependencies = [
  "bincode",
  "borsh 1.6.0",
  "bs58 0.5.1",
+ "clap",
  "generated",
  "hex",
  "jupiter-swap-api-client",
  "k256 0.12.0",
+ "parser_cli_core",
  "proptest",
  "serde",
  "serde_json",
@@ -14140,8 +14151,11 @@ dependencies = [
  "base64 0.22.1",
  "bs58 0.5.1",
  "chrono",
+ "clap",
+ "generated",
  "hex",
  "log",
+ "parser_cli_core",
  "protobuf 3.7.2",
  "serde",
  "serde_json",

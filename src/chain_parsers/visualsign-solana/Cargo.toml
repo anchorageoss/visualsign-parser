@@ -3,7 +3,15 @@ name = "visualsign-solana"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default    = ["cli-plugin"]
+cli-plugin = ["dep:clap", "dep:parser_cli_core", "dep:bs58"]
+diagnostics = ["visualsign/diagnostics"]
+
 [dependencies]
+bs58            = { version = "0.5", optional = true }
+clap            = { version = "4.0", features = ["derive"], optional = true }
+parser_cli_core = { path = "../../parser/cli-core", optional = true }
 
 tracing = { workspace = true }
 solana_parser = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "2146929" }
@@ -30,6 +38,7 @@ sha2 = "0.10"
 thiserror = "2.0.12"
 
 [dev-dependencies]
+parser_cli_core = { path = "../../parser/cli-core", features = ["test-utils"] }
 solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "2146929", features = ["proptest"] }
 solana_test_utils = { path = "../../solana_test_utils" }
 serde = { version = "1.0", features = ["derive"] }
@@ -39,9 +48,6 @@ base64 = "0.22.1"
 bs58 = "0.5"
 proptest = "1"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-
-[features]
-diagnostics = ["visualsign/diagnostics"]
 
 [lints]
 workspace = true
