@@ -7,7 +7,7 @@ publish = false
 [features]
 default = ["solana", "ethereum", "tron", "diagnostics"]
 solana = ["dep:visualsign-solana"]
-ethereum = ["dep:visualsign-ethereum", "dep:alloy-primitives"]
+ethereum = ["dep:visualsign-ethereum", "dep:alloy-primitives", "visualsign-ethereum/dev-signing"]
 tron = ["dep:visualsign-tron"]
 diagnostics = ["visualsign/diagnostics", "visualsign-solana?/diagnostics"]
 

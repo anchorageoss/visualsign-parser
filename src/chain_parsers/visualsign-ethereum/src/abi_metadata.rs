@@ -7,8 +7,11 @@ use crate::abi_registry::{AbiKind, AbiRegistry};
 use crate::embedded_abis::register_embedded_abi;
 use generated::parser::{ChainMetadata, chain_metadata};
 use k256::EncodedPoint;
+#[cfg(any(test, feature = "dev-signing"))]
 use k256::ecdsa::SigningKey;
-use k256::ecdsa::signature::hazmat::{PrehashSigner, PrehashVerifier};
+#[cfg(any(test, feature = "dev-signing"))]
+use k256::ecdsa::signature::hazmat::PrehashSigner;
+use k256::ecdsa::signature::hazmat::PrehashVerifier;
 use k256::ecdsa::{Signature, VerifyingKey};
 
 /// Maximum size for ABI JSON from proto messages (1 MB).
@@ -299,6 +302,12 @@ fn validate_abi_signature(
 /// (e.g. the `parser_cli --abi-json-mappings` flow). Not a production key. Any caller
 /// that trusts identity (rather than integrity) must verify the public key against an
 /// allowlist; see `try_extract_from_chain_metadata` security notes.
+///
+/// Gated behind the `dev-signing` cargo feature (and `cfg(test)` for the crate's own
+/// unit tests). It is never present in production builds (the enclave binary and the
+/// gRPC server do not enable the feature), so those binaries cannot derive the dev
+/// keypair and mint ABI signatures the parser would accept.
+#[cfg(any(test, feature = "dev-signing"))]
 pub const CLI_DEV_SIGNING_KEY_SEED: [u8; 32] = [0x42u8; 32];
 
 /// Sign `abi_json` with the given 32-byte secp256k1 seed and return a proto
@@ -314,6 +323,7 @@ pub const CLI_DEV_SIGNING_KEY_SEED: [u8; 32] = [0x42u8; 32];
 ///
 /// # Errors
 /// Returns `Err` if the seed does not form a valid secp256k1 scalar or signing fails.
+#[cfg(any(test, feature = "dev-signing"))]
 pub fn sign_abi(
     abi_json: &str,
     address: &alloy_primitives::Address,

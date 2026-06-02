@@ -18,19 +18,43 @@ use visualsign_ethereum::transaction_string_to_visual_sign;
 /// parser, so tests that exercise the metadata-ABI path must attach a real
 /// signature.
 ///
-/// The signature now binds the chain id and contract address, so `address` must be
-/// the map key the entry is stored under and the chain must match the transaction
-/// bytes (every test here uses chain 1). Delegates to the production signing routine
-/// so the test never drifts from the real signature format that
-/// `validate_abi_signature` verifies.
+/// The signature binds the chain id and contract address, so `address` must be the
+/// map key the entry is stored under and the chain must match the transaction bytes
+/// (every test here uses chain 1). The integration test is a separate crate and owns
+/// its signer: it signs through the public domain-separated prehash helper plus k256
+/// directly, so it does not depend on the gated dev seed/signer. The produced
+/// `SignatureMetadata` matches the format that `validate_abi_signature` verifies.
 fn sign_abi_for_test(abi_json: &str, address: &alloy_primitives::Address) -> SignatureMetadata {
-    visualsign_ethereum::abi_metadata::sign_abi(
-        abi_json,
-        address,
-        1,
-        &visualsign_ethereum::abi_metadata::CLI_DEV_SIGNING_KEY_SEED,
-    )
-    .expect("signing with the dev seed should succeed")
+    // local test seed; the integration test owns its signer (no dependency on the
+    // gated dev seed).
+    let seed: [u8; 32] = [0x42u8; 32];
+    let signing_key = k256::ecdsa::SigningKey::from_bytes(&seed).expect("valid key");
+    let verifying_key = k256::ecdsa::VerifyingKey::from(&signing_key);
+    let chain_id = 1u64;
+
+    let prehash = visualsign::signing::ethereum_metadata_prehash(
+        chain_id,
+        &address.into_array(),
+        abi_json.as_bytes(),
+    );
+
+    let signature: k256::ecdsa::Signature =
+        k256::ecdsa::signature::hazmat::PrehashSigner::sign_prehash(&signing_key, &prehash)
+            .expect("sign");
+
+    SignatureMetadata {
+        value: hex::encode(signature.to_der().as_bytes()),
+        metadata: vec![
+            generated::parser::Metadata {
+                key: "algorithm".to_string(),
+                value: "secp256k1".to_string(),
+            },
+            generated::parser::Metadata {
+                key: "public_key".to_string(),
+                value: hex::encode(verifying_key.to_encoded_point(false).as_bytes()),
+            },
+        ],
+    }
 }
 
 // Helper function to get fixture path

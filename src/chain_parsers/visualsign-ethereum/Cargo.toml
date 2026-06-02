@@ -3,6 +3,11 @@ name = "visualsign-ethereum"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Dev-only ABI signing helpers (CLI_DEV_SIGNING_KEY_SEED, sign_abi). Off by
+# default so enclave/server builds never link the dev key. The CLI enables it.
+dev-signing = []
+
 [dependencies]
 alloy-consensus = "1.2.1"
 alloy-contract = "1.2.1"
