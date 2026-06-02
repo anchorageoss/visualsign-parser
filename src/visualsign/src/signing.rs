@@ -14,10 +14,15 @@
 //!
 //! # v1 byte layout
 //!
-//! The prehash is computed as:
+//! The prehash is computed over a length-prefixed encoding of four fields:
 //!
 //! ```text
-//! prehash = SHA-256( DOMAIN || 0x00 || chain_tag || 0x00 || scope || 0x00 || body )
+//! prehash = SHA-256(
+//!     le_u64(DOMAIN.len())    || DOMAIN    ||
+//!     le_u64(chain_tag.len()) || chain_tag ||
+//!     le_u64(scope.len())     || scope     ||
+//!     le_u64(body.len())      || body
+//! )
 //! ```
 //!
 //! where:
@@ -29,9 +34,12 @@
 //!   ([`CHAIN_TAG_ETHEREUM`] or [`CHAIN_TAG_SOLANA`]).
 //! - `scope` is the chain-specific on-chain identity bytes (see below).
 //! - `body` is the metadata JSON bytes verbatim (the ABI/IDL string as supplied).
-//! - `0x00` is a single zero-byte separator placed between each field so the
-//!   concatenation is unambiguous and an attacker cannot shift bytes from one field
-//!   into an adjacent one to forge an equivalent preimage.
+//! - `le_u64(n)` is the 8-byte little-endian length of the field that immediately
+//!   follows it. Prefixing every field with its length makes the encoding injective:
+//!   distinct `(chain_tag, scope, body)` triples can never produce the same preimage,
+//!   so no shifting of bytes between adjacent fields (including empty fields or fields
+//!   that happen to contain length-prefix bytes) can forge an equivalent digest. This
+//!   holds for arbitrary field contents, not just the fixed-width scopes used today.
 //!
 //! # Per-chain scope
 //!
@@ -115,24 +123,27 @@ pub const CHAIN_TAG_ETHEREUM: &str = "ethereum";
 /// Chain tag for Solana metadata signatures.
 pub const CHAIN_TAG_SOLANA: &str = "solana";
 
-/// Single-byte separator placed between each field of the prehash preimage.
-const FIELD_SEPARATOR: u8 = 0x00;
-
 /// Core constructor for the v1 domain-separated metadata prehash.
 ///
-/// Computes `SHA-256(DOMAIN || 0x00 || chain_tag || 0x00 || scope || 0x00 || body)`.
-/// See the module documentation for the precise byte layout and the per-chain
-/// definition of `scope`.
+/// Computes the SHA-256 over the length-prefixed encoding of
+/// `(DOMAIN, chain_tag, scope, body)`. See the module documentation for the precise
+/// byte layout and the per-chain definition of `scope`.
 #[must_use]
 pub fn metadata_signing_prehash_v1(chain_tag: &str, scope: &[u8], body: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
-    hasher.update(METADATA_SIGNING_DOMAIN_V1);
-    hasher.update([FIELD_SEPARATOR]);
-    hasher.update(chain_tag.as_bytes());
-    hasher.update([FIELD_SEPARATOR]);
-    hasher.update(scope);
-    hasher.update([FIELD_SEPARATOR]);
-    hasher.update(body);
+    // Prefix every field with its little-endian u64 length so the concatenation is
+    // injective for arbitrary field contents (a field's bytes can never be reread as
+    // part of an adjacent field). usize -> u64 is a lossless widening on supported
+    // (<= 64-bit) targets.
+    for field in [
+        METADATA_SIGNING_DOMAIN_V1,
+        chain_tag.as_bytes(),
+        scope,
+        body,
+    ] {
+        hasher.update((field.len() as u64).to_le_bytes());
+        hasher.update(field);
+    }
     hasher.finalize().into()
 }
 
@@ -185,12 +196,23 @@ mod tests {
     }
 
     #[test]
-    fn test_separator_prevents_field_boundary_ambiguity() {
-        // Without the 0x00 separators, ("ab", "c") and ("a", "bc") would collide.
-        // The separators keep field boundaries unambiguous, so these must differ.
+    fn test_length_prefix_prevents_field_boundary_ambiguity() {
+        // A naive concatenation would let ("ab", "c") and ("a", "bc") collide.
+        // Length-prefixing keeps field boundaries unambiguous, so these must differ.
         let a = metadata_signing_prehash_v1(CHAIN_TAG_ETHEREUM, b"ab", b"c");
         let b = metadata_signing_prehash_v1(CHAIN_TAG_ETHEREUM, b"a", b"bc");
         assert_ne!(a, b, "field boundaries must be unambiguous");
+    }
+
+    #[test]
+    fn test_length_prefix_resists_separator_byte_collision() {
+        // Regression for the single-delimiter weakness: with a lone 0x00 separator,
+        // (scope = [0x00, b'y'], body = [b'z']) and (scope = [], body = [b'y', 0x00,
+        // b'z']) hash the same naive preimage. Length-prefixing must keep them
+        // distinct even when a field contains the separator byte or is empty.
+        let a = metadata_signing_prehash_v1(CHAIN_TAG_ETHEREUM, &[0x00, b'y'], b"z");
+        let b = metadata_signing_prehash_v1(CHAIN_TAG_ETHEREUM, &[], &[b'y', 0x00, b'z']);
+        assert_ne!(a, b, "embedded separator bytes must not create a collision");
     }
 
     #[test]
