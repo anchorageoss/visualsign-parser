@@ -8,6 +8,7 @@ pub mod field_builders;
 #[cfg(feature = "diagnostics")]
 pub mod lint;
 pub mod registry;
+pub mod signing;
 pub mod test_utils;
 pub mod vsptrait;
 
@@ -1280,8 +1281,12 @@ mod tests {
             panic!("Expected JSON object");
         }
 
-        println!("✅ Successfully demonstrated adding new field type with automatic alphabetical ordering!");
-        println!("✅ New field type MUST implement DeterministicOrdering to be used in deterministic contexts!");
+        println!(
+            "✅ Successfully demonstrated adding new field type with automatic alphabetical ordering!"
+        );
+        println!(
+            "✅ New field type MUST implement DeterministicOrdering to be used in deterministic contexts!"
+        );
     }
 
     #[test]
@@ -1356,7 +1361,9 @@ mod tests {
             }
         }
 
-        println!("✅ Demonstrated that types without DeterministicOrdering can't be used in deterministic contexts!");
+        println!(
+            "✅ Demonstrated that types without DeterministicOrdering can't be used in deterministic contexts!"
+        );
     }
 
     #[test]
@@ -2386,10 +2393,12 @@ mod tests {
                 expected_keys.sort();
 
                 assert_eq!(
-                    keys, expected_keys,
+                    keys,
+                    expected_keys,
                     "Object at path '{}' should have alphabetically ordered keys. Got: {:?}, Expected: {:?}",
                     if path.is_empty() { "root" } else { path },
-                    keys, expected_keys
+                    keys,
+                    expected_keys
                 );
 
                 // Recursively check nested values
