@@ -829,6 +829,42 @@ mod tests {
         assert!(registry.list_abis().contains(&TEST_ADDRESS));
     }
 
+    /// Boundary documentation: `abi_type` and `implementation_address` are NOT
+    /// covered by the ABI signature (only the ABI JSON body is). A signed ABI
+    /// whose `abi_type`/`implementation_address` carry attacker-chosen values the
+    /// signer never authorized still passes signature validation and is accepted,
+    /// because those fields sit outside the signed scope. The full `ChainMetadata`
+    /// (including these fields) is committed separately by `metadata_digest` in the
+    /// signed enclave output; see the module-level security notes. This test pins
+    /// that intended boundary so a future change that starts (or stops) covering
+    /// these fields fails loudly rather than silently.
+    #[test]
+    fn test_try_extract_abi_type_outside_signature_scope() {
+        // Signature is over VALID_ABI bound to (TEST_ADDRESS, chain 1) only.
+        let mut abi = signed_abi(VALID_ABI, TEST_ADDRESS);
+        // Flip metadata the signer never covered: mark it a Proxy pointing at an
+        // arbitrary implementation address.
+        abi.abi_type = Some(generated::parser::AbiType::Proxy as i32);
+        abi.implementation_address = Some("0x1111111111111111111111111111111111111111".to_string());
+
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![(TEST_ADDRESS, abi)])
+                    .into_iter()
+                    .collect(),
+            })),
+        };
+
+        let registry =
+            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
+                .expect("tampering with abi_type must NOT invalidate the body signature");
+        assert!(
+            registry.list_abis().contains(&TEST_ADDRESS),
+            "entry must still be accepted: abi_type/implementation_address are outside the signed scope"
+        );
+    }
+
     /// Regression: an ABI mapping that omits the signature must be rejected,
     /// even when the address and ABI JSON are otherwise valid. Without this check a
     /// wallet could supply arbitrary ABIs for any address and dictate the parsed

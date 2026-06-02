@@ -19,6 +19,7 @@ use solana_sdk::{
 };
 use std::collections::BTreeMap;
 use std::str::FromStr;
+use visualsign::signing::SignerAllowlist;
 use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
     encodings::SupportedEncodings,
@@ -173,6 +174,24 @@ impl SolanaTransactionWrapper {
 ///    (e.g. "System Program"), it would impersonate a trusted program in
 ///    the rendered "Program" field. Reject it.
 fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String, String)> {
+    // Resolve the authorized IDL-signer allowlist from the env-configured
+    // production list, then delegate. Splitting the allowlist out as a
+    // parameter lets tests exercise the positive acceptance path with an
+    // injected allowlist: env vars cannot be set in-process under edition 2024
+    // + forbid(unsafe), so an env-only allowlist would be untestable here.
+    extract_idl_mappings_with_signers(options, &authorized_idl_signers())
+}
+
+/// Extraction core with an explicitly supplied signer allowlist.
+///
+/// Identical to [`extract_idl_mappings`] except the caller provides the
+/// authorized-signer allowlist. Signed IDLs are accepted only when the signer
+/// appears in `idl_signers`; an empty allowlist rejects every signed IDL
+/// (fail-closed). Unsigned IDLs are unaffected.
+fn extract_idl_mappings_with_signers(
+    options: &VisualSignOptions,
+    idl_signers: &SignerAllowlist,
+) -> BTreeMap<String, (String, String)> {
     let Some(mappings) = options
         .metadata
         .as_ref()
@@ -187,11 +206,6 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
     else {
         return BTreeMap::new();
     };
-
-    // Build the authorized IDL-signer allowlist once. Signed IDLs are accepted
-    // only when the signer appears here; an empty allowlist rejects all signed
-    // IDLs (fail-closed). Unsigned IDLs are unaffected (still accepted below).
-    let idl_signers = authorized_idl_signers();
 
     let mut out: BTreeMap<String, (String, String)> = BTreeMap::new();
     for (program_id, idl) in mappings {
@@ -241,7 +255,7 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
         if let Some(proto_sig) = idl.signature.as_ref() {
             let local_sig = convert_proto_signature(proto_sig);
             if let Err(e) =
-                validate_idl_signature(&idl.value, &pubkey.to_bytes(), &local_sig, &idl_signers)
+                validate_idl_signature(&idl.value, &pubkey.to_bytes(), &local_sig, idl_signers)
             {
                 tracing::warn!(
                     "Skipping IDL mapping for '{program_id}': signature validation failed: {e}"
@@ -1881,6 +1895,76 @@ mod tests {
         assert!(
             mappings.is_empty(),
             "invalid signature should be skipped, got: {mappings:?}"
+        );
+    }
+
+    /// Positive acceptance path: a signed IDL whose signer is on the allowlist
+    /// is accepted through the full extraction pipeline. Driven via
+    /// `extract_idl_mappings_with_signers` with an injected allowlist, the only
+    /// way to cover the accept-on-valid-signature path (the production
+    /// allowlist is env-configured, and env vars cannot be set in-process under
+    /// edition 2024 + forbid(unsafe)). The empty-allowlist control proves the
+    /// acceptance was gated on the allowlist, not on the signature alone.
+    #[test]
+    fn test_extract_idl_mappings_accepts_signed_idl_from_allowlisted_signer() {
+        use k256::ecdsa::SigningKey;
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
+
+        const PROGRAM_ID: &str = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
+        let idl_json = r#"{"metadata":{"name":"Custom"},"instructions":[]}"#;
+
+        // Sign over the shared program-id-bound prehash, exactly as a real
+        // signer would (see `visualsign::signing::solana_metadata_prehash`).
+        let program_bytes = Pubkey::from_str(PROGRAM_ID)
+            .expect("valid pubkey")
+            .to_bytes();
+        let signing_key = SigningKey::from_bytes(&[0x42u8; 32]).expect("valid key");
+        let verifying_key = k256::ecdsa::VerifyingKey::from(&signing_key);
+        let hash =
+            visualsign::signing::solana_metadata_prehash(&program_bytes, idl_json.as_bytes());
+        let sig: k256::ecdsa::Signature = signing_key.sign_prehash(&hash).expect("sign");
+        let pk_bytes = verifying_key.to_encoded_point(false).as_bytes().to_vec();
+
+        let proto_sig = generated::parser::SignatureMetadata {
+            value: hex::encode(sig.to_der().as_bytes()),
+            metadata: vec![
+                generated::parser::Metadata {
+                    key: "algorithm".to_string(),
+                    value: "secp256k1".to_string(),
+                },
+                generated::parser::Metadata {
+                    key: "public_key".to_string(),
+                    value: hex::encode(&pk_bytes),
+                },
+            ],
+        };
+        let options = make_options_with_idl_mapping(
+            PROGRAM_ID,
+            generated::parser::Idl {
+                value: idl_json.to_string(),
+                idl_type: None,
+                idl_version: None,
+                signature: Some(proto_sig),
+                program_name: Some("Custom".to_string()),
+            },
+        );
+
+        // Allowlist authorizing exactly the test signer.
+        let mut allow = SignerAllowlist::new();
+        allow.insert(pk_bytes);
+        let mappings = extract_idl_mappings_with_signers(&options, &allow);
+        assert_eq!(
+            mappings.len(),
+            1,
+            "signed IDL from an allowlisted signer should be accepted, got: {mappings:?}"
+        );
+        assert!(mappings.contains_key(PROGRAM_ID));
+
+        // Negative control: same signed IDL, empty allowlist => rejected.
+        let rejected = extract_idl_mappings_with_signers(&options, &SignerAllowlist::new());
+        assert!(
+            rejected.is_empty(),
+            "empty allowlist must reject the signed IDL (fail-closed), got: {rejected:?}"
         );
     }
 

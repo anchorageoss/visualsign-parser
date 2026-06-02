@@ -6,9 +6,9 @@
 //! domain-separated prehash that binds the program id to the IDL JSON bytes
 //! (prehashed verification via `PrehashVerifier::verify_prehash`) before
 //! accepting the entry into the registry. The prehash is the shared v1
-//! construction in [`visualsign::signing`]:
-//! `SHA-256(DOMAIN \0 "solana" \0 program_id \0 idl_json)`. Signers must
-//! therefore reproduce that exact construction via
+//! domain-separated, length-prefixed construction defined in
+//! [`visualsign::signing`]; that module documents the authoritative byte
+//! layout. Signers must reproduce it via
 //! [`visualsign::signing::solana_metadata_prehash`] and sign the resulting
 //! 32-byte digest, not the raw JSON bytes directly.
 //!
