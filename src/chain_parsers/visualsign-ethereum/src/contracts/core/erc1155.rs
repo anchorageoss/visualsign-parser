@@ -20,7 +20,7 @@ sol! {
 }
 
 /// Visualizer for ERC-1155 multi-token contract calls
-pub struct ERC1155Visualizer {}
+pub struct ERC1155Visualizer;
 
 impl ERC1155Visualizer {
     /// Attempts to decode and visualize ERC-1155 transfer calls.
@@ -187,19 +187,19 @@ mod tests {
 
     #[test]
     fn test_visualize_empty_input() {
-        let visualizer = ERC1155Visualizer {};
+        let visualizer = ERC1155Visualizer;
         assert_eq!(visualizer.visualize_tx_commands(&[]), None);
     }
 
     #[test]
     fn test_visualize_too_short() {
-        let visualizer = ERC1155Visualizer {};
+        let visualizer = ERC1155Visualizer;
         assert_eq!(visualizer.visualize_tx_commands(&[0x01, 0x02]), None);
     }
 
     #[test]
     fn test_visualize_unknown_selector() {
-        let visualizer = ERC1155Visualizer {};
+        let visualizer = ERC1155Visualizer;
         let input = hex!("deadbeef01020304");
         assert!(visualizer.visualize_tx_commands(&input).is_none());
     }
@@ -215,7 +215,7 @@ mod tests {
         };
         let input = IERC1155::safeTransferFromCall::abi_encode(&call);
 
-        let field = ERC1155Visualizer {}
+        let field = ERC1155Visualizer
             .visualize_tx_commands(&input)
             .expect("Expected PreviewLayout");
 
@@ -239,7 +239,7 @@ mod tests {
         };
         let input = IERC1155::safeBatchTransferFromCall::abi_encode(&call);
 
-        let field = ERC1155Visualizer {}
+        let field = ERC1155Visualizer
             .visualize_tx_commands(&input)
             .expect("Expected PreviewLayout");
 
@@ -265,7 +265,7 @@ mod tests {
         };
         let input = IERC1155::safeBatchTransferFromCall::abi_encode(&call);
 
-        let field = ERC1155Visualizer {}
+        let field = ERC1155Visualizer
             .visualize_tx_commands(&input)
             .expect("Expected PreviewLayout");
 
