@@ -45,7 +45,63 @@
 //! (prehash signing). Note that the format is intentionally explicit so it can be
 //! re-implemented in any language.
 
+use std::collections::BTreeSet;
+
 use sha2::{Digest, Sha256};
+
+/// Allowlist of authorized signer public keys, compared by their canonical
+/// SEC1-encoded bytes (the chain crates canonicalize before insert/lookup, so
+/// compressed vs uncompressed encodings of the same key match). An EMPTY
+/// allowlist authorizes nothing: signed metadata is rejected (fail-closed).
+///
+/// This type is deliberately crypto-free: it stores already-decoded key bytes and
+/// never parses or validates them, so the core crate keeps no dependency on any
+/// secp256k1 implementation. Callers (the chain crates) decode and canonicalize the
+/// keys before inserting or looking them up. It is shared so the Ethereum ABI and
+/// Solana IDL signature paths can enforce the same mechanism.
+#[derive(Debug, Clone, Default)]
+pub struct SignerAllowlist {
+    keys: BTreeSet<Vec<u8>>,
+}
+
+impl SignerAllowlist {
+    /// Creates an empty allowlist. An empty allowlist authorizes nothing.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds a signer's canonical public-key bytes to the allowlist.
+    pub fn insert(&mut self, canonical_pubkey: Vec<u8>) {
+        self.keys.insert(canonical_pubkey);
+    }
+
+    /// Returns `true` if the canonical public-key bytes are authorized.
+    #[must_use]
+    pub fn contains(&self, canonical_pubkey: &[u8]) -> bool {
+        self.keys.contains(canonical_pubkey)
+    }
+
+    /// Returns `true` if the allowlist holds no keys (authorizes nothing).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
+
+    /// Returns the number of distinct authorized keys.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.keys.len()
+    }
+}
+
+impl FromIterator<Vec<u8>> for SignerAllowlist {
+    fn from_iter<I: IntoIterator<Item = Vec<u8>>>(iter: I) -> Self {
+        Self {
+            keys: iter.into_iter().collect(),
+        }
+    }
+}
 
 /// Domain separation tag for the v1 metadata signing prehash.
 ///
@@ -166,6 +222,54 @@ mod tests {
         assert_ne!(base, ethereum_metadata_prehash(1, &address_b, abi_json));
         // Different chain, same address.
         assert_ne!(base, ethereum_metadata_prehash(137, &address_a, abi_json));
+    }
+
+    #[test]
+    fn test_allowlist_empty_by_default() {
+        let allow = SignerAllowlist::new();
+        assert!(allow.is_empty(), "a fresh allowlist must be empty");
+        assert_eq!(allow.len(), 0);
+        assert!(
+            !allow.contains(b"any-key"),
+            "an empty allowlist must authorize nothing (fail-closed)"
+        );
+    }
+
+    #[test]
+    fn test_allowlist_insert_and_contains() {
+        let mut allow = SignerAllowlist::new();
+        allow.insert(b"key-a".to_vec());
+        assert!(!allow.is_empty());
+        assert_eq!(allow.len(), 1);
+        assert!(allow.contains(b"key-a"), "inserted key must be authorized");
+        assert!(
+            !allow.contains(b"key-b"),
+            "a key that was never inserted must not be authorized"
+        );
+    }
+
+    #[test]
+    fn test_allowlist_insert_is_idempotent() {
+        let mut allow = SignerAllowlist::new();
+        allow.insert(b"key-a".to_vec());
+        allow.insert(b"key-a".to_vec());
+        assert_eq!(
+            allow.len(),
+            1,
+            "inserting the same key twice keeps one entry"
+        );
+    }
+
+    #[test]
+    fn test_allowlist_from_iter() {
+        let allow: SignerAllowlist = [b"key-a".to_vec(), b"key-b".to_vec(), b"key-a".to_vec()]
+            .into_iter()
+            .collect();
+        // Duplicate "key-a" collapses to a single entry.
+        assert_eq!(allow.len(), 2);
+        assert!(allow.contains(b"key-a"));
+        assert!(allow.contains(b"key-b"));
+        assert!(!allow.contains(b"key-c"));
     }
 
     #[test]

@@ -57,6 +57,21 @@ fn sign_abi_for_test(abi_json: &str, address: &alloy_primitives::Address) -> Sig
     }
 }
 
+/// Allowlist authorizing the local test signer used by `sign_abi_for_test`
+/// (seed `[0x42u8; 32]`). In the integration-test build the `dev-signing` feature is
+/// off and no env var is set, so `authorized_abi_signers()` is empty (fail-closed).
+/// Tests that submit a signed ABI and expect it to be accepted inject this explicit
+/// allowlist via `EthereumVisualSignConverter::with_signers`.
+fn test_abi_signer_allowlist() -> visualsign::signing::SignerAllowlist {
+    let seed: [u8; 32] = [0x42u8; 32];
+    let signing_key = k256::ecdsa::SigningKey::from_bytes(&seed).expect("valid key");
+    let verifying_key = k256::ecdsa::VerifyingKey::from(&signing_key);
+    let pubkey = verifying_key.to_encoded_point(false).as_bytes().to_vec();
+    let mut allow = visualsign::signing::SignerAllowlist::new();
+    allow.insert(pubkey);
+    allow
+}
+
 // Helper function to get fixture path
 fn fixture_path(name: &str) -> PathBuf {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -293,7 +308,7 @@ fn test_abi_from_metadata_decodes_function() {
         developer_config: None,
     };
 
-    let converter = EthereumVisualSignConverter::new();
+    let converter = EthereumVisualSignConverter::with_signers(test_abi_signer_allowlist());
     let result = converter
         .to_visual_sign_payload_from_string(&tx_hex, options)
         .unwrap();
@@ -395,7 +410,7 @@ fn test_proxy_decodes_via_implementation_abi() {
         developer_config: None,
     };
 
-    let converter = EthereumVisualSignConverter::new();
+    let converter = EthereumVisualSignConverter::with_signers(test_abi_signer_allowlist());
     let json = converter
         .to_visual_sign_payload_from_string(&tx_hex, options)
         .unwrap()
@@ -487,7 +502,7 @@ fn test_proxy_entry_cannot_override_canonical_token() {
         developer_config: None,
     };
 
-    let converter = EthereumVisualSignConverter::new();
+    let converter = EthereumVisualSignConverter::with_signers(test_abi_signer_allowlist());
     let json = converter
         .to_visual_sign_payload_from_string(&tx_hex, options)
         .unwrap()
@@ -600,7 +615,7 @@ fn test_chain_id_matching_metadata_succeeds() {
         developer_config: None,
     };
 
-    let converter = EthereumVisualSignConverter::new();
+    let converter = EthereumVisualSignConverter::with_signers(test_abi_signer_allowlist());
     let payload = converter
         .to_visual_sign_payload_from_string(&tx_hex, options)
         .expect("matching network_id and chain_id should parse cleanly");

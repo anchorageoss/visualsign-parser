@@ -16,6 +16,7 @@ use visualsign::{
     SignablePayloadFieldAmountV2, SignablePayloadFieldCommon, SignablePayloadFieldTextV2,
     encodings::SupportedEncodings,
     registry::LayeredRegistry,
+    signing::SignerAllowlist,
     vsptrait::{
         DeveloperConfig, Transaction, TransactionParseError, VisualSignConverter,
         VisualSignConverterFromString, VisualSignError, VisualSignOptions,
@@ -162,14 +163,48 @@ impl EthereumTransactionWrapper {
 pub struct EthereumVisualSignConverter {
     registry: Arc<registry::ContractRegistry>,
     visualizer_registry: visualizer::EthereumVisualizerRegistry,
+    abi_signers: SignerAllowlist,
 }
 
 impl EthereumVisualSignConverter {
     /// Creates a new converter with a custom registry wrapped in Arc.
+    ///
+    /// The ABI-signer allowlist is the default from
+    /// [`abi_metadata::authorized_abi_signers`]. Use [`Self::with_registry_and_signers`]
+    /// to inject an explicit allowlist.
     pub fn with_registry(registry: Arc<registry::ContractRegistry>) -> Self {
         Self {
             registry,
             visualizer_registry: visualizer::EthereumVisualizerRegistryBuilder::new().build(),
+            abi_signers: abi_metadata::authorized_abi_signers(),
+        }
+    }
+
+    /// Creates a converter with a custom registry and an explicit ABI-signer
+    /// allowlist. Intended for tests and configured deployments that need to control
+    /// which signers are authorized rather than relying on the compile-time/env
+    /// defaults.
+    pub fn with_registry_and_signers(
+        registry: Arc<registry::ContractRegistry>,
+        abi_signers: SignerAllowlist,
+    ) -> Self {
+        Self {
+            registry,
+            visualizer_registry: visualizer::EthereumVisualizerRegistryBuilder::new().build(),
+            abi_signers,
+        }
+    }
+
+    /// Creates a converter with the default registry (all known protocols) and an
+    /// explicit ABI-signer allowlist. Mirrors [`Self::new`] but overrides the signer
+    /// allowlist.
+    pub fn with_signers(abi_signers: SignerAllowlist) -> Self {
+        let (contract_registry, visualizer_builder) =
+            registry::ContractRegistry::with_default_protocols();
+        Self {
+            registry: Arc::new(contract_registry),
+            visualizer_registry: visualizer_builder.build(),
+            abi_signers,
         }
     }
 
@@ -180,6 +215,7 @@ impl EthereumVisualSignConverter {
         Self {
             registry: Arc::new(contract_registry),
             visualizer_registry: visualizer_builder.build(),
+            abi_signers: abi_metadata::authorized_abi_signers(),
         }
     }
 
@@ -229,7 +265,7 @@ impl EthereumVisualSignConverter {
 
         // Resolve chain_id: metadata > transaction > default (1 for legacy).
         let chain_id = resolve_chain_id(&transaction, &options)?;
-        let metadata_abi = extract_metadata_abi(&options, chain_id);
+        let metadata_abi = extract_metadata_abi(&options, chain_id, &self.abi_signers);
 
         convert_to_visual_sign_payload(
             transaction,
@@ -440,8 +476,9 @@ fn resolve_chain_id(
 fn extract_metadata_abi(
     options: &VisualSignOptions,
     chain_id: u64,
+    allowlist: &SignerAllowlist,
 ) -> Option<abi_registry::AbiRegistry> {
-    abi_metadata::try_extract_from_chain_metadata(options.metadata.as_ref(), chain_id)
+    abi_metadata::try_extract_from_chain_metadata(options.metadata.as_ref(), chain_id, allowlist)
 }
 
 /// Known-token short-circuit: if the destination is a token registered in the

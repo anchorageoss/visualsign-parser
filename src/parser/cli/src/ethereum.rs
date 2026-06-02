@@ -541,9 +541,14 @@ mod tests {
         let extracted = ChainMetadata {
             metadata: Some(Metadata::Ethereum(eth)),
         };
-        let registry =
-            visualsign_ethereum::abi_metadata::try_extract_from_chain_metadata(Some(&extracted), 1)
-                .expect("metadata with a signed synthesized proxy must extract");
+        let registry = visualsign_ethereum::abi_metadata::try_extract_from_chain_metadata(
+            Some(&extracted),
+            1,
+            // dev-signing is enabled for the CLI, so this allowlists the dev key the
+            // CLI signed the synthesized proxy with.
+            &visualsign_ethereum::abi_metadata::authorized_abi_signers(),
+        )
+        .expect("metadata with a signed synthesized proxy must extract");
         assert!(
             registry.list_abis().contains(&PROXY),
             "signed synthesized proxy must survive extraction (unsigned would be dropped)",
