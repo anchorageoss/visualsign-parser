@@ -15,11 +15,12 @@ exact identity, from an authorized signer."
 
 ## Scope
 
-- **Domain-separated prehash (core).** Add a shared v1 prehash
-  `SHA-256(DOMAIN \0 chain_tag \0 scope \0 body)` in `visualsign/src/signing.rs`.
-  Ethereum scope = chain_id || contract address; Solana scope = program id.
-  Length-prefix every field (LE u64) so the encoding is injective for
-  arbitrary/empty field contents. Document the layout for external signers.
+- **Domain-separated prehash (core).** Add a shared v1 prehash in
+  `visualsign/src/signing.rs`: `SHA-256(le_u64(len)||DOMAIN || le_u64(len)||chain_tag
+  || le_u64(len)||scope || le_u64(len)||body)`. Ethereum scope = 8-byte big-endian
+  chain_id || 20-byte contract address; Solana scope = 32-byte program id. Every
+  field is length-prefixed (LE u64) so the encoding is injective for arbitrary/empty
+  field contents. Document the layout for external signers.
 - **Bind signatures to identity.** Thread chain id + contract address
   (Ethereum) and program id (Solana) into signature validation and the CLI
   signer. A signature is valid only for the exact identity it was produced for.
