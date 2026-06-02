@@ -5,6 +5,7 @@ use generated::parser::{Abi, AbiType, ChainMetadata, EthereumMetadata, chain_met
 use visualsign::registry::{Chain, TransactionConverterRegistry};
 use visualsign_ethereum::abi_metadata::{CLI_DEV_SIGNING_KEY_SEED, sign_abi};
 use visualsign_ethereum::networks::parse_network;
+use visualsign_ethereum::token_metadata::parse_network_id;
 
 use crate::mapping_parser;
 
@@ -98,25 +99,42 @@ fn normalize_eth_address(addr: &str) -> String {
 /// checksum casing the user supplied (e.g. `0xAbCd...` and `0xabcd...` both
 /// produce the same key). The [`validate_eth_address`] validator runs first, so
 /// [`normalize_eth_address`] can safely strip the prefix without re-checking.
-fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<String, Abi>, usize) {
+///
+/// `chain_id` is the numeric chain id the metadata targets; it is bound into each
+/// ABI signature (alongside the contract address) so the signature matches what the
+/// parser verifies for this (chain, address).
+fn build_abi_mappings_from_files(
+    abi_json_mappings: &[String],
+    chain_id: u64,
+) -> (HashMap<String, Abi>, usize) {
     let (raw, count) = mapping_parser::load_mappings(
         abi_json_mappings,
         "ABI",
         "UniswapV2:path/to/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
         "ContractAddress",
         validate_eth_address,
-        |_components, json| {
+        |components, json| {
             // The metadata-ABI extraction path rejects unsigned entries,
             // so the CLI attaches an integrity signature using a deterministic local
             // dev key. This is integrity, not identity, the CLI is a local dev tool
             // that already trusts its input files; production trust comes from the
             // gRPC caller verifying the public key against an allowlist.
             //
-            // If signing fails (e.g. an invalid seed in future refactors), surface
-            // the failure as a `load_mappings` rejection so the entry is skipped and
-            // the success count stays accurate, rather than emitting an unsigned
+            // The signature binds the contract address and chain id, so it must be
+            // produced for the same (chain, address) the parser verifies with. The
+            // parser uses the entry's map-key address (normalized to lowercase, but
+            // hex parsing is case-insensitive so the signed bytes match) and the
+            // resolved chain id, which for the CLI flow is this `chain_id`.
+            //
+            // If parsing or signing fails (e.g. an invalid seed in future refactors),
+            // surface the failure as a `load_mappings` rejection so the entry is
+            // skipped and the success count stays accurate, rather than emitting an
             // `Abi` that the extractor would silently drop later.
-            let signature = sign_abi(&json, &CLI_DEV_SIGNING_KEY_SEED)
+            let addr = components
+                .identifier
+                .parse::<alloy_primitives::Address>()
+                .map_err(|e| format!("invalid contract address: {e}"))?;
+            let signature = sign_abi(&json, &addr, chain_id, &CLI_DEV_SIGNING_KEY_SEED)
                 .map_err(|e| format!("failed to sign ABI: {e}"))?;
             Ok(Abi {
                 value: json,
@@ -142,10 +160,15 @@ fn build_abi_mappings_from_files(abi_json_mappings: &[String]) -> (HashMap<Strin
 /// `abi_json_mappings` is the original `--abi-json-mappings` list; it is used to
 /// emit a louder warning when a proxy's ABI file was specified but failed to load
 /// (vs. simply never having an ABI file specified at all).
+///
+/// `chain_id` is the numeric chain id the metadata targets; it is bound into the
+/// synthesized proxy ABI's signature (alongside the proxy address) so the parser
+/// accepts it for this (chain, address).
 fn apply_proxy_mappings(
     abi_mappings: &mut HashMap<String, Abi>,
     proxy_mappings: &[String],
     abi_json_mappings: &[String],
+    chain_id: u64,
 ) {
     // Pre-compute the set of addresses that were attempted in --abi-json-mappings.
     // Used below to distinguish "ABI file was specified but failed" from "no ABI file at all".
@@ -196,16 +219,30 @@ fn apply_proxy_mappings(
                 );
             }
             let empty_abi = "[]".to_string();
-            let signature = match sign_abi(&empty_abi, &CLI_DEV_SIGNING_KEY_SEED) {
-                Ok(sig) => sig,
+            // `proxy_key` is lowercase-normalized valid hex; parse it to bind the
+            // signature to the proxy address (hex parsing is case-insensitive, so
+            // the signed bytes match what the parser verifies for this entry).
+            let proxy_addr = match proxy_key.parse::<alloy_primitives::Address>() {
+                Ok(addr) => addr,
                 Err(e) => {
                     eprintln!(
                         "  Warning: Skipping proxy mapping '{mapping}': \
-                         failed to sign synthesized proxy ABI: {e}"
+                         invalid proxy address for signing: {e}"
                     );
                     continue;
                 }
             };
+            let signature =
+                match sign_abi(&empty_abi, &proxy_addr, chain_id, &CLI_DEV_SIGNING_KEY_SEED) {
+                    Ok(sig) => sig,
+                    Err(e) => {
+                        eprintln!(
+                            "  Warning: Skipping proxy mapping '{mapping}': \
+                             failed to sign synthesized proxy ABI: {e}"
+                        );
+                        continue;
+                    }
+                };
             abi_mappings.insert(
                 proxy_key.clone(),
                 Abi {
@@ -256,11 +293,19 @@ pub(crate) fn create_chain_metadata(
         parse_network("ETHEREUM_MAINNET").expect("ETHEREUM_MAINNET should always be valid")
     };
 
+    // The ABI signature binds the chain id, so the numeric chain id is only needed
+    // when there is at least one ABI to sign. Derive it lazily inside each branch so
+    // the no-ABI path still works for networks `parse_network_id` does not number
+    // (it only knows the canonical mainnets). The double lookup when both lists are
+    // non-empty is cheap and avoids sharing an `Option` across the lint-restricted
+    // borrow.
     let mut abi_mappings = if abi_json_mappings.is_empty() {
         HashMap::new()
     } else {
+        let chain_id = parse_network_id(&network_id)
+            .map_err(|e| format!("cannot sign ABI mappings for network '{network_id}': {e}"))?;
         eprintln!("Loading custom ABIs:");
-        let (mappings, valid_count) = build_abi_mappings_from_files(abi_json_mappings);
+        let (mappings, valid_count) = build_abi_mappings_from_files(abi_json_mappings, chain_id);
         eprintln!(
             "Successfully loaded {}/{} ABI mappings\n",
             valid_count,
@@ -270,8 +315,16 @@ pub(crate) fn create_chain_metadata(
     };
 
     if !abi_proxy_mappings.is_empty() {
+        let chain_id = parse_network_id(&network_id).map_err(|e| {
+            format!("cannot sign proxy ABI mappings for network '{network_id}': {e}")
+        })?;
         eprintln!("Applying proxy mappings:");
-        apply_proxy_mappings(&mut abi_mappings, abi_proxy_mappings, abi_json_mappings);
+        apply_proxy_mappings(
+            &mut abi_mappings,
+            abi_proxy_mappings,
+            abi_json_mappings,
+            chain_id,
+        );
         eprintln!();
     }
 

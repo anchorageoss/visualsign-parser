@@ -6549,6 +6549,7 @@ dependencies = [
 name = "parser_cli"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
  "bincode",
  "borsh 1.6.0",
  "bs58 0.5.1",

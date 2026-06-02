@@ -845,11 +845,17 @@ mod tests {
     /// Build a signed `Abi` for tests that exercise the metadata-ABI extraction
     /// path, which rejects unsigned entries. Proxy entries layer `abi_type` and
     /// `implementation_address` on top via struct-update (`..signed_abi(...)`).
-    fn signed_abi(value: &str) -> Abi {
+    ///
+    /// The signature is bound to `address` (the map key the entry is stored under)
+    /// on chain 1, matching what the converter verifies: it resolves chain_id from
+    /// the transaction bytes (all callers use chain 1) and checks each entry against
+    /// its own map-key address.
+    fn signed_abi(value: &str, address: &Address) -> Abi {
         Abi {
             value: value.to_string(),
             signature: Some(
-                abi_metadata::sign_abi(value, &abi_metadata::CLI_DEV_SIGNING_KEY_SEED).unwrap(),
+                abi_metadata::sign_abi(value, address, 1, &abi_metadata::CLI_DEV_SIGNING_KEY_SEED)
+                    .unwrap(),
             ),
             ..Default::default()
         }
@@ -2042,10 +2048,10 @@ mod tests {
                 Abi {
                     abi_type: Some(AbiType::Proxy as i32),
                     implementation_address: Some(impl_addr.to_string()),
-                    ..signed_abi("[]")
+                    ..signed_abi("[]", &proxy)
                 },
             ),
-            (impl_addr.to_string(), signed_abi(impl_abi)),
+            (impl_addr.to_string(), signed_abi(impl_abi, &impl_addr)),
         ]
         .into_iter()
         .collect();
@@ -2114,7 +2120,7 @@ mod tests {
                 Abi {
                     abi_type: Some(AbiType::Proxy as i32),
                     implementation_address: Some(proxy_b.to_string()),
-                    ..signed_abi("[]")
+                    ..signed_abi("[]", &proxy_a)
                 },
             ),
             (
@@ -2122,10 +2128,10 @@ mod tests {
                 Abi {
                     abi_type: Some(AbiType::Proxy as i32),
                     implementation_address: Some(impl_c.to_string()),
-                    ..signed_abi("[]")
+                    ..signed_abi("[]", &proxy_b)
                 },
             ),
-            (impl_c.to_string(), signed_abi(c_abi)),
+            (impl_c.to_string(), signed_abi(c_abi, &impl_c)),
         ]
         .into_iter()
         .collect();
