@@ -65,8 +65,15 @@ pub struct SharedArgs {
     #[arg(long)]
     pub condensed_only: bool,
 
-    /// Network identifier — chain ID (1, 137, …) or canonical name (`ETHEREUM_MAINNET`, …).
-    #[arg(long, short = 'n', value_name = "NETWORK")]
+    /// Network identifier (chain ID or canonical name).
+    #[arg(
+        long,
+        short = 'n',
+        value_name = "NETWORK",
+        long_help = "Network identifier - chain ID or canonical name.\n\
+                     Chain ID: 1, 137, 42161, etc.\n\
+                     Canonical name: ETHEREUM_MAINNET, POLYGON_MAINNET, ARBITRUM_MAINNET, etc."
+    )]
     pub network: Option<String>,
 }
 
