@@ -634,6 +634,16 @@ mod tests {
                     "expected WETH symbol, got: {}",
                     text_v2.text
                 );
+                // u128::MAX + 1 scaled by WETH's 18 decimals. Pinning the exact
+                // value (not just the absence of "0") also rejects a
+                // wrong-but-nonzero rendering such as a raw-integer fallback.
+                assert!(
+                    text_v2
+                        .text
+                        .contains("340282366920938463463.374607431768211456"),
+                    "expected decimal-scaled amount, got: {}",
+                    text_v2.text
+                );
             }
             other => panic!("expected TextV2, got {other:?}"),
         }
@@ -723,6 +733,16 @@ mod tests {
                 assert!(
                     text_v2.text.contains("WETH"),
                     "expected WETH symbol, got: {}",
+                    text_v2.text
+                );
+                // u128::MAX + 1 scaled by WETH's 18 decimals. Pinning the exact
+                // value (not just the absence of "0") also rejects a
+                // wrong-but-nonzero rendering such as a raw-integer fallback.
+                assert!(
+                    text_v2
+                        .text
+                        .contains("340282366920938463463.374607431768211456"),
+                    "expected decimal-scaled amount, got: {}",
                     text_v2.text
                 );
             }
