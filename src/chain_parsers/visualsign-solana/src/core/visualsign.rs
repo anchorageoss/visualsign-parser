@@ -8,7 +8,9 @@ use crate::idl::IdlRegistry;
 use crate::idl::builtin_programs::{
     canonical_name, is_reserved_canonical_name, is_trusted_program,
 };
-use crate::idl::signature::{convert_proto_signature, validate_idl_signature};
+use crate::idl::signature::{
+    authorized_idl_signers, convert_proto_signature, validate_idl_signature,
+};
 use base64::{self, Engine};
 use solana_sdk::{
     message::VersionedMessage,
@@ -152,15 +154,18 @@ impl SolanaTransactionWrapper {
 /// 3. The IDL JSON is rejected if it exceeds `MAX_IDL_JSON_BYTES`.
 /// 4. If `Idl.signature` is present, it must verify (secp256k1 ECDSA over the
 ///    shared domain-separated prehash that binds the program id to the IDL JSON
-///    via `PrehashVerifier::verify_prehash`) or the entry is dropped. Signers
-///    must therefore reproduce that prehash via
+///    via `PrehashVerifier::verify_prehash`) AND the signer must appear in the
+///    authorized-signer allowlist (see
+///    `crate::idl::signature::authorized_idl_signers`), or the entry is dropped.
+///    Signers must therefore reproduce that prehash via
 ///    `visualsign::signing::solana_metadata_prehash` and sign the resulting
 ///    32-byte digest, matching `visualsign-ethereum::abi_metadata`. Because the
 ///    prehash commits to the program id, a signature is valid only for the
-///    exact program it was produced for. Unsigned IDLs are still accepted so
-///    the feature degrades gracefully; callers that need mandatory signatures
-///    must enforce that at the API boundary. This check refuses to plumb
-///    attacker-tampered IDL bodies into the registry.
+///    exact program it was produced for. A verified signature alone is not
+///    enough: an empty allowlist rejects all signed IDLs (fail-closed). Unsigned
+///    IDLs are still accepted so the feature degrades gracefully; callers that
+///    need mandatory signatures must enforce that at the API boundary. This
+///    check refuses to plumb attacker-tampered IDL bodies into the registry.
 /// 5. The resolved `program_name` (from proto, IDL metadata, or fallback)
 ///    must not be a reserved canonical name. Step 2 already rejects when
 ///    the *program_id* is trusted, so by this step `program_id` has no
@@ -182,6 +187,11 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
     else {
         return BTreeMap::new();
     };
+
+    // Build the authorized IDL-signer allowlist once. Signed IDLs are accepted
+    // only when the signer appears here; an empty allowlist rejects all signed
+    // IDLs (fail-closed). Unsigned IDLs are unaffected (still accepted below).
+    let idl_signers = authorized_idl_signers();
 
     let mut out: BTreeMap<String, (String, String)> = BTreeMap::new();
     for (program_id, idl) in mappings {
@@ -225,11 +235,14 @@ fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String
             continue;
         }
 
-        // 4. If a signature is provided it must verify; unsigned IDLs are
-        //    accepted (parity with the Ethereum ABI path).
+        // 4. If a signature is provided it must verify AND the signer must be
+        //    allowlisted; unsigned IDLs are accepted (parity with the Ethereum
+        //    ABI path).
         if let Some(proto_sig) = idl.signature.as_ref() {
             let local_sig = convert_proto_signature(proto_sig);
-            if let Err(e) = validate_idl_signature(&idl.value, &pubkey.to_bytes(), &local_sig) {
+            if let Err(e) =
+                validate_idl_signature(&idl.value, &pubkey.to_bytes(), &local_sig, &idl_signers)
+            {
                 tracing::warn!(
                     "Skipping IDL mapping for '{program_id}': signature validation failed: {e}"
                 );

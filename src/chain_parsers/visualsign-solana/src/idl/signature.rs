@@ -22,13 +22,21 @@
 //!   IDL describes, so a signature minted for an IDL at one program id no
 //!   longer verifies when replayed under a different program. Existing
 //!   signatures must be re-issued.
-//! - Any public key is accepted; signatures prove the IDL was not tampered
-//!   with after signing and is bound to this program id, not who the signer is.
-//!   Identity must be established via an allowlist outside this module.
+//! - Signers are checked against an authorized allowlist. A verified signature
+//!   only proves the IDL was signed by *some* secp256k1 key, not an authorized
+//!   one. When an IDL carries a signature it must verify AND the signer must
+//!   appear in the allowlist (see [`authorized_idl_signers`]); both checks must
+//!   pass. An EMPTY allowlist rejects every signed IDL (fail-closed). Unsigned
+//!   IDLs remain accepted (graceful degradation), since the trusted-program and
+//!   reserved-name guards in the extraction path already constrain them.
+//! - Unlike the Ethereum ABI path, Solana has no exported dev signing key, so
+//!   the allowlist has no compile-time dev entry: it is built solely from the
+//!   env-configured production list.
 
 use k256::EncodedPoint;
 use k256::ecdsa::signature::hazmat::PrehashVerifier;
 use k256::ecdsa::{Signature, VerifyingKey};
+use visualsign::signing::SignerAllowlist;
 
 /// The only supported signature algorithm.
 const SUPPORTED_ALGORITHM: &str = "secp256k1";
@@ -79,7 +87,8 @@ pub fn convert_proto_signature(proto: &generated::parser::SignatureMetadata) -> 
     }
 }
 
-/// Validate an IDL JSON string against a secp256k1 ECDSA signature.
+/// Validate an IDL JSON string against a secp256k1 ECDSA signature, enforcing an
+/// authorized-signer allowlist.
 ///
 /// The signature must have been produced over the shared domain-separated
 /// prehash that binds `program_id` to `idl_json` (see
@@ -88,18 +97,26 @@ pub fn convert_proto_signature(proto: &generated::parser::SignatureMetadata) -> 
 /// via `PrehashVerifier::verify_prehash`. A signature is therefore valid only
 /// for the exact program id it was produced for.
 ///
+/// Both checks must pass: the signature must verify over the prehash AND the
+/// recovered signer must appear in `allowlist`. An empty allowlist rejects every
+/// signed IDL (fail-closed); see [`authorized_idl_signers`].
+///
 /// # Arguments
 /// * `idl_json` - The IDL JSON string that was signed.
 /// * `program_id` - The 32-byte program id the IDL is bound to.
 /// * `signature` - Signature and metadata for validation.
+/// * `allowlist` - Authorized signer public keys (canonical uncompressed bytes).
 ///
 /// # Returns
-/// * `Ok(())` if the signature verifies against the program-id-bound prehash.
-/// * `Err(IdlSignatureError)` if any step of validation fails.
+/// * `Ok(())` if the signature verifies against the program-id-bound prehash and
+///   the signer is authorized.
+/// * `Err(IdlSignatureError)` if signature validation fails or the signer is not
+///   in the allowlist.
 pub fn validate_idl_signature(
     idl_json: &str,
     program_id: &[u8; 32],
     signature: &SignatureMetadata,
+    allowlist: &SignerAllowlist,
 ) -> Result<(), IdlSignatureError> {
     let algorithm = signature
         .algorithm
@@ -143,7 +160,63 @@ pub fn validate_idl_signature(
         IdlSignatureError::Validation(format!("Signature verification failed: {e}"))
     })?;
 
+    // Enforce the authorized-signer allowlist. A verified signature only proves
+    // the IDL was signed by some secp256k1 key; it must also be an authorized
+    // one. Compare on the canonical uncompressed SEC1 encoding so the lookup
+    // matches how keys are stored in the allowlist. An empty allowlist contains
+    // nothing, so this rejects every signed IDL (fail-closed).
+    let pk = verifying_key.to_encoded_point(false).as_bytes().to_vec();
+    if !allowlist.contains(&pk) {
+        return Err(IdlSignatureError::Validation(
+            "signer not in allowlist".to_string(),
+        ));
+    }
+
     Ok(())
+}
+
+/// Build the authorized IDL-signer allowlist from the env-configured production
+/// list.
+///
+/// The env var `VISUALSIGN_SOL_IDL_SIGNERS` (comma-separated hex secp256k1
+/// public keys, any SEC1 encoding) populates the allowlist for configured
+/// deployments. Each entry is canonicalized to its uncompressed encoding via
+/// [`canonical_pubkey_from_hex`], so compressed and uncompressed inputs for the
+/// same key match. Invalid entries are logged and skipped.
+///
+/// Unlike the Ethereum ABI path, Solana has no exported dev signing key, so
+/// there is intentionally NO compile-time dev entry: the allowlist is built
+/// solely from the env var. When the env var is unset (or holds no valid keys)
+/// the allowlist is empty, which rejects all signed IDLs (fail-closed). This is
+/// the secure default for the untrusted, display-only caller-IDL path; unsigned
+/// IDLs are unaffected and still accepted by the extraction path.
+#[must_use]
+pub fn authorized_idl_signers() -> SignerAllowlist {
+    let mut allow = SignerAllowlist::new();
+
+    if let Ok(list) = std::env::var("VISUALSIGN_SOL_IDL_SIGNERS") {
+        for entry in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            match canonical_pubkey_from_hex(entry) {
+                Some(bytes) => allow.insert(bytes),
+                None => tracing::warn!("Ignoring invalid pubkey in VISUALSIGN_SOL_IDL_SIGNERS"),
+            }
+        }
+    }
+
+    allow
+}
+
+/// Parse a hex secp256k1 public key (optionally `0x`-prefixed, any SEC1 encoding)
+/// and return its canonical UNCOMPRESSED encoded-point bytes, or `None` if the
+/// input is not a valid point. Canonicalizing here means a compressed input and
+/// an uncompressed input for the same key both reduce to identical allowlist
+/// bytes.
+fn canonical_pubkey_from_hex(hex_str: &str) -> Option<Vec<u8>> {
+    let trimmed = hex_str.strip_prefix("0x").unwrap_or(hex_str);
+    let bytes = hex::decode(trimmed).ok()?;
+    let encoded_point = EncodedPoint::from_bytes(&bytes).ok()?;
+    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point).ok()?;
+    Some(verifying_key.to_encoded_point(false).as_bytes().to_vec())
 }
 
 #[cfg(test)]
@@ -178,6 +251,23 @@ mod tests {
         (signature_hex, public_key_hex)
     }
 
+    /// Canonical uncompressed public-key bytes derived from a 32-byte seed.
+    fn pubkey_bytes_from_seed(seed: &[u8; 32]) -> Vec<u8> {
+        let signing_key = SigningKey::from_bytes(seed).expect("valid key");
+        let verifying_key = VerifyingKey::from(&signing_key);
+        verifying_key.to_encoded_point(false).as_bytes().to_vec()
+    }
+
+    /// Allowlist authorizing the deterministic test signer (`create_test_signature`
+    /// signs with seed `[0x42u8; 32]`). Built explicitly so the tests never depend
+    /// on the env var. Non-empty so verified signatures from the test signer reach
+    /// the verify step and pass.
+    fn test_idl_signer_allowlist() -> SignerAllowlist {
+        let mut allow = SignerAllowlist::new();
+        allow.insert(pubkey_bytes_from_seed(&[0x42u8; 32]));
+        allow
+    }
+
     #[test]
     fn valid_signature_verifies() {
         let (sig_hex, pk_hex) = create_test_signature(SAMPLE_IDL, &TEST_PROGRAM_ID);
@@ -188,7 +278,65 @@ mod tests {
             issuer: None,
             timestamp: None,
         };
-        assert!(validate_idl_signature(SAMPLE_IDL, &TEST_PROGRAM_ID, &sig).is_ok());
+        assert!(
+            validate_idl_signature(
+                SAMPLE_IDL,
+                &TEST_PROGRAM_ID,
+                &sig,
+                &test_idl_signer_allowlist()
+            )
+            .is_ok()
+        );
+    }
+
+    /// A signature that verifies but whose signer is NOT in the allowlist is
+    /// rejected.
+    #[test]
+    fn validate_idl_signature_rejects_unlisted_signer() {
+        let (sig_hex, pk_hex) = create_test_signature(SAMPLE_IDL, &TEST_PROGRAM_ID);
+        let sig = SignatureMetadata {
+            value: sig_hex,
+            algorithm: Some("secp256k1".to_string()),
+            public_key: Some(pk_hex),
+            issuer: None,
+            timestamp: None,
+        };
+
+        // Allowlist holds a DIFFERENT key (seed 0x43), so the seed-0x42 signer is
+        // absent even though its signature verifies.
+        let mut allow = SignerAllowlist::new();
+        allow.insert(pubkey_bytes_from_seed(&[0x43u8; 32]));
+        let result = validate_idl_signature(SAMPLE_IDL, &TEST_PROGRAM_ID, &sig, &allow);
+        assert!(
+            result.is_err(),
+            "a verified signature from an unlisted signer must be rejected"
+        );
+        assert!(
+            result.unwrap_err().to_string().contains("not in allowlist"),
+            "rejection must cite the allowlist check"
+        );
+    }
+
+    /// An empty allowlist rejects every signed IDL, even a perfectly valid one
+    /// (fail-closed default).
+    #[test]
+    fn validate_idl_signature_fails_closed_on_empty_allowlist() {
+        let (sig_hex, pk_hex) = create_test_signature(SAMPLE_IDL, &TEST_PROGRAM_ID);
+        let sig = SignatureMetadata {
+            value: sig_hex,
+            algorithm: Some("secp256k1".to_string()),
+            public_key: Some(pk_hex),
+            issuer: None,
+            timestamp: None,
+        };
+
+        let empty = SignerAllowlist::new();
+        assert!(empty.is_empty(), "precondition: allowlist is empty");
+        let result = validate_idl_signature(SAMPLE_IDL, &TEST_PROGRAM_ID, &sig, &empty);
+        assert!(
+            result.is_err(),
+            "an empty allowlist must reject all signed IDLs (fail-closed)"
+        );
     }
 
     /// Core regression for this change: a signature is valid only for the exact
@@ -208,14 +356,15 @@ mod tests {
             timestamp: None,
         };
 
+        let allow = test_idl_signer_allowlist();
         // Valid for the exact program id it was produced for.
         assert!(
-            validate_idl_signature(SAMPLE_IDL, &program_id_a, &sig).is_ok(),
+            validate_idl_signature(SAMPLE_IDL, &program_id_a, &sig, &allow).is_ok(),
             "signature must verify for the bound program id"
         );
         // Different program id: rejected.
         assert!(
-            validate_idl_signature(SAMPLE_IDL, &program_id_b, &sig).is_err(),
+            validate_idl_signature(SAMPLE_IDL, &program_id_b, &sig, &allow).is_err(),
             "signature must not verify when replayed under a different program id"
         );
     }
@@ -231,7 +380,15 @@ mod tests {
             timestamp: None,
         };
         let tampered = r#"{"metadata":{"name":"Phantom Wallet"},"instructions":[]}"#;
-        assert!(validate_idl_signature(tampered, &TEST_PROGRAM_ID, &sig).is_err());
+        assert!(
+            validate_idl_signature(
+                tampered,
+                &TEST_PROGRAM_ID,
+                &sig,
+                &test_idl_signer_allowlist()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -243,7 +400,13 @@ mod tests {
             issuer: None,
             timestamp: None,
         };
-        let err = validate_idl_signature(SAMPLE_IDL, &TEST_PROGRAM_ID, &sig).unwrap_err();
+        let err = validate_idl_signature(
+            SAMPLE_IDL,
+            &TEST_PROGRAM_ID,
+            &sig,
+            &test_idl_signer_allowlist(),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("Missing algorithm"));
     }
 
@@ -256,7 +419,13 @@ mod tests {
             issuer: None,
             timestamp: None,
         };
-        let err = validate_idl_signature(SAMPLE_IDL, &TEST_PROGRAM_ID, &sig).unwrap_err();
+        let err = validate_idl_signature(
+            SAMPLE_IDL,
+            &TEST_PROGRAM_ID,
+            &sig,
+            &test_idl_signer_allowlist(),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("Missing public_key"));
     }
 
@@ -269,7 +438,13 @@ mod tests {
             issuer: None,
             timestamp: None,
         };
-        let err = validate_idl_signature(SAMPLE_IDL, &TEST_PROGRAM_ID, &sig).unwrap_err();
+        let err = validate_idl_signature(
+            SAMPLE_IDL,
+            &TEST_PROGRAM_ID,
+            &sig,
+            &test_idl_signer_allowlist(),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("Unsupported algorithm"));
     }
 
