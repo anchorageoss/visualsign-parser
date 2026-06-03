@@ -1,13 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
+use crate::abi_metadata::{CLI_DEV_SIGNING_KEY_SEED, sign_abi};
+use crate::networks::parse_network;
+use crate::token_metadata::parse_network_id;
 use clap::Args as ClapArgs;
 use generated::parser::{Abi, AbiType, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 use visualsign::registry::{Chain, TransactionConverterRegistry};
-use visualsign_ethereum::abi_metadata::{CLI_DEV_SIGNING_KEY_SEED, sign_abi};
-use visualsign_ethereum::networks::parse_network;
-use visualsign_ethereum::token_metadata::parse_network_id;
 
-use crate::mapping_parser;
+use parser_cli_core::mapping_parser;
 
 /// CLI arguments specific to Ethereum.
 #[derive(ClapArgs, Debug, Default, Clone)]
@@ -28,7 +28,7 @@ pub struct EthereumArgs {
     pub abi_proxy_mappings: Vec<String>,
 }
 
-/// [`crate::ChainPlugin`] implementation for Ethereum.
+/// [`parser_cli_core::ChainPlugin`] implementation for Ethereum.
 pub struct EthereumPlugin {
     args: EthereumArgs,
 }
@@ -41,15 +41,15 @@ impl EthereumPlugin {
     }
 }
 
-impl crate::ChainPlugin for EthereumPlugin {
+impl parser_cli_core::ChainPlugin for EthereumPlugin {
     fn chain(&self) -> Chain {
         Chain::Ethereum
     }
 
     fn register(&self, registry: &mut TransactionConverterRegistry) {
-        registry.register::<visualsign_ethereum::EthereumTransactionWrapper, _>(
+        registry.register::<crate::EthereumTransactionWrapper, _>(
             Chain::Ethereum,
-            visualsign_ethereum::EthereumVisualSignConverter::new(),
+            crate::EthereumVisualSignConverter::new(),
         );
     }
 
@@ -106,7 +106,7 @@ fn normalize_eth_address(addr: &str) -> String {
 fn build_abi_mappings_from_files(
     abi_json_mappings: &[String],
     chain_id: u64,
-) -> (HashMap<String, Abi>, usize) {
+) -> (BTreeMap<String, Abi>, usize) {
     let (raw, count) = mapping_parser::load_mappings(
         abi_json_mappings,
         "ABI",
@@ -165,14 +165,14 @@ fn build_abi_mappings_from_files(
 /// synthesized proxy ABI's signature (alongside the proxy address) so the parser
 /// accepts it for this (chain, address).
 fn apply_proxy_mappings(
-    abi_mappings: &mut HashMap<String, Abi>,
+    abi_mappings: &mut BTreeMap<String, Abi>,
     proxy_mappings: &[String],
     abi_json_mappings: &[String],
     chain_id: u64,
 ) {
     // Pre-compute the set of addresses that were attempted in --abi-json-mappings.
     // Used below to distinguish "ABI file was specified but failed" from "no ABI file at all".
-    let attempted_abi_addresses: HashSet<String> = abi_json_mappings
+    let attempted_abi_addresses: BTreeSet<String> = abi_json_mappings
         .iter()
         .filter_map(|m| mapping_parser::parse_mapping(m).ok())
         .filter(|c| validate_eth_address(&c.identifier).is_ok())
@@ -300,7 +300,7 @@ pub(crate) fn create_chain_metadata(
     // non-empty is cheap and avoids sharing an `Option` across the lint-restricted
     // borrow.
     let mut abi_mappings = if abi_json_mappings.is_empty() {
-        HashMap::new()
+        BTreeMap::new()
     } else {
         let chain_id = parse_network_id(&network_id)
             .map_err(|e| format!("cannot sign ABI mappings for network '{network_id}': {e}"))?;
@@ -331,7 +331,7 @@ pub(crate) fn create_chain_metadata(
     Ok(Some(ChainMetadata {
         metadata: Some(Metadata::Ethereum(EthereumMetadata {
             network_id: Some(network_id),
-            abi_mappings,
+            abi_mappings: abi_mappings.into_iter().collect(),
         })),
     }))
 }
@@ -342,7 +342,7 @@ mod tests {
     use super::*;
 
     fn write_temp_json(name: &str, content: &str) -> std::path::PathBuf {
-        crate::test_utils::write_temp_json("vsp_eth_tests", name, content)
+        parser_cli_core::test_utils::write_temp_json("vsp_eth_tests", name, content)
     }
 
     #[test]
@@ -541,12 +541,12 @@ mod tests {
         let extracted = ChainMetadata {
             metadata: Some(Metadata::Ethereum(eth)),
         };
-        let registry = visualsign_ethereum::abi_metadata::try_extract_from_chain_metadata(
+        let registry = crate::abi_metadata::try_extract_from_chain_metadata(
             Some(&extracted),
             1,
             // dev-signing is enabled for the CLI, so this allowlists the dev key the
             // CLI signed the synthesized proxy with.
-            &visualsign_ethereum::abi_metadata::authorized_abi_signers(),
+            &crate::abi_metadata::authorized_abi_signers(),
         )
         .expect("metadata with a signed synthesized proxy must extract");
         assert!(
@@ -576,7 +576,7 @@ mod tests {
     /// Mixed-casing between --abi-json-mappings and --abi-proxy-mappings must not
     /// silently lose the proxy link. The Copilot review comment identified a scenario
     /// where the user supplies the same address in different case across the two flags,
-    /// causing a `HashMap` miss and a synthesized empty ABI overwriting the real one.
+    /// causing a map-key miss and a synthesized empty ABI overwriting the real one.
     #[test]
     fn test_proxy_mapping_mixed_case_links_correctly() {
         // Use a freshly created pair so the uppercase vs lowercase contrast is clear.

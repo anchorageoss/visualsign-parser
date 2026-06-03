@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+use parser_cli_core::test_utils::write_temp_json;
 use similar::{ChangeTag, TextDiff};
 use std::fs;
 use std::io::Write;
@@ -25,26 +26,6 @@ fn run_cli_full(args: &[&str]) -> (String, String) {
 /// Helper to run the parser_cli binary with given args and return stdout.
 fn run_cli(args: &[&str]) -> String {
     run_cli_full(args).0
-}
-
-/// Helper to write a temp JSON file and return its path.
-/// Duplicated from `test_utils::write_temp_json` because `crate::test_utils`
-/// is behind `#[cfg(test)]` in `lib.rs` and therefore not compiled for
-/// integration tests.
-fn write_temp_json(name: &str, content: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join("vsp_cli_tests");
-    fs::create_dir_all(&dir).expect("create temp dir");
-    let path = dir.join(format!(
-        "{}_{}_{}",
-        name,
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time")
-            .as_nanos()
-    ));
-    fs::write(&path, content).expect("write temp file");
-    path
 }
 
 #[test]
@@ -407,7 +388,7 @@ const ERC20_TRANSFER_ABI: &str = r#"[{
 #[test]
 #[cfg(feature = "ethereum")]
 fn test_cli_ethereum_abi_json_mappings() {
-    let abi_path = write_temp_json("erc20_transfer.json", ERC20_TRANSFER_ABI);
+    let abi_path = write_temp_json("vsp_cli_tests", "erc20_transfer.json", ERC20_TRANSFER_ABI);
     let mapping = format!(
         "TestERC20:{}:0x1111111111111111111111111111111111111111",
         abi_path.display()
@@ -523,7 +504,7 @@ fn test_cli_solana_idl_json_mappings() {
         "name": "test_program",
         "instructions": []
     }"#;
-    let idl_path = write_temp_json("test_idl.json", idl_json);
+    let idl_path = write_temp_json("vsp_cli_tests", "test_idl.json", idl_json);
     let mapping = format!(
         "TestProgram:{}:TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
         idl_path.display()
