@@ -153,11 +153,12 @@ impl SolanaTransactionWrapper {
 ///    the `unknown_program` IDL decode path. Refusing the body closes that
 ///    gap.
 /// 3. The IDL JSON is rejected if it exceeds `MAX_IDL_JSON_BYTES`.
-/// 4. If `Idl.signature` is present, it must verify (secp256k1 ECDSA over the
-///    shared domain-separated prehash that binds the program id to the IDL JSON
-///    via `PrehashVerifier::verify_prehash`) AND the signer must appear in the
-///    authorized-signer allowlist (see
-///    `crate::idl::signature::authorized_idl_signers`), or the entry is dropped.
+/// 4. If `Idl.signature` is present, it must verify (ed25519 over the shared
+///    domain-separated prehash that binds the program id to the IDL JSON, via
+///    `verify_strict`) AND the signer must appear in the authorized-signer
+///    allowlist (see `crate::idl::signature::authorized_idl_signers`), or the
+///    entry is dropped. The signer is a VisualSign-trusted metadata curator key,
+///    not the program's on-chain upgrade authority.
 ///    Signers must therefore reproduce that prehash via
 ///    `visualsign::signing::solana_metadata_prehash` and sign the resulting
 ///    32-byte digest, matching `visualsign-ethereum::abi_metadata`. Because the
@@ -1873,7 +1874,7 @@ mod tests {
             metadata: vec![
                 generated::parser::Metadata {
                     key: "algorithm".to_string(),
-                    value: "secp256k1".to_string(),
+                    value: "ed25519".to_string(),
                 },
                 generated::parser::Metadata {
                     key: "public_key".to_string(),
@@ -1907,8 +1908,7 @@ mod tests {
     /// acceptance was gated on the allowlist, not on the signature alone.
     #[test]
     fn test_extract_idl_mappings_accepts_signed_idl_from_allowlisted_signer() {
-        use k256::ecdsa::SigningKey;
-        use k256::ecdsa::signature::hazmat::PrehashSigner;
+        use ed25519_dalek::{Signer, SigningKey};
 
         const PROGRAM_ID: &str = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
         let idl_json = r#"{"metadata":{"name":"Custom"},"instructions":[]}"#;
@@ -1918,19 +1918,19 @@ mod tests {
         let program_bytes = Pubkey::from_str(PROGRAM_ID)
             .expect("valid pubkey")
             .to_bytes();
-        let signing_key = SigningKey::from_bytes(&[0x42u8; 32]).expect("valid key");
-        let verifying_key = k256::ecdsa::VerifyingKey::from(&signing_key);
+        let signing_key = SigningKey::from_bytes(&[0x42u8; 32]);
+        let verifying_key = signing_key.verifying_key();
         let hash =
             visualsign::signing::solana_metadata_prehash(&program_bytes, idl_json.as_bytes());
-        let sig: k256::ecdsa::Signature = signing_key.sign_prehash(&hash).expect("sign");
-        let pk_bytes = verifying_key.to_encoded_point(false).as_bytes().to_vec();
+        let sig = signing_key.sign(&hash);
+        let pk_bytes = verifying_key.to_bytes().to_vec();
 
         let proto_sig = generated::parser::SignatureMetadata {
-            value: hex::encode(sig.to_der().as_bytes()),
+            value: hex::encode(sig.to_bytes()),
             metadata: vec![
                 generated::parser::Metadata {
                     key: "algorithm".to_string(),
-                    value: "secp256k1".to_string(),
+                    value: "ed25519".to_string(),
                 },
                 generated::parser::Metadata {
                     key: "public_key".to_string(),

@@ -2,28 +2,43 @@
 //!
 //! Mirrors `visualsign-ethereum::abi_metadata` for Solana IDL mappings. The
 //! proto carries an optional `SignatureMetadata` on every `Idl` entry; when
-//! present, we validate it as a secp256k1 ECDSA signature over a
-//! domain-separated prehash that binds the program id to the IDL JSON bytes
-//! (prehashed verification via `PrehashVerifier::verify_prehash`) before
-//! accepting the entry into the registry. The prehash is the shared v1
-//! domain-separated, length-prefixed construction defined in
-//! [`visualsign::signing`]; that module documents the authoritative byte
-//! layout. Signers must reproduce it via
-//! [`visualsign::signing::solana_metadata_prehash`] and sign the resulting
-//! 32-byte digest, not the raw JSON bytes directly.
+//! present, we validate it as an ed25519 signature over a domain-separated
+//! prehash that binds the program id to the IDL JSON bytes before accepting the
+//! entry into the registry. The prehash is the shared v1 domain-separated,
+//! length-prefixed construction defined in [`visualsign::signing`]; that module
+//! documents the authoritative byte layout. The 32-byte prehash digest is the
+//! message signed: signers reproduce it via
+//! [`visualsign::signing::solana_metadata_prehash`] and ed25519-sign the
+//! resulting 32 bytes (verified here with `verify_strict`), not the raw JSON
+//! bytes directly.
 //!
-//! Behaviour parity with the Ethereum ABI path:
+//! # Trust model: curator key, NOT the program's on-chain authority
+//!
+//! The signer is an off-chain, VisualSign-trusted *metadata curator* key. It is
+//! deliberately **not** the Solana program's on-chain upgrade authority, and the
+//! signature provides no binding to that authority. What a valid signature
+//! attests is narrow and display-scoped: "a key VisualSign trusts has vouched
+//! for this IDL as the correct decoder for this program id." It does not attest
+//! that the program owner signed anything. The parser runs with no chain access,
+//! so it cannot and does not check the IDL against the real on-chain authority;
+//! trust comes solely from the curator allowlist below. ed25519 is used because
+//! it is Solana's native curve (least surprise for anyone inspecting these
+//! signatures), but the curve choice carries no curator-vs-authority meaning on
+//! its own; that distinction lives in this documentation and the signer
+//! custody, not in the algorithm.
+//!
+//! Behaviour parity with the Ethereum ABI path (which uses secp256k1 for its own
+//! curator key, since EVM contracts have no native curve to match):
 //! - Unsigned IDLs are accepted (graceful degradation). Callers that require
 //!   mandatory signatures must enforce that at the API boundary.
-//! - Algorithm must be `secp256k1`. The proto is algorithm-agnostic, but we
-//!   only accept secp256k1 today so that wallets can rotate to a single trust
-//!   anchor shared with the Ethereum ABI path.
+//! - Algorithm must be `ed25519`. The proto is algorithm-agnostic, but we only
+//!   accept ed25519 for the Solana IDL path.
 //! - Signatures bind the program id. The prehash commits to the program id the
-//!   IDL describes, so a signature minted for an IDL at one program id no
-//!   longer verifies when replayed under a different program. Existing
-//!   signatures must be re-issued.
+//!   IDL describes, so a signature minted for an IDL at one program id no longer
+//!   verifies when replayed under a different program. Existing signatures must
+//!   be re-issued.
 //! - Signers are checked against an authorized allowlist. A verified signature
-//!   only proves the IDL was signed by *some* secp256k1 key, not an authorized
+//!   only proves the IDL was signed by *some* ed25519 key, not an authorized
 //!   one. When an IDL carries a signature it must verify AND the signer must
 //!   appear in the allowlist (see [`authorized_idl_signers`]); both checks must
 //!   pass. An EMPTY allowlist rejects every signed IDL (fail-closed). Unsigned
@@ -33,13 +48,17 @@
 //!   the allowlist has no compile-time dev entry: it is built solely from the
 //!   env-configured production list.
 
-use k256::EncodedPoint;
-use k256::ecdsa::signature::hazmat::PrehashVerifier;
-use k256::ecdsa::{Signature, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use visualsign::signing::SignerAllowlist;
 
 /// The only supported signature algorithm.
-const SUPPORTED_ALGORITHM: &str = "secp256k1";
+const SUPPORTED_ALGORITHM: &str = "ed25519";
+
+/// Length of an ed25519 public key in bytes.
+const ED25519_PUBLIC_KEY_LEN: usize = 32;
+
+/// Length of an ed25519 signature in bytes.
+const ED25519_SIGNATURE_LEN: usize = 64;
 
 /// Error type for IDL signature validation.
 #[derive(Debug, thiserror::Error)]
@@ -53,11 +72,11 @@ pub enum IdlSignatureError {
 /// Mirrors the protobuf `SignatureMetadata` structure in a local type.
 #[derive(Debug, Clone)]
 pub struct SignatureMetadata {
-    /// Signature value (hex-encoded, DER format for secp256k1).
+    /// Signature value (hex-encoded, 64-byte raw ed25519 signature).
     pub value: String,
-    /// Algorithm used (e.g., "secp256k1").
+    /// Algorithm used (e.g., "ed25519").
     pub algorithm: Option<String>,
-    /// Public key for signature verification (hex-encoded).
+    /// Public key for signature verification (hex-encoded, 32-byte ed25519 key).
     pub public_key: Option<String>,
     /// Issuer of the signature (mirrors proto field; not used in validation).
     #[allow(dead_code)]
@@ -87,25 +106,43 @@ pub fn convert_proto_signature(proto: &generated::parser::SignatureMetadata) -> 
     }
 }
 
-/// Validate an IDL JSON string against a secp256k1 ECDSA signature, enforcing an
+/// Decode an optionally `0x`/`0X`-prefixed hex string into a fixed-size byte
+/// array, failing if the hex is malformed or the wrong length.
+fn decode_hex_fixed<const N: usize>(value: &str, what: &str) -> Result<[u8; N], IdlSignatureError> {
+    let trimmed = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    let bytes = hex::decode(trimmed)
+        .map_err(|e| IdlSignatureError::Validation(format!("Invalid {what} hex: {e}")))?;
+    bytes.try_into().map_err(|v: Vec<u8>| {
+        IdlSignatureError::Validation(format!(
+            "Invalid {what} length: expected {N} bytes, got {}",
+            v.len()
+        ))
+    })
+}
+
+/// Validate an IDL JSON string against an ed25519 signature, enforcing an
 /// authorized-signer allowlist.
 ///
 /// The signature must have been produced over the shared domain-separated
 /// prehash that binds `program_id` to `idl_json` (see
 /// [`visualsign::signing::solana_metadata_prehash`]). This function recomputes
-/// that prehash and verifies the signature against the resulting 32-byte digest
-/// via `PrehashVerifier::verify_prehash`. A signature is therefore valid only
-/// for the exact program id it was produced for.
+/// that 32-byte prehash and verifies the signature against it as the signed
+/// message via `verify_strict` (which rejects malleable / non-canonical
+/// signatures and small-order keys). A signature is therefore valid only for the
+/// exact program id it was produced for.
 ///
 /// Both checks must pass: the signature must verify over the prehash AND the
-/// recovered signer must appear in `allowlist`. An empty allowlist rejects every
-/// signed IDL (fail-closed); see [`authorized_idl_signers`].
+/// signer's public key must appear in `allowlist`. An empty allowlist rejects
+/// every signed IDL (fail-closed); see [`authorized_idl_signers`].
 ///
 /// # Arguments
 /// * `idl_json` - The IDL JSON string that was signed.
 /// * `program_id` - The 32-byte program id the IDL is bound to.
 /// * `signature` - Signature and metadata for validation.
-/// * `allowlist` - Authorized signer public keys (canonical uncompressed bytes).
+/// * `allowlist` - Authorized signer public keys (32-byte ed25519 keys).
 ///
 /// # Returns
 /// * `Ok(())` if the signature verifies against the program-id-bound prehash and
@@ -136,40 +173,24 @@ pub fn validate_idl_signature(
 
     let hash = visualsign::signing::solana_metadata_prehash(program_id, idl_json.as_bytes());
 
-    let sig_hex = signature
-        .value
-        .strip_prefix("0x")
-        .or_else(|| signature.value.strip_prefix("0X"))
-        .unwrap_or(&signature.value);
-    let sig_bytes = hex::decode(sig_hex)
-        .map_err(|e| IdlSignatureError::Validation(format!("Invalid signature hex: {e}")))?;
+    let sig_bytes = decode_hex_fixed::<ED25519_SIGNATURE_LEN>(&signature.value, "signature")?;
+    let sig = Signature::from_bytes(&sig_bytes);
 
-    let sig = Signature::from_der(&sig_bytes)
-        .map_err(|e| IdlSignatureError::Validation(format!("Invalid DER signature: {e}")))?;
+    let pubkey_bytes = decode_hex_fixed::<ED25519_PUBLIC_KEY_LEN>(public_key_hex, "public key")?;
+    let verifying_key = VerifyingKey::from_bytes(&pubkey_bytes)
+        .map_err(|e| IdlSignatureError::Validation(format!("Invalid public key: {e}")))?;
 
-    let pubkey_hex = public_key_hex
-        .strip_prefix("0x")
-        .or_else(|| public_key_hex.strip_prefix("0X"))
-        .unwrap_or(public_key_hex);
-    let pubkey_bytes = hex::decode(pubkey_hex)
-        .map_err(|e| IdlSignatureError::Validation(format!("Invalid public key hex: {e}")))?;
-
-    let encoded_point = EncodedPoint::from_bytes(&pubkey_bytes)
-        .map_err(|e| IdlSignatureError::Validation(format!("Invalid public key point: {e}")))?;
-
-    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)
-        .map_err(|e| IdlSignatureError::Validation(format!("Invalid verifying key: {e}")))?;
-
-    verifying_key.verify_prehash(&hash, &sig).map_err(|e| {
+    verifying_key.verify_strict(&hash, &sig).map_err(|e| {
         IdlSignatureError::Validation(format!("Signature verification failed: {e}"))
     })?;
 
     // Enforce the authorized-signer allowlist. A verified signature only proves
-    // the IDL was signed by some secp256k1 key; it must also be an authorized
-    // one. Compare on the canonical uncompressed SEC1 encoding so the lookup
-    // matches how keys are stored in the allowlist. An empty allowlist contains
-    // nothing, so this rejects every signed IDL (fail-closed).
-    let pk = verifying_key.to_encoded_point(false).as_bytes().to_vec();
+    // the IDL was signed by some ed25519 key; it must also be an authorized one.
+    // ed25519 public keys are a canonical fixed 32 bytes (no compressed/
+    // uncompressed variants), so the verified key's bytes are compared directly
+    // against the allowlist. An empty allowlist contains nothing, so this rejects
+    // every signed IDL (fail-closed).
+    let pk = verifying_key.to_bytes().to_vec();
     if !allowlist.contains(&pk) {
         return Err(IdlSignatureError::Validation(
             "signer not in allowlist".to_string(),
@@ -182,11 +203,10 @@ pub fn validate_idl_signature(
 /// Build the authorized IDL-signer allowlist from the env-configured production
 /// list.
 ///
-/// The env var `VISUALSIGN_SOL_IDL_SIGNERS` (comma-separated hex secp256k1
-/// public keys, any SEC1 encoding) populates the allowlist for configured
-/// deployments. Each entry is canonicalized to its uncompressed encoding via
-/// [`canonical_pubkey_from_hex`], so compressed and uncompressed inputs for the
-/// same key match. Invalid entries are logged and skipped.
+/// The env var `VISUALSIGN_SOL_IDL_SIGNERS` (comma-separated hex ed25519 public
+/// keys, 32 bytes each) populates the allowlist for configured deployments. Each
+/// entry is validated as a real ed25519 point via [`canonical_pubkey_from_hex`]
+/// before insertion. Invalid entries are logged and skipped.
 ///
 /// Unlike the Ethereum ABI path, Solana has no exported dev signing key, so
 /// there is intentionally NO compile-time dev entry: the allowlist is built
@@ -210,29 +230,23 @@ pub fn authorized_idl_signers() -> SignerAllowlist {
     allow
 }
 
-/// Parse a hex secp256k1 public key (optionally `0x`- or `0X`-prefixed, any
-/// SEC1 encoding) and return its canonical UNCOMPRESSED encoded-point bytes, or
-/// `None` if the input is not a valid point. Canonicalizing here means a
-/// compressed input and an uncompressed input for the same key both reduce to
-/// identical allowlist bytes.
+/// Parse a hex ed25519 public key (optionally `0x`- or `0X`-prefixed, exactly 32
+/// bytes) and return its canonical bytes, or `None` if the input is not a valid
+/// ed25519 point. ed25519 keys have a single canonical encoding, so validation
+/// here just confirms the bytes decompress to a real point; the returned bytes
+/// are the same 32 bytes that [`validate_idl_signature`] compares against.
 fn canonical_pubkey_from_hex(hex_str: &str) -> Option<Vec<u8>> {
-    let trimmed = hex_str
-        .strip_prefix("0x")
-        .or_else(|| hex_str.strip_prefix("0X"))
-        .unwrap_or(hex_str);
-    let bytes = hex::decode(trimmed).ok()?;
-    let encoded_point = EncodedPoint::from_bytes(&bytes).ok()?;
-    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point).ok()?;
-    Some(verifying_key.to_encoded_point(false).as_bytes().to_vec())
+    let bytes = decode_hex_fixed::<ED25519_PUBLIC_KEY_LEN>(hex_str, "public key").ok()?;
+    let verifying_key = VerifyingKey::from_bytes(&bytes).ok()?;
+    Some(verifying_key.to_bytes().to_vec())
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
     use generated::parser::Metadata;
-    use k256::ecdsa::SigningKey;
-    use k256::ecdsa::signature::hazmat::PrehashSigner;
 
     const SAMPLE_IDL: &str = r#"{"metadata":{"name":"Real Program"},"instructions":[]}"#;
 
@@ -243,26 +257,26 @@ mod tests {
     ///
     /// The signature is over the shared domain-separated prehash binding
     /// `program_id` to `idl_json`, matching what [`validate_idl_signature`]
-    /// verifies.
+    /// verifies. Returns `(signature_hex, public_key_hex)`.
     fn create_test_signature(idl_json: &str, program_id: &[u8; 32]) -> (String, String) {
-        let seed: [u8; 32] = [0x42u8; 32];
-        let signing_key = SigningKey::from_bytes(&seed).expect("valid key");
-        let verifying_key = VerifyingKey::from(&signing_key);
+        let signing_key = SigningKey::from_bytes(&[0x42u8; 32]);
+        let verifying_key = signing_key.verifying_key();
 
         let hash = visualsign::signing::solana_metadata_prehash(program_id, idl_json.as_bytes());
 
-        let signature: Signature = signing_key.sign_prehash(&hash).expect("signing failed");
-        let signature_hex = hex::encode(signature.to_der().as_bytes());
-        let public_key_hex = hex::encode(verifying_key.to_encoded_point(false).as_bytes());
+        let signature = signing_key.sign(&hash);
+        let signature_hex = hex::encode(signature.to_bytes());
+        let public_key_hex = hex::encode(verifying_key.to_bytes());
 
         (signature_hex, public_key_hex)
     }
 
-    /// Canonical uncompressed public-key bytes derived from a 32-byte seed.
+    /// Canonical public-key bytes derived from a 32-byte ed25519 seed.
     fn pubkey_bytes_from_seed(seed: &[u8; 32]) -> Vec<u8> {
-        let signing_key = SigningKey::from_bytes(seed).expect("valid key");
-        let verifying_key = VerifyingKey::from(&signing_key);
-        verifying_key.to_encoded_point(false).as_bytes().to_vec()
+        SigningKey::from_bytes(seed)
+            .verifying_key()
+            .to_bytes()
+            .to_vec()
     }
 
     /// Allowlist authorizing the deterministic test signer (`create_test_signature`
@@ -280,7 +294,7 @@ mod tests {
         let (sig_hex, pk_hex) = create_test_signature(SAMPLE_IDL, &TEST_PROGRAM_ID);
         let sig = SignatureMetadata {
             value: sig_hex,
-            algorithm: Some("secp256k1".to_string()),
+            algorithm: Some("ed25519".to_string()),
             public_key: Some(pk_hex),
             issuer: None,
             timestamp: None,
@@ -303,7 +317,7 @@ mod tests {
         let (sig_hex, pk_hex) = create_test_signature(SAMPLE_IDL, &TEST_PROGRAM_ID);
         let sig = SignatureMetadata {
             value: sig_hex,
-            algorithm: Some("secp256k1".to_string()),
+            algorithm: Some("ed25519".to_string()),
             public_key: Some(pk_hex),
             issuer: None,
             timestamp: None,
@@ -331,7 +345,7 @@ mod tests {
         let (sig_hex, pk_hex) = create_test_signature(SAMPLE_IDL, &TEST_PROGRAM_ID);
         let sig = SignatureMetadata {
             value: sig_hex,
-            algorithm: Some("secp256k1".to_string()),
+            algorithm: Some("ed25519".to_string()),
             public_key: Some(pk_hex),
             issuer: None,
             timestamp: None,
@@ -357,7 +371,7 @@ mod tests {
         let (sig_hex, pk_hex) = create_test_signature(SAMPLE_IDL, &program_id_a);
         let sig = SignatureMetadata {
             value: sig_hex,
-            algorithm: Some("secp256k1".to_string()),
+            algorithm: Some("ed25519".to_string()),
             public_key: Some(pk_hex),
             issuer: None,
             timestamp: None,
@@ -381,7 +395,7 @@ mod tests {
         let (sig_hex, pk_hex) = create_test_signature(SAMPLE_IDL, &TEST_PROGRAM_ID);
         let sig = SignatureMetadata {
             value: sig_hex,
-            algorithm: Some("secp256k1".to_string()),
+            algorithm: Some("ed25519".to_string()),
             public_key: Some(pk_hex),
             issuer: None,
             timestamp: None,
@@ -421,7 +435,7 @@ mod tests {
     fn missing_public_key_rejected() {
         let sig = SignatureMetadata {
             value: "deadbeef".to_string(),
-            algorithm: Some("secp256k1".to_string()),
+            algorithm: Some("ed25519".to_string()),
             public_key: None,
             issuer: None,
             timestamp: None,
@@ -440,7 +454,7 @@ mod tests {
     fn unsupported_algorithm_rejected() {
         let sig = SignatureMetadata {
             value: "deadbeef".to_string(),
-            algorithm: Some("ed25519".to_string()),
+            algorithm: Some("secp256k1".to_string()),
             public_key: Some("deadbeef".to_string()),
             issuer: None,
             timestamp: None,
@@ -462,11 +476,11 @@ mod tests {
             metadata: vec![
                 Metadata {
                     key: "algorithm".to_string(),
-                    value: "secp256k1".to_string(),
+                    value: "ed25519".to_string(),
                 },
                 Metadata {
                     key: "public_key".to_string(),
-                    value: "04abcd".to_string(),
+                    value: "abcd".to_string(),
                 },
                 Metadata {
                     key: "issuer".to_string(),
@@ -480,8 +494,8 @@ mod tests {
         };
         let local = convert_proto_signature(&proto);
         assert_eq!(local.value, "sig");
-        assert_eq!(local.algorithm, Some("secp256k1".to_string()));
-        assert_eq!(local.public_key, Some("04abcd".to_string()));
+        assert_eq!(local.algorithm, Some("ed25519".to_string()));
+        assert_eq!(local.public_key, Some("abcd".to_string()));
         assert_eq!(local.issuer, Some("test".to_string()));
         assert_eq!(local.timestamp, Some("2026-01-01T00:00:00Z".to_string()));
     }

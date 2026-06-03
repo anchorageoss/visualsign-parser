@@ -49,9 +49,12 @@
 //!   (pubkey).
 //!
 //! External signers reproduce a valid signature by computing the SHA-256 over this
-//! exact byte sequence and signing the resulting 32-byte digest with secp256k1
-//! (prehash signing). Note that the format is intentionally explicit so it can be
-//! re-implemented in any language.
+//! exact byte sequence and signing the resulting 32-byte digest. The signing
+//! algorithm is chosen per chain by the verifier: the Ethereum ABI path verifies
+//! a secp256k1 ECDSA signature over the digest (prehash signing), and the Solana
+//! IDL path verifies an ed25519 signature over the digest as its message. The
+//! prehash construction itself is curve-agnostic. Note that the format is
+//! intentionally explicit so it can be re-implemented in any language.
 
 use std::collections::BTreeSet;
 
