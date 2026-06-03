@@ -442,6 +442,50 @@ pub fn sign_abi(
     })
 }
 
+/// CLI entry point for ABI signing, decoupled from the `dev-signing` cargo
+/// feature so the `cli-plugin` module compiles regardless of whether
+/// `dev-signing` is enabled.
+///
+/// `cli_plugin` is a default feature of this crate, so it is compiled into
+/// every consumer (including the production `parser_app`, which enables
+/// `cli-plugin` transitively but NOT `dev-signing`). The underlying [`sign_abi`]
+/// and [`CLI_DEV_SIGNING_KEY_SEED`] are `dev-signing`-gated, so calling them
+/// directly from `cli_plugin` breaks any `cli-plugin`-without-`dev-signing`
+/// build. This wrapper is always present: under `dev-signing` (or tests) it
+/// signs with the dev key; otherwise it returns an error.
+///
+/// In practice the error branch is never hit: the only caller is `parser_cli`,
+/// which always enables `dev-signing`. It exists purely so non-CLI consumers
+/// that merely link the `cli_plugin` module (without ever invoking it) compile
+/// without the dev key being available.
+///
+/// # Errors
+/// Returns `Err` if signing fails, or if the binary was built without
+/// `dev-signing` (in which case ABI signing is unavailable by design).
+#[cfg(any(test, feature = "dev-signing"))]
+pub fn sign_abi_for_cli(
+    abi_json: &str,
+    address: &alloy_primitives::Address,
+    chain_id: u64,
+) -> Result<generated::parser::SignatureMetadata, String> {
+    sign_abi(abi_json, address, chain_id, &CLI_DEV_SIGNING_KEY_SEED)
+}
+
+/// See the `dev-signing`-enabled variant above. Without `dev-signing` the dev
+/// key is not linked, so ABI signing is unavailable and this returns an error.
+#[cfg(not(any(test, feature = "dev-signing")))]
+pub fn sign_abi_for_cli(
+    _abi_json: &str,
+    _address: &alloy_primitives::Address,
+    _chain_id: u64,
+) -> Result<generated::parser::SignatureMetadata, String> {
+    Err(
+        "ABI signing is unavailable: this binary was built without the \
+         dev-signing feature"
+            .to_string(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

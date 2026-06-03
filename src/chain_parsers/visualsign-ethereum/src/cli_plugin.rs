@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::abi_metadata::{CLI_DEV_SIGNING_KEY_SEED, sign_abi};
+use crate::abi_metadata::sign_abi_for_cli;
 use crate::networks::parse_network;
 use crate::token_metadata::parse_network_id;
 use clap::Args as ClapArgs;
@@ -134,7 +134,7 @@ fn build_abi_mappings_from_files(
                 .identifier
                 .parse::<alloy_primitives::Address>()
                 .map_err(|e| format!("invalid contract address: {e}"))?;
-            let signature = sign_abi(&json, &addr, chain_id, &CLI_DEV_SIGNING_KEY_SEED)
+            let signature = sign_abi_for_cli(&json, &addr, chain_id)
                 .map_err(|e| format!("failed to sign ABI: {e}"))?;
             Ok(Abi {
                 value: json,
@@ -232,17 +232,16 @@ fn apply_proxy_mappings(
                     continue;
                 }
             };
-            let signature =
-                match sign_abi(&empty_abi, &proxy_addr, chain_id, &CLI_DEV_SIGNING_KEY_SEED) {
-                    Ok(sig) => sig,
-                    Err(e) => {
-                        eprintln!(
-                            "  Warning: Skipping proxy mapping '{mapping}': \
+            let signature = match sign_abi_for_cli(&empty_abi, &proxy_addr, chain_id) {
+                Ok(sig) => sig,
+                Err(e) => {
+                    eprintln!(
+                        "  Warning: Skipping proxy mapping '{mapping}': \
                              failed to sign synthesized proxy ABI: {e}"
-                        );
-                        continue;
-                    }
-                };
+                    );
+                    continue;
+                }
+            };
             abi_mappings.insert(
                 proxy_key.clone(),
                 Abi {
