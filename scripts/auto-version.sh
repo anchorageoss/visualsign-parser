@@ -21,6 +21,23 @@ fi
 
 SHORT_HASH=$(git rev-parse --short=12 HEAD)
 
+# A shallow clone makes the commit-distance counts below wrong (git only sees
+# the truncated history). On CI, deepen to full history and fail if we can't;
+# locally, warn loudly so a bogus version is obvious rather than silent.
+if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    echo "Repository is shallow; fetching full history for an accurate version..." >&2
+    git fetch --unshallow 2>/dev/null || git fetch --depth=2147483647 2>/dev/null || true
+    if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+      echo "ERROR: repository is still shallow after fetch; refusing to compute a version from truncated history." >&2
+      exit 1
+    fi
+  else
+    echo "WARNING: shallow clone detected -- the computed version will be wrong." >&2
+    echo "         Run 'git fetch --unshallow' for an accurate commit distance." >&2
+  fi
+fi
+
 # Sanitized branch for semver build metadata (allowed: [0-9A-Za-z-]).
 # Trailing "-" is a separator before SHORT_HASH; omitted when branch is empty.
 if [ -n "$RAW_BRANCH" ]; then
@@ -42,14 +59,38 @@ if { [ "$RAW_BRANCH" = "main" ] || [ "$RAW_BRANCH" = "master" ]; } \
   exit 0
 fi
 
-REMOTE=$(git remote -v | awk '/[[:space:]]\(fetch\)/ && /anchorageoss\/visualsign-parser/ {print $1; exit}')
+# Find the remote that points at the canonical upstream repo. Prefer
+# $GITHUB_REPOSITORY (set in Actions) so forks/renames work without editing this
+# script; fall back to the known upstream slug, then to "origin". Override with
+# AUTO_VERSION_REMOTE if your remote layout differs.
+EXPECTED_REPO="${AUTO_VERSION_REPO:-${GITHUB_REPOSITORY:-anchorageoss/visualsign-parser}}"
+REMOTE="${AUTO_VERSION_REMOTE:-}"
+if [ -z "$REMOTE" ]; then
+  REMOTE=$(git remote -v | awk -v repo="$EXPECTED_REPO" '$0 ~ "[[:space:]]\\(fetch\\)" && index($0, repo) {print $1; exit}')
+fi
 if [ -z "$REMOTE" ]; then
   REMOTE="origin"
 fi
 
-DEFAULT_BRANCH="main"
-if ! git rev-parse --verify "$REMOTE/$DEFAULT_BRANCH" > /dev/null 2>&1; then
+# Resolve the default branch. Prefer main, then master. If neither
+# remote-tracking ref is present (e.g. a CI checkout that fetched only the
+# current ref), try to fetch both before giving up, so the merge-base below
+# doesn't fail cryptically under `set -e`.
+if git rev-parse --verify "$REMOTE/main" > /dev/null 2>&1; then
+  DEFAULT_BRANCH="main"
+elif git rev-parse --verify "$REMOTE/master" > /dev/null 2>&1; then
   DEFAULT_BRANCH="master"
+else
+  git fetch "$REMOTE" main > /dev/null 2>&1 || true
+  git fetch "$REMOTE" master > /dev/null 2>&1 || true
+  if git rev-parse --verify "$REMOTE/main" > /dev/null 2>&1; then
+    DEFAULT_BRANCH="main"
+  elif git rev-parse --verify "$REMOTE/master" > /dev/null 2>&1; then
+    DEFAULT_BRANCH="master"
+  else
+    echo "ERROR: cannot resolve $REMOTE/main or $REMOTE/master to compute a merge base." >&2
+    exit 1
+  fi
 fi
 
 MERGE_BASE=$(git merge-base "$REMOTE/$DEFAULT_BRANCH" HEAD)
