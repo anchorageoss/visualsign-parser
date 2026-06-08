@@ -176,11 +176,14 @@ impl SolanaTransactionWrapper {
 ///    the rendered "Program" field. Reject it.
 fn extract_idl_mappings(options: &VisualSignOptions) -> BTreeMap<String, (String, String)> {
     // Resolve the authorized IDL-signer allowlist from the env-configured
-    // production list, then delegate. Splitting the allowlist out as a
-    // parameter lets tests exercise the positive acceptance path with an
-    // injected allowlist: env vars cannot be set in-process under edition 2024
-    // + forbid(unsafe), so an env-only allowlist would be untestable here.
-    extract_idl_mappings_with_signers(options, &authorized_idl_signers())
+    // production list, then delegate. The allowlist is cached once per process
+    // by `authorized_idl_signers`, so this is a cheap lookup rather than a fresh
+    // env read + hex/ed25519 parse on every parse request. Splitting the
+    // allowlist out as a parameter lets tests exercise the positive acceptance
+    // path with an injected allowlist: env vars cannot be set in-process under
+    // edition 2024 + forbid(unsafe), so an env-only allowlist would be
+    // untestable here.
+    extract_idl_mappings_with_signers(options, authorized_idl_signers())
 }
 
 /// Extraction core with an explicitly supplied signer allowlist.

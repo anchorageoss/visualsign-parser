@@ -48,6 +48,8 @@
 //!   the allowlist has no compile-time dev entry: it is built solely from the
 //!   env-configured production list.
 
+use std::sync::OnceLock;
+
 use ed25519_dalek::{Signature, VerifyingKey};
 use visualsign::signing::SignerAllowlist;
 
@@ -214,20 +216,29 @@ pub fn validate_idl_signature(
 /// the allowlist is empty, which rejects all signed IDLs (fail-closed). This is
 /// the secure default for the untrusted, display-only caller-IDL path; unsigned
 /// IDLs are unaffected and still accepted by the extraction path.
+///
+/// The allowlist is built once per process and cached: `VISUALSIGN_SOL_IDL_SIGNERS`
+/// is read from the environment on first call (deployments set it before launch),
+/// so the env read, hex decode, and ed25519 point validation happen a single time
+/// rather than on every parse request. Returns a shared reference to the cached
+/// allowlist.
 #[must_use]
-pub fn authorized_idl_signers() -> SignerAllowlist {
-    let mut allow = SignerAllowlist::new();
+pub fn authorized_idl_signers() -> &'static SignerAllowlist {
+    static SIGNERS: OnceLock<SignerAllowlist> = OnceLock::new();
+    SIGNERS.get_or_init(|| {
+        let mut allow = SignerAllowlist::new();
 
-    if let Ok(list) = std::env::var("VISUALSIGN_SOL_IDL_SIGNERS") {
-        for entry in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-            match canonical_pubkey_from_hex(entry) {
-                Some(bytes) => allow.insert(bytes),
-                None => tracing::warn!("Ignoring invalid pubkey in VISUALSIGN_SOL_IDL_SIGNERS"),
+        if let Ok(list) = std::env::var("VISUALSIGN_SOL_IDL_SIGNERS") {
+            for entry in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                match canonical_pubkey_from_hex(entry) {
+                    Some(bytes) => allow.insert(bytes),
+                    None => tracing::warn!("Ignoring invalid pubkey in VISUALSIGN_SOL_IDL_SIGNERS"),
+                }
             }
         }
-    }
 
-    allow
+        allow
+    })
 }
 
 /// Parse a hex ed25519 public key (optionally `0x`- or `0X`-prefixed, exactly 32
