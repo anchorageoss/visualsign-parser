@@ -1102,9 +1102,11 @@ fn test_unpack_rejects_unknown_opcode() {
 }
 
 #[test]
-fn test_visualizer_returns_decode_error_for_malformed_data() {
-    // End-to-end guard: the visualizer must surface DecodeError (not panic) for
-    // attacker-controlled instruction bytes targeting the SPL Token program.
+fn test_visualizer_renders_graceful_fallback_for_malformed_data() {
+    // End-to-end guard: per the catch-all "partial rendering" contract the
+    // visualizer must NEVER return Err for attacker-controlled bytes -- a
+    // visualizer Err aborts the whole transaction in the non-diagnostics build.
+    // Malformed input must degrade to a raw program_id + data layout.
     let instruction = Instruction {
         program_id: spl_token::id(),
         accounts: vec![],
@@ -1119,13 +1121,75 @@ fn test_visualizer_returns_decode_error_for_malformed_data() {
     let idl_registry = crate::idl::IdlRegistry::new();
     let context = VisualizerContext::new(&sender, &compiled, &account_keys, &idl_registry, 0);
 
-    let result = SplTokenVisualizer.visualize_tx_commands(&context);
-    assert!(
+    let field = SplTokenVisualizer
+        .visualize_tx_commands(&context)
+        .expect("malformed data must render a graceful fallback, not Err");
+
+    let SignablePayloadField::PreviewLayout { preview_layout, .. } = field.signable_payload_field
+    else {
+        panic!("expected PreviewLayout");
+    };
+    let expanded = preview_layout.expanded.expect("expanded layout");
+    let has_raw_data = expanded.fields.iter().any(|f| {
         matches!(
-            result,
-            Err(visualsign::errors::VisualSignError::DecodeError(_))
-        ),
-        "expected DecodeError, got {result:?}"
+            &f.signable_payload_field,
+            SignablePayloadField::TextV2 { common, .. } if common.label == "Raw Data"
+        )
+    });
+    assert!(
+        has_raw_data,
+        "graceful fallback should still surface the Raw Data field"
+    );
+}
+
+#[test]
+fn test_v0_unresolved_accounts_render_placeholder_not_err() {
+    // v0 + address-lookup-table: the TokenKeg program_id resolves (so spl_token
+    // handles the instruction) but a token account index points into a lookup
+    // table the parser has not resolved. This must degrade to an `unresolved(N)`
+    // placeholder, never Err (which would erase the whole transaction).
+    let program = spl_token::id();
+    let mint = Pubkey::new_unique();
+    let destination = Pubkey::new_unique();
+    // account_keys holds indices 0..=2 only; index 50 below is unresolved.
+    let account_keys = vec![program, mint, destination];
+
+    // MintTo (tag 7) + 8-byte little-endian amount. Accounts: [mint, destination,
+    // mintAuthority], with the authority pointing at the unresolved index 50.
+    let mut data = vec![7u8];
+    data.extend_from_slice(&1_000u64.to_le_bytes());
+    let compiled = CompiledInstruction {
+        program_id_index: 0,
+        accounts: vec![1, 2, 50],
+        data,
+    };
+
+    let sender = SolanaAccount {
+        account_key: program.to_string(),
+        signer: false,
+        writable: false,
+    };
+    let idl_registry = crate::idl::IdlRegistry::new();
+    let context = VisualizerContext::new(&sender, &compiled, &account_keys, &idl_registry, 0);
+
+    let field = SplTokenVisualizer
+        .visualize_tx_commands(&context)
+        .expect("unresolved accounts must not abort the visualizer");
+
+    let SignablePayloadField::PreviewLayout { preview_layout, .. } = field.signable_payload_field
+    else {
+        panic!("expected PreviewLayout");
+    };
+    let expanded = preview_layout.expanded.expect("expanded layout");
+    let has_placeholder = expanded.fields.iter().any(|f| {
+        matches!(
+            &f.signable_payload_field,
+            SignablePayloadField::TextV2 { text_v2, .. } if text_v2.text == "unresolved(50)"
+        )
+    });
+    assert!(
+        has_placeholder,
+        "unresolved account must render an `unresolved(50)` placeholder"
     );
 }
 

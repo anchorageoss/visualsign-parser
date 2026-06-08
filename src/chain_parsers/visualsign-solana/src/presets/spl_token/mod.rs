@@ -9,7 +9,6 @@ use crate::core::{
 };
 use config::SplTokenConfig;
 use solana_program::program_option::COption;
-use solana_sdk::instruction::{AccountMeta, Instruction};
 use spl_token::instruction::{AuthorityType, TokenInstruction};
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::*;
@@ -28,12 +27,18 @@ impl InstructionVisualizer for SplTokenVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction = build_instruction_shim(context)?;
-        let token_instruction = TokenInstruction::unpack(&instruction.data).map_err(|e| {
-            VisualSignError::DecodeError(format!("Failed to unpack SPL token instruction: {e}"))
-        })?;
-
-        create_token_preview_layout(&token_instruction, &instruction, context)
+        let instruction = InstructionView::from_context(context);
+        // Catch-all "partial rendering" contract (see `VisualizerContext` docs):
+        // never abort the whole transaction. Malformed instruction bytes
+        // (including attacker-controlled input) degrade to a raw program_id +
+        // data layout instead of returning `Err`, which the non-diagnostics
+        // dispatch turns into a whole-transaction failure.
+        match TokenInstruction::unpack(&instruction.data) {
+            Ok(token_instruction) => {
+                create_token_preview_layout(&token_instruction, &instruction, context)
+            }
+            Err(_) => create_unparsable_preview_layout(&instruction, context),
+        }
     }
 
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
@@ -45,39 +50,72 @@ impl InstructionVisualizer for SplTokenVisualizer {
     }
 }
 
-/// Reconstruct an `Instruction` from the post-#228 wire-data context.
+/// A display-resolved view of the instruction built from the post-#228
+/// wire-data context.
 ///
-/// The bulk of this preset still references an `Instruction` via the original
-/// `instruction.program_id` / `instruction.accounts` / `instruction.data`
-/// shape; this builds that view at the entry point so the inner per-variant
-/// branches don't need to be rewritten. Unresolved indices (those that need
-/// an address table lookup) are rejected rather than substituted with
-/// `Pubkey::default()`, which would render as a valid-looking address.
-fn build_instruction_shim(context: &VisualizerContext) -> Result<Instruction, VisualSignError> {
-    let program_id = match context.program_id() {
-        ProgramRef::Resolved(pk) => *pk,
-        ProgramRef::Unresolved { raw_index } => {
-            return Err(VisualSignError::DecodeError(format!(
-                "spl_token: unresolved program_id at index {raw_index}"
-            )));
+/// The per-variant branches reference `instruction.program_id` /
+/// `instruction.accounts` / `instruction.data`; this builds that view at the
+/// entry point with every program and account index already resolved to a
+/// display string. Following the catch-all "partial rendering" contract
+/// documented on `VisualizerContext`, indices that need an address-table lookup
+/// (v0 transactions) render as `unresolved(N)` placeholders rather than aborting
+/// the whole transaction or being substituted with `Pubkey::default()` (which
+/// would render as a valid-looking address).
+struct InstructionView {
+    program_id: String,
+    accounts: Vec<String>,
+    data: Vec<u8>,
+}
+
+impl InstructionView {
+    fn from_context(context: &VisualizerContext) -> Self {
+        let program_id = match context.program_id() {
+            ProgramRef::Resolved(pk) => pk.to_string(),
+            ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
+        };
+        let accounts = (0..context.num_accounts())
+            .map(|i| match context.account(i) {
+                Some(AccountRef::Resolved(pk)) => pk.to_string(),
+                Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
+                None => "unknown".to_string(),
+            })
+            .collect();
+        Self {
+            program_id,
+            accounts,
+            data: context.data().to_vec(),
         }
-    };
-    let accounts: Vec<AccountMeta> = (0..context.num_accounts())
-        .map(|i| match context.account(i) {
-            Some(AccountRef::Resolved(pk)) => Ok(AccountMeta::new_readonly(*pk, false)),
-            Some(AccountRef::Unresolved { raw_index }) => Err(VisualSignError::DecodeError(
-                format!("spl_token: unresolved account index {raw_index} at position {i}"),
-            )),
-            None => Err(VisualSignError::DecodeError(format!(
-                "spl_token: missing account at position {i}"
-            ))),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Instruction {
-        program_id,
-        accounts,
-        data: context.data().to_vec(),
-    })
+    }
+}
+
+/// Graceful fallback when the instruction bytes do not unpack into a known SPL
+/// Token instruction. Mirrors the unknown-program raw layout: surface the
+/// program and raw data rather than erroring (which would erase the whole tx).
+fn create_unparsable_preview_layout(
+    instruction: &InstructionView,
+    context: &VisualizerContext,
+) -> Result<AnnotatedPayloadField, VisualSignError> {
+    let title = "SPL Token (unparsed)";
+
+    let condensed_fields = vec![
+        create_text_field("Instruction", title)?,
+        create_text_field("Program", "SPL Token")?,
+    ];
+
+    let expanded_fields = vec![
+        create_text_field("Instruction", title)?,
+        create_text_field("Program", "SPL Token")?,
+        create_text_field("Program ID", &instruction.program_id)?,
+        create_text_field("Raw Data", &hex::encode(&instruction.data))?,
+    ];
+
+    create_preview_layout_field(
+        title,
+        condensed_fields,
+        expanded_fields,
+        instruction,
+        context,
+    )
 }
 
 fn format_authority_type(authority_type: &AuthorityType) -> &'static str {
@@ -98,7 +136,7 @@ fn format_coption_pubkey(coption: &COption<solana_sdk::pubkey::Pubkey>) -> Strin
 
 fn create_token_preview_layout(
     token_instruction: &TokenInstruction,
-    instruction: &solana_sdk::instruction::Instruction,
+    instruction: &InstructionView,
     context: &VisualizerContext,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     match token_instruction {
@@ -108,26 +146,20 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", &instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", "Mint To")?,
                 create_text_field("Amount", &amount.to_string())?,
             ];
 
             // MintTo accounts: [0] mint, [1] destination account, [2] mint authority
             if let Some(mint_account) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("mint", &mint_account.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("mint", mint_account)?);
             }
             if let Some(destination) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field(
-                    "account",
-                    &destination.pubkey.to_string(),
-                )?);
+                expanded_fields.push(create_text_field("account", destination)?);
             }
             if let Some(authority) = instruction.accounts.get(2) {
-                expanded_fields.push(create_text_field(
-                    "mintAuthority",
-                    &authority.pubkey.to_string(),
-                )?);
+                expanded_fields.push(create_text_field("mintAuthority", authority)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -151,7 +183,7 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", &instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", "Mint To (Checked)")?,
                 create_text_field("Amount", &amount.to_string())?,
                 create_text_field("Decimals", &decimals.to_string())?,
@@ -159,19 +191,13 @@ fn create_token_preview_layout(
 
             // MintToChecked accounts: [0] mint, [1] destination account, [2] mint authority
             if let Some(mint_account) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("mint", &mint_account.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("mint", mint_account)?);
             }
             if let Some(destination) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field(
-                    "account",
-                    &destination.pubkey.to_string(),
-                )?);
+                expanded_fields.push(create_text_field("account", destination)?);
             }
             if let Some(authority) = instruction.accounts.get(2) {
-                expanded_fields.push(create_text_field(
-                    "mintAuthority",
-                    &authority.pubkey.to_string(),
-                )?);
+                expanded_fields.push(create_text_field("mintAuthority", authority)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -200,7 +226,7 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", &instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", "Set Authority")?,
                 create_text_field("Authority Type", authority_type_str)?,
                 create_text_field("New Authority", &new_authority_str)?,
@@ -208,13 +234,10 @@ fn create_token_preview_layout(
 
             // SetAuthority accounts: [0] account whose authority is being set, [1] current authority
             if let Some(account) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Account", &account.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Account", account)?);
             }
             if let Some(current_authority) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field(
-                    "Current Authority",
-                    &current_authority.pubkey.to_string(),
-                )?);
+                expanded_fields.push(create_text_field("Current Authority", current_authority)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -238,7 +261,7 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
                 create_text_field("Amount", &amount.to_string())?,
             ];
@@ -252,16 +275,13 @@ fn create_token_preview_layout(
                 "spl_token: unchecked Transfer omits mint from instruction; use TransferChecked to verify"
             );
             if let Some(source) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Source", &source.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Source", source)?);
             }
             if let Some(destination) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field(
-                    "Destination",
-                    &destination.pubkey.to_string(),
-                )?);
+                expanded_fields.push(create_text_field("Destination", destination)?);
             }
             if let Some(owner) = instruction.accounts.get(2) {
-                expanded_fields.push(create_text_field("Owner", &owner.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Owner", owner)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -285,7 +305,7 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
                 create_text_field("Amount", &amount.to_string())?,
                 create_text_field("Decimals", &decimals.to_string())?,
@@ -293,19 +313,16 @@ fn create_token_preview_layout(
 
             // TransferChecked accounts: [0] source account, [1] mint, [2] destination account, [3] owner
             if let Some(source) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Source", &source.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Source", source)?);
             }
             if let Some(mint) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Token Mint", mint)?);
             }
             if let Some(destination) = instruction.accounts.get(2) {
-                expanded_fields.push(create_text_field(
-                    "Destination",
-                    &destination.pubkey.to_string(),
-                )?);
+                expanded_fields.push(create_text_field("Destination", destination)?);
             }
             if let Some(owner) = instruction.accounts.get(3) {
-                expanded_fields.push(create_text_field("Owner", &owner.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Owner", owner)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -329,20 +346,20 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
                 create_text_field("Amount", &amount.to_string())?,
             ];
 
             // Burn accounts: [0] token account to burn from, [1] mint, [2] owner
             if let Some(account) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Account", &account.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Account", account)?);
             }
             if let Some(mint) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Token Mint", mint)?);
             }
             if let Some(owner) = instruction.accounts.get(2) {
-                expanded_fields.push(create_text_field("Owner", &owner.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Owner", owner)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -366,7 +383,7 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
                 create_text_field("Amount", &amount.to_string())?,
                 create_text_field("Decimals", &decimals.to_string())?,
@@ -374,13 +391,13 @@ fn create_token_preview_layout(
 
             // BurnChecked accounts: [0] token account to burn from, [1] mint, [2] owner
             if let Some(account) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Account", &account.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Account", account)?);
             }
             if let Some(mint) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Token Mint", mint)?);
             }
             if let Some(owner) = instruction.accounts.get(2) {
-                expanded_fields.push(create_text_field("Owner", &owner.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Owner", owner)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -404,7 +421,7 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
                 create_text_field("Amount", &amount.to_string())?,
             ];
@@ -415,13 +432,13 @@ fn create_token_preview_layout(
                 "spl_token: unchecked Approve omits mint from instruction; use ApproveChecked to verify"
             );
             if let Some(source) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Source", &source.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Source", source)?);
             }
             if let Some(delegate) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field("Delegate", &delegate.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Delegate", delegate)?);
             }
             if let Some(owner) = instruction.accounts.get(2) {
-                expanded_fields.push(create_text_field("Owner", &owner.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Owner", owner)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -445,7 +462,7 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
                 create_text_field("Amount", &amount.to_string())?,
                 create_text_field("Decimals", &decimals.to_string())?,
@@ -453,16 +470,16 @@ fn create_token_preview_layout(
 
             // ApproveChecked accounts: [0] source account, [1] mint, [2] delegate, [3] owner
             if let Some(source) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Source", &source.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Source", source)?);
             }
             if let Some(mint) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Token Mint", mint)?);
             }
             if let Some(delegate) = instruction.accounts.get(2) {
-                expanded_fields.push(create_text_field("Delegate", &delegate.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Delegate", delegate)?);
             }
             if let Some(owner) = instruction.accounts.get(3) {
-                expanded_fields.push(create_text_field("Owner", &owner.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Owner", owner)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -490,7 +507,7 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
                 create_text_field("Decimals", &decimals.to_string())?,
                 create_text_field("Mint Authority", &mint_authority.to_string())?,
@@ -499,7 +516,7 @@ fn create_token_preview_layout(
 
             // InitializeMint accounts: [0] mint, [1] rent sysvar
             if let Some(mint) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Token Mint", mint)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -525,7 +542,7 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
                 create_text_field("Decimals", &decimals.to_string())?,
                 create_text_field("Mint Authority", &mint_authority.to_string())?,
@@ -534,7 +551,7 @@ fn create_token_preview_layout(
 
             // InitializeMint2 accounts: [0] mint
             if let Some(mint) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Token Mint", mint)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -556,19 +573,19 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
             ];
 
             // InitializeAccount accounts: [0] account, [1] mint, [2] owner, [3] rent
             if let Some(account) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Account", &account.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Account", account)?);
             }
             if let Some(mint) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Token Mint", mint)?);
             }
             if let Some(owner) = instruction.accounts.get(2) {
-                expanded_fields.push(create_text_field("Owner", &owner.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Owner", owner)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -590,7 +607,7 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
                 create_text_field("Owner", &owner.to_string())?,
             ];
@@ -598,10 +615,10 @@ fn create_token_preview_layout(
             // InitializeAccount2 accounts: [0] account, [1] mint, [2] rent (owner is in
             // instruction data, not the account list)
             if let Some(account) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Account", &account.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Account", account)?);
             }
             if let Some(mint) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Token Mint", mint)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -623,17 +640,17 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
                 create_text_field("Owner", &owner.to_string())?,
             ];
 
             // InitializeAccount3 accounts: [0] account, [1] mint (owner is in instruction data)
             if let Some(account) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Account", &account.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Account", account)?);
             }
             if let Some(mint) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Token Mint", mint)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -655,22 +672,19 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
             ];
 
             // FreezeAccount accounts: [0] account to freeze, [1] mint, [2] freeze authority
             if let Some(account) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Account", &account.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Account", account)?);
             }
             if let Some(mint) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Token Mint", mint)?);
             }
             if let Some(authority) = instruction.accounts.get(2) {
-                expanded_fields.push(create_text_field(
-                    "Freeze Authority",
-                    &authority.pubkey.to_string(),
-                )?);
+                expanded_fields.push(create_text_field("Freeze Authority", authority)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -692,22 +706,19 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
             ];
 
             // ThawAccount accounts: [0] account to thaw, [1] mint, [2] freeze authority
             if let Some(account) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Account", &account.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Account", account)?);
             }
             if let Some(mint) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field("Token Mint", &mint.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Token Mint", mint)?);
             }
             if let Some(authority) = instruction.accounts.get(2) {
-                expanded_fields.push(create_text_field(
-                    "Freeze Authority",
-                    &authority.pubkey.to_string(),
-                )?);
+                expanded_fields.push(create_text_field("Freeze Authority", authority)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -729,7 +740,7 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
             ];
 
@@ -739,16 +750,13 @@ fn create_token_preview_layout(
                 "spl_token: CloseAccount omits mint from instruction (derived from token account state)"
             );
             if let Some(account) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Account", &account.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Account", account)?);
             }
             if let Some(destination) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field(
-                    "Destination",
-                    &destination.pubkey.to_string(),
-                )?);
+                expanded_fields.push(create_text_field("Destination", destination)?);
             }
             if let Some(owner) = instruction.accounts.get(2) {
-                expanded_fields.push(create_text_field("Owner", &owner.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Owner", owner)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -770,7 +778,7 @@ fn create_token_preview_layout(
             let condensed_fields = vec![create_text_field("Instruction", instruction_name)?];
 
             let mut expanded_fields = vec![
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Instruction", instruction_name)?,
             ];
 
@@ -779,10 +787,10 @@ fn create_token_preview_layout(
                 "spl_token: Revoke omits mint from instruction (derived from source token account state)"
             );
             if let Some(source) = instruction.accounts.first() {
-                expanded_fields.push(create_text_field("Source", &source.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Source", source)?);
             }
             if let Some(owner) = instruction.accounts.get(1) {
-                expanded_fields.push(create_text_field("Owner", &owner.pubkey.to_string())?);
+                expanded_fields.push(create_text_field("Owner", owner)?);
             }
 
             expanded_fields.push(create_text_field(
@@ -813,7 +821,7 @@ fn create_token_preview_layout(
             let expanded_fields = vec![
                 create_text_field("Instruction", &instruction_name)?,
                 create_text_field("Program", "SPL Token")?,
-                create_text_field("Program ID", &instruction.program_id.to_string())?,
+                create_text_field("Program ID", &instruction.program_id)?,
                 create_text_field("Raw Data", &hex::encode(&instruction.data))?,
             ];
 
@@ -832,7 +840,7 @@ fn create_preview_layout_field(
     title: &str,
     condensed_fields: Vec<AnnotatedPayloadField>,
     expanded_fields: Vec<AnnotatedPayloadField>,
-    instruction: &solana_sdk::instruction::Instruction,
+    instruction: &InstructionView,
     context: &VisualizerContext,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     let condensed = SignablePayloadFieldListLayout {
