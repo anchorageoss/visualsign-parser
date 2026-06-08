@@ -61,15 +61,20 @@ use std::collections::BTreeSet;
 use sha2::{Digest, Sha256};
 
 /// Allowlist of authorized signer public keys, compared by their canonical
-/// SEC1-encoded bytes (the chain crates canonicalize before insert/lookup, so
-/// compressed vs uncompressed encodings of the same key match). An EMPTY
-/// allowlist authorizes nothing: signed metadata is rejected (fail-closed).
+/// byte representation. The exact encoding depends on the curve:
+/// - **secp256k1 (Ethereum ABI path)**: uncompressed SEC1 encoding (65 bytes).
+///   The chain crates canonicalize before insert/lookup, so compressed vs
+///   uncompressed forms of the same key match.
+/// - **ed25519 (Solana IDL path)**: raw 32-byte public key (no SEC1 variants).
+///
+/// An EMPTY allowlist authorizes nothing: signed metadata is rejected
+/// (fail-closed).
 ///
 /// This type is deliberately crypto-free: it stores already-decoded key bytes and
 /// never parses or validates them, so the core crate keeps no dependency on any
-/// secp256k1 implementation. Callers (the chain crates) decode and canonicalize the
-/// keys before inserting or looking them up. It is shared so the Ethereum ABI and
-/// Solana IDL signature paths can enforce the same mechanism.
+/// specific crypto implementation. Callers (the chain crates) decode and
+/// canonicalize the keys before inserting or looking them up. It is shared so the
+/// Ethereum ABI and Solana IDL signature paths can enforce the same mechanism.
 #[derive(Debug, Clone, Default)]
 pub struct SignerAllowlist {
     keys: BTreeSet<Vec<u8>>,

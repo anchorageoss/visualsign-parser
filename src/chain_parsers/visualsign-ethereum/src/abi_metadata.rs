@@ -320,8 +320,8 @@ fn validate_abi_signature(
     //    one. Compare on the canonical uncompressed SEC1 encoding so the lookup
     //    matches how keys are stored in the allowlist. An empty allowlist contains
     //    nothing, so this rejects every signed ABI (fail-closed).
-    let signer_pubkey = verifying_key.to_encoded_point(false).as_bytes().to_vec();
-    if !allowlist.contains(&signer_pubkey) {
+    let signer_pubkey = verifying_key.to_encoded_point(false);
+    if !allowlist.contains(signer_pubkey.as_bytes()) {
         return Err(AbiSignatureError::Validation(
             "signer not in allowlist".to_string(),
         ));

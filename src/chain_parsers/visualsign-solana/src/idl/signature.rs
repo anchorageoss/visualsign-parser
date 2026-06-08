@@ -192,8 +192,7 @@ pub fn validate_idl_signature(
     // uncompressed variants), so the verified key's bytes are compared directly
     // against the allowlist. An empty allowlist contains nothing, so this rejects
     // every signed IDL (fail-closed).
-    let pk = verifying_key.to_bytes().to_vec();
-    if !allowlist.contains(&pk) {
+    if !allowlist.contains(&verifying_key.to_bytes()) {
         return Err(IdlSignatureError::Validation(
             "signer not in allowlist".to_string(),
         ));
