@@ -52,7 +52,9 @@ enum AbiSignatureError {
 ///   different address or chain. Existing signatures must be re-issued.
 /// - **Signers are checked against an authorized allowlist.** A verified signature
 ///   only proves the ABI was signed by *some* secp256k1 key. Validation additionally
-///   requires the recovered signer to appear in an authorized-signer allowlist (see
+///   requires the verifying key supplied in `SignatureMetadata` (the one the
+///   signature is checked against, not a key recovered from the signature) to
+///   appear in an authorized-signer allowlist (see
 ///   [`authorized_abi_signers`]); unauthorized signers are rejected even when their
 ///   signature verifies. An EMPTY allowlist rejects all signed ABIs (fail-closed),
 ///   which is the secure default because the whole caller-supplied ABI path is
@@ -234,8 +236,9 @@ struct SignatureMetadata {
 /// replayed under another. See [`visualsign::signing::ethereum_metadata_prehash`].
 ///
 /// Both checks must pass: the signature must verify over the prehash AND the
-/// recovered signer must appear in `allowlist`. An empty allowlist rejects every
-/// signed ABI (fail-closed); see [`authorized_abi_signers`].
+/// `public_key` it was verified against must appear in `allowlist`. An empty
+/// allowlist rejects every signed ABI (fail-closed); see
+/// [`authorized_abi_signers`].
 ///
 /// # Arguments
 /// * `abi_json` - The ABI JSON string that was signed
