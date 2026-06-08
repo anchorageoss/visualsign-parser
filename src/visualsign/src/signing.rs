@@ -1,7 +1,8 @@
 //! Domain-separated prehash for caller-supplied metadata signatures.
 //!
 //! Caller-supplied ABI (Ethereum) and IDL (Solana) metadata can carry an optional
-//! secp256k1 signature. Historically the prehash was `SHA-256(body)` over the
+//! signature (secp256k1 ECDSA for Ethereum ABI, ed25519 for Solana IDL).
+//! Historically the prehash was `SHA-256(body)` over the
 //! metadata JSON alone. That proves the body was not altered after signing, but it
 //! binds the signature to nothing else: a signature minted for one (chain, on-chain
 //! identity) is byte-for-byte valid when replayed under any other (chain, identity).
