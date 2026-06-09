@@ -31,10 +31,10 @@ spl-stake-pool = "2.0.2"
 solana-system-interface = "1.0"
 spl-token-2022 = "10.0.0"
 spl-token-2022-interface = "2.1.0"
-# IDL signature validation (mirrors the Ethereum ABI path; see
-# `idl/signature.rs` for the secp256k1 verification logic).
-k256 = { version = "0.12", features = ["ecdsa"], default-features = false }
-sha2 = "0.10"
+# IDL signature validation. Solana uses ed25519 (its native curve); see
+# `idl/signature.rs`. The Ethereum ABI path uses secp256k1 for its own curator
+# key. Both verify a curator signature, not the program's on-chain authority.
+ed25519-dalek = "2"
 thiserror = "2.0.12"
 
 [dev-dependencies]

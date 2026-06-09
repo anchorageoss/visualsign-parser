@@ -16,6 +16,7 @@ use visualsign::{
     SignablePayloadFieldAmountV2, SignablePayloadFieldCommon, SignablePayloadFieldTextV2,
     encodings::SupportedEncodings,
     registry::LayeredRegistry,
+    signing::SignerAllowlist,
     vsptrait::{
         DeveloperConfig, Transaction, TransactionParseError, VisualSignConverter,
         VisualSignConverterFromString, VisualSignError, VisualSignOptions,
@@ -168,14 +169,48 @@ impl EthereumTransactionWrapper {
 pub struct EthereumVisualSignConverter {
     registry: Arc<registry::ContractRegistry>,
     visualizer_registry: visualizer::EthereumVisualizerRegistry,
+    abi_signers: SignerAllowlist,
 }
 
 impl EthereumVisualSignConverter {
     /// Creates a new converter with a custom registry wrapped in Arc.
+    ///
+    /// The ABI-signer allowlist is the default from
+    /// [`abi_metadata::authorized_abi_signers`]. Use [`Self::with_registry_and_signers`]
+    /// to inject an explicit allowlist.
     pub fn with_registry(registry: Arc<registry::ContractRegistry>) -> Self {
         Self {
             registry,
             visualizer_registry: visualizer::EthereumVisualizerRegistryBuilder::new().build(),
+            abi_signers: abi_metadata::authorized_abi_signers(),
+        }
+    }
+
+    /// Creates a converter with a custom registry and an explicit ABI-signer
+    /// allowlist. Intended for tests and configured deployments that need to control
+    /// which signers are authorized rather than relying on the compile-time/env
+    /// defaults.
+    pub fn with_registry_and_signers(
+        registry: Arc<registry::ContractRegistry>,
+        abi_signers: SignerAllowlist,
+    ) -> Self {
+        Self {
+            registry,
+            visualizer_registry: visualizer::EthereumVisualizerRegistryBuilder::new().build(),
+            abi_signers,
+        }
+    }
+
+    /// Creates a converter with the default registry (all known protocols) and an
+    /// explicit ABI-signer allowlist. Mirrors [`Self::new`] but overrides the signer
+    /// allowlist.
+    pub fn with_signers(abi_signers: SignerAllowlist) -> Self {
+        let (contract_registry, visualizer_builder) =
+            registry::ContractRegistry::with_default_protocols();
+        Self {
+            registry: Arc::new(contract_registry),
+            visualizer_registry: visualizer_builder.build(),
+            abi_signers,
         }
     }
 
@@ -186,6 +221,7 @@ impl EthereumVisualSignConverter {
         Self {
             registry: Arc::new(contract_registry),
             visualizer_registry: visualizer_builder.build(),
+            abi_signers: abi_metadata::authorized_abi_signers(),
         }
     }
 
@@ -235,7 +271,7 @@ impl EthereumVisualSignConverter {
 
         // Resolve chain_id: metadata > transaction > default (1 for legacy).
         let chain_id = resolve_chain_id(&transaction, &options)?;
-        let metadata_abi = extract_metadata_abi(&options, chain_id);
+        let metadata_abi = extract_metadata_abi(&options, chain_id, &self.abi_signers);
 
         convert_to_visual_sign_payload(
             transaction,
@@ -446,8 +482,9 @@ fn resolve_chain_id(
 fn extract_metadata_abi(
     options: &VisualSignOptions,
     chain_id: u64,
+    allowlist: &SignerAllowlist,
 ) -> Option<abi_registry::AbiRegistry> {
-    abi_metadata::try_extract_from_chain_metadata(options.metadata.as_ref(), chain_id)
+    abi_metadata::try_extract_from_chain_metadata(options.metadata.as_ref(), chain_id, allowlist)
 }
 
 /// Known-token short-circuit: if the destination is a token registered in the
@@ -857,11 +894,17 @@ mod tests {
     /// Build a signed `Abi` for tests that exercise the metadata-ABI extraction
     /// path, which rejects unsigned entries. Proxy entries layer `abi_type` and
     /// `implementation_address` on top via struct-update (`..signed_abi(...)`).
-    fn signed_abi(value: &str) -> Abi {
+    ///
+    /// The signature is bound to `address` (the map key the entry is stored under)
+    /// on chain 1, matching what the converter verifies: it resolves chain_id from
+    /// the transaction bytes (all callers use chain 1) and checks each entry against
+    /// its own map-key address.
+    fn signed_abi(value: &str, address: &Address) -> Abi {
         Abi {
             value: value.to_string(),
             signature: Some(
-                abi_metadata::sign_abi(value, &abi_metadata::CLI_DEV_SIGNING_KEY_SEED).unwrap(),
+                abi_metadata::sign_abi(value, address, 1, &abi_metadata::CLI_DEV_SIGNING_KEY_SEED)
+                    .unwrap(),
             ),
             ..Default::default()
         }
@@ -2622,10 +2665,10 @@ mod tests {
                 Abi {
                     abi_type: Some(AbiType::Proxy as i32),
                     implementation_address: Some(impl_addr.to_string()),
-                    ..signed_abi("[]")
+                    ..signed_abi("[]", &proxy)
                 },
             ),
-            (impl_addr.to_string(), signed_abi(impl_abi)),
+            (impl_addr.to_string(), signed_abi(impl_abi, &impl_addr)),
         ]
         .into_iter()
         .collect();
@@ -2694,7 +2737,7 @@ mod tests {
                 Abi {
                     abi_type: Some(AbiType::Proxy as i32),
                     implementation_address: Some(proxy_b.to_string()),
-                    ..signed_abi("[]")
+                    ..signed_abi("[]", &proxy_a)
                 },
             ),
             (
@@ -2702,10 +2745,10 @@ mod tests {
                 Abi {
                     abi_type: Some(AbiType::Proxy as i32),
                     implementation_address: Some(impl_c.to_string()),
-                    ..signed_abi("[]")
+                    ..signed_abi("[]", &proxy_b)
                 },
             ),
-            (impl_c.to_string(), signed_abi(c_abi)),
+            (impl_c.to_string(), signed_abi(c_abi, &impl_c)),
         ]
         .into_iter()
         .collect();
