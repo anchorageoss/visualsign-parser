@@ -1,0 +1,36 @@
+{
+  "description": "MintTo instruction - minting 1230 tokens to an account",
+  "source": "https://solscan.io/tx/35XirCzssnAVUB2FbLrf8vYUYmTq5omepqyR8tr5Y6eJ6yurs3LcRfzGxzn92wU3w5vBvM8BfodXsscz7nin8SbC?cluster=devnet",
+  "signature": "35XirCzssnAVUB2FbLrf8vYUYmTq5omepqyR8tr5Y6eJ6yurs3LcRfzGxzn92wU3w5vBvM8BfodXsscz7nin8SbC",
+  "cluster": "devnet",
+  "full_transaction_note": "This transaction has 2 instructions: [0] CreateIdempotent (Associated Token Account), [1] MintTo (SPL Token). We're testing instruction [1].",
+  "instruction_index": 1,
+  "instruction_data": "6YCQpfSgHpSj",
+  "program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  "accounts": [
+    {
+      "pubkey": "5pdHyGbtCmZdJ7ye71nzeke8kcQ4ngJNPHqoDvE5L2WT",
+      "signer": false,
+      "writable": true,
+      "description": "Token Mint"
+    },
+    {
+      "pubkey": "D7ZapNPiycy1imiL7deUiBXiqUGMisUuAmvAwSdxUKQT",
+      "signer": false,
+      "writable": true,
+      "description": "Destination token account"
+    },
+    {
+      "pubkey": "9AM41swmGH1iq3L1oNnV8T385BwzVUeNUMuGqKJbiDMm",
+      "signer": true,
+      "writable": false,
+      "description": "Mint authority"
+    }
+  ],
+  "expected_fields": {
+    "amount": "1230000000",
+    "mint": "5pdHyGbtCmZdJ7ye71nzeke8kcQ4ngJNPHqoDvE5L2WT",
+    "account": "D7ZapNPiycy1imiL7deUiBXiqUGMisUuAmvAwSdxUKQT",
+    "mintauthority": "9AM41swmGH1iq3L1oNnV8T385BwzVUeNUMuGqKJbiDMm"
+  }
+}
