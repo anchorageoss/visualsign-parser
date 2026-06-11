@@ -34,10 +34,7 @@ fn decode_transaction(
 ) -> Result<transaction::Raw, TronParserError> {
     let bytes = match encodings {
         SupportedEncodings::Hex => {
-            let clean_hex = raw_transaction
-                .strip_prefix("0x")
-                .unwrap_or(raw_transaction);
-            hex::decode(clean_hex).map_err(|e| {
+            visualsign::encodings::decode_hex(raw_transaction).map_err(|e| {
                 TronParserError::FailedToDecodeTransaction(format!("Failed to decode hex: {e}"))
             })?
         }
@@ -95,11 +92,8 @@ pub struct TronTransactionWrapper {
 
 impl Transaction for TronTransactionWrapper {
     fn from_string(data: &str) -> Result<Self, TransactionParseError> {
-        let format = if data.starts_with("0x") {
-            SupportedEncodings::Hex
-        } else {
-            SupportedEncodings::detect(data)
-        };
+        // detect() recognizes an optional 0x/0X prefix as hex.
+        let format = SupportedEncodings::detect(data);
         let transaction = decode_transaction(data, format)
             .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?;
         Ok(Self { transaction })

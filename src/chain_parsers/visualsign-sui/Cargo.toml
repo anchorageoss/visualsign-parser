@@ -7,7 +7,6 @@ edition = "2024"
 tracing = { workspace = true }
 
 base64 = { workspace = true }
-hex = { workspace = true }
 
 bcs = "0.1.6"
 serde = { workspace = true }

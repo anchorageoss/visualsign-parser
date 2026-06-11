@@ -18,7 +18,7 @@ solana_parser = { git = "https://github.com/anchorageoss/solana-parser.git", rev
 visualsign = { workspace = true }
 generated = { path = "../../generated" }
 serde_json = { workspace = true }
-hex = "0.4.3"
+hex = { workspace = true }
 base64 = "0.22.1"
 borsh = "1.5.5"
 bincode = "1.3.3"

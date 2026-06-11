@@ -96,3 +96,4 @@ Exceptions: test modules use `#[allow(clippy::unwrap_used, clippy::expect_used, 
 - **Type-erased converters** — `VisualSignConverterAny` trait objects for polymorphic registry without generics overhead
 - **Feature gates for chains** — Ethereum/Solana gated, extensible to new chains
 - **Rust edition 2024** on nightly channel 1.88
+- **Unified hex/`0x` handling** — All hex inputs (raw transactions, signatures, public keys, addresses) decode through `visualsign::encodings`: `decode_hex` (strip + decode), `strip_hex_prefix`, and `split_hex_prefix`. These accept an optional `0x`/`0X` prefix (case-insensitive). Do not hand-roll prefix stripping per chain. Where a prefix is mandatory (e.g. JSON-RPC quantities/data), use `split_hex_prefix` and turn `None` into an error. New chains and address parsers reuse these rather than introducing their own prefix rules.

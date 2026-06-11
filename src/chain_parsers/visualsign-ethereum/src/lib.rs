@@ -146,12 +146,8 @@ impl EthereumTransactionWrapper {
             return Ok(Self { transaction });
         }
 
-        // Existing RLP path
-        let format = if data.starts_with("0x") {
-            SupportedEncodings::Hex
-        } else {
-            visualsign::encodings::SupportedEncodings::detect(data)
-        };
+        // RLP path. detect() recognizes an optional 0x/0X prefix as hex.
+        let format = visualsign::encodings::SupportedEncodings::detect(data);
         let allow_signed = developer_config
             .map(|c| c.allow_signed_transactions)
             .unwrap_or(false);
@@ -431,10 +427,7 @@ fn decode_transaction(
 ) -> Result<TypedTransaction, EthereumParserError> {
     let bytes = match encodings {
         SupportedEncodings::Hex => {
-            let clean_hex = raw_transaction
-                .strip_prefix("0x")
-                .unwrap_or(raw_transaction);
-            hex::decode(clean_hex).map_err(|e| {
+            visualsign::encodings::decode_hex(raw_transaction).map_err(|e| {
                 EthereumParserError::FailedToDecodeTransaction(format!("Failed to decode hex: {e}"))
             })?
         }
