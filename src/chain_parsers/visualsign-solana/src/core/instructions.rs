@@ -419,6 +419,30 @@ mod off_tests {
             decode_instructions(&tx, &registry).expect("OOB account_index should not abort");
         assert_eq!(fields.len(), 1);
     }
+
+    #[test]
+    fn test_idl_preset_with_alt_accounts_renders_ok() {
+        // Simulate a v0 transaction where Jupiter Perps is the program and
+        // account index 50 is an ALT-referenced account (OOB in account_keys).
+        // Before the fix, resolve_accounts()? in jupiter_perps aborts the whole
+        // transaction. After the fix, it renders a fallback Ok field instead.
+        let jupiter_perps_pk: Pubkey = "PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu"
+            .parse()
+            .expect("valid pubkey");
+        let sender_pk = Pubkey::new_unique();
+        let tx = tx_with(
+            vec![sender_pk, jupiter_perps_pk],
+            vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0, 50], // 50 is OOB — simulates an ALT account
+                data: vec![0u8; 8],    // unknown discriminator -> fallback Ok
+            }],
+        );
+        let registry = IdlRegistry::new();
+        let fields = decode_instructions(&tx, &registry)
+            .expect("v0+ALT account must not abort an IDL preset");
+        assert_eq!(fields.len(), 1, "one field per instruction");
+    }
 }
 
 #[cfg(all(test, feature = "diagnostics"))]

@@ -5,7 +5,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::MeteoraDammV2Config;
 use solana_parser::{
@@ -32,12 +33,11 @@ impl InstructionVisualizer for MeteoraDammV2Visualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let program_id = context.resolve_program_id()?.to_string();
-        let accounts = context.resolve_accounts()?;
+        let view = InstructionView::from_context(context);
         let data = context.data();
         let instruction_data_hex = hex::encode(data);
 
-        let (parsed, named_accounts) = parse_meteora_damm_v2_instruction(data, &accounts)
+        let (parsed, named_accounts) = parse_meteora_damm_v2_instruction(data, &view.accounts)
             .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
         let instruction_title = format!("{DISPLAY_NAME}: {}", parsed.instruction_name);
@@ -48,7 +48,7 @@ impl InstructionVisualizer for MeteoraDammV2Visualizer {
         }
 
         let mut expanded_fields = vec![
-            create_text_field("Program ID", &program_id)?,
+            create_text_field("Program ID", &view.program_id)?,
             create_text_field("Instruction", &parsed.instruction_name)?,
             create_text_field("Discriminator", &parsed.discriminator)?,
         ];
@@ -78,7 +78,7 @@ impl InstructionVisualizer for MeteoraDammV2Visualizer {
             }),
         };
 
-        let fallback_text = format!("Program ID: {program_id}\nData: {instruction_data_hex}");
+        let fallback_text = format!("Program ID: {}\nData: {instruction_data_hex}", view.program_id);
 
         Ok(AnnotatedPayloadField {
             static_annotation: None,
@@ -109,7 +109,7 @@ fn load_idl() -> Result<Idl, Box<dyn std::error::Error>> {
 
 fn parse_meteora_damm_v2_instruction(
     data: &[u8],
-    accounts: &[solana_sdk::instruction::AccountMeta],
+    accounts: &[String],
 ) -> Result<(SolanaParsedInstructionData, BTreeMap<String, String>), Box<dyn std::error::Error>> {
     if data.len() < 8 {
         return Err("Instruction data too short for Anchor discriminator".into());
@@ -124,9 +124,9 @@ fn parse_meteora_damm_v2_instruction(
             .as_ref()
             .is_some_and(|disc| data.len() >= 8 && &data[0..8] == disc.as_slice())
     }) {
-        for (index, account_meta) in accounts.iter().enumerate() {
+        for (index, account_str) in accounts.iter().enumerate() {
             if let Some(idl_account) = idl_instruction.accounts.get(index) {
-                named_accounts.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
+                named_accounts.insert(idl_account.name.clone(), account_str.clone());
             }
         }
     }

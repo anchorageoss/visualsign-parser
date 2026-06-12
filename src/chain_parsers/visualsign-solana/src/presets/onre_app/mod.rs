@@ -3,7 +3,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::OnreAppConfig;
 use solana_parser::{
@@ -35,14 +36,14 @@ impl InstructionVisualizer for OnreAppVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let program_id_str = context.resolve_program_id()?.to_string();
-        let accounts = context.resolve_accounts()?;
+        let view = InstructionView::from_context(context);
+        let program_id_str = &view.program_id;
         let data = context.data();
 
         let instruction_number = context.instruction_index() + 1;
         let instruction_data_hex = hex::encode(data);
 
-        let decoded = parse_onre_app_instruction(data, &accounts)
+        let decoded = parse_onre_app_instruction(data, &view.accounts)
             .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
         let instruction_name = decoded.parsed.instruction_name.clone();
@@ -60,7 +61,7 @@ impl InstructionVisualizer for OnreAppVisualizer {
         }
 
         let mut expanded_fields = vec![
-            create_text_field("Program ID", &program_id_str)
+            create_text_field("Program ID", program_id_str)
                 .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
             create_text_field("Instruction", &instruction_name)
                 .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
@@ -132,7 +133,7 @@ fn get_onre_app_idl() -> Result<Idl, Box<dyn std::error::Error>> {
 
 fn parse_onre_app_instruction(
     data: &[u8],
-    accounts: &[solana_sdk::instruction::AccountMeta],
+    accounts: &[String],
 ) -> Result<OnreAppParsedInstruction, Box<dyn std::error::Error>> {
     if data.len() < 8 {
         return Err("Invalid instruction data length".into());
@@ -149,9 +150,9 @@ fn parse_onre_app_instruction(
             false
         }
     }) {
-        for (index, account_meta) in accounts.iter().enumerate() {
+        for (index, account_str) in accounts.iter().enumerate() {
             if let Some(idl_account) = idl_instruction.accounts.get(index) {
-                named_accounts.push((idl_account.name.clone(), account_meta.pubkey.to_string()));
+                named_accounts.push((idl_account.name.clone(), account_str.clone()));
             }
         }
     }

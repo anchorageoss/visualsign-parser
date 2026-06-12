@@ -3,13 +3,13 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::ExponentFinanceConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use solana_sdk::instruction::AccountMeta;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use visualsign::errors::VisualSignError;
@@ -32,18 +32,17 @@ impl InstructionVisualizer for ExponentFinanceVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let program_id = context.resolve_program_id()?.to_string();
-        let accounts = context.resolve_accounts()?;
+        let view = InstructionView::from_context(context);
         let data = context.data();
 
         let instruction_data_hex = hex::encode(data);
-        let fallback_text = format!("Program ID: {program_id}\nData: {instruction_data_hex}");
+        let fallback_text = format!("Program ID: {}\nData: {instruction_data_hex}", view.program_id);
 
-        let parsed = parse_exponent_finance_instruction(data, &accounts);
+        let parsed = parse_exponent_finance_instruction(data, &view.accounts);
 
         let (title, condensed_fields, mut expanded_fields) = match parsed {
-            Ok(parsed) => build_parsed_fields(&parsed, &program_id)?,
-            Err(_) => build_fallback_fields(&program_id)?,
+            Ok(parsed) => build_parsed_fields(&parsed, &view.program_id)?,
+            Err(_) => build_fallback_fields(&view.program_id)?,
         };
 
         let condensed = SignablePayloadFieldListLayout {
@@ -94,7 +93,7 @@ fn get_exponent_finance_idl() -> Option<&'static Idl> {
 
 fn parse_exponent_finance_instruction(
     data: &[u8],
-    accounts: &[AccountMeta],
+    accounts: &[String],
 ) -> Result<ExponentFinanceParsedInstruction, Box<dyn std::error::Error>> {
     if data.is_empty() {
         return Err("Invalid instruction data length".into());
@@ -114,7 +113,7 @@ fn parse_exponent_finance_instruction(
 fn build_named_accounts(
     data: &[u8],
     idl: &Idl,
-    accounts: &[AccountMeta],
+    accounts: &[String],
 ) -> BTreeMap<String, String> {
     let mut named_accounts = BTreeMap::new();
 
@@ -125,9 +124,9 @@ fn build_named_accounts(
     });
 
     if let Some(idl_instruction) = idl_instruction {
-        for (index, account_meta) in accounts.iter().enumerate() {
+        for (index, account_str) in accounts.iter().enumerate() {
             if let Some(idl_account) = idl_instruction.accounts.get(index) {
-                named_accounts.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
+                named_accounts.insert(idl_account.name.clone(), account_str.clone());
             }
         }
     }
