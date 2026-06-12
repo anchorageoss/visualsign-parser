@@ -3,7 +3,7 @@
 mod config;
 
 use crate::core::{
-    InstructionView, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
+    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
     VisualizerKind,
 };
 use crate::utils::format_token_amount;
@@ -51,10 +51,25 @@ impl InstructionVisualizer for Token2022Visualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let view = InstructionView::from_context(context);
+        // Unresolved accounts are rejected rather than substituted with
+        // "unresolved(N)". Authority fields (pause_authority, mint_authority,
+        // freeze_authority, etc.) are security-critical; showing an unresolvable
+        // address would let a user approve an instruction whose authority they
+        // cannot verify.
+        let accounts: Vec<String> = (0..context.num_accounts())
+            .map(|i| match context.account(i) {
+                Some(AccountRef::Resolved(pk)) => Ok(pk.to_string()),
+                Some(AccountRef::Unresolved { raw_index }) => Err(VisualSignError::DecodeError(
+                    format!("token_2022: unresolved account index {raw_index} at position {i}"),
+                )),
+                None => Err(VisualSignError::DecodeError(format!(
+                    "token_2022: missing account at position {i}"
+                ))),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Parse the Token 2022 instruction
-        let token_2022_instruction = parse_token_2022_instruction(context.data(), &view.accounts)
+        let token_2022_instruction = parse_token_2022_instruction(context.data(), &accounts)
             .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
         // Generate proper preview layout
@@ -565,10 +580,8 @@ mod tests {
     use solana_sdk::pubkey::Pubkey;
     mod fixture_test;
 
-    fn dummy_account_metas(n: usize) -> Vec<AccountMeta> {
-        (0..n)
-            .map(|_| AccountMeta::new_readonly(Pubkey::new_unique(), false))
-            .collect()
+    fn dummy_account_strings(n: usize) -> Vec<String> {
+        (0..n).map(|_| Pubkey::new_unique().to_string()).collect()
     }
 
     fn mint_to_checked_bytes(amount: u64, decimals: u8) -> Vec<u8> {
@@ -599,7 +612,7 @@ mod tests {
     /// instead of crashing the worker.
     #[test]
     fn test_mint_to_checked_rejects_out_of_range_decimals() {
-        let accounts = dummy_account_metas(3);
+        let accounts = dummy_account_strings(3);
         for decimals in [19u8, 20, 64, 100, 200, u8::MAX] {
             let data = mint_to_checked_bytes(1_000_000, decimals);
             let msg = match parse_token_2022_instruction(&data, &accounts) {
@@ -615,7 +628,7 @@ mod tests {
 
     #[test]
     fn test_burn_checked_rejects_out_of_range_decimals() {
-        let accounts = dummy_account_metas(3);
+        let accounts = dummy_account_strings(3);
         for decimals in [19u8, 20, 64, 100, 200, u8::MAX] {
             let data = burn_checked_bytes(1_000_000, decimals);
             let msg = match parse_token_2022_instruction(&data, &accounts) {
@@ -631,7 +644,7 @@ mod tests {
 
     #[test]
     fn test_mint_to_checked_accepts_typical_decimals() {
-        let accounts = dummy_account_metas(3);
+        let accounts = dummy_account_strings(3);
         for decimals in [0u8, 6, 9, 18] {
             let data = mint_to_checked_bytes(1_000_000, decimals);
             if let Err(msg) = parse_token_2022_instruction(&data, &accounts) {

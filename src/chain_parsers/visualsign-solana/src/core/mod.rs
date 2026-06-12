@@ -244,7 +244,9 @@ impl InstructionView {
             .map(|i| match context.account(i) {
                 Some(AccountRef::Resolved(pk)) => pk.to_string(),
                 Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
-                None => "unknown".to_string(),
+                // `i` is in `0..num_accounts()` which equals `accounts.len()`,
+                // so `account(i)` returning `None` is unreachable.
+                None => unreachable!("account index {i} is within num_accounts()"),
             })
             .collect();
         Self {
