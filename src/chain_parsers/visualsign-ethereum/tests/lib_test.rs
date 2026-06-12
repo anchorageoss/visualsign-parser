@@ -81,13 +81,15 @@ fn fixture_path(name: &str) -> PathBuf {
     path
 }
 
-static FIXTURES: [&str; 6] = [
+static FIXTURES: [&str; 7] = [
     "1559",
     "legacy",
     "uniswap-v2swap",
     "uniswap-v3swap",
     "json-eip1559",
     "json-legacy",
+    // Real mainnet Universal Router V2.1.1 swap (Permit2 permit + V3 USDC->USDT).
+    "json-uniswap-ur-v2_1_1",
 ];
 
 #[test]
