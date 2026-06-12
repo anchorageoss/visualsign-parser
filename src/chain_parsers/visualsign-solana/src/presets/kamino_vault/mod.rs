@@ -3,7 +3,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::KaminoVaultConfig;
 use solana_parser::{
@@ -32,8 +33,8 @@ impl InstructionVisualizer for KaminoVaultVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let program_id_str = context.resolve_program_id()?.to_string();
-        let accounts = context.resolve_accounts()?;
+        let view = InstructionView::from_context(context);
+        let program_id_str = &view.program_id;
         let data = context.data();
 
         let parsed_result = parse_kamino_vault_instruction(data);
@@ -41,7 +42,7 @@ impl InstructionVisualizer for KaminoVaultVisualizer {
         let (condensed_fields, expanded_fields, title_text) = match &parsed_result {
             Ok(parsed) => {
                 let named_accounts = match load_kamino_vault_idl() {
-                    Some(idl) => build_named_accounts(idl, data, &accounts),
+                    Some(idl) => build_named_accounts(idl, data, &view.accounts),
                     None => BTreeMap::new(),
                 };
                 (
@@ -122,7 +123,7 @@ fn parse_kamino_vault_instruction(
 fn build_named_accounts(
     idl: &Idl,
     instruction_data: &[u8],
-    instruction_accounts: &[solana_sdk::instruction::AccountMeta],
+    instruction_accounts: &[String],
 ) -> BTreeMap<String, String> {
     let mut named = BTreeMap::new();
 
@@ -135,9 +136,9 @@ fn build_named_accounts(
         return named;
     };
 
-    for (idx, account_meta) in instruction_accounts.iter().enumerate() {
+    for (idx, account_str) in instruction_accounts.iter().enumerate() {
         if let Some(idl_account) = idl_instruction.accounts.get(idx) {
-            named.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
+            named.insert(idl_account.name.clone(), account_str.clone());
         }
     }
 

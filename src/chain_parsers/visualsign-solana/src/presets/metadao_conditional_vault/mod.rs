@@ -3,7 +3,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::MetadaoConditionalVaultConfig;
 use solana_parser::{
@@ -33,8 +34,7 @@ impl InstructionVisualizer for MetadaoConditionalVaultVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let program_id = context.resolve_program_id()?;
-        let accounts = context.resolve_accounts()?;
+        let view = InstructionView::from_context(context);
         let data = context.data();
 
         if data.len() < 8 {
@@ -47,9 +47,9 @@ impl InstructionVisualizer for MetadaoConditionalVaultVisualizer {
         let parsed = parse_instruction_with_idl(data, METADAO_CONDITIONAL_VAULT_PROGRAM_ID, &idl)
             .map_err(|e| VisualSignError::DecodeError(format!("IDL parse failed: {e}")))?;
 
-        let named_accounts = build_named_accounts(&idl, data, &accounts);
+        let named_accounts = build_named_accounts(&idl, data, &view.accounts);
 
-        build_visualization(context, program_id, data, &parsed, &named_accounts)
+        build_visualization(context, &view.program_id, data, &parsed, &named_accounts)
     }
 
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
@@ -69,7 +69,7 @@ fn load_idl() -> Result<Idl, VisualSignError> {
 fn build_named_accounts(
     idl: &Idl,
     instruction_data: &[u8],
-    accounts: &[solana_sdk::instruction::AccountMeta],
+    accounts: &[String],
 ) -> BTreeMap<String, String> {
     let mut named = BTreeMap::new();
     if instruction_data.len() < 8 {
@@ -82,9 +82,9 @@ fn build_named_accounts(
     }) else {
         return named;
     };
-    for (index, account_meta) in accounts.iter().enumerate() {
+    for (index, account_str) in accounts.iter().enumerate() {
         if let Some(idl_account) = idl_instruction.accounts.get(index) {
-            named.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
+            named.insert(idl_account.name.clone(), account_str.clone());
         }
     }
     named
@@ -100,12 +100,12 @@ fn format_arg_value(value: &serde_json::Value) -> String {
 
 fn build_visualization(
     context: &VisualizerContext,
-    program_id: solana_sdk::pubkey::Pubkey,
+    program_id: &str,
     data: &[u8],
     parsed: &SolanaParsedInstructionData,
     named_accounts: &BTreeMap<String, String>,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
-    let program_id_str = program_id.to_string();
+    let program_id_str = program_id;
     let title = format!("{DISPLAY_NAME}: {}", parsed.instruction_name);
 
     let condensed_fields = vec![create_text_field("Instruction", &parsed.instruction_name)?];
@@ -168,11 +168,11 @@ fn build_visualization(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey};
+    use solana_sdk::pubkey::Pubkey;
 
-    fn dummy_account_metas(count: usize) -> Vec<AccountMeta> {
+    fn dummy_account_strings(count: usize) -> Vec<String> {
         (0..count)
-            .map(|_| AccountMeta::new_readonly(Pubkey::new_unique(), false))
+            .map(|_| Pubkey::new_unique().to_string())
             .collect()
     }
 
@@ -238,8 +238,8 @@ mod tests {
         let mut data = discriminator;
         data.extend_from_slice(&amount.to_le_bytes());
 
-        let metas = dummy_account_metas(split_tokens.accounts.len());
-        let named = build_named_accounts(&idl, &data, &metas);
+        let accounts = dummy_account_strings(split_tokens.accounts.len());
+        let named = build_named_accounts(&idl, &data, &accounts);
 
         assert_eq!(
             named.len(),

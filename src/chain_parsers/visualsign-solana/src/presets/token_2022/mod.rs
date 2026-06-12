@@ -3,12 +3,11 @@
 mod config;
 
 use crate::core::{
-    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
+    InstructionView, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
     VisualizerKind,
 };
 use crate::utils::format_token_amount;
 use config::Token2022Config;
-use solana_sdk::instruction::AccountMeta;
 use spl_token_2022::instruction::TokenInstruction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_number_field, create_raw_data_field, create_text_field};
@@ -52,23 +51,10 @@ impl InstructionVisualizer for Token2022Visualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        // Build AccountMeta shim for the parser (which expects &[AccountMeta]).
-        // Unresolved accounts are rejected rather than substituted with
-        // Pubkey::default(), which would render as a valid-looking address.
-        let accounts: Vec<AccountMeta> = (0..context.num_accounts())
-            .map(|i| match context.account(i) {
-                Some(AccountRef::Resolved(pk)) => Ok(AccountMeta::new_readonly(*pk, false)),
-                Some(AccountRef::Unresolved { raw_index }) => Err(VisualSignError::DecodeError(
-                    format!("token_2022: unresolved account index {raw_index} at position {i}"),
-                )),
-                None => Err(VisualSignError::DecodeError(format!(
-                    "token_2022: missing account at position {i}"
-                ))),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let view = InstructionView::from_context(context);
 
         // Parse the Token 2022 instruction
-        let token_2022_instruction = parse_token_2022_instruction(context.data(), &accounts)
+        let token_2022_instruction = parse_token_2022_instruction(context.data(), &view.accounts)
             .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
         // Generate proper preview layout
@@ -133,7 +119,7 @@ enum Token2022Instruction {
 
 fn parse_token_2022_instruction(
     data: &[u8],
-    accounts: &[AccountMeta],
+    accounts: &[String],
 ) -> Result<Token2022Instruction, String> {
     // Check for Pause instruction
     if is_pause_instruction(data) {
@@ -142,8 +128,8 @@ fn parse_token_2022_instruction(
         }
 
         return Ok(Token2022Instruction::Pause {
-            mint: accounts[0].pubkey.to_string(),
-            pause_authority: accounts[1].pubkey.to_string(),
+            mint: accounts[0].clone(),
+            pause_authority: accounts[1].clone(),
         });
     }
 
@@ -154,8 +140,8 @@ fn parse_token_2022_instruction(
         }
 
         return Ok(Token2022Instruction::Resume {
-            mint: accounts[0].pubkey.to_string(),
-            pause_authority: accounts[1].pubkey.to_string(),
+            mint: accounts[0].clone(),
+            pause_authority: accounts[1].clone(),
         });
     }
 
@@ -197,10 +183,10 @@ fn parse_token_2022_instruction(
         let authority_type_name = get_authority_type_name(authority_type);
 
         return Ok(Token2022Instruction::SetAuthority {
-            account: accounts[0].pubkey.to_string(),
+            account: accounts[0].clone(),
             authority_type,
             authority_type_name,
-            current_authority: accounts[1].pubkey.to_string(),
+            current_authority: accounts[1].clone(),
             new_authority,
         });
     }
@@ -221,9 +207,9 @@ fn parse_token_2022_instruction(
                 return Ok(Token2022Instruction::MintToChecked {
                     amount,
                     decimals,
-                    mint: accounts[0].pubkey.to_string(),
-                    account: accounts[1].pubkey.to_string(),
-                    mint_authority: accounts[2].pubkey.to_string(),
+                    mint: accounts[0].clone(),
+                    account: accounts[1].clone(),
+                    mint_authority: accounts[2].clone(),
                 });
             }
             TokenInstruction::BurnChecked { amount, decimals } => {
@@ -239,9 +225,9 @@ fn parse_token_2022_instruction(
                 return Ok(Token2022Instruction::BurnChecked {
                     amount,
                     decimals,
-                    account: accounts[0].pubkey.to_string(),
-                    mint: accounts[1].pubkey.to_string(),
-                    authority: accounts[2].pubkey.to_string(),
+                    account: accounts[0].clone(),
+                    mint: accounts[1].clone(),
+                    authority: accounts[2].clone(),
                 });
             }
             TokenInstruction::FreezeAccount => {
@@ -250,9 +236,9 @@ fn parse_token_2022_instruction(
                 }
 
                 return Ok(Token2022Instruction::Freeze {
-                    account: accounts[0].pubkey.to_string(),
-                    mint: accounts[1].pubkey.to_string(),
-                    freeze_authority: accounts[2].pubkey.to_string(),
+                    account: accounts[0].clone(),
+                    mint: accounts[1].clone(),
+                    freeze_authority: accounts[2].clone(),
                 });
             }
             TokenInstruction::ThawAccount => {
@@ -261,9 +247,9 @@ fn parse_token_2022_instruction(
                 }
 
                 return Ok(Token2022Instruction::Thaw {
-                    account: accounts[0].pubkey.to_string(),
-                    mint: accounts[1].pubkey.to_string(),
-                    freeze_authority: accounts[2].pubkey.to_string(),
+                    account: accounts[0].clone(),
+                    mint: accounts[1].clone(),
+                    freeze_authority: accounts[2].clone(),
                 });
             }
             TokenInstruction::CloseAccount => {
@@ -272,9 +258,9 @@ fn parse_token_2022_instruction(
                 }
 
                 return Ok(Token2022Instruction::CloseAccount {
-                    account: accounts[0].pubkey.to_string(),
-                    destination: accounts[1].pubkey.to_string(),
-                    owner: accounts[2].pubkey.to_string(),
+                    account: accounts[0].clone(),
+                    destination: accounts[1].clone(),
+                    owner: accounts[2].clone(),
                 });
             }
             _ => {
