@@ -30,11 +30,12 @@ pub fn register(
 ) {
     use config::{Permit2Contract, UniswapUniversalRouter};
 
-    // Register Universal Router on each supported chain with correct address
+    // Register every shipped Universal Router version (V1.2, V2.0, V2.1.1, V2.2.0) on each
+    // supported chain. All versions share the `execute` ABI and dispatch under the same type.
     for &chain_id in UniswapConfig::universal_router_chains() {
-        let addr = UniswapConfig::universal_router_address(chain_id)
+        let addrs = UniswapConfig::universal_router_addresses(chain_id)
             .expect("universal_router_chains should only contain valid chains");
-        contract_reg.register_contract_typed::<UniswapUniversalRouter>(chain_id, vec![addr]);
+        contract_reg.register_contract_typed::<UniswapUniversalRouter>(chain_id, addrs);
     }
 
     // Register Permit2 (same address on all chains)
@@ -77,6 +78,36 @@ mod tests {
                     panic!("Universal Router should be registered on chain {chain_id}")
                 });
             assert_eq!(contract_type, UniswapUniversalRouter::short_type_id());
+        }
+    }
+
+    #[test]
+    fn test_v2_router_addresses_dispatch_as_universal_router() {
+        use alloy_primitives::Address;
+
+        let mut contract_reg = ContractRegistry::new();
+        let mut visualizer_reg = EthereumVisualizerRegistryBuilder::new();
+        register(&mut contract_reg, &mut visualizer_reg);
+
+        // V2.1.1 mainnet (the address observed in a real swap) must resolve to the
+        // Universal Router type so the execute() decoder fires for it.
+        let v2_1_1: Address = "0x4C82D1fBFe28C977cBB58D8C7FF8FCF9F70a2cCA"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            contract_reg.get_contract_type(networks::ethereum::MAINNET, v2_1_1),
+            Some(UniswapUniversalRouter::short_type_id().to_string())
+        );
+
+        // Every version on every supported chain must be registered.
+        for &chain_id in UniswapConfig::universal_router_chains() {
+            for addr in UniswapConfig::universal_router_addresses(chain_id).unwrap() {
+                assert_eq!(
+                    contract_reg.get_contract_type(chain_id, addr),
+                    Some(UniswapUniversalRouter::short_type_id().to_string()),
+                    "router {addr} on chain {chain_id} should dispatch as Universal Router"
+                );
+            }
         }
     }
 
