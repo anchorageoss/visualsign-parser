@@ -111,7 +111,7 @@ fn build_visualization(
 
     let mut expanded_fields = vec![
         create_text_field("Program", DISPLAY_NAME)?,
-        create_text_field("Program ID", &program_id_str)?,
+        create_text_field("Program ID", program_id_str)?,
         create_text_field("Instruction", &parsed.instruction_name)?,
         create_text_field("Discriminator", &parsed.discriminator)?,
     ];

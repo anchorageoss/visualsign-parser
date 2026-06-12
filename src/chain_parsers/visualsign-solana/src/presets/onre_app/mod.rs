@@ -61,7 +61,7 @@ impl InstructionVisualizer for OnreAppVisualizer {
         }
 
         let mut expanded_fields = vec![
-            create_text_field("Program ID", &program_id_str)
+            create_text_field("Program ID", program_id_str)
                 .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
             create_text_field("Instruction", &instruction_name)
                 .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,

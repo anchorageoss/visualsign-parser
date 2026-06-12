@@ -59,7 +59,7 @@ impl InstructionVisualizer for NeutralTradeVisualizer {
             fields: build_condensed_fields(&instruction_title, &parsed)?,
         };
         let expanded = SignablePayloadFieldListLayout {
-            fields: build_parsed_fields(&program_id_str, &parsed, &named_accounts, data)?,
+            fields: build_parsed_fields(program_id_str, &parsed, &named_accounts, data)?,
         };
 
         let preview_layout = SignablePayloadFieldPreviewLayout {

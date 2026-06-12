@@ -47,13 +47,13 @@ impl InstructionVisualizer for KaminoVaultVisualizer {
                 };
                 (
                     build_condensed_fields(&parsed.instruction_name)?,
-                    build_parsed_fields(&program_id_str, parsed, &named_accounts, data)?,
+                    build_parsed_fields(program_id_str, parsed, &named_accounts, data)?,
                     format!("{KAMINO_VAULT_DISPLAY_NAME}: {}", parsed.instruction_name),
                 )
             }
             Err(_) => (
                 build_fallback_condensed_fields()?,
-                build_fallback_fields(&program_id_str, data)?,
+                build_fallback_fields(program_id_str, data)?,
                 format!("{KAMINO_VAULT_DISPLAY_NAME}: Unknown Instruction"),
             ),
         };
