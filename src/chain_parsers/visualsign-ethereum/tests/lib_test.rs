@@ -125,6 +125,17 @@ fn test_with_fixtures() {
         // Construct expected output path
         let expected_path = fixtures_dir.join(format!("{test_name}.expected"));
 
+        // Regeneration escape hatch: `REGEN_FIXTURES=1 cargo test -p visualsign-ethereum
+        // --test lib_test test_with_fixtures` rewrites every `.expected` from the current
+        // parser output (also bootstraps a brand-new fixture's `.expected`). Always review
+        // the resulting diff, an intended decoding change and a regression look identical
+        // here. Leave the env var unset for normal assertion runs.
+        if std::env::var_os("REGEN_FIXTURES").is_some() {
+            fs::write(&expected_path, format!("{}\n", actual_output.trim()))
+                .unwrap_or_else(|e| panic!("Failed to regenerate {expected_path:?}: {e}"));
+            continue;
+        }
+
         // Read expected output
         let expected_output = fs::read_to_string(&expected_path)
             .unwrap_or_else(|_| panic!("Expected output file not found: {expected_path:?}"));
