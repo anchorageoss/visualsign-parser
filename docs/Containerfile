@@ -1,0 +1,22 @@
+# Containerized Mintlify CLI for local docs validation.
+#
+# Build:  make -C docs build-image
+# Serve:  make -C docs dev          # http://localhost:3000
+#
+# The container only carries the CLI. The actual docs are bind-mounted from
+# this directory at runtime, so edits show up live in the dev server.
+
+FROM node:20-alpine
+
+# `mint` shells out to git for some operations; install it.
+RUN apk add --no-cache git
+
+# Install the Mintlify CLI globally. Package name is `mint` (not `mintlify`).
+# Bump deliberately by changing the @<version> pin.
+RUN npm install -g mint@latest
+
+WORKDIR /docs
+
+EXPOSE 3000
+
+CMD ["mint", "dev", "--port", "3000"]
