@@ -540,6 +540,9 @@ mod tests {
         let v1_2: Address = "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD"
             .parse()
             .unwrap();
+        let v2_0: Address = "0x66a9893cc07d91d95644aedd05d03f95e1dba8af"
+            .parse()
+            .unwrap();
         let v2_1_1: Address = "0x4C82D1fBFe28C977cBB58D8C7FF8FCF9F70a2cCA"
             .parse()
             .unwrap();
@@ -547,6 +550,7 @@ mod tests {
             .parse()
             .unwrap();
         assert!(addrs.contains(&v1_2));
+        assert!(addrs.contains(&v2_0));
         assert!(addrs.contains(&v2_1_1));
         assert!(addrs.contains(&v2_2_0));
     }
