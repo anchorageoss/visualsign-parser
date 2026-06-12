@@ -1,6 +1,6 @@
 # Changelog drafts
 
-PR authors of user-facing changes drop a fragment here. A maintainer batches drafts into one or more `<Update>` blocks on `../changelog.mdx` when a meaningful release ships, then deletes the consumed drafts.
+PR authors of user-facing changes drop a fragment here. A maintainer batches drafts into one or more `<Update>` blocks on the matching per-chain or core page (`../solana.mdx`, `../ethereum.mdx`, `../sui.mdx`, `../tron.mdx`, or `../core.mdx`) when a meaningful release ships, then deletes the consumed drafts. The `../changelog.mdx` index itself only links to those pages and carries no `<Update>` blocks.
 
 This directory is intentionally not listed in `docs.json` navigation, so Mintlify does not publish it.
 
