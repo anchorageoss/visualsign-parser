@@ -5,7 +5,7 @@ description: "Adding a new protocol to VisualSign rarely touches existing code. 
 
 In the last few weeks, VisualSign gained decoding for Jupiter (Borrow, Earn, Perpetuals, v6 route_v2), Kamino (Borrow, Vault, Farms, Limit Orders), Meteora (DLMM, DAMM V2), MetaDAO (Futarchy, Conditional Vault), Orca Whirlpool, Onre App, Neutral Trade, DFlow Aggregator, and Exponent Finance. Seventeen presets across nine protocols. Each PR added a directory under `src/chain_parsers/visualsign-solana/src/presets/`, a one-line module declaration, and a handful of fixtures. None of them changed how any of the other presets decode, and none of them touched the core parser.
 
-That's not luck. It's the consequence of a small, deliberate set of composition primitives.
+That comes from a few composition primitives the Solana decoder is built on.
 
 ## The three pieces
 
@@ -15,7 +15,7 @@ VisualSign's Solana decoder is built from three layers you can think about indep
 
 2. **Protocol-specific preset overlays.** A preset is a small unit that says "for *this* program id, decode the instruction and produce these human-readable fields." Presets implement `InstructionVisualizer` and declare which program id they handle via `SolanaIntegrationConfig`. The core hands each preset a `VisualizerContext` carrying the raw instruction plus the IDL registry; the preset calls `parse_instruction_with_idl` to get the typed view, then calls field builders (`create_text_field`, `create_amount_field`, `create_raw_data_field`) to shape output. Each preset lives in its own directory.
 
-3. **A build-time registry.** `build.rs` scans `src/presets/` and emits a generated `available_visualizers()` function — one `Box::new(<Dir>::<Pascal>Visualizer)` per directory. The build comment in the script states the design intent: the generated function lets VisualSign functionally compose instructions at display time. There is no central dispatch table to hand-edit; `build.rs` discovers each directory's visualizer automatically. The one piece of wiring that stays manual is the `pub mod <dir>;` line in `src/presets/mod.rs` that makes Rust compile the new module.
+3. **A build-time registry.** `build.rs` scans `src/presets/` and emits a generated `available_visualizers()` function — one `Box::new(<Dir>::<Pascal>Visualizer)` per directory. The build comment in the script states the design intent: the generated function lets VisualSign functionally compose instructions at display time. `build.rs` discovers each directory's visualizer automatically, so there's no central dispatch table to hand-edit. The one piece of wiring that stays manual is the `pub mod <dir>;` line in `src/presets/mod.rs` that makes Rust compile the new module.
 
 Field builders sit underneath all three layers. They enforce shape and determinism, so two presets emitting the same logical content produce byte-identical output. That property is what makes the composed payload safe to hash.
 
@@ -41,22 +41,22 @@ This is why the preset wave required no changes to the core. Each new preset add
 - Fixture tests under `tests/fixtures/`.
 - One `pub mod <dir>;` line in `src/presets/mod.rs`.
 
-The only shared file a preset PR touches is that module list, and only to append a line. No existing decoder, no dispatch table, no core type changes. Reviewers read each preset PR in isolation. CI sees no ripple.
+The only shared file a preset PR touches is that module list, and only to append a line. It leaves existing decoders, the dispatch path, and the core types alone, so reviewers can read each preset PR on its own.
 
 ## What composability buys you
 
 If you're **adding a new Solana protocol**, the design pushes you toward a particular shape: one IDL, one visualizer, one config, a handful of fixtures, one new directory, and the `pub mod` line that registers it. The same shape your reviewer expects, the same shape we expect from ourselves. The `solana-add-idl` skill scaffolds all of this for you — including the module declaration — when the protocol exposes an on-chain IDL.
 
-If you're **integrating VisualSign into a wallet**, composability is built into the data layer. The Ethereum side models token resolution as a `LayeredRegistry<T>`: a request-scoped registry layered over the compiled-in defaults, so wallet-provided overrides can take precedence at lookup time without forking VisualSign. The seam exists today; wiring wallet-supplied token metadata into that request layer is still a TODO (`create_layered_registry` in `visualsign-ethereum/src/lib.rs` currently uses defaults only). The Solana side composes through fixed IDL + preset layers; wallet-side overlays are the natural next step on both chains.
+If you're **integrating VisualSign into a wallet**, composability is built into the data layer. The Ethereum side models token resolution as a `LayeredRegistry<T>`: a request-scoped registry layered over the compiled-in defaults, so wallet-provided overrides can take precedence at lookup time without forking VisualSign. The layering exists today; wiring wallet-supplied token metadata into that request layer is still a TODO (`create_layered_registry` in `visualsign-ethereum/src/lib.rs` currently uses defaults only). The Solana side composes through fixed IDL + preset layers; wallet-side overlays are the natural next step on both chains.
 
 If you're **building a policy engine or signing pipeline on top of VisualSign**, the chain metadata + content digests change in the HTTP gateway (PR #287) gives you a stable input contract. The gateway forwards `chain_metadata` end-to-end and exposes payload digests on every response. Your policy logic composes onto our parser output without re-parsing or re-decoding.
 
-If you're **writing tests**, surfpool (PR #202) composes real Solana mainnet state into the local harness. Tests run against a local mainnet fork — backed by live RPC (Helius, a custom `SOLANA_RPC_URL`, or public mainnet-beta), so they need network access but never broadcast to a live cluster. Forking real chain data catches drift between IDL assumptions and on-chain reality.
+If you're **writing tests**, surfpool (PR #202) composes real Solana mainnet state into the local harness. Tests run against a local mainnet fork backed by live RPC (Helius, a custom `SOLANA_RPC_URL`, or public mainnet-beta). They need network access to pull that state, and nothing is ever sent to a live cluster. Forking real chain data catches drift between IDL assumptions and on-chain reality.
 
-## The seams are the product
+## Keeping it composable as it grows
 
-"Composable by design" is a phrase. The work is in keeping the seams clean as surface area grows. Build-time discovery means the dispatch registry can't drift out of sync with the directories on disk — the one list a contributor still maintains by hand is the `mod.rs` module declarations, and a missing line fails the build loudly rather than silently. Field builders mean two contributors emitting the same content produce identical bytes. And a shared IDL parser between the raw instruction and the preset means every preset decodes through the same typed view rather than hand-rolling byte parsing.
+A label like "composable by design" only earns its keep if the design still works once there are fifty presets instead of seventeen. Three things do most of that work. Build-time discovery keeps the generated registry in step with the directories on disk; the one list a contributor still edits by hand is the `mod.rs` module declarations, and forgetting a line breaks the build right away. Field builders give two contributors who emit the same content the same bytes. And the shared IDL parser hands every preset the same typed view of an instruction, so each one decodes against a consistent shape.
 
-The preset wave is a useful proof point. The more interesting test will be the next chain we add — and watching whether the same primitives carry across.
+The preset wave shows this works at the current size. The real test is the next chain we add, and whether these same primitives carry over.
 
 To start adding a Solana preset, see [Adding a Solana preset](/chains/solana). To see what shipped recently, see the [Changelog](/changelog).
