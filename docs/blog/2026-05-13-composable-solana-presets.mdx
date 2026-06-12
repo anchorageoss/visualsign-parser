@@ -53,6 +53,16 @@ If you're **building a policy engine or signing pipeline on top of VisualSign**,
 
 If you're **writing tests**, surfpool (PR #202) composes real Solana mainnet state into the local harness. Tests run against a local mainnet fork backed by live RPC (Helius, a custom `SOLANA_RPC_URL`, or public mainnet-beta). They need network access to pull that state, and nothing is ever sent to a live cluster. Forking real chain data catches drift between IDL assumptions and on-chain reality.
 
+## Composing with ClearSign
+
+This shape pays off past our own repo. Solana's clear-signing proposal, [SRFC 39](https://github.com/solana-foundation/SRFCs/discussions/4), asks protocols to enrich their IDLs with display metadata — instruction summaries, account labels, value formatters — so a wallet can show what a transaction does before anyone signs it. Protocols describe their own interactions; wallets render them. That is the same division of labor VisualSign already runs on, and the one our [vision and roadmap](/vision-roadmap) starts from: the IDL is the contract, and the preset is where protocol-specific display lives.
+
+VisualSign implements the reader side of that standard. The IDL parser is the layer SRFC 39 is written for, so the display metadata a protocol publishes lands in the same typed view a preset already reads. The richer that published IDL gets, the more VisualSign can render from the IDL alone, with a thinner protocol-specific preset on top. Protocols that haven't adopted the standard are still covered by a preset today, so coverage doesn't wait on the spec landing.
+
+VisualSign also answers the security worry the proposal raises. It treats a caller-supplied IDL as untrusted, display-only input: rendering happens on a trusted, attested path, and a crafted IDL cannot relabel a program or hide a destination. [As we argued on the SRFC](https://github.com/solana-foundation/SRFCs/discussions/4#discussioncomment-15500615), the wallet should act as a verifier that decouples display logic from the dapp. Clear signing decides what a wallet shows; VisualSign is where the wallet can trust that what it showed is what gets signed.
+
+Ethereum has the same arc with ERC-7730 (also on the [roadmap](/vision-roadmap)). Each chain arrives with its own clear-signing standard, and each one plugs into the same three primitives. Every chain we add widens the surface those standards can cover, so this only gets stronger as VisualSign grows.
+
 ## Keeping it composable as it grows
 
 A label like "composable by design" only earns its keep if the design still works once there are fifty presets instead of seventeen. Three things do most of that work. Build-time discovery keeps the generated registry in step with the directories on disk; the one list a contributor still edits by hand is the `mod.rs` module declarations, and forgetting a line breaks the build right away. Field builders give two contributors who emit the same content the same bytes. And the shared IDL parser hands every preset the same typed view of an instruction, so each one decodes against a consistent shape.
