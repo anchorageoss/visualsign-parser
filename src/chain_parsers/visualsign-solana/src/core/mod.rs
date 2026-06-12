@@ -60,11 +60,12 @@ pub enum AccountRef<'a> {
 /// `account_keys` (out-of-bounds, or v0 lookup-table entries that haven't
 /// been resolved):
 ///
-/// **All-or-nothing (most IDL-based presets).**
-/// Use `resolve_program_id()` / `resolve_accounts()`. The first unresolved
-/// index aborts visualization with a precise `Err` naming the bad index.
-/// Suitable when downstream parsing requires every account to be a real
-/// pubkey -- e.g. an Anchor IDL parser building a `named_accounts` map.
+/// **Infallible via `InstructionView` (IDL-based presets).**
+/// Call `InstructionView::from_context(context)` to get a fully-resolved
+/// display view where every unresolved index becomes an `"unresolved(N)"`
+/// placeholder. Suitable for all presets that only need pubkeys as display
+/// strings, and essential for v0+ALT transactions where ALT accounts are
+/// always unresolved in the static `account_keys` slice.
 ///
 /// **Partial rendering (catch-all visualizers).**
 /// Pattern-match on `program_id()` and `account(n)` directly and substitute
@@ -216,6 +217,41 @@ impl<'a> VisualizerContext<'a> {
                 ))),
             })
             .collect()
+    }
+}
+
+/// Display-resolved view of an instruction's wire data.
+///
+/// Built infallibly from a `VisualizerContext`: every program and account index
+/// resolves to either its base58 pubkey string or an `"unresolved(N)"` placeholder
+/// for indices that reference an address lookup table (v0 transactions) or are
+/// otherwise out of bounds. Presets use this instead of
+/// `resolve_accounts()?` / `resolve_program_id()?` on the render path so that
+/// a v0+ALT instruction degrades gracefully rather than aborting the transaction.
+pub struct InstructionView {
+    pub program_id: String,
+    pub accounts: Vec<String>,
+    pub data: Vec<u8>,
+}
+
+impl InstructionView {
+    pub fn from_context(context: &VisualizerContext) -> Self {
+        let program_id = match context.program_id() {
+            ProgramRef::Resolved(pk) => pk.to_string(),
+            ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
+        };
+        let accounts = (0..context.num_accounts())
+            .map(|i| match context.account(i) {
+                Some(AccountRef::Resolved(pk)) => pk.to_string(),
+                Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
+                None => "unknown".to_string(),
+            })
+            .collect();
+        Self {
+            program_id,
+            accounts,
+            data: context.data().to_vec(),
+        }
     }
 }
 
@@ -392,5 +428,27 @@ mod tests {
         assert_eq!(ctx.call_depth(), MAX_CALL_DEPTH);
         let ctx = ctx.with_call_depth(usize::MAX);
         assert_eq!(ctx.call_depth(), usize::MAX);
+    }
+
+    #[test]
+    fn test_instruction_view_substitutes_unresolved_placeholder() {
+        let keys = vec![Pubkey::new_unique()]; // only 1 key
+        let ci = CompiledInstruction {
+            program_id_index: 0,
+            accounts: vec![0, 50], // index 50 is OOB (simulates ALT)
+            data: vec![0xDE, 0xAD],
+        };
+        let sender = SolanaAccount {
+            account_key: keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
+        let registry = crate::idl::IdlRegistry::new();
+        let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry, 0);
+        let view = InstructionView::from_context(&ctx);
+        assert_eq!(view.program_id, keys[0].to_string());
+        assert_eq!(view.accounts[0], keys[0].to_string());
+        assert_eq!(view.accounts[1], "unresolved(50)");
+        assert_eq!(view.data, vec![0xDE, 0xAD]);
     }
 }
