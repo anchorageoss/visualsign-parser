@@ -131,6 +131,15 @@ fn test_with_fixtures() {
         // the resulting diff, an intended decoding change and a regression look identical
         // here. Leave the env var unset for normal assertion runs.
         if std::env::var_os("REGEN_FIXTURES").is_some() {
+            // Refuse to bless a parse failure as golden output. Without this guard a
+            // fixture whose parser errors would have its `.expected` rewritten to the
+            // "Error: ..." string, and every later run would compare against that and
+            // pass, masking the regression. Fix the parser/input, don't snapshot the error.
+            assert!(
+                !actual_output.starts_with("Error:"),
+                "REGEN_FIXTURES: refusing to write error output for '{test_name}' as expected; \
+                 fix the parser or input first:\n{actual_output}"
+            );
             fs::write(&expected_path, format!("{}\n", actual_output.trim()))
                 .unwrap_or_else(|e| panic!("Failed to regenerate {expected_path:?}: {e}"));
             continue;
