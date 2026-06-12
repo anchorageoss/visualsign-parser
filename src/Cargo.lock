@@ -14127,7 +14127,6 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "bcs",
- "hex",
  "move-bytecode-utils",
  "move-core-types",
  "serde",

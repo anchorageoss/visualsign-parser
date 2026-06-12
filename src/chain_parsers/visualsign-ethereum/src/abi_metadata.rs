@@ -284,24 +284,15 @@ fn validate_abi_signature(
         abi_json.as_bytes(),
     );
 
-    // 4. Decode signature (DER format) from hex
-    let sig_hex = signature
-        .value
-        .strip_prefix("0x")
-        .or_else(|| signature.value.strip_prefix("0X"))
-        .unwrap_or(&signature.value);
-    let sig_bytes = hex::decode(sig_hex)
+    // 4. Decode signature (DER format) from hex (optional 0x/0X prefix tolerated)
+    let sig_bytes = visualsign::encodings::decode_hex(&signature.value)
         .map_err(|e| AbiSignatureError::Validation(format!("Invalid signature hex: {e}")))?;
 
     let sig = Signature::from_der(&sig_bytes)
         .map_err(|e| AbiSignatureError::Validation(format!("Invalid DER signature: {e}")))?;
 
-    // 5. Decode public key from hex
-    let pubkey_hex = public_key_hex
-        .strip_prefix("0x")
-        .or_else(|| public_key_hex.strip_prefix("0X"))
-        .unwrap_or(public_key_hex);
-    let pubkey_bytes = hex::decode(pubkey_hex)
+    // 5. Decode public key from hex (optional 0x/0X prefix tolerated)
+    let pubkey_bytes = visualsign::encodings::decode_hex(public_key_hex)
         .map_err(|e| AbiSignatureError::Validation(format!("Invalid public key hex: {e}")))?;
 
     let encoded_point = EncodedPoint::from_bytes(&pubkey_bytes)
@@ -372,11 +363,7 @@ pub fn authorized_abi_signers() -> SignerAllowlist {
 /// compressed input and an uncompressed input for the same key both reduce to
 /// identical allowlist bytes.
 fn canonical_pubkey_from_hex(hex_str: &str) -> Option<Vec<u8>> {
-    let trimmed = hex_str
-        .strip_prefix("0x")
-        .or_else(|| hex_str.strip_prefix("0X"))
-        .unwrap_or(hex_str);
-    let bytes = hex::decode(trimmed).ok()?;
+    let bytes = visualsign::encodings::decode_hex(hex_str).ok()?;
     let encoded_point = EncodedPoint::from_bytes(&bytes).ok()?;
     let verifying_key = VerifyingKey::from_encoded_point(&encoded_point).ok()?;
     Some(verifying_key.to_encoded_point(false).as_bytes().to_vec())

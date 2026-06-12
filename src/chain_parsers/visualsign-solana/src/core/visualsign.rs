@@ -81,9 +81,8 @@ impl Transaction for SolanaTransactionWrapper {
             SupportedEncodings::Base64 => base64::engine::general_purpose::STANDARD
                 .decode(data)
                 .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?,
-            SupportedEncodings::Hex => {
-                hex::decode(data).map_err(|e| TransactionParseError::DecodeError(e.to_string()))?
-            }
+            SupportedEncodings::Hex => visualsign::encodings::decode_hex(data)
+                .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?,
         };
 
         // First try to decode as a VersionedTransaction

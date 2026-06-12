@@ -23,7 +23,7 @@ pub fn decode_transaction(
         SupportedEncodings::Base64 => base64::engine::general_purpose::STANDARD
             .decode(raw_transaction)
             .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?,
-        SupportedEncodings::Hex => hex::decode(raw_transaction)
+        SupportedEncodings::Hex => visualsign::encodings::decode_hex(raw_transaction)
             .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?,
     };
 

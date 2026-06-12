@@ -224,14 +224,12 @@ fn truncate_for_error(s: &str) -> String {
 }
 
 fn require_hex_prefix(s: &str) -> Result<&str, EthereumParserError> {
-    s.strip_prefix("0x")
-        .or_else(|| s.strip_prefix("0X"))
-        .ok_or_else(|| {
-            EthereumParserError::FailedToParseJsonTransaction(format!(
-                "Hex value '{}' must start with '0x' prefix",
-                truncate_for_error(s),
-            ))
-        })
+    visualsign::encodings::split_hex_prefix(s).ok_or_else(|| {
+        EthereumParserError::FailedToParseJsonTransaction(format!(
+            "Hex value '{}' must start with '0x' prefix",
+            truncate_for_error(s),
+        ))
+    })
 }
 
 macro_rules! parse_hex_int {
