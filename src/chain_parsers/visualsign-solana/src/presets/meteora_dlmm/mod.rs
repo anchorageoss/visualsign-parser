@@ -7,7 +7,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::MeteoraDlmmConfig;
 use solana_parser::{
@@ -39,8 +40,7 @@ impl InstructionVisualizer for MeteoraDlmmVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let program_id = context.resolve_program_id()?;
-        let accounts = context.resolve_accounts()?;
+        let view = InstructionView::from_context(context);
         let data = context.data();
 
         if data.len() < 8 {
@@ -55,7 +55,7 @@ impl InstructionVisualizer for MeteoraDlmmVisualizer {
         let parsed = parse_instruction_with_idl(data, METEORA_DLMM_PROGRAM_ID, idl)
             .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
-        let named_accounts = build_named_accounts(idl, data, &accounts);
+        let named_accounts = build_named_accounts(idl, data, &view.accounts);
 
         let parsed_instruction = MeteoraDlmmParsedInstruction {
             parsed,
@@ -72,7 +72,7 @@ impl InstructionVisualizer for MeteoraDlmmVisualizer {
         };
 
         let expanded = SignablePayloadFieldListLayout {
-            fields: build_expanded_fields(&parsed_instruction, &program_id.to_string(), data)?,
+            fields: build_expanded_fields(&parsed_instruction, &view.program_id, data)?,
         };
 
         let preview_layout = SignablePayloadFieldPreviewLayout {
@@ -86,7 +86,7 @@ impl InstructionVisualizer for MeteoraDlmmVisualizer {
             expanded: Some(expanded),
         };
 
-        let fallback_text = format!("Program ID: {program_id}\nData: {}", hex::encode(data));
+        let fallback_text = format!("Program ID: {}\nData: {}", view.program_id, hex::encode(data));
 
         Ok(AnnotatedPayloadField {
             static_annotation: None,
@@ -119,7 +119,7 @@ fn get_meteora_dlmm_idl() -> Option<&'static Idl> {
 fn build_named_accounts(
     idl: &Idl,
     data: &[u8],
-    accounts: &[solana_sdk::instruction::AccountMeta],
+    accounts: &[String],
 ) -> Vec<(String, String)> {
     if data.len() < 8 {
         return Vec::new();
@@ -136,7 +136,7 @@ fn build_named_accounts(
     accounts
         .iter()
         .zip(idl_instruction.accounts.iter())
-        .map(|(meta, idl_account)| (idl_account.name.clone(), meta.pubkey.to_string()))
+        .map(|(account_str, idl_account)| (idl_account.name.clone(), account_str.clone()))
         .collect()
 }
 
@@ -282,7 +282,6 @@ mod tests {
 
     #[test]
     fn test_build_named_accounts_pairs_ordered_accounts() {
-        use solana_sdk::instruction::AccountMeta;
         use solana_sdk::pubkey::Pubkey;
 
         let idl = get_meteora_dlmm_idl().expect("IDL must load");
@@ -296,12 +295,12 @@ mod tests {
         let program = Pubkey::new_unique();
         data.extend([] as [u8; 0]);
 
-        let accounts = vec![
-            AccountMeta::new(position, false),
-            AccountMeta::new_readonly(sender, true),
-            AccountMeta::new(rent_receiver, false),
-            AccountMeta::new_readonly(event_authority, false),
-            AccountMeta::new_readonly(program, false),
+        let accounts: Vec<String> = vec![
+            position.to_string(),
+            sender.to_string(),
+            rent_receiver.to_string(),
+            event_authority.to_string(),
+            program.to_string(),
         ];
 
         let named = build_named_accounts(idl, &data, &accounts);

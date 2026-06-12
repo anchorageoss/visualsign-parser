@@ -3,13 +3,13 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::DflowAggregatorConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use solana_sdk::instruction::AccountMeta;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use visualsign::errors::VisualSignError;
@@ -32,20 +32,19 @@ impl InstructionVisualizer for DflowAggregatorVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let program_id = context.resolve_program_id()?.to_string();
-        let accounts = context.resolve_accounts()?;
+        let view = InstructionView::from_context(context);
         let data = context.data();
 
         let instruction_data_hex = hex::encode(data);
-        let fallback_text = format!("Program ID: {program_id}\nData: {instruction_data_hex}");
+        let fallback_text = format!("Program ID: {}\nData: {instruction_data_hex}", view.program_id);
 
-        let parsed = parse_dflow_aggregator_instruction(data, &accounts);
+        let parsed = parse_dflow_aggregator_instruction(data, &view.accounts);
 
         let (title, condensed_fields, mut expanded_fields) = match parsed {
-            Ok(parsed) => build_parsed_fields(&parsed, &program_id)?,
+            Ok(parsed) => build_parsed_fields(&parsed, &view.program_id)?,
             Err(e) => {
                 tracing::warn!("Failed to parse DFlow Aggregator instruction with IDL: {e}");
-                build_fallback_fields(&program_id)?
+                build_fallback_fields(&view.program_id)?
             }
         };
 
@@ -97,7 +96,7 @@ fn get_dflow_aggregator_idl() -> Option<&'static Idl> {
 
 fn parse_dflow_aggregator_instruction(
     data: &[u8],
-    accounts: &[AccountMeta],
+    accounts: &[String],
 ) -> Result<DflowAggregatorParsedInstruction, Box<dyn std::error::Error>> {
     if data.len() < 8 {
         return Err("Invalid instruction data length".into());
@@ -118,7 +117,7 @@ fn parse_dflow_aggregator_instruction(
 fn build_named_accounts(
     data: &[u8],
     idl: &Idl,
-    accounts: &[AccountMeta],
+    accounts: &[String],
 ) -> (BTreeMap<String, String>, Vec<String>) {
     let mut named_accounts = BTreeMap::new();
     let mut extra_accounts = Vec::new();
@@ -130,11 +129,11 @@ fn build_named_accounts(
     });
 
     if let Some(idl_instruction) = idl_instruction {
-        for (index, account_meta) in accounts.iter().enumerate() {
+        for (index, account_str) in accounts.iter().enumerate() {
             if let Some(idl_account) = idl_instruction.accounts.get(index) {
-                named_accounts.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
+                named_accounts.insert(idl_account.name.clone(), account_str.clone());
             } else {
-                extra_accounts.push(account_meta.pubkey.to_string());
+                extra_accounts.push(account_str.clone());
             }
         }
     }
@@ -418,10 +417,7 @@ mod tests {
             .expect("instruction has a computed discriminator")
             .clone();
         let pubkeys: Vec<Pubkey> = (0..6).map(|_| Pubkey::new_unique()).collect();
-        let accounts: Vec<AccountMeta> = pubkeys
-            .iter()
-            .map(|pk| AccountMeta::new_readonly(*pk, false))
-            .collect();
+        let accounts: Vec<String> = pubkeys.iter().map(|pk| pk.to_string()).collect();
 
         let (named, extra) = build_named_accounts(&close_disc, idl, &accounts);
 
