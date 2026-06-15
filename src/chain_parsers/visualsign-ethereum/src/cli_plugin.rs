@@ -1,8 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::abi_metadata::sign_abi_for_cli;
-use crate::networks::parse_network;
-use crate::token_metadata::parse_network_id;
+use crate::networks::{network_id_to_chain_id, parse_network};
 use clap::Args as ClapArgs;
 use generated::parser::{Abi, AbiType, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 use visualsign::registry::{Chain, TransactionConverterRegistry};
@@ -294,15 +293,16 @@ pub(crate) fn create_chain_metadata(
 
     // The ABI signature binds the chain id, so the numeric chain id is only needed
     // when there is at least one ABI to sign. Derive it lazily inside each branch so
-    // the no-ABI path still works for networks `parse_network_id` does not number
-    // (it only knows the canonical mainnets). The double lookup when both lists are
-    // non-empty is cheap and avoids sharing an `Option` across the lint-restricted
-    // borrow.
+    // the no-ABI path stays decoupled from the numeric lookup. The double lookup when
+    // both lists are non-empty is cheap and avoids sharing an `Option` across the
+    // lint-restricted borrow. `network_id` is already a canonical id from
+    // `parse_network`, so `network_id_to_chain_id` resolves it for every known network.
     let mut abi_mappings = if abi_json_mappings.is_empty() {
         BTreeMap::new()
     } else {
-        let chain_id = parse_network_id(&network_id)
-            .map_err(|e| format!("cannot sign ABI mappings for network '{network_id}': {e}"))?;
+        let chain_id = network_id_to_chain_id(&network_id).ok_or_else(|| {
+            format!("cannot sign ABI mappings for network '{network_id}': unknown network ID")
+        })?;
         eprintln!("Loading custom ABIs:");
         let (mappings, valid_count) = build_abi_mappings_from_files(abi_json_mappings, chain_id);
         eprintln!(
@@ -314,8 +314,8 @@ pub(crate) fn create_chain_metadata(
     };
 
     if !abi_proxy_mappings.is_empty() {
-        let chain_id = parse_network_id(&network_id).map_err(|e| {
-            format!("cannot sign proxy ABI mappings for network '{network_id}': {e}")
+        let chain_id = network_id_to_chain_id(&network_id).ok_or_else(|| {
+            format!("cannot sign proxy ABI mappings for network '{network_id}': unknown network ID")
         })?;
         eprintln!("Applying proxy mappings:");
         apply_proxy_mappings(

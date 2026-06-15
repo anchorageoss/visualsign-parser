@@ -77,10 +77,12 @@ All amount and number fields validate the input using a regex pattern:
 The `token_metadata` module provides canonical wallet format for token data:
 
 ```rust
-use crate::token_metadata::{ChainMetadata, TokenMetadata, ErcStandard, parse_network_id};
+use crate::networks::network_id_to_chain_id;
+use crate::token_metadata::{ChainMetadata, TokenMetadata, ErcStandard};
 
-// Parse network identifier to chain ID
-let chain_id = parse_network_id("ETHEREUM_MAINNET")?; // Returns 1
+// Parse network identifier to chain ID (canonical mapping in networks.rs).
+// Returns Option<u64>; callers handle the None (unknown-network) case.
+let chain_id = network_id_to_chain_id("ETHEREUM_MAINNET"); // Some(1)
 
 // Create token metadata
 let token = TokenMetadata {
@@ -97,11 +99,14 @@ let hash = compute_metadata_hash(protobuf_bytes);
 
 ### Supported Networks
 
-- `ETHEREUM_MAINNET` → chain_id: 1
-- `POLYGON_MAINNET` → chain_id: 137
-- `ARBITRUM_MAINNET` → chain_id: 42161
-- `OPTIMISM_MAINNET` → chain_id: 10
-- `BASE_MAINNET` → chain_id: 8453
+The canonical `network_id -> chain_id` mapping lives in `networks.rs` (the `networks!`
+table) and covers all supported networks (case-insensitive). Examples:
+
+- `ETHEREUM_MAINNET` -> chain_id: 1
+- `POLYGON_MAINNET` -> chain_id: 137
+- `ARBITRUM_MAINNET` -> chain_id: 42161
+- `OPTIMISM_MAINNET` -> chain_id: 10
+- `BASE_MAINNET` -> chain_id: 8453
 
 ## Registry
 
@@ -152,7 +157,7 @@ let nested = context.for_nested_call(nested_contract, nested_calldata);
 2. **Handle errors** - All field builders return `Result` types
 3. **Prefer canonical types** - Use `TokenMetadata` from `token_metadata` module
 4. **Use registry for lookups** - Don't duplicate token metadata storage
-5. **Network ID mapping** - Always use `parse_network_id()` to convert string IDs to chain IDs
+5. **Network ID mapping** - Always use `networks::network_id_to_chain_id()` to convert string IDs to chain IDs
 6. **Validate amounts** - Field builders validate number formats automatically
 7. **Chain ID + Address as key** - Always use (chain_id, Address) tuple for token lookups
 
@@ -175,7 +180,7 @@ src/
 
 - `TokenMetadata`: canonical wallet token format with symbol, name, erc_standard, contract_address, decimals
 - `ChainMetadata`: grouping of tokens by network, sent from wallets as protobuf
-- `parse_network_id()`: maps network identifiers to chain IDs
+- `networks::network_id_to_chain_id()`: maps network identifiers to chain IDs
 - `compute_metadata_hash()`: SHA256 hashing of protobuf metadata bytes
 - `ContractRegistry`: (chain_id, Address) → TokenMetadata mapping for efficient lookups
 - Field builders from visualsign: reusable field construction utilities

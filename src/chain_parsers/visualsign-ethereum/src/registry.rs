@@ -1,4 +1,5 @@
-use crate::token_metadata::{ChainMetadata, TokenMetadata, parse_network_id};
+use crate::networks::network_id_to_chain_id;
+use crate::token_metadata::{ChainMetadata, TokenMetadata};
 use alloy_primitives::{Address, U256, utils::format_units};
 use std::collections::BTreeMap;
 
@@ -406,7 +407,8 @@ impl ContractRegistry {
     /// # Returns
     /// `Ok(())` on success, `Err(String)` if network_id is unknown or any token registration fails
     pub fn load_chain_metadata(&mut self, chain_metadata: &ChainMetadata) -> Result<(), String> {
-        let chain_id = parse_network_id(&chain_metadata.network_id).map_err(|e| e.to_string())?;
+        let chain_id = network_id_to_chain_id(&chain_metadata.network_id)
+            .ok_or_else(|| format!("Unknown network ID: {}", chain_metadata.network_id))?;
 
         let errors: Vec<String> = chain_metadata
             .assets
