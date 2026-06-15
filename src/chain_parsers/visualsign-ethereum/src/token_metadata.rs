@@ -50,66 +50,13 @@ pub struct TokenMetadata {
 ///
 /// This is the canonical format for wallets to send token metadata.
 /// Network ID is sent as a string (e.g., "ETHEREUM_MAINNET") and is converted
-/// to a numeric chain ID by parse_network_id().
+/// to a numeric chain ID by `networks::network_id_to_chain_id`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChainMetadata {
     /// Network identifier as string (e.g., "ETHEREUM_MAINNET")
     pub network_id: String,
     /// Map of token symbol to token metadata
     pub assets: BTreeMap<String, TokenMetadata>,
-}
-
-/// Error type for token metadata operations
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TokenMetadataError {
-    /// Unknown network ID
-    UnknownNetworkId(String),
-    /// Hash computation error
-    HashError(String),
-}
-
-impl std::fmt::Display for TokenMetadataError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TokenMetadataError::UnknownNetworkId(id) => write!(f, "Unknown network ID: {id}"),
-            TokenMetadataError::HashError(msg) => write!(f, "Hash error: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for TokenMetadataError {}
-
-/// Parses a network ID string to its corresponding chain ID
-///
-/// # Arguments
-/// * `network_id` - The network identifier string (e.g., "ETHEREUM_MAINNET")
-///
-/// # Returns
-/// `Ok(chain_id)` for known networks, `Err(TokenMetadataError)` otherwise
-///
-/// # Supported Networks
-/// - "ETHEREUM_MAINNET" -> 1
-/// - "POLYGON_MAINNET" -> 137
-/// - "ARBITRUM_MAINNET" -> 42161
-/// - "OPTIMISM_MAINNET" -> 10
-/// - "BASE_MAINNET" -> 8453
-///
-/// # Examples
-/// ```
-/// use visualsign_ethereum::token_metadata::parse_network_id;
-///
-/// assert_eq!(parse_network_id("ETHEREUM_MAINNET"), Ok(1));
-/// assert_eq!(parse_network_id("POLYGON_MAINNET"), Ok(137));
-/// ```
-pub fn parse_network_id(network_id: &str) -> Result<u64, TokenMetadataError> {
-    match network_id {
-        "ETHEREUM_MAINNET" => Ok(1),
-        "POLYGON_MAINNET" => Ok(137),
-        "ARBITRUM_MAINNET" => Ok(42161),
-        "OPTIMISM_MAINNET" => Ok(10),
-        "BASE_MAINNET" => Ok(8453),
-        _ => Err(TokenMetadataError::UnknownNetworkId(network_id.to_string())),
-    }
 }
 
 /// Computes a deterministic SHA256 hash of protobuf bytes
@@ -143,49 +90,6 @@ pub fn compute_metadata_hash(protobuf_bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_network_id_ethereum() {
-        assert_eq!(parse_network_id("ETHEREUM_MAINNET"), Ok(1));
-    }
-
-    #[test]
-    fn test_parse_network_id_polygon() {
-        assert_eq!(parse_network_id("POLYGON_MAINNET"), Ok(137));
-    }
-
-    #[test]
-    fn test_parse_network_id_arbitrum() {
-        assert_eq!(parse_network_id("ARBITRUM_MAINNET"), Ok(42161));
-    }
-
-    #[test]
-    fn test_parse_network_id_optimism() {
-        assert_eq!(parse_network_id("OPTIMISM_MAINNET"), Ok(10));
-    }
-
-    #[test]
-    fn test_parse_network_id_base() {
-        assert_eq!(parse_network_id("BASE_MAINNET"), Ok(8453));
-    }
-
-    #[test]
-    fn test_parse_network_id_unknown() {
-        let result = parse_network_id("UNKNOWN_NETWORK");
-        assert!(result.is_err());
-        assert_eq!(
-            result,
-            Err(TokenMetadataError::UnknownNetworkId(
-                "UNKNOWN_NETWORK".to_string()
-            ))
-        );
-    }
-
-    #[test]
-    fn test_parse_network_id_empty() {
-        let result = parse_network_id("");
-        assert!(result.is_err());
-    }
 
     #[test]
     fn test_compute_metadata_hash_deterministic() {
