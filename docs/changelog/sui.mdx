@@ -3,7 +3,7 @@ title: "Changelog — Sui"
 description: "Sui Move package decoders, programmable transaction support, and Sui-specific decoder fixes. One entry per meaningful release."
 ---
 
-Subscribe via RSS at [`/changelog/sui/rss.xml`](/changelog/sui/rss.xml). Filter by tag — `Security`.
+<Icon icon="rss" /> [RSS](/changelog/sui/rss.xml) · Filter by tag — `Security`.
 
 <Update label="2026-06-01 — PTB decoding fixes and DoS hardening" description="v0.706.0 — v0.744.0" tags={["Security"]}>
   Sui programmable-transaction decoding now distinguishes `Result(N)` from `Input(N)` arguments, the `resolve_object` walk is depth-bounded to prevent a stack-overflow denial of service, and a reachable `todo!()` in the Momentum `flash_loan` handlers was removed.

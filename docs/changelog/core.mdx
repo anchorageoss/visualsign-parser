@@ -3,7 +3,7 @@ title: "Changelog — Core"
 description: "Core types, field builders, HTTP/gRPC API, attestation, policy, and build/test infrastructure. One entry per meaningful release."
 ---
 
-Subscribe via RSS at [`/changelog/core/rss.xml`](/changelog/core/rss.xml). Filter by tag — `Wallet API`, `Security`, `Attestation`, `Architecture`, `Policy`.
+<Icon icon="rss" /> [RSS](/changelog/core/rss.xml) · Filter by tag — `Wallet API`, `Security`, `Attestation`, `Architecture`, `Policy`.
 
 <Update label="2026-06-09 — Signature binding and signing-path charset hardening" description="v0.724.0 — v0.764.0" tags={["Security"]}>
   ABI and IDL signatures are now bound to chain and identity, backed by a fail-closed signer allowlist, with the development signing key gated out of production builds. On the signing path, `validate_charset` runs unconditionally and rejects JSON short-form control escapes.
