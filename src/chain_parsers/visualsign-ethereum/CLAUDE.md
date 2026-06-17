@@ -160,6 +160,7 @@ let nested = context.for_nested_call(nested_contract, nested_calldata);
 5. **Network ID mapping** - Always use `networks::network_id_to_chain_id()` to convert string IDs to chain IDs
 6. **Validate amounts** - Field builders validate number formats automatically
 7. **Chain ID + Address as key** - Always use (chain_id, Address) tuple for token lookups
+8. **Hex & address inputs** - Decode hex through `visualsign::encodings` (`decode_hex`, `strip_hex_prefix`, `split_hex_prefix`), which accept an optional `0x`/`0X` prefix. Addresses share this `0x` convention; do not re-roll prefix stripping locally.
 
 ## Module Structure
 

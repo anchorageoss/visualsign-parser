@@ -63,10 +63,7 @@ impl parser_cli_core::ChainPlugin for EthereumPlugin {
 
 /// Validate an Ethereum address string: `0x` prefix + 40 hex chars.
 fn validate_eth_address(addr: &str) -> Result<(), String> {
-    let hex = addr
-        .strip_prefix("0x")
-        .or_else(|| addr.strip_prefix("0X"))
-        .ok_or("must start with 0x")?;
+    let hex = visualsign::encodings::split_hex_prefix(addr).ok_or("must start with 0x")?;
     if hex.len() != 40 {
         return Err(format!(
             "expected 0x + 40 hex chars, got {} hex chars",
@@ -85,10 +82,7 @@ fn validate_eth_address(addr: &str) -> Result<(), String> {
 /// this function. The returned string is always `0x<40 lowercase hex chars>`.
 fn normalize_eth_address(addr: &str) -> String {
     // Strip the prefix (0x or 0X) and re-attach lowercase 0x.
-    let hex = addr
-        .strip_prefix("0x")
-        .or_else(|| addr.strip_prefix("0X"))
-        .unwrap_or(addr);
+    let hex = visualsign::encodings::strip_hex_prefix(addr);
     format!("0x{}", hex.to_ascii_lowercase())
 }
 

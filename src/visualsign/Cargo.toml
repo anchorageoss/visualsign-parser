@@ -15,12 +15,12 @@ thiserror = "2.0.12"
 # the most minimal regex import so that I can do number validation
 regex = { version = "1.11.1", default-features = false, features = ["std"] }
 sha2 = "0.10"
+hex = { workspace = true }
 tracing = { workspace = true }
 generated = { path = "../generated" }
 
 [dev-dependencies]
 base64 = "0.22.1"
-hex = "0.4.3"
 
 [features]
 diagnostics = []
