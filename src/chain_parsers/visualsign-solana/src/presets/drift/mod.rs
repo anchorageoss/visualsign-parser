@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn test_build_fallback_fields_returns_result() {
         let (title, condensed, expanded) =
-            build_fallback_fields("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH").unwrap();
+            build_fallback_fields(DRIFT_PROGRAM_ID).unwrap();
         assert_eq!(title, "Drift: Unknown Instruction");
         assert_eq!(condensed.len(), 2);
         assert_eq!(expanded.len(), 2);
@@ -261,7 +261,7 @@ mod tests {
     fn test_build_parsed_fields_returns_result() {
         let instruction = make_parsed_instruction("deposit");
         let (title, condensed, expanded) =
-            build_parsed_fields(&instruction, "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH")
+            build_parsed_fields(&instruction, DRIFT_PROGRAM_ID)
                 .unwrap();
         assert_eq!(title, "Drift: deposit");
         assert!(!condensed.is_empty());
