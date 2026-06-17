@@ -21,7 +21,38 @@ Field builders sit underneath all three layers. They enforce shape and determini
 
 ## What happens when a transaction lands
 
-A Solana transaction is, in VisualSign's view, a list of instructions. Decoding is a fold:
+A Solana transaction is, in VisualSign's view, a list of instructions. Decoding is a fold over them: each instruction is matched to the first preset that can handle it, and the emitted fields collect into one payload.
+
+```mermaid
+flowchart LR
+  tx[Raw Solana instruction] --> idl[Built-in IDL parser<br/>typed view]
+  idl --> dispatch{Dispatch by program id<br/>visualize_with_any}
+  dispatch --> p1[Jupiter preset]
+  dispatch --> p2[Kamino preset]
+  dispatch --> p3[more presets...]
+  dispatch --> pu[unknown_program<br/>catch-all, sorts last]
+  p1 --> fb[Field builders<br/>deterministic bytes]
+  p2 --> fb
+  p3 --> fb
+  pu --> fb
+  fb --> out[SignablePayload]
+
+  classDef io fill:#dbe9fb,stroke:#9bb8e3,color:#1f2937;
+  classDef parse fill:#d8f0e3,stroke:#9ad4b5,color:#1f2937;
+  classDef decide fill:#fdf0c4,stroke:#e6c768,color:#1f2937;
+  classDef preset fill:#e7ddf6,stroke:#c3aee6,color:#1f2937;
+  classDef fallback fill:#ffe0cc,stroke:#f0b48a,color:#1f2937;
+  classDef build fill:#fcd9e6,stroke:#eeaac4,color:#1f2937;
+
+  class tx,out io;
+  class idl parse;
+  class dispatch decide;
+  class p1,p2,p3 preset;
+  class pu fallback;
+  class fb build;
+```
+
+In code:
 
 ```text
 for each instruction in the transaction:
@@ -62,6 +93,32 @@ VisualSign implements the reader side of that standard. The IDL parser is the la
 VisualSign also answers the security worry the proposal raises. It treats a caller-supplied IDL as untrusted, display-only input: rendering happens on a trusted, attested path, and a crafted IDL cannot relabel a program or hide a destination. [As we argued on the SRFC](https://github.com/solana-foundation/SRFCs/discussions/4#discussioncomment-15500615), the wallet should act as a verifier that decouples display logic from the dapp. Clear signing decides what a wallet shows; VisualSign is where the wallet can trust that what it showed is what gets signed.
 
 How far to carry IDL verification is a wallet's decision, set by its business and threat model. An IDL can carry an ed25519 signature bound to its program id, which VisualSign checks against a curator allowlist, and unsigned IDLs are still accepted as graceful degradation. A wallet that wants a firmer root can relay the on-chain IDL and verify it against the program's upgrade authority, or trust a shared curator key that an auditor controls for several wallets at once. Teams on testnets often prefer unsigned IDLs to keep the development loop fast and avoid publishing on chain before they are ready. VisualSign supplies the verifier, and each wallet chooses where the trust root sits.
+
+```mermaid
+flowchart LR
+  proto[Protocol publishes IDL<br/>+ display metadata, SRFC 39] --> vs[VisualSign verifier<br/>trusted, attested path]
+  subgraph roots["Trust root: set by the wallet's threat model"]
+    a[Unsigned IDL<br/>dev / testnet]
+    b[Curator-key signature<br/>+ allowlist]
+    c[On-chain authority<br/>relay and verify]
+  end
+  roots --> vs
+  vs --> wallet[Wallet shows<br/>human-readable intent]
+  wallet --> user[User signs]
+
+  classDef proto fill:#dbe9fb,stroke:#9bb8e3,color:#1f2937;
+  classDef verify fill:#e7ddf6,stroke:#c3aee6,color:#1f2937;
+  classDef root fill:#d8f0e3,stroke:#9ad4b5,color:#1f2937;
+  classDef wallet fill:#fcd9e6,stroke:#eeaac4,color:#1f2937;
+  classDef user fill:#fdf0c4,stroke:#e6c768,color:#1f2937;
+
+  class proto proto;
+  class vs verify;
+  class a,b,c root;
+  class wallet wallet;
+  class user user;
+  style roots fill:#f3f7ff,stroke:#c9d6ea,color:#1f2937;
+```
 
 Ethereum has the same arc with ERC-7730 (also on the [roadmap](/vision-roadmap)). Each chain arrives with its own clear-signing standard, and each one plugs into the same three primitives. Every chain we add widens the surface those standards can cover, so this only gets stronger as VisualSign grows.
 
