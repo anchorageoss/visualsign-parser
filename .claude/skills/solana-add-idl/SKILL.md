@@ -100,28 +100,43 @@ Read that file for the exact structure, then generate a generic version with the
 - Two additional helpers — `append_raw_data` (for byte-blob args) and `format_arg_value` (for custom scalar rendering) — are not present in `dflow_aggregator`. Add them when the target IDL needs them, copying the pattern from another preset such as `kamino_vault` or `jupiter_earn`.
 - The parse function should: check `data.len() < 8`, load IDL, call `parse_instruction_with_idl`, call `build_named_accounts`, return a struct with parsed data + named accounts
 
-**Visualizer body must use the wire-data context API.** At the top of `visualize_tx_commands`:
+**Visualizer body must use `InstructionView`.** At the top of `visualize_tx_commands`:
 ```rust
-let program_id = context.resolve_program_id()?.to_string();
-let accounts = context.resolve_accounts()?;
+let view = InstructionView::from_context(context);
 let data = context.data();
 ```
 
-These three accessors replace the old `context.current_instruction()`. They surface
-unresolved indices as `Err(VisualSignError::DecodeError(...))` with the bad index
-named, instead of returning a generic "no instruction found" failure. Use
-`context.instruction_index()` for any "Instruction N" labels.
+`InstructionView::from_context` is infallible: every account index resolves to either
+its base58 pubkey string or `"unresolved(N)"` for ALT/OOB indices. This is the
+correct pattern for all IDL-based presets — v0 transactions that use Address Lookup
+Tables have ALT-referenced accounts that can never be resolved from `account_keys`,
+and showing `"unresolved(N)"` is strictly better than aborting the whole transaction
+display.
+
+**Security asymmetry — do not use `resolve_accounts()?` in IDL presets.**
+The old `resolve_accounts()?` pattern (and the newer `context.resolve_accounts()?`)
+fails closed on unresolved accounts. It is intentionally kept only in `token_2022`,
+where the account fields (mint, pause_authority, mint_authority, freeze_authority)
+are themselves the security-critical content — showing `"unresolved(N)"` in place of
+an authority would let a user approve an instruction whose authority they cannot
+verify. For IDL presets, the accounts are display labels, not security gates, so
+graceful degradation is correct. Do not import or call `resolve_accounts` in new
+presets.
+
+Use `view.program_id` for the program ID string and `view.accounts` (a `Vec<String>`)
+wherever the old code passed `&[AccountMeta]`. Use `context.instruction_index()` for
+"Instruction N" labels.
 
 **Required imports** (at top of module, NOT inside functions):
 ```rust
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::{PascalName}Config;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use solana_sdk::instruction::AccountMeta;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use visualsign::errors::VisualSignError;
@@ -133,12 +148,22 @@ use visualsign::{
 ```
 
 `BTreeMap` (not `HashMap`) keeps the rendered named-accounts order deterministic.
+Do not import `solana_sdk::instruction::AccountMeta` — the new pattern passes
+`&[String]` everywhere `AccountMeta` slices used to go.
 
 **Required tests** (in `#[cfg(test)] mod tests`):
 - `test_{snake_name}_idl_loads` — IDL loads and has instructions
 - `test_{snake_name}_idl_has_discriminators` — every instruction has an 8-byte discriminator
 - `test_unknown_discriminator_returns_error` — garbage 9-byte data returns error
 - `test_short_data_returns_error` — 3-byte data returns error
+
+Test helpers that supply dummy accounts must use `Vec<String>`, not `Vec<AccountMeta>`:
+```rust
+fn dummy_account_strings(n: usize) -> Vec<String> {
+    use solana_sdk::pubkey::Pubkey;
+    (0..n).map(|_| Pubkey::new_unique().to_string()).collect()
+}
+```
 
 ## Step 4: Register in presets/mod.rs
 
