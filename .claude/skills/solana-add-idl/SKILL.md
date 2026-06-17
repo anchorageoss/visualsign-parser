@@ -202,14 +202,29 @@ builds without `diagnostics` while parser_cli builds with it.
 
 ## When validating the skill via preset regeneration
 
-If this skill is being run as part of a regeneration test (delete existing preset → regenerate → verify), post a PR comment for each finding encountered — compile errors, test failures, generated code that doesn't match expectations. This creates a paper trail for reviewers and drives iterative skill improvements within the same PR.
+The regeneration test is an iterative loop, not a one-shot pass. Expect multiple cycles:
 
-```bash
-gh pr comment <PR_NUMBER> --body "**Finding: <short title>**
-
-<description of what went wrong and what the correct behavior should be>"
+```
+delete preset implementations
+  → run skill → cargo build/test
+    → finding? → post PR comment + fix skill → repeat
+      → all green → done
 ```
 
-Each comment should name the specific step or template section that needs updating (e.g. "Step 4", "config.rs template", "Required imports list"). After all findings are addressed and CI passes, update the skill accordingly in the same PR.
+**Per finding:**
 
-**Do not aggregate findings into the PR description.** Post them as individual comments as they surface so reviewers can track resolution per finding.
+1. Post a PR comment immediately — don't batch findings:
+   ```bash
+   gh pr comment <PR_NUMBER> --body "**Finding: <short title>**
+
+   <what went wrong and what the correct behavior should be>"
+   ```
+   Name the specific step or template section affected (e.g. "Step 4", "config.rs template", "Required imports list").
+
+2. Fix the skill in the same PR commit. The skill and the generated output evolve together — a finding that isn't fixed in the skill will recur the next time someone runs it.
+
+3. Re-delete and regenerate the affected preset to confirm the fix produces clean output before moving on.
+
+**Do not aggregate findings into the PR description.** Post them as individual comments as they surface so reviewers can track each one's resolution independently.
+
+**The skill is the artifact.** Generated preset files are evidence that the skill works; the skill file is what ships. If the generated output needed a manual tweak to compile or pass tests, that tweak belongs in the skill — not just in the generated file.
