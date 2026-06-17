@@ -479,7 +479,10 @@ mod off_tests {
         else {
             panic!("expected PreviewLayout");
         };
-        let expanded = preview_layout.expanded.as_ref().expect("expanded fields present");
+        let expanded = preview_layout
+            .expanded
+            .as_ref()
+            .expect("expanded fields present");
         let found = expanded.fields.iter().any(|f| {
             matches!(&f.signable_payload_field,
                 SignablePayloadField::TextV2 { text_v2, .. }

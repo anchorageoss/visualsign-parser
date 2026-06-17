@@ -248,7 +248,10 @@ impl InstructionView {
                 None => format!("unresolved(oob:{i})"),
             })
             .collect();
-        Self { program_id, accounts }
+        Self {
+            program_id,
+            accounts,
+        }
     }
 }
 
