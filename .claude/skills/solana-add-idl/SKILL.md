@@ -100,6 +100,13 @@ Read that file for the exact structure, then generate a generic version with the
 - Two additional helpers — `append_raw_data` (for byte-blob args) and `format_arg_value` (for custom scalar rendering) — are not present in `dflow_aggregator`. Add them when the target IDL needs them, copying the pattern from another preset such as `kamino_vault` or `jupiter_earn`.
 - The parse function should: check `data.len() < 8`, load IDL, call `parse_instruction_with_idl`, call `build_named_accounts`, return a struct with parsed data + named accounts
 
+**Expanded view must include a `Program` display-name field.** The first field in `expanded_fields` must be the human-readable program name, before `Program ID`:
+```rust
+expanded_fields.push(create_text_field("Program", "{display_name}")?);
+expanded_fields.push(create_text_field("Program ID", program_id)?);
+```
+The condensed view already has `Program: {display_name}` — expanded must match so the user sees the program name in both the summary and the detail view, not just a raw address.
+
 **Prerequisite:** `InstructionView` must be present in `crate::core` (introduced in the v0+ALT graceful-degradation refactor). If the codebase predates that change, `InstructionView` will not resolve — check `core/mod.rs` before proceeding.
 
 **Visualizer body must use `InstructionView`.** At the top of `visualize_tx_commands`:
@@ -199,6 +206,37 @@ make -C src test
 All must pass before the task is complete. Both feature configurations
 (diagnostics on and off) need to compile and test cleanly because parser_app
 builds without `diagnostics` while parser_cli builds with it.
+
+## Step 7: Compare against the prior implementation
+
+When regenerating an existing preset, diff the generated output against the version that existed before deletion (the base branch, one commit before the delete commit). Look for:
+
+- **Structural regressions**: fields missing from condensed or expanded, fallback path removed, IDL caching changed from `OnceLock` to per-call
+- **Behaviour changes**: field labels renamed, arg rendering changed (flat `format_arg_value` vs recursive `push_arg_fields`), subtitle content changed, extra accounts dropped or added
+- **Improvements**: the generated output may be strictly better than what was hand-written (e.g. adding `Remaining Account N` handling, using recursive arg rendering, consistent `dummy_account_strings` test helpers) — call these out explicitly as they validate the skill is producing higher-quality output than the predecessor
+
+```bash
+# diff generated output against the pre-deletion version
+git diff <base-branch>..<current-branch> -- \
+  src/chain_parsers/visualsign-solana/src/presets/{snake_name}/mod.rs
+```
+
+Post a PR comment summarising observations — improvements, neutral changes, and any concerns — regardless of whether anything needs fixing. This creates a record that the regeneration was reviewed and the output was understood, not just "it compiles."
+
+```bash
+gh pr comment <PR_NUMBER> --body "**Comparison: generated vs prior {display_name} implementation**
+
+Improvements:
+- <list>
+
+Neutral changes:
+- <list>
+
+Concerns / open questions:
+- <list or 'none'>"
+```
+
+If the comparison surfaces a missing field or a behaviour regression that should always be present in new presets, fix the skill template and regenerate before marking the round complete.
 
 ## When validating the skill via preset regeneration
 

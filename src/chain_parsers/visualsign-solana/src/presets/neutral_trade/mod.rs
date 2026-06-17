@@ -172,6 +172,7 @@ fn build_parsed_fields(
         push_arg_fields(&mut condensed_fields, key, value)?;
     }
 
+    expanded_fields.push(create_text_field("Program", "Neutral Trade")?);
     expanded_fields.push(create_text_field("Program ID", program_id)?);
     expanded_fields.push(create_text_field("Instruction", instruction_name)?);
     expanded_fields.push(create_text_field("Discriminator", &parsed.discriminator)?);
@@ -212,6 +213,7 @@ fn build_fallback_fields(
     condensed_fields.push(create_text_field("Program", "Neutral Trade")?);
     condensed_fields.push(create_text_field("Status", "Unknown instruction type")?);
 
+    expanded_fields.push(create_text_field("Program", "Neutral Trade")?);
     expanded_fields.push(create_text_field("Program ID", program_id)?);
     expanded_fields.push(create_text_field("Status", "Unknown instruction type")?);
 
