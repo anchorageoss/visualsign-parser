@@ -18,12 +18,14 @@ Ask the user for:
 1. **Program address** (base58 Solana program ID)
 2. **Human-readable name** (e.g. "Squads Multisig", "Marinade Finance", "Jupiter Swap")
 3. **VisualizerKind** — one of: `Dex`, `Lending`, `StakingPools`, `Payments`
+4. **Subtitle** — the short label shown under the instruction title in the preview layout. Default is the human-readable name (e.g. `"Jupiter Swap"`); ask the user if they want something different or leave it empty.
 
 Derive these from the human name:
 - `snake_name`: lowercase with underscores (e.g. `marinade_finance`)
 - `PascalName`: PascalCase (e.g. `MarinadeFinance`)
 - `SCREAMING_SNAKE`: uppercase with underscores (e.g. `MARINADE_FINANCE`)
 - `display_name`: the human name as-is for display strings
+- `subtitle_text`: the user-provided subtitle, or `display_name` if none given
 
 ## Step 2: Fetch the IDL
 
@@ -112,6 +114,14 @@ expanded_fields.push(create_text_field("Program ID", program_id)?);
 The condensed view already has `Program: {display_name}` — expanded must match so the user sees the program name in both the summary and the detail view, not just a raw address.
 
 **Prerequisite:** `InstructionView` must be present in `crate::core` (introduced in the v0+ALT graceful-degradation refactor). If the codebase predates that change, `InstructionView` will not resolve — check `core/mod.rs` before proceeding.
+
+**Subtitle field uses `{subtitle_text}`.** In the `preview_layout` construction inside `visualize_tx_commands`, set the subtitle to the value gathered in Step 1:
+```rust
+subtitle: Some(SignablePayloadFieldTextV2 {
+    text: "{subtitle_text}".to_string(),
+}),
+```
+If the user provided no subtitle (or said to leave it empty), use `String::new()` instead.
 
 **Visualizer body must use `InstructionView`.** At the top of `visualize_tx_commands`:
 ```rust

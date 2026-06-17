@@ -60,7 +60,7 @@ impl InstructionVisualizer for NeutralTradeVisualizer {
         let preview_layout = SignablePayloadFieldPreviewLayout {
             title: Some(SignablePayloadFieldTextV2 { text: title }),
             subtitle: Some(SignablePayloadFieldTextV2 {
-                text: String::new(),
+                text: "Neutral Trade".to_string(),
             }),
             condensed: Some(condensed),
             expanded: Some(expanded),
