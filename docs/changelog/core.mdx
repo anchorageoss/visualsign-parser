@@ -3,7 +3,23 @@ title: "Changelog — Core"
 description: "Core types, field builders, HTTP/gRPC API, attestation, policy, and build/test infrastructure. One entry per meaningful release."
 ---
 
-Subscribe via RSS at [`/changelog/core/rss.xml`](/changelog/core/rss.xml). Filter by tag — `Wallet API`, `Security`, `Architecture`, `Policy`.
+Subscribe via RSS at [`/changelog/core/rss.xml`](/changelog/core/rss.xml). Filter by tag — `Wallet API`, `Security`, `Attestation`, `Architecture`, `Policy`.
+
+<Update label="2026-06-09 — Signature binding and signing-path charset hardening" description="v0.724.0 — v0.764.0" tags={["Security"]}>
+  ABI and IDL signatures are now bound to chain and identity, backed by a fail-closed signer allowlist, with the development signing key gated out of production builds. On the signing path, `validate_charset` runs unconditionally and rejects JSON short-form control escapes.
+</Update>
+
+<Update label="2026-05-27 — Gateway production parity: mock bootProof and v2 route" description="v0.716.0" tags={["Wallet API", "Attestation"]}>
+  The parser gateway emits a mock `bootProof` and mounts the v2 route, matching the production TDX deployment shape for local development.
+</Update>
+
+<Update label="2026-05-16 — Per-chain feature flags in parser_app" description="v0.700.0" tags={["Architecture"]}>
+  `parser_app` now mirrors `parser_cli`'s chain-feature flags, so enclave and gRPC builds can include or exclude individual chains.
+</Update>
+
+<Update label="2026-05-14 — Nitro PCR extraction tooling and self-hosted TEE docs" description="v0.654.0" tags={["Attestation", "Security"]}>
+  Added `scripts/extract-nitro-pcrs.sh` for extracting AWS Nitro PCR values, alongside self-hosted TEE deployment docs.
+</Update>
 
 <Update label="2026-05-12 — Chain metadata and content digests in HTTP gateway" description="v0.648.0" tags={["Wallet API"]}>
   The HTTP gateway now forwards `chain_metadata` end-to-end and exposes content digests on every response. Downstream tools — policy engines, signing pipelines, audit logs — can compose VisualSign output into their own workflows without re-parsing the transaction.

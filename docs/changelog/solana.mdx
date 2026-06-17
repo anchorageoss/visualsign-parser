@@ -3,7 +3,15 @@ title: "Changelog — Solana"
 description: "New Solana preset coverage, IDL handling changes, and Solana-specific decoder fixes. One entry per meaningful release."
 ---
 
-Subscribe via RSS at [`/changelog/solana/rss.xml`](/changelog/solana/rss.xml). Filter by tag — `Wallet API`, `Contributors`, `Policy`, `Architecture`.
+Subscribe via RSS at [`/changelog/solana/rss.xml`](/changelog/solana/rss.xml). Filter by tag — `Wallet API`, `Contributors`, `Security`, `Architecture`.
+
+<Update label="2026-06-12 — Drift Protocol preset" description="v0.769.0" tags={["Wallet API", "Contributors"]}>
+  VisualSign now decodes Drift Protocol instructions. Like every Solana preset, it ships as a self-contained directory under `src/chain_parsers/visualsign-solana/src/presets/` with no changes to existing decoders. See [Adding a Solana preset](/chains/solana).
+</Update>
+
+<Update label="2026-05-30 — Solana decoder hardening" description="v0.722.0 — v0.730.0" tags={["Security"]}>
+  A round of safety fixes on the Solana path: caller-supplied IDL overrides are rejected for trusted programs and validated against the signer allowlist, V0 transactions referencing unresolved address-lookup-table entries are rejected instead of mis-decoded, `swig_wallet` inner-instruction recursion is depth-bounded, and Token-2022 mints with more than 18 decimals are rejected while `format_token_amount` gained overflow hardening.
+</Update>
 
 <Update label="2026-05-12 — Solana preset wave" description="v0.646.0 — v0.649.0" tags={["Wallet API", "Contributors"]}>
   VisualSign now decodes Jupiter (Borrow, Earn, Perpetuals, v6 route_v2), Kamino (Borrow, Vault, Farms, Limit Orders), Meteora (DLMM, DAMM V2), MetaDAO (Futarchy, Conditional Vault), Orca Whirlpool, Onre App, Neutral Trade, DFlow Aggregator, and Exponent Finance.
@@ -12,5 +20,5 @@ Subscribe via RSS at [`/changelog/solana/rss.xml`](/changelog/solana/rss.xml). F
 </Update>
 
 <Update label="2026-05-12 — Surfpool mainnet-fork integration for IDL fuzz testing" description="v0.647.0" tags={["Contributors"]}>
-  The built-in Solana IDL parser path is now fuzz-tested against real mainnet state via Surfpool. Composing live chain state into the local test harness catches drift between IDL assumptions and on-chain reality, without requiring a live cluster.
+  The built-in Solana IDL parser path is now fuzz-tested against real mainnet state via Surfpool. Tests run against a local mainnet fork backed by live RPC, so they catch drift between IDL assumptions and on-chain reality without broadcasting to a live cluster.
 </Update>
