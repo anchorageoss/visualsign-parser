@@ -18,14 +18,14 @@ Ask the user for:
 1. **Program address** (base58 Solana program ID)
 2. **Human-readable name** (e.g. "Squads Multisig", "Marinade Finance", "Jupiter Swap")
 3. **VisualizerKind** — one of: `Dex`, `Lending`, `StakingPools`, `Payments`
-4. **Subtitle** — the short label shown under the instruction title in the preview layout. Default is the human-readable name (e.g. `"Jupiter Swap"`); ask the user if they want something different or leave it empty.
+4. **Subtitle** — the short label shown under the instruction title in the preview layout. Default is empty (corpus-wide convention for IDL presets); ask the user if they want a custom string.
 
 Derive these from the human name:
 - `snake_name`: lowercase with underscores (e.g. `marinade_finance`)
 - `PascalName`: PascalCase (e.g. `MarinadeFinance`)
 - `SCREAMING_SNAKE`: uppercase with underscores (e.g. `MARINADE_FINANCE`)
 - `display_name`: the human name as-is for display strings
-- `subtitle_text`: the user-provided subtitle, or `display_name` if none given
+- `subtitle_text`: the user-provided subtitle, or `String::new()` if none given
 
 ## Step 2: Fetch the IDL
 

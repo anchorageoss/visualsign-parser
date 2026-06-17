@@ -60,7 +60,7 @@ impl InstructionVisualizer for OnreAppVisualizer {
         let preview_layout = SignablePayloadFieldPreviewLayout {
             title: Some(SignablePayloadFieldTextV2 { text: title }),
             subtitle: Some(SignablePayloadFieldTextV2 {
-                text: "Onre App".to_string(),
+                text: String::new(),
             }),
             condensed: Some(condensed),
             expanded: Some(expanded),
