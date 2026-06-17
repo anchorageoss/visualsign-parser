@@ -13,7 +13,7 @@ RUN apk add --no-cache git
 
 # Install the Mintlify CLI globally. Package name is `mint` (not `mintlify`).
 # Bump deliberately by changing the @<version> pin.
-RUN npm install -g mint@latest
+RUN npm install -g mint@4.2.626
 
 WORKDIR /docs
 

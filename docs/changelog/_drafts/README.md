@@ -40,10 +40,9 @@ If a change spans multiple categories (rare — e.g., a core change that require
 Use tags from the shared vocabulary so subscribers can filter:
 
 - **Audience** — `Wallet API`, `Contributors`, `Security`, `Ecosystem`.
-- **Chain** — `Ethereum`, `Solana`, `Sui`, `Tron`.
 - **Theme** — `Policy`, `Architecture`, `Lints`, `Attestation`, `Performance`.
 
-A single fragment usually has one audience tag, one chain tag (if applicable), and zero or one theme tag.
+A single fragment usually has one audience tag and zero or one theme tag. Don't add a chain tag: the per-chain pages already convey the chain, and `core` entries aren't chain-specific.
 
 ## What counts as user-facing
 

@@ -3,7 +3,7 @@ title: "Composable by design: how Solana presets stack"
 description: "Adding a new protocol to VisualSign rarely touches existing code. Here's how the IDL parser, preset overlays, and a build-time registry compose into one signable payload."
 ---
 
-In the last few weeks, VisualSign gained decoding for Jupiter (Borrow, Earn, Perpetuals, v6 route_v2), Kamino (Borrow, Vault, Farms, Limit Orders), Meteora (DLMM, DAMM V2), MetaDAO (Futarchy, Conditional Vault), Orca Whirlpool, Onre App, Neutral Trade, DFlow Aggregator, and Exponent Finance. Seventeen presets across nine protocols. Each PR added a directory under `src/chain_parsers/visualsign-solana/src/presets/`, a one-line module declaration, and a handful of fixtures. None of them changed how any of the other presets decode, and none of them touched the core parser.
+Across April and May 2026, VisualSign gained decoding for Jupiter (Borrow, Earn, Perpetuals, v6 route_v2), Kamino (Borrow, Vault, Farms, Limit Orders), Meteora (DLMM, DAMM V2), MetaDAO (Futarchy, Conditional Vault), Orca Whirlpool, Onre App, Neutral Trade, DFlow Aggregator, and Exponent Finance. Seventeen presets across nine protocols. Each PR added a directory under `src/chain_parsers/visualsign-solana/src/presets/`, a one-line module declaration, and a handful of fixtures. None of them changed how any of the other presets decode, and none of them touched the core parser.
 
 That comes from a few composition primitives the Solana decoder is built on.
 
@@ -45,13 +45,13 @@ The only shared file a preset PR touches is that module list, and only to append
 
 ## What composability buys you
 
-If you're **adding a new Solana protocol**, the design pushes you toward a particular shape: one IDL, one visualizer, one config, a handful of fixtures, one new directory, and the `pub mod` line that registers it. The same shape your reviewer expects, the same shape we expect from ourselves. The `solana-add-idl` skill scaffolds all of this for you — including the module declaration — when the protocol exposes an on-chain IDL.
+If you're **adding a new Solana protocol**, the design pushes you toward a particular shape: one IDL, one visualizer, one config, a handful of fixtures, one new directory, and the `pub mod` line that registers it. The same shape your reviewer expects, the same shape we expect from ourselves. When the protocol exposes an on-chain IDL, the scaffolding in [Adding a Solana preset](/chains/solana) generates all of this for you, including the module declaration.
 
 If you're **integrating VisualSign into a wallet**, composability is built into the data layer. The Ethereum side models token resolution as a `LayeredRegistry<T>`: a request-scoped registry layered over the compiled-in defaults, so wallet-provided overrides can take precedence at lookup time without forking VisualSign. The layering exists today; wiring wallet-supplied token metadata into that request layer is still a TODO (`create_layered_registry` in `visualsign-ethereum/src/lib.rs` currently uses defaults only). The Solana side composes through fixed IDL + preset layers; wallet-side overlays are the natural next step on both chains.
 
-If you're **building a policy engine or signing pipeline on top of VisualSign**, the chain metadata + content digests change in the HTTP gateway (PR #287) gives you a stable input contract. The gateway forwards `chain_metadata` end-to-end and exposes payload digests on every response. Your policy logic composes onto our parser output without re-parsing or re-decoding.
+If you're **building a policy engine or signing pipeline on top of VisualSign**, the chain metadata and content digests in the HTTP gateway give you a stable input contract. The gateway forwards `chain_metadata` end-to-end and exposes payload digests on every response. Your policy logic composes onto our parser output without re-parsing or re-decoding.
 
-If you're **writing tests**, surfpool (PR #202) composes real Solana mainnet state into the local harness. Tests run against a local mainnet fork backed by live RPC (Helius, a custom `SOLANA_RPC_URL`, or public mainnet-beta). They need network access to pull that state, and nothing is ever sent to a live cluster. Forking real chain data catches drift between IDL assumptions and on-chain reality.
+If you're **writing tests**, surfpool composes real Solana mainnet state into the local harness. Tests run against a local mainnet fork backed by live RPC (Helius, a custom `SOLANA_RPC_URL`, or public mainnet-beta). They need network access to pull that state, and nothing is ever sent to a live cluster. Forking real chain data catches drift between IDL assumptions and on-chain reality.
 
 ## Composing with ClearSign
 
@@ -60,6 +60,8 @@ This shape pays off past our own repo. Solana's clear-signing proposal, [SRFC 39
 VisualSign implements the reader side of that standard. The IDL parser is the layer SRFC 39 is written for, so the display metadata a protocol publishes lands in the same typed view a preset already reads. The richer that published IDL gets, the more VisualSign can render from the IDL alone, with a thinner protocol-specific preset on top. Protocols that haven't adopted the standard are still covered by a preset today, so coverage doesn't wait on the spec landing.
 
 VisualSign also answers the security worry the proposal raises. It treats a caller-supplied IDL as untrusted, display-only input: rendering happens on a trusted, attested path, and a crafted IDL cannot relabel a program or hide a destination. [As we argued on the SRFC](https://github.com/solana-foundation/SRFCs/discussions/4#discussioncomment-15500615), the wallet should act as a verifier that decouples display logic from the dapp. Clear signing decides what a wallet shows; VisualSign is where the wallet can trust that what it showed is what gets signed.
+
+How far to carry IDL verification is a wallet's decision, set by its business and threat model. An IDL can carry an ed25519 signature bound to its program id, which VisualSign checks against a curator allowlist, and unsigned IDLs are still accepted as graceful degradation. A wallet that wants a firmer root can relay the on-chain IDL and verify it against the program's upgrade authority, or trust a shared curator key that an auditor controls for several wallets at once. Teams on testnets often prefer unsigned IDLs to keep the development loop fast and avoid publishing on chain before they are ready. VisualSign supplies the verifier, and each wallet chooses where the trust root sits.
 
 Ethereum has the same arc with ERC-7730 (also on the [roadmap](/vision-roadmap)). Each chain arrives with its own clear-signing standard, and each one plugs into the same three primitives. Every chain we add widens the surface those standards can cover, so this only gets stronger as VisualSign grows.
 
