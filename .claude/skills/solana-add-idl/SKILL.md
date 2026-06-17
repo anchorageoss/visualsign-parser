@@ -125,13 +125,20 @@ The condensed view already has `Program: {display_name}` — expanded must match
 
 **Prerequisite:** `InstructionView` must be present in `crate::core` (introduced in the v0+ALT graceful-degradation refactor). If the codebase predates that change, `InstructionView` will not resolve — check `core/mod.rs` before proceeding.
 
-**Subtitle field uses `{subtitle_text}`.** In the `preview_layout` construction inside `visualize_tx_commands`, set the subtitle to the value gathered in Step 1:
+**Subtitle field uses the value gathered in Step 1.** In the `preview_layout` construction inside `visualize_tx_commands`, emit one of these two forms depending on what the user provided:
+
+With a custom subtitle:
 ```rust
 subtitle: Some(SignablePayloadFieldTextV2 {
-    text: "{subtitle_text}".to_string(),
+    text: "My Custom Subtitle".to_string(),
 }),
 ```
-If the user provided no subtitle (or said to leave it empty), use `String::new()` instead.
+With no subtitle (default):
+```rust
+subtitle: Some(SignablePayloadFieldTextV2 {
+    text: String::new(),
+}),
+```
 
 **Visualizer body must use `InstructionView`.** At the top of `visualize_tx_commands`:
 ```rust
