@@ -106,6 +106,16 @@ Read that file for the exact structure, then generate a generic version with the
 - Two additional helpers — `append_raw_data` (for byte-blob args) and `format_arg_value` (for custom scalar rendering) — are not present in `dflow_aggregator`. Add them when the target IDL needs them, copying the pattern from another preset such as `kamino_vault` or `jupiter_earn`.
 - The parse function should: check `data.len() < 8`, load IDL, call `parse_instruction_with_idl`, call `build_named_accounts`, return a struct with parsed data + named accounts
 
+`build_named_accounts` has this exact signature — argument order matters:
+```rust
+fn build_named_accounts(
+    data: &[u8],
+    idl: &Idl,
+    accounts: &[String],
+) -> (BTreeMap<String, String>, Vec<String>)
+```
+The first return value is named accounts (IDL account name → pubkey string); the second is extra accounts (accounts beyond what the IDL instruction defines), rendered as `"Remaining Account N"` in the expanded view.
+
 **Expanded view must include a `Program` display-name field.** The first field in `expanded_fields` must be the human-readable program name, before `Program ID`:
 ```rust
 expanded_fields.push(create_text_field("Program", "{display_name}")?);
@@ -179,13 +189,34 @@ Do not import `solana_sdk::instruction::AccountMeta` — the new pattern passes
 - `test_{snake_name}_idl_has_discriminators` — every instruction has an 8-byte discriminator
 - `test_unknown_discriminator_returns_error` — garbage 9-byte data returns error
 - `test_short_data_returns_error` — 3-byte data returns error
+- `test_push_arg_fields_renders_scalars` — string/number/bool/null each produce one `TextV2` field
+- `test_push_arg_fields_recurses_into_array_with_indexed_labels` — `key[0]`, `key[1]` … labels
+- `test_push_arg_fields_recurses_into_object_with_dotted_labels` — `parent.child` labels
+- `test_push_arg_fields_renders_empty_collections` — empty array/object render as `[]`/`{}`
+- `test_build_named_accounts_surfaces_extra_accounts` — pick an IDL instruction with N named accounts, provide N+2 account strings, assert `named.len()==N` and `extra.len()==2`
+- `test_remaining_account_label_is_human_readable` — extra accounts appear as `"Remaining Account 1"`, `"Remaining Account 2"`, etc. in expanded view
 
-Test helpers that supply dummy accounts must use `Vec<String>`, not `Vec<AccountMeta>`:
+Test helpers — add both to the test module:
 ```rust
 fn dummy_account_strings(n: usize) -> Vec<String> {
     use solana_sdk::pubkey::Pubkey;
     (0..n).map(|_| Pubkey::new_unique().to_string()).collect()
 }
+
+fn field_label_value(field: &AnnotatedPayloadField) -> (String, String) {
+    match &field.signable_payload_field {
+        SignablePayloadField::TextV2 { common, text_v2 } => {
+            (common.label.clone(), text_v2.text.clone())
+        }
+        other => panic!("expected TextV2 field, got {other:?}"),
+    }
+}
+```
+
+The `push_arg_fields` and `build_named_accounts` tests require these imports at the top of the test module:
+```rust
+use serde_json::json;
+use solana_parser::IdlSource;
 ```
 
 ## Step 4: No manual registration needed

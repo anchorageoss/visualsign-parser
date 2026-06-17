@@ -266,10 +266,21 @@ fn push_arg_fields(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use solana_parser::IdlSource;
 
     fn dummy_account_strings(n: usize) -> Vec<String> {
         use solana_sdk::pubkey::Pubkey;
         (0..n).map(|_| Pubkey::new_unique().to_string()).collect()
+    }
+
+    fn field_label_value(field: &AnnotatedPayloadField) -> (String, String) {
+        match &field.signable_payload_field {
+            SignablePayloadField::TextV2 { common, text_v2 } => {
+                (common.label.clone(), text_v2.text.clone())
+            }
+            other => panic!("expected TextV2 field, got {other:?}"),
+        }
     }
 
     #[test]
@@ -313,5 +324,135 @@ mod tests {
         let accounts = dummy_account_strings(0);
         let result = parse_onre_app_instruction(&short_data, &accounts);
         assert!(result.is_err(), "Short data should return error");
+    }
+
+    #[test]
+    fn test_push_arg_fields_renders_scalars() {
+        let mut fields = Vec::new();
+        push_arg_fields(&mut fields, "s", &json!("hello")).unwrap();
+        push_arg_fields(&mut fields, "n", &json!(42)).unwrap();
+        push_arg_fields(&mut fields, "b", &json!(true)).unwrap();
+        push_arg_fields(&mut fields, "z", &serde_json::Value::Null).unwrap();
+
+        assert_eq!(
+            fields
+                .iter()
+                .map(field_label_value)
+                .collect::<Vec<(String, String)>>(),
+            vec![
+                ("s".to_string(), "hello".to_string()),
+                ("n".to_string(), "42".to_string()),
+                ("b".to_string(), "true".to_string()),
+                ("z".to_string(), "null".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_push_arg_fields_recurses_into_array_with_indexed_labels() {
+        let mut fields = Vec::new();
+        push_arg_fields(&mut fields, "actions", &json!(["a", "b", "c"])).unwrap();
+        let pairs: Vec<(String, String)> = fields.iter().map(field_label_value).collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("actions[0]".to_string(), "a".to_string()),
+                ("actions[1]".to_string(), "b".to_string()),
+                ("actions[2]".to_string(), "c".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_push_arg_fields_recurses_into_object_with_dotted_labels() {
+        let mut fields = Vec::new();
+        push_arg_fields(
+            &mut fields,
+            "params",
+            &json!({"amount": 100, "side": "buy"}),
+        )
+        .unwrap();
+        let pairs: std::collections::BTreeSet<(String, String)> =
+            fields.iter().map(field_label_value).collect();
+        let expected: std::collections::BTreeSet<(String, String)> = [
+            ("params.amount".to_string(), "100".to_string()),
+            ("params.side".to_string(), "buy".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(pairs, expected);
+    }
+
+    #[test]
+    fn test_push_arg_fields_renders_empty_collections() {
+        let mut fields = Vec::new();
+        push_arg_fields(&mut fields, "empty_arr", &json!([])).unwrap();
+        push_arg_fields(&mut fields, "empty_obj", &json!({})).unwrap();
+        assert_eq!(
+            fields
+                .iter()
+                .map(field_label_value)
+                .collect::<Vec<(String, String)>>(),
+            vec![
+                ("empty_arr".to_string(), "[]".to_string()),
+                ("empty_obj".to_string(), "{}".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_build_named_accounts_surfaces_extra_accounts() {
+        let idl = get_onre_app_idl().unwrap();
+        let ix = idl
+            .instructions
+            .iter()
+            .find(|ix| ix.name == "accept_boss")
+            .expect("accept_boss exists in the bundled IDL");
+        let disc = ix
+            .discriminator
+            .as_ref()
+            .expect("instruction has a computed discriminator")
+            .clone();
+
+        // accept_boss has 2 named accounts; provide 4 to get 2 extras
+        let accounts = dummy_account_strings(4);
+        let (named, extra) = build_named_accounts(&disc, idl, &accounts);
+
+        assert_eq!(named.len(), 2, "first 2 accounts should be named");
+        assert_eq!(extra.len(), 2, "remaining 2 accounts should be extras");
+        assert_eq!(extra[0], accounts[2]);
+        assert_eq!(extra[1], accounts[3]);
+    }
+
+    #[test]
+    fn test_remaining_account_label_is_human_readable() {
+        let pubkeys = dummy_account_strings(3);
+        let parsed = OnreAppParsedInstruction {
+            parsed: SolanaParsedInstructionData {
+                instruction_name: "test_ix".to_string(),
+                discriminator: "00".to_string(),
+                named_accounts: Default::default(),
+                program_call_args: serde_json::Map::new(),
+                idl_source: IdlSource::Custom,
+                idl_hash: String::new(),
+            },
+            named_accounts: BTreeMap::new(),
+            extra_accounts: pubkeys.clone(),
+        };
+
+        let (_title, _condensed, expanded) = build_parsed_fields(&parsed, "PROGRAM_ID").unwrap();
+        let entries: Vec<(String, String)> = expanded
+            .iter()
+            .map(field_label_value)
+            .filter(|(label, _)| label.starts_with("Remaining Account"))
+            .collect();
+        assert_eq!(
+            entries,
+            vec![
+                ("Remaining Account 1".to_string(), pubkeys[0].clone()),
+                ("Remaining Account 2".to_string(), pubkeys[1].clone()),
+                ("Remaining Account 3".to_string(), pubkeys[2].clone()),
+            ]
+        );
     }
 }
