@@ -40,14 +40,14 @@ impl InstructionVisualizer for DriftVisualizer {
         let parsed = parse_drift_instruction(data, &accounts);
 
         let (title, condensed_fields, expanded_fields) = match parsed {
-            Ok(parsed) => build_parsed_fields(&parsed, &program_id),
-            Err(_) => build_fallback_fields(&program_id),
+            Ok(parsed) => build_parsed_fields(&parsed, &program_id)?,
+            Err(_) => build_fallback_fields(&program_id)?,
         };
 
         let condensed = SignablePayloadFieldListLayout {
             fields: condensed_fields,
         };
-        let expanded_with_raw = append_raw_data(expanded_fields, data, &instruction_data_hex);
+        let expanded_with_raw = append_raw_data(expanded_fields, data, &instruction_data_hex)?;
         let expanded = SignablePayloadFieldListLayout {
             fields: expanded_with_raw,
         };
@@ -140,38 +140,29 @@ struct DriftParsedInstruction {
 fn build_parsed_fields(
     instruction: &DriftParsedInstruction,
     program_id: &str,
-) -> (
-    String,
-    Vec<AnnotatedPayloadField>,
-    Vec<AnnotatedPayloadField>,
-) {
+) -> Result<
+    (
+        String,
+        Vec<AnnotatedPayloadField>,
+        Vec<AnnotatedPayloadField>,
+    ),
+    VisualSignError,
+> {
     let parsed = &instruction.parsed;
     let title = format!("Drift: {}", parsed.instruction_name);
 
     let mut condensed_fields = vec![];
     let mut expanded_fields = vec![];
 
-    if let Ok(f) = create_text_field("Program", "Drift") {
-        condensed_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Instruction", &parsed.instruction_name) {
-        condensed_fields.push(f);
-    }
+    condensed_fields.push(create_text_field("Program", "Drift")?);
+    condensed_fields.push(create_text_field("Instruction", &parsed.instruction_name)?);
     for (key, value) in &parsed.program_call_args {
-        if let Ok(f) = create_text_field(key, &format_arg_value(value)) {
-            condensed_fields.push(f);
-        }
+        condensed_fields.push(create_text_field(key, &format_arg_value(value))?);
     }
 
-    if let Ok(f) = create_text_field("Program ID", program_id) {
-        expanded_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Instruction", &parsed.instruction_name) {
-        expanded_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Discriminator", &parsed.discriminator) {
-        expanded_fields.push(f);
-    }
+    expanded_fields.push(create_text_field("Program ID", program_id)?);
+    expanded_fields.push(create_text_field("Instruction", &parsed.instruction_name)?);
+    expanded_fields.push(create_text_field("Discriminator", &parsed.discriminator)?);
 
     for (account_name, account_address) in &instruction.named_accounts {
         let label = if parsed.program_call_args.contains_key(account_name) {
@@ -179,9 +170,7 @@ fn build_parsed_fields(
         } else {
             account_name.clone()
         };
-        if let Ok(f) = create_text_field(&label, account_address) {
-            expanded_fields.push(f);
-        }
+        expanded_fields.push(create_text_field(&label, account_address)?);
     }
 
     for (key, value) in &parsed.program_call_args {
@@ -190,52 +179,43 @@ fn build_parsed_fields(
         } else {
             key.clone()
         };
-        if let Ok(f) = create_text_field(&label, &format_arg_value(value)) {
-            expanded_fields.push(f);
-        }
+        expanded_fields.push(create_text_field(&label, &format_arg_value(value))?);
     }
 
-    (title, condensed_fields, expanded_fields)
+    Ok((title, condensed_fields, expanded_fields))
 }
 
 fn build_fallback_fields(
     program_id: &str,
-) -> (
-    String,
-    Vec<AnnotatedPayloadField>,
-    Vec<AnnotatedPayloadField>,
-) {
+) -> Result<
+    (
+        String,
+        Vec<AnnotatedPayloadField>,
+        Vec<AnnotatedPayloadField>,
+    ),
+    VisualSignError,
+> {
     let title = "Drift: Unknown Instruction".to_string();
 
     let mut condensed_fields = vec![];
     let mut expanded_fields = vec![];
 
-    if let Ok(f) = create_text_field("Program", "Drift") {
-        condensed_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Status", "Unknown instruction type") {
-        condensed_fields.push(f);
-    }
+    condensed_fields.push(create_text_field("Program", "Drift")?);
+    condensed_fields.push(create_text_field("Status", "Unknown instruction type")?);
 
-    if let Ok(f) = create_text_field("Program ID", program_id) {
-        expanded_fields.push(f);
-    }
-    if let Ok(f) = create_text_field("Status", "Unknown instruction type") {
-        expanded_fields.push(f);
-    }
+    expanded_fields.push(create_text_field("Program ID", program_id)?);
+    expanded_fields.push(create_text_field("Status", "Unknown instruction type")?);
 
-    (title, condensed_fields, expanded_fields)
+    Ok((title, condensed_fields, expanded_fields))
 }
 
 fn append_raw_data(
     mut fields: Vec<AnnotatedPayloadField>,
     data: &[u8],
     hex_str: &str,
-) -> Vec<AnnotatedPayloadField> {
-    if let Ok(f) = create_raw_data_field(data, Some(hex_str.to_string())) {
-        fields.push(f);
-    }
-    fields
+) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    fields.push(create_raw_data_field(data, Some(hex_str.to_string()))?);
+    Ok(fields)
 }
 
 fn format_arg_value(value: &serde_json::Value) -> String {
@@ -252,6 +232,49 @@ fn format_arg_value(value: &serde_json::Value) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use solana_parser::IdlSource;
+
+    fn make_parsed_instruction(instruction_name: &str) -> DriftParsedInstruction {
+        DriftParsedInstruction {
+            parsed: solana_parser::SolanaParsedInstructionData {
+                instruction_name: instruction_name.to_string(),
+                discriminator: "aabbccdd".to_string(),
+                named_accounts: Default::default(),
+                program_call_args: serde_json::Map::new(),
+                idl_source: IdlSource::Custom,
+                idl_hash: String::new(),
+            },
+            named_accounts: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_build_fallback_fields_returns_result() {
+        let (title, condensed, expanded) =
+            build_fallback_fields("dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH").unwrap();
+        assert_eq!(title, "Drift: Unknown Instruction");
+        assert_eq!(condensed.len(), 2);
+        assert_eq!(expanded.len(), 2);
+    }
+
+    #[test]
+    fn test_build_parsed_fields_returns_result() {
+        let instruction = make_parsed_instruction("deposit");
+        let (title, condensed, expanded) =
+            build_parsed_fields(&instruction, "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH")
+                .unwrap();
+        assert_eq!(title, "Drift: deposit");
+        assert!(!condensed.is_empty());
+        assert!(!expanded.is_empty());
+    }
+
+    #[test]
+    fn test_append_raw_data_returns_result() {
+        let data = &[0x01u8, 0x02, 0x03];
+        let hex_str = hex::encode(data);
+        let fields = append_raw_data(vec![], data, &hex_str).unwrap();
+        assert_eq!(fields.len(), 1);
+    }
 
     #[test]
     fn test_drift_idl_loads() {
