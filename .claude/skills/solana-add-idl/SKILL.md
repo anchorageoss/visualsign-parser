@@ -259,6 +259,8 @@ All must pass before the task is complete. Both feature configurations
 (diagnostics on and off) need to compile and test cleanly because parser_app
 builds without `diagnostics` while parser_cli builds with it.
 
+**Live fuzz test via surfpool.** Once the PR is open, add the `surfpool` label to trigger the `surfpool_fuzz_all_idls.sh` CI job. This runs the `surfpool_fuzz` integration test suite against every bundled IDL — including the new preset — using real mainnet transactions (32 proptest cases per IDL). It exercises the full parse pipeline with live tx data that synthetic unit tests can't replicate. If any IDL fails, CI automatically adds a `surfpool-failure` label to the PR. The `surfpool` label job only fires on non-fork PRs (secrets required for `HELIUS_API_KEY`).
+
 ## Step 7: Compare against the prior implementation
 
 Skip this step for programs with no prior implementation — there is nothing to diff.
