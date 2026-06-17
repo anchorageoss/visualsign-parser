@@ -231,7 +231,6 @@ impl<'a> VisualizerContext<'a> {
 pub struct InstructionView {
     pub program_id: String,
     pub accounts: Vec<String>,
-    pub data: Vec<u8>,
 }
 
 impl InstructionView {
@@ -244,16 +243,12 @@ impl InstructionView {
             .map(|i| match context.account(i) {
                 Some(AccountRef::Resolved(pk)) => pk.to_string(),
                 Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
-                // `i` is in `0..num_accounts()` which equals `accounts.len()`,
-                // so `account(i)` returning `None` is unreachable.
-                None => unreachable!("account index {i} is within num_accounts()"),
+                // `i` is in `0..num_accounts()`, so this arm is unreachable in
+                // practice, but we keep a total fallback to preserve infallibility.
+                None => format!("unresolved(oob:{i})"),
             })
             .collect();
-        Self {
-            program_id,
-            accounts,
-            data: context.data().to_vec(),
-        }
+        Self { program_id, accounts }
     }
 }
 
@@ -451,6 +446,6 @@ mod tests {
         assert_eq!(view.program_id, keys[0].to_string());
         assert_eq!(view.accounts[0], keys[0].to_string());
         assert_eq!(view.accounts[1], "unresolved(50)");
-        assert_eq!(view.data, vec![0xDE, 0xAD]);
+        assert_eq!(ctx.data(), &[0xDE, 0xAD]);
     }
 }

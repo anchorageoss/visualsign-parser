@@ -443,6 +443,54 @@ mod off_tests {
             .expect("v0+ALT account must not abort an IDL preset");
         assert_eq!(fields.len(), 1, "one field per instruction");
     }
+
+    #[test]
+    fn test_idl_preset_named_account_renders_unresolved_for_alt() {
+        use visualsign::SignablePayloadField;
+        // DFlow Aggregator `close_empty_token_account` has a real discriminator and
+        // zero args, so parse_instruction_with_idl succeeds with 8 bytes of data.
+        // Account slot 0 (token_account in the IDL) maps to wire index 50, which is
+        // OOB — simulating an ALT-referenced account. Before the fix the preset
+        // aborted; after the fix `build_named_accounts` maps it to "unresolved(50)"
+        // and that string appears in the rendered expanded fields.
+        let dflow_pk: Pubkey = "DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH"
+            .parse()
+            .expect("valid pubkey");
+        let sender_pk = Pubkey::new_unique();
+        let tx = tx_with(
+            vec![sender_pk, dflow_pk],
+            vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 1,
+                // accounts[0]=50 (OOB/ALT) maps to IDL "token_account"
+                accounts: vec![50, 0, 0, 0],
+                // close_empty_token_account discriminator, no args needed
+                data: vec![232, 75, 140, 136, 250, 78, 224, 188],
+            }],
+        );
+        let registry = IdlRegistry::new();
+        let fields = decode_instructions(&tx, &registry)
+            .expect("v0+ALT account must not abort an IDL preset");
+        assert_eq!(fields.len(), 1);
+
+        // Dig into the expanded preview fields and assert that the IDL-named
+        // account slot that references an ALT entry renders as "unresolved(50)".
+        let SignablePayloadField::PreviewLayout { preview_layout, .. } =
+            &fields[0].signable_payload_field
+        else {
+            panic!("expected PreviewLayout");
+        };
+        let expanded = preview_layout.expanded.as_ref().expect("expanded fields present");
+        let found = expanded.fields.iter().any(|f| {
+            matches!(&f.signable_payload_field,
+                SignablePayloadField::TextV2 { text_v2, .. }
+                if text_v2.text == "unresolved(50)")
+        });
+        assert!(
+            found,
+            "expected an expanded field with value 'unresolved(50)' for the ALT-referenced \
+             token_account slot; got fields: {expanded:#?}"
+        );
+    }
 }
 
 #[cfg(all(test, feature = "diagnostics"))]
