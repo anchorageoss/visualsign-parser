@@ -6,7 +6,11 @@ user-invocable: true
 
 # Add Solana IDL Visualizer Preset
 
-You are scaffolding a new Solana program visualizer preset from an Anchor IDL.
+## When to use this skill
+
+**Adding a new program** — follow Steps 1–7 linearly. The output is a new preset directory with `config.rs`, `mod.rs`, and the bundled IDL JSON.
+
+**Validating or improving the skill itself** — use the "Validation Mode" section at the bottom. Delete one or more existing presets, regenerate them with this skill, surface findings as PR comments, fix the skill, and repeat until clean. Any manual tweak needed to make generated output compile or pass tests belongs back in the skill template, not just in the file.
 
 ## Step 1: Gather Information
 
@@ -209,6 +213,8 @@ builds without `diagnostics` while parser_cli builds with it.
 
 ## Step 7: Compare against the prior implementation
 
+Skip this step for programs with no prior implementation — there is nothing to diff.
+
 When regenerating an existing preset, diff the generated output against the version that existed before deletion (the base branch, one commit before the delete commit). Look for:
 
 - **Structural regressions**: fields missing from condensed or expanded, fallback path removed, IDL caching changed from `OnceLock` to per-call
@@ -238,7 +244,7 @@ Concerns / open questions:
 
 If the comparison surfaces a missing field or a behaviour regression that should always be present in new presets, fix the skill template and regenerate before marking the round complete.
 
-## When validating the skill via preset regeneration
+## Validation Mode
 
 The regeneration test is an iterative loop, not a one-shot pass. Expect multiple cycles:
 
