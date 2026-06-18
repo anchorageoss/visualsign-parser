@@ -8,7 +8,6 @@ use crate::core::{
 };
 use crate::utils::format_token_amount;
 use config::Token2022Config;
-use solana_sdk::instruction::AccountMeta;
 use spl_token_2022::instruction::TokenInstruction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_number_field, create_raw_data_field, create_text_field};
@@ -52,12 +51,14 @@ impl InstructionVisualizer for Token2022Visualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        // Build AccountMeta shim for the parser (which expects &[AccountMeta]).
         // Unresolved accounts are rejected rather than substituted with
-        // Pubkey::default(), which would render as a valid-looking address.
-        let accounts: Vec<AccountMeta> = (0..context.num_accounts())
+        // "unresolved(N)". Authority fields (pause_authority, mint_authority,
+        // freeze_authority, etc.) are security-critical; showing an unresolvable
+        // address would let a user approve an instruction whose authority they
+        // cannot verify.
+        let accounts: Vec<String> = (0..context.num_accounts())
             .map(|i| match context.account(i) {
-                Some(AccountRef::Resolved(pk)) => Ok(AccountMeta::new_readonly(*pk, false)),
+                Some(AccountRef::Resolved(pk)) => Ok(pk.to_string()),
                 Some(AccountRef::Unresolved { raw_index }) => Err(VisualSignError::DecodeError(
                     format!("token_2022: unresolved account index {raw_index} at position {i}"),
                 )),
@@ -133,7 +134,7 @@ enum Token2022Instruction {
 
 fn parse_token_2022_instruction(
     data: &[u8],
-    accounts: &[AccountMeta],
+    accounts: &[String],
 ) -> Result<Token2022Instruction, String> {
     // Check for Pause instruction
     if is_pause_instruction(data) {
@@ -142,8 +143,8 @@ fn parse_token_2022_instruction(
         }
 
         return Ok(Token2022Instruction::Pause {
-            mint: accounts[0].pubkey.to_string(),
-            pause_authority: accounts[1].pubkey.to_string(),
+            mint: accounts[0].clone(),
+            pause_authority: accounts[1].clone(),
         });
     }
 
@@ -154,8 +155,8 @@ fn parse_token_2022_instruction(
         }
 
         return Ok(Token2022Instruction::Resume {
-            mint: accounts[0].pubkey.to_string(),
-            pause_authority: accounts[1].pubkey.to_string(),
+            mint: accounts[0].clone(),
+            pause_authority: accounts[1].clone(),
         });
     }
 
@@ -197,10 +198,10 @@ fn parse_token_2022_instruction(
         let authority_type_name = get_authority_type_name(authority_type);
 
         return Ok(Token2022Instruction::SetAuthority {
-            account: accounts[0].pubkey.to_string(),
+            account: accounts[0].clone(),
             authority_type,
             authority_type_name,
-            current_authority: accounts[1].pubkey.to_string(),
+            current_authority: accounts[1].clone(),
             new_authority,
         });
     }
@@ -221,9 +222,9 @@ fn parse_token_2022_instruction(
                 return Ok(Token2022Instruction::MintToChecked {
                     amount,
                     decimals,
-                    mint: accounts[0].pubkey.to_string(),
-                    account: accounts[1].pubkey.to_string(),
-                    mint_authority: accounts[2].pubkey.to_string(),
+                    mint: accounts[0].clone(),
+                    account: accounts[1].clone(),
+                    mint_authority: accounts[2].clone(),
                 });
             }
             TokenInstruction::BurnChecked { amount, decimals } => {
@@ -239,9 +240,9 @@ fn parse_token_2022_instruction(
                 return Ok(Token2022Instruction::BurnChecked {
                     amount,
                     decimals,
-                    account: accounts[0].pubkey.to_string(),
-                    mint: accounts[1].pubkey.to_string(),
-                    authority: accounts[2].pubkey.to_string(),
+                    account: accounts[0].clone(),
+                    mint: accounts[1].clone(),
+                    authority: accounts[2].clone(),
                 });
             }
             TokenInstruction::FreezeAccount => {
@@ -250,9 +251,9 @@ fn parse_token_2022_instruction(
                 }
 
                 return Ok(Token2022Instruction::Freeze {
-                    account: accounts[0].pubkey.to_string(),
-                    mint: accounts[1].pubkey.to_string(),
-                    freeze_authority: accounts[2].pubkey.to_string(),
+                    account: accounts[0].clone(),
+                    mint: accounts[1].clone(),
+                    freeze_authority: accounts[2].clone(),
                 });
             }
             TokenInstruction::ThawAccount => {
@@ -261,9 +262,9 @@ fn parse_token_2022_instruction(
                 }
 
                 return Ok(Token2022Instruction::Thaw {
-                    account: accounts[0].pubkey.to_string(),
-                    mint: accounts[1].pubkey.to_string(),
-                    freeze_authority: accounts[2].pubkey.to_string(),
+                    account: accounts[0].clone(),
+                    mint: accounts[1].clone(),
+                    freeze_authority: accounts[2].clone(),
                 });
             }
             TokenInstruction::CloseAccount => {
@@ -272,9 +273,9 @@ fn parse_token_2022_instruction(
                 }
 
                 return Ok(Token2022Instruction::CloseAccount {
-                    account: accounts[0].pubkey.to_string(),
-                    destination: accounts[1].pubkey.to_string(),
-                    owner: accounts[2].pubkey.to_string(),
+                    account: accounts[0].clone(),
+                    destination: accounts[1].clone(),
+                    owner: accounts[2].clone(),
                 });
             }
             _ => {
@@ -579,10 +580,8 @@ mod tests {
     use solana_sdk::pubkey::Pubkey;
     mod fixture_test;
 
-    fn dummy_account_metas(n: usize) -> Vec<AccountMeta> {
-        (0..n)
-            .map(|_| AccountMeta::new_readonly(Pubkey::new_unique(), false))
-            .collect()
+    fn dummy_account_strings(n: usize) -> Vec<String> {
+        (0..n).map(|_| Pubkey::new_unique().to_string()).collect()
     }
 
     fn mint_to_checked_bytes(amount: u64, decimals: u8) -> Vec<u8> {
@@ -613,7 +612,7 @@ mod tests {
     /// instead of crashing the worker.
     #[test]
     fn test_mint_to_checked_rejects_out_of_range_decimals() {
-        let accounts = dummy_account_metas(3);
+        let accounts = dummy_account_strings(3);
         for decimals in [19u8, 20, 64, 100, 200, u8::MAX] {
             let data = mint_to_checked_bytes(1_000_000, decimals);
             let msg = match parse_token_2022_instruction(&data, &accounts) {
@@ -629,7 +628,7 @@ mod tests {
 
     #[test]
     fn test_burn_checked_rejects_out_of_range_decimals() {
-        let accounts = dummy_account_metas(3);
+        let accounts = dummy_account_strings(3);
         for decimals in [19u8, 20, 64, 100, 200, u8::MAX] {
             let data = burn_checked_bytes(1_000_000, decimals);
             let msg = match parse_token_2022_instruction(&data, &accounts) {
@@ -645,7 +644,7 @@ mod tests {
 
     #[test]
     fn test_mint_to_checked_accepts_typical_decimals() {
-        let accounts = dummy_account_metas(3);
+        let accounts = dummy_account_strings(3);
         for decimals in [0u8, 6, 9, 18] {
             let data = mint_to_checked_bytes(1_000_000, decimals);
             if let Err(msg) = parse_token_2022_instruction(&data, &accounts) {

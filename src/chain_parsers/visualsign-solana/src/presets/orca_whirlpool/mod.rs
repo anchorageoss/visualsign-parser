@@ -3,7 +3,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::OrcaWhirlpoolConfig;
 use solana_parser::{
@@ -31,17 +32,11 @@ impl InstructionVisualizer for OrcaWhirlpoolVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let program_id = context.resolve_program_id()?;
-        let resolved_accounts = context.resolve_accounts()?;
+        let view = InstructionView::from_context(context);
         let data = context.data();
 
-        let account_keys: Vec<String> = resolved_accounts
-            .iter()
-            .map(|account| account.pubkey.to_string())
-            .collect();
-
-        let parsed = parse_orca_whirlpool_instruction(data, &account_keys)?;
-        let named_accounts = build_named_accounts(&parsed, &account_keys);
+        let parsed = parse_orca_whirlpool_instruction(data, &view.accounts)?;
+        let named_accounts = build_named_accounts(&parsed, &view.accounts);
 
         let title_text = format!("{ORCA_WHIRLPOOL_DISPLAY_NAME}: {}", parsed.instruction_name);
 
@@ -53,7 +48,7 @@ impl InstructionVisualizer for OrcaWhirlpoolVisualizer {
         };
 
         let expanded = SignablePayloadFieldListLayout {
-            fields: build_expanded_fields(&parsed, &named_accounts, &program_id.to_string(), data)?,
+            fields: build_expanded_fields(&parsed, &named_accounts, &view.program_id, data)?,
         };
 
         let preview_layout = SignablePayloadFieldPreviewLayout {
@@ -67,7 +62,7 @@ impl InstructionVisualizer for OrcaWhirlpoolVisualizer {
             expanded: Some(expanded),
         };
 
-        let fallback_text = format!("Program ID: {program_id}\nData: {}", hex::encode(data));
+        let fallback_text = format!("Program ID: {}\nData: {}", view.program_id, hex::encode(data));
 
         Ok(AnnotatedPayloadField {
             static_annotation: None,

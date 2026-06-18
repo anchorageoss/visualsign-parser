@@ -5,7 +5,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::NeutralTradeConfig;
 use solana_parser::{
@@ -32,8 +33,8 @@ impl InstructionVisualizer for NeutralTradeVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let program_id_str = context.resolve_program_id()?.to_string();
-        let accounts = context.resolve_accounts()?;
+        let view = InstructionView::from_context(context);
+        let program_id_str = &view.program_id;
         let data = context.data();
 
         if data.len() < 8 {
@@ -48,7 +49,7 @@ impl InstructionVisualizer for NeutralTradeVisualizer {
                 VisualSignError::DecodeError(format!("Neutral Trade IDL parse failed: {e}"))
             })?;
 
-        let named_accounts = build_named_accounts(data, &accounts, &idl);
+        let named_accounts = build_named_accounts(data, &view.accounts, &idl);
 
         let instruction_data_hex = hex::encode(data);
         let instruction_title =
@@ -58,7 +59,7 @@ impl InstructionVisualizer for NeutralTradeVisualizer {
             fields: build_condensed_fields(&instruction_title, &parsed)?,
         };
         let expanded = SignablePayloadFieldListLayout {
-            fields: build_parsed_fields(&program_id_str, &parsed, &named_accounts, data)?,
+            fields: build_parsed_fields(program_id_str, &parsed, &named_accounts, data)?,
         };
 
         let preview_layout = SignablePayloadFieldPreviewLayout {
@@ -103,7 +104,7 @@ fn load_idl() -> Result<Idl, VisualSignError> {
 
 fn build_named_accounts(
     data: &[u8],
-    accounts: &[solana_sdk::instruction::AccountMeta],
+    accounts: &[String],
     idl: &Idl,
 ) -> BTreeMap<String, String> {
     let mut named_accounts = BTreeMap::new();
@@ -117,9 +118,9 @@ fn build_named_accounts(
     });
 
     if let Some(idl_instruction) = matching_idl_instruction {
-        for (index, account_meta) in accounts.iter().enumerate() {
+        for (index, account_str) in accounts.iter().enumerate() {
             if let Some(idl_account) = idl_instruction.accounts.get(index) {
-                named_accounts.insert(idl_account.name.clone(), account_meta.pubkey.to_string());
+                named_accounts.insert(idl_account.name.clone(), account_str.clone());
             }
         }
     }
