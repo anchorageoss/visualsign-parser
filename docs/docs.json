@@ -124,7 +124,6 @@
             "pages": [
               "chain-modules",
               "adding-new-chain",
-              "contributing",
               "contributor-guides/project-structure",
               "contributor-guides/best-practices",
               "contributor-guides/lint-diagnostics"
@@ -139,6 +138,44 @@
             "group": "Playground",
             "pages": [
               "playground"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Changelog",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "changelog"
+            ]
+          },
+          {
+            "group": "Chain streams",
+            "pages": [
+              "changelog/solana",
+              "changelog/ethereum",
+              "changelog/sui",
+              "changelog/tron"
+            ]
+          },
+          {
+            "group": "Core",
+            "pages": [
+              "changelog/core"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Blog",
+        "groups": [
+          {
+            "group": "Blog",
+            "pages": [
+              "blog",
+              "blog/2026-05-13-composable-solana-presets"
             ]
           }
         ]

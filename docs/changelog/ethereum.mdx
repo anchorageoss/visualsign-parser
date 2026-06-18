@@ -1,0 +1,14 @@
+---
+title: "Changelog — Ethereum"
+description: "Ethereum protocol decoders, ABI registry changes, EVM-specific contract additions, and decoder fixes. One entry per meaningful release."
+---
+
+<Icon icon="rss" /> [Subscribe](/changelog/ethereum/rss.xml) · Filter by tag — `Wallet API`, `Security`.
+
+<Update label="2026-06-12 — Broader EVM decoding: ABI type awareness, Universal Router, ERC-1155" description="v0.739.0 — v0.768.0" tags={["Wallet API"]}>
+  Ethereum decoding gained ABI type awareness with proxy-to-implementation resolution, so a call to a proxy contract resolves against the implementation ABI. All Universal Router versions now register (previously only V1.2), and ERC-1155 transfers get a dedicated visualizer.
+</Update>
+
+<Update label="2026-06-01 — Trust-model and swap-decoding hardening" description="v0.707.0 — v0.762.0" tags={["Security"]}>
+  Several correctness and safety fixes. On the trust model: a signed `chain_id` is now authoritative over `network_id`, unsigned ABI mappings in chain metadata are rejected, the built-in token decoder is preferred over a caller-supplied ABI, and charset validation is enforced in the string-input converter. On the swap path: Universal Router inputs align to the raw command index, V3 swap output tokens read from the end of the path, U256 amounts are no longer silently truncated to zero, and out-of-range Permit2 amounts and uint48 timestamps render as fallback instead of panicking.
+</Update>

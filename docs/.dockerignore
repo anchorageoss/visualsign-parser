@@ -1,0 +1,4 @@
+# Keep the image tiny — only the Containerfile is needed at build time;
+# the docs themselves are bind-mounted at runtime.
+*
+!Containerfile
