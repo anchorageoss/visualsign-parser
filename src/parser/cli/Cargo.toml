@@ -10,6 +10,7 @@ solana = ["dep:visualsign-solana"]
 ethereum = ["dep:visualsign-ethereum", "visualsign-ethereum/dev-signing"]
 tron = ["dep:visualsign-tron"]
 diagnostics = ["visualsign/diagnostics", "visualsign-solana?/diagnostics"]
+serve = ["dep:axum", "dep:tokio", "dep:serde", "dep:serde_json"]
 
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }
@@ -23,6 +24,13 @@ tracing = { workspace = true }
 tracing-log = "0.2.0"
 tracing-bunyan-formatter = "0.3.10"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
+# `serve` subcommand only. axum + tokio are already transitive via tonic, so the
+# resolved dep tree gains nothing by listing them as direct (optional) deps.
+axum = { version = "0.8", optional = true, default-features = false, features = ["http1", "tokio", "query", "json"] }
+tokio = { workspace = true, optional = true, features = ["rt", "macros", "net"] }
+serde = { version = "1", optional = true, features = ["derive"] }
+serde_json = { version = "1", optional = true }
 
 [dev-dependencies]
 parser_cli_core = { path = "../cli-core", features = ["test-utils"] }

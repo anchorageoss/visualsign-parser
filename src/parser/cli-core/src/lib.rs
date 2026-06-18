@@ -77,10 +77,28 @@ pub struct SharedArgs {
     pub network: Option<String>,
 }
 
-/// CLI entry point. Pass the shared args plus an ordered list of chain plugins.
-/// The first plugin whose `chain()` matches `shared.chain` handles the transaction.
-pub fn run(shared: &SharedArgs, plugins: &[Box<dyn ChainPlugin>]) -> Result<(), String> {
-    let chain = chains::parse_chain(&shared.chain);
+/// A resolved registry plus the visual-sign options for a chain, ready to decode
+/// transactions. Built by [`prepare_runtime`] and shared by [`run`] (the `decode`
+/// path) and any other consumer that decodes many transactions for one chain
+/// (e.g. the binary's `serve` subcommand).
+pub struct Runtime {
+    /// Registry with every plugin's converter registered.
+    pub registry: TransactionConverterRegistry,
+    /// Visual-sign options carrying the selected chain's metadata.
+    pub options: VisualSignOptions,
+}
+
+/// Resolve `chain_str` against `plugins`: register every plugin, select the one
+/// whose `chain()` matches, and build its [`VisualSignOptions`] from `network`.
+///
+/// On an unknown or unsupported chain, returns an `Err(String)` with a
+/// user-facing message — the caller prints it and exits non-zero.
+pub fn prepare_runtime(
+    chain_str: &str,
+    network: Option<String>,
+    plugins: &[Box<dyn ChainPlugin>],
+) -> Result<Runtime, String> {
+    let chain = chains::parse_chain(chain_str);
     let mut registry = TransactionConverterRegistry::new();
     for plugin in plugins {
         plugin.register(&mut registry);
@@ -95,13 +113,16 @@ pub fn run(shared: &SharedArgs, plugins: &[Box<dyn ChainPlugin>]) -> Result<(), 
         } else {
             supported.join(", ")
         };
-        format!(
-            "chain '{}' is not supported by this CLI build.\nSupported chains: {supported_str}",
-            shared.chain
-        )
+        if chain == Chain::Unspecified {
+            format!("unrecognized chain '{chain_str}'.\nSupported chains: {supported_str}")
+        } else {
+            format!(
+                "chain '{chain_str}' is not supported by this CLI build.\nSupported chains: {supported_str}"
+            )
+        }
     })?;
 
-    let chain_metadata = plugin.create_metadata(shared.network.clone())?;
+    let chain_metadata = plugin.create_metadata(network)?;
     let options = VisualSignOptions {
         decode_transfers: true,
         transaction_name: None,
@@ -110,6 +131,15 @@ pub fn run(shared: &SharedArgs, plugins: &[Box<dyn ChainPlugin>]) -> Result<(), 
             allow_signed_transactions: true,
         }),
     };
+
+    Ok(Runtime { registry, options })
+}
+
+/// CLI entry point. Pass the shared args plus an ordered list of chain plugins.
+/// The first plugin whose `chain()` matches `shared.chain` handles the transaction.
+pub fn run(shared: &SharedArgs, plugins: &[Box<dyn ChainPlugin>]) -> Result<(), String> {
+    let Runtime { registry, options } =
+        prepare_runtime(&shared.chain, shared.network.clone(), plugins)?;
 
     let raw_tx =
         tx_input::resolve_transaction_input(&shared.transaction).map_err(|e| e.to_string())?;

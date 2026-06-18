@@ -310,6 +310,7 @@ fn test_cli_transaction_from_stdin() {
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_parser_cli"))
         .args([
+            "decode",
             "--chain",
             "ethereum",
             "--network",
@@ -350,6 +351,7 @@ fn test_cli_transaction_from_stdin() {
 fn test_cli_transaction_at_missing_file_errors() {
     let output = Command::new(env!("CARGO_BIN_EXE_parser_cli"))
         .args([
+            "decode",
             "--chain",
             "ethereum",
             "--network",
@@ -395,6 +397,7 @@ fn test_cli_ethereum_abi_json_mappings() {
     );
 
     let output = run_cli(&[
+        "decode",
         "--chain",
         "ethereum",
         "--network",
@@ -441,6 +444,7 @@ fn test_cli_ethereum_abi_json_mappings() {
 #[cfg(feature = "ethereum")]
 fn test_cli_ethereum_without_abi_uses_builtin_visualizer() {
     let output = run_cli(&[
+        "decode",
         "--chain",
         "ethereum",
         "--network",
@@ -476,6 +480,7 @@ fn test_cli_ethereum_abi_invalid_file_still_parses() {
     let mapping = "Bad:/nonexistent/abi.json:0x1111111111111111111111111111111111111111";
 
     let output = run_cli(&[
+        "decode",
         "--chain",
         "ethereum",
         "--network",
