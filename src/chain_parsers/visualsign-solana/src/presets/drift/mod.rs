@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_fallback_fields_returns_result() {
+    fn test_build_fallback_fields_renders_unknown_instruction() {
         let (title, condensed, expanded) =
             build_fallback_fields(DRIFT_PROGRAM_ID).unwrap();
         assert_eq!(title, "Drift: Unknown Instruction");
@@ -258,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_parsed_fields_returns_result() {
+    fn test_build_parsed_fields_renders_deposit_instruction() {
         let instruction = make_parsed_instruction("deposit");
         let (title, condensed, expanded) =
             build_parsed_fields(&instruction, DRIFT_PROGRAM_ID)
@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn test_append_raw_data_returns_result() {
+    fn test_append_raw_data_appends_one_field() {
         let data = &[0x01u8, 0x02, 0x03];
         let hex_str = hex::encode(data);
         let fields = append_raw_data(vec![], data, &hex_str).unwrap();
