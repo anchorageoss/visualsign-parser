@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use visualsign::registry::Chain;
 
 fn chain_string_mapping() -> BTreeMap<&'static str, Chain> {
@@ -15,15 +16,14 @@ fn chain_string_mapping() -> BTreeMap<&'static str, Chain> {
 
 /// Parses a chain string into a `Chain`.
 ///
-/// Built-in chains map to their dedicated variant. Any other string maps to
-/// `Chain::Custom`, so a chain contributed by an external [`ChainPlugin`] is
-/// selected by the plugin that registered under the matching `Chain::Custom`.
+/// Known chain names (case-insensitive) map to their dedicated variant,
+/// including `"unspecified"` -> `Chain::Unspecified`. Any other string maps
+/// to `Chain::Custom`, so a chain contributed by an external
+/// [`crate::ChainPlugin`] is selected by the plugin that registered under
+/// the matching `Chain::Custom`.
 #[must_use]
 pub fn parse_chain(chain_str: &str) -> Chain {
-    chain_string_mapping()
-        .get(chain_str)
-        .cloned()
-        .unwrap_or_else(|| Chain::Custom(chain_str.to_string()))
+    Chain::from_str(chain_str).unwrap_or_else(|()| Chain::Custom(chain_str.to_string()))
 }
 
 /// Returns a vector of all available chain names as string slices.
@@ -43,10 +43,13 @@ mod tests {
     }
 
     #[test]
+    fn parse_chain_builtins_are_case_insensitive() {
+        assert_eq!(parse_chain("Ethereum"), Chain::Ethereum);
+        assert_eq!(parse_chain("SOLANA"), Chain::Solana);
+    }
+
+    #[test]
     fn parse_chain_maps_unknown_to_custom() {
-        // A chain contributed by an external ChainPlugin (e.g. NEAR) is not a
-        // built-in, but must still resolve so the plugin registered under the
-        // matching Chain::Custom is selected by `run`.
         assert_eq!(parse_chain("near"), Chain::Custom("near".to_string()));
     }
 }

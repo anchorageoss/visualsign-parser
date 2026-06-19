@@ -95,17 +95,10 @@ pub fn run(shared: &SharedArgs, plugins: &[Box<dyn ChainPlugin>]) -> Result<(), 
         } else {
             supported.join(", ")
         };
-        if chain == Chain::Unspecified {
-            format!(
-                "unrecognized chain '{}'.\nSupported chains: {supported_str}",
-                shared.chain
-            )
-        } else {
-            format!(
-                "chain '{}' is not supported by this CLI build.\nSupported chains: {supported_str}",
-                shared.chain
-            )
-        }
+        format!(
+            "chain '{}' is not supported by this CLI build.\nSupported chains: {supported_str}",
+            shared.chain
+        )
     })?;
 
     let chain_metadata = plugin.create_metadata(shared.network.clone())?;
