@@ -491,157 +491,6 @@ fn convert_versioned_to_visual_sign_payload(
     }
 }
 
-/// Reject a V0 transaction when at least one instruction references a
-/// program_id or account that lives behind an address lookup table, or that
-/// is out of range entirely.
-///
-/// Rationale: VisualSign converts raw bytes; it has no RPC and cannot
-/// resolve ALT entries. Without resolution, the only safe choice is to refuse
-/// to render -- otherwise the displayed payload would omit instructions or
-/// account references that the validator will still execute, and a malicious
-/// instruction could be hidden behind an ALT entry while the user signs a
-/// benign-looking display.
-///
-/// The resolved account vector in v0 is `account_keys` followed by, for each
-/// lookup, the addresses pulled at `writable_indexes` then at
-/// `readonly_indexes`. For instruction `accounts[]`, indices in
-/// `[static_len, static_len + loaded_len)` are ALT-backed and indices
-/// `>= static_len + loaded_len` are malformed. For `program_id_index`, the
-/// V0 spec says program ids must index into the static account_keys table
-/// and cannot be loaded from an ALT, so any `program_id_index >= static_len`
-/// is malformed regardless of `loaded_len`. The error reports the two
-/// classes separately, but rejects on either.
-///
-/// When `address_table_lookups` is empty, any out-of-bounds index is a
-/// malformed transaction (not an ALT reference) and we keep the existing
-/// "render as `unresolved(N)` placeholder" behavior intact. (A lint
-/// diagnostic is also emitted for that case, but only when the
-/// `diagnostics` feature is enabled.)
-fn reject_v0_if_any_ix_references_alts(
-    v0_message: &solana_sdk::message::v0::Message,
-) -> Result<(), VisualSignError> {
-    if v0_message.address_table_lookups.is_empty() {
-        return Ok(());
-    }
-
-    let static_len = v0_message.account_keys.len();
-    // `loaded_len` is the total number of addresses the message claims to load
-    // via ALTs. In Solana v0, the resolved account vector seen by the runtime
-    // is the concatenation of `account_keys` and, for each lookup, the
-    // addresses pulled at `writable_indexes` followed by those at
-    // `readonly_indexes`. The valid instruction-index range is therefore
-    // `[0, static_len + loaded_len)`. Indices in `[static_len, static_len +
-    // loaded_len)` reference ALT-backed addresses we cannot resolve offline;
-    // indices `>= static_len + loaded_len` are malformed (out-of-range).
-    // Both are unsafe to render, but we report them separately so the error
-    // message is accurate.
-    let loaded_len: usize = v0_message
-        .address_table_lookups
-        .iter()
-        .map(|l| l.writable_indexes.len() + l.readonly_indexes.len())
-        .sum();
-    let loaded_end = static_len.saturating_add(loaded_len);
-
-    let mut alt_offenders: Vec<String> = Vec::new();
-    let mut malformed_offenders: Vec<String> = Vec::new();
-    // Track the actual number of offending index references (post-dedup),
-    // not the number of formatted offender entries. A single entry like
-    // `instruction 0: account indices [2, 3] reference ALT entries`
-    // represents two index references, so counting entries would understate
-    // the offence count and mismatch the wording "N reference(s)".
-    let mut n_alt_refs: usize = 0;
-    let mut n_mal_refs: usize = 0;
-
-    // Use a small enum instead of string tags so the match arms below are
-    // exhaustively checked by the compiler. A stray string typo or a future
-    // tag rename would otherwise fall through `_ => {}` and silently skip
-    // rejection, which would re-introduce the very bug this function exists
-    // to prevent. Program ids do not use this classifier (see below): per
-    // spec, no program_id_index can legitimately resolve via an ALT.
-    enum RefKind {
-        Alt,
-        Malformed,
-    }
-    let classify_account = |idx: usize| -> Option<RefKind> {
-        if idx >= loaded_end {
-            Some(RefKind::Malformed)
-        } else if idx >= static_len {
-            Some(RefKind::Alt)
-        } else {
-            None
-        }
-    };
-
-    for (i, ci) in v0_message.instructions.iter().enumerate() {
-        // Per the V0 message spec, program ids cannot be loaded via an
-        // ALT: "Program indexes must index into the list of message
-        // account_keys because program ids cannot be dynamically loaded
-        // from a lookup table." Any `program_id_index >= static_len` is
-        // therefore a spec violation, even when the index would fall
-        // within the ALT-loaded range. Classify it as malformed so the
-        // rejection message names the right defect.
-        if (ci.program_id_index as usize) >= static_len {
-            malformed_offenders.push(format!(
-                "instruction {i}: program_id_index {} cannot resolve via ALT \
-                 (program ids must index static account keys; static={static_len}, loaded={loaded_len})",
-                ci.program_id_index
-            ));
-            n_mal_refs += 1;
-        }
-
-        let mut alt_accounts: Vec<u8> = Vec::new();
-        let mut malformed_accounts: Vec<u8> = Vec::new();
-        for &idx in &ci.accounts {
-            match classify_account(idx as usize) {
-                Some(RefKind::Malformed) => malformed_accounts.push(idx),
-                Some(RefKind::Alt) => alt_accounts.push(idx),
-                None => {}
-            }
-        }
-        // Sort + dedup so the error message is stable regardless of how the
-        // raw instruction listed its accounts (and so the same index isn't
-        // repeated when it appears twice in `accounts`).
-        alt_accounts.sort_unstable();
-        alt_accounts.dedup();
-        malformed_accounts.sort_unstable();
-        malformed_accounts.dedup();
-        if !alt_accounts.is_empty() {
-            n_alt_refs += alt_accounts.len();
-            alt_offenders.push(format!(
-                "instruction {i}: account indices {alt_accounts:?} reference ALT entries"
-            ));
-        }
-        if !malformed_accounts.is_empty() {
-            n_mal_refs += malformed_accounts.len();
-            malformed_offenders.push(format!(
-                "instruction {i}: account indices {malformed_accounts:?} are out of range (static={static_len}, loaded={loaded_len})"
-            ));
-        }
-    }
-
-    if alt_offenders.is_empty() && malformed_offenders.is_empty() {
-        return Ok(());
-    }
-
-    let mut details_parts: Vec<String> = Vec::new();
-    if !alt_offenders.is_empty() {
-        details_parts.push(format!("ALT-backed: {}", alt_offenders.join("; ")));
-    }
-    if !malformed_offenders.is_empty() {
-        details_parts.push(format!("malformed: {}", malformed_offenders.join("; ")));
-    }
-
-    Err(VisualSignError::DecodeError(format!(
-        "Cannot render V0 transaction: {n_alt} address lookup table(s) present, {n_alt_off} unresolved ALT reference(s) and {n_mal_off} out-of-range reference(s) ({static_len} static account keys, {loaded_len} ALT-loaded). \
-         Resolving ALT contents requires an on-chain lookup that the parser does not perform. \
-         Refusing to display a partial transaction. Details: {details}",
-        n_alt = v0_message.address_table_lookups.len(),
-        n_alt_off = n_alt_refs,
-        n_mal_off = n_mal_refs,
-        details = details_parts.join(" | ")
-    )))
-}
-
 /// Convert V0 transaction to visual sign payload
 fn convert_v0_to_visual_sign_payload(
     versioned_tx: &VersionedTransaction,
@@ -651,15 +500,15 @@ fn convert_v0_to_visual_sign_payload(
     options: &VisualSignOptions,
     #[cfg(feature = "diagnostics")] lint_config: &visualsign::lint::LintConfig,
 ) -> Result<SignablePayload, VisualSignError> {
-    // SECURITY: the parser does not perform on-chain ALT resolution,
-    // so any instruction or account that references an entry in
-    // `address_table_lookups` is unresolvable here. Historically those
-    // references were silently dropped from the displayed payload, letting an
-    // attacker hide malicious instructions behind ALTs while the user signed a
-    // benign-looking display. Reject the transaction instead -- we can either
-    // resolve ALTs and surface their contents, or refuse to render. We do the
-    // latter.
-    reject_v0_if_any_ix_references_alts(v0_message)?;
+    // NOTE: the parser does not perform on-chain ALT resolution, so any
+    // instruction or account that references an entry in
+    // `address_table_lookups` cannot be fully resolved here. We previously
+    // fail-closed and rejected such transactions outright (#324), but that
+    // blocks all ALT-backed V0 transactions (e.g. aggregator swaps) from being
+    // signed. The proper fix is to pass resolved ALT contents into the parser
+    // from the caller; until that lands we render with graceful degradation --
+    // ALT-backed accounts surface as placeholders via decode_v0_instructions.
+    // TODO: re-introduce ALT-aware rendering once ALT data is supplied.
 
     // Create IDL registry from options metadata
     let idl_registry = create_idl_registry_from_options(options)?;
@@ -1571,11 +1420,13 @@ mod tests {
         );
     }
 
-    // Regression tests: a V0 transaction that references an
-    // address lookup table entry (program_id or account index past the static
-    // keys, while `address_table_lookups` is non-empty) MUST be rejected, not
-    // silently rendered with the ALT-resolved data missing.
-    mod v0_alt_rejection {
+    // Regression tests for V0 transactions that reference address lookup table
+    // entries. The parser cannot resolve ALT contents offline, so these render
+    // with graceful degradation (ALT-backed accounts surface as placeholders)
+    // rather than being rejected outright. The earlier fail-closed behavior
+    // (#324) blocked all ALT-backed V0 transactions from being signed and was
+    // reverted pending a design that passes resolved ALT data into the parser.
+    mod v0_alt_rendering {
         use super::*;
         use solana_sdk::instruction::CompiledInstruction;
         use solana_sdk::message::MessageHeader;
@@ -1628,70 +1479,14 @@ mod tests {
         }
 
         #[test]
-        fn rejects_v0_when_program_id_index_points_past_static_keys() {
-            // 2 static account keys, 1 ALT supplying extra accounts, one
-            // benign instruction in-range, one instruction whose
-            // program_id_index points past the static keys. Per the V0
-            // spec, program ids cannot be loaded via an ALT -- they must
-            // index into the static account_keys table -- so this is
-            // classified as `malformed:`, not `ALT-backed:`, even though
-            // the index would otherwise fall within the ALT-loaded range.
-            let key0 = Pubkey::new_unique();
-            let key1 = Pubkey::new_unique();
-            let alt = MessageAddressTableLookup {
-                account_key: Pubkey::new_unique(),
-                writable_indexes: vec![0, 1, 2],
-                readonly_indexes: vec![3],
-            };
-            let benign = CompiledInstruction {
-                program_id_index: 1,
-                accounts: vec![0],
-                data: vec![0xAA],
-            };
-            let malicious = CompiledInstruction {
-                program_id_index: 5, // past static_len=2; spec says this is malformed
-                accounts: vec![0],
-                data: vec![0xBB],
-            };
-            let msg = make_v0(vec![key0, key1], vec![benign, malicious], vec![alt]);
-
-            let err = convert(&msg).expect_err("must reject out-of-static program_id refs");
-            let VisualSignError::DecodeError(text) = err else {
-                panic!("expected DecodeError, got {err:?}");
-            };
-            assert!(
-                text.contains("Cannot render V0 transaction"),
-                "error should explain why: {text}"
-            );
-            assert!(
-                text.contains("program_id_index 5"),
-                "error should name the offending index: {text}"
-            );
-            assert!(
-                text.contains("instruction 1"),
-                "error should name the offending instruction index: {text}"
-            );
-            assert!(
-                text.contains("malformed:"),
-                "program ids cannot be loaded via ALT, so the spec-violation \
-                 classification is malformed, not ALT-backed: {text}"
-            );
-            assert!(
-                !text.contains("ALT-backed:"),
-                "this case has only a spec-violating program_id ref, no \
-                 ALT-backed account refs: {text}"
-            );
-        }
-
-        #[test]
-        fn rejects_v0_when_account_index_lives_behind_an_alt() {
+        fn renders_v0_when_account_index_lives_behind_an_alt() {
             // Instruction's program_id is in-range, but two of its accounts
             // point past the static keys into the ALT-loaded range. With
             // static_len=2 and loaded_len=3 (writable=[0,1], readonly=[2])
             // the valid resolved range is [0, 5); ALT-backed indices are
-            // [2, 5). Using accounts {2, 3} exercises the ALT-backed path
-            // (not the malformed-OOB path) and lets us assert the error
-            // surfaces them under the `ALT-backed:` section.
+            // [2, 5). The parser cannot resolve those offline, but it no
+            // longer rejects the whole transaction (#324, reverted) -- it
+            // renders with the ALT-backed accounts surfaced as placeholders.
             let key0 = Pubkey::new_unique();
             let key1 = Pubkey::new_unique();
             let alt = MessageAddressTableLookup {
@@ -1706,26 +1501,9 @@ mod tests {
             };
             let msg = make_v0(vec![key0, key1], vec![ix], vec![alt]);
 
-            let err = convert(&msg).expect_err("must reject ALT-referenced accounts");
-            let VisualSignError::DecodeError(text) = err else {
-                panic!("expected DecodeError, got {err:?}");
-            };
-            assert!(
-                text.contains("ALT-backed:"),
-                "error should classify these accounts under ALT-backed, not malformed: {text}"
-            );
-            assert!(
-                !text.contains("malformed:"),
-                "this case has no out-of-range references, only ALT-backed ones: {text}"
-            );
-            assert!(
-                text.contains("account indices"),
-                "error should mention account indices: {text}"
-            );
-            assert!(
-                text.contains("[2, 3]"),
-                "error should enumerate the offending indices as `[2, 3]`: {text}"
-            );
+            let payload =
+                convert(&msg).expect("ALT-backed account references should render, not reject");
+            assert_eq!(payload.payload_type, "SolanaTx");
         }
 
         #[test]
@@ -1761,52 +1539,6 @@ mod tests {
             assert!(
                 has_alt_field,
                 "Address Lookup Tables field must be present in payload"
-            );
-        }
-
-        #[test]
-        fn rejects_v0_with_malformed_index_when_alts_are_present() {
-            // ALTs are present but loaded_len=1 (one writable index). Static
-            // keys=2, so the valid resolved range is [0, 3). An instruction
-            // account index of 99 is past `static_len + loaded_len`, i.e.
-            // genuinely out-of-range / malformed, not just ALT-backed. We
-            // still reject (any unresolvable reference is unsafe to render),
-            // and the error message classifies it as malformed rather than
-            // claiming it references an ALT entry.
-            let key0 = Pubkey::new_unique();
-            let key1 = Pubkey::new_unique();
-            let alt = MessageAddressTableLookup {
-                account_key: Pubkey::new_unique(),
-                writable_indexes: vec![0],
-                readonly_indexes: vec![],
-            };
-            let ix = CompiledInstruction {
-                program_id_index: 1,
-                accounts: vec![0, 99],
-                data: vec![0xFF],
-            };
-            let msg = make_v0(vec![key0, key1], vec![ix], vec![alt]);
-
-            let err =
-                convert(&msg).expect_err("must reject out-of-range indices even with ALTs present");
-            let VisualSignError::DecodeError(text) = err else {
-                panic!("expected DecodeError, got {err:?}");
-            };
-            assert!(
-                text.contains("Cannot render V0 transaction"),
-                "error should explain why: {text}"
-            );
-            assert!(
-                text.contains("malformed:"),
-                "error should classify the index as malformed, not ALT-backed: {text}"
-            );
-            assert!(
-                text.contains("[99]"),
-                "error should enumerate the offending malformed index: {text}"
-            );
-            assert!(
-                !text.contains("ALT-backed:"),
-                "this case has no ALT-backed references, only malformed ones: {text}"
             );
         }
 
