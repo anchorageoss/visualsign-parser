@@ -36,7 +36,10 @@ impl InstructionVisualizer for DflowAggregatorVisualizer {
         let data = context.data();
 
         let instruction_data_hex = hex::encode(data);
-        let fallback_text = format!("Program ID: {}\nData: {instruction_data_hex}", view.program_id);
+        let fallback_text = format!(
+            "Program ID: {}\nData: {instruction_data_hex}",
+            view.program_id
+        );
 
         let parsed = parse_dflow_aggregator_instruction(data, &view.accounts);
 
@@ -168,7 +171,7 @@ fn build_parsed_fields(
     condensed_fields.push(create_text_field("Program", "DFlow Aggregator")?);
     condensed_fields.push(create_text_field("Instruction", instruction_name)?);
     for (key, value) in &parsed.program_call_args {
-        push_arg_fields(&mut condensed_fields, key, value)?;
+        condensed_fields.push(create_text_field(key, &format_arg_value(value))?);
     }
 
     expanded_fields.push(create_text_field("Program ID", program_id)?);
@@ -187,7 +190,7 @@ fn build_parsed_fields(
     }
 
     for (key, value) in &parsed.program_call_args {
-        push_arg_fields(&mut expanded_fields, key, value)?;
+        expanded_fields.push(create_text_field(key, &format_arg_value(value))?);
     }
 
     Ok((title, condensed_fields, expanded_fields))
@@ -217,46 +220,67 @@ fn build_fallback_fields(
     Ok((title, condensed_fields, expanded_fields))
 }
 
-fn push_arg_fields(
-    fields: &mut Vec<AnnotatedPayloadField>,
-    key: &str,
-    value: &serde_json::Value,
-) -> Result<(), VisualSignError> {
+/// Render a single program-call argument as one field value.
+///
+/// Each top-level argument becomes exactly ONE field. Objects and arrays are
+/// rendered as a compact, JSON-like string -- but WITHOUT the `"` quotes that
+/// real JSON puts around keys and strings. This matters for two reasons:
+///
+/// 1. **No field explosion.** We do not recurse into separate fields. A byte
+///    array such as `RecordId.id` (76 bytes) would otherwise blow up into 76
+///    per-byte fields and bury the meaningful arguments (`quoted_out_amount`,
+///    `slippage_bps`, ...). See `test_format_arg_value_does_not_blow_up_nested_fields`.
+/// 2. **Charset safety.** `SignablePayload::validate_charset` rejects the `\"`
+///    JSON escape (see #332). Real compact JSON of an object contains quoted
+///    keys, which serialize to `\"` and fail validation. Emitting quote-free
+///    output keeps the whole payload charset-valid. See
+///    `test_format_arg_value_is_charset_safe`.
+///
+/// Arrays whose elements are all byte-sized integers (0..=255) -- e.g. a
+/// `[u8; 32]` market id or the 76-byte `RecordId.id` -- render as a single
+/// `0x`-prefixed hex string instead of a bracketed number list, which is both
+/// shorter and the conventional way to show opaque ids.
+///
+/// This is a deliberately type-agnostic stopgap. A DFlow-aware renderer that
+/// understands the IDL types (Action enum, RecordId, DynamicRoute, ...) and
+/// presents proper nested fields is intended to stack on top of this.
+fn format_arg_value(value: &serde_json::Value) -> String {
     match value {
-        serde_json::Value::Object(map) => {
-            if map.is_empty() {
-                fields.push(create_text_field(key, "{}")?);
-            } else {
-                for (sub_key, sub_value) in map {
-                    let label = format!("{key}.{sub_key}");
-                    push_arg_fields(fields, &label, sub_value)?;
-                }
-            }
-        }
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => "null".to_string(),
         serde_json::Value::Array(items) => {
-            if items.is_empty() {
-                fields.push(create_text_field(key, "[]")?);
+            if let Some(hex) = bytes_as_hex(items) {
+                hex
             } else {
-                for (i, item) in items.iter().enumerate() {
-                    let label = format!("{key}[{i}]");
-                    push_arg_fields(fields, &label, item)?;
-                }
+                let inner: Vec<String> = items.iter().map(format_arg_value).collect();
+                format!("[{}]", inner.join(","))
             }
         }
-        serde_json::Value::String(s) => {
-            fields.push(create_text_field(key, s)?);
-        }
-        serde_json::Value::Number(n) => {
-            fields.push(create_text_field(key, &n.to_string())?);
-        }
-        serde_json::Value::Bool(b) => {
-            fields.push(create_text_field(key, &b.to_string())?);
-        }
-        serde_json::Value::Null => {
-            fields.push(create_text_field(key, "null")?);
+        serde_json::Value::Object(map) => {
+            let inner: Vec<String> = map
+                .iter()
+                .map(|(k, v)| format!("{k}:{}", format_arg_value(v)))
+                .collect();
+            format!("{{{}}}", inner.join(","))
         }
     }
-    Ok(())
+}
+
+/// If every element is an integer in `0..=255`, render the array as a single
+/// `0x`-prefixed hex string. Returns `None` for empty or non-byte arrays so the
+/// caller falls back to a bracketed list.
+fn bytes_as_hex(items: &[serde_json::Value]) -> Option<String> {
+    if items.is_empty() {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(items.len());
+    for item in items {
+        let byte = item.as_u64().filter(|n| *n <= u8::MAX as u64)? as u8;
+        bytes.push(byte);
+    }
+    Some(format!("0x{}", hex::encode(bytes)))
 }
 
 #[cfg(test)]
@@ -323,79 +347,178 @@ mod tests {
     }
 
     #[test]
-    fn test_push_arg_fields_renders_scalars() {
-        let mut fields = Vec::new();
-        push_arg_fields(&mut fields, "s", &json!("hello")).unwrap();
-        push_arg_fields(&mut fields, "n", &json!(42)).unwrap();
-        push_arg_fields(&mut fields, "b", &json!(true)).unwrap();
-        push_arg_fields(&mut fields, "z", &serde_json::Value::Null).unwrap();
+    fn test_format_arg_value_renders_scalars() {
+        assert_eq!(format_arg_value(&json!("hello")), "hello");
+        assert_eq!(format_arg_value(&json!(42)), "42");
+        assert_eq!(format_arg_value(&json!(true)), "true");
+        assert_eq!(format_arg_value(&serde_json::Value::Null), "null");
+    }
 
+    #[test]
+    fn test_format_arg_value_renders_objects_and_arrays_quote_free() {
+        // Objects and arrays collapse into a single quote-free, JSON-like string
+        // rather than recursing into per-key / per-element fields. No `"` is
+        // emitted (see test_format_arg_value_is_charset_safe).
+        assert_eq!(format_arg_value(&json!([])), "[]");
+        assert_eq!(format_arg_value(&json!({})), "{}");
+        // serde_json::Map is a BTreeMap without the `preserve_order` feature, so
+        // keys come out sorted -- assert against that deterministic order.
         assert_eq!(
-            fields
-                .iter()
-                .map(field_label_value)
-                .collect::<Vec<(String, String)>>(),
-            vec![
-                ("s".to_string(), "hello".to_string()),
-                ("n".to_string(), "42".to_string()),
-                ("b".to_string(), "true".to_string()),
-                ("z".to_string(), "null".to_string()),
-            ]
+            format_arg_value(&json!({"side": "buy", "amount": 100})),
+            "{amount:100,side:buy}"
+        );
+        // Arrays of non-byte values render as a bracketed, comma-joined list.
+        assert_eq!(
+            format_arg_value(&json!([5_000_000u64, 68_980_730u64])),
+            "[5000000,68980730]"
+        );
+        assert_eq!(format_arg_value(&json!(["a", "b"])), "[a,b]");
+    }
+
+    #[test]
+    fn test_format_arg_value_renders_byte_arrays_as_hex() {
+        // All-byte arrays (every element in 0..=255) collapse to one 0x-hex
+        // string -- the conventional, compact form for opaque ids like
+        // RecordId.id ([u8; 76]) or a [u8; 32] market id.
+        assert_eq!(format_arg_value(&json!([1, 2, 3])), "0x010203");
+        assert_eq!(format_arg_value(&json!([0, 255])), "0x00ff");
+        // A single out-of-byte-range element disqualifies the whole array, so it
+        // falls back to the bracketed list rather than mis-rendering as hex.
+        assert_eq!(format_arg_value(&json!([1, 2, 256])), "[1,2,256]");
+    }
+
+    #[test]
+    fn test_format_arg_value_is_charset_safe() {
+        // SignablePayload::validate_charset rejects the `\"` and `\\` JSON
+        // escapes (#332). Real compact JSON of an object would emit quoted keys
+        // (-> `\"`) and fail. Our quote-free rendering must contain neither `"`
+        // nor `\` so the whole payload stays charset-valid end to end.
+        let nested = json!({
+            "actions": [{"RecordId": [{"id": (0u8..76).collect::<Vec<u8>>()}]}],
+            "quoted_out_amount": 68_980_730u64,
+        });
+        let rendered = format_arg_value(&nested);
+        assert!(
+            !rendered.contains('"') && !rendered.contains('\\'),
+            "rendered arg must be charset-safe (no quotes/backslashes), got: {rendered}"
         );
     }
 
     #[test]
-    fn test_push_arg_fields_recurses_into_array_with_indexed_labels() {
-        let mut fields = Vec::new();
-        push_arg_fields(&mut fields, "actions", &json!(["a", "b", "c"])).unwrap();
-        let pairs: Vec<(String, String)> = fields.iter().map(field_label_value).collect();
-        assert_eq!(
-            pairs,
-            vec![
-                ("actions[0]".to_string(), "a".to_string()),
-                ("actions[1]".to_string(), "b".to_string()),
-                ("actions[2]".to_string(), "c".to_string()),
-            ]
-        );
-    }
-
-    #[test]
-    fn test_push_arg_fields_recurses_into_object_with_dotted_labels() {
-        let mut fields = Vec::new();
-        push_arg_fields(
-            &mut fields,
-            "params",
-            &json!({"amount": 100, "side": "buy"}),
+    fn test_real_swap_matches_pre286_field_structure() {
+        // Real `swap` instruction bytes from a mainnet DFlow tx.
+        //
+        // Pins equivalence with the pre-#286 output: that code emitted exactly
+        // one field per top-level argument with the value rendered via
+        // `serde_json::Value::to_string()` (compact JSON). We assert the SAME
+        // single-field structure and the SAME underlying data, with the value
+        // re-encoded charset-safe (no `"`; #332) and the byte array shown as hex.
+        let data = hex::decode(
+            "f8c69e91e17587c802000000252daaa2dfe9ae6201ec11a78f6acf1feffe9ca87508eeee3918bb36d974972fc032d35027909ca6bf0454ff3da70dcafbb3d3f63c230546c40a985cafaf71520a29498619000130a9a20000001f020000000208404b4c000000000001fa8f1c040000000014000000",
         )
         .unwrap();
-        // Without the `preserve_order` feature, serde_json::Map is a BTreeMap
-        // (sorted by key, not insertion-ordered). Assert as a set to stay
-        // robust against either backing map.
-        let pairs: std::collections::BTreeSet<(String, String)> =
-            fields.iter().map(field_label_value).collect();
-        let expected: std::collections::BTreeSet<(String, String)> = [
-            ("params.amount".to_string(), "100".to_string()),
-            ("params.side".to_string(), "buy".to_string()),
-        ]
-        .into_iter()
-        .collect();
-        assert_eq!(pairs, expected);
+        let idl = get_dflow_aggregator_idl().unwrap();
+        let parsed = parse_instruction_with_idl(&data, DFLOW_AGGREGATOR_PROGRAM_ID, idl).unwrap();
+
+        // Same field structure as pre-#286: exactly one top-level arg -> one field.
+        let keys: Vec<&str> = parsed.program_call_args.keys().map(String::as_str).collect();
+        assert_eq!(keys, vec!["params"]);
+
+        let value = parsed.program_call_args.get("params").unwrap();
+        let now = format_arg_value(value);
+
+        // Charset-safe (the pre-#286 compact JSON would fail validate_charset).
+        assert!(!now.contains('"') && !now.contains('\\'), "not charset-safe: {now}");
+        // Same data as pre-#286, re-encoded: scalars verbatim, byte array as hex,
+        // and crucially NOT exploded into a per-byte number list.
+        assert!(now.contains("id:0x2daaa2dfe9ae6201"), "byte id not hex-encoded: {now}");
+        assert!(!now.contains("[45,170,162"), "byte id leaked as number list: {now}");
+        assert!(
+            now.contains("quoted_out_amount:68980730")
+                && now.contains("slippage_bps:20")
+                && now.contains("platform_fee_bps:0"),
+            "scalars not preserved: {now}"
+        );
     }
 
     #[test]
-    fn test_push_arg_fields_renders_empty_collections() {
-        let mut fields = Vec::new();
-        push_arg_fields(&mut fields, "empty_arr", &json!([])).unwrap();
-        push_arg_fields(&mut fields, "empty_obj", &json!({})).unwrap();
-        assert_eq!(
-            fields
-                .iter()
-                .map(field_label_value)
-                .collect::<Vec<(String, String)>>(),
-            vec![
-                ("empty_arr".to_string(), "[]".to_string()),
-                ("empty_obj".to_string(), "{}".to_string()),
-            ]
+    fn test_format_arg_value_does_not_blow_up_nested_fields() {
+        // Regression guard for the field explosion (introduced by #286's
+        // recursive push_arg_fields, reverted here): a deeply-nested `params`
+        // argument that contains a 76-byte array (e.g. RecordId.id) must render
+        // as exactly ONE field per top-level argument, NOT one field per byte.
+        let id_bytes: Vec<u8> = (0..76).collect();
+        let params = json!({
+            "actions": [
+                {"RecordId": [{"id": id_bytes}]},
+                {"DFlowDynamicRouteV1": [{"amount": 5_000_000u64,
+                                          "orchestrator_flags": {"flags": 1}}]},
+            ],
+            "quoted_out_amount": 68_980_730u64,
+            "slippage_bps": 20,
+            "platform_fee_bps": 0,
+        });
+        let mut program_call_args = serde_json::Map::new();
+        program_call_args.insert("params".to_string(), params.clone());
+
+        let parsed = DflowAggregatorParsedInstruction {
+            parsed: SolanaParsedInstructionData {
+                instruction_name: "swap".to_string(),
+                discriminator: "00".to_string(),
+                named_accounts: Default::default(),
+                program_call_args,
+                idl_source: IdlSource::Custom,
+                idl_hash: String::new(),
+            },
+            named_accounts: BTreeMap::new(),
+            extra_accounts: Vec::new(),
+        };
+
+        let (_title, condensed, expanded) = build_parsed_fields(&parsed, "PROGRAM_ID").unwrap();
+
+        for (view, fields) in [("condensed", &condensed), ("expanded", &expanded)] {
+            let labels: Vec<String> = fields.iter().map(|f| field_label_value(f).0).collect();
+            // Exactly one field carries the whole `params` argument.
+            let params_fields: Vec<&String> = labels.iter().filter(|l| *l == "params").collect();
+            assert_eq!(
+                params_fields.len(),
+                1,
+                "{view} view should render `params` as a single field, got labels: {labels:?}"
+            );
+            // No flattened / indexed leaf labels leaked through.
+            assert!(
+                !labels
+                    .iter()
+                    .any(|l| l.starts_with("params.") || l.contains('[')),
+                "{view} view must not explode nested params into per-leaf fields: {labels:?}"
+            );
+        }
+
+        // The single field holds the whole value quote-free, with the 76-byte
+        // RecordId.id collapsed to one 0x-hex string (not a per-byte list) and
+        // the meaningful scalars still legible inline.
+        let params_value = expanded
+            .iter()
+            .map(field_label_value)
+            .find(|(label, _)| label == "params")
+            .map(|(_, value)| value)
+            .expect("params field present");
+        assert!(
+            params_value.contains("id:0x000102030405"),
+            "byte array should render as inline hex, got: {params_value}"
+        );
+        assert!(
+            !params_value.contains("[0,1,2,3"),
+            "byte array must not render as a per-byte number list, got: {params_value}"
+        );
+        assert!(
+            params_value.contains("quoted_out_amount:68980730")
+                && params_value.contains("slippage_bps:20"),
+            "meaningful scalars should remain legible inline, got: {params_value}"
+        );
+        assert!(
+            !params_value.contains('"') && !params_value.contains('\\'),
+            "rendered params must be charset-safe, got: {params_value}"
         );
     }
 
