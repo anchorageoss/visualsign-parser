@@ -80,21 +80,14 @@ fn req<'a>(flags: &'a HashMap<String, String>, key: &str) -> Result<&'a String, 
     flags.get(key).ok_or_else(|| format!("missing --{key}"))
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for &b in bytes {
-        s.push(HEX[(b >> 4) as usize] as char);
-        s.push(HEX[(b & 0xf) as usize] as char);
-    }
-    s
-}
-
 fn gen_operator_key(flags: &HashMap<String, String>) -> Result<(), String> {
     let out = req(flags, "out")?;
     let pair = P256Pair::generate().map_err(|e| format!("key generation failed: {e:?}"))?;
-    let seed_hex = hex_encode(&pair.to_master_seed()[..]);
-    let pub_hex = hex_encode(&pair.public_key().to_bytes());
+    // qos_p256 provides the hex encoding (it owns the master-seed / pubkey formats).
+    let seed_hex = String::from_utf8(pair.to_master_seed_hex())
+        .map_err(|e| format!("seed hex not utf8: {e}"))?;
+    let pub_hex = String::from_utf8(pair.public_key().to_hex_bytes())
+        .map_err(|e| format!("public key hex not utf8: {e}"))?;
     write_secret_file(Path::new(out), &seed_hex)?;
     // SECURITY: only the public key is ever printed; the seed stays in the file.
     println!("{pub_hex}");
