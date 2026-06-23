@@ -1,18 +1,22 @@
-name: TVC Deploy (manual)
+name: TVC Deploy
 
-# Manually trigger a parser_app TVC deployment via the standalone tools/tvc-deploy
-# helper: assemble config (gRPC health) -> create -> pivot-digest safety gate ->
-# approve -> poll-to-healthy -> set-live.
+# Deploy parser_app to TVC via the standalone tools/tvc-deploy helper:
+# image-digest gate -> create -> approve -> poll-to-healthy -> set-live.
 #
+# Triggers:
+#   - workflow_dispatch: deploy with explicit inputs (use the dev TEST app for trials).
+#   - pull_request labeled `tvc-deploy-test`: CI validation deploy against the dev
+#     TEST app using repo vars.TVC_TEST_* (never the live app).
 # Dev/staging only. Production deploys stay manual (see the deploy runbook).
-# For a safe trial, point `app_id` at the dev TEST app, not the live app.
 #
 # Required repo secrets:
-#   TVC_CI_OPERATOR_SEED  - operator master seed; the operator MUST be a member of
-#                           the target app's manifest set (set for the test app today)
+#   TVC_CI_OPERATOR_SEED  - operator master seed; MUST be a member of the target
+#                           app's manifest set (set for the test app today)
 #   TVC_ORG_ID            - dev org id
 #   TVC_API_KEY_PUBLIC    - dedicated CI dev API key (public)   [needs provisioning]
 #   TVC_API_KEY_PRIVATE   - dedicated CI dev API key (private)  [needs provisioning]
+# Required repo variables (PR-label test path):
+#   TVC_TEST_APP_ID, TVC_TEST_IMAGE_URL, TVC_TEST_EXPECTED_DIGEST, TVC_TEST_OPERATOR_ID
 
 on:
   workflow_dispatch:
@@ -41,6 +45,15 @@ on:
         description: "parser_app listen port"
         required: false
         default: "3000"
+  pull_request:
+    # Apply the `tvc-deploy-test` label to a PR to run a CI validation deploy
+    # against the dev TEST app (uses repo vars.TVC_TEST_*; never the live app).
+    types: [labeled]
+
+# Avoid overlapping deploys to the same target.
+concurrency:
+  group: tvc-deploy-${{ github.ref }}
+  cancel-in-progress: false
 
 # The deploy job only reads the repo and uses secrets; no write scope needed.
 permissions:
@@ -48,6 +61,10 @@ permissions:
 
 jobs:
   deploy:
+    # Manual dispatch, or the `tvc-deploy-test` label on a PR (test app only).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.label.name == 'tvc-deploy-test'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -75,13 +92,15 @@ jobs:
           TVC_API_KEY_PUBLIC: ${{ secrets.TVC_API_KEY_PUBLIC }}
           TVC_API_KEY_PRIVATE: ${{ secrets.TVC_API_KEY_PRIVATE }}
           # Inputs via env (avoid shell-injection from interpolated ${{ }}).
-          APP_ID: ${{ inputs.app_id }}
-          IMAGE_URL: ${{ inputs.image_url }}
-          EXPECTED_DIGEST: ${{ inputs.expected_digest }}
-          OPERATOR_ID: ${{ inputs.operator_id }}
-          QOS_VERSION: ${{ inputs.qos_version }}
-          HOST_IP: ${{ inputs.host_ip }}
-          HOST_PORT: ${{ inputs.host_port }}
+          # workflow_dispatch uses inputs; the PR-label path has none, so fall
+          # back to the test-app repo variables / defaults.
+          APP_ID: ${{ inputs.app_id || vars.TVC_TEST_APP_ID }}
+          IMAGE_URL: ${{ inputs.image_url || vars.TVC_TEST_IMAGE_URL }}
+          EXPECTED_DIGEST: ${{ inputs.expected_digest || vars.TVC_TEST_EXPECTED_DIGEST }}
+          OPERATOR_ID: ${{ inputs.operator_id || vars.TVC_TEST_OPERATOR_ID }}
+          QOS_VERSION: ${{ inputs.qos_version || 'v2026.2.6' }}
+          HOST_IP: ${{ inputs.host_ip || '0.0.0.0' }}
+          HOST_PORT: ${{ inputs.host_port || '3000' }}
         run: |
           ./tools/tvc-deploy/target/release/tvc-deploy deploy \
             --app-id "$APP_ID" \
