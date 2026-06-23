@@ -73,7 +73,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
 
       - name: Install tvc CLI
-        run: cargo install tvc --version 0.6.2 --locked
+        run: cargo install tvc --version 0.7.0 --locked
 
       - name: Build deploy helper
         run: cargo build --release --manifest-path tools/tvc-deploy/Cargo.toml
