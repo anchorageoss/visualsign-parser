@@ -42,6 +42,10 @@ on:
         required: false
         default: "3000"
 
+# The deploy job only reads the repo and uses secrets; no write scope needed.
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -52,7 +56,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
 
       - name: Install tvc CLI
-        run: cargo install tvc
+        run: cargo install tvc --version 0.6.2 --locked
 
       - name: Build deploy helper
         run: cargo build --release --manifest-path tools/tvc-deploy/Cargo.toml
