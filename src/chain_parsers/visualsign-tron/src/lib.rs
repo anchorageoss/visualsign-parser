@@ -10,11 +10,14 @@ use anychain_tron::protocol::balance_contract::{
     UnDelegateResourceContract, UnfreezeBalanceV2Contract, WithdrawExpireUnfreezeContract,
 };
 use anychain_tron::protocol::common::ResourceCode;
+use anychain_tron::protocol::witness_contract::VoteWitnessContract;
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use protobuf::Message;
 use visualsign::field_builders::{create_address_field, create_amount_field, create_text_field};
+use visualsign::time_fmt::{format_relative_ms, format_timestamp_ms};
 use visualsign::{
-    AnnotatedPayloadField, SignablePayload,
+    AnnotatedPayloadField, SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
+    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
     encodings::SupportedEncodings,
     vsptrait::{
         Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
@@ -135,22 +138,14 @@ fn convert_to_visual_sign_payload(
 
     fields.push(create_text_field("Network", "Tron")?);
 
+    let now_ms = chrono::Utc::now().timestamp_millis();
     fields.push(create_text_field(
         "Timestamp",
-        &format!(
-            "{} ({} ms)",
-            format_timestamp(raw_data.timestamp),
-            raw_data.timestamp
-        ),
+        &render_time_field(raw_data.timestamp, now_ms),
     )?);
-
     fields.push(create_text_field(
         "Expiration",
-        &format!(
-            "{} ({} ms)",
-            format_timestamp(raw_data.expiration),
-            raw_data.expiration
-        ),
+        &render_time_field(raw_data.expiration, now_ms),
     )?);
 
     fields.push(create_amount_field(
@@ -382,6 +377,76 @@ fn decode_contract(
                 "TRX",
             )?);
         }
+        "type.googleapis.com/protocol.VoteWitnessContract" => {
+            let vote = VoteWitnessContract::parse_from_bytes(value).map_err(|e| {
+                VisualSignError::ConversionError(format!("decode VoteWitnessContract: {e}"))
+            })?;
+            fields.push(create_text_field("Contract Type", "Vote Witness")?);
+            fields.push(create_address_field(
+                "Owner",
+                &address_to_base58(&vote.owner_address),
+                None,
+                None,
+                None,
+                None,
+            )?);
+
+            let mut detail_fields: Vec<AnnotatedPayloadField> = Vec::new();
+            for (i, v) in vote.votes.iter().enumerate() {
+                let n = i + 1;
+                detail_fields.push(create_address_field(
+                    &format!("Vote {n} (SR)"),
+                    &address_to_base58(&v.vote_address),
+                    None,
+                    None,
+                    None,
+                    None,
+                )?);
+                detail_fields.push(create_text_field(
+                    &format!("Vote {n} (Count)"),
+                    &v.vote_count.to_string(),
+                )?);
+            }
+
+            // i64 sum may overflow only for adversarial inputs; saturating keeps the
+            // summary readable rather than panicking. Per-vote counts are still shown
+            // verbatim in the expanded list.
+            let total: i64 = vote
+                .votes
+                .iter()
+                .map(|v| v.vote_count)
+                .fold(0i64, i64::saturating_add);
+            let subtitle = format!("{} votes across {} SRs", total, vote.votes.len());
+            let fallback = format!("Vote Witness: {subtitle}");
+
+            // Condensed view targets hardware-wallet screens with limited room:
+            // only the totals plus the owner are echoed. Expanded carries the full
+            // per-vote breakdown so signers can audit every SR before signing.
+            let condensed_fields = vec![create_text_field("Summary", &subtitle)?];
+
+            fields.push(AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::PreviewLayout {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: fallback.clone(),
+                        label: "Votes".to_string(),
+                    },
+                    preview_layout: SignablePayloadFieldPreviewLayout {
+                        title: Some(SignablePayloadFieldTextV2 {
+                            text: "Vote Witness".to_string(),
+                        }),
+                        subtitle: Some(SignablePayloadFieldTextV2 { text: subtitle }),
+                        condensed: Some(SignablePayloadFieldListLayout {
+                            fields: condensed_fields,
+                        }),
+                        expanded: Some(SignablePayloadFieldListLayout {
+                            fields: detail_fields,
+                        }),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            });
+        }
         other => {
             fields.push(create_text_field(
                 "Contract Type",
@@ -459,12 +524,15 @@ fn sun_to_trx_string(sun: i64) -> String {
     }
 }
 
-// Returns only the human date; callers append the raw millis themselves to avoid a
-// doubled "(N ms)" suffix when the timestamp is out of chrono's representable range.
-fn format_timestamp(timestamp_ms: i64) -> String {
-    chrono::DateTime::from_timestamp_millis(timestamp_ms)
-        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-        .unwrap_or_else(|| "invalid timestamp".to_string())
+// Renders "<UTC> (<ms> ms[, <relative>])" — the relative tag is omitted when
+// the timestamp is outside chrono's representable range so signers still see
+// the raw bytes without a misleading "N years ago".
+fn render_time_field(ms: i64, now_ms: i64) -> String {
+    let abs = format_timestamp_ms(ms);
+    match format_relative_ms(ms, now_ms) {
+        Some(rel) => format!("{abs} ({ms} ms, {rel})"),
+        None => format!("{abs} ({ms} ms)"),
+    }
 }
 
 #[cfg(test)]
@@ -895,11 +963,167 @@ mod tests {
         );
     }
 
+    fn build_vote_witness_bytes(owner: &[u8], votes: &[(&[u8], i64)]) -> Vec<u8> {
+        use anychain_tron::protocol::witness_contract::vote_witness_contract::Vote;
+        let mut contract = VoteWitnessContract {
+            owner_address: owner.to_vec(),
+            ..Default::default()
+        };
+        for (addr, count) in votes {
+            contract.votes.push(Vote {
+                vote_address: addr.to_vec(),
+                vote_count: *count,
+                ..Default::default()
+            });
+        }
+        contract.write_to_bytes().unwrap()
+    }
+
+    fn preview_layout_subtitle(field: &SignablePayloadField) -> &str {
+        match field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => preview_layout
+                .subtitle
+                .as_ref()
+                .map(|t| t.text.as_str())
+                .unwrap_or(""),
+            _ => panic!("expected PreviewLayout"),
+        }
+    }
+
+    fn preview_layout_expanded(field: &SignablePayloadField) -> &SignablePayloadFieldListLayout {
+        match field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => preview_layout
+                .expanded
+                .as_ref()
+                .expect("expanded must be Some"),
+            _ => panic!("expected PreviewLayout"),
+        }
+    }
+
+    fn preview_layout_condensed(field: &SignablePayloadField) -> &SignablePayloadFieldListLayout {
+        match field {
+            SignablePayloadField::PreviewLayout { preview_layout, .. } => preview_layout
+                .condensed
+                .as_ref()
+                .expect("condensed must be Some"),
+            _ => panic!("expected PreviewLayout"),
+        }
+    }
+
     #[test]
-    fn format_timestamp_handles_invalid_value() {
+    fn vote_witness_decodes_owner_and_votes() {
+        // 21-byte SR addresses (0x41 prefix + 20 bytes), deterministic.
+        let sr1 = hex::decode("4100000000000000000000000000000000000001").unwrap();
+        let sr2 = hex::decode("4100000000000000000000000000000000000002").unwrap();
+        let owner = owner_bytes();
+        let bytes = build_vote_witness_bytes(&owner, &[(&sr1, 1000), (&sr2, 500)]);
+        let raw =
+            build_raw_with_contract("type.googleapis.com/protocol.VoteWitnessContract", bytes);
+        let payload = TronVisualSignConverter
+            .to_visual_sign_payload(
+                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+                VisualSignOptions::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            text_value(find_field(&payload, "Contract Type").unwrap()),
+            "Vote Witness",
+        );
+        // Owner round-trips through base58check.
+        assert_eq!(
+            address_value(find_field(&payload, "Owner").unwrap()),
+            address_to_base58(&owner),
+        );
+
+        let votes_field = find_field(&payload, "Votes").expect("Votes preview layout");
+        assert_eq!(
+            preview_layout_subtitle(votes_field),
+            "1500 votes across 2 SRs"
+        );
+
+        // Condensed view: signers with constrained screens see only the summary line.
+        let condensed = preview_layout_condensed(votes_field);
+        assert_eq!(condensed.fields.len(), 1);
+        assert_eq!(
+            text_value(&condensed.fields[0].signable_payload_field),
+            "1500 votes across 2 SRs",
+        );
+
+        // Expanded view: full per-vote breakdown, two fields per vote, in input order.
+        let expanded = preview_layout_expanded(votes_field);
+        assert_eq!(expanded.fields.len(), 4);
+        let labels: Vec<&str> = expanded
+            .fields
+            .iter()
+            .map(|f| field_label(&f.signable_payload_field))
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Vote 1 (SR)",
+                "Vote 1 (Count)",
+                "Vote 2 (SR)",
+                "Vote 2 (Count)"
+            ],
+        );
+        assert_eq!(
+            address_value(&expanded.fields[0].signable_payload_field),
+            address_to_base58(&sr1),
+        );
+        assert_eq!(
+            text_value(&expanded.fields[1].signable_payload_field),
+            "1000",
+        );
+        assert_eq!(
+            text_value(&expanded.fields[3].signable_payload_field),
+            "500",
+        );
+    }
+
+    #[test]
+    fn vote_witness_empty_votes_renders_zero_summary() {
+        let owner = owner_bytes();
+        let bytes = build_vote_witness_bytes(&owner, &[]);
+        let raw =
+            build_raw_with_contract("type.googleapis.com/protocol.VoteWitnessContract", bytes);
+        let payload = TronVisualSignConverter
+            .to_visual_sign_payload(
+                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+                VisualSignOptions::default(),
+            )
+            .unwrap();
+
+        let votes_field = find_field(&payload, "Votes").expect("Votes preview layout");
+        assert_eq!(preview_layout_subtitle(votes_field), "0 votes across 0 SRs");
+        assert!(preview_layout_expanded(votes_field).fields.is_empty());
+    }
+
+    #[test]
+    fn render_time_field_includes_relative_tag() {
+        // Past timestamp -> "<ms> ms, N minutes ago".
+        let rendered = render_time_field(1_700_000_000_000, 1_700_000_120_000);
+        assert_eq!(
+            rendered,
+            "2023-11-14 22:13:20 UTC (1700000000000 ms, 2 minutes ago)",
+        );
+
+        // Future timestamp -> "<ms> ms, in about N hours".
+        let rendered = render_time_field(1_700_000_000_000 + 3_600_000, 1_700_000_000_000);
+        assert!(
+            rendered.ends_with(", in about 1 hour)"),
+            "unexpected render: {rendered}",
+        );
+    }
+
+    #[test]
+    fn render_time_field_omits_relative_tag_for_unrepresentable() {
         // i64::MAX is out of chrono's representable range; the helper must NOT include
-        // "(N ms)" so the caller's own "(N ms)" suffix isn't doubled.
-        assert_eq!(format_timestamp(i64::MAX), "invalid timestamp");
+        // a misleading relative tag and must not double the "(N ms)" suffix.
+        assert_eq!(
+            render_time_field(i64::MAX, 0),
+            format!("invalid timestamp ({} ms)", i64::MAX),
+        );
     }
 
     #[test]

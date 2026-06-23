@@ -189,8 +189,10 @@ fn test_cli_with_fixtures() {
                 // Non-JSON output (text/human): strip diagnostic blocks from the
                 // actual Debug-formatted payload so the display fixture stays
                 // diagnostics-agnostic, matching how the JSON branch filters them above.
+                // Also strip the wall-clock-dependent relative-time tag the Tron parser
+                // appends to Timestamp/Expiration so the snapshot doesn't drift over time.
                 #[cfg_attr(not(feature = "diagnostics"), allow(unused_mut))]
-                let mut actual_display = actual_output.trim().to_string();
+                let mut actual_display = strip_relative_time_tag(actual_output.trim());
                 #[cfg(feature = "diagnostics")]
                 {
                     actual_display = strip_debug_diagnostic_blocks(&actual_display);
@@ -233,6 +235,64 @@ fn strip_debug_diagnostic_blocks(input: &str) -> String {
         out.pop();
     }
     out
+}
+
+/// Strip the wall-clock-dependent relative-time suffix from `(<digits> ms, <text>)`
+/// patterns so timestamp fixtures don't have to be regenerated as time passes.
+/// Leaves `(<digits> ms)` untouched and matches each occurrence independently.
+fn strip_relative_time_tag(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(idx) = rest.find(" ms, ") {
+        let before = &rest[..idx];
+        let digit_run_start = before.rfind('(').map(|p| p + 1);
+        let is_paren_digits = digit_run_start.is_some_and(|start| {
+            let candidate = &before[start..];
+            !candidate.is_empty() && candidate.bytes().all(|b| b.is_ascii_digit())
+        });
+        if is_paren_digits {
+            out.push_str(&rest[..idx + 3]); // keep "<digits> ms"
+            let after_ms = &rest[idx + 5..]; // skip ", "
+            match after_ms.find(')') {
+                Some(close) => {
+                    out.push(')'); // close the parens we kept
+                    rest = &after_ms[close + 1..]; // continue scanning after ')'
+                }
+                None => {
+                    rest = "";
+                }
+            }
+        } else {
+            // Not the pattern we care about — advance past this match and continue.
+            out.push_str(&rest[..idx + 5]);
+            rest = &rest[idx + 5..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+#[test]
+fn strip_relative_time_tag_normalizes_only_ms_paren_pattern() {
+    // Strips the relative tag inside `(<digits> ms, <relative>)`.
+    assert_eq!(
+        strip_relative_time_tag("(1779381252000 ms, about 6 days ago)"),
+        "(1779381252000 ms)",
+    );
+    // Leaves `(<digits> ms)` without a relative tag untouched.
+    assert_eq!(strip_relative_time_tag("(123 ms)"), "(123 ms)",);
+    // Handles multiple occurrences and unrelated commas in the same string.
+    assert_eq!(
+        strip_relative_time_tag(
+            "Timestamp: T (10 ms, in 5 seconds), unrelated, ms, comma, Expiration: T (20 ms, 1 minute ago)"
+        ),
+        "Timestamp: T (10 ms), unrelated, ms, comma, Expiration: T (20 ms)",
+    );
+    // Non-digit prefix inside parens is left alone.
+    assert_eq!(
+        strip_relative_time_tag("(label ms, ignored)"),
+        "(label ms, ignored)",
+    );
 }
 
 fn assert_strings_match(test_name: &str, fixture_type: &str, expected: &str, actual: &str) {
