@@ -1,0 +1,94 @@
+name: TVC Deploy (manual)
+
+# Manually trigger a parser_app TVC deployment via the standalone tools/tvc-deploy
+# helper: assemble config (gRPC health) -> create -> pivot-digest safety gate ->
+# approve -> poll-to-healthy -> set-live.
+#
+# Dev/staging only. Production deploys stay manual (see the deploy runbook).
+# For a safe trial, point `app_id` at the dev TEST app, not the live app.
+#
+# Required repo secrets:
+#   TVC_CI_OPERATOR_SEED  - operator master seed; the operator MUST be a member of
+#                           the target app's manifest set (set for the test app today)
+#   TVC_ORG_ID            - dev org id
+#   TVC_API_KEY_PUBLIC    - dedicated CI dev API key (public)   [needs provisioning]
+#   TVC_API_KEY_PRIVATE   - dedicated CI dev API key (private)  [needs provisioning]
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_id:
+        description: "TVC app id (use the dev TEST app for a safe trial)"
+        required: true
+      image_url:
+        description: "Pinned parser_app image, ghcr.io/...@sha256:..."
+        required: true
+      expected_digest:
+        description: "Expected pivot binary sha256 (hex, no 0x/sha256: prefix)"
+        required: true
+      operator_id:
+        description: "TVC operator id (must be in the app's manifest set)"
+        required: true
+      qos_version:
+        description: "QOS version"
+        required: false
+        default: "v2026.2.6"
+      host_ip:
+        description: "parser_app listen IP"
+        required: false
+        default: "0.0.0.0"
+      host_port:
+        description: "parser_app listen port"
+        required: false
+        default: "3000"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
+
+      - name: Install tvc CLI
+        run: cargo install tvc
+
+      - name: Build deploy helper
+        run: cargo build --release --manifest-path tools/tvc-deploy/Cargo.toml
+
+      - name: Write operator seed
+        env:
+          TVC_CI_OPERATOR_SEED: ${{ secrets.TVC_CI_OPERATOR_SEED }}
+        run: |
+          umask 077
+          printf '%s' "$TVC_CI_OPERATOR_SEED" > "$RUNNER_TEMP/operator.seed"
+
+      - name: Deploy
+        env:
+          # tvc reads auth from these (see `tvc deploy create --help`).
+          TVC_ORG_ID: ${{ secrets.TVC_ORG_ID }}
+          TVC_API_KEY_PUBLIC: ${{ secrets.TVC_API_KEY_PUBLIC }}
+          TVC_API_KEY_PRIVATE: ${{ secrets.TVC_API_KEY_PRIVATE }}
+          # Inputs via env (avoid shell-injection from interpolated ${{ }}).
+          APP_ID: ${{ inputs.app_id }}
+          IMAGE_URL: ${{ inputs.image_url }}
+          EXPECTED_DIGEST: ${{ inputs.expected_digest }}
+          OPERATOR_ID: ${{ inputs.operator_id }}
+          QOS_VERSION: ${{ inputs.qos_version }}
+          HOST_IP: ${{ inputs.host_ip }}
+          HOST_PORT: ${{ inputs.host_port }}
+        run: |
+          ./tools/tvc-deploy/target/release/tvc-deploy deploy \
+            --app-id "$APP_ID" \
+            --image-url "$IMAGE_URL" \
+            --expected-digest "$EXPECTED_DIGEST" \
+            --operator-id "$OPERATOR_ID" \
+            --operator-seed "$RUNNER_TEMP/operator.seed" \
+            --qos-version "$QOS_VERSION" \
+            --host-ip "$HOST_IP" \
+            --host-port "$HOST_PORT"
+
+      - name: Scrub seed
+        if: always()
+        run: shred -u "$RUNNER_TEMP/operator.seed" 2>/dev/null || rm -f "$RUNNER_TEMP/operator.seed"
