@@ -11,6 +11,9 @@ mod integrations;
 /// `ParsedTransactionPayload.intermediate_output`. Published so downstream
 /// consumers can `borsh::from_slice` into the same schema the parser produces.
 pub mod intermediate;
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod preset_conventions;
 mod presets;
 pub mod utils;
 

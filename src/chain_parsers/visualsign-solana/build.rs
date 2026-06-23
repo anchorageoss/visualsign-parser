@@ -8,19 +8,30 @@ fn main() -> BuildResult<()> {
     println!("cargo:rerun-if-changed=src/integrations");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);
-    let visualizers = collect_visualizers()?;
+    let (visualizers, preset_visualizers) = collect_visualizers()?;
 
     // We operate on instructions at a transaction level even though Solana uses programs
     // and that's what we want to create the modules around, but each instruction may
     // individually be special and has to be handled properly. This should allow us to
     // functionally compose instructions at the time of display too.
+    //
+    // `preset_visualizers_by_name` pairs each preset visualizer with its directory name so
+    // tests can join it against `PRESET_IDLS` (keyed by the same name).
     let code = format!(
         "pub fn available_visualizers() -> Vec<Box<dyn InstructionVisualizer>> {{
             vec![
                 {}
             ]
+        }}
+
+        #[cfg(test)]
+        pub(crate) fn preset_visualizers_by_name() -> Vec<(&'static str, Box<dyn InstructionVisualizer>)> {{
+            vec![
+                {}
+            ]
         }}",
-        visualizers.join(",\n")
+        visualizers.join(",\n"),
+        preset_visualizers.join(",\n")
     );
     fs::write(out_dir.join("generated_visualizers.rs"), code)?;
 
@@ -91,7 +102,9 @@ fn emit_module_declarations(folder: &str, out_path: &Path) -> BuildResult<()> {
     Ok(())
 }
 
-fn collect_visualizers() -> BuildResult<Vec<String>> {
+/// Returns every visualizer (catch-all `unknown_program` last) and, separately, the
+/// `(dir_name, visualizer)` pairs for `src/presets` only.
+fn collect_visualizers() -> BuildResult<(Vec<String>, Vec<String>)> {
     let mut all_visualizers: Vec<(String, String)> = Vec::new();
     for (folder_name, module_root) in [
         ("src/presets", "crate::presets"),
@@ -118,16 +131,24 @@ fn collect_visualizers() -> BuildResult<Vec<String>> {
         }
     }
 
+    let mut preset_visualizers: Vec<String> = all_visualizers
+        .iter()
+        .filter(|(_, vis)| vis.starts_with("Box::new(crate::presets::"))
+        .map(|(name, vis)| format!("({name:?}, {vis})"))
+        .collect();
+    preset_visualizers.sort();
+
     // Partition: specific visualizers first, unknown_program visualizer last (it's a catch-all).
     let (unknown, specific): (Vec<_>, Vec<_>) = all_visualizers
         .into_iter()
         .partition(|(name, _)| name == "unknown_program");
 
-    Ok(specific
+    let visualizers = specific
         .into_iter()
         .map(|(_, vis)| vis)
         .chain(unknown.into_iter().map(|(_, vis)| vis))
-        .collect())
+        .collect();
+    Ok((visualizers, preset_visualizers))
 }
 
 fn collect_preset_idls() -> BuildResult<Vec<String>> {
