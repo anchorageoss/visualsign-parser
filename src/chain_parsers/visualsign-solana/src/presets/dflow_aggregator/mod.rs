@@ -246,7 +246,7 @@ fn build_fallback_fields(
 /// presents proper nested fields is intended to stack on top of this.
 fn format_arg_value(value: &serde_json::Value) -> String {
     match value {
-        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::String(s) => charset_safe(s),
         serde_json::Value::Number(n) => n.to_string(),
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Null => "null".to_string(),
@@ -261,11 +261,23 @@ fn format_arg_value(value: &serde_json::Value) -> String {
         serde_json::Value::Object(map) => {
             let inner: Vec<String> = map
                 .iter()
-                .map(|(k, v)| format!("{k}:{}", format_arg_value(v)))
+                .map(|(k, v)| format!("{}:{}", charset_safe(k), format_arg_value(v)))
                 .collect();
             format!("{{{}}}", inner.join(","))
         }
     }
+}
+
+/// Drop characters from a leaf string/key that would otherwise force a forbidden
+/// JSON escape and make `SignablePayload::validate_charset` reject the payload:
+/// `"` and `\` (both ASCII-graphic, so excluded explicitly), plus tabs, carriage
+/// returns, other control bytes, and non-ASCII. Keeps printable ASCII + spaces.
+/// IDL strings here (pubkeys, enum names) are already clean; this is a defensive
+/// guard so the function's charset-safe contract always holds.
+fn charset_safe(text: &str) -> String {
+    text.chars()
+        .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '"' && c != '\\'))
+        .collect()
 }
 
 /// If every element is an integer in `0..=255`, render the array as a single
@@ -361,11 +373,14 @@ mod tests {
         // emitted (see test_format_arg_value_is_charset_safe).
         assert_eq!(format_arg_value(&json!([])), "[]");
         assert_eq!(format_arg_value(&json!({})), "{}");
-        // serde_json::Map is a BTreeMap without the `preserve_order` feature, so
-        // keys come out sorted -- assert against that deterministic order.
-        assert_eq!(
-            format_arg_value(&json!({"side": "buy", "amount": 100})),
-            "{amount:100,side:buy}"
+        // Object renders both fields quote-free. Assert order-insensitively: the
+        // key order depends on whether `serde_json/preserve_order` is active
+        // (BTreeMap = sorted vs. insertion order), which feature unification can
+        // flip without changing correctness.
+        let object = format_arg_value(&json!({"side": "buy", "amount": 100}));
+        assert!(
+            object == "{amount:100,side:buy}" || object == "{side:buy,amount:100}",
+            "object should render both fields quote-free in some order: {object}"
         );
         // Arrays of non-byte values render as a bracketed, comma-joined list.
         assert_eq!(
@@ -405,6 +420,23 @@ mod tests {
     }
 
     #[test]
+    fn test_format_arg_value_sanitizes_string_values_and_keys() {
+        // Leaf strings and object keys that contain charset-forbidden characters
+        // (`"`, `\`, tab, CR, control bytes) are stripped so the payload always
+        // passes validate_charset, never silently rejected.
+        assert_eq!(format_arg_value(&json!("a\"b\\c\td")), "abcd");
+        let object = format_arg_value(&json!({"a\"b": "x\\y"}));
+        assert!(
+            !object.contains('"') && !object.contains('\\'),
+            "object keys and values must be sanitized: {object}"
+        );
+        assert!(
+            object.contains("ab:xy"),
+            "expected sanitized key:value, got: {object}"
+        );
+    }
+
+    #[test]
     fn test_real_swap_matches_pre286_field_structure() {
         // Real `swap` instruction bytes from a mainnet DFlow tx.
         //
@@ -421,18 +453,31 @@ mod tests {
         let parsed = parse_instruction_with_idl(&data, DFLOW_AGGREGATOR_PROGRAM_ID, idl).unwrap();
 
         // Same field structure as pre-#286: exactly one top-level arg -> one field.
-        let keys: Vec<&str> = parsed.program_call_args.keys().map(String::as_str).collect();
+        let keys: Vec<&str> = parsed
+            .program_call_args
+            .keys()
+            .map(String::as_str)
+            .collect();
         assert_eq!(keys, vec!["params"]);
 
         let value = parsed.program_call_args.get("params").unwrap();
         let now = format_arg_value(value);
 
         // Charset-safe (the pre-#286 compact JSON would fail validate_charset).
-        assert!(!now.contains('"') && !now.contains('\\'), "not charset-safe: {now}");
+        assert!(
+            !now.contains('"') && !now.contains('\\'),
+            "not charset-safe: {now}"
+        );
         // Same data as pre-#286, re-encoded: scalars verbatim, byte array as hex,
         // and crucially NOT exploded into a per-byte number list.
-        assert!(now.contains("id:0x2daaa2dfe9ae6201"), "byte id not hex-encoded: {now}");
-        assert!(!now.contains("[45,170,162"), "byte id leaked as number list: {now}");
+        assert!(
+            now.contains("id:0x2daaa2dfe9ae6201"),
+            "byte id not hex-encoded: {now}"
+        );
+        assert!(
+            !now.contains("[45,170,162"),
+            "byte id leaked as number list: {now}"
+        );
         assert!(
             now.contains("quoted_out_amount:68980730")
                 && now.contains("slippage_bps:20")
