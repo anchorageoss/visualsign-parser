@@ -8,3 +8,13 @@
   - changed-files:
       - any-glob-to-any-file:
           - 'src/chain_parsers/visualsign-tron/**'
+
+"chain:ethereum":
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/chain_parsers/visualsign-ethereum/**'
+
+"chain:sui":
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/chain_parsers/visualsign-sui/**'
