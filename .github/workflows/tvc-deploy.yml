@@ -55,9 +55,10 @@ concurrency:
   group: tvc-deploy-${{ github.ref }}
   cancel-in-progress: false
 
-# The deploy job only reads the repo and uses secrets; no write scope needed.
+# Reads the repo + secrets, and pulls the smoke-test container from GHCR.
 permissions:
   contents: read
+  packages: read
 
 jobs:
   deploy:
@@ -112,6 +113,30 @@ jobs:
             --host-ip "$HOST_IP" \
             --host-port "$HOST_PORT"
 
-      - name: Scrub seed
+      # Post-deploy smoke: verify the live dev parse endpoint (/visualsign-dev)
+      # renders a V0+ALT transaction, via the published turnkey-client container.
+      # The parse API key is reconstructed from the same TVC_API_KEY_* secrets.
+      # NOTE: requires the turnkey-client image on GHCR (visualsign-turnkeyclient
+      # docker.yml / #23); until that's published this step can't pull the image.
+      - name: Smoke (dev parse endpoint)
+        if: success()
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TVC_API_KEY_PUBLIC: ${{ secrets.TVC_API_KEY_PUBLIC }}
+          TVC_API_KEY_PRIVATE: ${{ secrets.TVC_API_KEY_PRIVATE }}
+          VSP_SMOKE_ORG: ${{ secrets.TVC_ORG_ID }}
+          # The app wired to the /visualsign-dev endpoint (asserted as enclaveApp).
+          VSP_SMOKE_APP: e349edd8-2a25-4083-922d-592ebded9acf
+        run: |
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          umask 077
+          mkdir -p "$HOME/.config/turnkey/keys"
+          printf '%s' "$TVC_API_KEY_PUBLIC"       > "$HOME/.config/turnkey/keys/dev.public"
+          printf '%s:p256' "$TVC_API_KEY_PRIVATE" > "$HOME/.config/turnkey/keys/dev.private"
+          ./scripts/smoke.sh
+
+      - name: Scrub secrets
         if: always()
-        run: shred -u "$RUNNER_TEMP/operator.seed" 2>/dev/null || rm -f "$RUNNER_TEMP/operator.seed"
+        run: |
+          shred -u "$RUNNER_TEMP/operator.seed" 2>/dev/null || rm -f "$RUNNER_TEMP/operator.seed"
+          rm -rf "$HOME/.config/turnkey/keys"
