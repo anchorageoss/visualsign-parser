@@ -1,0 +1,10 @@
+"chain:solana":
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/chain_parsers/visualsign-solana/**'
+          - 'src/solana_test_utils/**'
+
+"chain:tron":
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/chain_parsers/visualsign-tron/**'

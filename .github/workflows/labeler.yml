@@ -1,0 +1,16 @@
+name: Labeler
+
+on:
+  pull_request_target:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    name: Label PRs by changed paths
+    runs-on: ubuntu-latest
+    steps:
+      # actions/labeler@v5.0.0
+      - uses: actions/labeler@8558fd74291d67161a8a78ce36a881fa63b766a9
