@@ -15,11 +15,12 @@
 //! this binary owns config assembly, the image-digest safety gate, and polling.
 
 use std::collections::HashMap;
-use std::fs::OpenOptions;
+use std::fs::{OpenOptions, Permissions};
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -107,6 +108,10 @@ fn write_secret_file(path: &Path, contents: &str) -> Result<()> {
         .mode(0o600)
         .open(path)
         .with_context(|| format!("open {}", path.display()))?;
+    // mode() only applies when the file is newly created; force 0600 in case it
+    // pre-existed with broader perms, so the secret is never world-readable.
+    f.set_permissions(Permissions::from_mode(0o600))
+        .with_context(|| format!("chmod {}", path.display()))?;
     f.write_all(contents.as_bytes())
         .with_context(|| format!("write {}", path.display()))
 }
@@ -197,14 +202,18 @@ fn verify_image_digest(sh: &Shell, image: &str, expected: &str) -> Result<()> {
     let cid = cid.trim().to_owned();
     let bin = temp_path("parser_app", "bin");
     let target = format!("{cid}:/parser_app");
-    let cp = cmd!(sh, "docker cp {target} {bin}")
-        .run()
-        .context("docker cp /parser_app");
+    // Extract + hash the pivot binary, then ALWAYS clean up the container and the
+    // temp file regardless of where this fails (no leftover binary on error).
+    let hashed = (|| -> Result<String> {
+        cmd!(sh, "docker cp {target} {bin}")
+            .run()
+            .context("docker cp /parser_app")?;
+        let sha = cmd!(sh, "sha256sum {bin}").read().context("sha256sum")?;
+        Ok(sha.split_whitespace().next().unwrap_or_default().to_owned())
+    })();
     let _ = cmd!(sh, "docker rm {cid}").ignore_status().quiet().run();
-    cp?;
-    let sha = cmd!(sh, "sha256sum {bin}").read().context("sha256sum")?;
     let _ = std::fs::remove_file(&bin);
-    let actual = sha.split_whitespace().next().unwrap_or_default();
+    let actual = hashed?;
     if !actual.eq_ignore_ascii_case(expected) {
         bail!(
             "DIGEST GATE FAILED: image /parser_app sha256 {actual} != expected {expected}; refusing to deploy"
@@ -333,9 +342,16 @@ fn parse_after(haystack: &str, marker: &str) -> Option<String> {
 }
 
 fn temp_path(prefix: &str, ext: &str) -> PathBuf {
+    // PID + timestamp + a per-process counter so repeated calls within one clock
+    // tick can't collide (the timestamp alone is coarse on some VMs).
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    std::env::temp_dir().join(format!("{prefix}-{}-{nanos}.{ext}", std::process::id()))
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "{prefix}-{}-{nanos}-{seq}.{ext}",
+        std::process::id()
+    ))
 }
