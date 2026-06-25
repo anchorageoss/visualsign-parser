@@ -190,7 +190,15 @@ mod tests {
     fn test_{snake_name}_idl_loads() { /* IDL loads and has instructions */ }
 
     #[test]
-    fn test_{snake_name}_idl_has_discriminators() { /* every instruction has 8-byte discriminator */ }
+    fn test_{snake_name}_idl_has_discriminators() {
+        // IdlInstruction.discriminator is Option<Vec<u8>>
+        let idl_json = include_str!("{snake_name}.json");
+        let idl: Idl = serde_json::from_str(idl_json).unwrap();
+        for ix in &idl.instructions {
+            let len = ix.discriminator.as_ref().map(Vec::len).unwrap_or(0);
+            assert_eq!(len, 8, "instruction {} missing 8-byte discriminator", ix.name);
+        }
+    }
 
     #[test]
     fn test_unknown_discriminator_returns_error() { /* garbage 9-byte data returns error */ }
@@ -200,13 +208,11 @@ mod tests {
 }
 ```
 
-## Step D: Register in presets/mod.rs
+## Step D: Registration
 
-Add `pub mod {snake_name};` to
-`src/chain_parsers/visualsign-solana/src/presets/mod.rs`, maintaining alphabetical
-order.
-
-No other registration needed — `build.rs` auto-discovers `{PascalName}Visualizer`.
+No manual registration needed. `build.rs` auto-discovers `{PascalName}Visualizer`
+from any directory under `src/presets/` — do not edit `presets/mod.rs`, it is
+generated.
 
 ## Step E: Code Quality
 
