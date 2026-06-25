@@ -92,7 +92,7 @@ The IDL **must** have an `instructions` array. Stop and report if missing.
 ```rust
 use super::{SCREAMING_SNAKE}_PROGRAM_ID;
 use crate::core::{SolanaIntegrationConfig, SolanaIntegrationConfigData};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub struct {PascalName}Config;
 
@@ -102,8 +102,8 @@ impl SolanaIntegrationConfig for {PascalName}Config {
     fn data(&self) -> &SolanaIntegrationConfigData {
         static DATA: std::sync::OnceLock<SolanaIntegrationConfigData> = std::sync::OnceLock::new();
         DATA.get_or_init(|| {
-            let mut programs = HashMap::new();
-            let mut instructions = HashMap::new();
+            let mut programs = BTreeMap::new();
+            let mut instructions = BTreeMap::new();
             instructions.insert("*", vec!["*"]);
             programs.insert({SCREAMING_SNAKE}_PROGRAM_ID, instructions);
             SolanaIntegrationConfigData { programs }
@@ -132,7 +132,8 @@ let data = context.data();
 **Required imports** (at top of module, NOT inside functions):
 ```rust
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    format_arg_value, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::{PascalName}Config;
 use solana_parser::{
@@ -150,69 +151,23 @@ use visualsign::{
 
 `BTreeMap` (not `HashMap`) — keeps named-account order deterministic.
 
-### Required: arg rendering helpers
+### Arg rendering: import from crate::core
 
-Every preset **must** include these three helpers. They solve two constraints that
-apply to all programs, not just this one:
+`format_arg_value` is already included via the import above. Do **not** copy the
+function body into the preset — the implementation lives in
+`src/chain_parsers/visualsign-solana/src/core/arg_rendering.rs`.
+
+It enforces two constraints that apply to every program:
 
 **Constraint 1 — charset safety.** `SignablePayload::validate_charset` rejects `"`
-and `\`. Compact JSON of any object contains quoted keys, which serialize to `\"`
-and fail validation. Arg values must never emit `"` or `\`.
+and `\`. Compact JSON of any object emits `\"` for keys and fails validation.
+`format_arg_value` never emits `"` or `\`.
 
-**Constraint 2 — field explosion.** Recursing into nested structs/arrays produces
-one field per leaf. A `[u8; 32]` seed or a 76-byte opaque ID becomes 32 or 76
-per-byte fields, burying the meaningful human-readable arguments.
+**Constraint 2 — field explosion.** A `[u8; 32]` seed or 76-byte opaque ID would
+produce 32 or 76 per-byte fields if recursed into. `format_arg_value` collapses
+all-byte arrays into a single `0x`-prefixed hex string.
 
-```rust
-/// Renders one top-level program-call argument as a single field value.
-/// Objects/arrays: quote-free (no `"` or `\`), JSON-like.
-/// All-byte arrays (every element 0–255): `0x`-prefixed hex string.
-fn format_arg_value(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => charset_safe(s),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Null => "null".to_string(),
-        serde_json::Value::Array(items) => {
-            if let Some(hex) = bytes_as_hex(items) {
-                hex
-            } else {
-                let inner: Vec<String> = items.iter().map(format_arg_value).collect();
-                format!("[{}]", inner.join(","))
-            }
-        }
-        serde_json::Value::Object(map) => {
-            let inner: Vec<String> = map
-                .iter()
-                .map(|(k, v)| format!("{}:{}", charset_safe(k), format_arg_value(v)))
-                .collect();
-            format!("{{{}}}", inner.join(","))
-        }
-    }
-}
-
-/// Strips `"`, `\`, control chars, and non-ASCII from strings/keys so the
-/// charset-safe contract holds even for unexpected arg values.
-fn charset_safe(text: &str) -> String {
-    text.chars()
-        .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '"' && c != '\\'))
-        .collect()
-}
-
-/// Returns `Some(0x…)` if every element is an integer in 0–255; `None` otherwise.
-/// Empty arrays return `None` (caller falls back to bracketed list).
-fn bytes_as_hex(items: &[serde_json::Value]) -> Option<String> {
-    if items.is_empty() { return None; }
-    let mut bytes = Vec::with_capacity(items.len());
-    for item in items {
-        let byte = item.as_u64().filter(|n| *n <= u8::MAX as u64)? as u8;
-        bytes.push(byte);
-    }
-    Some(format!("0x{}", hex::encode(bytes)))
-}
-```
-
-Use `format_arg_value` in `build_parsed_fields` for every program-call arg:
+Use it in `build_parsed_fields` for every program-call arg:
 ```rust
 for (key, value) in &parsed.program_call_args {
     condensed_fields.push(create_text_field(key, &format_arg_value(value))?);
@@ -242,24 +197,6 @@ mod tests {
 
     #[test]
     fn test_short_data_returns_error() { /* 3-byte data returns error */ }
-
-    #[test]
-    fn test_format_arg_value_is_charset_safe() {
-        // No `"` or `\` in output for any input shape
-        let nested = serde_json::json!({"key": "val\"ue", "arr": [1u8, 2, 3]});
-        let rendered = format_arg_value(&nested);
-        assert!(!rendered.contains('"') && !rendered.contains('\\'));
-    }
-
-    #[test]
-    fn test_format_arg_value_no_field_explosion() {
-        // A 32-element byte array becomes one hex string, not 32 fields
-        let bytes: Vec<u8> = (0..32).collect();
-        let val = serde_json::json!(bytes);
-        let rendered = format_arg_value(&val);
-        assert!(rendered.starts_with("0x"), "byte array should be hex: {rendered}");
-        assert!(!rendered.contains(','), "byte array must not expand to list: {rendered}");
-    }
 }
 ```
 
