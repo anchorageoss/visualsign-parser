@@ -95,7 +95,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [ "${{ steps.surfpool.outcome }}" = "failure" ]; then
-            gh pr edit "$PR_NUMBER" --add-label surfpool-failure || true
+            gh pr edit "$PR_NUMBER" --add-label test:surfpool-failure || true
           else
-            gh pr edit "$PR_NUMBER" --remove-label surfpool-failure || true
+            gh pr edit "$PR_NUMBER" --remove-label test:surfpool-failure || true
           fi
