@@ -6,6 +6,7 @@ use crate::core::{
     InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
     VisualizerKind,
 };
+use crate::core::format_arg_value;
 use config::KaminoLimitConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
@@ -214,13 +215,6 @@ fn append_raw_data(
 ) -> Result<(), VisualSignError> {
     fields.push(create_raw_data_field(data, Some(hex::encode(data)))?);
     Ok(())
-}
-
-fn format_arg_value(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
 }
 
 #[cfg(test)]

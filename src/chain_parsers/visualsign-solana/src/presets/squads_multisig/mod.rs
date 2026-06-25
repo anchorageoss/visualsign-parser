@@ -6,6 +6,7 @@ use crate::core::{
     InstructionVisualizer, MAX_CALL_DEPTH, SolanaIntegrationConfig, VisualizerContext,
     VisualizerKind, available_visualizers, visualize_with_any,
 };
+use crate::core::format_arg_value;
 use config::SquadsMultisigConfig;
 use solana_parser::solana::structs::SolanaAccount;
 use solana_parser::{
@@ -640,16 +641,6 @@ fn append_raw_data(
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     fields.push(create_raw_data_field(data, Some(hex_str.to_string()))?);
     Ok(fields)
-}
-
-fn format_arg_value(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Null => "null".to_string(),
-        other => other.to_string(),
-    }
 }
 
 #[cfg(test)]

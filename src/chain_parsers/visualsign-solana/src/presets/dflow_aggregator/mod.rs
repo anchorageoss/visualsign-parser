@@ -6,6 +6,7 @@ use crate::core::{
     InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
     VisualizerKind,
 };
+use crate::core::format_arg_value;
 use config::DflowAggregatorConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
@@ -244,57 +245,6 @@ fn build_fallback_fields(
 /// This is a deliberately type-agnostic stopgap. A DFlow-aware renderer that
 /// understands the IDL types (Action enum, RecordId, DynamicRoute, ...) and
 /// presents proper nested fields is intended to stack on top of this.
-fn format_arg_value(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => charset_safe(s),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Null => "null".to_string(),
-        serde_json::Value::Array(items) => {
-            if let Some(hex) = bytes_as_hex(items) {
-                hex
-            } else {
-                let inner: Vec<String> = items.iter().map(format_arg_value).collect();
-                format!("[{}]", inner.join(","))
-            }
-        }
-        serde_json::Value::Object(map) => {
-            let inner: Vec<String> = map
-                .iter()
-                .map(|(k, v)| format!("{}:{}", charset_safe(k), format_arg_value(v)))
-                .collect();
-            format!("{{{}}}", inner.join(","))
-        }
-    }
-}
-
-/// Drop characters from a leaf string/key that would otherwise force a forbidden
-/// JSON escape and make `SignablePayload::validate_charset` reject the payload:
-/// `"` and `\` (both ASCII-graphic, so excluded explicitly), plus tabs, carriage
-/// returns, other control bytes, and non-ASCII. Keeps printable ASCII + spaces.
-/// IDL strings here (pubkeys, enum names) are already clean; this is a defensive
-/// guard so the function's charset-safe contract always holds.
-fn charset_safe(text: &str) -> String {
-    text.chars()
-        .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '"' && c != '\\'))
-        .collect()
-}
-
-/// If every element is an integer in `0..=255`, render the array as a single
-/// `0x`-prefixed hex string. Returns `None` for empty or non-byte arrays so the
-/// caller falls back to a bracketed list.
-fn bytes_as_hex(items: &[serde_json::Value]) -> Option<String> {
-    if items.is_empty() {
-        return None;
-    }
-    let mut bytes = Vec::with_capacity(items.len());
-    for item in items {
-        let byte = item.as_u64().filter(|n| *n <= u8::MAX as u64)? as u8;
-        bytes.push(byte);
-    }
-    Some(format!("0x{}", hex::encode(bytes)))
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
