@@ -118,22 +118,28 @@ Use `src/chain_parsers/visualsign-solana/src/presets/dflow_aggregator/mod.rs` as
 structural template. Make these substitutions:
 - `DflowAggregator` / `dflow_aggregator` / `DFLOW_AGGREGATOR` → appropriate casing
 - Program ID string → {PROGRAM_ID}
-- `"DFlow Aggregator"` display strings → `{display_name}`
+- `"DFlow Aggregator"` display strings → the constant `{SCREAMING_SNAKE}_DISPLAY_NAME` (define it once as `const {SCREAMING_SNAKE}_DISPLAY_NAME: &str = "{display_name}";`)
 - `include_str!("dflow_aggregator.json")` → `include_str!("{snake_name}.json")`
 - `kind()` → returns `{VisualizerKind}("{display_name}")`
 
-**Wire-data context API** — at the top of `visualize_tx_commands`:
+**Account resolution** — use `InstructionView`, not `resolve_accounts()`:
 ```rust
-let program_id = context.resolve_program_id()?.to_string();
-let accounts = context.resolve_accounts()?;
+let view = InstructionView::from_context(context);
 let data = context.data();
 ```
+
+`InstructionView::from_context` is infallible and degrades gracefully on v0+ALT
+transactions (unresolvable account indices become empty strings rather than
+aborting). `context.resolve_accounts()?` aborts on those — do not use it for IDL
+presets. Use `view.program_id` for the program ID string and `view.accounts` (a
+`Vec<String>`) wherever account pubkeys are needed. Inner helpers take
+`accounts: &[String]`.
 
 **Required imports** (at top of module, NOT inside functions):
 ```rust
 use crate::core::{
-    format_arg_value, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    format_arg_value, InstructionView, InstructionVisualizer, SolanaIntegrationConfig,
+    VisualizerContext, VisualizerKind,
 };
 use config::{PascalName}Config;
 use solana_parser::{
