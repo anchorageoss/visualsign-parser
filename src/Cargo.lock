@@ -6545,10 +6545,13 @@ dependencies = [
 name = "parser_cli"
 version = "0.1.0"
 dependencies = [
+ "axum 0.8.8",
  "clap",
  "parser_cli_core",
+ "serde",
  "serde_json",
  "similar",
+ "tokio",
  "tracing",
  "tracing-bunyan-formatter",
  "tracing-log 0.2.0",
