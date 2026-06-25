@@ -22,9 +22,9 @@ jobs:
     #    would be empty and `gh pr edit` would lack write permissions.
     if: |
       (
-        (github.event.action == 'labeled' && github.event.label.name == 'surfpool')
+        (github.event.action == 'labeled' && github.event.label.name == 'test:surfpool')
         ||
-        (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'surfpool'))
+        (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'test:surfpool'))
       )
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest-4-cores

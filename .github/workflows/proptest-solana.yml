@@ -6,7 +6,7 @@ on:
 
 jobs:
   proptest:
-    if: contains(github.event.pull_request.labels.*.name, 'proptest')
+    if: contains(github.event.pull_request.labels.*.name, 'test:proptest')
     runs-on: ubuntu-latest-4-cores
     permissions:
       pull-requests: write
