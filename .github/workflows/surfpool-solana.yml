@@ -14,9 +14,9 @@ env:
 jobs:
   surfpool:
     # Two guards:
-    # 1. On `labeled` events only run when the label being added is `surfpool`.
-    #    Without this, the workflow's own `surfpool-failure` add (and any other
-    #    label change on a PR that happens to already carry `surfpool`) would
+    # 1. On `labeled` events only run when the label being added is `test:surfpool`.
+    #    Without this, the workflow's own `test:surfpool-failure` add (and any other
+    #    label change on a PR that happens to already carry `test:surfpool`) would
     #    re-fire the workflow.
     # 2. Skip fork PRs: secrets aren't passed across forks, so HELIUS_API_KEY
     #    would be empty and `gh pr edit` would lack write permissions.
