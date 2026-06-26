@@ -217,11 +217,11 @@ Tests are triggered by adding labels to a PR:
 
 | Label | Workflow | What runs |
 |-------|----------|-----------|
-| `proptest` | `proptest.yml` | `cargo test -p visualsign-solana` |
-| `fuzz` | `fuzz.yml` | Both libFuzzer targets for 30 seconds each |
+| `test:proptest` | `proptest-solana.yml` | `cargo test -p visualsign-solana` |
+| `test:fuzz` | `fuzz-solana.yml` | Both libFuzzer targets for 30 seconds each |
 | `ci` | `main.yml` | Full build, lint, and test suite |
 
-If a fuzz target crashes, the `fuzz-failure` label is added to the PR. If a proptest fails, the `proptest-failure` label is added. These labels are removed automatically on a clean run.
+If a fuzz target crashes, the `test:fuzz-failure` label is added to the PR. If a proptest fails, the `test:proptest-failure` label is added. These labels are removed automatically on a clean run.
 
 ## End-to-end format chain with test coverage
 
