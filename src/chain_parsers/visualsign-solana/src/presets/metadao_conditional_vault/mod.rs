@@ -4,7 +4,7 @@ mod config;
 
 use crate::core::{
     InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    VisualizerKind, format_arg_value,
 };
 use config::MetadaoConditionalVaultConfig;
 use solana_parser::{
@@ -88,14 +88,6 @@ fn build_named_accounts(
         }
     }
     named
-}
-
-fn format_arg_value(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Null => "null".to_string(),
-        _ => value.to_string(),
-    }
 }
 
 fn build_visualization(

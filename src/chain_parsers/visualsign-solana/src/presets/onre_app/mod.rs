@@ -4,7 +4,7 @@ mod config;
 
 use crate::core::{
     InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    VisualizerKind, format_arg_value,
 };
 use config::OnreAppConfig;
 use solana_parser::{
@@ -169,7 +169,7 @@ fn build_parsed_fields(
     condensed_fields.push(create_text_field("Program", "Onre App")?);
     condensed_fields.push(create_text_field("Instruction", instruction_name)?);
     for (key, value) in &parsed.program_call_args {
-        push_arg_fields(&mut condensed_fields, key, value)?;
+        condensed_fields.push(create_text_field(key, &format_arg_value(value))?);
     }
 
     expanded_fields.push(create_text_field("Program", "Onre App")?);
@@ -189,7 +189,7 @@ fn build_parsed_fields(
     }
 
     for (key, value) in &parsed.program_call_args {
-        push_arg_fields(&mut expanded_fields, key, value)?;
+        expanded_fields.push(create_text_field(key, &format_arg_value(value))?);
     }
 
     Ok((title, condensed_fields, expanded_fields))
@@ -220,53 +220,11 @@ fn build_fallback_fields(
     Ok((title, condensed_fields, expanded_fields))
 }
 
-fn push_arg_fields(
-    fields: &mut Vec<AnnotatedPayloadField>,
-    key: &str,
-    value: &serde_json::Value,
-) -> Result<(), VisualSignError> {
-    match value {
-        serde_json::Value::Object(map) => {
-            if map.is_empty() {
-                fields.push(create_text_field(key, "{}")?);
-            } else {
-                for (sub_key, sub_value) in map {
-                    let label = format!("{key}.{sub_key}");
-                    push_arg_fields(fields, &label, sub_value)?;
-                }
-            }
-        }
-        serde_json::Value::Array(items) => {
-            if items.is_empty() {
-                fields.push(create_text_field(key, "[]")?);
-            } else {
-                for (i, item) in items.iter().enumerate() {
-                    let label = format!("{key}[{i}]");
-                    push_arg_fields(fields, &label, item)?;
-                }
-            }
-        }
-        serde_json::Value::String(s) => {
-            fields.push(create_text_field(key, s)?);
-        }
-        serde_json::Value::Number(n) => {
-            fields.push(create_text_field(key, &n.to_string())?);
-        }
-        serde_json::Value::Bool(b) => {
-            fields.push(create_text_field(key, &b.to_string())?);
-        }
-        serde_json::Value::Null => {
-            fields.push(create_text_field(key, "null")?);
-        }
-    }
-    Ok(())
-}
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use solana_parser::IdlSource;
 
     fn dummy_account_strings(n: usize) -> Vec<String> {
@@ -324,80 +282,6 @@ mod tests {
         let accounts = dummy_account_strings(0);
         let result = parse_onre_app_instruction(&short_data, &accounts);
         assert!(result.is_err(), "Short data should return error");
-    }
-
-    #[test]
-    fn test_push_arg_fields_renders_scalars() {
-        let mut fields = Vec::new();
-        push_arg_fields(&mut fields, "s", &json!("hello")).unwrap();
-        push_arg_fields(&mut fields, "n", &json!(42)).unwrap();
-        push_arg_fields(&mut fields, "b", &json!(true)).unwrap();
-        push_arg_fields(&mut fields, "z", &serde_json::Value::Null).unwrap();
-
-        assert_eq!(
-            fields
-                .iter()
-                .map(field_label_value)
-                .collect::<Vec<(String, String)>>(),
-            vec![
-                ("s".to_string(), "hello".to_string()),
-                ("n".to_string(), "42".to_string()),
-                ("b".to_string(), "true".to_string()),
-                ("z".to_string(), "null".to_string()),
-            ]
-        );
-    }
-
-    #[test]
-    fn test_push_arg_fields_recurses_into_array_with_indexed_labels() {
-        let mut fields = Vec::new();
-        push_arg_fields(&mut fields, "actions", &json!(["a", "b", "c"])).unwrap();
-        let pairs: Vec<(String, String)> = fields.iter().map(field_label_value).collect();
-        assert_eq!(
-            pairs,
-            vec![
-                ("actions[0]".to_string(), "a".to_string()),
-                ("actions[1]".to_string(), "b".to_string()),
-                ("actions[2]".to_string(), "c".to_string()),
-            ]
-        );
-    }
-
-    #[test]
-    fn test_push_arg_fields_recurses_into_object_with_dotted_labels() {
-        let mut fields = Vec::new();
-        push_arg_fields(
-            &mut fields,
-            "params",
-            &json!({"amount": 100, "side": "buy"}),
-        )
-        .unwrap();
-        let pairs: std::collections::BTreeSet<(String, String)> =
-            fields.iter().map(field_label_value).collect();
-        let expected: std::collections::BTreeSet<(String, String)> = [
-            ("params.amount".to_string(), "100".to_string()),
-            ("params.side".to_string(), "buy".to_string()),
-        ]
-        .into_iter()
-        .collect();
-        assert_eq!(pairs, expected);
-    }
-
-    #[test]
-    fn test_push_arg_fields_renders_empty_collections() {
-        let mut fields = Vec::new();
-        push_arg_fields(&mut fields, "empty_arr", &json!([])).unwrap();
-        push_arg_fields(&mut fields, "empty_obj", &json!({})).unwrap();
-        assert_eq!(
-            fields
-                .iter()
-                .map(field_label_value)
-                .collect::<Vec<(String, String)>>(),
-            vec![
-                ("empty_arr".to_string(), "[]".to_string()),
-                ("empty_obj".to_string(), "{}".to_string()),
-            ]
-        );
     }
 
     #[test]

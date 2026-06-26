@@ -8,7 +8,7 @@ mod config;
 
 use crate::core::{
     InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    VisualizerKind, format_arg_value,
 };
 use config::MeteoraDlmmConfig;
 use solana_parser::{
@@ -195,12 +195,6 @@ fn build_expanded_fields(
     Ok(fields)
 }
 
-fn format_arg_value(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
-}
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
