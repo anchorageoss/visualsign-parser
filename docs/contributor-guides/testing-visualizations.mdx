@@ -219,9 +219,13 @@ Tests are triggered by adding labels to a PR:
 |-------|----------|-----------|
 | `test:proptest` | `proptest-solana.yml` | `cargo test -p visualsign-solana` |
 | `test:fuzz` | `fuzz-solana.yml` | Both libFuzzer targets for 30 seconds each |
+| `test:surfpool` | `surfpool-solana.yml` | `scripts/surfpool_fuzz_all_idls.sh` against all embedded IDLs |
+| `ci:stagex` | `stagex.yml` | Hermetic stagex OCI image builds |
 | `ci` | `main.yml` | Full build, lint, and test suite |
 
-If a fuzz target crashes, the `test:fuzz-failure` label is added to the PR. If a proptest fails, the `test:proptest-failure` label is added. These labels are removed automatically on a clean run.
+`test:` labels gate test runs; `ci:` labels gate the build/image pipeline.
+
+When a run fails, the workflow adds an outcome label to the PR: `test:fuzz-failure` if a fuzz target crashes, `test:proptest-failure` if a proptest fails, and `test:surfpool-failure` if a surfpool run fails. These labels are removed automatically on a clean run.
 
 ## End-to-end format chain with test coverage
 
