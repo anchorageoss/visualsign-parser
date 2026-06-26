@@ -8,6 +8,18 @@ user-invocable: true
 
 You are orchestrating the scaffolding of a new Solana program visualizer preset.
 
+## Scope: bootstrap only
+
+This skill scaffolds a **new** preset from zero to a working, registered, charset-safe
+baseline. It is a one-time bootstrap, not a repeatable regenerator: once a preset exists,
+it is owned by humans/PRs and may diverge from this skill's output through hand
+customization (e.g. program-specific nested rendering). Do **not** re-run this skill over a
+preset that already exists — regeneration is destructive to that customization. If the
+target `presets/<snake_name>/` directory is already present, stop and tell the user rather
+than overwriting it. Program-agnostic improvements belong in `crate::core` (e.g.
+`core::arg_rendering`) so every future scaffold inherits them; program-specific work stays
+in the individual preset.
+
 ## Mode Selection
 
 - **Standard** (`/solana-add-idl`): gather inputs, dispatch one Sonnet subagent to scaffold the preset
