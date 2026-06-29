@@ -224,11 +224,14 @@ fn do_deploy(ops: &impl TvcOps, flags: &HashMap<String, String>) -> Result<()> {
     let seed = resolve_seed_file(flags)?;
     let deploy_id = initiate(ops, flags)?;
     let seed_path = seed.as_ref().map(|(p, _)| p.as_path());
-    ops.approve(&deploy_id, operator_id, seed_path)?;
-    println!("approved manifest for {deploy_id}");
+    // Approve, then ALWAYS clean up an env-sourced seed temp file -- even if
+    // approve failed -- before propagating, so the operator seed never leaks.
+    let approved = ops.approve(&deploy_id, operator_id, seed_path);
     if let Some((path, true)) = &seed {
         let _ = std::fs::remove_file(path);
     }
+    approved?;
+    println!("approved manifest for {deploy_id}");
     ops.poll_health(app_id, &deploy_id, POLL_TIMEOUT)?;
     ops.set_live(&deploy_id, SETLIVE_TIMEOUT)?;
     println!("deployment {deploy_id} is healthy and live");
@@ -516,5 +519,63 @@ mod tests {
         ]);
         assert!(initiate(&ops, &f).is_err());
         assert!(ops.calls.borrow().is_empty());
+    }
+
+    fn leftover_operator_seeds() -> usize {
+        std::fs::read_dir(std::env::temp_dir())
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter(|e| e.file_name().to_string_lossy().starts_with("tvc-operator-"))
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn deploy_cleans_env_seed_when_approve_fails() {
+        struct FailingApprove;
+        impl TvcOps for FailingApprove {
+            fn verify_image_digest(&self, _i: &str, _e: &str) -> Result<()> {
+                Ok(())
+            }
+            fn create(&self, _c: &Path) -> Result<String> {
+                Ok("deploy-1".into())
+            }
+            fn approve(&self, _d: &str, _o: &str, seed: Option<&Path>) -> Result<()> {
+                assert!(
+                    seed.map(Path::exists).unwrap_or(false),
+                    "seed must exist at approve"
+                );
+                bail!("approve boom")
+            }
+            fn poll_health(&self, _a: &str, _d: &str, _t: Duration) -> Result<()> {
+                panic!("poll_health must not run after approve failure")
+            }
+            fn set_live(&self, _d: &str, _t: Duration) -> Result<()> {
+                panic!("set_live must not run after approve failure")
+            }
+        }
+        let digest = "a".repeat(64);
+        let f = flags(&[
+            ("app-id", "app"),
+            ("image-url", "img"),
+            ("expected-digest", &digest),
+            ("operator-id", "op"),
+        ]);
+        let before = leftover_operator_seeds();
+        // SAFETY: this is the only test that touches this env var.
+        unsafe {
+            std::env::set_var("TVC_CI_OPERATOR_SEED", "00".repeat(32));
+        }
+        let result = do_deploy(&FailingApprove, &f);
+        unsafe {
+            std::env::remove_var("TVC_CI_OPERATOR_SEED");
+        }
+        assert!(result.is_err(), "approve failure should propagate");
+        assert_eq!(
+            before,
+            leftover_operator_seeds(),
+            "env-sourced seed leaked on approve failure"
+        );
     }
 }
