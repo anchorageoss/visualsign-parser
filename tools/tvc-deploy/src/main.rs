@@ -41,6 +41,8 @@ const USAGE: &str = "usage:\n  \
     [--qos-version v2026.2.6] [--host-ip 0.0.0.0] [--host-port 3000]\n  \
     tvc-deploy deploy --app-id <id> --image-url <url> --expected-digest <hex> --operator-id <id> \
     [--operator-seed <path>] [--qos-version v2026.2.6] [--host-ip 0.0.0.0] [--host-port 3000]\n  \
+    tvc-deploy approve --deploy-id <id> --operator-id <id> --image-url <url> --expected-digest <hex> \
+    [--operator-seed <path>]\n  \
     tvc-deploy promote --app-id <id> --deploy-id <id>\n  \
     (operator seed may instead come from env TVC_CI_OPERATOR_SEED, or be omitted \
     to approve with the logged-in org operator key)";
@@ -62,6 +64,7 @@ fn run() -> Result<()> {
         "gen-operator-key" => gen_operator_key(&flags),
         "initiate" => initiate(&RealTvc { sh: &sh }, &flags).map(|_| ()),
         "deploy" => do_deploy(&RealTvc { sh: &sh }, &flags),
+        "approve" => approve(&RealTvc { sh: &sh }, &flags),
         "promote" => promote(&RealTvc { sh: &sh }, &flags),
         other => bail!("unknown subcommand {other:?}\n{USAGE}"),
     }
@@ -237,6 +240,27 @@ fn do_deploy(ops: &impl TvcOps, flags: &HashMap<String, String>) -> Result<()> {
     ops.poll_health(app_id, &deploy_id, POLL_TIMEOUT)?;
     ops.set_live(&deploy_id, SETLIVE_TIMEOUT)?;
     println!("deployment {deploy_id} is healthy and live");
+    Ok(())
+}
+
+fn approve(ops: &impl TvcOps, flags: &HashMap<String, String>) -> Result<()> {
+    let deploy_id = req(flags, "deploy-id")?;
+    let operator_id = req(flags, "operator-id")?;
+    let image = req(flags, "image-url")?;
+    let digest = req(flags, "expected-digest")?;
+    validate_digest(digest)?;
+    ops.verify_image_digest(image, digest)?;
+    let seed = resolve_seed_file(flags)?;
+    let result = ops.approve(
+        deploy_id,
+        operator_id,
+        seed.as_ref().map(|(p, _)| p.as_path()),
+    );
+    if let Some((path, true)) = &seed {
+        let _ = std::fs::remove_file(path);
+    }
+    result?;
+    println!("approved manifest for {deploy_id}");
     Ok(())
 }
 
@@ -587,6 +611,26 @@ mod tests {
             before,
             leftover_operator_seeds(),
             "env-sourced seed leaked on approve failure"
+        );
+    }
+
+    #[test]
+    fn approve_reverifies_then_approves() {
+        let ops = RecordingTvc::default();
+        let f = flags(&[
+            ("deploy-id", "deploy-7"),
+            ("operator-id", "op"),
+            ("image-url", "img"),
+            (
+                "expected-digest",
+                "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+            ),
+            ("operator-seed", "/tmp/seed"),
+        ]);
+        approve(&ops, &f).unwrap();
+        assert_eq!(
+            *ops.calls.borrow(),
+            vec!["verify_image_digest", "approve:deploy-7"]
         );
     }
 
