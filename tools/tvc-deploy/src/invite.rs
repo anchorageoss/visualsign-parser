@@ -41,7 +41,7 @@ const ENV_API_KEY_PRIVATE: &str = "TVC_API_KEY_PRIVATE";
 /// `--org <alias-or-id>`: shared by every subcommand that talks to Turnkey.
 /// Accepts either the config alias (e.g. what `tvc login` calls the org) or
 /// the org's own UUID; falls back to the active org if omitted.
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct OrgArgs {
     /// Org alias from tvc.config.toml, or the org's own UUID; defaults to the active org
     #[arg(long)]
