@@ -10,11 +10,14 @@
 //!       Re-derive the pivot binary digest from the image and assert it matches
 //!       --expected-digest, then assemble tvc-deploy.json (gRPC health), create
 //!       the deployment, approve, poll until healthy, and set it live.
+//!       The operator seed resolves flag -> env TVC_CI_OPERATOR_SEED -> none; when
+//!       none is given, approval uses the logged-in org operator key (`tvc login`).
 //!
 //! All Turnkey API actions shell out to the `tvc` CLI (it owns auth/consensus);
 //! this binary owns config assembly, the image-digest safety gate, and polling.
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fs::{OpenOptions, Permissions};
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -36,7 +39,8 @@ const USAGE: &str = "usage:\n  \
     tvc-deploy gen-operator-key --out <path>\n  \
     tvc-deploy deploy --app-id <id> --image-url <url> --expected-digest <hex> --operator-id <id> \
     [--operator-seed <path>] [--qos-version v2026.2.6] [--host-ip 0.0.0.0] [--host-port 3000]\n  \
-    (operator seed may instead come from env TVC_CI_OPERATOR_SEED)";
+    (operator seed may instead come from env TVC_CI_OPERATOR_SEED, or be omitted \
+    to approve with the logged-in org operator key)";
 
 fn main() -> ExitCode {
     match run() {
@@ -141,7 +145,16 @@ fn deploy(sh: &Shell, flags: &HashMap<String, String>) -> Result<()> {
     // it matches --expected-digest, tying the submitted digest to the real binary.
     verify_image_digest(sh, image, digest)?;
 
-    let (seed_path, cleanup_seed) = resolve_seed_file(flags)?;
+    let seed = resolve_seed_file(flags)?;
+    // Pass --operator-seed only when we have one; otherwise tvc approves with the
+    // logged-in org operator key (the local `tvc login` path).
+    let seed_args: Vec<OsString> = match &seed {
+        Some((path, _)) => vec!["--operator-seed".into(), path.clone().into_os_string()],
+        None => {
+            println!("no operator seed provided; approving with the logged-in org operator key");
+            Vec::new()
+        }
+    };
     let cfg_path = temp_path("tvc-deploy", "json");
 
     // Everything that can fail after the seed file exists runs inside this
@@ -171,7 +184,7 @@ fn deploy(sh: &Shell, flags: &HashMap<String, String>) -> Result<()> {
             .with_context(|| format!("no deployment id in create output:\n{created}"))?;
         println!("created deployment {deploy_id}");
 
-        cmd!(sh, "tvc deploy approve --deploy-id {deploy_id} --operator-id {operator_id} --operator-seed {seed_path} --dangerous-skip-interactive")
+        cmd!(sh, "tvc deploy approve --deploy-id {deploy_id} --operator-id {operator_id} {seed_args...} --dangerous-skip-interactive")
             .run()
             .context("tvc deploy approve")?;
         println!("approved manifest for {deploy_id}");
@@ -183,8 +196,8 @@ fn deploy(sh: &Shell, flags: &HashMap<String, String>) -> Result<()> {
         Ok(deploy_id)
     })();
 
-    if cleanup_seed {
-        let _ = std::fs::remove_file(&seed_path);
+    if let Some((path, true)) = &seed {
+        let _ = std::fs::remove_file(path);
     }
     let _ = std::fs::remove_file(&cfg_path);
 
@@ -318,18 +331,23 @@ fn validate_digest(d: &str) -> Result<()> {
     }
 }
 
-/// Resolve the operator seed to a file path. Prefers `--operator-seed <path>`;
-/// otherwise reads the hex seed from env `TVC_CI_OPERATOR_SEED` into a temp 0600
-/// file (returning cleanup=true so the caller deletes it).
-fn resolve_seed_file(flags: &HashMap<String, String>) -> Result<(PathBuf, bool)> {
+/// Resolve the operator seed to a file path, returning `(path, cleanup)` or
+/// `None`. Prefers `--operator-seed <path>`; else reads the hex seed from env
+/// `TVC_CI_OPERATOR_SEED` into a temp 0600 file (cleanup=true so the caller
+/// deletes it); if neither is set, returns `None` and approval falls back to the
+/// logged-in org operator key.
+fn resolve_seed_file(flags: &HashMap<String, String>) -> Result<Option<(PathBuf, bool)>> {
     if let Some(p) = flags.get("operator-seed") {
-        return Ok((PathBuf::from(p), false));
+        return Ok(Some((PathBuf::from(p), false)));
     }
-    let seed = std::env::var("TVC_CI_OPERATOR_SEED")
-        .context("no --operator-seed and env TVC_CI_OPERATOR_SEED is unset")?;
-    let p = temp_path("tvc-operator", "seed");
-    write_secret_file(&p, seed.trim())?;
-    Ok((p, true))
+    match std::env::var("TVC_CI_OPERATOR_SEED") {
+        Ok(seed) => {
+            let p = temp_path("tvc-operator", "seed");
+            write_secret_file(&p, seed.trim())?;
+            Ok(Some((p, true)))
+        }
+        Err(_) => Ok(None),
+    }
 }
 
 /// Trimmed remainder of the first line containing `marker`.
