@@ -449,9 +449,12 @@ pub struct SignablePayloadFieldPreviewLayout {
     pub title: Option<SignablePayloadFieldTextV2>,
     #[serde(rename = "Subtitle", skip_serializing_if = "Option::is_none")]
     pub subtitle: Option<SignablePayloadFieldTextV2>,
-    #[serde(rename = "Condensed", skip_serializing_if = "Option::is_none")]
+    // No `skip_serializing_if`: the custom Serialize impl below always emits
+    // Condensed and Expanded (empty list when None) to satisfy the iOS decoder
+    // (PRS-548). Title/Subtitle remain conditionally emitted by that impl.
+    #[serde(rename = "Condensed")]
     pub condensed: Option<SignablePayloadFieldListLayout>,
-    #[serde(rename = "Expanded", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "Expanded")]
     pub expanded: Option<SignablePayloadFieldListLayout>,
 }
 
@@ -469,18 +472,24 @@ impl Serialize for SignablePayloadFieldPreviewLayout {
 
         // Add fields in alphabetical order (BTreeMap will maintain this)
         // Note: Order should be Condensed, Expanded, Subtitle, Title
-        if let Some(ref condensed) = self.condensed {
-            map.insert(
-                "Condensed",
-                serde_json::to_value(condensed).map_err(serde::ser::Error::custom)?,
-            );
-        }
-        if let Some(ref expanded) = self.expanded {
-            map.insert(
-                "Expanded",
-                serde_json::to_value(expanded).map_err(serde::ser::Error::custom)?,
-            );
-        }
+        //
+        // `Condensed` and `Expanded` are ALWAYS emitted, defaulting to an empty list
+        // when unset. The iOS VSP decoder (anchor-ios VisualSigningPayload.swift)
+        // declares both as non-optional `List`; omitting either makes its synthesized
+        // decoder throw keyNotFound and silently drop the whole preview to FallbackText
+        // (PRS-548). Filling an absent list with `{"Fields": []}` matches that contract
+        // without synthesizing display content (Title/Subtitle still carry the summary).
+        let empty_list = SignablePayloadFieldListLayout { fields: vec![] };
+        map.insert(
+            "Condensed",
+            serde_json::to_value(self.condensed.as_ref().unwrap_or(&empty_list))
+                .map_err(serde::ser::Error::custom)?,
+        );
+        map.insert(
+            "Expanded",
+            serde_json::to_value(self.expanded.as_ref().unwrap_or(&empty_list))
+                .map_err(serde::ser::Error::custom)?,
+        );
         if let Some(ref subtitle) = self.subtitle {
             map.insert(
                 "Subtitle",
@@ -2248,10 +2257,11 @@ mod tests {
         if let serde_json::Value::Object(map) = value2 {
             let keys: Vec<_> = map.keys().cloned().collect();
 
-            // Should only have Condensed and Title, still alphabetical
+            // Condensed and Expanded are always emitted (iOS requires them as
+            // non-optional, see PRS-548); Subtitle is omitted here. Still alphabetical.
             assert_eq!(
                 keys,
-                vec!["Condensed", "Title"],
+                vec!["Condensed", "Expanded", "Title"],
                 "Partial PreviewLayout fields should be in alphabetical order"
             );
         }
@@ -2288,6 +2298,40 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_preview_layout_always_emits_condensed_and_expanded() {
+        // The iOS VSP decoder (anchor-ios VisualSigningPayload.swift) declares
+        // PreviewLayout.condensed and PreviewLayout.expanded as NON-optional `List`.
+        // If either key is missing, the synthesized decoder throws keyNotFound and the
+        // whole preview_layout silently falls back to FallbackText (PRS-548). So both
+        // keys must always be serialized, even when the builder left them as `None`.
+        let empty_preview = SignablePayloadFieldPreviewLayout {
+            title: Some(SignablePayloadFieldTextV2 {
+                text: "Title".to_string(),
+            }),
+            subtitle: Some(SignablePayloadFieldTextV2 {
+                text: "Subtitle".to_string(),
+            }),
+            condensed: None,
+            expanded: None,
+        };
+
+        let value: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&empty_preview).unwrap()).unwrap();
+        let map = value.as_object().unwrap();
+
+        assert_eq!(
+            map.get("Condensed"),
+            Some(&serde_json::json!({ "Fields": [] })),
+            "Condensed must always be present (empty list when unset)"
+        );
+        assert_eq!(
+            map.get("Expanded"),
+            Some(&serde_json::json!({ "Fields": [] })),
+            "Expanded must always be present (empty list when unset)"
+        );
     }
 
     #[test]

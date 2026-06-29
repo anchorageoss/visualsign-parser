@@ -11,8 +11,8 @@
     {
       "AddressV2": {
         "Address": "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af",
-        "Name": "To",
-        "AssetLabel": "ETH"
+        "AssetLabel": "ETH",
+        "Name": "To"
       },
       "FallbackText": "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af",
       "Label": "To",
@@ -63,12 +63,21 @@
       "FallbackText": "Uniswap Universal Router Execute: 4 commands ([WrapEth, V2SwapExactIn, PayPortion, Sweep]), deadline 2025-07-24 21:15:28 UTC",
       "Label": "Universal Router",
       "PreviewLayout": {
+        "Condensed": {
+          "Fields": []
+        },
         "Expanded": {
           "Fields": [
             {
               "FallbackText": "Wrap >=0.005000000000000000 ETH to WETH",
               "Label": "Command 1",
               "PreviewLayout": {
+                "Condensed": {
+                  "Fields": []
+                },
+                "Expanded": {
+                  "Fields": []
+                },
                 "Subtitle": {
                   "Text": "Wrap >=0.005000000000000000 ETH to WETH"
                 },
@@ -82,6 +91,9 @@
               "FallbackText": "Swap 0.005000000000000000 WETH for >=0 0xb1137b9ce6db98312bc9dcb3a8a41eb3d212776f via V2 (1 hops)",
               "Label": "V2 Swap Exact In",
               "PreviewLayout": {
+                "Condensed": {
+                  "Fields": []
+                },
                 "Expanded": {
                   "Fields": [
                     {
@@ -139,6 +151,9 @@
               "FallbackText": "Pay 0.2500% of 0xb1137b9ce6db98312bc9dcb3a8a41eb3d212776f to 0x000000fee13a103A10D593b9AE06b3e05F2E7E1c",
               "Label": "Pay Portion",
               "PreviewLayout": {
+                "Condensed": {
+                  "Fields": []
+                },
                 "Expanded": {
                   "Fields": [
                     {
@@ -180,6 +195,12 @@
               "FallbackText": "Sweep >=15576608559435 0xb1137b9ce6db98312bc9dcb3a8a41eb3d212776f to 0x6b95d095598e1a080cb62e8ccd99dd64853f1b99",
               "Label": "Command 4",
               "PreviewLayout": {
+                "Condensed": {
+                  "Fields": []
+                },
+                "Expanded": {
+                  "Fields": []
+                },
                 "Subtitle": {
                   "Text": "Sweep >=15576608559435 0xb1137b9ce6db98312bc9dcb3a8a41eb3d212776f to 0x6b95d095598e1a080cb62e8ccd99dd64853f1b99"
                 },
