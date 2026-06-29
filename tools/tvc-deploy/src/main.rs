@@ -4,6 +4,10 @@
 //!   gen-operator-key --out <path>
 //!       Mint a qos_p256 operator key. Writes the 32-byte master seed (hex) to
 //!       <path> with mode 0600 and prints ONLY the public key hex to stdout.
+//!   initiate --app-id <id> --image-url <url> --expected-digest <hex>
+//!            [--qos-version v] [--host-ip 0.0.0.0] [--host-port 3000]
+//!       Run the image-digest gate and create the deployment, printing the
+//!       deployment ID. Does not approve or set-live (prod initiate step).
 //!   deploy --app-id <id> --image-url <url> --expected-digest <hex>
 //!          --operator-id <id> [--operator-seed <path>] [--qos-version v]
 //!          [--host-ip 0.0.0.0] [--host-port 3000]
@@ -12,6 +16,11 @@
 //!       the deployment, approve, poll until healthy, and set it live.
 //!       The operator seed resolves flag -> env TVC_CI_OPERATOR_SEED -> none; when
 //!       none is given, approval uses the logged-in org operator key (`tvc login`).
+//!   approve --deploy-id <id> --operator-id <id> --image-url <url>
+//!           --expected-digest <hex> [--operator-seed <path>]
+//!       Re-run the digest gate, then approve the manifest (operator step).
+//!   promote --app-id <id> --deploy-id <id>
+//!       Poll the deployment to healthy, then set it live (prod promote step).
 //!
 //! All Turnkey API actions shell out to the `tvc` CLI (it owns auth/consensus);
 //! this binary owns config assembly, the image-digest safety gate, and polling.
@@ -37,8 +46,13 @@ const SETLIVE_TIMEOUT: Duration = Duration::from_secs(300);
 
 const USAGE: &str = "usage:\n  \
     tvc-deploy gen-operator-key --out <path>\n  \
+    tvc-deploy initiate --app-id <id> --image-url <url> --expected-digest <hex> \
+    [--qos-version v2026.2.6] [--host-ip 0.0.0.0] [--host-port 3000]\n  \
     tvc-deploy deploy --app-id <id> --image-url <url> --expected-digest <hex> --operator-id <id> \
     [--operator-seed <path>] [--qos-version v2026.2.6] [--host-ip 0.0.0.0] [--host-port 3000]\n  \
+    tvc-deploy approve --deploy-id <id> --operator-id <id> --image-url <url> --expected-digest <hex> \
+    [--operator-seed <path>]\n  \
+    tvc-deploy promote --app-id <id> --deploy-id <id>\n  \
     (operator seed may instead come from env TVC_CI_OPERATOR_SEED, or be omitted \
     to approve with the logged-in org operator key)";
 
@@ -57,7 +71,10 @@ fn run() -> Result<()> {
     let sh = Shell::new()?;
     match subcmd.as_str() {
         "gen-operator-key" => gen_operator_key(&flags),
-        "deploy" => deploy(&sh, &flags),
+        "initiate" => initiate(&RealTvc { sh: &sh }, &flags).map(|_| ()),
+        "deploy" => do_deploy(&RealTvc { sh: &sh }, &flags),
+        "approve" => approve(&RealTvc { sh: &sh }, &flags),
+        "promote" => promote(&RealTvc { sh: &sh }, &flags),
         other => bail!("unknown subcommand {other:?}\n{USAGE}"),
     }
 }
@@ -90,6 +107,48 @@ fn req<'a>(flags: &'a HashMap<String, String>, key: &str) -> Result<&'a String> 
     flags.get(key).with_context(|| format!("missing --{key}"))
 }
 
+/// Trait abstracting all external TVC/Docker operations for testability.
+trait TvcOps {
+    fn verify_image_digest(&self, image: &str, expected: &str) -> Result<()>;
+    fn create(&self, cfg_path: &Path) -> Result<String>;
+    fn approve(&self, deploy_id: &str, operator_id: &str, seed: Option<&Path>) -> Result<()>;
+    fn poll_health(&self, app_id: &str, deploy_id: &str, timeout: Duration) -> Result<()>;
+    fn set_live(&self, deploy_id: &str, timeout: Duration) -> Result<()>;
+}
+
+struct RealTvc<'a> {
+    sh: &'a Shell,
+}
+
+impl TvcOps for RealTvc<'_> {
+    fn verify_image_digest(&self, image: &str, expected: &str) -> Result<()> {
+        verify_image_digest(self.sh, image, expected)
+    }
+    fn create(&self, cfg_path: &Path) -> Result<String> {
+        let created = cmd!(self.sh, "tvc deploy create --config-file {cfg_path}")
+            .read()
+            .context("tvc deploy create")?;
+        parse_after(&created, "Deployment ID:")
+            .with_context(|| format!("no deployment id in create output:\n{created}"))
+    }
+    fn approve(&self, deploy_id: &str, operator_id: &str, seed: Option<&Path>) -> Result<()> {
+        let mut seed_args: Vec<OsString> = Vec::new();
+        if let Some(p) = seed {
+            seed_args.push("--operator-seed".into());
+            seed_args.push(p.into());
+        }
+        cmd!(self.sh, "tvc deploy approve --deploy-id {deploy_id} --operator-id {operator_id} {seed_args...} --dangerous-skip-interactive")
+            .run()
+            .context("tvc deploy approve")
+    }
+    fn poll_health(&self, app_id: &str, deploy_id: &str, timeout: Duration) -> Result<()> {
+        poll_health(self.sh, app_id, deploy_id, timeout)
+    }
+    fn set_live(&self, deploy_id: &str, timeout: Duration) -> Result<()> {
+        set_live(self.sh, deploy_id, timeout)
+    }
+}
+
 fn gen_operator_key(flags: &HashMap<String, String>) -> Result<()> {
     let out = req(flags, "out")?;
     let pair = P256Pair::generate().map_err(|e| anyhow!("key generation failed: {e:?}"))?;
@@ -120,11 +179,32 @@ fn write_secret_file(path: &Path, contents: &str) -> Result<()> {
         .with_context(|| format!("write {}", path.display()))
 }
 
-fn deploy(sh: &Shell, flags: &HashMap<String, String>) -> Result<()> {
+fn build_deploy_config(
+    app_id: &str,
+    qos: &str,
+    image: &str,
+    host_ip: &str,
+    host_port: u16,
+    digest: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "appId": app_id,
+        "qosVersion": qos,
+        "pivotContainerImageUrl": image,
+        "pivotPath": "/parser_app",
+        "pivotArgs": ["--host-ip", host_ip, "--host-port", host_port.to_string()],
+        "expectedPivotDigest": digest,
+        "debugMode": false,
+        "healthCheckType": "TVC_HEALTH_CHECK_TYPE_GRPC",
+        "healthCheckPort": host_port,
+        "publicIngressPort": host_port,
+    })
+}
+
+fn initiate(ops: &impl TvcOps, flags: &HashMap<String, String>) -> Result<String> {
     let app_id = req(flags, "app-id")?;
     let image = req(flags, "image-url")?;
     let digest = req(flags, "expected-digest")?;
-    let operator_id = req(flags, "operator-id")?;
     let qos = flags
         .get("qos-version")
         .map(String::as_str)
@@ -139,69 +219,70 @@ fn deploy(sh: &Shell, flags: &HashMap<String, String>) -> Result<()> {
             .with_context(|| format!("invalid --host-port: {s}"))?,
         None => 3000,
     };
-
     validate_digest(digest)?;
-    // Safety gate: re-derive the pivot binary digest from the image and confirm
-    // it matches --expected-digest, tying the submitted digest to the real binary.
-    verify_image_digest(sh, image, digest)?;
-
-    let seed = resolve_seed_file(flags)?;
-    // Pass --operator-seed only when we have one; otherwise tvc approves with the
-    // logged-in org operator key (the local `tvc login` path).
-    let seed_args: Vec<OsString> = match &seed {
-        Some((path, _)) => vec!["--operator-seed".into(), path.clone().into_os_string()],
-        None => {
-            println!("no operator seed provided; approving with the logged-in org operator key");
-            Vec::new()
-        }
-    };
+    ops.verify_image_digest(image, digest)?;
+    let cfg = build_deploy_config(app_id, qos, image, host_ip, host_port, digest);
     let cfg_path = temp_path("tvc-deploy", "json");
+    std::fs::write(&cfg_path, serde_json::to_vec_pretty(&cfg)?)
+        .with_context(|| format!("write {}", cfg_path.display()))?;
+    let deploy_id = ops.create(&cfg_path);
+    let _ = std::fs::remove_file(&cfg_path);
+    let deploy_id = deploy_id?;
+    println!("created deployment {deploy_id}");
+    Ok(deploy_id)
+}
 
-    // Everything that can fail after the seed file exists runs inside this
-    // closure, so the seed + config temp files are always cleaned up below
-    // (otherwise an early `?` would leave the operator seed on disk).
-    let outcome = (|| -> Result<String> {
-        // Assemble the deployment config (gRPC health is mandatory for parser_app).
-        let cfg = serde_json::json!({
-            "appId": app_id,
-            "qosVersion": qos,
-            "pivotContainerImageUrl": image,
-            "pivotPath": "/parser_app",
-            "pivotArgs": ["--host-ip", host_ip, "--host-port", host_port.to_string()],
-            "expectedPivotDigest": digest,
-            "debugMode": false,
-            "healthCheckType": "TVC_HEALTH_CHECK_TYPE_GRPC",
-            "healthCheckPort": host_port,
-            "publicIngressPort": host_port,
-        });
-        std::fs::write(&cfg_path, serde_json::to_vec_pretty(&cfg)?)
-            .with_context(|| format!("write {}", cfg_path.display()))?;
-
-        let created = cmd!(sh, "tvc deploy create --config-file {cfg_path}")
-            .read()
-            .context("tvc deploy create")?;
-        let deploy_id = parse_after(&created, "Deployment ID:")
-            .with_context(|| format!("no deployment id in create output:\n{created}"))?;
-        println!("created deployment {deploy_id}");
-
-        cmd!(sh, "tvc deploy approve --deploy-id {deploy_id} --operator-id {operator_id} {seed_args...} --dangerous-skip-interactive")
-            .run()
-            .context("tvc deploy approve")?;
-        println!("approved manifest for {deploy_id}");
-
-        // TVC refuses to target a deployment with zero healthy replicas, so poll
-        // to healthy BEFORE set-live. A fresh app auto-targets its first deploy.
-        poll_health(sh, app_id, &deploy_id, POLL_TIMEOUT)?;
-        set_live(sh, &deploy_id, SETLIVE_TIMEOUT)?;
-        Ok(deploy_id)
-    })();
-
-    if let Some((path, true)) = &seed {
+/// Approve `deploy_id` as `operator_id` with the resolved seed, then ALWAYS
+/// remove an env-sourced seed temp file (cleanup=true) before propagating, so
+/// the operator seed never leaks on an approve failure.
+fn approve_and_cleanup(
+    ops: &impl TvcOps,
+    deploy_id: &str,
+    operator_id: &str,
+    seed: &Option<(PathBuf, bool)>,
+) -> Result<()> {
+    let result = ops.approve(
+        deploy_id,
+        operator_id,
+        seed.as_ref().map(|(p, _)| p.as_path()),
+    );
+    if let Some((path, true)) = seed {
         let _ = std::fs::remove_file(path);
     }
-    let _ = std::fs::remove_file(&cfg_path);
+    result
+}
 
-    let deploy_id = outcome?;
+fn do_deploy(ops: &impl TvcOps, flags: &HashMap<String, String>) -> Result<()> {
+    let app_id = req(flags, "app-id")?;
+    let operator_id = req(flags, "operator-id")?;
+    let deploy_id = initiate(ops, flags)?;
+    let seed = resolve_seed_file(flags)?;
+    approve_and_cleanup(ops, &deploy_id, operator_id, &seed)?;
+    println!("approved manifest for {deploy_id}");
+    ops.poll_health(app_id, &deploy_id, POLL_TIMEOUT)?;
+    ops.set_live(&deploy_id, SETLIVE_TIMEOUT)?;
+    println!("deployment {deploy_id} is healthy and live");
+    Ok(())
+}
+
+fn approve(ops: &impl TvcOps, flags: &HashMap<String, String>) -> Result<()> {
+    let deploy_id = req(flags, "deploy-id")?;
+    let operator_id = req(flags, "operator-id")?;
+    let image = req(flags, "image-url")?;
+    let digest = req(flags, "expected-digest")?;
+    validate_digest(digest)?;
+    ops.verify_image_digest(image, digest)?;
+    let seed = resolve_seed_file(flags)?;
+    approve_and_cleanup(ops, deploy_id, operator_id, &seed)?;
+    println!("approved manifest for {deploy_id}");
+    Ok(())
+}
+
+fn promote(ops: &impl TvcOps, flags: &HashMap<String, String>) -> Result<()> {
+    let app_id = req(flags, "app-id")?;
+    let deploy_id = req(flags, "deploy-id")?;
+    ops.poll_health(app_id, deploy_id, POLL_TIMEOUT)?;
+    ops.set_live(deploy_id, SETLIVE_TIMEOUT)?;
     println!("deployment {deploy_id} is healthy and live");
     Ok(())
 }
@@ -372,4 +453,257 @@ fn temp_path(prefix: &str, ext: &str) -> PathBuf {
         "{prefix}-{}-{nanos}-{seq}.{ext}",
         std::process::id()
     ))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::sync::Mutex;
+
+    static SEED_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[derive(Default)]
+    struct RecordingTvc {
+        calls: RefCell<Vec<String>>,
+    }
+    impl TvcOps for RecordingTvc {
+        fn verify_image_digest(&self, _image: &str, _expected: &str) -> Result<()> {
+            self.calls.borrow_mut().push("verify_image_digest".into());
+            Ok(())
+        }
+        fn create(&self, _cfg_path: &Path) -> Result<String> {
+            self.calls.borrow_mut().push("create".into());
+            Ok("deploy-123".into())
+        }
+        fn approve(&self, deploy_id: &str, _operator_id: &str, _seed: Option<&Path>) -> Result<()> {
+            self.calls.borrow_mut().push(format!("approve:{deploy_id}"));
+            Ok(())
+        }
+        fn poll_health(&self, _app: &str, deploy_id: &str, _t: Duration) -> Result<()> {
+            self.calls.borrow_mut().push(format!("poll:{deploy_id}"));
+            Ok(())
+        }
+        fn set_live(&self, deploy_id: &str, _t: Duration) -> Result<()> {
+            self.calls
+                .borrow_mut()
+                .push(format!("set_live:{deploy_id}"));
+            Ok(())
+        }
+    }
+
+    fn flags(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn config_has_grpc_health_and_digest() {
+        let cfg = build_deploy_config(
+            "app",
+            "v1",
+            "img",
+            "0.0.0.0",
+            3000,
+            "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        );
+        assert_eq!(cfg["healthCheckType"], "TVC_HEALTH_CHECK_TYPE_GRPC");
+        assert_eq!(
+            cfg["expectedPivotDigest"],
+            "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+        );
+        assert_eq!(cfg["pivotPath"], "/parser_app");
+        assert_eq!(cfg["healthCheckPort"], 3000);
+    }
+
+    #[test]
+    fn deploy_runs_gate_create_approve_poll_setlive_in_order() {
+        let ops = RecordingTvc::default();
+        let f = flags(&[
+            ("app-id", "app"),
+            ("image-url", "img"),
+            (
+                "expected-digest",
+                "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+            ),
+            ("operator-id", "op"),
+            ("operator-seed", "/tmp/seed"),
+        ]);
+        do_deploy(&ops, &f).unwrap();
+        assert_eq!(
+            *ops.calls.borrow(),
+            vec![
+                "verify_image_digest",
+                "create",
+                "approve:deploy-123",
+                "poll:deploy-123",
+                "set_live:deploy-123",
+            ]
+        );
+    }
+
+    #[test]
+    fn initiate_runs_only_gate_and_create() {
+        let ops = RecordingTvc::default();
+        let f = flags(&[
+            ("app-id", "app"),
+            ("image-url", "img"),
+            (
+                "expected-digest",
+                "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+            ),
+        ]);
+        let id = initiate(&ops, &f).unwrap();
+        assert_eq!(id, "deploy-123");
+        assert_eq!(*ops.calls.borrow(), vec!["verify_image_digest", "create"]);
+    }
+
+    #[test]
+    fn initiate_rejects_bad_digest() {
+        let ops = RecordingTvc::default();
+        let f = flags(&[
+            ("app-id", "a"),
+            ("image-url", "i"),
+            ("expected-digest", "xyz"),
+        ]);
+        assert!(initiate(&ops, &f).is_err());
+        assert!(ops.calls.borrow().is_empty());
+    }
+
+    fn leftover_operator_seeds() -> usize {
+        std::fs::read_dir(std::env::temp_dir())
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter(|e| e.file_name().to_string_lossy().starts_with("tvc-operator-"))
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn deploy_cleans_env_seed_when_approve_fails() {
+        let _env = SEED_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        struct FailingApprove;
+        impl TvcOps for FailingApprove {
+            fn verify_image_digest(&self, _i: &str, _e: &str) -> Result<()> {
+                Ok(())
+            }
+            fn create(&self, _c: &Path) -> Result<String> {
+                Ok("deploy-1".into())
+            }
+            fn approve(&self, _d: &str, _o: &str, seed: Option<&Path>) -> Result<()> {
+                assert!(
+                    seed.map(Path::exists).unwrap_or(false),
+                    "seed must exist at approve"
+                );
+                bail!("approve boom")
+            }
+            fn poll_health(&self, _a: &str, _d: &str, _t: Duration) -> Result<()> {
+                panic!("poll_health must not run after approve failure")
+            }
+            fn set_live(&self, _d: &str, _t: Duration) -> Result<()> {
+                panic!("set_live must not run after approve failure")
+            }
+        }
+        let digest = "a".repeat(64);
+        let f = flags(&[
+            ("app-id", "app"),
+            ("image-url", "img"),
+            ("expected-digest", &digest),
+            ("operator-id", "op"),
+        ]);
+        let before = leftover_operator_seeds();
+        // SAFETY: this is the only test that touches this env var.
+        unsafe {
+            std::env::set_var("TVC_CI_OPERATOR_SEED", "00".repeat(32));
+        }
+        let result = do_deploy(&FailingApprove, &f);
+        unsafe {
+            std::env::remove_var("TVC_CI_OPERATOR_SEED");
+        }
+        assert!(result.is_err(), "approve failure should propagate");
+        assert_eq!(
+            before,
+            leftover_operator_seeds(),
+            "env-sourced seed leaked on approve failure"
+        );
+    }
+
+    #[test]
+    fn deploy_does_not_write_seed_when_initiate_fails() {
+        let _env = SEED_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        struct FailingGate;
+        impl TvcOps for FailingGate {
+            fn verify_image_digest(&self, _i: &str, _e: &str) -> Result<()> {
+                bail!("gate boom")
+            }
+            fn create(&self, _c: &Path) -> Result<String> {
+                panic!("create must not run when the gate fails")
+            }
+            fn approve(&self, _d: &str, _o: &str, _s: Option<&Path>) -> Result<()> {
+                panic!("approve must not run")
+            }
+            fn poll_health(&self, _a: &str, _d: &str, _t: Duration) -> Result<()> {
+                panic!("poll_health must not run")
+            }
+            fn set_live(&self, _d: &str, _t: Duration) -> Result<()> {
+                panic!("set_live must not run")
+            }
+        }
+        let digest = "a".repeat(64);
+        let f = flags(&[
+            ("app-id", "app"),
+            ("image-url", "img"),
+            ("expected-digest", &digest),
+            ("operator-id", "op"),
+        ]);
+        let before = leftover_operator_seeds();
+        unsafe {
+            std::env::set_var("TVC_CI_OPERATOR_SEED", "00".repeat(32));
+        }
+        let result = do_deploy(&FailingGate, &f);
+        unsafe {
+            std::env::remove_var("TVC_CI_OPERATOR_SEED");
+        }
+        assert!(result.is_err(), "initiate failure should propagate");
+        assert_eq!(
+            before,
+            leftover_operator_seeds(),
+            "seed must not be written when initiate fails"
+        );
+    }
+
+    #[test]
+    fn approve_reverifies_then_approves() {
+        let ops = RecordingTvc::default();
+        let f = flags(&[
+            ("deploy-id", "deploy-7"),
+            ("operator-id", "op"),
+            ("image-url", "img"),
+            (
+                "expected-digest",
+                "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+            ),
+            ("operator-seed", "/tmp/seed"),
+        ]);
+        approve(&ops, &f).unwrap();
+        assert_eq!(
+            *ops.calls.borrow(),
+            vec!["verify_image_digest", "approve:deploy-7"]
+        );
+    }
+
+    #[test]
+    fn promote_polls_then_sets_live() {
+        let ops = RecordingTvc::default();
+        let f = flags(&[("app-id", "app"), ("deploy-id", "deploy-9")]);
+        promote(&ops, &f).unwrap();
+        assert_eq!(
+            *ops.calls.borrow(),
+            vec!["poll:deploy-9", "set_live:deploy-9"]
+        );
+    }
 }
