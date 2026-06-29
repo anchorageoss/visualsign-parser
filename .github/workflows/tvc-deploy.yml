@@ -45,6 +45,10 @@ on:
         description: "parser_app listen port"
         required: false
         default: "3000"
+      turnkey_client_version:
+        description: "turnkey-client image tag for the smoke check (approved version, not latest)"
+        required: false
+        default: "latest"
   pull_request:
     # Apply the `tvc-deploy-test` label to a PR to run a CI validation deploy
     # against the dev TEST app (uses repo vars.TVC_TEST_*; never the live app).
@@ -115,20 +119,22 @@ jobs:
             --host-ip "$HOST_IP" \
             --host-port "$HOST_PORT"
 
-      # Post-deploy smoke: verify the live dev parse endpoint (/visualsign-dev)
-      # renders a V0+ALT transaction, via the published turnkey-client container.
-      # The parse API key is reconstructed from the same TVC_API_KEY_* secrets.
+      # Post-deploy smoke: against the live dev endpoint (/visualsign-dev), run
+      # `turnkey-client verify` on a V0+ALT tx and assert it both RENDERS and
+      # cryptographically VERIFIES (AWS Nitro attestation + enclave signature).
+      # The API key is reconstructed from the same TVC_API_KEY_* secrets. Pins an
+      # approved turnkey-client image version rather than :latest.
       # NOTE: requires the turnkey-client image on GHCR (visualsign-turnkeyclient
       # docker.yml / #23); until that's published this step can't pull the image.
-      - name: Smoke (dev parse endpoint)
+      - name: Smoke (dev verify endpoint)
         if: success()
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TVC_API_KEY_PUBLIC: ${{ secrets.TVC_API_KEY_PUBLIC }}
           TVC_API_KEY_PRIVATE: ${{ secrets.TVC_API_KEY_PRIVATE }}
           VSP_SMOKE_ORG: ${{ secrets.TVC_ORG_ID }}
-          # The app wired to the /visualsign-dev endpoint (asserted as enclaveApp).
-          VSP_SMOKE_APP: e349edd8-2a25-4083-922d-592ebded9acf
+          # Pin the approved turnkey-client version (input -> repo var -> latest).
+          VSP_SMOKE_CLIENT_VERSION: ${{ inputs.turnkey_client_version || vars.TVC_SMOKE_CLIENT_VERSION || 'latest' }}
         run: |
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           umask 077
