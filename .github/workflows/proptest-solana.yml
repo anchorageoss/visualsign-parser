@@ -6,7 +6,7 @@ on:
 
 jobs:
   proptest:
-    if: contains(github.event.pull_request.labels.*.name, 'proptest')
+    if: contains(github.event.pull_request.labels.*.name, 'test:proptest')
     runs-on: ubuntu-latest-4-cores
     permissions:
       pull-requests: write
@@ -55,7 +55,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [ "${{ steps.proptest.outcome }}" = "failure" ]; then
-            gh pr edit "$PR_NUMBER" --add-label proptest-failure || true
+            gh pr edit "$PR_NUMBER" --add-label test:proptest-failure || true
           else
-            gh pr edit "$PR_NUMBER" --remove-label proptest-failure || true
+            gh pr edit "$PR_NUMBER" --remove-label test:proptest-failure || true
           fi
