@@ -4,6 +4,10 @@
 //!   gen-operator-key --out <path>
 //!       Mint a qos_p256 operator key. Writes the 32-byte master seed (hex) to
 //!       <path> with mode 0600 and prints ONLY the public key hex to stdout.
+//!   initiate --app-id <id> --image-url <url> --expected-digest <hex>
+//!            [--qos-version v] [--host-ip 0.0.0.0] [--host-port 3000]
+//!       Run the image-digest gate and create the deployment, printing the
+//!       deployment ID. Does not approve or set-live (prod initiate step).
 //!   deploy --app-id <id> --image-url <url> --expected-digest <hex>
 //!          --operator-id <id> [--operator-seed <path>] [--qos-version v]
 //!          [--host-ip 0.0.0.0] [--host-port 3000]
@@ -12,6 +16,11 @@
 //!       the deployment, approve, poll until healthy, and set it live.
 //!       The operator seed resolves flag -> env TVC_CI_OPERATOR_SEED -> none; when
 //!       none is given, approval uses the logged-in org operator key (`tvc login`).
+//!   approve --deploy-id <id> --operator-id <id> --image-url <url>
+//!           --expected-digest <hex> [--operator-seed <path>]
+//!       Re-run the digest gate, then approve the manifest (operator step).
+//!   promote --app-id <id> --deploy-id <id>
+//!       Poll the deployment to healthy, then set it live (prod promote step).
 //!
 //! All Turnkey API actions shell out to the `tvc` CLI (it owns auth/consensus);
 //! this binary owns config assembly, the image-digest safety gate, and polling.
@@ -223,19 +232,32 @@ fn initiate(ops: &impl TvcOps, flags: &HashMap<String, String>) -> Result<String
     Ok(deploy_id)
 }
 
+/// Approve `deploy_id` as `operator_id` with the resolved seed, then ALWAYS
+/// remove an env-sourced seed temp file (cleanup=true) before propagating, so
+/// the operator seed never leaks on an approve failure.
+fn approve_and_cleanup(
+    ops: &impl TvcOps,
+    deploy_id: &str,
+    operator_id: &str,
+    seed: &Option<(PathBuf, bool)>,
+) -> Result<()> {
+    let result = ops.approve(
+        deploy_id,
+        operator_id,
+        seed.as_ref().map(|(p, _)| p.as_path()),
+    );
+    if let Some((path, true)) = seed {
+        let _ = std::fs::remove_file(path);
+    }
+    result
+}
+
 fn do_deploy(ops: &impl TvcOps, flags: &HashMap<String, String>) -> Result<()> {
     let app_id = req(flags, "app-id")?;
     let operator_id = req(flags, "operator-id")?;
-    let seed = resolve_seed_file(flags)?;
     let deploy_id = initiate(ops, flags)?;
-    let seed_path = seed.as_ref().map(|(p, _)| p.as_path());
-    // Approve, then ALWAYS clean up an env-sourced seed temp file -- even if
-    // approve failed -- before propagating, so the operator seed never leaks.
-    let approved = ops.approve(&deploy_id, operator_id, seed_path);
-    if let Some((path, true)) = &seed {
-        let _ = std::fs::remove_file(path);
-    }
-    approved?;
+    let seed = resolve_seed_file(flags)?;
+    approve_and_cleanup(ops, &deploy_id, operator_id, &seed)?;
     println!("approved manifest for {deploy_id}");
     ops.poll_health(app_id, &deploy_id, POLL_TIMEOUT)?;
     ops.set_live(&deploy_id, SETLIVE_TIMEOUT)?;
@@ -251,15 +273,7 @@ fn approve(ops: &impl TvcOps, flags: &HashMap<String, String>) -> Result<()> {
     validate_digest(digest)?;
     ops.verify_image_digest(image, digest)?;
     let seed = resolve_seed_file(flags)?;
-    let result = ops.approve(
-        deploy_id,
-        operator_id,
-        seed.as_ref().map(|(p, _)| p.as_path()),
-    );
-    if let Some((path, true)) = &seed {
-        let _ = std::fs::remove_file(path);
-    }
-    result?;
+    approve_and_cleanup(ops, deploy_id, operator_id, &seed)?;
     println!("approved manifest for {deploy_id}");
     Ok(())
 }
@@ -446,6 +460,9 @@ fn temp_path(prefix: &str, ext: &str) -> PathBuf {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+    use std::sync::Mutex;
+
+    static SEED_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[derive(Default)]
     struct RecordingTvc {
@@ -568,6 +585,7 @@ mod tests {
 
     #[test]
     fn deploy_cleans_env_seed_when_approve_fails() {
+        let _env = SEED_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         struct FailingApprove;
         impl TvcOps for FailingApprove {
             fn verify_image_digest(&self, _i: &str, _e: &str) -> Result<()> {
@@ -611,6 +629,50 @@ mod tests {
             before,
             leftover_operator_seeds(),
             "env-sourced seed leaked on approve failure"
+        );
+    }
+
+    #[test]
+    fn deploy_does_not_write_seed_when_initiate_fails() {
+        let _env = SEED_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        struct FailingGate;
+        impl TvcOps for FailingGate {
+            fn verify_image_digest(&self, _i: &str, _e: &str) -> Result<()> {
+                bail!("gate boom")
+            }
+            fn create(&self, _c: &Path) -> Result<String> {
+                panic!("create must not run when the gate fails")
+            }
+            fn approve(&self, _d: &str, _o: &str, _s: Option<&Path>) -> Result<()> {
+                panic!("approve must not run")
+            }
+            fn poll_health(&self, _a: &str, _d: &str, _t: Duration) -> Result<()> {
+                panic!("poll_health must not run")
+            }
+            fn set_live(&self, _d: &str, _t: Duration) -> Result<()> {
+                panic!("set_live must not run")
+            }
+        }
+        let digest = "a".repeat(64);
+        let f = flags(&[
+            ("app-id", "app"),
+            ("image-url", "img"),
+            ("expected-digest", &digest),
+            ("operator-id", "op"),
+        ]);
+        let before = leftover_operator_seeds();
+        unsafe {
+            std::env::set_var("TVC_CI_OPERATOR_SEED", "00".repeat(32));
+        }
+        let result = do_deploy(&FailingGate, &f);
+        unsafe {
+            std::env::remove_var("TVC_CI_OPERATOR_SEED");
+        }
+        assert!(result.is_err(), "initiate failure should propagate");
+        assert_eq!(
+            before,
+            leftover_operator_seeds(),
+            "seed must not be written when initiate fails"
         );
     }
 
