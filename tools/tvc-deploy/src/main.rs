@@ -41,6 +41,7 @@ const USAGE: &str = "usage:\n  \
     [--qos-version v2026.2.6] [--host-ip 0.0.0.0] [--host-port 3000]\n  \
     tvc-deploy deploy --app-id <id> --image-url <url> --expected-digest <hex> --operator-id <id> \
     [--operator-seed <path>] [--qos-version v2026.2.6] [--host-ip 0.0.0.0] [--host-port 3000]\n  \
+    tvc-deploy promote --app-id <id> --deploy-id <id>\n  \
     (operator seed may instead come from env TVC_CI_OPERATOR_SEED, or be omitted \
     to approve with the logged-in org operator key)";
 
@@ -61,6 +62,7 @@ fn run() -> Result<()> {
         "gen-operator-key" => gen_operator_key(&flags),
         "initiate" => initiate(&RealTvc { sh: &sh }, &flags).map(|_| ()),
         "deploy" => do_deploy(&RealTvc { sh: &sh }, &flags),
+        "promote" => promote(&RealTvc { sh: &sh }, &flags),
         other => bail!("unknown subcommand {other:?}\n{USAGE}"),
     }
 }
@@ -234,6 +236,15 @@ fn do_deploy(ops: &impl TvcOps, flags: &HashMap<String, String>) -> Result<()> {
     println!("approved manifest for {deploy_id}");
     ops.poll_health(app_id, &deploy_id, POLL_TIMEOUT)?;
     ops.set_live(&deploy_id, SETLIVE_TIMEOUT)?;
+    println!("deployment {deploy_id} is healthy and live");
+    Ok(())
+}
+
+fn promote(ops: &impl TvcOps, flags: &HashMap<String, String>) -> Result<()> {
+    let app_id = req(flags, "app-id")?;
+    let deploy_id = req(flags, "deploy-id")?;
+    ops.poll_health(app_id, deploy_id, POLL_TIMEOUT)?;
+    ops.set_live(deploy_id, SETLIVE_TIMEOUT)?;
     println!("deployment {deploy_id} is healthy and live");
     Ok(())
 }
@@ -576,6 +587,17 @@ mod tests {
             before,
             leftover_operator_seeds(),
             "env-sourced seed leaked on approve failure"
+        );
+    }
+
+    #[test]
+    fn promote_polls_then_sets_live() {
+        let ops = RecordingTvc::default();
+        let f = flags(&[("app-id", "app"), ("deploy-id", "deploy-9")]);
+        promote(&ops, &f).unwrap();
+        assert_eq!(
+            *ops.calls.borrow(),
+            vec!["poll:deploy-9", "set_live:deploy-9"]
         );
     }
 }
