@@ -38,7 +38,7 @@ pub mod abi_type_serde {
     where
         S: Serializer,
     {
-        match value.and_then(AbiType::from_i32) {
+        match value.and_then(|v| AbiType::try_from(v).ok()) {
             Some(kind) => serializer.serialize_some(kind.as_str_name()),
             None => serializer.serialize_none(),
         }
@@ -69,7 +69,7 @@ pub const FILE_DESCRIPTOR_SET: &[u8] = include_bytes!("generated/descriptor.bin"
 impl From<Status> for tonic::Status {
     fn from(status: Status) -> Self {
         Self::with_details(
-            tonic::Code::from_i32(status.code),
+            tonic::Code::from(status.code),
             status.message.clone(),
             status.encode_to_vec().into(),
         )

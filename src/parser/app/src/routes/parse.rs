@@ -52,8 +52,8 @@ pub(crate) fn parse_with_registry(
         metadata: parse_request.chain_metadata.clone(),
         developer_config: None, // Production API: only accept unsigned transactions
     };
-    let proto_chain = ProtoChain::from_i32(parse_request.chain)
-        .ok_or_else(|| GrpcError::new(Code::InvalidArgument, "invalid chain"))?;
+    let proto_chain = ProtoChain::try_from(parse_request.chain)
+        .map_err(|_| GrpcError::new(Code::InvalidArgument, "invalid chain"))?;
     let registry_chain: VisualSignRegistryChain = chain_conversion::proto_to_registry(proto_chain);
 
     let signable_payload = registry
@@ -124,7 +124,7 @@ pub(crate) fn parse_with_registry(
 mod tests {
     use super::*;
     use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata};
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
     use visualsign::vsptrait::{
         Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
     };
@@ -134,37 +134,45 @@ mod tests {
     };
 
     /// Verify that `metadata_digest` is deterministic for identical metadata,
-    /// including non-empty `abi_mappings` (exercises `HashMap` key ordering through borsh).
+    /// including non-empty `abi_mappings` — the proto map field is now a `BTreeMap`
+    /// (after the tonic 0.10 / `tonic_build::Builder::btree_map(["."])` config), so
+    /// borsh serialization sees keys in a consistent order regardless of insertion
+    /// order. This test exercises that contract.
     #[test]
     fn metadata_digest_is_deterministic() {
-        let mut abi_mappings = HashMap::new();
-        abi_mappings.insert(
-            "0xaaaa".to_string(),
-            Abi {
-                value: r#"[{"name":"transfer"}]"#.to_string(),
-                signature: None,
-                ..Default::default()
-            },
-        );
-        abi_mappings.insert(
-            "0xbbbb".to_string(),
-            Abi {
-                value: r#"[{"name":"approve"}]"#.to_string(),
-                signature: None,
-                ..Default::default()
-            },
-        );
+        let transfer_abi = Abi {
+            value: r#"[{"name":"transfer"}]"#.to_string(),
+            signature: None,
+            ..Default::default()
+        };
+        let approve_abi = Abi {
+            value: r#"[{"name":"approve"}]"#.to_string(),
+            signature: None,
+            ..Default::default()
+        };
+
+        // Build two maps with the SAME entries but OPPOSITE insertion orders. The
+        // proto field is a `BTreeMap` (forced via `btree_map(["."])`), so both must
+        // serialize to identical borsh bytes regardless of the order keys were
+        // inserted -- that is the determinism contract this test pins.
+        let mut abi_mappings_forward = BTreeMap::new();
+        abi_mappings_forward.insert("0xaaaa".to_string(), transfer_abi.clone());
+        abi_mappings_forward.insert("0xbbbb".to_string(), approve_abi.clone());
+
+        let mut abi_mappings_reverse = BTreeMap::new();
+        abi_mappings_reverse.insert("0xbbbb".to_string(), approve_abi);
+        abi_mappings_reverse.insert("0xaaaa".to_string(), transfer_abi);
 
         let metadata_a = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi_mappings: abi_mappings.clone(),
+                abi_mappings: abi_mappings_forward,
             })),
         };
         let metadata_b = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi_mappings,
+                abi_mappings: abi_mappings_reverse,
             })),
         };
 
@@ -173,7 +181,7 @@ mod tests {
         assert_eq!(
             sha_256(&bytes_a),
             sha_256(&bytes_b),
-            "metadata_digest must be identical for identical metadata"
+            "metadata_digest must be identical regardless of map insertion order"
         );
     }
 
