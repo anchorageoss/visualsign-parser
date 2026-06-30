@@ -7,7 +7,8 @@ pub use cli_plugin::{TronArgs, TronPlugin};
 use anychain_tron::protocol::Tron::{Transaction as TronTransaction, transaction};
 use anychain_tron::protocol::balance_contract::{
     DelegateResourceContract, FreezeBalanceV2Contract, TransferContract,
-    UnDelegateResourceContract, UnfreezeBalanceV2Contract, WithdrawExpireUnfreezeContract,
+    UnDelegateResourceContract, UnfreezeBalanceV2Contract, WithdrawBalanceContract,
+    WithdrawExpireUnfreezeContract,
 };
 use anychain_tron::protocol::common::ResourceCode;
 use anychain_tron::protocol::witness_contract::VoteWitnessContract;
@@ -291,6 +292,26 @@ fn decode_contract(
             fields.push(create_text_field(
                 "Contract Type",
                 "WithdrawExpireUnfreeze (Claim Unfrozen)",
+            )?);
+            fields.push(create_address_field(
+                "Owner",
+                &address_to_base58(&withdraw.owner_address),
+                None,
+                None,
+                None,
+                None,
+            )?);
+        }
+        "type.googleapis.com/protocol.WithdrawBalanceContract" => {
+            // Claims accumulated voting / Super Representative rewards to the owner's
+            // balance. The amount is computed by the chain at execution time, so the
+            // contract itself carries only the owner address.
+            let withdraw = WithdrawBalanceContract::parse_from_bytes(value).map_err(|e| {
+                VisualSignError::ConversionError(format!("decode WithdrawBalanceContract: {e}"))
+            })?;
+            fields.push(create_text_field(
+                "Contract Type",
+                "WithdrawBalance (Claim Rewards)",
             )?);
             fields.push(create_address_field(
                 "Owner",
@@ -874,6 +895,33 @@ mod tests {
             "WithdrawExpireUnfreeze (Claim Unfrozen)"
         );
         assert!(address_value(find_field(&payload, "Owner").unwrap()).starts_with('T'));
+    }
+
+    #[test]
+    fn synthetic_withdraw_balance() {
+        let inner = WithdrawBalanceContract {
+            owner_address: owner_bytes(),
+            ..Default::default()
+        };
+        let raw = build_raw_with_contract(
+            "type.googleapis.com/protocol.WithdrawBalanceContract",
+            inner.write_to_bytes().unwrap(),
+        );
+        let payload = TronVisualSignConverter
+            .to_visual_sign_payload(
+                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+                VisualSignOptions::default(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            text_value(find_field(&payload, "Contract Type").unwrap()),
+            "WithdrawBalance (Claim Rewards)"
+        );
+        assert!(address_value(find_field(&payload, "Owner").unwrap()).starts_with('T'));
+        // No amount/resource fields — the reward amount is chain-computed, not in the tx.
+        assert!(find_field(&payload, "Amount").is_none());
+        assert!(find_field(&payload, "Resource").is_none());
     }
 
     #[test]
