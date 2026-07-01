@@ -37,15 +37,19 @@ enum AbiSignatureError {
 ///
 /// # Security notes
 ///
-/// - **Unsigned ABIs are rejected.** Every ABI mapping must carry a signature;
-///   entries with `signature: None` are skipped with a warning. Without this check,
-///   a wallet could supply any ABI for any address and dictate the human-readable
-///   rendering of the call.
-/// - **Every accepted entry's signature is validated**, using secp256k1 over a
+/// - **Unsigned ABIs are accepted, but logged as unverified.** Not every caller
+///   signs its ABI mappings yet, so an entry with `signature: None` is registered
+///   rather than dropped; unsigned entries are counted and reported in a single
+///   aggregated warning once per request (no per-entry flag or marker is stored
+///   in the registry). This is acceptable because the whole caller-supplied ABI
+///   path is display-only and untrusted regardless of signature status (see
+///   below).
+/// - **When present, a signature is validated**, using secp256k1 over a
 ///   domain-separated prehash that binds the chain id and the contract address to
-///   the ABI JSON (see [`visualsign::signing::ethereum_metadata_prehash`]). Since
-///   unsigned entries are rejected above, no ABI reaches the registry without a
-///   verified signature.
+///   the ABI JSON (see [`visualsign::signing::ethereum_metadata_prehash`]). An entry
+///   that carries a signature but fails validation (bad signature, or signer not in
+///   the allowlist) is still rejected outright: a present-but-invalid signature is a
+///   stronger signal of tampering than simply omitting one.
 /// - **Signatures bind chain id + contract address.** The prehash commits to the
 ///   resolved `chain_id` and the entry's map-key address, so a signature minted for
 ///   an ABI at one (chain, address) no longer verifies when replayed under a
@@ -83,6 +87,7 @@ pub fn try_extract_from_chain_metadata(
     }
 
     let mut registry = AbiRegistry::new();
+    let mut unsigned_count: usize = 0;
     for (address, abi) in &ethereum.abi_mappings {
         // Validate address first (cheap) before expensive signature/ABI operations
         let parsed_address = match address.parse::<alloy_primitives::Address>() {
@@ -102,21 +107,22 @@ pub fn try_extract_from_chain_metadata(
             continue;
         }
 
-        // Reject unsigned ABI entries unconditionally. Allowing
-        // signature: None would let a wallet supply arbitrary ABIs for any
-        // address and steer the human-readable rendering of the call.
-        let Some(proto_sig) = abi.signature.as_ref() else {
-            log::warn!(
-                "Skipping ABI mapping for '{address}': missing signature (unsigned ABI entries are rejected)"
-            );
-            continue;
-        };
-        let signature = convert_proto_signature(proto_sig);
-        if let Err(e) =
-            validate_abi_signature(&abi.value, &parsed_address, chain_id, &signature, allowlist)
-        {
-            log::warn!("Skipping ABI mapping for '{address}': signature validation failed: {e}");
-            continue;
+        // Signatures aren't required to register an entry: not every caller signs
+        // its ABI mappings yet, and this whole path is display-only and untrusted
+        // regardless. An entry that DOES carry a signature must still validate,
+        // since a present-but-invalid signature signals tampering rather than
+        // simply an unsigned source.
+        let is_unsigned = abi.signature.is_none();
+        if let Some(proto_sig) = abi.signature.as_ref() {
+            let signature = convert_proto_signature(proto_sig);
+            if let Err(e) =
+                validate_abi_signature(&abi.value, &parsed_address, chain_id, &signature, allowlist)
+            {
+                log::warn!(
+                    "Skipping ABI mapping for '{address}': signature validation failed: {e}"
+                );
+                continue;
+            }
         }
 
         // Determine the kind of contract this ABI describes. An unset or
@@ -134,11 +140,19 @@ pub fn try_extract_from_chain_metadata(
                     abi_kind,
                     implementation,
                 );
+                if is_unsigned {
+                    unsigned_count += 1;
+                }
             }
             Err(e) => {
                 log::warn!("Skipping ABI mapping for '{address}': {e}");
             }
         }
+    }
+    if unsigned_count > 0 {
+        log::warn!(
+            "Accepted {unsigned_count} unsigned ABI mapping(s): integrity/provenance unverified"
+        );
     }
     if registry.list_abis().is_empty() {
         return None;
@@ -385,8 +399,8 @@ pub const CLI_DEV_SIGNING_KEY_SEED: [u8; 32] = [0x42u8; 32];
 /// `SignatureMetadata` ready to drop into `Abi.signature`.
 ///
 /// Used by the CLI to attach an integrity signature to locally-loaded ABI files so
-/// the metadata-ABI extraction path (which rejects unsigned entries) can
-/// register them. The signature is over the domain-separated prehash that binds the
+/// the metadata-ABI extraction path can register them as verified rather than
+/// unsigned. The signature is over the domain-separated prehash that binds the
 /// `chain_id` and contract `address` to `abi_json` (see
 /// [`visualsign::signing::ethereum_metadata_prehash`]), so it is valid only for the
 /// exact (chain, address) it was produced for, matching the verifier in
@@ -907,12 +921,11 @@ mod tests {
         );
     }
 
-    /// Regression: an ABI mapping that omits the signature must be rejected,
-    /// even when the address and ABI JSON are otherwise valid. Without this check a
-    /// wallet could supply arbitrary ABIs for any address and dictate the parsed
-    /// payload rendering.
+    /// An ABI mapping that omits the signature is still registered: not every
+    /// caller signs its ABI mappings yet, and this whole path is display-only and
+    /// untrusted regardless of signature status.
     #[test]
-    fn test_try_extract_unsigned_abi_rejected() {
+    fn test_try_extract_unsigned_abi_accepted() {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
@@ -928,9 +941,74 @@ mod tests {
                 .collect(),
             })),
         };
+        let registry =
+            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
+                .expect("unsigned ABI entries must still be registered");
+        assert!(registry.list_abis().contains(&TEST_ADDRESS));
+    }
+
+    /// Mixed signed and unsigned entries: neither one blocks the other. The signed
+    /// entry is verified, the unsigned entry is accepted unverified, and both end
+    /// up in the registry.
+    #[test]
+    fn test_try_extract_mixed_signed_and_unsigned_both_accepted() {
+        let unsigned_address = "0x3333333333333333333333333333333333333333";
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![
+                    (
+                        unsigned_address,
+                        Abi {
+                            value: VALID_ABI.to_string(),
+                            signature: None,
+                            ..Default::default()
+                        },
+                    ),
+                    (TEST_ADDRESS, signed_abi(VALID_ABI, TEST_ADDRESS)),
+                ])
+                .into_iter()
+                .collect(),
+            })),
+        };
+        let registry =
+            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
+                .expect("should contain both entries");
         assert!(
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist()).is_none(),
-            "unsigned ABI entries must be rejected"
+            registry.list_abis().contains(&unsigned_address),
+            "unsigned entry must be registered alongside the signed one"
+        );
+        assert!(
+            registry.list_abis().contains(&TEST_ADDRESS),
+            "signed entry must still be registered"
+        );
+    }
+
+    /// An entry that DOES carry a signature but fails validation (signer not on
+    /// the allowlist) is still rejected outright, unlike a missing signature. A
+    /// present-but-invalid signature is a stronger signal of tampering than
+    /// simply omitting one, so it must not be downgraded to "accept and log".
+    #[test]
+    fn test_try_extract_unauthorized_signer_still_rejected() {
+        // `signed_abi` signs with seed 0x42, so pass an allowlist that only
+        // authorizes seed 0x43: the signature verifies but the signer is
+        // unauthorized (mirrors `validate_abi_signature_rejects_unlisted_signer`).
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![(
+                    TEST_ADDRESS,
+                    signed_abi(VALID_ABI, TEST_ADDRESS),
+                )])
+                .into_iter()
+                .collect(),
+            })),
+        };
+        let mut unlisted_allow = SignerAllowlist::new();
+        unlisted_allow.insert(pubkey_bytes_from_seed(&[0x43u8; 32]));
+        assert!(
+            try_extract_from_chain_metadata(Some(&metadata), 1, &unlisted_allow).is_none(),
+            "a signature present but failing validation must still be rejected"
         );
     }
 
@@ -1180,5 +1258,53 @@ mod tests {
                 .get_abi_for_address(1, parse_addr(PROXY_ADDRESS))
                 .is_some()
         );
+    }
+
+    /// End-to-end regression for the reported bug: an UNSIGNED proxy entry
+    /// pointing at an UNSIGNED implementation entry must still resolve and
+    /// register both, so the implementation ABI is available for decoding.
+    /// Previously, omitting `signature` on either entry caused it to be
+    /// dropped outright, silently breaking proxy resolution.
+    #[test]
+    fn test_extract_unsigned_proxy_links_to_unsigned_implementation() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![
+                    (
+                        PROXY_ADDRESS,
+                        Abi {
+                            value: "[]".to_string(),
+                            signature: None,
+                            abi_type: Some(generated::parser::AbiType::Proxy as i32),
+                            implementation_address: Some(IMPL_ADDRESS.to_string()),
+                        },
+                    ),
+                    (
+                        IMPL_ADDRESS,
+                        Abi {
+                            value: VALID_ABI.to_string(),
+                            signature: None,
+                            ..Default::default()
+                        },
+                    ),
+                ])
+                .into_iter()
+                .collect(),
+            })),
+        };
+        let registry =
+            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
+                .expect("has ABIs, even though neither entry is signed");
+
+        assert_eq!(
+            registry.get_abi_kind(1, parse_addr(PROXY_ADDRESS)),
+            Some(AbiKind::Proxy)
+        );
+        let (impl_addr, impl_abi) = registry
+            .get_implementation_abi(1, parse_addr(PROXY_ADDRESS))
+            .expect("unsigned proxy must still resolve to its unsigned implementation");
+        assert_eq!(impl_addr, parse_addr(IMPL_ADDRESS));
+        assert!(impl_abi.functions().any(|f| f.name == "transfer"));
     }
 }

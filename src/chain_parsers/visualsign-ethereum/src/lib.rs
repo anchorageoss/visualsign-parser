@@ -885,7 +885,9 @@ mod tests {
     }
 
     /// Build a signed `Abi` for tests that exercise the metadata-ABI extraction
-    /// path, which rejects unsigned entries. Proxy entries layer `abi_type` and
+    /// path as a verified entry (the path also accepts unsigned entries, but
+    /// logs them as unverified via a single aggregated warning; no per-entry
+    /// flag is stored in the registry). Proxy entries layer `abi_type` and
     /// `implementation_address` on top via struct-update (`..signed_abi(...)`).
     ///
     /// The signature is bound to `address` (the map key the entry is stored under)

@@ -107,11 +107,15 @@ fn build_abi_mappings_from_files(
         "ContractAddress",
         validate_eth_address,
         |components, json| {
-            // The metadata-ABI extraction path rejects unsigned entries,
-            // so the CLI attaches an integrity signature using a deterministic local
-            // dev key. This is integrity, not identity, the CLI is a local dev tool
+            // The metadata-ABI extraction path accepts unsigned entries too, but the
+            // CLI attaches an integrity signature using a deterministic local dev key
+            // so locally-loaded ABIs extract as verified rather than logged as
+            // unverified. This is integrity, not identity, the CLI is a local dev tool
             // that already trusts its input files; production trust comes from the
-            // gRPC caller verifying the public key against an allowlist.
+            // service running the parser, which validates the signature and checks the
+            // signer's public key against an allowlist during extraction (see
+            // `abi_metadata::try_extract_from_chain_metadata`), not from the gRPC
+            // caller.
             //
             // The signature binds the contract address and chain id, so it must be
             // produced for the same (chain, address) the parser verifies with. The
@@ -122,7 +126,7 @@ fn build_abi_mappings_from_files(
             // If parsing or signing fails (e.g. an invalid seed in future refactors),
             // surface the failure as a `load_mappings` rejection so the entry is
             // skipped and the success count stays accurate, rather than emitting an
-            // `Abi` that the extractor would silently drop later.
+            // `Abi` the extractor would register as unverified instead of signed.
             let addr = components
                 .identifier
                 .parse::<alloy_primitives::Address>()
@@ -196,10 +200,8 @@ fn apply_proxy_mappings(
         let impl_key = normalize_eth_address(implementation);
 
         // Ensure the proxy has an entry to stamp. If it has no own ABI file, synthesize
-        // an empty "[]" ABI. The metadata-ABI extraction path rejects unsigned entries,
-        // so the synthesized ABI is signed with the same dev key used for file-loaded
-        // ABIs; otherwise the extractor would silently drop the proxy and the
-        // proxy->implementation link would be lost.
+        // an empty "[]" ABI, signed with the same dev key used for file-loaded ABIs so
+        // it extracts as verified rather than logged as unverified.
         if !abi_mappings.contains_key(&proxy_key) {
             if attempted_abi_addresses.contains(&proxy_key) {
                 eprintln!(
@@ -403,8 +405,8 @@ mod tests {
             .get("0xdac17f958d2ee523a2206206994597c13d831ec7")
             .expect("mapping present");
         assert!(abi.value.contains("swap"));
-        // CLI signs locally-loaded ABIs so the metadata-ABI extractor
-        // (which rejects unsigned entries) can register them.
+        // CLI signs locally-loaded ABIs so they extract as verified rather than
+        // logged as unverified by the metadata-ABI extractor.
         assert!(
             abi.signature.is_some(),
             "CLI should attach a dev-key signature to locally-loaded ABIs"
@@ -520,17 +522,16 @@ mod tests {
         assert_eq!(proxy_abi.value, "[]");
         assert_eq!(proxy_abi.abi_type, Some(AbiType::Proxy as i32));
         assert_eq!(proxy_abi.implementation_address.as_deref(), Some(IMPL));
-        // Regression guard: the synthesized proxy ABI must be signed. The
-        // metadata-ABI extraction path rejects unsigned entries, so an unsigned
-        // synthesized proxy would be silently dropped and the proxy->impl link lost.
+        // Regression guard: the CLI still signs the synthesized proxy ABI so it
+        // extracts as verified, even though the extractor now also accepts
+        // unsigned entries.
         assert!(
             proxy_abi.signature.is_some(),
-            "synthesized proxy ABI must be signed so the extractor accepts it",
+            "synthesized proxy ABI must be signed so the extractor treats it as verified",
         );
 
         // End-to-end: the signed synthesized proxy survives extraction. `list_abis`
-        // returns each registered entry's address string; the proxy being present
-        // proves it cleared the unsigned-rejection gate.
+        // returns each registered entry's address string.
         let extracted = ChainMetadata {
             metadata: Some(Metadata::Ethereum(eth)),
         };
@@ -544,7 +545,7 @@ mod tests {
         .expect("metadata with a signed synthesized proxy must extract");
         assert!(
             registry.list_abis().contains(&PROXY),
-            "signed synthesized proxy must survive extraction (unsigned would be dropped)",
+            "signed synthesized proxy must survive extraction",
         );
     }
 
