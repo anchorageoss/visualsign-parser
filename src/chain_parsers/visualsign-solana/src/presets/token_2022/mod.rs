@@ -1,13 +1,13 @@
 //! Token 2022 preset implementation for Solana
 
-mod confidential_transfer;
+pub(crate) mod confidential_transfer;
 mod config;
 
 use crate::core::{
     InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
 };
 use crate::utils::format_token_amount;
-use confidential_transfer::ConfidentialTransferIx;
+pub(crate) use confidential_transfer::{ConfidentialTransferIx, try_decode_confidential_transfer};
 use config::Token2022Config;
 use solana_sdk::instruction::AccountMeta;
 use spl_token_2022::instruction::TokenInstruction;

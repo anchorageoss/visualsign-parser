@@ -27,6 +27,10 @@ use visualsign::vsptrait::TransactionParseError;
 
 use crate::idl::IdlRegistry;
 
+/// Token-2022 program id. Confidential-transfer decoding only applies to
+/// instructions issued against this program.
+const TOKEN_2022_PROGRAM_ID: &str = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+
 /// Top-level Solana intermediate output. Mirrors `solana_parser::SolanaMetadata`
 /// minus `signatures`.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -48,6 +52,91 @@ pub struct SolanaIntermediateInstruction {
     pub address_table_lookups: Vec<SolanaSingleAddressTableLookup>,
     /// `None` when the parser could not match an IDL for this instruction.
     pub parsed_instruction_data: Option<SolanaParsedInstructionDataIo>,
+    /// `Some` only for Token-2022 ConfidentialTransfer Transfer/Withdraw
+    /// sub-instructions; `None` otherwise (including other CT
+    /// sub-instructions and decode failures).
+    pub confidential_transfer: Option<ConfidentialTransferIo>,
+}
+
+/// Borsh-serializable mirror of
+/// [`crate::presets::token_2022::ConfidentialTransferIx`] for the policy
+/// engine's intermediate output.
+///
+/// The `Transfer` variant deliberately carries no amount field: the transfer
+/// amount is confidential (encrypted on-chain) and a wallet-decoded value
+/// must never be placed in this trust boundary. `Withdraw`'s amount is
+/// plaintext in the instruction itself, so it is safe to include.
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
+pub enum ConfidentialTransferIo {
+    Withdraw {
+        source_token_account: String,
+        mint: String,
+        owner: String,
+        amount: u64,
+        decimals: u8,
+        new_decryptable_available_balance: String,
+        equality_proof_context_account: Option<String>,
+        range_proof_context_account: Option<String>,
+    },
+    Transfer {
+        source_token_account: String,
+        mint: String,
+        destination_token_account: String,
+        owner: String,
+        new_source_decryptable_available_balance: String,
+        auditor_configured: bool,
+        equality_proof_context_account: Option<String>,
+        validity_proof_context_account: Option<String>,
+        range_proof_context_account: Option<String>,
+    },
+}
+
+impl From<crate::presets::token_2022::ConfidentialTransferIx> for ConfidentialTransferIo {
+    fn from(ix: crate::presets::token_2022::ConfidentialTransferIx) -> Self {
+        use crate::presets::token_2022::ConfidentialTransferIx as Ix;
+        match ix {
+            Ix::Withdraw {
+                source_token_account,
+                mint,
+                owner,
+                amount,
+                decimals,
+                new_decryptable_available_balance,
+                equality_proof_context_account,
+                range_proof_context_account,
+            } => Self::Withdraw {
+                source_token_account,
+                mint,
+                owner,
+                amount,
+                decimals,
+                new_decryptable_available_balance,
+                equality_proof_context_account,
+                range_proof_context_account,
+            },
+            Ix::Transfer {
+                source_token_account,
+                mint,
+                destination_token_account,
+                owner,
+                new_source_decryptable_available_balance,
+                auditor_configured,
+                equality_proof_context_account,
+                validity_proof_context_account,
+                range_proof_context_account,
+            } => Self::Transfer {
+                source_token_account,
+                mint,
+                destination_token_account,
+                owner,
+                new_source_decryptable_available_balance,
+                auditor_configured,
+                equality_proof_context_account,
+                validity_proof_context_account,
+                range_proof_context_account,
+            },
+        }
+    }
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -196,6 +285,29 @@ impl From<&SolanaParsedInstructionData> for SolanaParsedInstructionDataIo {
     }
 }
 
+/// Decode a Token-2022 ConfidentialTransfer Transfer/Withdraw sub-instruction
+/// from a parsed instruction's hex data and account list, if applicable.
+///
+/// Returns `None` for non-Token-2022 programs, undecodable hex, decode
+/// errors, or any CT sub-instruction other than Transfer/Withdraw.
+fn decode_confidential_transfer(
+    value: &parser::SolanaInstruction,
+) -> Option<ConfidentialTransferIo> {
+    if value.program_key != TOKEN_2022_PROGRAM_ID {
+        return None;
+    }
+    let data = hex::decode(&value.instruction_data_hex).ok()?;
+    let account_strings: Vec<String> = value
+        .accounts
+        .iter()
+        .map(|a| a.account_key.clone())
+        .collect();
+    crate::presets::token_2022::try_decode_confidential_transfer(&data, &account_strings)
+        .ok()
+        .flatten()
+        .map(ConfidentialTransferIo::from)
+}
+
 impl From<&parser::SolanaInstruction> for SolanaIntermediateInstruction {
     fn from(value: &parser::SolanaInstruction) -> Self {
         Self {
@@ -211,6 +323,7 @@ impl From<&parser::SolanaInstruction> for SolanaIntermediateInstruction {
                 .parsed_instruction
                 .as_ref()
                 .map(SolanaParsedInstructionDataIo::from),
+            confidential_transfer: decode_confidential_transfer(value),
         }
     }
 }
@@ -285,8 +398,12 @@ pub fn extract_solana_intermediate_output(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use bytemuck::bytes_of;
     use serde_json::json;
     use solana_parser::solana::structs::ProgramType;
+    use spl_token_2022_interface::extension::confidential_transfer::instruction::{
+        ConfidentialTransferInstruction, WithdrawInstructionData,
+    };
     use std::collections::HashMap;
 
     fn args_map(values: &[(&str, Value)]) -> serde_json::Map<String, Value> {
@@ -346,6 +463,91 @@ mod tests {
             r#"{"amount":42,"recipient":"abc"}"#
         );
         assert_eq!(io.idl_source, "Custom");
+    }
+
+    #[test]
+    fn confidential_transfer_io_round_trip() {
+        let io = ConfidentialTransferIo::Withdraw {
+            source_token_account: "src".into(),
+            mint: "mint".into(),
+            owner: "owner".into(),
+            amount: 1_000_000,
+            decimals: 6,
+            new_decryptable_available_balance: "AAAA".into(),
+            equality_proof_context_account: Some("eq".into()),
+            range_proof_context_account: Some("rng".into()),
+        };
+        let bytes = borsh::to_vec(&io).expect("borsh serializes");
+        let recovered: ConfidentialTransferIo =
+            borsh::from_slice(&bytes).expect("borsh deserializes");
+        assert_eq!(io, recovered);
+    }
+
+    #[test]
+    fn from_solana_instruction_populates_confidential_transfer_withdraw() {
+        let d = WithdrawInstructionData {
+            amount: 1_500_000u64.into(),
+            decimals: 6,
+            new_decryptable_available_balance: Default::default(),
+            equality_proof_instruction_offset: 0,
+            range_proof_instruction_offset: 0,
+        };
+        let mut data = vec![
+            crate::presets::token_2022::confidential_transfer::CONFIDENTIAL_TRANSFER_EXTENSION_DISCRIMINATOR,
+            ConfidentialTransferInstruction::Withdraw as u8,
+        ];
+        data.extend_from_slice(bytes_of(&d));
+
+        // Accounts: [src, mint, equality_ctx, range_ctx, owner]
+        let account_labels = ["src", "mint", "eqctx", "rngctx", "owner"];
+        let accounts: Vec<parser::SolanaAccount> = account_labels
+            .iter()
+            .map(|label| parser::SolanaAccount {
+                account_key: (*label).to_string(),
+                signer: false,
+                writable: false,
+            })
+            .collect();
+
+        let instruction = parser::SolanaInstruction {
+            program_key: TOKEN_2022_PROGRAM_ID.to_string(),
+            accounts,
+            instruction_data_hex: hex::encode(&data),
+            address_table_lookups: vec![],
+            parsed_instruction: None,
+        };
+
+        let io = SolanaIntermediateInstruction::from(&instruction);
+        match io.confidential_transfer {
+            Some(ConfidentialTransferIo::Withdraw {
+                amount,
+                source_token_account,
+                mint,
+                owner,
+                ..
+            }) => {
+                assert_eq!(amount, 1_500_000);
+                assert_eq!(source_token_account, "src");
+                assert_eq!(mint, "mint");
+                assert_eq!(owner, "owner");
+            }
+            other => {
+                panic!("expected Some(ConfidentialTransferIo::Withdraw {{ .. }}), got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn from_solana_instruction_leaves_confidential_transfer_none_for_other_programs() {
+        let instruction = parser::SolanaInstruction {
+            program_key: "11111111111111111111111111111111".to_string(),
+            accounts: vec![],
+            instruction_data_hex: String::new(),
+            address_table_lookups: vec![],
+            parsed_instruction: None,
+        };
+        let io = SolanaIntermediateInstruction::from(&instruction);
+        assert!(io.confidential_transfer.is_none());
     }
 
     #[test]
