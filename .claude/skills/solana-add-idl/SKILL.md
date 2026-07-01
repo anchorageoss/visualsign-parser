@@ -6,7 +6,24 @@ user-invocable: true
 
 # Add Solana IDL Visualizer Preset
 
-You are scaffolding a new Solana program visualizer preset from an Anchor IDL.
+You are orchestrating the scaffolding of a new Solana program visualizer preset.
+
+## Scope: bootstrap only
+
+This skill scaffolds a **new** preset from zero to a working, registered, charset-safe
+baseline. It is a one-time bootstrap, not a repeatable regenerator: once a preset exists,
+it is owned by humans/PRs and may diverge from this skill's output through hand
+customization (e.g. program-specific nested rendering). Do **not** re-run this skill over a
+preset that already exists — regeneration is destructive to that customization. If the
+target `presets/<snake_name>/` directory is already present, stop and tell the user rather
+than overwriting it. Program-agnostic improvements belong in `crate::core` (e.g.
+`core::arg_rendering`) so every future scaffold inherits them; program-specific work stays
+in the individual preset.
+
+## Mode Selection
+
+- **Standard** (`/solana-add-idl`): gather inputs, dispatch one Sonnet subagent to scaffold the preset
+- **Compare** (`/solana-add-idl compare`): gather inputs, dispatch Sonnet and Opus subagents in parallel to separate temp dirs, then diff their outputs to surface capability gaps
 
 ## Step 1: Gather Information
 
@@ -14,68 +31,108 @@ Ask the user for:
 1. **Program address** (base58 Solana program ID)
 2. **Human-readable name** (e.g. "Squads Multisig", "Marinade Finance", "Jupiter Swap")
 3. **VisualizerKind** — one of: `Dex`, `Lending`, `StakingPools`, `Payments`
+4. **Subtitle** (optional) — the short label shown under the instruction title in the preview layout. Default is empty (corpus-wide convention for IDL presets); ask the user if they want a custom string.
 
-Derive these from the human name:
+Derive from the human name:
 - `snake_name`: lowercase with underscores (e.g. `marinade_finance`)
 - `PascalName`: PascalCase (e.g. `MarinadeFinance`)
 - `SCREAMING_SNAKE`: uppercase with underscores (e.g. `MARINADE_FINANCE`)
-- `display_name`: the human name as-is for display strings
+- `display_name`: human name as-is
+- `subtitle_text`: the user-provided subtitle, or `String::new()` if none given
 
-## Step 2: Fetch the IDL
+## Step 2: Dispatch
 
-Try these in order:
+### Standard mode
+
+Dispatch one Agent with **`model: "sonnet"`**, substituting gathered values into the implementation prompt below.
+
+### Compare mode
+
+Dispatch two Agents **in parallel** — one with `model: "sonnet"`, one with `model: "opus"`. Give each a different output directory:
+
+- Sonnet writes to: `/tmp/solana-add-idl-compare/sonnet/`
+- Opus writes to: `/tmp/solana-add-idl-compare/opus/`
+
+Both receive the same implementation prompt (below), with only the output directory differing.
+
+After both complete, diff the two output directories:
+
+```bash
+diff -ru /tmp/solana-add-idl-compare/sonnet/ /tmp/solana-add-idl-compare/opus/
+```
+
+Present the diff to the user and summarize: what did Opus add or do differently? Are any of those patterns general enough to encode in this skill's instructions?
+
+## Step 3: Live-fuzz validation (surfpool)
+
+After the scaffolding subagent finishes and the PR is open, add the `surfpool` label to trigger the `surfpool_fuzz_all_idls.sh` CI job. This runs the `surfpool_fuzz` integration suite against every bundled IDL — including the new preset — using real mainnet transactions (32 proptest cases per IDL). It exercises the full parse pipeline with live tx data that synthetic unit tests can't replicate. If any IDL fails, CI adds a `surfpool-failure` label. The job only fires on non-fork PRs (secrets required for `HELIUS_API_KEY`).
+
+```bash
+gh pr edit <PR_NUMBER> --add-label surfpool
+```
+
+If adding the label requires repo permissions you don't have, request it via comment instead:
+
+```bash
+gh pr comment <PR_NUMBER> --body "Please add the \`surfpool\` label to trigger the live fuzz CI job for the new preset."
+```
+
+---
+
+## Implementation Prompt (for subagents)
+
+```
+You are scaffolding a Solana program visualizer preset from an Anchor IDL.
+
+## Inputs
+
+- Program address: {PROGRAM_ID}
+- snake_name: {snake_name}
+- PascalName: {PascalName}
+- SCREAMING_SNAKE: {SCREAMING_SNAKE}
+- display_name: {display_name}
+- VisualizerKind: {VisualizerKind}
+- subtitle_text: {subtitle_text}   ← custom subtitle string, or empty for the corpus default
+- Output directory: {OUTPUT_DIR}   ← for compare mode; omit in standard mode (write to repo)
+
+## Step A: Fetch the IDL
 
 ### Option A: Local Anchor CLI
 ```bash
-anchor idl fetch <PROGRAM_ID> --provider.cluster mainnet
+anchor idl fetch {PROGRAM_ID} --provider.cluster mainnet
 ```
 
 ### Option B: Docker container
-If `anchor` is not installed locally, use the project's Anchor CLI container:
-
 ```bash
-# Build the image if it doesn't exist
 docker images -q anchor-cli | grep -q . || \
   docker build -t anchor-cli -f images/anchor-cli/Containerfile .
-
-# Fetch the IDL
-docker run --rm anchor-cli idl fetch <PROGRAM_ID> --provider.cluster mainnet
+docker run --rm anchor-cli idl fetch {PROGRAM_ID} --provider.cluster mainnet
 ```
 
-### Option C: User-provided IDL
-If both methods fail, ask the user to provide the IDL via:
-- A local file path
-- A URL to fetch
-- Pasted JSON
+### Option C: User-provided
+If both fail, ask the user for the IDL (file path, URL, or pasted JSON).
 
-Save the IDL to: `src/chain_parsers/visualsign-solana/src/presets/{snake_name}/{snake_name}.json`
+Save to: `{OUTPUT_DIR}src/chain_parsers/visualsign-solana/src/presets/{snake_name}/{snake_name}.json`
 
-### Validation
-The IDL JSON **must** have an `instructions` array. Verify this before proceeding. If it's missing, tell the user the IDL is invalid.
+The IDL **must** have an `instructions` array. Stop and report if missing.
 
-## Step 3: Scaffold the Preset
-
-Create directory: `src/chain_parsers/visualsign-solana/src/presets/{snake_name}/`
-
-### File: `config.rs`
+## Step B: Scaffold config.rs
 
 ```rust
 use super::{SCREAMING_SNAKE}_PROGRAM_ID;
 use crate::core::{SolanaIntegrationConfig, SolanaIntegrationConfigData};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub struct {PascalName}Config;
 
 impl SolanaIntegrationConfig for {PascalName}Config {
-    fn new() -> Self {
-        Self
-    }
+    fn new() -> Self { Self }
 
     fn data(&self) -> &SolanaIntegrationConfigData {
         static DATA: std::sync::OnceLock<SolanaIntegrationConfigData> = std::sync::OnceLock::new();
         DATA.get_or_init(|| {
-            let mut programs = HashMap::new();
-            let mut instructions = HashMap::new();
+            let mut programs = BTreeMap::new();
+            let mut instructions = BTreeMap::new();
             instructions.insert("*", vec!["*"]);
             programs.insert({SCREAMING_SNAKE}_PROGRAM_ID, instructions);
             SolanaIntegrationConfigData { programs }
@@ -84,44 +141,49 @@ impl SolanaIntegrationConfig for {PascalName}Config {
 }
 ```
 
-### File: `mod.rs`
+## Step C: Scaffold mod.rs
 
-Use the dflow_aggregator preset as a template: `src/chain_parsers/visualsign-solana/src/presets/dflow_aggregator/mod.rs`
+Use `src/chain_parsers/visualsign-solana/src/presets/dflow_aggregator/mod.rs` as the
+structural template. Make these substitutions:
+- `DflowAggregator` / `dflow_aggregator` / `DFLOW_AGGREGATOR` → appropriate casing
+- Program ID string → {PROGRAM_ID}
+- `"DFlow Aggregator"` display strings → the constant `{SCREAMING_SNAKE}_DISPLAY_NAME` (define it once as `const {SCREAMING_SNAKE}_DISPLAY_NAME: &str = "{display_name}";`)
+- `include_str!("dflow_aggregator.json")` → `include_str!("{snake_name}.json")`
+- `kind()` → returns `{VisualizerKind}("{display_name}")`
 
-Read that file for the exact structure, then generate a generic version with these substitutions:
-- Replace `DflowAggregator` / `dflow_aggregator` / `DFLOW_AGGREGATOR` with the appropriate casing of the new program name
-- Replace the program ID string with the new program address
-- Replace `"DFlow Aggregator"` display strings with `{display_name}`
-- Replace IDL file reference: `include_str!("{snake_name}.json")`
-- Keep the `kind()` method returning the user's chosen `VisualizerKind` variant with `display_name` as the `&'static str` argument
-
-**Generic IDL pattern only:**
-- The generic scaffold uses the three helpers `dflow_aggregator` defines: `build_named_accounts`, `build_parsed_fields`, and `build_fallback_fields`. All three work with any IDL.
-- Two additional helpers — `append_raw_data` (for byte-blob args) and `format_arg_value` (for custom scalar rendering) — are not present in `dflow_aggregator`. Add them when the target IDL needs them, copying the pattern from another preset such as `kamino_vault` or `jupiter_earn`.
-- The parse function should: check `data.len() < 8`, load IDL, call `parse_instruction_with_idl`, call `build_named_accounts`, return a struct with parsed data + named accounts
-
-**Visualizer body must use the wire-data context API.** At the top of `visualize_tx_commands`:
+**Account resolution** — use `InstructionView`, not `resolve_accounts()`:
 ```rust
-let program_id = context.resolve_program_id()?.to_string();
-let accounts = context.resolve_accounts()?;
+let view = InstructionView::from_context(context);
 let data = context.data();
 ```
 
-These three accessors replace the old `context.current_instruction()`. They surface
-unresolved indices as `Err(VisualSignError::DecodeError(...))` with the bad index
-named, instead of returning a generic "no instruction found" failure. Use
-`context.instruction_index()` for any "Instruction N" labels.
+`InstructionView::from_context` is infallible and degrades gracefully on v0+ALT
+transactions (unresolvable account indices become empty strings rather than
+aborting). `context.resolve_accounts()?` aborts on those — do not use it for IDL
+presets. Use `view.program_id` for the program ID string and `view.accounts` (a
+`Vec<String>`) wherever account pubkeys are needed. Inner helpers take
+`accounts: &[String]`.
+
+**Subtitle** — in the `preview_layout` construction, set the subtitle field from
+`subtitle_text`. The default is the empty corpus convention; a custom string is used only
+if the user supplied one:
+```rust
+// custom subtitle:
+subtitle: Some(SignablePayloadFieldTextV2 { text: "{subtitle_text}".to_string() }),
+// default (no subtitle given):
+subtitle: Some(SignablePayloadFieldTextV2 { text: String::new() }),
+```
 
 **Required imports** (at top of module, NOT inside functions):
 ```rust
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    format_arg_value, InstructionView, InstructionVisualizer, SolanaIntegrationConfig,
+    VisualizerContext, VisualizerKind,
 };
 use config::{PascalName}Config;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use solana_sdk::instruction::AccountMeta;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use visualsign::errors::VisualSignError;
@@ -132,35 +194,79 @@ use visualsign::{
 };
 ```
 
-`BTreeMap` (not `HashMap`) keeps the rendered named-accounts order deterministic.
+`BTreeMap` (not `HashMap`) — keeps named-account order deterministic.
 
-**Required tests** (in `#[cfg(test)] mod tests`):
-- `test_{snake_name}_idl_loads` — IDL loads and has instructions
-- `test_{snake_name}_idl_has_discriminators` — every instruction has an 8-byte discriminator
-- `test_unknown_discriminator_returns_error` — garbage 9-byte data returns error
-- `test_short_data_returns_error` — 3-byte data returns error
+### Arg rendering: import from crate::core
 
-## Step 4: Register in presets/mod.rs
+`format_arg_value` is already included via the import above. Do **not** copy the
+function body into the preset — the implementation lives in
+`src/chain_parsers/visualsign-solana/src/core/arg_rendering.rs`.
 
-Add `pub mod {snake_name};` to `src/chain_parsers/visualsign-solana/src/presets/mod.rs`.
+It enforces two constraints that apply to every program:
 
-**Keep entries in alphabetical order.** The existing entries are sorted — insert the new module in the correct position.
+**Constraint 1 — charset safety.** `SignablePayload::validate_charset` rejects `"`
+and `\`. Compact JSON of any object emits `\"` for keys and fails validation.
+`format_arg_value` never emits `"` or `\`.
 
-No other registration is needed. `build.rs` auto-discovers `{PascalName}Visualizer` from any directory under `src/presets/`.
+**Constraint 2 — field explosion.** A `[u8; 32]` seed or 76-byte opaque ID would
+produce 32 or 76 per-byte fields if recursed into. `format_arg_value` collapses
+all-byte arrays into a single `0x`-prefixed hex string.
 
-## Step 5: Code Quality
+Use it in `build_parsed_fields` for every program-call arg:
+```rust
+for (key, value) in &parsed.program_call_args {
+    condensed_fields.push(create_text_field(key, &format_arg_value(value))?);
+}
+// same in expanded_fields
+```
 
-Follow these rules in all generated code:
+For raw-data fields, pass `None` as the second arg of `create_raw_data_field`
+unless you already have a precomputed hex string to reuse.
+
+### Required tests
+
+```rust
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_{snake_name}_idl_loads() { /* IDL loads and has instructions */ }
+
+    #[test]
+    fn test_{snake_name}_idl_has_discriminators() {
+        // IdlInstruction.discriminator is Option<Vec<u8>>
+        let idl_json = include_str!("{snake_name}.json");
+        let idl: Idl = serde_json::from_str(idl_json).unwrap();
+        for ix in &idl.instructions {
+            let len = ix.discriminator.as_ref().map(Vec::len).unwrap_or(0);
+            assert_eq!(len, 8, "instruction {} missing 8-byte discriminator", ix.name);
+        }
+    }
+
+    #[test]
+    fn test_unknown_discriminator_returns_error() { /* garbage 9-byte data returns error */ }
+
+    #[test]
+    fn test_short_data_returns_error() { /* 3-byte data returns error */ }
+}
+```
+
+## Step D: Registration
+
+No manual registration needed. `build.rs` auto-discovers `{PascalName}Visualizer`
+from any directory under `src/presets/` — do not edit `presets/mod.rs`, it is
+generated.
+
+## Step E: Code Quality
+
 - `use` statements at top of module, never inside functions
 - Inline format strings: `format!("{variable}")` not `format!("{}", variable)`
-- Use `create_text_field` and `create_raw_data_field` from `visualsign::field_builders` — never construct field structs directly
-- For raw-data fields, pass `None` as the second arg of `create_raw_data_field` unless you already have a precomputed hex string to reuse (e.g. one you built for `fallback_text`). Do not call `hex::encode(data)` solely to populate this arg — the helper falls back to the same lowercase byte-by-byte hex on `None`.
 - ASCII only in user-visible strings: `>=` not `≥`, `->` not `→`
 - Rust edition 2024 on nightly
 
-## Step 6: Verify
-
-Run these commands and fix any issues:
+## Step F: Verify
 
 ```bash
 cargo fmt -p visualsign-solana
@@ -171,6 +277,41 @@ cargo test -p visualsign-solana --features diagnostics
 make -C src test
 ```
 
-All must pass before the task is complete. Both feature configurations
-(diagnostics on and off) need to compile and test cleanly because parser_app
-builds without `diagnostics` while parser_cli builds with it.
+Both feature configurations must pass. Report any failures before marking done.
+```
+
+---
+
+## Improving this skill
+
+The skill file is the artifact; generated preset files are only evidence it works. Two non-destructive loops surface where the skill needs work — both regenerate into a scratch directory and **never overwrite a committed preset** (see Scope: bootstrap only).
+
+### Loop 1 — corpus diff (does the skill still reproduce known-good presets?)
+
+Regenerate an existing preset into a scratch dir (the same way compare mode writes to `/tmp`), then diff against the committed version:
+
+```bash
+git diff --no-index \
+  src/chain_parsers/visualsign-solana/src/presets/{snake_name}/mod.rs \
+  /tmp/solana-add-idl-regen/{snake_name}/mod.rs
+```
+
+Look for:
+
+- **Structural regressions**: fields missing from condensed or expanded, fallback path removed, IDL caching changed from `OnceLock` to per-call
+- **Behaviour changes**: field labels renamed, subtitle content changed, extra accounts dropped or added
+- **Improvements**: the generated output may be strictly better than the committed version (e.g. added `Remaining Account N` handling) — call these out; they validate the skill is producing higher-quality output than the predecessor
+
+It is an iterative loop, not a one-shot pass:
+
+```
+regenerate to scratch -> diff vs committed
+  -> finding? -> fix the SKILL (not the preset) -> repeat
+    -> clean -> done
+```
+
+Per finding, name the specific step or template section affected (e.g. "Step C", "config.rs template", "Required imports"), fix it in the skill, and re-regenerate to confirm clean output. **The skill is the artifact**: if regenerated output needed a manual tweak to compile or pass tests, that tweak belongs in the skill, not in a committed preset. Do not commit the regenerated preset over the existing one.
+
+### Loop 2 — model compare
+
+Compare mode (above) regenerates with Sonnet and Opus into separate scratch dirs and diffs them to surface model capability gaps. Encode any general pattern Opus produces back into this skill so Sonnet reproduces it.
