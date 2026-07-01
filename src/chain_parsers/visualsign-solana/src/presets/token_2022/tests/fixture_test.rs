@@ -114,7 +114,7 @@ fn test_real_transaction(fixture_name: &str, test_name: &str) {
         writable: false,
     };
     let idl_registry = crate::idl::IdlRegistry::new();
-    let context = VisualizerContext::new(&sender, 0, &instructions, &idl_registry);
+    let context = VisualizerContext::new(&sender, 0, &instructions, &idl_registry, None);
 
     // Visualize
     let visualizer = Token2022Visualizer;
@@ -308,6 +308,16 @@ fn test_thaw_real_transaction() {
 #[test]
 fn test_close_account_real_transaction() {
     test_real_transaction("close_account", "CloseAccount");
+}
+
+#[test]
+fn test_confidential_withdraw_fixture() {
+    test_real_transaction("confidential_withdraw", "ConfidentialWithdraw");
+}
+
+#[test]
+fn test_confidential_transfer_fixture() {
+    test_real_transaction("confidential_transfer", "ConfidentialTransfer");
 }
 
 #[test]

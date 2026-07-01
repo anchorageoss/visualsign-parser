@@ -99,6 +99,7 @@ pub(crate) fn create_chain_metadata(idl_json_mappings: &[String]) -> Option<Chai
             network_id: None,
             idl: None,
             idl_mappings,
+            confidential_transfer_hints: HashMap::default(),
         })),
     })
 }

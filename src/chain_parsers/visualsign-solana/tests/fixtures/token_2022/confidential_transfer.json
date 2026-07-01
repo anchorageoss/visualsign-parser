@@ -1,0 +1,66 @@
+{
+  "description": "Token 2022 ConfidentialTransfer Transfer instruction (context-state proof model) - synthetic fixture, no real key material",
+  "source": "synthetic",
+  "signature": "synthetic_signature_confidential_transfer",
+  "cluster": "devnet",
+  "full_transaction_note": "Synthetic fixture: confidential-to-confidential transfer between two token accounts. The transfer amount is encrypted and not present in the instruction data or accounts; the parser never decrypts it, so no wallet-decoded amount is expected here. Proof context accounts are present (offsets == 0); no inline proof / instructions sysvar.",
+  "instruction_index": 0,
+  "instruction_data": "3gH4gev4KvzAPokXYzUnr2cn5B62o5Xk7PX7iNVBf3KCgmWrfAey5X82n5kbF7eAB6cKsBDX3Q9TX99ucP3RJYehSPtqiBSbJxk5wH5ykAQxB4ses2d6gfvnduWQztCyEQQic4vUZXZQtyE9XMobZzkAsnKc68pUxF2nsoyTTDwZgv52GkSr9Tfh7P6SYMDPkdYadxAA3zCMg4ihhteUukfuk6XkjZ2gMDimBrF",
+  "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "accounts": [
+    {
+      "pubkey": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+      "signer": false,
+      "writable": true,
+      "description": "Source token account"
+    },
+    {
+      "pubkey": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+      "signer": false,
+      "writable": false,
+      "description": "Mint"
+    },
+    {
+      "pubkey": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+      "signer": false,
+      "writable": true,
+      "description": "Destination token account"
+    },
+    {
+      "pubkey": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+      "signer": false,
+      "writable": false,
+      "description": "Equality proof context state account"
+    },
+    {
+      "pubkey": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+      "signer": false,
+      "writable": false,
+      "description": "Ciphertext validity proof context state account"
+    },
+    {
+      "pubkey": "QWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF",
+      "signer": false,
+      "writable": false,
+      "description": "Range proof context state account"
+    },
+    {
+      "pubkey": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+      "signer": true,
+      "writable": false,
+      "description": "Source token account owner"
+    }
+  ],
+  "expected_fields": {
+    "instruction": "Confidential Transfer",
+    "mint": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+    "source_token_account": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+    "destination_token_account": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+    "owner": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+    "equality_proof_context_account": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+    "validity_proof_context_account": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+    "range_proof_context_account": "QWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF",
+    "auditor_configured": "no",
+    "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  }
+}

@@ -13107,6 +13107,7 @@ dependencies = [
  "bincode",
  "borsh 1.6.0",
  "bs58 0.5.1",
+ "bytemuck",
  "cel-interpreter",
  "generated",
  "hex",

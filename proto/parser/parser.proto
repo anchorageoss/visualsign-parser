@@ -129,6 +129,15 @@ message SolanaMetadata {
   // Map of program_id (base58 string) to IDL definitions
   // Allows wallet to provide multiple IDLs, one per program
   map<string, Idl> idl_mappings = 3;
+  // Wallet-decoded ConfidentialTransfer amounts, keyed by instruction index.
+  // UI-only: the wallet holds the viewing key and decrypts off-parser. NOT
+  // used for policy decisions.
+  map<uint32, SolanaConfidentialTransferHint> confidential_transfer_hints = 4;
+}
+
+message SolanaConfidentialTransferHint {
+  // Plaintext transfer amount in base units, decoded by the wallet.
+  optional uint64 decoded_amount = 1;
 }
 
 message Abi {

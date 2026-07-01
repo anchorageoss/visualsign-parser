@@ -16,6 +16,7 @@ include!(concat!(env!("OUT_DIR"), "/generated_visualizers.rs"));
 pub fn decode_instructions(
     transaction: &SolanaTransaction,
     idl_registry: &IdlRegistry,
+    hints: &std::collections::BTreeMap<u32, u64>,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     // available_visualizers is generated at build time by build.rs
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
@@ -76,8 +77,13 @@ pub fn decode_instructions(
                 writable: false,
             };
 
-            let context =
-                VisualizerContext::new(&sender, instruction_index, &instructions, idl_registry);
+            let context = VisualizerContext::new(
+                &sender,
+                instruction_index,
+                &instructions,
+                idl_registry,
+                hints.get(&(instruction_index as u32)).copied(),
+            );
 
             // Try to visualize with available visualizers (including unknown_program fallback)
             visualize_with_any(&visualizers_refs, &context)
@@ -224,7 +230,8 @@ mod tests {
             message,
         };
         let registry = IdlRegistry::new();
-        let result = decode_instructions(&tx, &registry);
+        let hints = std::collections::BTreeMap::new();
+        let result = decode_instructions(&tx, &registry, &hints);
 
         assert!(
             matches!(
@@ -268,7 +275,8 @@ mod tests {
             message,
         };
         let registry = IdlRegistry::new();
-        let result = decode_instructions(&tx, &registry);
+        let hints = std::collections::BTreeMap::new();
+        let result = decode_instructions(&tx, &registry, &hints);
 
         let fields = result.expect("should not error when OOB instructions are skipped");
         assert_eq!(fields.len(), 1, "expected 1 field for 1 valid instruction");
@@ -304,7 +312,8 @@ mod tests {
             message,
         };
         let registry = IdlRegistry::new();
-        let result = decode_instructions(&tx, &registry);
+        let hints = std::collections::BTreeMap::new();
+        let result = decode_instructions(&tx, &registry, &hints);
 
         let fields = result.expect("should succeed with all OOB instructions");
         assert!(

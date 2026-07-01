@@ -291,6 +291,7 @@ fn test_solana_idl_with_ed25519_signature() {
         network_id: None,
         idl: Some(idl),
         idl_mappings: Default::default(),
+        confidential_transfer_hints: Default::default(),
     };
     let parse_request = ParseRequest {
         unsigned_payload: "0x".to_string(),

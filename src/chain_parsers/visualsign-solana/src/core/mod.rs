@@ -43,6 +43,9 @@ pub struct VisualizerContext<'a> {
     instructions: &'a Vec<Instruction>,
     /// IDL registry for parsing unknown programs with Anchor IDLs
     idl_registry: &'a crate::idl::IdlRegistry,
+    /// Wallet-supplied decoded ConfidentialTransfer amount for this instruction
+    /// (UI-only). `None` when the wallet provided no hint.
+    confidential_decoded_amount: Option<u64>,
 }
 
 impl<'a> VisualizerContext<'a> {
@@ -52,13 +55,21 @@ impl<'a> VisualizerContext<'a> {
         instruction_index: usize,
         instructions: &'a Vec<Instruction>,
         idl_registry: &'a crate::idl::IdlRegistry,
+        confidential_decoded_amount: Option<u64>,
     ) -> Self {
         Self {
             sender,
             instruction_index,
             instructions,
             idl_registry,
+            confidential_decoded_amount,
         }
+    }
+
+    /// Returns the wallet-supplied decoded ConfidentialTransfer amount for
+    /// this instruction, if the wallet provided one. UI-only.
+    pub fn confidential_decoded_amount(&self) -> Option<u64> {
+        self.confidential_decoded_amount
     }
 
     /// Returns a reference to the IDL registry
@@ -84,6 +95,27 @@ impl<'a> VisualizerContext<'a> {
     /// Returns the current instruction being visualized.
     pub fn current_instruction(&self) -> Option<&Instruction> {
         self.instructions.get(self.instruction_index)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_exposes_confidential_decoded_amount() {
+        let sender = SolanaAccount {
+            account_key: "11111111111111111111111111111111".to_string(),
+            signer: false,
+            writable: false,
+        };
+        let instructions: Vec<Instruction> = vec![];
+        let registry = crate::idl::IdlRegistry::new();
+        let ctx = VisualizerContext::new(&sender, 0, &instructions, &registry, Some(1_234));
+        assert_eq!(ctx.confidential_decoded_amount(), Some(1_234));
+        let ctx_none = VisualizerContext::new(&sender, 0, &instructions, &registry, None);
+        assert_eq!(ctx_none.confidential_decoded_amount(), None);
     }
 }
 
