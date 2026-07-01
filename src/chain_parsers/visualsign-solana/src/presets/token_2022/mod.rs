@@ -1,5 +1,6 @@
 //! Token 2022 preset implementation for Solana
 
+mod confidential_transfer;
 mod config;
 
 use crate::core::{

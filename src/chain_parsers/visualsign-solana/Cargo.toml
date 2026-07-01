@@ -23,6 +23,7 @@ spl-stake-pool = "2.0.2"
 solana-system-interface = "1.0"
 spl-token-2022 = "10.0.0"
 spl-token-2022-interface = "2.1.0"
+bytemuck = "1.24.0"
 
 [dev-dependencies]
 solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "a0c554d", features = ["proptest"] }
