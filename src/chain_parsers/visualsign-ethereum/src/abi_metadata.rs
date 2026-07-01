@@ -110,24 +110,16 @@ pub fn try_extract_from_chain_metadata(
         // regardless. An entry that DOES carry a signature must still validate,
         // since a present-but-invalid signature signals tampering rather than
         // simply an unsigned source.
-        match abi.signature.as_ref() {
-            Some(proto_sig) => {
-                let signature = convert_proto_signature(proto_sig);
-                if let Err(e) = validate_abi_signature(
-                    &abi.value,
-                    &parsed_address,
-                    chain_id,
-                    &signature,
-                    allowlist,
-                ) {
-                    log::warn!(
-                        "Skipping ABI mapping for '{address}': signature validation failed: {e}"
-                    );
-                    continue;
-                }
-            }
-            None => {
-                unsigned_count += 1;
+        let is_unsigned = abi.signature.is_none();
+        if let Some(proto_sig) = abi.signature.as_ref() {
+            let signature = convert_proto_signature(proto_sig);
+            if let Err(e) =
+                validate_abi_signature(&abi.value, &parsed_address, chain_id, &signature, allowlist)
+            {
+                log::warn!(
+                    "Skipping ABI mapping for '{address}': signature validation failed: {e}"
+                );
+                continue;
             }
         }
 
@@ -146,6 +138,9 @@ pub fn try_extract_from_chain_metadata(
                     abi_kind,
                     implementation,
                 );
+                if is_unsigned {
+                    unsigned_count += 1;
+                }
             }
             Err(e) => {
                 log::warn!("Skipping ABI mapping for '{address}': {e}");
