@@ -175,6 +175,7 @@
             "group": "Blog",
             "pages": [
               "blog",
+              "blog/2026-06-18-swig-composability",
               "blog/2026-05-13-composable-solana-presets"
             ]
           }
