@@ -1,0 +1,54 @@
+{
+  "description": "Token 2022 ConfidentialTransfer Withdraw instruction (context-state proof model) - synthetic fixture, no real key material",
+  "source": "synthetic",
+  "signature": "synthetic_signature_confidential_withdraw",
+  "cluster": "devnet",
+  "full_transaction_note": "Synthetic fixture: withdraws 2.5 tokens (2,500,000 raw units, 6 decimals) from a confidential balance back to the public balance. Proof context accounts are present (offsets == 0); no inline proof / instructions sysvar.",
+  "instruction_index": 0,
+  "instruction_data": "5Nnxe4prCGNzG9grXPAoZvxsJWu5rR5W6rZAiLGArWmhuoivNjjoHnwnZsZCJD9Qb9H",
+  "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "accounts": [
+    {
+      "pubkey": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+      "signer": false,
+      "writable": true,
+      "description": "Source token account"
+    },
+    {
+      "pubkey": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+      "signer": false,
+      "writable": false,
+      "description": "Mint"
+    },
+    {
+      "pubkey": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+      "signer": false,
+      "writable": false,
+      "description": "Equality proof context state account"
+    },
+    {
+      "pubkey": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+      "signer": false,
+      "writable": false,
+      "description": "Range proof context state account"
+    },
+    {
+      "pubkey": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+      "signer": true,
+      "writable": false,
+      "description": "Source token account owner"
+    }
+  ],
+  "expected_fields": {
+    "instruction": "Confidential Withdraw",
+    "amount": "2.5",
+    "raw_amount": "2500000",
+    "decimals": "6",
+    "mint": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+    "source_token_account": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+    "owner": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+    "equality_proof_context_account": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+    "range_proof_context_account": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+    "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  }
+}

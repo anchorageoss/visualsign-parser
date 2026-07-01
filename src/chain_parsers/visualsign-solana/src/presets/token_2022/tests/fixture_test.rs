@@ -311,6 +311,16 @@ fn test_close_account_real_transaction() {
 }
 
 #[test]
+fn test_confidential_withdraw_fixture() {
+    test_real_transaction("confidential_withdraw", "ConfidentialWithdraw");
+}
+
+#[test]
+fn test_confidential_transfer_fixture() {
+    test_real_transaction("confidential_transfer", "ConfidentialTransfer");
+}
+
+#[test]
 fn test_encode_pause_resume_instructions() {
     // Helper test to generate correct base58 encodings for Pause and Resume
     let pause_bytes = [44u8, 1u8];

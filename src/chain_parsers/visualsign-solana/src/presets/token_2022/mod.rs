@@ -7,6 +7,7 @@ use crate::core::{
     InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
 };
 use crate::utils::format_token_amount;
+use confidential_transfer::ConfidentialTransferIx;
 use config::Token2022Config;
 use solana_sdk::instruction::AccountMeta;
 use spl_token_2022::instruction::TokenInstruction;
@@ -101,6 +102,8 @@ enum Token2022Instruction {
         current_authority: String,
         new_authority: Option<String>,
     },
+    ConfidentialWithdraw(ConfidentialTransferIx),
+    ConfidentialTransfer(ConfidentialTransferIx),
 }
 
 fn parse_token_2022_instruction(
@@ -175,6 +178,26 @@ fn parse_token_2022_instruction(
             current_authority: accounts[1].pubkey.to_string(),
             new_authority,
         });
+    }
+
+    // Check for ConfidentialTransfer extension (Withdraw / Transfer sub-instructions)
+    if data.first().copied()
+        == Some(confidential_transfer::CONFIDENTIAL_TRANSFER_EXTENSION_DISCRIMINATOR)
+    {
+        let account_keys: Vec<String> = accounts.iter().map(|a| a.pubkey.to_string()).collect();
+        if let Some(ix) =
+            confidential_transfer::try_decode_confidential_transfer(data, &account_keys)?
+        {
+            return Ok(match ix {
+                ConfidentialTransferIx::Withdraw { .. } => {
+                    Token2022Instruction::ConfidentialWithdraw(ix)
+                }
+                ConfidentialTransferIx::Transfer { .. } => {
+                    Token2022Instruction::ConfidentialTransfer(ix)
+                }
+            });
+        }
+        // Other CT sub-instructions fall through to the unsupported path below.
     }
 
     // Try to parse as standard TokenInstruction first
@@ -499,6 +522,131 @@ fn create_token_2022_preview_layout(
 
             (title, condensed, expanded)
         }
+        Token2022Instruction::ConfidentialWithdraw(ConfidentialTransferIx::Withdraw {
+            source_token_account,
+            mint,
+            owner,
+            amount,
+            decimals,
+            new_decryptable_available_balance,
+            equality_proof_context_account,
+            range_proof_context_account,
+        }) => {
+            let formatted_amount = format_token_amount(*amount, *decimals);
+            let title = format!("Confidential Withdraw: {formatted_amount} tokens");
+            let condensed = vec![
+                create_text_field("Action", "Confidential Withdraw")?,
+                create_text_field("Amount", &formatted_amount)?,
+            ];
+            let mut expanded = vec![
+                create_text_field("Instruction", "Confidential Withdraw")?,
+                create_text_field("Amount", &formatted_amount)?,
+                create_number_field("Raw Amount", &amount.to_string(), "")?,
+                create_number_field("Decimals", &decimals.to_string(), "")?,
+                create_text_field("Mint", mint)?,
+                create_text_field("Source Token Account", source_token_account)?,
+                create_text_field("Owner", owner)?,
+            ];
+            if let Some(a) = equality_proof_context_account {
+                expanded.push(create_text_field("Equality Proof Context Account", a)?);
+            }
+            if let Some(a) = range_proof_context_account {
+                expanded.push(create_text_field("Range Proof Context Account", a)?);
+            }
+            // Opaque / fallback at the bottom.
+            expanded.push(create_text_field(
+                "New Decryptable Available Balance (encrypted; wallet decrypts)",
+                new_decryptable_available_balance,
+            )?);
+            expanded.push(create_text_field(
+                "Program ID",
+                &instruction.program_id.to_string(),
+            )?);
+            expanded.push(create_raw_data_field(
+                &instruction.data,
+                Some(hex::encode(&instruction.data)),
+            )?);
+            (title, condensed, expanded)
+        }
+        Token2022Instruction::ConfidentialTransfer(ConfidentialTransferIx::Transfer {
+            source_token_account,
+            mint,
+            destination_token_account,
+            owner,
+            new_source_decryptable_available_balance,
+            auditor_configured,
+            equality_proof_context_account,
+            validity_proof_context_account,
+            range_proof_context_account,
+        }) => {
+            let decoded = context.confidential_decoded_amount();
+            let title = match decoded {
+                Some(a) => format!("Confidential Transfer: {a} tokens"),
+                None => "Confidential Transfer".to_string(),
+            };
+            let mut condensed = vec![create_text_field("Action", "Confidential Transfer")?];
+            if let Some(a) = decoded {
+                condensed.push(create_text_field(
+                    "Amount (wallet-decoded)",
+                    &a.to_string(),
+                )?);
+            }
+            let mut expanded = vec![create_text_field("Instruction", "Confidential Transfer")?];
+            if let Some(a) = decoded {
+                expanded.push(create_text_field(
+                    "Amount (wallet-decoded)",
+                    &a.to_string(),
+                )?);
+            }
+            expanded.push(create_text_field("Mint", mint)?);
+            expanded.push(create_text_field(
+                "Source Token Account",
+                source_token_account,
+            )?);
+            expanded.push(create_text_field(
+                "Destination Token Account",
+                destination_token_account,
+            )?);
+            expanded.push(create_text_field("Owner", owner)?);
+            if let Some(a) = equality_proof_context_account {
+                expanded.push(create_text_field("Equality Proof Context Account", a)?);
+            }
+            if let Some(a) = validity_proof_context_account {
+                expanded.push(create_text_field("Validity Proof Context Account", a)?);
+            }
+            if let Some(a) = range_proof_context_account {
+                expanded.push(create_text_field("Range Proof Context Account", a)?);
+            }
+            // Opaque / fallback at the bottom.
+            expanded.push(create_text_field(
+                "Auditor Configured",
+                if *auditor_configured { "yes" } else { "no" },
+            )?);
+            expanded.push(create_text_field(
+                "New Source Decryptable Available Balance (encrypted; wallet decrypts)",
+                new_source_decryptable_available_balance,
+            )?);
+            expanded.push(create_text_field(
+                "Program ID",
+                &instruction.program_id.to_string(),
+            )?);
+            expanded.push(create_raw_data_field(
+                &instruction.data,
+                Some(hex::encode(&instruction.data)),
+            )?);
+            (title, condensed, expanded)
+        }
+        // `ConfidentialWithdraw` and `ConfidentialTransfer` are constructed
+        // exclusively from the matching `ConfidentialTransferIx` variant in
+        // `parse_token_2022_instruction`; the mismatched combinations below
+        // are unreachable in practice but must be handled since the wrapped
+        // enum has two variants.
+        Token2022Instruction::ConfidentialWithdraw(ConfidentialTransferIx::Transfer { .. })
+        | Token2022Instruction::ConfidentialTransfer(ConfidentialTransferIx::Withdraw { .. }) => {
+            return Err(VisualSignError::DecodeError(
+                "confidential_transfer: mismatched instruction variant".to_string(),
+            ));
+        }
     };
 
     let preview_layout = SignablePayloadFieldPreviewLayout {
@@ -539,5 +687,212 @@ fn create_token_2022_preview_layout(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use bytemuck::bytes_of;
+    use solana_sdk::pubkey::Pubkey;
+    use spl_token_2022_interface::extension::confidential_transfer::instruction::{
+        ConfidentialTransferInstruction, TransferInstructionData, WithdrawInstructionData,
+    };
+    use std::str::FromStr;
+
     mod fixture_test;
+
+    fn meta(pubkey_seed: u8) -> AccountMeta {
+        let mut bytes = [0u8; 32];
+        bytes[0] = pubkey_seed;
+        AccountMeta {
+            pubkey: Pubkey::new_from_array(bytes),
+            is_signer: false,
+            is_writable: false,
+        }
+    }
+
+    #[test]
+    fn withdraw_renders_amount_in_title() {
+        let d = WithdrawInstructionData {
+            amount: 1_500_000u64.into(),
+            decimals: 6,
+            new_decryptable_available_balance: Default::default(),
+            equality_proof_instruction_offset: 0,
+            range_proof_instruction_offset: 0,
+        };
+        let mut data = vec![
+            confidential_transfer::CONFIDENTIAL_TRANSFER_EXTENSION_DISCRIMINATOR,
+            ConfidentialTransferInstruction::Withdraw as u8,
+        ];
+        data.extend_from_slice(bytes_of(&d));
+        // Accounts: [src, mint, equality_ctx, range_ctx, owner]
+        let accounts: Vec<AccountMeta> = (0..5).map(meta).collect();
+
+        let ix = parse_token_2022_instruction(&data, &accounts).unwrap();
+        assert!(matches!(ix, Token2022Instruction::ConfidentialWithdraw(_)));
+
+        let instruction = solana_sdk::instruction::Instruction {
+            program_id: Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb").unwrap(),
+            accounts,
+            data,
+        };
+        let sender = solana_parser::solana::structs::SolanaAccount {
+            account_key: "11111111111111111111111111111111".to_string(),
+            signer: false,
+            writable: false,
+        };
+        let instructions = vec![instruction.clone()];
+        let idl_registry = crate::idl::IdlRegistry::new();
+        let context = VisualizerContext::new(&sender, 0, &instructions, &idl_registry, None);
+
+        let field = create_token_2022_preview_layout(&ix, &instruction, &context).unwrap();
+        let SignablePayloadField::PreviewLayout { preview_layout, .. } =
+            field.signable_payload_field
+        else {
+            panic!("expected PreviewLayout");
+        };
+        let title = preview_layout.title.unwrap().text;
+        assert_eq!(title, "Confidential Withdraw: 1.5 tokens");
+    }
+
+    #[test]
+    fn transfer_with_wallet_decoded_amount_shows_amount_in_title() {
+        let d = TransferInstructionData {
+            new_source_decryptable_available_balance: Default::default(),
+            transfer_amount_auditor_ciphertext_lo: Default::default(),
+            transfer_amount_auditor_ciphertext_hi: Default::default(),
+            equality_proof_instruction_offset: 0,
+            ciphertext_validity_proof_instruction_offset: 0,
+            range_proof_instruction_offset: 0,
+        };
+        let mut data = vec![
+            confidential_transfer::CONFIDENTIAL_TRANSFER_EXTENSION_DISCRIMINATOR,
+            ConfidentialTransferInstruction::Transfer as u8,
+        ];
+        data.extend_from_slice(bytes_of(&d));
+        // Accounts: [src, mint, dest, eqctx, validityctx, rngctx, owner]
+        let accounts: Vec<AccountMeta> = (0..7).map(meta).collect();
+
+        let ix = parse_token_2022_instruction(&data, &accounts).unwrap();
+        assert!(matches!(ix, Token2022Instruction::ConfidentialTransfer(_)));
+
+        let instruction = solana_sdk::instruction::Instruction {
+            program_id: Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb").unwrap(),
+            accounts,
+            data,
+        };
+        let sender = solana_parser::solana::structs::SolanaAccount {
+            account_key: "11111111111111111111111111111111".to_string(),
+            signer: false,
+            writable: false,
+        };
+        let instructions = vec![instruction.clone()];
+        let idl_registry = crate::idl::IdlRegistry::new();
+
+        // With a wallet-supplied decoded amount, the title and condensed
+        // fields include it.
+        let context_with_amount =
+            VisualizerContext::new(&sender, 0, &instructions, &idl_registry, Some(42_000u64));
+        let field_with_amount =
+            create_token_2022_preview_layout(&ix, &instruction, &context_with_amount).unwrap();
+        let SignablePayloadField::PreviewLayout {
+            preview_layout: layout_with_amount,
+            ..
+        } = field_with_amount.signable_payload_field
+        else {
+            panic!("expected PreviewLayout");
+        };
+        assert_eq!(
+            layout_with_amount.title.unwrap().text,
+            "Confidential Transfer: 42000 tokens"
+        );
+        let condensed_with_amount = layout_with_amount.condensed.unwrap().fields;
+        let has_condensed_amount =
+            condensed_with_amount
+                .iter()
+                .any(|f| match &f.signable_payload_field {
+                    SignablePayloadField::TextV2 { common, text_v2 } => {
+                        common.label == "Amount (wallet-decoded)" && text_v2.text == "42000"
+                    }
+                    _ => false,
+                });
+        assert!(
+            has_condensed_amount,
+            "expected condensed wallet-decoded amount field"
+        );
+
+        // With no wallet-supplied amount, the title has no amount, and no
+        // amount field is present.
+        let context_without_amount =
+            VisualizerContext::new(&sender, 0, &instructions, &idl_registry, None);
+        let field_without_amount =
+            create_token_2022_preview_layout(&ix, &instruction, &context_without_amount).unwrap();
+        let SignablePayloadField::PreviewLayout {
+            preview_layout: layout_without_amount,
+            ..
+        } = field_without_amount.signable_payload_field
+        else {
+            panic!("expected PreviewLayout");
+        };
+        assert_eq!(
+            layout_without_amount.title.unwrap().text,
+            "Confidential Transfer"
+        );
+        let expanded_without_amount = layout_without_amount.expanded.unwrap().fields;
+        let has_amount_field = expanded_without_amount.iter().any(|f| {
+            matches!(&f.signable_payload_field, SignablePayloadField::TextV2 { common, .. } if common.label == "Amount (wallet-decoded)")
+        });
+        assert!(
+            !has_amount_field,
+            "did not expect a wallet-decoded amount field when context has none"
+        );
+    }
+
+    #[test]
+    fn withdraw_encrypted_fields_render_at_bottom_of_expanded_list() {
+        let d = WithdrawInstructionData {
+            amount: 10u64.into(),
+            decimals: 0,
+            new_decryptable_available_balance: Default::default(),
+            equality_proof_instruction_offset: 0,
+            range_proof_instruction_offset: 0,
+        };
+        let mut data = vec![
+            confidential_transfer::CONFIDENTIAL_TRANSFER_EXTENSION_DISCRIMINATOR,
+            ConfidentialTransferInstruction::Withdraw as u8,
+        ];
+        data.extend_from_slice(bytes_of(&d));
+        let accounts: Vec<AccountMeta> = (0..5).map(meta).collect();
+        let ix = parse_token_2022_instruction(&data, &accounts).unwrap();
+
+        let instruction = solana_sdk::instruction::Instruction {
+            program_id: Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb").unwrap(),
+            accounts,
+            data,
+        };
+        let sender = solana_parser::solana::structs::SolanaAccount {
+            account_key: "11111111111111111111111111111111".to_string(),
+            signer: false,
+            writable: false,
+        };
+        let instructions = vec![instruction.clone()];
+        let idl_registry = crate::idl::IdlRegistry::new();
+        let context = VisualizerContext::new(&sender, 0, &instructions, &idl_registry, None);
+
+        let field = create_token_2022_preview_layout(&ix, &instruction, &context).unwrap();
+        let SignablePayloadField::PreviewLayout { preview_layout, .. } =
+            field.signable_payload_field
+        else {
+            panic!("expected PreviewLayout");
+        };
+        let expanded = preview_layout.expanded.unwrap().fields;
+        let encrypted_label = "New Decryptable Available Balance (encrypted; wallet decrypts)";
+        let encrypted_idx = expanded
+            .iter()
+            .position(|f| matches!(&f.signable_payload_field, SignablePayloadField::TextV2 { common, .. } if common.label == encrypted_label))
+            .expect("expected encrypted balance field to be present");
+        // The encrypted/opaque field must be the last human-labeled field,
+        // i.e. only the Program ID and raw data fields (also opaque/fallback)
+        // may come after it.
+        assert!(
+            encrypted_idx >= expanded.len() - 3,
+            "expected encrypted field near bottom of expanded list, got index {encrypted_idx} of {}",
+            expanded.len()
+        );
+    }
 }

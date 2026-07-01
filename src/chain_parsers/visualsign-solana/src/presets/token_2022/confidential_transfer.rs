@@ -11,10 +11,8 @@
 //! The parser never decrypts: AE balance blobs and auditor ciphertexts are
 //! surfaced opaque (base64 / presence bool).
 //!
-//! This module is not yet wired into `Token2022Visualizer`; a later task
-//! consumes `try_decode_confidential_transfer` from `mod.rs`. Until then the
-//! public API is exercised only by this module's tests.
-#![allow(dead_code)]
+//! `try_decode_confidential_transfer` is consumed by
+//! `parse_token_2022_instruction` in `mod.rs`.
 
 use base64::Engine;
 use bytemuck::bytes_of;
