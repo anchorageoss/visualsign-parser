@@ -857,7 +857,7 @@ fn visualize_inner_instruction(instruction: Instruction) -> Option<String> {
     };
     let instructions = vec![instruction];
     let idl_registry = crate::idl::IdlRegistry::new();
-    let context = VisualizerContext::new(&sender, 0, &instructions, &idl_registry);
+    let context = VisualizerContext::new(&sender, 0, &instructions, &idl_registry, None);
 
     visualize_with_any(&visualizer_refs, &context)
         .and_then(|result| result.ok())

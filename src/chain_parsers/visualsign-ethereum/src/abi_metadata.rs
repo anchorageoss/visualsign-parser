@@ -391,6 +391,7 @@ mod tests {
                 network_id: None,
                 idl: None,
                 idl_mappings: Default::default(),
+                confidential_transfer_hints: Default::default(),
             })),
         };
         assert!(try_extract_from_chain_metadata(Some(&metadata), 1).is_none());

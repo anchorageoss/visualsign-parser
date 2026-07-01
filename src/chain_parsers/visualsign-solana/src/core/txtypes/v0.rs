@@ -129,6 +129,7 @@ pub fn decode_v0_transfers(
 pub fn decode_v0_instructions(
     v0_message: &solana_sdk::message::v0::Message,
     idl_registry: &crate::idl::IdlRegistry,
+    hints: &std::collections::BTreeMap<u32, u64>,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     // Get visualizers
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
@@ -198,7 +199,13 @@ pub fn decode_v0_instructions(
 
             visualize_with_any(
                 &visualizers_refs,
-                &VisualizerContext::new(&sender, instruction_index, &instructions, idl_registry),
+                &VisualizerContext::new(
+                    &sender,
+                    instruction_index,
+                    &instructions,
+                    idl_registry,
+                    hints.get(&(instruction_index as u32)).copied(),
+                ),
             )
         })
         .map(|res| res.map(|viz_result| viz_result.field))

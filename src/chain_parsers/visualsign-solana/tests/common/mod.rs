@@ -101,6 +101,7 @@ pub fn options_with_idl(program_id: &Pubkey, idl_json: &str, name: &str) -> Visu
                 idl_mappings,
                 network_id: None,
                 idl: None,
+                confidential_transfer_hints: Default::default(),
             })),
         }),
         ..VisualSignOptions::default()

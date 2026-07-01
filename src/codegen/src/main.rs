@@ -31,6 +31,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .enum_attribute(".parser.Metadata", BORSH_ENUM_DISC_ATTR)
         .type_attribute(".parser.SolanaMetadata", BORSH_DERIVE)
         .enum_attribute(".parser.SolanaMetadata", BORSH_ENUM_DISC_ATTR)
+        .type_attribute(".parser.SolanaConfidentialTransferHint", BORSH_DERIVE)
+        .enum_attribute(
+            ".parser.SolanaConfidentialTransferHint",
+            BORSH_ENUM_DISC_ATTR,
+        )
         .type_attribute(".parser.EthereumMetadata", BORSH_DERIVE)
         .enum_attribute(".parser.EthereumMetadata", BORSH_ENUM_DISC_ATTR)
         .type_attribute(".parser.Abi", BORSH_DERIVE)

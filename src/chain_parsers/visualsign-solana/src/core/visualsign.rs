@@ -152,6 +152,32 @@ fn create_idl_registry_from_options(
     }
 }
 
+/// Extract wallet-decoded ConfidentialTransfer amounts from `VisualSignOptions`
+/// metadata, keyed by instruction index.
+///
+/// UI-only: the wallet holds the viewing key and decrypts off-parser. These
+/// hints are surfaced to visualizer presets via `VisualizerContext` and must
+/// never be routed into `intermediate.rs` / the intermediate output used by
+/// the policy engine.
+fn confidential_transfer_hints(
+    options: &VisualSignOptions,
+) -> std::collections::BTreeMap<u32, u64> {
+    let mut out = std::collections::BTreeMap::new();
+    let Some(generated::parser::chain_metadata::Metadata::Solana(solana_meta)) = options
+        .metadata
+        .as_ref()
+        .and_then(|meta| meta.metadata.as_ref())
+    else {
+        return out;
+    };
+    for (idx, hint) in &solana_meta.confidential_transfer_hints {
+        if let Some(amount) = hint.decoded_amount {
+            out.insert(*idx, amount);
+        }
+    }
+    out
+}
+
 /// Converter that knows how to format Solana transactions for VisualSign
 pub struct SolanaVisualSignConverter;
 
@@ -266,6 +292,7 @@ fn convert_to_visual_sign_payload(
 
     // Create IDL registry from options metadata
     let idl_registry = create_idl_registry_from_options(options)?;
+    let hints = confidential_transfer_hints(options);
 
     let mut fields = vec![SignablePayloadField::TextV2 {
         common: SignablePayloadFieldCommon {
@@ -288,7 +315,7 @@ fn convert_to_visual_sign_payload(
 
     // Process instructions with visualizers (pass IDL registry for future use)
     fields.extend(
-        instructions::decode_instructions(transaction, &idl_registry)?
+        instructions::decode_instructions(transaction, &idl_registry, &hints)?
             .iter()
             .map(|e| e.signable_payload_field.clone()),
     );
@@ -349,6 +376,7 @@ fn convert_v0_to_visual_sign_payload(
 ) -> Result<SignablePayload, VisualSignError> {
     // Create IDL registry from options metadata
     let idl_registry = create_idl_registry_from_options(options)?;
+    let hints = confidential_transfer_hints(options);
 
     // Decode and sort accounts using the dedicated function
     let accounts = decode_v0_accounts(v0_message)?;
@@ -371,7 +399,7 @@ fn convert_v0_to_visual_sign_payload(
 
     // Directly process V0 instructions using the visualizer framework
     // This approach works for all V0 transactions, including those with lookup tables
-    match decode_v0_instructions(v0_message, &idl_registry) {
+    match decode_v0_instructions(v0_message, &idl_registry, &hints) {
         Ok(instruction_fields) => {
             for (index, instruction_field) in instruction_fields.iter().enumerate() {
                 tracing::debug!(

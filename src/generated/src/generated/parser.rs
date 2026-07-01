@@ -245,6 +245,27 @@ pub struct SolanaMetadata {
     /// Allows wallet to provide multiple IDLs, one per program
     #[prost(map = "string, message", tag = "3")]
     pub idl_mappings: ::std::collections::HashMap<::prost::alloc::string::String, Idl>,
+    /// Wallet-decoded ConfidentialTransfer amounts, keyed by instruction index.
+    /// UI-only: the wallet holds the viewing key and decrypts off-parser. NOT
+    /// used for policy decisions.
+    #[prost(map = "uint32, message", tag = "4")]
+    pub confidential_transfer_hints: ::std::collections::HashMap<
+        u32,
+        SolanaConfidentialTransferHint,
+    >,
+}
+#[cfg_attr(
+    feature = "serde_derive",
+    derive(::serde::Serialize, ::serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
+#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SolanaConfidentialTransferHint {
+    /// Plaintext transfer amount in base units, decoded by the wallet.
+    #[prost(uint64, optional, tag = "1")]
+    pub decoded_amount: ::core::option::Option<u64>,
 }
 #[cfg_attr(
     feature = "serde_derive",
