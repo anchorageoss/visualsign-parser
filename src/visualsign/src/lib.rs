@@ -265,7 +265,20 @@ impl FieldSerializer for SignablePayloadField {
                 serialize_field_variant!(fields, "address_v2", common, ("AddressV2", address_v2));
             }
             SignablePayloadField::Number { common, number } => {
-                serialize_field_variant!(fields, "number", common, ("Number", number));
+                // VSP has no `number` field type; numbers render as `amount_v2`
+                // (a unitless number = empty abbreviation). The unit, if any, is
+                // the remainder of `fallback_text` after the numeric value (see
+                // `create_number_field`, which builds "{number} {unit}").
+                let abbreviation = common
+                    .fallback_text
+                    .strip_prefix(number.number.as_str())
+                    .map(|rest| rest.trim_start().to_string())
+                    .unwrap_or_default();
+                let amount_v2 = SignablePayloadFieldAmountV2 {
+                    amount: number.number.clone(),
+                    abbreviation: Some(abbreviation),
+                };
+                serialize_field_variant!(fields, "amount_v2", common, ("AmountV2", &amount_v2));
             }
             SignablePayloadField::Amount { common, amount } => {
                 serialize_field_variant!(fields, "amount", common, ("Amount", amount));
@@ -319,7 +332,8 @@ impl FieldSerializer for SignablePayloadField {
             SignablePayloadField::TextV2 { .. } => base_fields.push("TextV2"),
             SignablePayloadField::Address { .. } => base_fields.push("Address"),
             SignablePayloadField::AddressV2 { .. } => base_fields.push("AddressV2"),
-            SignablePayloadField::Number { .. } => base_fields.push("Number"),
+            // Serialized as `amount_v2` under the hood (see `serialize_to_map`).
+            SignablePayloadField::Number { .. } => base_fields.push("AmountV2"),
             SignablePayloadField::Amount { .. } => base_fields.push("Amount"),
             SignablePayloadField::AmountV2 { .. } => base_fields.push("AmountV2"),
             SignablePayloadField::Divider { .. } => base_fields.push("Divider"),

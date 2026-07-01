@@ -187,12 +187,13 @@
               "Type": "text_v2"
             },
             {
+              "AmountV2": {
+                "Abbreviation": "units",
+                "Amount": "400000"
+              },
               "FallbackText": "400000 units",
               "Label": "Compute Unit Limit",
-              "Number": {
-                "Number": "400000"
-              },
-              "Type": "number"
+              "Type": "amount_v2"
             },
             {
               "FallbackText": "02801a0600",
@@ -240,12 +241,13 @@
               "Type": "text_v2"
             },
             {
+              "AmountV2": {
+                "Abbreviation": "micro-lamports",
+                "Amount": "50000"
+              },
               "FallbackText": "50000 micro-lamports",
               "Label": "Price per Compute Unit",
-              "Number": {
-                "Number": "50000"
-              },
-              "Type": "number"
+              "Type": "amount_v2"
             },
             {
               "FallbackText": "0350c3000000000000",

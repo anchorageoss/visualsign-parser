@@ -812,9 +812,12 @@ mod tests {
                         && field.get("Type").and_then(|t| t.as_str()) == Some("text_v2")
                 });
 
+                // `number` fields render as `amount_v2` on the wire (VSP has no
+                // `number` type; numbers are unitless/with-unit amounts); the
+                // in-memory variant stays Number.
                 let has_slippage = fields_array.iter().any(|field| {
                     field.get("Label").and_then(|l| l.as_str()) == Some("Slippage")
-                        && field.get("Type").and_then(|t| t.as_str()) == Some("number")
+                        && field.get("Type").and_then(|t| t.as_str()) == Some("amount_v2")
                 });
 
                 assert!(
