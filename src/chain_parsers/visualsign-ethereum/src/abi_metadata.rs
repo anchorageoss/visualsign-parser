@@ -170,7 +170,7 @@ pub fn try_extract_from_chain_metadata(
 fn resolve_abi_kind(abi: &generated::parser::Abi) -> (AbiKind, Option<alloy_primitives::Address>) {
     let proto_type = abi
         .abi_type
-        .and_then(generated::parser::AbiType::from_i32)
+        .and_then(|v| generated::parser::AbiType::try_from(v).ok())
         .unwrap_or(generated::parser::AbiType::Unspecified);
 
     match proto_type {
@@ -795,7 +795,7 @@ mod tests {
     const TEST_ADDRESS: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 
     /// Builds the test fixture as a `BTreeMap` (crate determinism rule) and lets each
-    /// call site `.into_iter().collect()` into the proto field's `HashMap`.
+    /// call site `.into_iter().collect()` into the proto field's map.
     fn make_abi_mappings(entries: Vec<(&str, Abi)>) -> std::collections::BTreeMap<String, Abi> {
         entries
             .into_iter()
