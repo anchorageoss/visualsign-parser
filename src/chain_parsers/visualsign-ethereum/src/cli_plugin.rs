@@ -109,10 +109,13 @@ fn build_abi_mappings_from_files(
         |components, json| {
             // The metadata-ABI extraction path accepts unsigned entries too, but the
             // CLI attaches an integrity signature using a deterministic local dev key
-            // so locally-loaded ABIs extract as verified rather than flagged unsigned.
-            // This is integrity, not identity, the CLI is a local dev tool that
-            // already trusts its input files; production trust comes from the gRPC
-            // caller verifying the public key against an allowlist.
+            // so locally-loaded ABIs extract as verified rather than logged as
+            // unverified. This is integrity, not identity, the CLI is a local dev tool
+            // that already trusts its input files; production trust comes from the
+            // service running the parser, which validates the signature and checks the
+            // signer's public key against an allowlist during extraction (see
+            // `abi_metadata::try_extract_from_chain_metadata`), not from the gRPC
+            // caller.
             //
             // The signature binds the contract address and chain id, so it must be
             // produced for the same (chain, address) the parser verifies with. The
@@ -198,7 +201,7 @@ fn apply_proxy_mappings(
 
         // Ensure the proxy has an entry to stamp. If it has no own ABI file, synthesize
         // an empty "[]" ABI, signed with the same dev key used for file-loaded ABIs so
-        // it extracts as verified rather than flagged unsigned.
+        // it extracts as verified rather than logged as unverified.
         if !abi_mappings.contains_key(&proxy_key) {
             if attempted_abi_addresses.contains(&proxy_key) {
                 eprintln!(
@@ -403,7 +406,7 @@ mod tests {
             .expect("mapping present");
         assert!(abi.value.contains("swap"));
         // CLI signs locally-loaded ABIs so they extract as verified rather than
-        // flagged unsigned by the metadata-ABI extractor.
+        // logged as unverified by the metadata-ABI extractor.
         assert!(
             abi.signature.is_some(),
             "CLI should attach a dev-key signature to locally-loaded ABIs"

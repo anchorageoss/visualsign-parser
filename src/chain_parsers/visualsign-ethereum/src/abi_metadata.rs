@@ -37,11 +37,13 @@ enum AbiSignatureError {
 ///
 /// # Security notes
 ///
-/// - **Unsigned ABIs are accepted, but flagged.** Not every caller signs its ABI
-///   mappings yet, so an entry with `signature: None` is registered rather than
-///   dropped; a warning is logged noting the ABI is unverified. This is acceptable
-///   because the whole caller-supplied ABI path is display-only and untrusted
-///   regardless of signature status (see below).
+/// - **Unsigned ABIs are accepted, but logged as unverified.** Not every caller
+///   signs its ABI mappings yet, so an entry with `signature: None` is registered
+///   rather than dropped; unsigned entries are counted and reported in a single
+///   aggregated warning once per request (no per-entry flag or marker is stored
+///   in the registry). This is acceptable because the whole caller-supplied ABI
+///   path is display-only and untrusted regardless of signature status (see
+///   below).
 /// - **When present, a signature is validated**, using secp256k1 over a
 ///   domain-separated prehash that binds the chain id and the contract address to
 ///   the ABI JSON (see [`visualsign::signing::ethereum_metadata_prehash`]). An entry
