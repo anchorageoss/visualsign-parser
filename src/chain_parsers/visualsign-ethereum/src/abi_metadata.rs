@@ -85,6 +85,7 @@ pub fn try_extract_from_chain_metadata(
     }
 
     let mut registry = AbiRegistry::new();
+    let mut unsigned_count: usize = 0;
     for (address, abi) in &ethereum.abi_mappings {
         // Validate address first (cheap) before expensive signature/ABI operations
         let parsed_address = match address.parse::<alloy_primitives::Address>() {
@@ -126,9 +127,7 @@ pub fn try_extract_from_chain_metadata(
                 }
             }
             None => {
-                log::warn!(
-                    "Accepting unsigned ABI mapping for '{address}': integrity/provenance unverified"
-                );
+                unsigned_count += 1;
             }
         }
 
@@ -152,6 +151,11 @@ pub fn try_extract_from_chain_metadata(
                 log::warn!("Skipping ABI mapping for '{address}': {e}");
             }
         }
+    }
+    if unsigned_count > 0 {
+        log::warn!(
+            "Accepted {unsigned_count} unsigned ABI mapping(s): integrity/provenance unverified"
+        );
     }
     if registry.list_abis().is_empty() {
         return None;
@@ -988,7 +992,7 @@ mod tests {
     /// present-but-invalid signature is a stronger signal of tampering than
     /// simply omitting one, so it must not be downgraded to "accept and log".
     #[test]
-    fn test_try_extract_invalid_signature_still_rejected() {
+    fn test_try_extract_unauthorized_signer_still_rejected() {
         // `signed_abi` signs with seed 0x42, so pass an allowlist that only
         // authorizes seed 0x43: the signature verifies but the signer is
         // unauthorized (mirrors `validate_abi_signature_rejects_unlisted_signer`).
