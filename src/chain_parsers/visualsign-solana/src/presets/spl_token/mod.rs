@@ -4,7 +4,7 @@
 mod config;
 
 use crate::core::{
-    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
     VisualizerKind,
 };
 use config::SplTokenConfig;
@@ -33,7 +33,7 @@ impl InstructionVisualizer for SplTokenVisualizer {
         // (including attacker-controlled input) degrade to a raw program_id +
         // data layout instead of returning `Err`, which the non-diagnostics
         // dispatch turns into a whole-transaction failure.
-        match TokenInstruction::unpack(&instruction.data) {
+        match TokenInstruction::unpack(context.data()) {
             Ok(token_instruction) => {
                 create_token_preview_layout(&token_instruction, &instruction, context)
             }
@@ -50,43 +50,6 @@ impl InstructionVisualizer for SplTokenVisualizer {
     }
 }
 
-/// A display-resolved view of the instruction built from the post-#228
-/// wire-data context.
-///
-/// The per-variant branches reference `instruction.program_id` /
-/// `instruction.accounts` / `instruction.data`; this builds that view at the
-/// entry point with every program and account index already resolved to a
-/// display string. Following the catch-all "partial rendering" contract
-/// documented on `VisualizerContext`, indices that need an address-table lookup
-/// (v0 transactions) render as `unresolved(N)` placeholders rather than aborting
-/// the whole transaction or being substituted with `Pubkey::default()` (which
-/// would render as a valid-looking address).
-struct InstructionView {
-    program_id: String,
-    accounts: Vec<String>,
-    data: Vec<u8>,
-}
-
-impl InstructionView {
-    fn from_context(context: &VisualizerContext) -> Self {
-        let program_id = match context.program_id() {
-            ProgramRef::Resolved(pk) => pk.to_string(),
-            ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
-        };
-        let accounts = (0..context.num_accounts())
-            .map(|i| match context.account(i) {
-                Some(AccountRef::Resolved(pk)) => pk.to_string(),
-                Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
-                None => "unknown".to_string(),
-            })
-            .collect();
-        Self {
-            program_id,
-            accounts,
-            data: context.data().to_vec(),
-        }
-    }
-}
 
 /// Graceful fallback when the instruction bytes do not unpack into a known SPL
 /// Token instruction. Mirrors the unknown-program raw layout: surface the
@@ -106,7 +69,7 @@ fn create_unparsable_preview_layout(
         create_text_field("Instruction", title)?,
         create_text_field("Program", "SPL Token")?,
         create_text_field("Program ID", &instruction.program_id)?,
-        create_text_field("Raw Data", &hex::encode(&instruction.data))?,
+        create_text_field("Raw Data", &hex::encode(context.data()))?,
     ];
 
     create_preview_layout_field(
@@ -164,7 +127,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             let expanded_fields = expanded_fields;
@@ -202,7 +165,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             let expanded_fields = expanded_fields;
@@ -242,7 +205,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             let expanded_fields = expanded_fields;
@@ -286,7 +249,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             let expanded_fields = expanded_fields;
@@ -327,7 +290,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             let expanded_fields = expanded_fields;
@@ -364,7 +327,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             let expanded_fields = expanded_fields;
@@ -402,7 +365,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             let expanded_fields = expanded_fields;
@@ -443,7 +406,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             let expanded_fields = expanded_fields;
@@ -484,7 +447,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             let expanded_fields = expanded_fields;
@@ -521,7 +484,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             create_preview_layout_field(
@@ -556,7 +519,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             create_preview_layout_field(
@@ -590,7 +553,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             create_preview_layout_field(
@@ -623,7 +586,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             create_preview_layout_field(
@@ -655,7 +618,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             create_preview_layout_field(
@@ -689,7 +652,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             create_preview_layout_field(
@@ -723,7 +686,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             create_preview_layout_field(
@@ -761,7 +724,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             create_preview_layout_field(
@@ -795,7 +758,7 @@ fn create_token_preview_layout(
 
             expanded_fields.push(create_text_field(
                 "Raw Data",
-                &hex::encode(&instruction.data),
+                &hex::encode(context.data()),
             )?);
 
             create_preview_layout_field(
@@ -822,7 +785,7 @@ fn create_token_preview_layout(
                 create_text_field("Instruction", &instruction_name)?,
                 create_text_field("Program", "SPL Token")?,
                 create_text_field("Program ID", &instruction.program_id)?,
-                create_text_field("Raw Data", &hex::encode(&instruction.data))?,
+                create_text_field("Raw Data", &hex::encode(context.data()))?,
             ];
 
             create_preview_layout_field(
@@ -870,7 +833,7 @@ fn create_preview_layout_field(
                 fallback_text: format!(
                     "Program ID: {}\nData: {}",
                     instruction.program_id,
-                    hex::encode(&instruction.data)
+                    hex::encode(context.data())
                 ),
             },
             preview_layout,
