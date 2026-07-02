@@ -238,7 +238,10 @@ fn verify_image_digest(sh: &Shell, image: &str, expected: &str) -> Result<()> {
 
 /// Set the deployment live, retrying while TVC reports the status is still
 /// settling. A fresh app auto-targets its first deploy on approval, surfacing as
-/// an "already" error -- treat that as success.
+/// an "already live" error -- treat that as success. Requires both "already"
+/// and "live" in the message (not a bare "already" substring) so an unrelated
+/// failure that happens to contain "already" (e.g. a retry-exhaustion message)
+/// isn't misreported as success.
 fn set_live(sh: &Shell, deploy_id: &str, timeout: Duration) -> Result<()> {
     let start = Instant::now();
     loop {
@@ -256,7 +259,7 @@ fn set_live(sh: &Shell, deploy_id: &str, timeout: Duration) -> Result<()> {
             String::from_utf8_lossy(&out.stderr)
         )
         .to_lowercase();
-        if msg.contains("already") {
+        if msg.contains("already") && msg.contains("live") {
             println!("{deploy_id} already live (auto-targeted)");
             return Ok(());
         }
@@ -372,4 +375,82 @@ fn temp_path(prefix: &str, ext: &str) -> PathBuf {
         "{prefix}-{}-{nanos}-{seq}.{ext}",
         std::process::id()
     ))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deployment_health_reads_ratio_for_matching_deployment() {
+        let status = "\
+Deployment: deploy-other
+  Healthy / Desired Replicas: 0/3
+Deployment: deploy-123
+  Healthy / Desired Replicas: 2/3
+Deployment: deploy-another
+  Healthy / Desired Replicas: 5/5
+";
+        assert_eq!(
+            deployment_health(status, "deploy-123"),
+            Some("2/3".to_owned())
+        );
+    }
+
+    #[test]
+    fn deployment_health_returns_none_for_unknown_deployment() {
+        let status = "Deployment: deploy-123\n  Healthy / Desired Replicas: 2/3\n";
+        assert_eq!(deployment_health(status, "deploy-999"), None);
+    }
+
+    #[test]
+    fn deployment_health_returns_none_when_ratio_line_missing() {
+        let status = "Deployment: deploy-123\n  Some other field: x\n";
+        assert_eq!(deployment_health(status, "deploy-123"), None);
+    }
+
+    #[test]
+    fn deployment_health_ignores_ratio_lines_outside_the_matching_block() {
+        // A "Healthy / Desired Replicas" line for a different deployment must not
+        // leak into the block for the one we're looking for.
+        let status = "\
+Healthy / Desired Replicas: 9/9
+Deployment: deploy-123
+  Healthy / Desired Replicas: 1/2
+";
+        assert_eq!(
+            deployment_health(status, "deploy-123"),
+            Some("1/2".to_owned())
+        );
+    }
+
+    #[test]
+    fn validate_digest_accepts_64_hex_chars() {
+        assert!(validate_digest(&"a".repeat(64)).is_ok());
+        assert!(validate_digest(&"F".repeat(64)).is_ok());
+    }
+
+    #[test]
+    fn validate_digest_rejects_wrong_length_or_non_hex() {
+        assert!(validate_digest(&"a".repeat(63)).is_err());
+        assert!(validate_digest(&"a".repeat(65)).is_err());
+        assert!(validate_digest(&("g".repeat(64))).is_err());
+        assert!(validate_digest("").is_err());
+    }
+
+    #[test]
+    fn parse_after_finds_trimmed_remainder_of_first_matching_line() {
+        let out = "some preamble\nDeployment ID: deploy-123\nmore text";
+        assert_eq!(
+            parse_after(out, "Deployment ID:"),
+            Some("deploy-123".to_owned())
+        );
+    }
+
+    #[test]
+    fn parse_after_returns_none_when_marker_missing_or_value_empty() {
+        assert_eq!(parse_after("no marker here", "Deployment ID:"), None);
+        assert_eq!(parse_after("Deployment ID:   \n", "Deployment ID:"), None);
+    }
 }

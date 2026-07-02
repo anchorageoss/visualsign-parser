@@ -129,13 +129,25 @@ if [ "$RC" -ne 0 ]; then
     echo "FAIL: deployed parser rejected a tx it should render (regression)" >&2
     exit 1
   fi
-  # A genuine transport/network error reaching the endpoint is a pre-existing
-  # outage, not the deploy's fault -> skip. Match only connection-level errors.
+  # A genuine transport/network error where we never even connected is a
+  # pre-existing outage, not the deploy's fault -> skip. Deliberately excludes
+  # bare timeout/EOF/context-deadline below: those equally describe a
+  # connection that WAS established to a hung or crashed enclave, which is
+  # exactly the failure this smoke check exists to catch, so they must not be
+  # classified as a benign outage.
   if grep -qiE \
-    'connection refused|connection reset|no such host|dial tcp|i/o timeout|timeout|tls handshake|\bEOF\b|context deadline|network is unreachable|server misbehaving|temporary failure in name resolution' \
+    'connection refused|connection reset|no such host|dial tcp|tls handshake|network is unreachable|server misbehaving|temporary failure in name resolution' \
     "$ERRFILE"; then
     echo "SKIP: dev endpoint unreachable / outage — not a regression" >&2
     exit 0
+  fi
+  # A timeout, dropped connection (EOF), or context-deadline reaching an
+  # endpoint we could otherwise connect to is ambiguous with a hung or
+  # crashed enclave right after set-live -> treat as a possible regression,
+  # not a skip, so a broken deploy can't hide behind an outage classification.
+  if grep -qiE 'timeout|\bEOF\b|context deadline' "$ERRFILE"; then
+    echo "FAIL: endpoint reachable but request timed out / connection dropped after connecting (possible deploy regression, not an outage)" >&2
+    exit 1
   fi
   # Anything else means the smoke harness itself could not run the client
   # (missing/unpullable image, missing binary, bad invocation). NOT a pass:

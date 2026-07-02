@@ -54,9 +54,12 @@ on:
     # against the dev TEST app (uses repo vars.TVC_TEST_*; never the live app).
     types: [labeled]
 
-# Avoid overlapping deploys to the same target.
+# Avoid overlapping deploys to the same target. Keyed on the resolved TVC app
+# id (not github.ref): two different PRs/dispatches targeting the same app
+# must serialize, since they'd otherwise race each other's
+# create/approve/set-live against that app.
 concurrency:
-  group: tvc-deploy-${{ github.ref }}
+  group: tvc-deploy-${{ inputs.app_id || vars.TVC_TEST_APP_ID }}
   cancel-in-progress: false
 
 # Reads the repo + secrets, and pulls the smoke-test container from GHCR.
@@ -81,6 +84,9 @@ jobs:
 
       - name: Install tvc CLI
         run: cargo install tvc --version 0.7.0 --locked
+
+      - name: Test deploy helper
+        run: cargo test --manifest-path tools/tvc-deploy/Cargo.toml
 
       - name: Build deploy helper
         run: cargo build --release --manifest-path tools/tvc-deploy/Cargo.toml
