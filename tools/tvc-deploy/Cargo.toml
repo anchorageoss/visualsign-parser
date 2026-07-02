@@ -1,0 +1,20 @@
+[package]
+name = "tvc-deploy"
+version = "0.1.0"
+edition = "2021"
+description = "Standalone TVC deploy helper for parser_app (operator-key minting + deploy orchestration)"
+
+[[bin]]
+name = "tvc-deploy"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+lexopt = "0.3.2"
+qos_p256 = { version = "0.6.1", default-features = false }
+serde_json = "1"
+xshell = "0.2.7"
+
+# Own workspace root so this stays independent of the parser cargo workspace
+# under ../../src and compiles fast on its own.
+[workspace]
