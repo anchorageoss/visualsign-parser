@@ -14,11 +14,11 @@
 //! |------------------|--------------------|-----------------------------------------|
 //! | `text_v2`        | yes                |                                         |
 //! | `address_v2`     | yes                |                                         |
-//! | `amount_v2`      | yes                | use this for numeric values, NOT number |
+//! | `amount_v2`      | yes                | use this for numeric values             |
 //! | `diagnostic`     | yes                |                                         |
-//! | `preview_layout` | yes (container)    | needs both Condensed/Expanded lists on the wire, and every descendant to render |
+//! | `preview_layout` | yes (container)    | every descendant must render            |
 //! | `list_layout`    | only as a container| INVALID as a standalone field entry     |
-//! | `number`         | no                 | not a VSP type; use `amount_v2`         |
+//! | `number`         | yes (as `amount_v2`)| the in-memory `Number` variant serializes to `amount_v2` on the wire (VSP has no `number` type), so it renders fine |
 //! | `text` (v1)      | no                 | superseded by `text_v2`                 |
 //! | `address` (v1)   | no                 | superseded by `address_v2`              |
 //! | `amount` (v1)    | no                 | superseded by `amount_v2`               |
@@ -37,6 +37,13 @@
 //! `Expanded` list inside a `preview_layout` (or `accordion` section), never via
 //! the field-type decoder. So a `list_layout` appearing as an entry in a `Fields`
 //! array is unrenderable — to nest, wrap the group in a `preview_layout`.
+//!
+//! `preview_layout` always carries both a `Condensed` and an `Expanded` list on
+//! the wire: the `SignablePayloadFieldPreviewLayout` serializer emits an empty
+//! list for whichever is unset, so the wallet's decoder always sees both and
+//! there is no missing-list failure mode for this validator to catch. The check
+//! recurses into whichever lists are present so an unsupported descendant still
+//! marks the container.
 
 use crate::errors::VisualSignError;
 use crate::{FieldSerializer, SignablePayload, SignablePayloadField};
@@ -50,8 +57,8 @@ pub const ANCHORAGE_RENDERABLE_LEAF_TYPES: &[&str] =
 /// unsupported-reason diagnostic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnchorageUnsupportedReason {
-    /// The field's `Type` is not in the wallet's renderable set (e.g. `number`,
-    /// legacy `text`/`address`/`amount`, `divider`, `unknown`).
+    /// The field's `Type` is not in the wallet's renderable set (e.g. legacy
+    /// `text`/`address`/`amount`, `divider`, `unknown`).
     UnsupportedFieldType,
     /// `list_layout` appears as a standalone field entry. It is only valid as
     /// the `Condensed`/`Expanded` container of a `preview_layout`/`accordion`.
@@ -60,10 +67,6 @@ pub enum AnchorageUnsupportedReason {
     /// more unsupported descendants. Mirrors the wallet's
     /// contains-unsupported-nested-fields flag.
     ContainsUnsupportedNestedFields,
-    /// A `preview_layout` container is missing its `Condensed` or `Expanded`
-    /// list on the wire. The wallet's model requires both; a missing list
-    /// fails to decode and the whole container falls back to plain text.
-    MissingRequiredList,
 }
 
 impl AnchorageUnsupportedReason {
@@ -72,7 +75,6 @@ impl AnchorageUnsupportedReason {
             Self::UnsupportedFieldType => "unsupported field type",
             Self::ListLayoutAsStandaloneField => "list_layout used as a standalone field",
             Self::ContainsUnsupportedNestedFields => "contains unsupported nested fields",
-            Self::MissingRequiredList => "missing required Condensed/Expanded list",
         }
     }
 }
@@ -125,17 +127,12 @@ fn check_field(
     out: &mut Vec<AnchorageRenderFinding>,
 ) -> bool {
     match field {
-        // Container: supported iff both lists are present on the wire and
-        // every descendant is.
+        // Container: supported iff every descendant renders. The
+        // `SignablePayloadFieldPreviewLayout` serializer always emits both the
+        // `Condensed` and `Expanded` lists (an empty list for whichever is
+        // unset), so the wallet's decoder always receives both and there is no
+        // missing-list failure mode to flag here.
         SignablePayloadField::PreviewLayout { preview_layout, .. } => {
-            // The wallet's PreviewLayout model requires both `Condensed` and
-            // `Expanded`. Check the actual wire output rather than the
-            // in-memory `Option`s: whether a `None` list is omitted or
-            // defaulted on the wire is a serialization-layer decision
-            // independent of this check, and this stays correct either way.
-            let missing_list = !wire_has_key(field, "PreviewLayout", "Condensed")
-                || !wire_has_key(field, "PreviewLayout", "Expanded");
-
             let mut descendants_ok = true;
             if let Some(condensed) = &preview_layout.condensed {
                 for (index, child) in condensed.fields.iter().enumerate() {
@@ -158,20 +155,14 @@ fn check_field(
                 }
             }
 
-            if missing_list {
-                out.push(finding(
-                    path,
-                    field,
-                    AnchorageUnsupportedReason::MissingRequiredList,
-                ));
-            } else if !descendants_ok {
+            if !descendants_ok {
                 out.push(finding(
                     path,
                     field,
                     AnchorageUnsupportedReason::ContainsUnsupportedNestedFields,
                 ));
             }
-            !missing_list && descendants_ok
+            descendants_ok
         }
         // `list_layout` is never a valid standalone field.
         SignablePayloadField::ListLayout { .. } => {
@@ -216,17 +207,6 @@ fn wire_type(field: &SignablePayloadField) -> String {
         .unwrap_or_else(|| field.field_type().to_string())
 }
 
-/// Whether `field`'s wire serialization of its `container_key` object
-/// actually includes `inner_key`.
-fn wire_has_key(field: &SignablePayloadField, container_key: &str, inner_key: &str) -> bool {
-    let Ok(map) = field.serialize_to_map() else {
-        return false;
-    };
-    map.get(container_key)
-        .and_then(|value| value.get(inner_key))
-        .is_some()
-}
-
 fn finding(
     path: &str,
     field: &SignablePayloadField,
@@ -246,7 +226,8 @@ mod tests {
     use super::*;
     use crate::field_builders::{create_amount_field, create_number_field, create_text_field};
     use crate::{
-        AnnotatedPayloadField, SignablePayloadFieldCommon, SignablePayloadFieldListLayout,
+        AnnotatedPayloadField, DividerStyle, SignablePayloadFieldCommon,
+        SignablePayloadFieldDivider, SignablePayloadFieldListLayout,
         SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
     };
 
@@ -282,6 +263,26 @@ mod tests {
                     fallback_text: label.to_string(),
                 },
                 list_layout: SignablePayloadFieldListLayout { fields: vec![] },
+            },
+        }
+    }
+
+    /// A genuinely unsupported leaf: `divider` is not in the wallet's renderable
+    /// set and (unlike `number`) is not remapped to a renderable type on the
+    /// wire, so it stays a stable "unsupported" example across serializer
+    /// remaps such as #393 (`number` -> `amount_v2`).
+    fn divider(label: &str) -> AnnotatedPayloadField {
+        AnnotatedPayloadField {
+            static_annotation: None,
+            dynamic_annotation: None,
+            signable_payload_field: SignablePayloadField::Divider {
+                common: SignablePayloadFieldCommon {
+                    label: label.to_string(),
+                    fallback_text: label.to_string(),
+                },
+                divider: SignablePayloadFieldDivider {
+                    style: DividerStyle::THIN,
+                },
             },
         }
     }
@@ -331,17 +332,17 @@ mod tests {
     }
 
     #[test]
-    fn number_field_is_unsupported() {
+    fn number_field_renders_as_amount_v2_on_the_wire() {
+        // The in-memory `Number` variant serializes to `amount_v2` on the wire
+        // (VSP has no `number` type; see #393), so an Anchorage wallet renders
+        // it. The validator must track the *wire* type and not flag this as
+        // unsupported — otherwise every `number` field is a permanent false
+        // positive even though the wallet decodes it fine.
         let p = payload(vec![bare(number("Slippage"))]);
         let findings = p.anchorage_render_findings();
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].field_type, "number");
-        assert_eq!(
-            findings[0].reason,
-            AnchorageUnsupportedReason::UnsupportedFieldType
-        );
-        assert_eq!(findings[0].path, "Fields[0]");
-        assert!(p.validate_anchorage_wallet_renderable().is_err());
+        assert!(findings.is_empty(), "{findings:?}");
+        assert!(p.validate_anchorage_wallet_renderable().is_ok());
+        assert_eq!(wire_type(&bare(number("Slippage"))), "amount_v2");
     }
 
     #[test]
@@ -368,20 +369,20 @@ mod tests {
 
     #[test]
     fn preview_layout_with_unsupported_child_flags_child_and_container() {
-        // A `number` inside the expanded list makes the whole preview_layout
+        // A `divider` inside the expanded list makes the whole preview_layout
         // contain unsupported nested fields, and the child itself is reported.
         let p = payload(vec![bare(preview(
             "Instruction 1",
             vec![text("Program")],
-            vec![number("Slippage")],
+            vec![divider("Separator")],
         ))]);
         let findings = p.anchorage_render_findings();
         assert_eq!(findings.len(), 2, "{findings:?}");
 
         let child = findings
             .iter()
-            .find(|f| f.field_type == "number")
-            .expect("number child reported");
+            .find(|f| f.field_type == "divider")
+            .expect("divider child reported");
         assert_eq!(child.path, "Fields[0].Expanded.Fields[0]");
         assert_eq!(
             child.reason,
@@ -418,49 +419,40 @@ mod tests {
     }
 
     #[test]
-    fn preview_layout_missing_condensed_is_unsupported_even_with_clean_descendants() {
-        // Mirrors `create_preview_layout`, which always leaves `condensed:
-        // None` (and several Ethereum visualizers leave `expanded: None`
-        // too, e.g. the ERC-20 Transfer preview): the wallet's PreviewLayout
-        // model requires both lists, so a missing one is a render failure
-        // even though every present descendant is supported.
+    fn preview_layout_with_unset_lists_renders_clean() {
+        // `create_preview_layout` always leaves `condensed: None` and several
+        // Ethereum visualizers leave `expanded: None` too (e.g. the ERC-20
+        // Transfer preview). The PreviewLayout serializer (#403) emits an
+        // empty list for whichever is unset, so the wallet's decoder always
+        // sees both — there is no missing-list failure mode, and the validator
+        // must not flag this. Every present descendant is still checked.
         let p = payload(vec![bare(preview_with_lists(
             "Instruction 1",
             None,
             Some(vec![text("Program")]),
         ))]);
-        let findings = p.anchorage_render_findings();
-        assert_eq!(findings.len(), 1, "{findings:?}");
-        assert_eq!(findings[0].path, "Fields[0]");
-        assert_eq!(
-            findings[0].reason,
-            AnchorageUnsupportedReason::MissingRequiredList
-        );
-        assert!(p.validate_anchorage_wallet_renderable().is_err());
+        assert!(p.anchorage_render_findings().is_empty());
+        assert!(p.validate_anchorage_wallet_renderable().is_ok());
     }
 
     #[test]
-    fn preview_layout_missing_both_lists_is_unsupported() {
+    fn preview_layout_with_both_lists_unset_renders_clean() {
         let p = payload(vec![bare(preview_with_lists("Instruction 1", None, None))]);
-        let findings = p.anchorage_render_findings();
-        assert_eq!(findings.len(), 1, "{findings:?}");
-        assert_eq!(
-            findings[0].reason,
-            AnchorageUnsupportedReason::MissingRequiredList
-        );
+        assert!(p.anchorage_render_findings().is_empty());
+        assert!(p.validate_anchorage_wallet_renderable().is_ok());
     }
 
     #[test]
     fn validate_error_lists_offending_paths() {
         let p = payload(vec![
             bare(text("ok")),
-            bare(preview("Instruction 2", vec![], vec![number("Fee")])),
+            bare(preview("Instruction 2", vec![], vec![divider("Fee")])),
         ]);
         let err = p
             .validate_anchorage_wallet_renderable()
             .expect_err("should be unrenderable");
         let msg = err.to_string();
         assert!(msg.contains("Fields[1].Expanded.Fields[0]"), "{msg}");
-        assert!(msg.contains("number"), "{msg}");
+        assert!(msg.contains("divider"), "{msg}");
     }
 }

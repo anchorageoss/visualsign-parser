@@ -33,10 +33,10 @@ other string decodes to unknown → unsupported.
 | `delta`          | wallet-only | leaf    | wallet renders it, but **not in the validator's allowed set** (parser emits none; no plans) |
 | `highlight`      | wallet-only | leaf    | wallet renders it, but **not in the validator's allowed set** (parser emits none; no plans) |
 | `rule`           | wallet-only | leaf    | wallet renders it, but **not in the validator's allowed set** (parser emits none; no plans) |
-| `preview_layout` | yes      | container  | requires both `Condensed`/`Expanded` on the wire, and every descendant to render |
+| `preview_layout` | yes      | container  | every descendant must render                       |
 | `accordion`      | wallet-only | container | wallet renders it, but **not in the validator's allowed set** (parser emits none; no plans) |
 | `list_layout`    | **structural only** | — | valid only as a container's `Condensed`/`Expanded`; **never as a field entry** |
-| `number`         | **no**   | —          | not a VSP type → use `amount_v2`                   |
+| `number`         | yes, as `amount_v2` | leaf | not a VSP type on its own; the in-memory `Number` variant serializes to `amount_v2` on the wire (see #393), so it renders fine |
 | `text` (v1)      | **no**   | —          | superseded by `text_v2`                            |
 | `address` (v1)   | **no**   | —          | superseded by `address_v2`                         |
 | `amount` (v1)    | **no**   | —          | superseded by `amount_v2`                          |
@@ -64,19 +64,20 @@ when a parser field variant starts emitting it.
    containing unsupported nested fields. Nesting of supported leaves is unlimited in
    depth; nesting via `preview_layout` is the supported way to express hierarchy.
 
-3. **`preview_layout` requires both `Condensed` and `Expanded` on the wire.**
-   The wallet's model has no optional case for either list; a missing key fails
-   to decode and the whole container falls back to plain text. The validator
-   checks the actual serialized output rather than the in-memory value, since a
-   builder leaving a list unset and the serializer's choice of how to represent
-   that (omit the key vs. default to an empty list) are independent concerns.
-   `create_preview_layout` always leaves `Condensed` unset today, and several
-   Ethereum visualizers (e.g. the ERC-20 `Transfer` preview) leave `Expanded`
-   unset too, so this is a live parser output shape, not a hypothetical one.
+3. **`preview_layout` always carries both `Condensed` and `Expanded` on the
+   wire.** The `SignablePayloadFieldPreviewLayout` serializer emits an empty
+   list for whichever is unset (see #403), so the wallet's decoder always
+   receives both — there is no missing-list failure mode for the validator to
+   catch. `create_preview_layout` always leaves `Condensed` unset in memory,
+   and several Ethereum visualizers (e.g. the ERC-20 `Transfer` preview) leave
+   `Expanded` unset too; both cases render clean.
 
-4. **Numeric values use `amount_v2`, never `number`.** `number` is a legacy
-   parser-only variant that the wallet never recognized; render numbers (token
-   amounts, slippage bps, fees, compute units) as `amount_v2`.
+4. **`number` fields render fine, via `amount_v2` on the wire.** VSP has no
+   `number` type; the in-memory `Number` variant is serialized to `amount_v2`
+   (see #393), so it is not flagged as unsupported. New code should still
+   prefer building `amount_v2` fields directly (via `create_amount_field`)
+   rather than `create_number_field`, since the remap is a compatibility
+   shim, not the primary path.
 
 ## Validator
 
@@ -95,8 +96,6 @@ when a parser field variant starts emitting it.
   since a variant can be remapped to a different wire representation.
 - `ListLayoutAsStandaloneField` — `list_layout` used as a field entry.
 - `ContainsUnsupportedNestedFields` — a container with an unsupported descendant.
-- `MissingRequiredList` — a `preview_layout` missing `Condensed` or `Expanded`
-  on the wire.
 
 Ad-hoc check of a payload JSON:
 
@@ -107,8 +106,7 @@ cargo run -p visualsign --features diagnostics \
 
 ## Known parser violations (as of this writing)
 
-`create_number_field` emits the unsupported `number` type, used by the
-`compute_budget`, `system`, `token_2022`, and `jupiter_swap` presets. Payloads
-containing those instructions carry unrenderable fields today (e.g. a DFlow swap
-transaction's leading ComputeBudget instructions). Migrating those call sites to
-`amount_v2` is tracked separately.
+None. `create_number_field` (used by the `compute_budget`, `system`,
+`token_2022`, and `jupiter_swap` presets) previously emitted the unrenderable
+`number` type; #393 made the `Number` variant serialize as `amount_v2` on the
+wire, so those call sites render fine without needing a migration.
