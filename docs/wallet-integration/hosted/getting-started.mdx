@@ -39,7 +39,7 @@ See [Attestation Verification](../self-hosted-tee/attestation) for implementatio
 
 ## PCR allowlist values
 
-The PCRs are determined by the qos enclave runtime version Turnkey has deployed (currently TVC `v2026.2.6`, qos commit [`d866f2c6cbc58cc08c24eab4828f0824ad16a226`](https://github.com/tkhq/qos/commit/d866f2c6cbc58cc08c24eab4828f0824ad16a226)). You can reproduce them locally from that qos rev — never trust an externally supplied PCR file without verifying it.
+The PCRs are determined by the qos enclave runtime version Turnkey has deployed (currently TVC `v2026.6.11`, qos commit [`3e4d73c4d2b9bb270c457bf7eae2e76a7f420998`](https://github.com/tkhq/qos/commit/3e4d73c4d2b9bb270c457bf7eae2e76a7f420998)). You can reproduce them locally from that qos rev — never trust an externally supplied PCR file without verifying it.
 
 ### Generating PCRs from source
 
@@ -52,7 +52,7 @@ The `scripts/extract-nitro-pcrs.sh` tool in this repo clones tkhq/qos at the dep
 The deployment rev lives in a marker comment in `src/Cargo.toml`:
 
 ```toml
-# qos-deployment-rev = d866f2c6cbc58cc08c24eab4828f0824ad16a226
+# qos-deployment-rev = 3e4d73c4d2b9bb270c457bf7eae2e76a7f420998
 ```
 
 This is distinct from the `rev = "..."` on each `qos_*` crate in the same file, which pins the qos library code that `parser_app` compiles against and does not affect PCRs. To audit a prospective deployment bump before updating the marker, pass `--rev` explicitly:

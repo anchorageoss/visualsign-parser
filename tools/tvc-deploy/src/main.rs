@@ -38,7 +38,7 @@ const SETLIVE_TIMEOUT: Duration = Duration::from_secs(300);
 const USAGE: &str = "usage:\n  \
     tvc-deploy gen-operator-key --out <path>\n  \
     tvc-deploy deploy --app-id <id> --image-url <url> --expected-digest <hex> --operator-id <id> \
-    [--operator-seed <path>] [--qos-version v2026.2.6] [--host-ip 0.0.0.0] [--host-port 3000]\n  \
+    [--operator-seed <path>] [--qos-version v2026.6.11] [--host-ip 0.0.0.0] [--host-port 3000]\n  \
     (operator seed may instead come from env TVC_CI_OPERATOR_SEED, or be omitted \
     to approve with the logged-in org operator key)";
 
@@ -128,7 +128,7 @@ fn deploy(sh: &Shell, flags: &HashMap<String, String>) -> Result<()> {
     let qos = flags
         .get("qos-version")
         .map(String::as_str)
-        .unwrap_or("v2026.2.6");
+        .unwrap_or("v2026.6.11");
     let host_ip = flags
         .get("host-ip")
         .map(String::as_str)
