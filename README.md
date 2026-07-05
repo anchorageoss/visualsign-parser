@@ -19,10 +19,10 @@ See the [Adding a New Chain](https://visualsign.dev/adding-new-chain) guide to a
 
 ```sh
 # Parse a transaction from hex
-cargo run --bin parser_cli -- --chain ethereum --network ETHEREUM_MAINNET --output human -t <transaction_hex>
+cargo run --bin parser_cli -- decode --chain ethereum --network ETHEREUM_MAINNET --output human -t <transaction_hex>
 
 # Try a real Uniswap swap from the test fixtures
-cargo run --bin parser_cli -- --chain ethereum --network ETHEREUM_MAINNET --output human \
+cargo run --bin parser_cli -- decode --chain ethereum --network ETHEREUM_MAINNET --output human \
   -t "$(cat chain_parsers/visualsign-ethereum/tests/fixtures/1559.input)"
 ```
 

@@ -143,7 +143,7 @@ This parser is transaction-focused: it reads RLP-encoded EVM transactions, not E
 Before announcing a contract to wallet integrators, render a real transaction against your ABI locally with `parser_cli`:
 
 ```bash
-cargo run --bin parser_cli -- \
+cargo run --bin parser_cli -- decode \
   --chain ethereum \
   --network ETHEREUM_MAINNET \
   --output human \
