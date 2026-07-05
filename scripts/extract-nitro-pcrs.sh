@@ -14,6 +14,7 @@ SKOPEO_IMAGE="quay.io/skopeo/stable@sha256:4d60d6c00b62b463d0a99a7aeedc49358a32c
 QOS_REMOTE="https://github.com/tkhq/qos.git"
 QOS_DIR=""
 REV=""
+EXPECTED_KERNEL_HASH=""
 
 QOS_DIR_AUTO=0
 STAGE_DIR=""
@@ -31,12 +32,15 @@ any other qos rev — useful when auditing a prospective deployment bump
 before updating Cargo.toml.
 
 Options:
-  --cargo-toml PATH    Workspace Cargo.toml                (default: $CARGO_TOML)
-  --qos-dir PATH       Where to clone/reuse qos            (default: mktemp -d, removed on exit)
-  --output PATH        Where to write nitro.pcrs           (default: $OUTPUT)
-  --skopeo-image REF   Skopeo image (pinned by digest)     (default: pinned upstream)
-  --rev REV            Override the rev (skip Cargo.toml marker)
-  -h, --help           Show this help and exit
+  --cargo-toml PATH        Workspace Cargo.toml                (default: $CARGO_TOML)
+  --qos-dir PATH           Where to clone/reuse qos            (default: mktemp -d, removed on exit)
+  --output PATH            Where to write nitro.pcrs           (default: $OUTPUT)
+  --skopeo-image REF       Skopeo image (pinned by digest)     (default: pinned upstream)
+  --rev REV                Override the rev (skip Cargo.toml marker)
+  --expected-kernel-hash H Assert the reproduced PCR0 and PCR1 (the Nitro EIF/kernel
+                           measurement) both equal hex digest H — e.g. a value pulled
+                           from a live attestation. Exits non-zero on mismatch.
+  -h, --help               Show this help and exit
 EOF
 }
 
@@ -53,10 +57,47 @@ parse_args() {
       --output)       OUTPUT="$2"; shift 2 ;;
       --skopeo-image) SKOPEO_IMAGE="$2"; shift 2 ;;
       --rev)          REV="$2"; shift 2 ;;
+      --expected-kernel-hash) EXPECTED_KERNEL_HASH="$2"; shift 2 ;;
       -h|--help)      usage; exit 0 ;;
       *) die "Unknown argument: $1" ;;
     esac
   done
+  if [[ -n "$EXPECTED_KERNEL_HASH" ]]; then
+    EXPECTED_KERNEL_HASH="$(echo "$EXPECTED_KERNEL_HASH" | tr '[:upper:]' '[:lower:]')"
+    [[ "$EXPECTED_KERNEL_HASH" =~ ^[0-9a-f]+$ ]] \
+      || die "--expected-kernel-hash must be hex, got: $EXPECTED_KERNEL_HASH"
+  fi
+}
+
+# Read the hex digest for PCR<n> ("PCR0"/"PCR1"/"PCR2") out of a nitro.pcrs
+# file, whose lines look like "<hex> PCR0".
+read_pcr() {
+  local pcrs_file="$1" name="$2"
+  awk -v name="$name" '$2 == name { print tolower($1) }' "$pcrs_file"
+}
+
+# Assert the reproduced PCR0 and PCR1 both equal --expected-kernel-hash.
+check_expected_kernel_hash() {
+  [[ -n "$EXPECTED_KERNEL_HASH" ]] || return 0
+  local pcr0 pcr1 ok=1
+  pcr0="$(read_pcr "$OUTPUT" PCR0)"
+  pcr1="$(read_pcr "$OUTPUT" PCR1)"
+  [[ -n "$pcr0" ]] || die "PCR0 not found in $OUTPUT"
+  [[ -n "$pcr1" ]] || die "PCR1 not found in $OUTPUT"
+
+  if [[ "$pcr0" == "$EXPECTED_KERNEL_HASH" ]]; then
+    echo "PCR0 matches expected kernel hash" >&2
+  else
+    echo "PCR0 MISMATCH: expected $EXPECTED_KERNEL_HASH, got $pcr0" >&2
+    ok=0
+  fi
+  if [[ "$pcr1" == "$EXPECTED_KERNEL_HASH" ]]; then
+    echo "PCR1 matches expected kernel hash" >&2
+  else
+    echo "PCR1 MISMATCH: expected $EXPECTED_KERNEL_HASH, got $pcr1" >&2
+    ok=0
+  fi
+  [[ "$ok" -eq 1 ]] || die "kernel-hash check failed"
 }
 
 read_rev() {
@@ -97,7 +138,22 @@ ensure_qos_checkout() {
   git -C "$QOS_DIR" checkout --quiet "$REV"
 }
 
+BUILDX_BUILDER_NAME="qos-oci-builder"
+
+# qos's Makefile emits `--output type=oci`, which the default `docker` buildx
+# driver can't produce (it only knows the daemon's local image store). Ensure
+# a docker-container driver builder exists and point the build at it via
+# BUILDX_BUILDER, without touching the host's default builder.
+ensure_buildx_builder() {
+  if ! docker buildx inspect "$BUILDX_BUILDER_NAME" >/dev/null 2>&1; then
+    echo "Creating buildx builder '$BUILDX_BUILDER_NAME' (docker-container driver, supports OCI export)..." >&2
+    docker buildx create --name "$BUILDX_BUILDER_NAME" --driver docker-container >/dev/null
+  fi
+  export BUILDX_BUILDER="$BUILDX_BUILDER_NAME"
+}
+
 build_qos_enclave() {
+  ensure_buildx_builder
   echo "Building qos_enclave at rev $REV (may take several minutes)..." >&2
   make -C "$QOS_DIR" out/qos_enclave/index.json
 }
@@ -151,6 +207,7 @@ main() {
   echo "Wrote $OUTPUT:" >&2
   cat "$OUTPUT"
   echo
+  check_expected_kernel_hash
 }
 
 main "$@"
