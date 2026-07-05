@@ -19,13 +19,13 @@ Before testing, ensure you have:
 Run the parser CLI with your transaction:
 
 ```bash
-parser_cli --chain <chain> -t <your_transaction_hex> --output human
+parser_cli decode --chain <chain> -t <your_transaction_hex> --output human
 ```
 
 For example, with an Ethereum transaction:
 
 ```bash
-parser_cli --chain ethereum -t 0x02f9... --output human
+parser_cli decode --chain ethereum -t 0x02f9... --output human
 ```
 
 ### 2. Verify the output
@@ -40,7 +40,7 @@ Check that the visualization:
 Hardware wallets have limited screen space. Verify your visualization works in condensed mode:
 
 ```bash
-parser_cli --chain <chain> -t <your_transaction_hex> --output human --condensed-only
+parser_cli decode --chain <chain> -t <your_transaction_hex> --output human --condensed-only
 ```
 
 The condensed view should show only the most critical information.
@@ -50,13 +50,13 @@ The condensed view should show only the most critical information.
 For programmatic validation, use JSON output:
 
 ```bash
-parser_cli --chain <chain> -t <your_transaction_hex> --output json
+parser_cli decode --chain <chain> -t <your_transaction_hex> --output json
 ```
 
 You can extract specific fields with `jq`:
 
 ```bash
-parser_cli --chain ethereum -t <tx_hex> --output json | jq '.Fields'
+parser_cli decode --chain ethereum -t <tx_hex> --output json | jq '.Fields'
 ```
 
 ## Common issues

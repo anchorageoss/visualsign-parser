@@ -37,17 +37,17 @@ cd visualsign-parser/src
 cargo build --release
 
 # Test with a real transaction
-./target/release/parser_cli --chain <chain> -t <transaction_hex> --output human
+./target/release/parser_cli decode --chain <chain> -t <transaction_hex> --output human
 ```
 
 Run both expanded and condensed views:
 
 ```bash
 # Full view
-./target/release/parser_cli --chain ethereum -t <tx_hex> --output human
+./target/release/parser_cli decode --chain ethereum -t <tx_hex> --output human
 
 # Hardware wallet view
-./target/release/parser_cli --chain ethereum -t <tx_hex> --output human --condensed-only
+./target/release/parser_cli decode --chain ethereum -t <tx_hex> --output human --condensed-only
 ```
 
 ### 4. Submit a pull request
