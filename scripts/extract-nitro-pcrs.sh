@@ -10,7 +10,7 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 CARGO_TOML="$REPO_ROOT/src/Cargo.toml"
 OUTPUT="$REPO_ROOT/out/nitro.pcrs"
-SKOPEO_IMAGE="quay.io/skopeo/stable@sha256:4d60d6c00b62b463d0a99a7aeedc49358a32c8222540c72d561606e188afb168"
+SKOPEO_IMAGE="quay.io/skopeo/stable@sha256:c7d3c512612f52805023cd38351081dad7e2729fc13d14b701e47c7c8bdd6615"
 QOS_REMOTE="https://github.com/tkhq/qos.git"
 QOS_DIR=""
 REV=""
@@ -135,6 +135,9 @@ ensure_qos_checkout() {
 
   echo "Cloning tkhq/qos into $QOS_DIR" >&2
   git clone --quiet "$QOS_REMOTE" "$QOS_DIR"
+  # REV may not be reachable from any branch tip the clone fetched (e.g. a
+  # superseded/rebased PR commit) but still directly fetchable by SHA.
+  git -C "$QOS_DIR" fetch --quiet origin "$REV"
   git -C "$QOS_DIR" checkout --quiet "$REV"
 }
 
