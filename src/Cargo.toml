@@ -47,12 +47,10 @@ repository = "https://github.com/anchorageoss/visualsign-parser"
 #     so it links against qos_core etc.
 #   * Deployment rev — the qos version whose EIF actually boots in the Nitro enclave
 #     and is measured by PCRs in attestation documents. They are not required to
-#     match. The deployment rev currently tracks TVC v2026.6.11:
-#       https://github.com/tkhq/qos/commit/3e4d73c4d2b9bb270c457bf7eae2e76a7f420998
-#       PCRs from upstream CI:
-#       https://github.com/tkhq/qos/actions/runs/27232527879/job/80416081988
+#     match. The deployment rev currently tracks TVC 0.12.0:
+#       https://github.com/tkhq/qos/commit/4371d44e672a1322d15ef929cfd32169ebb0bd0f
 #     scripts/extract-nitro-pcrs.sh reads the marker line below to reproduce them.
-# qos-deployment-rev = 3e4d73c4d2b9bb270c457bf7eae2e76a7f420998
+# qos-deployment-rev = 4371d44e672a1322d15ef929cfd32169ebb0bd0f
 qos_client = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
 qos_core = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
 qos_crypto = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
