@@ -154,7 +154,7 @@ jobs:
           digest=$(sha256sum /tmp/binary | awk '{print $1}')
           pinned_url="${container_url}@${container_digest}"
           # Hardcoded: TVC currently only supports this QOS version.
-          qos_version="v2026.2.6"
+          qos_version="0.12.0"
 
           # Build the deployment block once, then fan it out to both the run
           # summary and (when a matching GitHub release exists) the release
