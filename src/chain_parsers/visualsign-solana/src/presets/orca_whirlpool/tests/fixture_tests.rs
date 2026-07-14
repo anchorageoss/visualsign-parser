@@ -133,6 +133,15 @@ fn test_increase_liquidity_by_token_amounts_v2_real_transaction() {
         let expected_str = expected_value
             .as_str()
             .unwrap_or_else(|| panic!("Expected field '{key}' is not a string"));
+        // `serde_json::Map`'s key order isn't guaranteed stable across builds
+        // (depends on whether the `preserve_order` feature gets pulled in
+        // transitively by whatever else is compiled alongside this crate), so
+        // an embedded-JSON arg like `method` can render with its object keys
+        // in a different order without the underlying value actually
+        // changing. Compare structurally (as serde_json::Value, which is
+        // order-independent for objects) when both sides parse as JSON;
+        // fall back to plain string equality otherwise.
+        let expected_json: Option<serde_json::Value> = serde_json::from_str(expected_str).ok();
 
         let found = expanded.fields.iter().any(|field| {
             let SignablePayloadField::TextV2 { common, text_v2 } = &field.signable_payload_field
@@ -140,7 +149,14 @@ fn test_increase_liquidity_by_token_amounts_v2_real_transaction() {
                 return false;
             };
             let label_normalized = common.label.to_lowercase().replace(' ', "_");
-            label_normalized == key.to_lowercase() && text_v2.text == expected_str
+            if label_normalized != key.to_lowercase() {
+                return false;
+            }
+            match &expected_json {
+                Some(expected_value) => serde_json::from_str::<serde_json::Value>(&text_v2.text)
+                    .is_ok_and(|actual_value| actual_value == *expected_value),
+                None => text_v2.text == expected_str,
+            }
         });
 
         assert!(
