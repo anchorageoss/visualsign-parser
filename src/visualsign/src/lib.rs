@@ -2836,13 +2836,24 @@ mod tests {
     /// ascii-graphic checks (PRS-572).
     #[test]
     fn test_validate_charset_accepts_quote_and_backslash_escapes() {
-        let cases: &[(&str, &str)] = &[
-            ("double quote", "hello\"world"),
-            ("backslash", "hello\\world"),
+        // (label, text-containing-quote-or-backslash, expected escape in the
+        // serialized JSON). Mirrors the control-escape rejection test above:
+        // confirm the escape is actually present in `to_json()`'s output
+        // before asserting the validator accepts it, so this doesn't
+        // silently pass for the wrong reason if serde_json's formatter ever
+        // changes.
+        let cases: &[(&str, &str, &str)] = &[
+            ("double quote", "hello\"world", "\\\""),
+            ("backslash", "hello\\world", "\\\\"),
         ];
 
-        for (label, text) in cases {
+        for (label, text, expected_escape) in cases {
             let payload = payload_with_text(text);
+            let json = payload.to_json().expect("serialization should succeed");
+            assert!(
+                json.contains(expected_escape),
+                "{label}: expected serialized JSON to contain `{expected_escape}`, got: {json}",
+            );
             payload
                 .validate_charset()
                 .unwrap_or_else(|e| panic!("{label}: validator must accept, got {e:?}"));
