@@ -1,0 +1,27 @@
+name: Labeler
+
+on:
+  # Restrict to PR lifecycle events (not label changes) so applying a label
+  # doesn't re-trigger this workflow.
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+# Read-only repo access + label write. actions/labeler reads the changed-file
+# list via the API and does NOT check out untrusted PR code, so running under
+# pull_request_target (needed to label fork PRs) is safe here.
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: labeler-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    name: Label PRs by changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # actions/labeler@v5.0.0
+      - uses: actions/labeler@8558fd74291d67161a8a78ce36a881fa63b766a9
