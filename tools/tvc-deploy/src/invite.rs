@@ -16,6 +16,7 @@ use turnkey_client::generated::{
     ApproveActivityIntent, CreateInvitationsIntent, CreatePoliciesIntent, CreatePolicyIntentV3,
     CreateUserTagIntent, DeleteInvitationIntent, GetActivityRequest, GetPoliciesRequest,
     GetUsersRequest, GetWhoamiRequest, InvitationParams, ListUserTagsRequest, RejectActivityIntent,
+    UpdateUserTagIntent,
 };
 use turnkey_client::TurnkeyP256ApiKey;
 use turnkey_client::{TurnkeyClient, TurnkeyClientError, TurnkeySecp256k1ApiKey};
@@ -51,8 +52,14 @@ pub const USAGE: &str = "\
         (--user-ids retroactively tags existing users; to tag people being invited, put the \
     new tag's id in invitees.json's top-level \"tags\" -- applied to every invitee that \
     doesn't set its own \"tags\" -- since invitees aren't users yet and can't be passed here)\n  \
+    tvc-deploy update-tag --tag-id <id> [--add-user-ids id1,id2,...] \
+    [--remove-user-ids id1,id2,...] [--name <new-name>] [--org <alias-or-id>]\n  \
+        (adds/removes existing users from a tag created earlier, or renames it; \
+    look up user ids with list-users)\n  \
     tvc-deploy list-tags [--org <alias-or-id>]\n  \
         (prints user-tag id + name pairs; use the id in invitees.json \"tags\", not the name)\n  \
+    tvc-deploy list-users [--org <alias-or-id>]\n  \
+        (prints user id + name + email; use the id with update-tag --add-user-ids)\n  \
     tvc-deploy list-policies [--org <alias-or-id>]\n  \
     tvc-deploy create-policy --name <name> --effect allow|deny --notes <text> \
     [--condition <tql>] [--consensus <tql>] [--org <alias-or-id>]\n  \
@@ -736,6 +743,89 @@ pub fn create_policies(flags: &HashMap<String, String>) -> Result<()> {
                 Ok(())
             }
             Err(e) => Err(anyhow!("create_policies failed: {e}")),
+        }
+    })
+}
+
+pub fn list_users(flags: &HashMap<String, String>) -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("build tokio runtime")?;
+    rt.block_on(async {
+        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
+
+        let response = auth
+            .client
+            .get_users(GetUsersRequest {
+                organization_id: auth.org_id.clone(),
+            })
+            .await
+            .map_err(|e| anyhow!("get_users failed: {e}"))?;
+
+        if response.users.is_empty() {
+            println!("no users in org {}", auth.org_id);
+            return Ok(());
+        }
+        for user in response.users {
+            println!(
+                "{}  {}  <{}>",
+                user.user_id,
+                user.user_name,
+                user.user_email.as_deref().unwrap_or("no email")
+            );
+        }
+        Ok(())
+    })
+}
+
+pub fn update_tag(flags: &HashMap<String, String>) -> Result<()> {
+    let user_tag_id = req(flags, "tag-id")?.clone();
+    let new_user_tag_name = flags.get("name").cloned();
+    let add_user_ids = flags
+        .get("add-user-ids")
+        .map(|s| parse_tags(s))
+        .unwrap_or_default();
+    let remove_user_ids = flags
+        .get("remove-user-ids")
+        .map(|s| parse_tags(s))
+        .unwrap_or_default();
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("build tokio runtime")?;
+    rt.block_on(async {
+        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
+
+        let outcome = auth
+            .client
+            .update_user_tag(
+                auth.org_id.clone(),
+                current_timestamp_ms(),
+                UpdateUserTagIntent {
+                    user_tag_id,
+                    new_user_tag_name,
+                    add_user_ids,
+                    remove_user_ids,
+                },
+            )
+            .await;
+
+        match outcome {
+            Ok(result) => {
+                println!("activity {} status={:?}", result.activity_id, result.status);
+                println!("tag id: {}", result.result.user_tag_id);
+                Ok(())
+            }
+            Err(TurnkeyClientError::ActivityRequiresApproval(activity_id)) => {
+                println!(
+                    "activity {activity_id} needs consensus; approve it with:\n  \
+                     tvc-deploy approve-activity --activity-id {activity_id} --org <alias-or-id>"
+                );
+                Ok(())
+            }
+            Err(e) => Err(anyhow!("update_user_tag failed: {e}")),
         }
     })
 }
