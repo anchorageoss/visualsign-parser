@@ -65,6 +65,7 @@ fn run() -> Result<()> {
         "dismiss-invite" => invite::dismiss_invite(&flags),
         "approve-activity" => invite::approve_activity(&flags),
         "reject-activity" => invite::reject_activity(&flags),
+        "create-tag" => invite::create_tag(&flags),
         "list-tags" => invite::list_tags(&flags),
         "list-policies" => invite::list_policies(&flags),
         "create-policy" => invite::create_policy(&flags),

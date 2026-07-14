@@ -14,8 +14,8 @@ use turnkey_api_key_stamper::{Stamp, StampHeader, StamperError};
 use turnkey_client::generated::immutable::common::v1::{AccessType, Effect};
 use turnkey_client::generated::{
     ApproveActivityIntent, CreateInvitationsIntent, CreatePoliciesIntent, CreatePolicyIntentV3,
-    DeleteInvitationIntent, GetActivityRequest, GetPoliciesRequest, GetUsersRequest,
-    GetWhoamiRequest, InvitationParams, ListUserTagsRequest, RejectActivityIntent,
+    CreateUserTagIntent, DeleteInvitationIntent, GetActivityRequest, GetPoliciesRequest,
+    GetUsersRequest, GetWhoamiRequest, InvitationParams, ListUserTagsRequest, RejectActivityIntent,
 };
 use turnkey_client::TurnkeyP256ApiKey;
 use turnkey_client::{TurnkeyClient, TurnkeyClientError, TurnkeySecp256k1ApiKey};
@@ -28,28 +28,36 @@ const ENV_API_KEY_PRIVATE: &str = "TVC_API_KEY_PRIVATE";
 
 pub const USAGE: &str = "\
     tvc-deploy invite --user-name <name> --email <email> \
-    [--access-type web|api|all] [--tags t1,t2,...] [--sender-user-id <id>] [--org <alias>]\n  \
+    [--access-type web|api|all] [--tags t1,t2,...] [--sender-user-id <id>] \
+    [--allow-existing true] [--org <alias-or-id>]\n  \
     tvc-deploy invite --file <invitees.json> [--access-type web|api|all] [--sender-user-id <id>] \
-    [--include-existing true] [--allowlist a@co.com,b@co.com,...] [--org <alias>]\n  \
-        (invitees.json: {\"accessType\": \"all\", \"invitees\": [{\"userName\": \"...\", \
-    \"email\": \"...\", \"tags\": [\"tag-id\", ...], \"accessType\": \"...\"}, ...]}; \
-    per-invitee accessType overrides the file-level default, which overrides --access-type; \
-    by default, invitees whose canonical email (lowercased, +suffix stripped, so \
-    alice+dev1@co.com and alice@co.com match) equals an existing org member's are skipped with \
-    a printed reason instead of re-invited -- pass --include-existing true to disable this \
-    check entirely, or --allowlist with the exact invitee email(s) to invite just those \
-    specific aliases anyway, e.g. when alice@co.com is already a member but you deliberately \
-    want to invite alice+dev1@co.com as a separate dev-test account)\n  \
-    tvc-deploy dismiss-invite --invitation-id <id> [--org <alias>]\n  \
-    tvc-deploy approve-activity --activity-id <id> [--org <alias>]\n  \
-    tvc-deploy reject-activity --activity-id <id> [--org <alias>]\n  \
-    tvc-deploy list-tags [--org <alias>]\n  \
+    [--include-existing true] [--org <alias-or-id>]\n  \
+        (invitees.json: {\"accessType\": \"all\", \"allowExisting\": false, \"tags\": [\"tag-id\", \
+    ...], \"invitees\": [{\"userName\": \"...\", \"email\": \"...\", \"tags\": [\"tag-id\", ...], \
+    \"accessType\": \"...\", \"allowExisting\": true}, ...]}; per-invitee accessType/tags/ \
+    allowExisting each override that same file-level default (accessType also falls back to \
+    --access-type; tags default is [] if unset). By default, invitees whose canonical email \
+    (lowercased, +suffix stripped, so alice+dev1@co.com and alice@co.com match) equals an \
+    existing org member's are skipped with a printed reason instead of re-invited. Set \
+    \"allowExisting\": true for the specific invitee (or at the file's top level, for the whole \
+    batch) to invite it anyway, e.g. when alice@co.com is already a member but you deliberately \
+    want alice+dev1@co.com as a separate dev-test account -- do this in the file you already \
+    curated, not by repeating emails on the command line. --include-existing true instead \
+    disables the whole existing-member check (skips the get_users lookup entirely).)\n  \
+    tvc-deploy dismiss-invite --invitation-id <id> [--org <alias-or-id>]\n  \
+    tvc-deploy approve-activity --activity-id <id> [--org <alias-or-id>]\n  \
+    tvc-deploy reject-activity --activity-id <id> [--org <alias-or-id>]\n  \
+    tvc-deploy create-tag --name <name> [--user-ids id1,id2,...] [--org <alias-or-id>]\n  \
+        (--user-ids retroactively tags existing users; to tag people being invited, put the \
+    new tag's id in invitees.json's top-level \"tags\" -- applied to every invitee that \
+    doesn't set its own \"tags\" -- since invitees aren't users yet and can't be passed here)\n  \
+    tvc-deploy list-tags [--org <alias-or-id>]\n  \
         (prints user-tag id + name pairs; use the id in invitees.json \"tags\", not the name)\n  \
-    tvc-deploy list-policies [--org <alias>]\n  \
+    tvc-deploy list-policies [--org <alias-or-id>]\n  \
     tvc-deploy create-policy --name <name> --effect allow|deny --notes <text> \
-    [--condition <tql>] [--consensus <tql>] [--org <alias>]\n  \
+    [--condition <tql>] [--consensus <tql>] [--org <alias-or-id>]\n  \
     tvc-deploy create-policies --file <policies.json> [--vars <vars.json>] [--dry-run true] \
-    [--org <alias>]\n  \
+    [--org <alias-or-id>]\n  \
         (policies.json: {\"policies\": [{\"policyName\": \"...\", \"effect\": \"allow\"|\"deny\", \
     \"condition\": \"<tql>\", \"consensus\": \"<tql>\", \"notes\": \"...\"}, ...]}; \
     condition/consensus may contain {{PLACEHOLDER}} tokens filled in from --vars, a flat JSON \
@@ -191,6 +199,26 @@ fn resolve_from_env() -> Result<Option<ResolvedCreds>> {
     }))
 }
 
+/// Resolve `--org` (or the active org, if `None`) to a config entry. `--org`
+/// may be the config alias (e.g. "Anchorage Digital (Development)") or the
+/// org's own UUID; alias lookup is tried first, then a fall back to matching
+/// on [`OrgEntry::id`], since the org's UUID alone is what most people reach
+/// for and doesn't require knowing the alias it happens to be stored under.
+fn resolve_org<'a>(config: &'a TvcConfig, org_override: Option<&str>) -> Option<&'a OrgEntry> {
+    match org_override {
+        Some(given) => config.orgs.get(given).or_else(|| {
+            config
+                .orgs
+                .values()
+                .find(|o| o.id.eq_ignore_ascii_case(given))
+        }),
+        None => config
+            .active_org
+            .as_ref()
+            .and_then(|alias| config.orgs.get(alias)),
+    }
+}
+
 fn resolve_from_config(org_override: Option<&str>) -> Result<ResolvedCreds> {
     let config_path = dirs_config_path()?;
     let content = std::fs::read_to_string(&config_path).with_context(|| {
@@ -202,19 +230,17 @@ fn resolve_from_config(org_override: Option<&str>) -> Result<ResolvedCreds> {
     let config: TvcConfig =
         toml::from_str(&content).with_context(|| format!("parse {}", config_path.display()))?;
 
-    let alias = org_override
-        .map(str::to_owned)
-        .or(config.active_org)
-        .ok_or_else(|| {
-            anyhow!(
-                "no --org given and no active org in {}",
-                config_path.display()
-            )
-        })?;
-    let org = config
-        .orgs
-        .get(&alias)
-        .ok_or_else(|| anyhow!("org {alias:?} not found in {}", config_path.display()))?;
+    let org = resolve_org(&config, org_override);
+    let org = org.ok_or_else(|| match org_override {
+        Some(given) => anyhow!(
+            "org {given:?} not found (by alias or id) in {}",
+            config_path.display()
+        ),
+        None => anyhow!(
+            "no --org given and no active org in {}",
+            config_path.display()
+        ),
+    })?;
 
     let key_content = std::fs::read_to_string(&org.api_key_path)
         .with_context(|| format!("read {}", org.api_key_path.display()))?;
@@ -273,23 +299,35 @@ fn parse_tags(s: &str) -> Vec<String> {
 struct InviteeEntry {
     user_name: String,
     email: String,
-    #[serde(default)]
-    tags: Vec<String>,
+    /// Overrides the file-level `tags` default entirely (not merged) when present.
+    tags: Option<Vec<String>>,
     /// Overrides the file-level `access_type`, which overrides `--access-type`.
     access_type: Option<String>,
+    /// Overrides the file-level `allow_existing`. See [`InviteesFile::allow_existing`].
+    allow_existing: Option<bool>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct InviteesFile {
     access_type: Option<String>,
+    /// Default tag id(s) applied to every invitee that doesn't set its own `tags`.
+    #[serde(default)]
+    tags: Vec<String>,
+    /// Default for whether invitees may bypass the existing-member alias check
+    /// (see [`partition_existing`]); a per-invitee `allowExisting` overrides
+    /// this. Put the exact addresses you know alias an existing member here
+    /// (or per-invitee) rather than passing them again on the command line.
+    #[serde(default)]
+    allow_existing: bool,
     invitees: Vec<InviteeEntry>,
 }
 
 /// Build the invitation list from either `--file <path>` (batch) or the
-/// singular `--user-name`/`--email`/`--tags` flags (one invite). `sender_user_id`
+/// singular `--user-name`/`--email`/`--tags` flags (one invite), paired with
+/// whether each may bypass the existing-member alias check. `sender_user_id`
 /// is left blank here; the caller fills it in once resolved.
-fn build_invitations(flags: &HashMap<String, String>) -> Result<Vec<InvitationParams>> {
+fn build_invitations(flags: &HashMap<String, String>) -> Result<Vec<(InvitationParams, bool)>> {
     let flag_access_type = flags
         .get("access-type")
         .map(String::as_str)
@@ -306,6 +344,8 @@ fn build_invitations(flags: &HashMap<String, String>) -> Result<Vec<InvitationPa
             Some(s) => parse_access_type(s)?,
             None => parse_access_type(flag_access_type)?,
         };
+        let default_tags = file.tags;
+        let default_allow_existing = file.allow_existing;
         file.invitees
             .into_iter()
             .map(|e| {
@@ -313,13 +353,18 @@ fn build_invitations(flags: &HashMap<String, String>) -> Result<Vec<InvitationPa
                     Some(s) => parse_access_type(s)?,
                     None => default_access,
                 };
-                Ok(InvitationParams {
-                    receiver_user_name: e.user_name,
-                    receiver_user_email: e.email,
-                    receiver_user_tags: e.tags,
-                    access_type,
-                    sender_user_id: String::new(),
-                })
+                let receiver_user_tags = e.tags.unwrap_or_else(|| default_tags.clone());
+                let allow_existing = e.allow_existing.unwrap_or(default_allow_existing);
+                Ok((
+                    InvitationParams {
+                        receiver_user_name: e.user_name,
+                        receiver_user_email: e.email,
+                        receiver_user_tags,
+                        access_type,
+                        sender_user_id: String::new(),
+                    },
+                    allow_existing,
+                ))
             })
             .collect()
     } else {
@@ -327,13 +372,17 @@ fn build_invitations(flags: &HashMap<String, String>) -> Result<Vec<InvitationPa
         let email = req(flags, "email")?.clone();
         let access_type = parse_access_type(flag_access_type)?;
         let tags = flags.get("tags").map(|s| parse_tags(s)).unwrap_or_default();
-        Ok(vec![InvitationParams {
-            receiver_user_name: user_name,
-            receiver_user_email: email,
-            receiver_user_tags: tags,
-            access_type,
-            sender_user_id: String::new(),
-        }])
+        let allow_existing = flags.contains_key("allow-existing");
+        Ok(vec![(
+            InvitationParams {
+                receiver_user_name: user_name,
+                receiver_user_email: email,
+                receiver_user_tags: tags,
+                access_type,
+                sender_user_id: String::new(),
+            },
+            allow_existing,
+        )])
     }
 }
 
@@ -353,33 +402,30 @@ fn canonical_email(email: &str) -> String {
     }
 }
 
-/// Split `invitations` into (kept, skipped): an invitee is skipped when its
-/// canonical email (see [`canonical_email`]) matches an existing org member's,
-/// UNLESS its raw (lowercased) email is in `allowlist` -- e.g. to deliberately
-/// invite a `+dev` alias of someone who's already a real member.
+/// Split `(invitation, allow_existing)` pairs into (kept, skipped): an
+/// invitee is skipped when its canonical email (see [`canonical_email`])
+/// matches an existing org member's, UNLESS its own `allow_existing` is true
+/// -- e.g. to deliberately invite a `+dev` alias of someone who's already a
+/// real member. Set per-invitee in the file (or file-wide via its top-level
+/// `allowExisting`) rather than repeated on the command line -- see
+/// [`InviteesFile::allow_existing`].
 fn partition_existing(
-    invitations: Vec<InvitationParams>,
+    invitations: Vec<(InvitationParams, bool)>,
     existing_emails: &std::collections::HashSet<String>,
-    allowlist: &std::collections::HashSet<String>,
 ) -> (Vec<InvitationParams>, Vec<InvitationParams>) {
-    invitations.into_iter().partition(|i| {
-        let raw = i.receiver_user_email.to_lowercase();
-        allowlist.contains(&raw) || !existing_emails.contains(&canonical_email(&raw))
-    })
+    let (kept, skipped): (Vec<_>, Vec<_>) =
+        invitations.into_iter().partition(|(i, allow_existing)| {
+            *allow_existing || !existing_emails.contains(&canonical_email(&i.receiver_user_email))
+        });
+    (
+        kept.into_iter().map(|(i, _)| i).collect(),
+        skipped.into_iter().map(|(i, _)| i).collect(),
+    )
 }
 
 pub fn invite(flags: &HashMap<String, String>) -> Result<()> {
-    let mut invitations = build_invitations(flags)?;
+    let invitations_with_allow = build_invitations(flags)?;
     let include_existing = flags.contains_key("include-existing");
-    let allowlist: std::collections::HashSet<String> = flags
-        .get("allowlist")
-        .map(|s| {
-            parse_tags(s)
-                .into_iter()
-                .map(|e| e.to_lowercase())
-                .collect()
-        })
-        .unwrap_or_default();
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -388,7 +434,9 @@ pub fn invite(flags: &HashMap<String, String>) -> Result<()> {
     rt.block_on(async {
         let auth = resolve_auth(flags.get("org").map(String::as_str))?;
 
-        if !include_existing {
+        let mut invitations = if include_existing {
+            invitations_with_allow.into_iter().map(|(i, _)| i).collect()
+        } else {
             let users = auth
                 .client
                 .get_users(GetUsersRequest {
@@ -403,22 +451,23 @@ pub fn invite(flags: &HashMap<String, String>) -> Result<()> {
                 .map(|e| canonical_email(&e))
                 .collect();
 
-            let (kept, skipped) = partition_existing(invitations, &existing_emails, &allowlist);
+            let (kept, skipped) = partition_existing(invitations_with_allow, &existing_emails);
             for s in &skipped {
                 println!(
                     "skipping {} <{}>: matches an existing member of org {} \
-                     (pass --allowlist {} to invite anyway)",
-                    s.receiver_user_name, s.receiver_user_email, auth.org_id, s.receiver_user_email
+                     (set \"allowExisting\": true for this invitee, or at the top level of \
+                     the file, to invite it anyway)",
+                    s.receiver_user_name, s.receiver_user_email, auth.org_id
                 );
             }
-            invitations = kept;
-            if invitations.is_empty() {
+            if kept.is_empty() {
                 println!(
                     "nothing to invite: everyone in the list already matches an existing member"
                 );
                 return Ok(());
             }
-        }
+            kept
+        };
 
         let sender_user_id = match flags.get("sender-user-id") {
             Some(id) => id.clone(),
@@ -458,7 +507,7 @@ pub fn invite(flags: &HashMap<String, String>) -> Result<()> {
             Err(TurnkeyClientError::ActivityRequiresApproval(activity_id)) => {
                 println!(
                     "activity {activity_id} needs consensus; approve it with:\n  \
-                     tvc-deploy approve-activity --activity-id {activity_id} --org <alias>"
+                     tvc-deploy approve-activity --activity-id {activity_id} --org <alias-or-id>"
                 );
                 Ok(())
             }
@@ -548,7 +597,7 @@ pub fn create_policy(flags: &HashMap<String, String>) -> Result<()> {
             Err(TurnkeyClientError::ActivityRequiresApproval(activity_id)) => {
                 println!(
                     "activity {activity_id} needs consensus; approve it with:\n  \
-                     tvc-deploy approve-activity --activity-id {activity_id} --org <alias>"
+                     tvc-deploy approve-activity --activity-id {activity_id} --org <alias-or-id>"
                 );
                 Ok(())
             }
@@ -682,11 +731,55 @@ pub fn create_policies(flags: &HashMap<String, String>) -> Result<()> {
             Err(TurnkeyClientError::ActivityRequiresApproval(activity_id)) => {
                 println!(
                     "activity {activity_id} needs consensus; approve it with:\n  \
-                     tvc-deploy approve-activity --activity-id {activity_id} --org <alias>"
+                     tvc-deploy approve-activity --activity-id {activity_id} --org <alias-or-id>"
                 );
                 Ok(())
             }
             Err(e) => Err(anyhow!("create_policies failed: {e}")),
+        }
+    })
+}
+
+pub fn create_tag(flags: &HashMap<String, String>) -> Result<()> {
+    let user_tag_name = req(flags, "name")?.clone();
+    let user_ids = flags
+        .get("user-ids")
+        .map(|s| parse_tags(s))
+        .unwrap_or_default();
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("build tokio runtime")?;
+    rt.block_on(async {
+        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
+
+        let outcome = auth
+            .client
+            .create_user_tag(
+                auth.org_id.clone(),
+                current_timestamp_ms(),
+                CreateUserTagIntent {
+                    user_tag_name,
+                    user_ids,
+                },
+            )
+            .await;
+
+        match outcome {
+            Ok(result) => {
+                println!("activity {} status={:?}", result.activity_id, result.status);
+                println!("tag id: {}", result.result.user_tag_id);
+                Ok(())
+            }
+            Err(TurnkeyClientError::ActivityRequiresApproval(activity_id)) => {
+                println!(
+                    "activity {activity_id} needs consensus; approve it with:\n  \
+                     tvc-deploy approve-activity --activity-id {activity_id} --org <alias-or-id>"
+                );
+                Ok(())
+            }
+            Err(e) => Err(anyhow!("create_user_tag failed: {e}")),
         }
     })
 }
@@ -746,7 +839,7 @@ pub fn dismiss_invite(flags: &HashMap<String, String>) -> Result<()> {
             Err(TurnkeyClientError::ActivityRequiresApproval(activity_id)) => {
                 println!(
                     "activity {activity_id} needs consensus; approve it with:\n  \
-                     tvc-deploy approve-activity --activity-id {activity_id} --org <alias>"
+                     tvc-deploy approve-activity --activity-id {activity_id} --org <alias-or-id>"
                 );
                 Ok(())
             }
@@ -834,30 +927,92 @@ mod tests {
     #[test]
     fn partition_existing_splits_by_case_insensitive_email() {
         let invitations = vec![
-            InvitationParams {
-                receiver_user_name: "Alice".to_string(),
-                receiver_user_email: "Alice@Example.com".to_string(),
-                receiver_user_tags: vec![],
-                access_type: AccessType::All,
-                sender_user_id: String::new(),
-            },
-            InvitationParams {
-                receiver_user_name: "Bob".to_string(),
-                receiver_user_email: "bob@example.com".to_string(),
-                receiver_user_tags: vec![],
-                access_type: AccessType::All,
-                sender_user_id: String::new(),
-            },
+            (
+                InvitationParams {
+                    receiver_user_name: "Alice".to_string(),
+                    receiver_user_email: "Alice@Example.com".to_string(),
+                    receiver_user_tags: vec![],
+                    access_type: AccessType::All,
+                    sender_user_id: String::new(),
+                },
+                false,
+            ),
+            (
+                InvitationParams {
+                    receiver_user_name: "Bob".to_string(),
+                    receiver_user_email: "bob@example.com".to_string(),
+                    receiver_user_tags: vec![],
+                    access_type: AccessType::All,
+                    sender_user_id: String::new(),
+                },
+                false,
+            ),
         ];
         let mut existing = std::collections::HashSet::new();
         existing.insert("alice@example.com".to_string());
 
-        let (kept, skipped) =
-            partition_existing(invitations, &existing, &std::collections::HashSet::new());
+        let (kept, skipped) = partition_existing(invitations, &existing);
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].receiver_user_name, "Bob");
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].receiver_user_name, "Alice");
+    }
+
+    fn test_config() -> TvcConfig {
+        let mut orgs = HashMap::new();
+        orgs.insert(
+            "dev".to_string(),
+            OrgEntry {
+                id: "11111111-1111-1111-1111-111111111111".to_string(),
+                api_key_path: PathBuf::from("/dev/key.json"),
+                api_base_url: DEFAULT_API_BASE_URL.to_string(),
+            },
+        );
+        orgs.insert(
+            "prod".to_string(),
+            OrgEntry {
+                id: "22222222-2222-2222-2222-222222222222".to_string(),
+                api_key_path: PathBuf::from("/prod/key.json"),
+                api_base_url: DEFAULT_API_BASE_URL.to_string(),
+            },
+        );
+        TvcConfig {
+            active_org: Some("dev".to_string()),
+            orgs,
+        }
+    }
+
+    #[test]
+    fn resolve_org_by_alias() {
+        let config = test_config();
+        let org = resolve_org(&config, Some("prod")).unwrap();
+        assert_eq!(org.id, "22222222-2222-2222-2222-222222222222");
+    }
+
+    #[test]
+    fn resolve_org_by_id_case_insensitive() {
+        let config = test_config();
+        let org = resolve_org(&config, Some("22222222-2222-2222-2222-222222222222")).unwrap();
+        assert_eq!(org.api_key_path, PathBuf::from("/prod/key.json"));
+
+        let org = resolve_org(&config, Some("AAAAAAAA-1111-1111-1111-111111111111"));
+        assert!(org.is_none());
+
+        let org = resolve_org(&config, Some("11111111-1111-1111-1111-111111111111")).unwrap();
+        assert_eq!(org.api_key_path, PathBuf::from("/dev/key.json"));
+    }
+
+    #[test]
+    fn resolve_org_falls_back_to_active_org_when_none_given() {
+        let config = test_config();
+        let org = resolve_org(&config, None).unwrap();
+        assert_eq!(org.api_key_path, PathBuf::from("/dev/key.json"));
+    }
+
+    #[test]
+    fn resolve_org_returns_none_for_unknown_alias_or_id() {
+        let config = test_config();
+        assert!(resolve_org(&config, Some("nonexistent")).is_none());
     }
 
     #[test]
@@ -875,37 +1030,40 @@ mod tests {
 
     #[test]
     fn partition_existing_treats_plus_alias_as_matching_existing_member() {
-        let invitations = vec![InvitationParams {
-            receiver_user_name: "Alice Dev".to_string(),
-            receiver_user_email: "alice+dev1@example.com".to_string(),
-            receiver_user_tags: vec![],
-            access_type: AccessType::All,
-            sender_user_id: String::new(),
-        }];
+        let invitations = vec![(
+            InvitationParams {
+                receiver_user_name: "Alice Dev".to_string(),
+                receiver_user_email: "alice+dev1@example.com".to_string(),
+                receiver_user_tags: vec![],
+                access_type: AccessType::All,
+                sender_user_id: String::new(),
+            },
+            false,
+        )];
         let mut existing = std::collections::HashSet::new();
         existing.insert("alice@example.com".to_string()); // canonical form, as stored by the caller
 
-        let (kept, skipped) =
-            partition_existing(invitations, &existing, &std::collections::HashSet::new());
+        let (kept, skipped) = partition_existing(invitations, &existing);
         assert!(kept.is_empty());
         assert_eq!(skipped.len(), 1);
     }
 
     #[test]
-    fn partition_existing_allowlist_bypasses_alias_match() {
-        let invitations = vec![InvitationParams {
-            receiver_user_name: "Alice Dev".to_string(),
-            receiver_user_email: "Alice+Dev1@Example.com".to_string(),
-            receiver_user_tags: vec![],
-            access_type: AccessType::All,
-            sender_user_id: String::new(),
-        }];
+    fn partition_existing_per_invitee_allow_existing_bypasses_alias_match() {
+        let invitations = vec![(
+            InvitationParams {
+                receiver_user_name: "Alice Dev".to_string(),
+                receiver_user_email: "Alice+Dev1@Example.com".to_string(),
+                receiver_user_tags: vec![],
+                access_type: AccessType::All,
+                sender_user_id: String::new(),
+            },
+            true,
+        )];
         let mut existing = std::collections::HashSet::new();
         existing.insert("alice@example.com".to_string());
-        let mut allowlist = std::collections::HashSet::new();
-        allowlist.insert("alice+dev1@example.com".to_string()); // lowercased, exact
 
-        let (kept, skipped) = partition_existing(invitations, &existing, &allowlist);
+        let (kept, skipped) = partition_existing(invitations, &existing);
         assert_eq!(kept.len(), 1);
         assert!(skipped.is_empty());
     }
@@ -920,10 +1078,22 @@ mod tests {
 
         let invitations = build_invitations(&flags).unwrap();
         assert_eq!(invitations.len(), 1);
-        assert_eq!(invitations[0].receiver_user_name, "Alice");
-        assert_eq!(invitations[0].receiver_user_email, "alice@example.com");
-        assert_eq!(invitations[0].receiver_user_tags, vec!["tag-a", "tag-b"]);
-        assert_eq!(invitations[0].access_type, AccessType::Web);
+        assert_eq!(invitations[0].0.receiver_user_name, "Alice");
+        assert_eq!(invitations[0].0.receiver_user_email, "alice@example.com");
+        assert_eq!(invitations[0].0.receiver_user_tags, vec!["tag-a", "tag-b"]);
+        assert_eq!(invitations[0].0.access_type, AccessType::Web);
+        assert!(!invitations[0].1, "allow_existing should default to false");
+    }
+
+    #[test]
+    fn build_invitations_single_allow_existing_flag() {
+        let mut flags = HashMap::new();
+        flags.insert("user-name".to_string(), "Alice".to_string());
+        flags.insert("email".to_string(), "alice@example.com".to_string());
+        flags.insert("allow-existing".to_string(), "true".to_string());
+
+        let invitations = build_invitations(&flags).unwrap();
+        assert!(invitations[0].1);
     }
 
     #[test]
@@ -933,8 +1103,8 @@ mod tests {
         flags.insert("email".to_string(), "alice@example.com".to_string());
 
         let invitations = build_invitations(&flags).unwrap();
-        assert_eq!(invitations[0].access_type, AccessType::All);
-        assert!(invitations[0].receiver_user_tags.is_empty());
+        assert_eq!(invitations[0].0.access_type, AccessType::All);
+        assert!(invitations[0].0.receiver_user_tags.is_empty());
     }
 
     #[test]
@@ -960,12 +1130,67 @@ mod tests {
 
         let invitations = build_invitations(&flags).unwrap();
         assert_eq!(invitations.len(), 2);
-        assert_eq!(invitations[0].receiver_user_name, "Alice");
-        assert_eq!(invitations[0].access_type, AccessType::All);
-        assert_eq!(invitations[0].receiver_user_tags, vec!["tag-a"]);
-        assert_eq!(invitations[1].receiver_user_name, "Bob");
-        assert_eq!(invitations[1].access_type, AccessType::Web);
-        assert!(invitations[1].receiver_user_tags.is_empty());
+        assert_eq!(invitations[0].0.receiver_user_name, "Alice");
+        assert_eq!(invitations[0].0.access_type, AccessType::All);
+        assert_eq!(invitations[0].0.receiver_user_tags, vec!["tag-a"]);
+        assert_eq!(invitations[1].0.receiver_user_name, "Bob");
+        assert_eq!(invitations[1].0.access_type, AccessType::Web);
+        assert!(invitations[1].0.receiver_user_tags.is_empty());
+    }
+
+    #[test]
+    fn build_invitations_file_level_tags_default_and_per_invitee_override() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(
+            file,
+            r#"{{
+                "tags": ["group-tag"],
+                "invitees": [
+                    {{"userName": "Alice", "email": "alice@example.com"}},
+                    {{"userName": "Bob", "email": "bob@example.com", "tags": ["bob-only-tag"]}},
+                    {{"userName": "Carl", "email": "carl@example.com", "tags": []}}
+                ]
+            }}"#
+        )
+        .unwrap();
+
+        let mut flags = HashMap::new();
+        flags.insert(
+            "file".to_string(),
+            file.path().to_str().unwrap().to_string(),
+        );
+
+        let invitations = build_invitations(&flags).unwrap();
+        assert_eq!(invitations[0].0.receiver_user_tags, vec!["group-tag"]);
+        assert_eq!(invitations[1].0.receiver_user_tags, vec!["bob-only-tag"]);
+        // An explicit empty array overrides the default entirely (not merged).
+        assert!(invitations[2].0.receiver_user_tags.is_empty());
+    }
+
+    #[test]
+    fn build_invitations_file_level_allow_existing_default_and_per_invitee_override() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(
+            file,
+            r#"{{
+                "allowExisting": true,
+                "invitees": [
+                    {{"userName": "Alice", "email": "alice@example.com"}},
+                    {{"userName": "Bob", "email": "bob@example.com", "allowExisting": false}}
+                ]
+            }}"#
+        )
+        .unwrap();
+
+        let mut flags = HashMap::new();
+        flags.insert(
+            "file".to_string(),
+            file.path().to_str().unwrap().to_string(),
+        );
+
+        let invitations = build_invitations(&flags).unwrap();
+        assert!(invitations[0].1, "Alice inherits the file-level default");
+        assert!(!invitations[1].1, "Bob overrides the file-level default");
     }
 
     #[test]
