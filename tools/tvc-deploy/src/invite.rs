@@ -934,4 +934,27 @@ mod tests {
             .unwrap_or_default()
             .contains("{{")));
     }
+
+    #[test]
+    fn load_policies_file_renders_checked_in_readonly_template() {
+        let mut vars = NamedTempFile::new().unwrap();
+        write!(vars, r#"{{"READONLY_TAG_ID": "readonly-uuid"}}"#).unwrap();
+
+        let policies = load_policies_file(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/templates/readonly-policy.json"
+            ),
+            Some(vars.path().to_str().unwrap()),
+        )
+        .unwrap();
+
+        assert_eq!(policies.len(), 1);
+        assert_eq!(policies[0].effect, Effect::Deny);
+        assert_eq!(policies[0].condition.as_deref(), Some("true"));
+        assert_eq!(
+            policies[0].consensus.as_deref(),
+            Some("approvers.any(user, user.tags.contains('readonly-uuid'))")
+        );
+    }
 }

@@ -80,3 +80,24 @@ tvc-deploy create-policies --file templates/releaser-initiator-policies.json \
 tvc-deploy create-policies --file templates/releaser-initiator-policies.json \
   --vars prod-vars.json --org prod                                # actually create
 ```
+
+### Basic / read-only access
+
+`accessType` on an invite only controls *how* a user authenticates (web
+dashboard vs. API key) -- it is not a permission level, and there is no
+built-in "basic" tier. Permission scoping is entirely policy-driven, so a
+read-only user is one who's been tagged and given an explicit deny.
+
+`templates/readonly-policy.json` is a single-policy template for exactly
+that: `EFFECT_DENY` on every activity type (`condition: "true"`), scoped via
+`consensus` to only apply to whoever holds the given tag. Because
+`EFFECT_DENY` always wins over any conflicting `EFFECT_ALLOW`, this acts as a
+hard guardrail even if the tagged user later picks up other allow policies.
+Queries (`list_*`/`get_*`) aren't gated by policies at all, so a read-only
+user can still browse the org, wallets, policies, etc. -- this only blocks
+activities that change state:
+
+```
+tvc-deploy create-policies --file templates/readonly-policy.json \
+  --vars readonly-vars.json --org <alias>
+```
