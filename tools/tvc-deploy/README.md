@@ -48,6 +48,19 @@ the org requires it):
    `--sender-user-id <id>` is given, then submits all invitees as a single
    `create_invitations` activity.
 
+   Before sending, it fetches the org's current members and skips any invitee
+   whose **canonical** email (lowercased, `+suffix` stripped) matches an
+   existing member's -- so `alice+dev1@co.com` is treated as the same person
+   as `alice@co.com` and won't get a redundant invite. To bypass this for
+   specific addresses (e.g. you deliberately want a `+dev` test account for
+   someone who's already a real member), pass their exact email(s):
+
+   ```
+   tvc-deploy invite --file invitees.json --allowlist alice+dev1@co.com --org <alias>
+   ```
+
+   Or disable the check entirely with `--include-existing true`.
+
 5. **Approve, if needed.** If the org's policies require consensus, the command
    prints the activity id and the exact follow-up command instead of erroring:
 

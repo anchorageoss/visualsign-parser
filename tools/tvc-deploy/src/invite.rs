@@ -14,8 +14,8 @@ use turnkey_api_key_stamper::{Stamp, StampHeader, StamperError};
 use turnkey_client::generated::immutable::common::v1::{AccessType, Effect};
 use turnkey_client::generated::{
     ApproveActivityIntent, CreateInvitationsIntent, CreatePoliciesIntent, CreatePolicyIntentV3,
-    DeleteInvitationIntent, GetActivityRequest, GetPoliciesRequest, GetWhoamiRequest,
-    InvitationParams, ListUserTagsRequest, RejectActivityIntent,
+    DeleteInvitationIntent, GetActivityRequest, GetPoliciesRequest, GetUsersRequest,
+    GetWhoamiRequest, InvitationParams, ListUserTagsRequest, RejectActivityIntent,
 };
 use turnkey_client::TurnkeyP256ApiKey;
 use turnkey_client::{TurnkeyClient, TurnkeyClientError, TurnkeySecp256k1ApiKey};
@@ -30,10 +30,16 @@ pub const USAGE: &str = "\
     tvc-deploy invite --user-name <name> --email <email> \
     [--access-type web|api|all] [--tags t1,t2,...] [--sender-user-id <id>] [--org <alias>]\n  \
     tvc-deploy invite --file <invitees.json> [--access-type web|api|all] [--sender-user-id <id>] \
-    [--org <alias>]\n  \
+    [--include-existing true] [--allowlist a@co.com,b@co.com,...] [--org <alias>]\n  \
         (invitees.json: {\"accessType\": \"all\", \"invitees\": [{\"userName\": \"...\", \
     \"email\": \"...\", \"tags\": [\"tag-id\", ...], \"accessType\": \"...\"}, ...]}; \
-    per-invitee accessType overrides the file-level default, which overrides --access-type)\n  \
+    per-invitee accessType overrides the file-level default, which overrides --access-type; \
+    by default, invitees whose canonical email (lowercased, +suffix stripped, so \
+    alice+dev1@co.com and alice@co.com match) equals an existing org member's are skipped with \
+    a printed reason instead of re-invited -- pass --include-existing true to disable this \
+    check entirely, or --allowlist with the exact invitee email(s) to invite just those \
+    specific aliases anyway, e.g. when alice@co.com is already a member but you deliberately \
+    want to invite alice+dev1@co.com as a separate dev-test account)\n  \
     tvc-deploy dismiss-invite --invitation-id <id> [--org <alias>]\n  \
     tvc-deploy approve-activity --activity-id <id> [--org <alias>]\n  \
     tvc-deploy reject-activity --activity-id <id> [--org <alias>]\n  \
@@ -331,8 +337,49 @@ fn build_invitations(flags: &HashMap<String, String>) -> Result<Vec<InvitationPa
     }
 }
 
+/// Split `invitations` into (kept, skipped) by case-insensitive email
+/// membership in `existing_emails`.
+/// Lowercase, and drop any `+suffix` from the local part, so
+/// `Alice+dev1@Co.com` and `alice@co.com` compare equal -- plus-addressed
+/// aliases of the same mailbox map to the same canonical identity.
+fn canonical_email(email: &str) -> String {
+    let email = email.to_lowercase();
+    match email.split_once('@') {
+        Some((local, domain)) => {
+            let base_local = local.split('+').next().unwrap_or(local);
+            format!("{base_local}@{domain}")
+        }
+        None => email,
+    }
+}
+
+/// Split `invitations` into (kept, skipped): an invitee is skipped when its
+/// canonical email (see [`canonical_email`]) matches an existing org member's,
+/// UNLESS its raw (lowercased) email is in `allowlist` -- e.g. to deliberately
+/// invite a `+dev` alias of someone who's already a real member.
+fn partition_existing(
+    invitations: Vec<InvitationParams>,
+    existing_emails: &std::collections::HashSet<String>,
+    allowlist: &std::collections::HashSet<String>,
+) -> (Vec<InvitationParams>, Vec<InvitationParams>) {
+    invitations.into_iter().partition(|i| {
+        let raw = i.receiver_user_email.to_lowercase();
+        allowlist.contains(&raw) || !existing_emails.contains(&canonical_email(&raw))
+    })
+}
+
 pub fn invite(flags: &HashMap<String, String>) -> Result<()> {
     let mut invitations = build_invitations(flags)?;
+    let include_existing = flags.contains_key("include-existing");
+    let allowlist: std::collections::HashSet<String> = flags
+        .get("allowlist")
+        .map(|s| {
+            parse_tags(s)
+                .into_iter()
+                .map(|e| e.to_lowercase())
+                .collect()
+        })
+        .unwrap_or_default();
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -340,6 +387,38 @@ pub fn invite(flags: &HashMap<String, String>) -> Result<()> {
         .context("build tokio runtime")?;
     rt.block_on(async {
         let auth = resolve_auth(flags.get("org").map(String::as_str))?;
+
+        if !include_existing {
+            let users = auth
+                .client
+                .get_users(GetUsersRequest {
+                    organization_id: auth.org_id.clone(),
+                })
+                .await
+                .map_err(|e| anyhow!("get_users failed: {e}"))?;
+            let existing_emails: std::collections::HashSet<String> = users
+                .users
+                .into_iter()
+                .filter_map(|u| u.user_email)
+                .map(|e| canonical_email(&e))
+                .collect();
+
+            let (kept, skipped) = partition_existing(invitations, &existing_emails, &allowlist);
+            for s in &skipped {
+                println!(
+                    "skipping {} <{}>: matches an existing member of org {} \
+                     (pass --allowlist {} to invite anyway)",
+                    s.receiver_user_name, s.receiver_user_email, auth.org_id, s.receiver_user_email
+                );
+            }
+            invitations = kept;
+            if invitations.is_empty() {
+                println!(
+                    "nothing to invite: everyone in the list already matches an existing member"
+                );
+                return Ok(());
+            }
+        }
 
         let sender_user_id = match flags.get("sender-user-id") {
             Some(id) => id.clone(),
@@ -751,6 +830,85 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn partition_existing_splits_by_case_insensitive_email() {
+        let invitations = vec![
+            InvitationParams {
+                receiver_user_name: "Alice".to_string(),
+                receiver_user_email: "Alice@Example.com".to_string(),
+                receiver_user_tags: vec![],
+                access_type: AccessType::All,
+                sender_user_id: String::new(),
+            },
+            InvitationParams {
+                receiver_user_name: "Bob".to_string(),
+                receiver_user_email: "bob@example.com".to_string(),
+                receiver_user_tags: vec![],
+                access_type: AccessType::All,
+                sender_user_id: String::new(),
+            },
+        ];
+        let mut existing = std::collections::HashSet::new();
+        existing.insert("alice@example.com".to_string());
+
+        let (kept, skipped) =
+            partition_existing(invitations, &existing, &std::collections::HashSet::new());
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].receiver_user_name, "Bob");
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].receiver_user_name, "Alice");
+    }
+
+    #[test]
+    fn canonical_email_lowercases_and_strips_plus_suffix() {
+        assert_eq!(
+            canonical_email("Alice+dev1@Example.com"),
+            "alice@example.com"
+        );
+        assert_eq!(canonical_email("alice@example.com"), "alice@example.com");
+        assert_eq!(
+            canonical_email("ALICE+DEV2@EXAMPLE.COM"),
+            "alice@example.com"
+        );
+    }
+
+    #[test]
+    fn partition_existing_treats_plus_alias_as_matching_existing_member() {
+        let invitations = vec![InvitationParams {
+            receiver_user_name: "Alice Dev".to_string(),
+            receiver_user_email: "alice+dev1@example.com".to_string(),
+            receiver_user_tags: vec![],
+            access_type: AccessType::All,
+            sender_user_id: String::new(),
+        }];
+        let mut existing = std::collections::HashSet::new();
+        existing.insert("alice@example.com".to_string()); // canonical form, as stored by the caller
+
+        let (kept, skipped) =
+            partition_existing(invitations, &existing, &std::collections::HashSet::new());
+        assert!(kept.is_empty());
+        assert_eq!(skipped.len(), 1);
+    }
+
+    #[test]
+    fn partition_existing_allowlist_bypasses_alias_match() {
+        let invitations = vec![InvitationParams {
+            receiver_user_name: "Alice Dev".to_string(),
+            receiver_user_email: "Alice+Dev1@Example.com".to_string(),
+            receiver_user_tags: vec![],
+            access_type: AccessType::All,
+            sender_user_id: String::new(),
+        }];
+        let mut existing = std::collections::HashSet::new();
+        existing.insert("alice@example.com".to_string());
+        let mut allowlist = std::collections::HashSet::new();
+        allowlist.insert("alice+dev1@example.com".to_string()); // lowercased, exact
+
+        let (kept, skipped) = partition_existing(invitations, &existing, &allowlist);
+        assert_eq!(kept.len(), 1);
+        assert!(skipped.is_empty());
+    }
 
     #[test]
     fn build_invitations_single_from_flags() {
