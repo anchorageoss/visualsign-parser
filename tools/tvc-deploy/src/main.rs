@@ -61,6 +61,8 @@ enum Command {
     ApproveActivity(invite::ActivityIdArgs),
     /// Reject a Turnkey activity that needs consensus
     RejectActivity(invite::ActivityIdArgs),
+    /// List an org's activities, newest first, with optional status/type filters
+    ListActivities(invite::ListActivitiesArgs),
     /// Create a user tag, optionally seeding it with existing user ids
     CreateTag(invite::CreateTagArgs),
     /// Add/remove existing users from a tag, or rename it
@@ -105,6 +107,11 @@ struct DeployArgs {
     host_ip: String,
     #[arg(long, default_value_t = 3000)]
     host_port: u16,
+    /// Skip the check for an existing pending deploy activity for this app-id
+    #[arg(long)]
+    force: bool,
+    #[command(flatten)]
+    org: invite::OrgArgs,
 }
 
 fn main() -> ExitCode {
@@ -128,6 +135,7 @@ fn run() -> Result<()> {
         Command::ListInvitations(args) => invite::list_invitations(&args),
         Command::ApproveActivity(args) => invite::approve_activity(&args),
         Command::RejectActivity(args) => invite::reject_activity(&args),
+        Command::ListActivities(args) => invite::list_activities(&args),
         Command::CreateTag(args) => invite::create_tag(&args),
         Command::UpdateTag(args) => invite::update_tag(&args),
         Command::ListTags(args) => invite::list_tags(&args),
@@ -172,6 +180,25 @@ fn write_secret_file(path: &Path, contents: &str) -> Result<()> {
 
 fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
     validate_digest(&args.expected_digest)?;
+
+    if !args.force {
+        // Turnkey has no dedup for create_tvc_deployment: submitting the same
+        // deploy twice while the first is still ConsensusNeeded creates a
+        // second, independent activity instead of reusing it (see README).
+        let pending = invite::find_pending_deployments(args.org.as_deref(), &args.app_id)?;
+        if !pending.is_empty() {
+            let ids: Vec<&str> = pending.iter().map(|a| a.id.as_str()).collect();
+            bail!(
+                "app {} already has {} deployment activity(ies) awaiting consensus: {}\n\
+                 approve or reject the existing one first (tvc-deploy approve-activity / \
+                 reject-activity --activity-id <id>), or pass --force to submit anyway",
+                args.app_id,
+                ids.len(),
+                ids.join(", ")
+            );
+        }
+    }
+
     // Safety gate: re-derive the pivot binary digest from the image and confirm
     // it matches --expected-digest, tying the submitted digest to the real binary.
     verify_image_digest(sh, &args.image_url, &args.expected_digest)?;

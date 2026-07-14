@@ -1,6 +1,6 @@
 //! Turnkey org-management subcommands: invite/dismiss-invite, activity
-//! approve/reject, tag CRUD (create/update/list), user listing, and policy
-//! CRUD (create single/batch, list). See each `*Args` struct's doc comments
+//! approve/reject/list, tag CRUD (create/update/list), user listing, and
+//! policy CRUD (create single/batch, list). See each `*Args` struct's doc comments
 //! (surfaced via `--help`) and `tools/tvc-deploy/README.md` for the batch
 //! invite / batch policy workflows and file schemas.
 //!
@@ -17,12 +17,14 @@ use clap::Args;
 use serde::Deserialize;
 use turnkey_api_key_stamper::{Stamp, StampHeader, StamperError};
 use turnkey_client::generated::external::data::v1::InvitationStatus;
+use turnkey_client::generated::external::options::v1::Pagination;
 use turnkey_client::generated::immutable::common::v1::{AccessType, Effect};
 use turnkey_client::generated::{
-    ApproveActivityIntent, CreateInvitationsIntent, CreatePoliciesIntent, CreatePolicyIntentV3,
-    CreateUserTagIntent, DeleteInvitationIntent, GetActivityRequest, GetOrganizationRequest,
-    GetOrganizationResponse, GetPoliciesRequest, GetUsersRequest, GetWhoamiRequest,
-    InvitationParams, ListUserTagsRequest, RejectActivityIntent, UpdateUserTagIntent,
+    intent, Activity, ActivityStatus, ActivityType, ApproveActivityIntent, CreateInvitationsIntent,
+    CreatePoliciesIntent, CreatePolicyIntentV3, CreateUserTagIntent, DeleteInvitationIntent,
+    GetActivitiesRequest, GetActivityRequest, GetOrganizationRequest, GetOrganizationResponse,
+    GetPoliciesRequest, GetUsersRequest, GetWhoamiRequest, InvitationParams, ListUserTagsRequest,
+    RejectActivityIntent, UpdateUserTagIntent,
 };
 use turnkey_client::TurnkeyP256ApiKey;
 use turnkey_client::{TurnkeyClient, TurnkeyClientError, TurnkeySecp256k1ApiKey};
@@ -93,6 +95,26 @@ pub struct DismissInviteArgs {
 pub struct ActivityIdArgs {
     #[arg(long)]
     pub activity_id: String,
+    #[command(flatten)]
+    pub org: OrgArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct ListActivitiesArgs {
+    /// Comma-separated statuses to filter by: created, pending, completed,
+    /// failed, consensus_needed, rejected, authenticators_needed
+    #[arg(long)]
+    pub status: Option<String>,
+    /// Comma-separated activity type suffixes, e.g. create_invitations,delete_invitation
+    /// (matched case-insensitively against the ACTIVITY_TYPE_* names)
+    #[arg(long)]
+    pub activity_type: Option<String>,
+    /// Max number of activities to return
+    #[arg(long)]
+    pub limit: Option<u32>,
+    /// Print the full activity (including intent/result) as JSON instead of a summary line
+    #[arg(long)]
+    pub json: bool,
     #[command(flatten)]
     pub org: OrgArgs,
 }
@@ -391,6 +413,28 @@ fn parse_access_type(s: &str) -> Result<AccessType> {
         "all" => Ok(AccessType::All),
         other => bail!("--access-type must be one of web|api|all, got {other:?}"),
     }
+}
+
+fn parse_activity_status(s: &str) -> Result<ActivityStatus> {
+    match s.to_ascii_lowercase().as_str() {
+        "created" => Ok(ActivityStatus::Created),
+        "pending" => Ok(ActivityStatus::Pending),
+        "completed" => Ok(ActivityStatus::Completed),
+        "failed" => Ok(ActivityStatus::Failed),
+        "consensus_needed" => Ok(ActivityStatus::ConsensusNeeded),
+        "rejected" => Ok(ActivityStatus::Rejected),
+        "authenticators_needed" => Ok(ActivityStatus::AuthenticatorsNeeded),
+        other => bail!(
+            "--status entries must be one of created|pending|completed|failed|\
+             consensus_needed|rejected|authenticators_needed, got {other:?}"
+        ),
+    }
+}
+
+fn parse_activity_type(s: &str) -> Result<ActivityType> {
+    let name = format!("ACTIVITY_TYPE_{}", s.to_ascii_uppercase());
+    ActivityType::from_str_name(&name)
+        .ok_or_else(|| anyhow!("unrecognized --activity-type entry {s:?}"))
 }
 
 fn parse_tags(s: &str) -> Vec<String> {
@@ -871,6 +915,114 @@ pub fn list_invitations(args: &OrgArgs) -> Result<()> {
             );
         }
         Ok(())
+    })?
+}
+
+/// Query activities, newest first. Shared by `list_activities` and by
+/// `find_pending_deployments` (the `deploy` duplicate-activity guard).
+async fn fetch_activities(
+    auth: &Auth,
+    filter_by_status: Vec<ActivityStatus>,
+    filter_by_type: Vec<ActivityType>,
+    limit: Option<u32>,
+) -> Result<Vec<Activity>> {
+    let pagination_options = limit.map(|limit| Pagination {
+        limit: limit.to_string(),
+        before: String::new(),
+        after: String::new(),
+    });
+    let response = auth
+        .client
+        .get_activities(GetActivitiesRequest {
+            organization_id: auth.org_id.clone(),
+            filter_by_status,
+            pagination_options,
+            filter_by_type,
+        })
+        .await
+        .map_err(|e| anyhow!("get_activities failed: {e}"))?;
+
+    // Newest first, so a burst of near-duplicate activities (e.g. an
+    // accidental double-submit) lines up together for comparison.
+    let mut activities = response.activities;
+    activities.sort_by(|a, b| {
+        let seconds = |t: &Option<turnkey_client::generated::external::data::v1::Timestamp>| {
+            t.as_ref()
+                .and_then(|t| t.seconds.parse::<i64>().ok())
+                .unwrap_or(0)
+        };
+        seconds(&b.created_at).cmp(&seconds(&a.created_at))
+    });
+    Ok(activities)
+}
+
+pub fn list_activities(args: &ListActivitiesArgs) -> Result<()> {
+    let filter_by_status = args
+        .status
+        .as_deref()
+        .map(|s| s.split(',').map(parse_activity_status).collect())
+        .transpose()?
+        .unwrap_or_default();
+    let filter_by_type = args
+        .activity_type
+        .as_deref()
+        .map(|s| s.split(',').map(parse_activity_type).collect())
+        .transpose()?
+        .unwrap_or_default();
+
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
+        let activities =
+            fetch_activities(&auth, filter_by_status, filter_by_type, args.limit).await?;
+
+        if activities.is_empty() {
+            println!("no activities matching filters in org {}", auth.org_id);
+            return Ok(());
+        }
+        for activity in activities {
+            if args.json {
+                println!("{}", serde_json::to_string(&activity)?);
+                continue;
+            }
+            let created_at = activity
+                .created_at
+                .as_ref()
+                .map(|t| t.seconds.as_str())
+                .unwrap_or("?");
+            println!(
+                "{}  {}  {:?}  created_at={}  fingerprint={}",
+                activity.id,
+                activity.r#type.as_str_name(),
+                activity.status,
+                created_at,
+                activity.fingerprint
+            );
+        }
+        Ok(())
+    })?
+}
+
+/// Activities still awaiting consensus for a `create_tvc_deployment` targeting
+/// `app_id`, newest first. Used by `deploy` to warn before creating a second,
+/// independent activity for a deployment that's already pending approval --
+/// Turnkey has no built-in dedup for this (see tvc-deploy/README.md).
+pub fn find_pending_deployments(org_override: Option<&str>, app_id: &str) -> Result<Vec<Activity>> {
+    block_on(async {
+        let auth = resolve_auth(org_override)?;
+        let activities = fetch_activities(
+            &auth,
+            vec![ActivityStatus::ConsensusNeeded],
+            vec![ActivityType::CreateTvcDeployment],
+            None,
+        )
+        .await?;
+        Ok(activities
+            .into_iter()
+            .filter(|a| match a.intent.as_ref().and_then(|i| i.inner.as_ref()) {
+                Some(intent::Inner::CreateTvcDeploymentIntent(i)) => i.app_id == app_id,
+                _ => false,
+            })
+            .collect())
     })?
 }
 

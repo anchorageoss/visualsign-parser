@@ -26,6 +26,15 @@ the org requires it):
    org with its status (created/accepted/revoked) -- useful for checking
    whether someone's accepted yet, since Turnkey doesn't email you that.
 
+   `tvc-deploy list-activities --org <alias>` lists activities newest-first,
+   with `--status`/`--activity-type` filters and `--limit`. Add `--json` to
+   dump the full activity (intent, votes, fingerprint) -- handy for comparing
+   two activities that look like duplicates, since the dashboard doesn't make
+   that easy either. A duplicate is usually the same intent submitted twice
+   (e.g. a deploy retried before the first one finished consensus) -- the
+   fingerprints will differ because they include the submission timestamp,
+   but the `intent` payloads will be identical.
+
 3. **Write an `invitees.json`** listing everyone to invite:
 
    ```json
@@ -100,6 +109,23 @@ tvc-deploy create-policies --file templates/releaser-initiator-policies.json \
 tvc-deploy create-policies --file templates/releaser-initiator-policies.json \
   --vars prod-vars.json --org prod                                # actually create
 ```
+
+## Deploying
+
+`tvc-deploy deploy` refuses to run if the target `--app-id` already has a
+`create_tvc_deployment` activity awaiting consensus, since Turnkey has no
+dedup for this -- submitting the same deploy twice (e.g. a retry before the
+first finished consensus) creates a second, independent activity rather than
+reusing the pending one:
+
+```
+error: app <app-id> already has 1 deployment activity(ies) awaiting consensus: <activity-id>
+approve or reject the existing one first (tvc-deploy approve-activity / reject-activity --activity-id <id>), or pass --force to submit anyway
+```
+
+Resolve the existing activity (approve or reject it) and re-run, or pass
+`--force` to submit anyway. The check uses the active org by default; pass
+`--org <alias>` on `deploy` if the deployment's org differs from it.
 
 ### Basic / read-only access
 
