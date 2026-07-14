@@ -52,14 +52,16 @@ the org requires it):
    whose **canonical** email (lowercased, `+suffix` stripped) matches an
    existing member's -- so `alice+dev1@co.com` is treated as the same person
    as `alice@co.com` and won't get a redundant invite. To bypass this for
-   specific addresses (e.g. you deliberately want a `+dev` test account for
-   someone who's already a real member), pass their exact email(s):
+   specific invitees (e.g. you deliberately want a `+dev` test account for
+   someone who's already a real member), set `"allowExisting": true` on that
+   invitee (or at the file's top level, for the whole batch) -- this lives in
+   the file you already curated, not as a repeated command-line flag:
 
-   ```
-   tvc-deploy invite --file invitees.json --allowlist alice+dev1@co.com --org <alias>
+   ```json
+   {"userName": "Alice", "email": "alice+dev1@co.com", "allowExisting": true}
    ```
 
-   Or disable the check entirely with `--include-existing true`.
+   Or disable the check entirely with `--include-existing`.
 
 5. **Approve, if needed.** If the org's policies require consensus, the command
    prints the activity id and the exact follow-up command instead of erroring:
@@ -82,14 +84,14 @@ tvc-deploy invite --user-name Alice --email alice@co.com --tags <tag-uuid> --org
 
 See `templates/releaser-initiator-policies.json` for an example: a template
 with `{{PLACEHOLDER}}` tokens for tag ids that differ per environment, rendered
-via a `--vars` file before submission. `--dry-run true` renders and prints
+via a `--vars` file before submission. `--dry-run` renders and prints
 without submitting, useful for checking a template against a new org's tags
 before it actually creates anything:
 
 ```
 tvc-deploy list-tags --org prod                                  # look up prod tag ids
 tvc-deploy create-policies --file templates/releaser-initiator-policies.json \
-  --vars prod-vars.json --dry-run true --org prod                # verify rendering
+  --vars prod-vars.json --dry-run --org prod                     # verify rendering
 tvc-deploy create-policies --file templates/releaser-initiator-policies.json \
   --vars prod-vars.json --org prod                                # actually create
 ```

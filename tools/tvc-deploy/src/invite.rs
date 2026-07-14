@@ -1,14 +1,19 @@
-//! Turnkey org invitation management: `invite` and `dismiss-invite` subcommands.
+//! Turnkey org-management subcommands: invite/dismiss-invite, activity
+//! approve/reject, tag CRUD (create/update/list), user listing, and policy
+//! CRUD (create single/batch, list). See each `*Args` struct's doc comments
+//! (surfaced via `--help`) and `tools/tvc-deploy/README.md` for the batch
+//! invite / batch policy workflows and file schemas.
 //!
 //! Auth resolves the same way as the official `tvc` CLI: env vars
 //! (TVC_ORG_ID / TVC_API_KEY_PUBLIC / TVC_API_KEY_PRIVATE / TVC_API_BASE_URL)
 //! take priority; otherwise falls back to ~/.config/turnkey/tvc.config.toml
 //! (written by `tvc login`), selecting --org or the active org.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context, Result};
+use clap::Args;
 use serde::Deserialize;
 use turnkey_api_key_stamper::{Stamp, StampHeader, StamperError};
 use turnkey_client::generated::immutable::common::v1::{AccessType, Effect};
@@ -27,53 +32,133 @@ const ENV_API_BASE_URL: &str = "TVC_API_BASE_URL";
 const ENV_API_KEY_PUBLIC: &str = "TVC_API_KEY_PUBLIC";
 const ENV_API_KEY_PRIVATE: &str = "TVC_API_KEY_PRIVATE";
 
-pub const USAGE: &str = "\
-    tvc-deploy invite --user-name <name> --email <email> \
-    [--access-type web|api|all] [--tags t1,t2,...] [--sender-user-id <id>] \
-    [--allow-existing true] [--org <alias-or-id>]\n  \
-    tvc-deploy invite --file <invitees.json> [--access-type web|api|all] [--sender-user-id <id>] \
-    [--include-existing true] [--org <alias-or-id>]\n  \
-        (invitees.json: {\"accessType\": \"all\", \"allowExisting\": false, \"tags\": [\"tag-id\", \
-    ...], \"invitees\": [{\"userName\": \"...\", \"email\": \"...\", \"tags\": [\"tag-id\", ...], \
-    \"accessType\": \"...\", \"allowExisting\": true}, ...]}; per-invitee accessType/tags/ \
-    allowExisting each override that same file-level default (accessType also falls back to \
-    --access-type; tags default is [] if unset). By default, invitees whose canonical email \
-    (lowercased, +suffix stripped, so alice+dev1@co.com and alice@co.com match) equals an \
-    existing org member's are skipped with a printed reason instead of re-invited. Set \
-    \"allowExisting\": true for the specific invitee (or at the file's top level, for the whole \
-    batch) to invite it anyway, e.g. when alice@co.com is already a member but you deliberately \
-    want alice+dev1@co.com as a separate dev-test account -- do this in the file you already \
-    curated, not by repeating emails on the command line. --include-existing true instead \
-    disables the whole existing-member check (skips the get_users lookup entirely).)\n  \
-    tvc-deploy dismiss-invite --invitation-id <id> [--org <alias-or-id>]\n  \
-    tvc-deploy approve-activity --activity-id <id> [--org <alias-or-id>]\n  \
-    tvc-deploy reject-activity --activity-id <id> [--org <alias-or-id>]\n  \
-    tvc-deploy create-tag --name <name> [--user-ids id1,id2,...] [--org <alias-or-id>]\n  \
-        (--user-ids retroactively tags existing users; to tag people being invited, put the \
-    new tag's id in invitees.json's top-level \"tags\" -- applied to every invitee that \
-    doesn't set its own \"tags\" -- since invitees aren't users yet and can't be passed here)\n  \
-    tvc-deploy update-tag --tag-id <id> [--add-user-ids id1,id2,...] \
-    [--remove-user-ids id1,id2,...] [--name <new-name>] [--org <alias-or-id>]\n  \
-        (adds/removes existing users from a tag created earlier, or renames it; \
-    look up user ids with list-users)\n  \
-    tvc-deploy list-tags [--org <alias-or-id>]\n  \
-        (prints user-tag id + name pairs; use the id in invitees.json \"tags\", not the name)\n  \
-    tvc-deploy list-users [--org <alias-or-id>]\n  \
-        (prints user id + name + email; use the id with update-tag --add-user-ids)\n  \
-    tvc-deploy list-policies [--org <alias-or-id>]\n  \
-    tvc-deploy create-policy --name <name> --effect allow|deny --notes <text> \
-    [--condition <tql>] [--consensus <tql>] [--org <alias-or-id>]\n  \
-    tvc-deploy create-policies --file <policies.json> [--vars <vars.json>] [--dry-run true] \
-    [--org <alias-or-id>]\n  \
-        (policies.json: {\"policies\": [{\"policyName\": \"...\", \"effect\": \"allow\"|\"deny\", \
-    \"condition\": \"<tql>\", \"consensus\": \"<tql>\", \"notes\": \"...\"}, ...]}; \
-    condition/consensus may contain {{PLACEHOLDER}} tokens filled in from --vars, a flat JSON \
-    object of {\"PLACEHOLDER\": \"value\"}; --dry-run (any value; every flag needs one) renders \
-    and prints without submitting, for checking a template before it hits an org)\n  \
-    (auth resolves via TVC_ORG_ID/TVC_API_KEY_PUBLIC/TVC_API_KEY_PRIVATE env vars, \
-    else ~/.config/turnkey/tvc.config.toml from `tvc login`; if an invite/dismiss activity \
-    needs consensus, it prints the activity id -- approve or reject it with the subcommands above, \
-    authenticated as another quorum member if needed)";
+/// `--org <alias-or-id>`: shared by every subcommand that talks to Turnkey.
+/// Accepts either the config alias (e.g. what `tvc login` calls the org) or
+/// the org's own UUID; falls back to the active org if omitted.
+#[derive(Args, Debug)]
+pub struct OrgArgs {
+    /// Org alias from tvc.config.toml, or the org's own UUID; defaults to the active org
+    #[arg(long)]
+    pub org: Option<String>,
+}
+
+impl OrgArgs {
+    pub fn as_deref(&self) -> Option<&str> {
+        self.org.as_deref()
+    }
+}
+
+#[derive(Args, Debug)]
+pub struct InviteArgs {
+    /// Batch-invite from a JSON file instead of a single --user-name/--email
+    /// (see README for the invitees.json schema: accessType/tags/allowExisting
+    /// defaults, each overridable per invitee)
+    #[arg(long)]
+    pub file: Option<String>,
+    /// Display name for a single invitee (requires --email; use --file for a batch)
+    #[arg(long)]
+    pub user_name: Option<String>,
+    /// Email for a single invitee
+    #[arg(long)]
+    pub email: Option<String>,
+    /// web|api|all -- default access type; a batch file's own accessType overrides this
+    #[arg(long, default_value = "all")]
+    pub access_type: String,
+    /// Comma-separated tag ids (single-invitee mode only; batch mode uses the file's tags)
+    #[arg(long)]
+    pub tags: Option<String>,
+    /// Existing user id to use as senderUserId; defaults to whoami
+    #[arg(long)]
+    pub sender_user_id: Option<String>,
+    /// Bypass the existing-member alias check for this single invitee
+    #[arg(long)]
+    pub allow_existing: bool,
+    /// Disable the existing-member alias check entirely (skips the get_users lookup)
+    #[arg(long)]
+    pub include_existing: bool,
+    #[command(flatten)]
+    pub org: OrgArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct DismissInviteArgs {
+    #[arg(long)]
+    pub invitation_id: String,
+    #[command(flatten)]
+    pub org: OrgArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct ActivityIdArgs {
+    #[arg(long)]
+    pub activity_id: String,
+    #[command(flatten)]
+    pub org: OrgArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct CreateTagArgs {
+    #[arg(long)]
+    pub name: String,
+    /// Comma-separated existing user ids to tag immediately
+    #[arg(long)]
+    pub user_ids: Option<String>,
+    #[command(flatten)]
+    pub org: OrgArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct UpdateTagArgs {
+    #[arg(long)]
+    pub tag_id: String,
+    /// Comma-separated existing user ids to add to the tag
+    #[arg(long)]
+    pub add_user_ids: Option<String>,
+    /// Comma-separated existing user ids to remove from the tag
+    #[arg(long)]
+    pub remove_user_ids: Option<String>,
+    /// Rename the tag
+    #[arg(long)]
+    pub name: Option<String>,
+    #[command(flatten)]
+    pub org: OrgArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct CreatePolicyArgs {
+    #[arg(long)]
+    pub name: String,
+    /// allow|deny
+    #[arg(long)]
+    pub effect: String,
+    #[arg(long, default_value = "")]
+    pub notes: String,
+    /// TQL expression; see an existing org's `list-policies` output for examples
+    #[arg(long)]
+    pub condition: Option<String>,
+    /// TQL expression scoping who the policy applies to (e.g. by user tag)
+    #[arg(long)]
+    pub consensus: Option<String>,
+    #[command(flatten)]
+    pub org: OrgArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct CreatePoliciesArgs {
+    /// policies.json: {"policies": [{"policyName", "effect": "allow"|"deny",
+    /// "condition", "consensus", "notes"}, ...]}; condition/consensus may
+    /// contain {{PLACEHOLDER}} tokens filled in from --vars
+    #[arg(long)]
+    pub file: String,
+    /// Flat JSON object of {"PLACEHOLDER": "value"} to render --file's {{PLACEHOLDER}} tokens
+    #[arg(long)]
+    pub vars: Option<String>,
+    /// Render and print the batch without submitting, to check a template before it hits an org
+    #[arg(long)]
+    pub dry_run: bool,
+    #[command(flatten)]
+    pub org: OrgArgs,
+}
 
 /// API key as stored on disk in `api_key.json` by `tvc login`.
 #[derive(Deserialize)]
@@ -177,6 +262,14 @@ fn resolve_auth(org_override: Option<&str>) -> Result<Auth> {
 }
 
 /// Env vars always assume a P256 key (the only curve TVC_API_KEY_* supports today).
+///
+/// NOTE: `TVC_API_BASE_URL` only takes effect alongside the other three env
+/// vars -- if org id/public/private key are all unset, this returns `None`
+/// and falls back to the config file entirely (which carries its own
+/// per-org `api_base_url`), rather than overriding just the base URL for a
+/// config-file org. This intentionally mirrors the official `tvc` CLI's own
+/// `load_credentials_from_env_vars`, since `TVC_API_BASE_URL` exists for the
+/// fully-env-var-driven CI path, not to override one field of a file-backed org.
 fn resolve_from_env() -> Result<Option<ResolvedCreds>> {
     let org_id = read_env_var(ENV_ORG_ID);
     let public_key = read_env_var(ENV_API_KEY_PUBLIC);
@@ -207,7 +300,7 @@ fn resolve_from_env() -> Result<Option<ResolvedCreds>> {
 }
 
 /// Resolve `--org` (or the active org, if `None`) to a config entry. `--org`
-/// may be the config alias (e.g. "Anchorage Digital (Development)") or the
+/// may be the config alias (e.g. what `tvc login` calls the org) or the
 /// org's own UUID; alias lookup is tried first, then a fall back to matching
 /// on [`OrgEntry::id`], since the org's UUID alone is what most people reach
 /// for and doesn't require knowing the alias it happens to be stored under.
@@ -237,8 +330,7 @@ fn resolve_from_config(org_override: Option<&str>) -> Result<ResolvedCreds> {
     let config: TvcConfig =
         toml::from_str(&content).with_context(|| format!("parse {}", config_path.display()))?;
 
-    let org = resolve_org(&config, org_override);
-    let org = org.ok_or_else(|| match org_override {
+    let org = resolve_org(&config, org_override).ok_or_else(|| match org_override {
         Some(given) => anyhow!(
             "org {given:?} not found (by alias or id) in {}",
             config_path.display()
@@ -279,6 +371,18 @@ fn current_timestamp_ms() -> u128 {
         .unwrap_or(0)
 }
 
+/// Build a fresh single-threaded tokio runtime and drive `fut` to completion.
+/// Each subcommand runs exactly one async block per process invocation, so a
+/// shared runtime isn't needed -- this just avoids repeating the
+/// builder/`.build()` boilerplate at every call site.
+fn block_on<F: std::future::Future>(fut: F) -> Result<F::Output> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("build tokio runtime")?;
+    Ok(rt.block_on(fut))
+}
+
 fn parse_access_type(s: &str) -> Result<AccessType> {
     match s.to_ascii_lowercase().as_str() {
         "web" => Ok(AccessType::Web),
@@ -286,10 +390,6 @@ fn parse_access_type(s: &str) -> Result<AccessType> {
         "all" => Ok(AccessType::All),
         other => bail!("--access-type must be one of web|api|all, got {other:?}"),
     }
-}
-
-fn req<'a>(flags: &'a HashMap<String, String>, key: &str) -> Result<&'a String> {
-    flags.get(key).with_context(|| format!("missing --{key}"))
 }
 
 fn parse_tags(s: &str) -> Vec<String> {
@@ -300,7 +400,7 @@ fn parse_tags(s: &str) -> Vec<String> {
         .collect()
 }
 
-/// One team member to invite, as listed in a `--file` batch (see [`USAGE`]).
+/// One team member to invite, as listed in a `--file` batch (see [`InviteArgs::file`]).
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct InviteeEntry {
@@ -334,13 +434,8 @@ struct InviteesFile {
 /// singular `--user-name`/`--email`/`--tags` flags (one invite), paired with
 /// whether each may bypass the existing-member alias check. `sender_user_id`
 /// is left blank here; the caller fills it in once resolved.
-fn build_invitations(flags: &HashMap<String, String>) -> Result<Vec<(InvitationParams, bool)>> {
-    let flag_access_type = flags
-        .get("access-type")
-        .map(String::as_str)
-        .unwrap_or("all");
-
-    if let Some(path) = flags.get("file") {
+fn build_invitations(args: &InviteArgs) -> Result<Vec<(InvitationParams, bool)>> {
+    if let Some(path) = &args.file {
         let content = std::fs::read_to_string(path).with_context(|| format!("read {path}"))?;
         let file: InviteesFile =
             serde_json::from_str(&content).with_context(|| format!("parse {path}"))?;
@@ -349,7 +444,7 @@ fn build_invitations(flags: &HashMap<String, String>) -> Result<Vec<(InvitationP
         }
         let default_access = match &file.access_type {
             Some(s) => parse_access_type(s)?,
-            None => parse_access_type(flag_access_type)?,
+            None => parse_access_type(&args.access_type)?,
         };
         let default_tags = file.tags;
         let default_allow_existing = file.allow_existing;
@@ -375,11 +470,16 @@ fn build_invitations(flags: &HashMap<String, String>) -> Result<Vec<(InvitationP
             })
             .collect()
     } else {
-        let user_name = req(flags, "user-name")?.clone();
-        let email = req(flags, "email")?.clone();
-        let access_type = parse_access_type(flag_access_type)?;
-        let tags = flags.get("tags").map(|s| parse_tags(s)).unwrap_or_default();
-        let allow_existing = flags.contains_key("allow-existing");
+        let user_name = args
+            .user_name
+            .clone()
+            .ok_or_else(|| anyhow!("--user-name is required without --file"))?;
+        let email = args
+            .email
+            .clone()
+            .ok_or_else(|| anyhow!("--email is required without --file"))?;
+        let access_type = parse_access_type(&args.access_type)?;
+        let tags = args.tags.as_deref().map(parse_tags).unwrap_or_default();
         Ok(vec![(
             InvitationParams {
                 receiver_user_name: user_name,
@@ -388,13 +488,11 @@ fn build_invitations(flags: &HashMap<String, String>) -> Result<Vec<(InvitationP
                 access_type,
                 sender_user_id: String::new(),
             },
-            allow_existing,
+            args.allow_existing,
         )])
     }
 }
 
-/// Split `invitations` into (kept, skipped) by case-insensitive email
-/// membership in `existing_emails`.
 /// Lowercase, and drop any `+suffix` from the local part, so
 /// `Alice+dev1@Co.com` and `alice@co.com` compare equal -- plus-addressed
 /// aliases of the same mailbox map to the same canonical identity.
@@ -418,7 +516,7 @@ fn canonical_email(email: &str) -> String {
 /// [`InviteesFile::allow_existing`].
 fn partition_existing(
     invitations: Vec<(InvitationParams, bool)>,
-    existing_emails: &std::collections::HashSet<String>,
+    existing_emails: &HashSet<String>,
 ) -> (Vec<InvitationParams>, Vec<InvitationParams>) {
     let (kept, skipped): (Vec<_>, Vec<_>) =
         invitations.into_iter().partition(|(i, allow_existing)| {
@@ -430,18 +528,13 @@ fn partition_existing(
     )
 }
 
-pub fn invite(flags: &HashMap<String, String>) -> Result<()> {
-    let invitations_with_allow = build_invitations(flags)?;
-    let include_existing = flags.contains_key("include-existing");
+pub fn invite(args: &InviteArgs) -> Result<()> {
+    let invitations_with_allow = build_invitations(args)?;
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime")?;
-    rt.block_on(async {
-        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
 
-        let mut invitations = if include_existing {
+        let mut invitations = if args.include_existing {
             invitations_with_allow.into_iter().map(|(i, _)| i).collect()
         } else {
             let users = auth
@@ -451,7 +544,7 @@ pub fn invite(flags: &HashMap<String, String>) -> Result<()> {
                 })
                 .await
                 .map_err(|e| anyhow!("get_users failed: {e}"))?;
-            let existing_emails: std::collections::HashSet<String> = users
+            let existing_emails: HashSet<String> = users
                 .users
                 .into_iter()
                 .filter_map(|u| u.user_email)
@@ -476,7 +569,7 @@ pub fn invite(flags: &HashMap<String, String>) -> Result<()> {
             kept
         };
 
-        let sender_user_id = match flags.get("sender-user-id") {
+        let sender_user_id = match &args.sender_user_id {
             Some(id) => id.clone(),
             None => {
                 let who = auth
@@ -520,7 +613,7 @@ pub fn invite(flags: &HashMap<String, String>) -> Result<()> {
             }
             Err(e) => Err(anyhow!("create_invitations failed: {e}")),
         }
-    })
+    })?
 }
 
 fn parse_effect(s: &str) -> Result<Effect> {
@@ -531,13 +624,9 @@ fn parse_effect(s: &str) -> Result<Effect> {
     }
 }
 
-pub fn list_policies(flags: &HashMap<String, String>) -> Result<()> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime")?;
-    rt.block_on(async {
-        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
+pub fn list_policies(args: &OrgArgs) -> Result<()> {
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
 
         let response = auth
             .client
@@ -563,22 +652,14 @@ pub fn list_policies(flags: &HashMap<String, String>) -> Result<()> {
             );
         }
         Ok(())
-    })
+    })?
 }
 
-pub fn create_policy(flags: &HashMap<String, String>) -> Result<()> {
-    let policy_name = req(flags, "name")?.clone();
-    let effect = parse_effect(req(flags, "effect")?)?;
-    let notes = flags.get("notes").cloned().unwrap_or_default();
-    let condition = flags.get("condition").cloned();
-    let consensus = flags.get("consensus").cloned();
+pub fn create_policy(args: &CreatePolicyArgs) -> Result<()> {
+    let effect = parse_effect(&args.effect)?;
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime")?;
-    rt.block_on(async {
-        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
 
         let outcome = auth
             .client
@@ -586,11 +667,11 @@ pub fn create_policy(flags: &HashMap<String, String>) -> Result<()> {
                 auth.org_id.clone(),
                 current_timestamp_ms(),
                 CreatePolicyIntentV3 {
-                    policy_name,
+                    policy_name: args.name.clone(),
                     effect,
-                    condition,
-                    consensus,
-                    notes,
+                    condition: args.condition.clone(),
+                    consensus: args.consensus.clone(),
+                    notes: args.notes.clone(),
                 },
             )
             .await;
@@ -610,12 +691,13 @@ pub fn create_policy(flags: &HashMap<String, String>) -> Result<()> {
             }
             Err(e) => Err(anyhow!("create_policy failed: {e}")),
         }
-    })
+    })?
 }
 
-/// One policy as listed in a `--file` batch for `create-policies` (see [`USAGE`]).
-/// Uses the CLI's friendly "allow"/"deny" rather than Turnkey's own
-/// "EFFECT_ALLOW"/"EFFECT_DENY" wire format, for consistency with `create-policy`.
+/// One policy as listed in a `--file` batch for `create-policies` (see
+/// [`CreatePoliciesArgs::file`]). Uses the CLI's friendly "allow"/"deny"
+/// rather than Turnkey's own "EFFECT_ALLOW"/"EFFECT_DENY" wire format, for
+/// consistency with `create-policy`.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PolicyEntry {
@@ -705,22 +787,17 @@ fn load_policies_file(path: &str, vars_path: Option<&str>) -> Result<Vec<CreateP
         .collect()
 }
 
-pub fn create_policies(flags: &HashMap<String, String>) -> Result<()> {
-    let path = req(flags, "file")?;
-    let policies = load_policies_file(path, flags.get("vars").map(String::as_str))?;
+pub fn create_policies(args: &CreatePoliciesArgs) -> Result<()> {
+    let policies = load_policies_file(&args.file, args.vars.as_deref())?;
     let intent = CreatePoliciesIntent { policies };
 
-    if flags.contains_key("dry-run") {
+    if args.dry_run {
         println!("{}", serde_json::to_string_pretty(&intent)?);
         return Ok(());
     }
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime")?;
-    rt.block_on(async {
-        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
 
         let outcome = auth
             .client
@@ -744,16 +821,12 @@ pub fn create_policies(flags: &HashMap<String, String>) -> Result<()> {
             }
             Err(e) => Err(anyhow!("create_policies failed: {e}")),
         }
-    })
+    })?
 }
 
-pub fn list_users(flags: &HashMap<String, String>) -> Result<()> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime")?;
-    rt.block_on(async {
-        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
+pub fn list_users(args: &OrgArgs) -> Result<()> {
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
 
         let response = auth
             .client
@@ -776,27 +849,23 @@ pub fn list_users(flags: &HashMap<String, String>) -> Result<()> {
             );
         }
         Ok(())
-    })
+    })?
 }
 
-pub fn update_tag(flags: &HashMap<String, String>) -> Result<()> {
-    let user_tag_id = req(flags, "tag-id")?.clone();
-    let new_user_tag_name = flags.get("name").cloned();
-    let add_user_ids = flags
-        .get("add-user-ids")
-        .map(|s| parse_tags(s))
+pub fn update_tag(args: &UpdateTagArgs) -> Result<()> {
+    let add_user_ids = args
+        .add_user_ids
+        .as_deref()
+        .map(parse_tags)
         .unwrap_or_default();
-    let remove_user_ids = flags
-        .get("remove-user-ids")
-        .map(|s| parse_tags(s))
+    let remove_user_ids = args
+        .remove_user_ids
+        .as_deref()
+        .map(parse_tags)
         .unwrap_or_default();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime")?;
-    rt.block_on(async {
-        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
 
         let outcome = auth
             .client
@@ -804,8 +873,8 @@ pub fn update_tag(flags: &HashMap<String, String>) -> Result<()> {
                 auth.org_id.clone(),
                 current_timestamp_ms(),
                 UpdateUserTagIntent {
-                    user_tag_id,
-                    new_user_tag_name,
+                    user_tag_id: args.tag_id.clone(),
+                    new_user_tag_name: args.name.clone(),
                     add_user_ids,
                     remove_user_ids,
                 },
@@ -827,22 +896,14 @@ pub fn update_tag(flags: &HashMap<String, String>) -> Result<()> {
             }
             Err(e) => Err(anyhow!("update_user_tag failed: {e}")),
         }
-    })
+    })?
 }
 
-pub fn create_tag(flags: &HashMap<String, String>) -> Result<()> {
-    let user_tag_name = req(flags, "name")?.clone();
-    let user_ids = flags
-        .get("user-ids")
-        .map(|s| parse_tags(s))
-        .unwrap_or_default();
+pub fn create_tag(args: &CreateTagArgs) -> Result<()> {
+    let user_ids = args.user_ids.as_deref().map(parse_tags).unwrap_or_default();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime")?;
-    rt.block_on(async {
-        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
 
         let outcome = auth
             .client
@@ -850,7 +911,7 @@ pub fn create_tag(flags: &HashMap<String, String>) -> Result<()> {
                 auth.org_id.clone(),
                 current_timestamp_ms(),
                 CreateUserTagIntent {
-                    user_tag_name,
+                    user_tag_name: args.name.clone(),
                     user_ids,
                 },
             )
@@ -871,16 +932,12 @@ pub fn create_tag(flags: &HashMap<String, String>) -> Result<()> {
             }
             Err(e) => Err(anyhow!("create_user_tag failed: {e}")),
         }
-    })
+    })?
 }
 
-pub fn list_tags(flags: &HashMap<String, String>) -> Result<()> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime")?;
-    rt.block_on(async {
-        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
+pub fn list_tags(args: &OrgArgs) -> Result<()> {
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
 
         let response = auth
             .client
@@ -898,25 +955,21 @@ pub fn list_tags(flags: &HashMap<String, String>) -> Result<()> {
             println!("{}  {}", tag.tag_id, tag.tag_name);
         }
         Ok(())
-    })
+    })?
 }
 
-pub fn dismiss_invite(flags: &HashMap<String, String>) -> Result<()> {
-    let invitation_id = req(flags, "invitation-id")?.clone();
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime")?;
-    rt.block_on(async {
-        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
+pub fn dismiss_invite(args: &DismissInviteArgs) -> Result<()> {
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
 
         let outcome = auth
             .client
             .delete_invitation(
                 auth.org_id.clone(),
                 current_timestamp_ms(),
-                DeleteInvitationIntent { invitation_id },
+                DeleteInvitationIntent {
+                    invitation_id: args.invitation_id.clone(),
+                },
             )
             .await;
 
@@ -935,7 +988,7 @@ pub fn dismiss_invite(flags: &HashMap<String, String>) -> Result<()> {
             }
             Err(e) => Err(anyhow!("delete_invitation failed: {e}")),
         }
-    })
+    })?
 }
 
 /// Fetch an activity's fingerprint, the artifact `approve_activity`/`reject_activity`
@@ -955,16 +1008,10 @@ async fn fetch_fingerprint(auth: &Auth, activity_id: &str) -> Result<String> {
     Ok(activity.fingerprint)
 }
 
-pub fn approve_activity(flags: &HashMap<String, String>) -> Result<()> {
-    let activity_id = req(flags, "activity-id")?.clone();
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime")?;
-    rt.block_on(async {
-        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
-        let fingerprint = fetch_fingerprint(&auth, &activity_id).await?;
+pub fn approve_activity(args: &ActivityIdArgs) -> Result<()> {
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
+        let fingerprint = fetch_fingerprint(&auth, &args.activity_id).await?;
 
         let activity = auth
             .client
@@ -978,19 +1025,13 @@ pub fn approve_activity(flags: &HashMap<String, String>) -> Result<()> {
 
         println!("activity {} status={:?}", activity.id, activity.status);
         Ok(())
-    })
+    })?
 }
 
-pub fn reject_activity(flags: &HashMap<String, String>) -> Result<()> {
-    let activity_id = req(flags, "activity-id")?.clone();
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime")?;
-    rt.block_on(async {
-        let auth = resolve_auth(flags.get("org").map(String::as_str))?;
-        let fingerprint = fetch_fingerprint(&auth, &activity_id).await?;
+pub fn reject_activity(args: &ActivityIdArgs) -> Result<()> {
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
+        let fingerprint = fetch_fingerprint(&auth, &args.activity_id).await?;
 
         let activity = auth
             .client
@@ -1004,7 +1045,7 @@ pub fn reject_activity(flags: &HashMap<String, String>) -> Result<()> {
 
         println!("activity {} status={:?}", activity.id, activity.status);
         Ok(())
-    })
+    })?
 }
 
 #[cfg(test)]
@@ -1013,6 +1054,20 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    fn invite_args(file: Option<&str>, user_name: Option<&str>, email: Option<&str>) -> InviteArgs {
+        InviteArgs {
+            file: file.map(String::from),
+            user_name: user_name.map(String::from),
+            email: email.map(String::from),
+            access_type: "all".to_string(),
+            tags: None,
+            sender_user_id: None,
+            allow_existing: false,
+            include_existing: false,
+            org: OrgArgs { org: None },
+        }
+    }
 
     #[test]
     fn partition_existing_splits_by_case_insensitive_email() {
@@ -1038,7 +1093,7 @@ mod tests {
                 false,
             ),
         ];
-        let mut existing = std::collections::HashSet::new();
+        let mut existing = HashSet::new();
         existing.insert("alice@example.com".to_string());
 
         let (kept, skipped) = partition_existing(invitations, &existing);
@@ -1046,6 +1101,59 @@ mod tests {
         assert_eq!(kept[0].receiver_user_name, "Bob");
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].receiver_user_name, "Alice");
+    }
+
+    #[test]
+    fn canonical_email_lowercases_and_strips_plus_suffix() {
+        assert_eq!(
+            canonical_email("Alice+dev1@Example.com"),
+            "alice@example.com"
+        );
+        assert_eq!(canonical_email("alice@example.com"), "alice@example.com");
+        assert_eq!(
+            canonical_email("ALICE+DEV2@EXAMPLE.COM"),
+            "alice@example.com"
+        );
+    }
+
+    #[test]
+    fn partition_existing_treats_plus_alias_as_matching_existing_member() {
+        let invitations = vec![(
+            InvitationParams {
+                receiver_user_name: "Alice Dev".to_string(),
+                receiver_user_email: "alice+dev1@example.com".to_string(),
+                receiver_user_tags: vec![],
+                access_type: AccessType::All,
+                sender_user_id: String::new(),
+            },
+            false,
+        )];
+        let mut existing = HashSet::new();
+        existing.insert("alice@example.com".to_string()); // canonical form, as stored by the caller
+
+        let (kept, skipped) = partition_existing(invitations, &existing);
+        assert!(kept.is_empty());
+        assert_eq!(skipped.len(), 1);
+    }
+
+    #[test]
+    fn partition_existing_per_invitee_allow_existing_bypasses_alias_match() {
+        let invitations = vec![(
+            InvitationParams {
+                receiver_user_name: "Alice Dev".to_string(),
+                receiver_user_email: "Alice+Dev1@Example.com".to_string(),
+                receiver_user_tags: vec![],
+                access_type: AccessType::All,
+                sender_user_id: String::new(),
+            },
+            true,
+        )];
+        let mut existing = HashSet::new();
+        existing.insert("alice@example.com".to_string());
+
+        let (kept, skipped) = partition_existing(invitations, &existing);
+        assert_eq!(kept.len(), 1);
+        assert!(skipped.is_empty());
     }
 
     fn test_config() -> TvcConfig {
@@ -1106,67 +1214,12 @@ mod tests {
     }
 
     #[test]
-    fn canonical_email_lowercases_and_strips_plus_suffix() {
-        assert_eq!(
-            canonical_email("Alice+dev1@Example.com"),
-            "alice@example.com"
-        );
-        assert_eq!(canonical_email("alice@example.com"), "alice@example.com");
-        assert_eq!(
-            canonical_email("ALICE+DEV2@EXAMPLE.COM"),
-            "alice@example.com"
-        );
-    }
-
-    #[test]
-    fn partition_existing_treats_plus_alias_as_matching_existing_member() {
-        let invitations = vec![(
-            InvitationParams {
-                receiver_user_name: "Alice Dev".to_string(),
-                receiver_user_email: "alice+dev1@example.com".to_string(),
-                receiver_user_tags: vec![],
-                access_type: AccessType::All,
-                sender_user_id: String::new(),
-            },
-            false,
-        )];
-        let mut existing = std::collections::HashSet::new();
-        existing.insert("alice@example.com".to_string()); // canonical form, as stored by the caller
-
-        let (kept, skipped) = partition_existing(invitations, &existing);
-        assert!(kept.is_empty());
-        assert_eq!(skipped.len(), 1);
-    }
-
-    #[test]
-    fn partition_existing_per_invitee_allow_existing_bypasses_alias_match() {
-        let invitations = vec![(
-            InvitationParams {
-                receiver_user_name: "Alice Dev".to_string(),
-                receiver_user_email: "Alice+Dev1@Example.com".to_string(),
-                receiver_user_tags: vec![],
-                access_type: AccessType::All,
-                sender_user_id: String::new(),
-            },
-            true,
-        )];
-        let mut existing = std::collections::HashSet::new();
-        existing.insert("alice@example.com".to_string());
-
-        let (kept, skipped) = partition_existing(invitations, &existing);
-        assert_eq!(kept.len(), 1);
-        assert!(skipped.is_empty());
-    }
-
-    #[test]
     fn build_invitations_single_from_flags() {
-        let mut flags = HashMap::new();
-        flags.insert("user-name".to_string(), "Alice".to_string());
-        flags.insert("email".to_string(), "alice@example.com".to_string());
-        flags.insert("tags".to_string(), "tag-a, tag-b".to_string());
-        flags.insert("access-type".to_string(), "web".to_string());
+        let mut args = invite_args(None, Some("Alice"), Some("alice@example.com"));
+        args.tags = Some("tag-a, tag-b".to_string());
+        args.access_type = "web".to_string();
 
-        let invitations = build_invitations(&flags).unwrap();
+        let invitations = build_invitations(&args).unwrap();
         assert_eq!(invitations.len(), 1);
         assert_eq!(invitations[0].0.receiver_user_name, "Alice");
         assert_eq!(invitations[0].0.receiver_user_email, "alice@example.com");
@@ -1177,22 +1230,18 @@ mod tests {
 
     #[test]
     fn build_invitations_single_allow_existing_flag() {
-        let mut flags = HashMap::new();
-        flags.insert("user-name".to_string(), "Alice".to_string());
-        flags.insert("email".to_string(), "alice@example.com".to_string());
-        flags.insert("allow-existing".to_string(), "true".to_string());
+        let mut args = invite_args(None, Some("Alice"), Some("alice@example.com"));
+        args.allow_existing = true;
 
-        let invitations = build_invitations(&flags).unwrap();
+        let invitations = build_invitations(&args).unwrap();
         assert!(invitations[0].1);
     }
 
     #[test]
     fn build_invitations_defaults_access_type_to_all() {
-        let mut flags = HashMap::new();
-        flags.insert("user-name".to_string(), "Alice".to_string());
-        flags.insert("email".to_string(), "alice@example.com".to_string());
+        let args = invite_args(None, Some("Alice"), Some("alice@example.com"));
 
-        let invitations = build_invitations(&flags).unwrap();
+        let invitations = build_invitations(&args).unwrap();
         assert_eq!(invitations[0].0.access_type, AccessType::All);
         assert!(invitations[0].0.receiver_user_tags.is_empty());
     }
@@ -1212,13 +1261,9 @@ mod tests {
         )
         .unwrap();
 
-        let mut flags = HashMap::new();
-        flags.insert(
-            "file".to_string(),
-            file.path().to_str().unwrap().to_string(),
-        );
+        let args = invite_args(Some(file.path().to_str().unwrap()), None, None);
 
-        let invitations = build_invitations(&flags).unwrap();
+        let invitations = build_invitations(&args).unwrap();
         assert_eq!(invitations.len(), 2);
         assert_eq!(invitations[0].0.receiver_user_name, "Alice");
         assert_eq!(invitations[0].0.access_type, AccessType::All);
@@ -1244,13 +1289,9 @@ mod tests {
         )
         .unwrap();
 
-        let mut flags = HashMap::new();
-        flags.insert(
-            "file".to_string(),
-            file.path().to_str().unwrap().to_string(),
-        );
+        let args = invite_args(Some(file.path().to_str().unwrap()), None, None);
 
-        let invitations = build_invitations(&flags).unwrap();
+        let invitations = build_invitations(&args).unwrap();
         assert_eq!(invitations[0].0.receiver_user_tags, vec!["group-tag"]);
         assert_eq!(invitations[1].0.receiver_user_tags, vec!["bob-only-tag"]);
         // An explicit empty array overrides the default entirely (not merged).
@@ -1272,13 +1313,9 @@ mod tests {
         )
         .unwrap();
 
-        let mut flags = HashMap::new();
-        flags.insert(
-            "file".to_string(),
-            file.path().to_str().unwrap().to_string(),
-        );
+        let args = invite_args(Some(file.path().to_str().unwrap()), None, None);
 
-        let invitations = build_invitations(&flags).unwrap();
+        let invitations = build_invitations(&args).unwrap();
         assert!(invitations[0].1, "Alice inherits the file-level default");
         assert!(!invitations[1].1, "Bob overrides the file-level default");
     }
@@ -1288,13 +1325,9 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         write!(file, r#"{{"invitees": []}}"#).unwrap();
 
-        let mut flags = HashMap::new();
-        flags.insert(
-            "file".to_string(),
-            file.path().to_str().unwrap().to_string(),
-        );
+        let args = invite_args(Some(file.path().to_str().unwrap()), None, None);
 
-        let err = build_invitations(&flags).unwrap_err();
+        let err = build_invitations(&args).unwrap_err();
         assert!(err.to_string().contains("no invitees"));
     }
 

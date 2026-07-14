@@ -1,22 +1,19 @@
-//! Standalone TVC deploy helper for `parser_app`.
+//! Standalone TVC deploy + Turnkey org-management helper for `parser_app`.
 //!
-//! Subcommands:
-//!   gen-operator-key --out <path>
-//!       Mint a qos_p256 operator key. Writes the 32-byte master seed (hex) to
-//!       <path> with mode 0600 and prints ONLY the public key hex to stdout.
-//!   deploy --app-id <id> --image-url <url> --expected-digest <hex>
-//!          --operator-id <id> [--operator-seed <path>] [--qos-version v]
-//!          [--host-ip 0.0.0.0] [--host-port 3000]
-//!       Re-derive the pivot binary digest from the image and assert it matches
-//!       --expected-digest, then assemble tvc-deploy.json (gRPC health), create
-//!       the deployment, approve, poll until healthy, and set it live.
-//!       The operator seed resolves flag -> env TVC_CI_OPERATOR_SEED -> none; when
-//!       none is given, approval uses the logged-in org operator key (`tvc login`).
+//! `deploy` re-derives the pivot binary digest from the image and asserts it
+//! matches `--expected-digest`, then assembles tvc-deploy.json (gRPC health),
+//! creates the deployment, approves, polls until healthy, and sets it live.
+//! The operator seed resolves flag -> env `TVC_CI_OPERATOR_SEED` -> none; when
+//! none is given, approval uses the logged-in org operator key (`tvc login`).
 //!
-//! All Turnkey API actions shell out to the `tvc` CLI (it owns auth/consensus);
-//! this binary owns config assembly, the image-digest safety gate, and polling.
+//! See `tvc-deploy --help` for the full subcommand list (invite/dismiss-invite,
+//! activity approve/reject, tag and policy CRUD -- all in `invite.rs`).
+//!
+//! Deploy's Turnkey API actions shell out to the `tvc` CLI (it owns
+//! auth/consensus); this binary owns config assembly, the image-digest safety
+//! gate, and polling. The `invite`/tag/policy subcommands call the Turnkey API
+//! directly instead (see `invite.rs`'s module doc).
 
-use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs::{OpenOptions, Permissions};
 use std::io::Write;
@@ -27,7 +24,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
+use clap::{Parser, Subcommand};
 use qos_p256::P256Pair;
 use xshell::{cmd, Shell};
 
@@ -37,13 +35,75 @@ const POLL_TIMEOUT: Duration = Duration::from_secs(900);
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
 const SETLIVE_TIMEOUT: Duration = Duration::from_secs(300);
 
-const USAGE: &str = "usage:\n  \
-    tvc-deploy gen-operator-key --out <path>\n  \
-    tvc-deploy deploy --app-id <id> --image-url <url> --expected-digest <hex> --operator-id <id> \
-    [--operator-seed <path>] [--qos-version 0.12.0] [--host-ip 0.0.0.0] [--host-port 3000]\n  \
-    (operator seed may instead come from env TVC_CI_OPERATOR_SEED, or be omitted \
-    to approve with the logged-in org operator key)\n  \
-    ";
+#[derive(Parser)]
+#[command(
+    name = "tvc-deploy",
+    about = "TVC deploy + Turnkey org-management helper for parser_app"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Mint a qos_p256 operator key: writes the seed to --out (mode 0600), prints only the public key
+    GenOperatorKey(GenOperatorKeyArgs),
+    /// Deploy parser_app: digest-gate, create, approve, poll healthy, set live
+    Deploy(DeployArgs),
+    /// Invite one person, or a batch from --file (see README)
+    Invite(invite::InviteArgs),
+    /// Delete an existing invitation
+    DismissInvite(invite::DismissInviteArgs),
+    /// Approve a Turnkey activity that needs consensus
+    ApproveActivity(invite::ActivityIdArgs),
+    /// Reject a Turnkey activity that needs consensus
+    RejectActivity(invite::ActivityIdArgs),
+    /// Create a user tag, optionally seeding it with existing user ids
+    CreateTag(invite::CreateTagArgs),
+    /// Add/remove existing users from a tag, or rename it
+    UpdateTag(invite::UpdateTagArgs),
+    /// List user tags (id + name)
+    ListTags(invite::OrgArgs),
+    /// List org users (id + name + email)
+    ListUsers(invite::OrgArgs),
+    /// List policies (id, name, effect, notes, condition, consensus)
+    ListPolicies(invite::OrgArgs),
+    /// Create a single policy
+    CreatePolicy(invite::CreatePolicyArgs),
+    /// Create a batch of policies from a template, with {{PLACEHOLDER}} substitution
+    CreatePolicies(invite::CreatePoliciesArgs),
+}
+
+#[derive(clap::Args)]
+struct GenOperatorKeyArgs {
+    /// Path to write the operator's 32-byte master seed (hex), mode 0600
+    #[arg(long)]
+    out: PathBuf,
+}
+
+#[derive(clap::Args)]
+struct DeployArgs {
+    #[arg(long)]
+    app_id: String,
+    #[arg(long)]
+    image_url: String,
+    /// Expected sha256 of the image's /parser_app binary (64 hex chars)
+    #[arg(long)]
+    expected_digest: String,
+    #[arg(long)]
+    operator_id: String,
+    /// Path to the operator seed file; falls back to env TVC_CI_OPERATOR_SEED,
+    /// then to the logged-in org operator key, if omitted
+    #[arg(long)]
+    operator_seed: Option<PathBuf>,
+    #[arg(long, default_value = "0.12.0")]
+    qos_version: String,
+    #[arg(long, default_value = "0.0.0.0")]
+    host_ip: String,
+    #[arg(long, default_value_t = 3000)]
+    host_port: u16,
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -56,65 +116,38 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<()> {
-    let (subcmd, flags) = parse_args()?;
+    let cli = Cli::parse();
     let sh = Shell::new()?;
-    match subcmd.as_str() {
-        "gen-operator-key" => gen_operator_key(&flags),
-        "deploy" => deploy(&sh, &flags),
-        "invite" => invite::invite(&flags),
-        "dismiss-invite" => invite::dismiss_invite(&flags),
-        "approve-activity" => invite::approve_activity(&flags),
-        "reject-activity" => invite::reject_activity(&flags),
-        "create-tag" => invite::create_tag(&flags),
-        "update-tag" => invite::update_tag(&flags),
-        "list-tags" => invite::list_tags(&flags),
-        "list-users" => invite::list_users(&flags),
-        "list-policies" => invite::list_policies(&flags),
-        "create-policy" => invite::create_policy(&flags),
-        "create-policies" => invite::create_policies(&flags),
-        other => bail!("unknown subcommand {other:?}\n{USAGE}\n{}", invite::USAGE),
+    match cli.command {
+        Command::GenOperatorKey(args) => gen_operator_key(&args),
+        Command::Deploy(args) => deploy(&sh, &args),
+        Command::Invite(args) => invite::invite(&args),
+        Command::DismissInvite(args) => invite::dismiss_invite(&args),
+        Command::ApproveActivity(args) => invite::approve_activity(&args),
+        Command::RejectActivity(args) => invite::reject_activity(&args),
+        Command::CreateTag(args) => invite::create_tag(&args),
+        Command::UpdateTag(args) => invite::update_tag(&args),
+        Command::ListTags(args) => invite::list_tags(&args),
+        Command::ListUsers(args) => invite::list_users(&args),
+        Command::ListPolicies(args) => invite::list_policies(&args),
+        Command::CreatePolicy(args) => invite::create_policy(&args),
+        Command::CreatePolicies(args) => invite::create_policies(&args),
     }
 }
 
-/// Parse `<subcommand> --key value ...` into the subcommand and a flag map.
-fn parse_args() -> Result<(String, HashMap<String, String>)> {
-    use lexopt::prelude::*;
-    let mut parser = lexopt::Parser::from_env();
-    let mut subcmd: Option<String> = None;
-    let mut flags = HashMap::new();
-    while let Some(arg) = parser.next()? {
-        match arg {
-            Value(v) if subcmd.is_none() => subcmd = Some(v.string()?),
-            Long(name) => {
-                let name = name.to_owned();
-                let val = parser
-                    .value()
-                    .with_context(|| format!("--{name} requires a value"))?
-                    .string()?;
-                flags.insert(name, val);
-            }
-            other => return Err(other.unexpected().into()),
-        }
-    }
-    let subcmd = subcmd.ok_or_else(|| anyhow!("missing subcommand\n{USAGE}\n{}", invite::USAGE))?;
-    Ok((subcmd, flags))
-}
-
-fn req<'a>(flags: &'a HashMap<String, String>, key: &str) -> Result<&'a String> {
-    flags.get(key).with_context(|| format!("missing --{key}"))
-}
-
-fn gen_operator_key(flags: &HashMap<String, String>) -> Result<()> {
-    let out = req(flags, "out")?;
-    let pair = P256Pair::generate().map_err(|e| anyhow!("key generation failed: {e:?}"))?;
+fn gen_operator_key(args: &GenOperatorKeyArgs) -> Result<()> {
+    let pair = P256Pair::generate().map_err(|e| anyhow::anyhow!("key generation failed: {e:?}"))?;
     // qos_p256 owns the master-seed / pubkey hex formats.
     let seed_hex = String::from_utf8(pair.to_master_seed_hex()).context("seed hex not utf8")?;
     let pub_hex =
         String::from_utf8(pair.public_key().to_hex_bytes()).context("pubkey hex not utf8")?;
-    write_secret_file(Path::new(out), &seed_hex)?;
+    write_secret_file(&args.out, &seed_hex)?;
     // SECURITY: only the public key is ever printed; the seed stays in the file.
     println!("{pub_hex}");
-    eprintln!("operator seed written to {out} (mode 0600); public key printed above");
+    eprintln!(
+        "operator seed written to {} (mode 0600); public key printed above",
+        args.out.display()
+    );
     Ok(())
 }
 
@@ -134,32 +167,13 @@ fn write_secret_file(path: &Path, contents: &str) -> Result<()> {
         .with_context(|| format!("write {}", path.display()))
 }
 
-fn deploy(sh: &Shell, flags: &HashMap<String, String>) -> Result<()> {
-    let app_id = req(flags, "app-id")?;
-    let image = req(flags, "image-url")?;
-    let digest = req(flags, "expected-digest")?;
-    let operator_id = req(flags, "operator-id")?;
-    let qos = flags
-        .get("qos-version")
-        .map(String::as_str)
-        .unwrap_or("0.12.0");
-    let host_ip = flags
-        .get("host-ip")
-        .map(String::as_str)
-        .unwrap_or("0.0.0.0");
-    let host_port: u16 = match flags.get("host-port") {
-        Some(s) => s
-            .parse()
-            .with_context(|| format!("invalid --host-port: {s}"))?,
-        None => 3000,
-    };
-
-    validate_digest(digest)?;
+fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
+    validate_digest(&args.expected_digest)?;
     // Safety gate: re-derive the pivot binary digest from the image and confirm
     // it matches --expected-digest, tying the submitted digest to the real binary.
-    verify_image_digest(sh, image, digest)?;
+    verify_image_digest(sh, &args.image_url, &args.expected_digest)?;
 
-    let seed = resolve_seed_file(flags)?;
+    let seed = resolve_seed_file(args.operator_seed.as_deref())?;
     // Pass --operator-seed only when we have one; otherwise tvc approves with the
     // logged-in org operator key (the local `tvc login` path).
     let seed_args: Vec<OsString> = match &seed {
@@ -170,6 +184,15 @@ fn deploy(sh: &Shell, flags: &HashMap<String, String>) -> Result<()> {
         }
     };
     let cfg_path = temp_path("tvc-deploy", "json");
+    let (app_id, image, digest, operator_id, qos, host_ip, host_port) = (
+        &args.app_id,
+        &args.image_url,
+        &args.expected_digest,
+        &args.operator_id,
+        &args.qos_version,
+        &args.host_ip,
+        args.host_port,
+    );
 
     // Everything that can fail after the seed file exists runs inside this
     // closure, so the seed + config temp files are always cleaned up below
@@ -353,9 +376,9 @@ fn validate_digest(d: &str) -> Result<()> {
 /// `TVC_CI_OPERATOR_SEED` into a temp 0600 file (cleanup=true so the caller
 /// deletes it); if neither is set, returns `None` and approval falls back to the
 /// logged-in org operator key.
-fn resolve_seed_file(flags: &HashMap<String, String>) -> Result<Option<(PathBuf, bool)>> {
-    if let Some(p) = flags.get("operator-seed") {
-        return Ok(Some((PathBuf::from(p), false)));
+fn resolve_seed_file(operator_seed: Option<&Path>) -> Result<Option<(PathBuf, bool)>> {
+    if let Some(p) = operator_seed {
+        return Ok(Some((p.to_path_buf(), false)));
     }
     match std::env::var("TVC_CI_OPERATOR_SEED") {
         Ok(seed) => {
@@ -395,6 +418,12 @@ fn temp_path(prefix: &str, ext: &str) -> PathBuf {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_parses_all_subcommands() {
+        Cli::command().debug_assert();
+    }
 
     #[test]
     fn deployment_health_reads_ratio_for_matching_deployment() {
