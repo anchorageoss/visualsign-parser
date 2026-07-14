@@ -16,12 +16,13 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::Args;
 use serde::Deserialize;
 use turnkey_api_key_stamper::{Stamp, StampHeader, StamperError};
+use turnkey_client::generated::external::data::v1::InvitationStatus;
 use turnkey_client::generated::immutable::common::v1::{AccessType, Effect};
 use turnkey_client::generated::{
     ApproveActivityIntent, CreateInvitationsIntent, CreatePoliciesIntent, CreatePolicyIntentV3,
-    CreateUserTagIntent, DeleteInvitationIntent, GetActivityRequest, GetPoliciesRequest,
-    GetUsersRequest, GetWhoamiRequest, InvitationParams, ListUserTagsRequest, RejectActivityIntent,
-    UpdateUserTagIntent,
+    CreateUserTagIntent, DeleteInvitationIntent, GetActivityRequest, GetOrganizationRequest,
+    GetOrganizationResponse, GetPoliciesRequest, GetUsersRequest, GetWhoamiRequest,
+    InvitationParams, ListUserTagsRequest, RejectActivityIntent, UpdateUserTagIntent,
 };
 use turnkey_client::TurnkeyP256ApiKey;
 use turnkey_client::{TurnkeyClient, TurnkeyClientError, TurnkeySecp256k1ApiKey};
@@ -537,24 +538,28 @@ pub fn invite(args: &InviteArgs) -> Result<()> {
         let mut invitations = if args.include_existing {
             invitations_with_allow.into_iter().map(|(i, _)| i).collect()
         } else {
-            let users = auth
-                .client
-                .get_users(GetUsersRequest {
-                    organization_id: auth.org_id.clone(),
-                })
-                .await
-                .map_err(|e| anyhow!("get_users failed: {e}"))?;
-            let existing_emails: HashSet<String> = users
+            let org_data = fetch_org_data(&auth).await?;
+            let existing_emails: HashSet<String> = org_data
                 .users
                 .into_iter()
                 .filter_map(|u| u.user_email)
                 .map(|e| canonical_email(&e))
+                .chain(
+                    // Also skip emails with a still-pending invitation, not just
+                    // accepted members -- a revoked/accepted invitation frees up
+                    // its email again, but "created" (unaccepted) does not.
+                    org_data
+                        .invitations
+                        .into_iter()
+                        .filter(|i| i.status == InvitationStatus::Created)
+                        .map(|i| canonical_email(&i.receiver_email)),
+                )
                 .collect();
 
             let (kept, skipped) = partition_existing(invitations_with_allow, &existing_emails);
             for s in &skipped {
                 println!(
-                    "skipping {} <{}>: matches an existing member of org {} \
+                    "skipping {} <{}>: matches an existing member or pending invitation in org {} \
                      (set \"allowExisting\": true for this invitee, or at the top level of \
                      the file, to invite it anyway)",
                     s.receiver_user_name, s.receiver_user_email, auth.org_id
@@ -562,7 +567,8 @@ pub fn invite(args: &InviteArgs) -> Result<()> {
             }
             if kept.is_empty() {
                 println!(
-                    "nothing to invite: everyone in the list already matches an existing member"
+                    "nothing to invite: everyone in the list already matches an existing member \
+                     or pending invitation"
                 );
                 return Ok(());
             }
@@ -821,6 +827,50 @@ pub fn create_policies(args: &CreatePoliciesArgs) -> Result<()> {
             }
             Err(e) => Err(anyhow!("create_policies failed: {e}")),
         }
+    })?
+}
+
+/// Fetch the org's full data blob -- users, invitations, tags, policies, etc.
+/// Not wrapped in a convenience method upstream (unlike `get_users`), but the
+/// request/response types are in the generated client, and `process_request`
+/// is public, so this is a normal query, not a private/undocumented API.
+async fn fetch_org_data(
+    auth: &Auth,
+) -> Result<turnkey_client::generated::external::data::v1::OrganizationData> {
+    let response: GetOrganizationResponse = auth
+        .client
+        .process_request(
+            &GetOrganizationRequest {
+                organization_id: auth.org_id.clone(),
+            },
+            "/public/v1/query/get_organization".to_string(),
+        )
+        .await
+        .map_err(|e| anyhow!("get_organization failed: {e}"))?;
+    response
+        .organization_data
+        .ok_or_else(|| anyhow!("get_organization returned no organization_data"))
+}
+
+pub fn list_invitations(args: &OrgArgs) -> Result<()> {
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
+        let org_data = fetch_org_data(&auth).await?;
+
+        if org_data.invitations.is_empty() {
+            println!("no invitations in org {}", auth.org_id);
+            return Ok(());
+        }
+        for invitation in org_data.invitations {
+            println!(
+                "{}  {}  <{}>  {:?}",
+                invitation.invitation_id,
+                invitation.receiver_user_name,
+                invitation.receiver_email,
+                invitation.status
+            );
+        }
+        Ok(())
     })?
 }
 

@@ -55,6 +55,8 @@ enum Command {
     Invite(invite::InviteArgs),
     /// Delete an existing invitation
     DismissInvite(invite::DismissInviteArgs),
+    /// List an org's invitations (pending/accepted/revoked)
+    ListInvitations(invite::OrgArgs),
     /// Approve a Turnkey activity that needs consensus
     ApproveActivity(invite::ActivityIdArgs),
     /// Reject a Turnkey activity that needs consensus
@@ -123,6 +125,7 @@ fn run() -> Result<()> {
         Command::Deploy(args) => deploy(&sh, &args),
         Command::Invite(args) => invite::invite(&args),
         Command::DismissInvite(args) => invite::dismiss_invite(&args),
+        Command::ListInvitations(args) => invite::list_invitations(&args),
         Command::ApproveActivity(args) => invite::approve_activity(&args),
         Command::RejectActivity(args) => invite::reject_activity(&args),
         Command::CreateTag(args) => invite::create_tag(&args),

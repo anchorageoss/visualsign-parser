@@ -22,6 +22,10 @@ the org requires it):
    tvc-deploy list-tags --org <alias>
    ```
 
+   `tvc-deploy list-invitations --org <alias>` shows every invitation in the
+   org with its status (created/accepted/revoked) -- useful for checking
+   whether someone's accepted yet, since Turnkey doesn't email you that.
+
 3. **Write an `invitees.json`** listing everyone to invite:
 
    ```json
@@ -48,10 +52,11 @@ the org requires it):
    `--sender-user-id <id>` is given, then submits all invitees as a single
    `create_invitations` activity.
 
-   Before sending, it fetches the org's current members and skips any invitee
-   whose **canonical** email (lowercased, `+suffix` stripped) matches an
-   existing member's -- so `alice+dev1@co.com` is treated as the same person
-   as `alice@co.com` and won't get a redundant invite. To bypass this for
+   Before sending, it fetches the org's current members *and* pending
+   invitations and skips any invitee whose **canonical** email (lowercased,
+   `+suffix` stripped) matches either -- so `alice+dev1@co.com` is treated as
+   the same person as `alice@co.com`, and inviting the same email twice
+   before they accept is caught and skipped too. To bypass this for
    specific invitees (e.g. you deliberately want a `+dev` test account for
    someone who's already a real member), set `"allowExisting": true` on that
    invitee (or at the file's top level, for the whole batch) -- this lives in
