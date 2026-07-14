@@ -416,25 +416,20 @@ fn parse_access_type(s: &str) -> Result<AccessType> {
 }
 
 fn parse_activity_status(s: &str) -> Result<ActivityStatus> {
-    match s.to_ascii_lowercase().as_str() {
-        "created" => Ok(ActivityStatus::Created),
-        "pending" => Ok(ActivityStatus::Pending),
-        "completed" => Ok(ActivityStatus::Completed),
-        "failed" => Ok(ActivityStatus::Failed),
-        "consensus_needed" => Ok(ActivityStatus::ConsensusNeeded),
-        "rejected" => Ok(ActivityStatus::Rejected),
-        "authenticators_needed" => Ok(ActivityStatus::AuthenticatorsNeeded),
-        other => bail!(
-            "--status entries must be one of created|pending|completed|failed|\
-             consensus_needed|rejected|authenticators_needed, got {other:?}"
-        ),
-    }
+    let name = format!("ACTIVITY_STATUS_{}", s.to_ascii_uppercase());
+    ActivityStatus::from_str_name(&name).ok_or_else(|| anyhow!("unrecognized --status entry {s:?}"))
 }
 
 fn parse_activity_type(s: &str) -> Result<ActivityType> {
     let name = format!("ACTIVITY_TYPE_{}", s.to_ascii_uppercase());
     ActivityType::from_str_name(&name)
         .ok_or_else(|| anyhow!("unrecognized --activity-type entry {s:?}"))
+}
+
+fn parse_comma_list<T>(s: Option<&str>, parse: impl Fn(&str) -> Result<T>) -> Result<Vec<T>> {
+    s.map(|s| s.split(',').map(parse).collect())
+        .transpose()
+        .map(|v| v.unwrap_or_default())
 }
 
 fn parse_tags(s: &str) -> Vec<String> {
@@ -957,18 +952,8 @@ async fn fetch_activities(
 }
 
 pub fn list_activities(args: &ListActivitiesArgs) -> Result<()> {
-    let filter_by_status = args
-        .status
-        .as_deref()
-        .map(|s| s.split(',').map(parse_activity_status).collect())
-        .transpose()?
-        .unwrap_or_default();
-    let filter_by_type = args
-        .activity_type
-        .as_deref()
-        .map(|s| s.split(',').map(parse_activity_type).collect())
-        .transpose()?
-        .unwrap_or_default();
+    let filter_by_status = parse_comma_list(args.status.as_deref(), parse_activity_status)?;
+    let filter_by_type = parse_comma_list(args.activity_type.as_deref(), parse_activity_type)?;
 
     block_on(async {
         let auth = resolve_auth(args.org.as_deref())?;
