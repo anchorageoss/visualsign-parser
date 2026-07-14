@@ -1,0 +1,31 @@
+{
+  "description": "PRS-572 regression: increase_liquidity_by_token_amounts_v2 renders a struct-valued arg ('method') that must survive validate_charset as real embedded JSON. This repro previously failed with 'Validation failed: Restricted Characters Detected' before the charset-validator fix.",
+  "source": "PRS-572 repro transaction (raw base64 tx supplied in the ticket)",
+  "signature": "n/a - unsigned repro transaction, PRS-572",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "Instruction 5 of a 5-instruction v0 transaction (compute budget x2, system transfer, orca open_position_with_token_extensions, orca increase_liquidity_by_token_amounts_v2). We're testing the increase_liquidity_by_token_amounts_v2 instruction in isolation.",
+  "instruction_index": 4,
+  "instruction_data": "3BcRfVthCtB9NCjTZV56JPQ2hoy2tvJW9LfVZznEXuqt9st2DFu1TVeyDGVARudfi5vD3HPDoahs2mwD",
+  "program_id": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+  "accounts": [
+    { "pubkey": "9tXiuRRw7kbejLhZXtxDxYs2REe43uH2e7k1kocgdM9B", "signer": true, "writable": true, "description": "Account 0 (position owner)" },
+    { "pubkey": "11111111111111111111111111111111", "signer": false, "writable": true, "description": "Account 1 (ALT-resolved in the real tx; placeholder here, not asserted on)" },
+    { "pubkey": "11111111111111111111111111111111", "signer": false, "writable": true, "description": "Account 2 (ALT-resolved in the real tx; placeholder here, not asserted on)" },
+    { "pubkey": "11111111111111111111111111111111", "signer": false, "writable": true, "description": "Account 3 (ALT-resolved in the real tx; placeholder here, not asserted on)" },
+    { "pubkey": "BTEByC4EFC5erpXs8JMLq5tx73aLnqEtK6BDjqmTFs7q", "signer": false, "writable": true, "description": "Account 4" },
+    { "pubkey": "HzieVsPqA9e91c26fXHih4nwdYUZKip2kZbWT3Wo8W16", "signer": false, "writable": true, "description": "Account 5" },
+    { "pubkey": "EpzFfaqn49Sj4AVdg7eKoy8tYXG8PDdx7sSAdtBrDFkh", "signer": false, "writable": true, "description": "Account 6" },
+    { "pubkey": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", "signer": false, "writable": false, "description": "Account 7" },
+    { "pubkey": "11111111111111111111111111111111", "signer": false, "writable": false, "description": "Account 8 (ALT-resolved in the real tx; placeholder here, not asserted on)" },
+    { "pubkey": "CjR2rwcdnxyfDi5ejdYynH3sLpqhTyzNtokQxPrFJR1o", "signer": false, "writable": true, "description": "Account 9" },
+    { "pubkey": "3x6jNqyAp81trnPc73qGPAJWAovWj4UfuD34PeQ3m3N2", "signer": false, "writable": true, "description": "Account 10" },
+    { "pubkey": "EeF6oBy6AQiBJoRx5xiRNxa6cmpQE3ayVagj28QFZuyg", "signer": false, "writable": true, "description": "Account 11" },
+    { "pubkey": "MvB8poDgpDPbRgx8MXeb7EPEsawGuiBTqpkpM9exeLi", "signer": false, "writable": true, "description": "Account 12" },
+    { "pubkey": "8hXTpuvJQRar4Pf6BZiEWquFgtAtSf2RFDM6EL2FCcf1", "signer": false, "writable": true, "description": "Account 13" },
+    { "pubkey": "B1jXbjDzenSy8kPNaGw3GSKAVQis5K5tRLeXuaskZTpS", "signer": false, "writable": true, "description": "Account 14" }
+  ],
+  "expected_fields": {
+    "instruction_name": "increase_liquidity_by_token_amounts_v2",
+    "arg:_method": "{\"ByTokenAmounts\":{\"max_sqrt_price\":\"18675676272558904210\",\"min_sqrt_price\":\"18214477279551604378\",\"token_max_a\":1025000,\"token_max_b\":1461217}}"
+  }
+}

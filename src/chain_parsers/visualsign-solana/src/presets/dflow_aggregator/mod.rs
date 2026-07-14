@@ -230,11 +230,15 @@ fn build_fallback_fields(
 ///    array such as `RecordId.id` (76 bytes) would otherwise blow up into 76
 ///    per-byte fields and bury the meaningful arguments (`quoted_out_amount`,
 ///    `slippage_bps`, ...). See `test_format_arg_value_does_not_blow_up_nested_fields`.
-/// 2. **Charset safety.** `SignablePayload::validate_charset` rejects the `\"`
-///    JSON escape (see #332). Real compact JSON of an object contains quoted
-///    keys, which serialize to `\"` and fail validation. Emitting quote-free
-///    output keeps the whole payload charset-valid. See
-///    `test_format_arg_value_is_charset_safe`.
+/// 2. **Charset safety (historical).** `SignablePayload::validate_charset`
+///    used to reject the `\"` / `\\` JSON escapes (see #332), so real compact
+///    JSON of an object -- with its quoted keys -- would fail validation.
+///    Quote-free output was required to keep the payload charset-valid.
+///    PRS-572 relaxed that deny-list to allow `\"` / `\\` (both decode to
+///    already-permitted printable-ASCII bytes), so quote-free rendering is no
+///    longer *required* here -- it's kept anyway for reason 1 above (no field
+///    explosion) and to avoid a behavior change to this preset's existing,
+///    already-tested output. See `test_format_arg_value_is_charset_safe`.
 ///
 /// Arrays whose elements are all byte-sized integers (0..=255) -- e.g. a
 /// `[u8; 32]` market id or the 76-byte `RecordId.id` -- render as a single
@@ -268,12 +272,15 @@ fn format_arg_value(value: &serde_json::Value) -> String {
     }
 }
 
-/// Drop characters from a leaf string/key that would otherwise force a forbidden
-/// JSON escape and make `SignablePayload::validate_charset` reject the payload:
-/// `"` and `\` (both ASCII-graphic, so excluded explicitly), plus tabs, carriage
-/// returns, other control bytes, and non-ASCII. Keeps printable ASCII + spaces.
-/// IDL strings here (pubkeys, enum names) are already clean; this is a defensive
-/// guard so the function's charset-safe contract always holds.
+/// Drop characters from a leaf string/key that would break this preset's
+/// quote-free rendering contract or (still, post-PRS-572) trip
+/// `SignablePayload::validate_charset`: `"` and `\` are stripped to preserve
+/// the quote-free format described in `format_arg_value` above (no longer
+/// required for charset safety itself -- see that comment), while tabs,
+/// carriage returns, other control bytes, and non-ASCII are stripped because
+/// `validate_charset` still forbids them. Keeps printable ASCII + spaces.
+/// IDL strings here (pubkeys, enum names) are already clean; this is a
+/// defensive guard so the function's charset-safe contract always holds.
 fn charset_safe(text: &str) -> String {
     text.chars()
         .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '"' && c != '\\'))
@@ -404,10 +411,12 @@ mod tests {
 
     #[test]
     fn test_format_arg_value_is_charset_safe() {
-        // SignablePayload::validate_charset rejects the `\"` and `\\` JSON
-        // escapes (#332). Real compact JSON of an object would emit quoted keys
-        // (-> `\"`) and fail. Our quote-free rendering must contain neither `"`
-        // nor `\` so the whole payload stays charset-valid end to end.
+        // Historically SignablePayload::validate_charset rejected the `\"`
+        // and `\\` JSON escapes (#332), so real compact JSON of an object --
+        // with quoted keys -- would fail. PRS-572 relaxed that deny-list, but
+        // this preset still deliberately renders quote-free (see
+        // `format_arg_value`'s doc comment), so this pins that our rendering
+        // continues to contain neither `"` nor `\`.
         let nested = json!({
             "actions": [{"RecordId": [{"id": (0u8..76).collect::<Vec<u8>>()}]}],
             "quoted_out_amount": 68_980_730u64,
@@ -421,9 +430,11 @@ mod tests {
 
     #[test]
     fn test_format_arg_value_sanitizes_string_values_and_keys() {
-        // Leaf strings and object keys that contain charset-forbidden characters
-        // (`"`, `\`, tab, CR, control bytes) are stripped so the payload always
-        // passes validate_charset, never silently rejected.
+        // Leaf strings and object keys have `"`/`\` stripped to preserve this
+        // preset's quote-free rendering contract (no longer required by
+        // validate_charset itself post-PRS-572, see format_arg_value's doc
+        // comment), and tab/CR/other control bytes stripped because
+        // validate_charset still forbids those.
         assert_eq!(format_arg_value(&json!("a\"b\\c\td")), "abcd");
         let object = format_arg_value(&json!({"a\"b": "x\\y"}));
         assert!(
@@ -463,7 +474,9 @@ mod tests {
         let value = parsed.program_call_args.get("params").unwrap();
         let now = format_arg_value(value);
 
-        // Charset-safe (the pre-#286 compact JSON would fail validate_charset).
+        // Charset-safe (the pre-#286 compact JSON would have failed the
+        // stricter pre-PRS-572 validate_charset; this preset still renders
+        // quote-free by choice, see format_arg_value's doc comment).
         assert!(
             !now.contains('"') && !now.contains('\\'),
             "not charset-safe: {now}"

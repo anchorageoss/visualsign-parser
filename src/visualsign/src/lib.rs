@@ -934,12 +934,22 @@ impl SignablePayload {
         // smuggle non-printable / structural characters past the ASCII-only
         // checks below. The serializer (`serde_json::CompactFormatter`) emits
         // short-form escapes for 0x08, 0x09, 0x0A, 0x0C, 0x0D (`\b`, `\t`,
-        // `\n`, `\f`, `\r`) and escapes `"` and `\` as `\"` and `\\`. All of
-        // these survive `is_ascii() && (is_ascii_graphic() ||
-        // is_ascii_whitespace())` while still letting an attacker inject
-        // control bytes into the decoded field text and break single-line
-        // wallet UI. `\/` is included defensively even though the compact
-        // formatter does not emit it.
+        // `\n`, `\f`, `\r`). All of these survive `is_ascii() &&
+        // (is_ascii_graphic() || is_ascii_whitespace())` while still letting
+        // an attacker inject control bytes into the decoded field text and
+        // break single-line wallet UI.
+        //
+        // `\"` and `\\` are deliberately NOT forbidden: they decode to `"`
+        // and `\`, both already-permitted `is_ascii_graphic()` bytes, so
+        // allowing the escaped form smuggles nothing new past the checks
+        // below. This lets field text carry real, valid embedded JSON
+        // (objects/arrays/strings from chain-parser preset output) so it can
+        // be copied out of the wallet UI and parsed by any standard JSON
+        // parser, while every byte inside that embedded JSON must still be
+        // plain printable ASCII (PRS-572).
+        //
+        // `\/` stays forbidden defensively even though the compact formatter
+        // does not emit it, keeping the allow-list as narrow as possible.
         //
         // Carve-out: `\n` is the wallet's documented line separator for
         // multi-line field text (e.g. "Program ID: X\nData: Y" used by every
@@ -952,8 +962,7 @@ impl SignablePayload {
         // List order has no runtime effect: every match returns the same
         // generic `ValidationError`, so which entry fires first is not
         // observable. The defensive-first ordering is purely cosmetic.
-        const FORBIDDEN_JSON_ESCAPES: &[&str] =
-            &["\\u", "\\t", "\\r", "\\b", "\\f", "\\\"", "\\/", "\\\\"];
+        const FORBIDDEN_JSON_ESCAPES: &[&str] = &["\\u", "\\t", "\\r", "\\b", "\\f", "\\/"];
 
         let json_str = self.to_json().map_err(|e| {
             VisualSignError::SerializationError(format!("Failed to serialize for validation: {e}"))
@@ -2819,52 +2828,50 @@ mod tests {
         }
     }
 
-    /// `validate_charset` must reject `\"` (escaped double-quote) and `\\`
-    /// (escaped backslash) in serialized JSON. Embedded `"` / `\` in display
-    /// text can splice structural characters past a downstream JSON parser or
-    /// break out of single-line UI rendering.
+    /// `validate_charset` must accept `\"` (escaped double-quote) and `\\`
+    /// (escaped backslash) in serialized JSON. Both decode to bytes
+    /// (`"` and `\`) that are already permitted unescaped elsewhere in the
+    /// payload, so allowing the escaped form lets field text carry real,
+    /// valid embedded JSON without smuggling anything new past the
+    /// ascii-graphic checks (PRS-572).
     #[test]
-    fn test_validate_charset_rejects_quote_and_backslash_escapes() {
-        let cases: &[(&str, &str)] = &[
-            ("double quote", "hello\"world"),
-            ("backslash", "hello\\world"),
+    fn test_validate_charset_accepts_quote_and_backslash_escapes() {
+        // (label, text-containing-quote-or-backslash, expected escape in the
+        // serialized JSON). Mirrors the control-escape rejection test above:
+        // confirm the escape is actually present in `to_json()`'s output
+        // before asserting the validator accepts it, so this doesn't
+        // silently pass for the wrong reason if serde_json's formatter ever
+        // changes.
+        let cases: &[(&str, &str, &str)] = &[
+            ("double quote", "hello\"world", "\\\""),
+            ("backslash", "hello\\world", "\\\\"),
         ];
 
-        for (label, text) in cases {
+        for (label, text, expected_escape) in cases {
             let payload = payload_with_text(text);
-            let err = payload
-                .validate_charset()
-                .expect_err(&format!("{label}: validator must reject"));
+            let json = payload.to_json().expect("serialization should succeed");
             assert!(
-                matches!(err, VisualSignError::ValidationError(_)),
-                "{label}: expected ValidationError, got {err:?}",
+                json.contains(expected_escape),
+                "{label}: expected serialized JSON to contain `{expected_escape}`, got: {json}",
             );
+            payload
+                .validate_charset()
+                .unwrap_or_else(|e| panic!("{label}: validator must accept, got {e:?}"));
         }
     }
 
     /// `validate_charset` must reject serialized JSON containing the literal
-    /// substring `\/`. The `serde_json::CompactFormatter` does not currently
-    /// emit `\/`, so this
-    /// test can't trigger that path through `to_json()` alone (a literal
-    /// backslash in field text serializes as `\\`, which contains `\/` as a
-    /// substring only if a `/` happens to follow it). The `\/` entry is
-    /// kept as a defensive guard against a future serializer that emits
-    /// bare `\/`.
-    ///
-    /// What this test actually asserts: input containing the two-character
-    /// sequence `\` `/` (which serializes as `\\/`) trips the deny-list. The
-    /// `\` `world` companion test
-    /// (`test_validate_charset_rejects_quote_and_backslash_escapes`) covers
-    /// the pure `\\` path. Either the `\/` or `\\` rule rejects this input;
-    /// since both return the same generic error, which one fires is not
-    /// observable.
+    /// substring `\/`, kept as a defensive guard even though the
+    /// `serde_json::CompactFormatter` does not currently emit it. `\\` alone
+    /// is permitted (see `test_validate_charset_accepts_quote_and_backslash_escapes`),
+    /// so this test's rejection comes solely from the still-forbidden `\/`
+    /// entry.
     #[test]
     fn test_validate_charset_rejects_backslash_slash_combination() {
         let payload = payload_with_text("path\\/to/resource");
         let json = payload.to_json().expect("serialization should succeed");
         // The serialized JSON contains `\\/` (backslash-slash combo), which
-        // matches both the `\/` and `\\` entries in FORBIDDEN_JSON_ESCAPES.
-        // Either way the payload must be rejected.
+        // matches the still-forbidden `\/` entry in FORBIDDEN_JSON_ESCAPES.
         assert!(
             json.contains("\\/"),
             "expected serialized JSON to contain \\\\/, got: {json}",
@@ -2910,5 +2917,19 @@ mod tests {
         payload.validate_charset().expect(
             "multi-line text with \\n is the wallet's documented line separator and must validate",
         );
+    }
+
+    /// PRS-572: field text carrying real, valid embedded JSON (as chain-parser
+    /// presets emit for struct/enum instruction args via
+    /// `serde_json::Value::to_string()`) must validate. The embedded quotes
+    /// become `\"` in the outer serialized payload; this is exactly the case
+    /// the fix allows so that copying a field's text out of the wallet UI
+    /// yields something any JSON parser can decode.
+    #[test]
+    fn test_validate_charset_accepts_embedded_json() {
+        let payload = payload_with_text(r#"{"a":"b","c":[1,2]}"#);
+        payload
+            .validate_charset()
+            .expect("field text containing valid embedded JSON should validate");
     }
 }

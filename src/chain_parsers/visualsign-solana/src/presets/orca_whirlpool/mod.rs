@@ -234,4 +234,6 @@ mod tests {
         let result = parse_orca_whirlpool_instruction(&short, &accounts);
         assert!(result.is_err(), "Short data should return an error");
     }
+
+    mod fixture_tests;
 }
