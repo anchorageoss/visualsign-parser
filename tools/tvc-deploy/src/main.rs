@@ -31,6 +31,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use qos_p256::P256Pair;
 use xshell::{cmd, Shell};
 
+mod invite;
+
 const POLL_TIMEOUT: Duration = Duration::from_secs(900);
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
 const SETLIVE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -40,7 +42,8 @@ const USAGE: &str = "usage:\n  \
     tvc-deploy deploy --app-id <id> --image-url <url> --expected-digest <hex> --operator-id <id> \
     [--operator-seed <path>] [--qos-version 0.12.0] [--host-ip 0.0.0.0] [--host-port 3000]\n  \
     (operator seed may instead come from env TVC_CI_OPERATOR_SEED, or be omitted \
-    to approve with the logged-in org operator key)";
+    to approve with the logged-in org operator key)\n  \
+    ";
 
 fn main() -> ExitCode {
     match run() {
@@ -58,7 +61,15 @@ fn run() -> Result<()> {
     match subcmd.as_str() {
         "gen-operator-key" => gen_operator_key(&flags),
         "deploy" => deploy(&sh, &flags),
-        other => bail!("unknown subcommand {other:?}\n{USAGE}"),
+        "invite" => invite::invite(&flags),
+        "dismiss-invite" => invite::dismiss_invite(&flags),
+        "approve-activity" => invite::approve_activity(&flags),
+        "reject-activity" => invite::reject_activity(&flags),
+        "list-tags" => invite::list_tags(&flags),
+        "list-policies" => invite::list_policies(&flags),
+        "create-policy" => invite::create_policy(&flags),
+        "create-policies" => invite::create_policies(&flags),
+        other => bail!("unknown subcommand {other:?}\n{USAGE}\n{}", invite::USAGE),
     }
 }
 
@@ -82,7 +93,7 @@ fn parse_args() -> Result<(String, HashMap<String, String>)> {
             other => return Err(other.unexpected().into()),
         }
     }
-    let subcmd = subcmd.ok_or_else(|| anyhow!("missing subcommand\n{USAGE}"))?;
+    let subcmd = subcmd.ok_or_else(|| anyhow!("missing subcommand\n{USAGE}\n{}", invite::USAGE))?;
     Ok((subcmd, flags))
 }
 

@@ -1,0 +1,25 @@
+{
+  "policies": [
+    {
+      "policyName": "Allow users with releaser tag to also approve manifests",
+      "effect": "allow",
+      "condition": "activity.type == 'ACTIVITY_TYPE_CREATE_TVC_MANIFEST_APPROVALS'",
+      "consensus": "approvers.any(user, user.tags.contains('{{RELEASER_TAG_ID}}'))",
+      "notes": ""
+    },
+    {
+      "policyName": "Allow users with releaser tag to update and delete deployments",
+      "effect": "allow",
+      "condition": "activity.type == 'ACTIVITY_TYPE_UPDATE_TVC_APP_LIVE_DEPLOYMENT' || activity.type == 'ACTIVITY_TYPE_DELETE_TVC_DEPLOYMENT'",
+      "consensus": "approvers.any(user, user.tags.contains('{{RELEASER_TAG_ID}}'))",
+      "notes": ""
+    },
+    {
+      "policyName": "Allow users with initiators tag to create TVC deployments",
+      "effect": "allow",
+      "condition": "activity.type == 'ACTIVITY_TYPE_CREATE_TVC_DEPLOYMENT'",
+      "consensus": "approvers.any(user, user.tags.contains('{{INITIATORS_TAG_ID}}'))",
+      "notes": ""
+    }
+  ]
+}
