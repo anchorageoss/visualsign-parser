@@ -27,13 +27,24 @@ the org requires it):
    whether someone's accepted yet, since Turnkey doesn't email you that.
 
    `tvc-deploy list-activities --org <alias>` lists activities newest-first,
-   with `--status`/`--activity-type` filters and `--limit`. Add `--json` to
-   dump the full activity (intent, votes, fingerprint) -- handy for comparing
-   two activities that look like duplicates, since the dashboard doesn't make
-   that easy either. A duplicate is usually the same intent submitted twice
-   (e.g. a deploy retried before the first one finished consensus) -- the
-   fingerprints will differ because they include the submission timestamp,
-   but the `intent` payloads will be identical.
+   with `--status`/`--activity-type` filters and `--limit`. Its default
+   (non-`--json`) output decodes each activity's `intent` into a short
+   summary -- e.g. `updates tag 'releaser' (adds <user's display name>)`
+   instead of just `ACTIVITY_TYPE_UPDATE_USER_TAG` -- resolving tag/user ids
+   to their display names, so you don't have to cross-reference
+   `list-tags`/`list-users` by hand. Add `--json` to dump the full raw activity (intent, votes,
+   fingerprint) instead -- handy for comparing two activities that look like
+   duplicates, since the dashboard doesn't make that easy either. A
+   duplicate is usually the same intent submitted twice (e.g. a deploy
+   retried before the first one finished consensus) -- the fingerprints will
+   differ because they include the submission timestamp, but the `intent`
+   payloads will be identical.
+
+   `tvc-deploy view-activity --activity-id <id> --org <alias>` shows the
+   same decoded summary for one activity, plus its full status/fingerprint
+   and who's voted so far -- useful for digging into a specific activity
+   flagged by `list-activities` without the surrounding noise of a full
+   list.
 
 3. **Write an `invitees.json`** listing everyone to invite:
 

@@ -1,5 +1,5 @@
 //! Turnkey org-management subcommands: invite/dismiss-invite, activity
-//! approve/reject/list, tag CRUD (create/update/list), user listing, and
+//! approve/reject/list/view, tag CRUD (create/update/list), user listing, and
 //! policy CRUD (create single/batch, list). See each `*Args` struct's doc comments
 //! (surfaced via `--help`) and `tools/tvc-deploy/README.md` for the batch
 //! invite / batch policy workflows and file schemas.
@@ -891,6 +891,183 @@ async fn fetch_org_data(
         .ok_or_else(|| anyhow!("get_organization returned no organization_data"))
 }
 
+/// Id -> display-name lookups built once from `OrganizationData`, so decoding
+/// a list of activities doesn't re-fetch the org per activity.
+struct NameLookup {
+    tag_names: HashMap<String, String>,
+    user_names: HashMap<String, String>,
+}
+
+impl NameLookup {
+    fn from_org_data(
+        org_data: &turnkey_client::generated::external::data::v1::OrganizationData,
+    ) -> Self {
+        NameLookup {
+            tag_names: org_data
+                .tags
+                .iter()
+                .map(|t| (t.tag_id.clone(), t.tag_name.clone()))
+                .collect(),
+            user_names: org_data
+                .users
+                .iter()
+                .map(|u| (u.user_id.clone(), u.user_name.clone()))
+                .collect(),
+        }
+    }
+
+    /// Falls back to a truncated id when it's not found (e.g. a user/tag
+    /// deleted after the activity was created), so decoding never panics.
+    fn tag(&self, id: &str) -> String {
+        self.tag_names
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| format!("<unknown tag {}>", short_id(id)))
+    }
+
+    fn user(&self, id: &str) -> String {
+        self.user_names
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| format!("<unknown user {}>", short_id(id)))
+    }
+}
+
+fn short_id(id: &str) -> &str {
+    &id[..id.len().min(8)]
+}
+
+/// Human-readable one-line summary of an activity's intent, e.g. `updates
+/// tag 'protocols-solana' (adds Alice Example)` instead of just
+/// `ACTIVITY_TYPE_UPDATE_USER_TAG`. Explicitly handles the intent variants
+/// tvc-deploy itself creates or cares about; the other 100+ Turnkey activity
+/// types (billing, wallets, webhooks, MFA, Spark, sub-orgs, ...) fall back to
+/// the bare type name -- same as today's output, no maintenance burden for
+/// functionality this tool doesn't touch.
+fn decode_intent(
+    activity_type: ActivityType,
+    intent: Option<&intent::Inner>,
+    names: &NameLookup,
+) -> String {
+    use intent::Inner;
+    match intent {
+        Some(Inner::CreateInvitationsIntent(i)) => format!(
+            "invites {}",
+            i.invitations
+                .iter()
+                .map(|inv| inv.receiver_user_name.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Some(Inner::DeleteInvitationIntent(i)) => {
+            format!("deletes invitation {}", i.invitation_id)
+        }
+        Some(Inner::CreateUserTagIntent(i)) => {
+            let users: Vec<String> = i.user_ids.iter().map(|id| names.user(id)).collect();
+            if users.is_empty() {
+                format!("creates tag '{}'", i.user_tag_name)
+            } else {
+                format!(
+                    "creates tag '{}' (members: {})",
+                    i.user_tag_name,
+                    users.join(", ")
+                )
+            }
+        }
+        Some(Inner::UpdateUserTagIntent(i)) => {
+            let tag_name = i
+                .new_user_tag_name
+                .clone()
+                .unwrap_or_else(|| names.tag(&i.user_tag_id));
+            let mut parts = vec![];
+            if !i.add_user_ids.is_empty() {
+                parts.push(format!(
+                    "adds {}",
+                    i.add_user_ids
+                        .iter()
+                        .map(|id| names.user(id))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+            if !i.remove_user_ids.is_empty() {
+                parts.push(format!(
+                    "removes {}",
+                    i.remove_user_ids
+                        .iter()
+                        .map(|id| names.user(id))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+            if i.new_user_tag_name.is_some() {
+                parts.push(format!("renames to '{tag_name}'"));
+            }
+            if parts.is_empty() {
+                format!("updates tag '{tag_name}'")
+            } else {
+                format!("updates tag '{}' ({})", tag_name, parts.join("; "))
+            }
+        }
+        Some(Inner::DeleteUserTagsIntent(i)) => format!(
+            "deletes tags: {}",
+            i.user_tag_ids
+                .iter()
+                .map(|id| names.tag(id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Some(Inner::CreatePolicyIntentV3(i)) => {
+            format!("creates policy '{}' ({:?})", i.policy_name, i.effect)
+        }
+        Some(Inner::CreatePoliciesIntent(i)) => format!(
+            "creates {} policies: {}",
+            i.policies.len(),
+            i.policies
+                .iter()
+                .map(|p| p.policy_name.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Some(Inner::CreateTvcDeploymentIntent(i)) => format!(
+            "creates deployment for app {} (image {})",
+            i.app_id, i.pivot_container_image_url
+        ),
+        Some(Inner::UpdateTvcAppLiveDeploymentIntent(i)) => {
+            format!("sets deployment {} live", i.deployment_id)
+        }
+        Some(Inner::DeleteTvcDeploymentIntent(i)) => {
+            format!("deletes deployment {}", i.deployment_id)
+        }
+        Some(Inner::DeleteTvcAppAndDeploymentsIntent(i)) => {
+            format!("deletes app {} and all its deployments", i.app_id)
+        }
+        Some(Inner::CreateTvcManifestApprovalsIntent(i)) => format!(
+            "adds {} manifest approval(s) for manifest {}",
+            i.approvals.len(),
+            i.manifest_id
+        ),
+        Some(Inner::AcceptInvitationIntentV2(i)) => format!(
+            "accepts invitation {} as user {}",
+            i.invitation_id,
+            names.user(&i.user_id)
+        ),
+        Some(Inner::ApproveActivityIntent(i)) => {
+            format!(
+                "approves activity (fingerprint {})",
+                short_id(&i.fingerprint)
+            )
+        }
+        Some(Inner::RejectActivityIntent(i)) => {
+            format!(
+                "rejects activity (fingerprint {})",
+                short_id(&i.fingerprint)
+            )
+        }
+        Some(_) | None => activity_type.as_str_name().to_string(),
+    }
+}
+
 pub fn list_invitations(args: &OrgArgs) -> Result<()> {
     block_on(async {
         let auth = resolve_auth(args.org.as_deref())?;
@@ -964,23 +1141,34 @@ pub fn list_activities(args: &ListActivitiesArgs) -> Result<()> {
             println!("no activities matching filters in org {}", auth.org_id);
             return Ok(());
         }
-        for activity in activities {
-            if args.json {
+        if args.json {
+            for activity in activities {
                 println!("{}", serde_json::to_string(&activity)?);
-                continue;
             }
+            return Ok(());
+        }
+        // Only fetched for the human-readable path; --json is for
+        // raw/scripted consumption and shouldn't pay for this extra query.
+        let names = NameLookup::from_org_data(&fetch_org_data(&auth).await?);
+        for activity in activities {
             let created_at = activity
                 .created_at
                 .as_ref()
                 .map(|t| t.seconds.as_str())
                 .unwrap_or("?");
+            let summary = decode_intent(
+                activity.r#type,
+                activity.intent.as_ref().and_then(|i| i.inner.as_ref()),
+                &names,
+            );
             println!(
-                "{}  {}  {:?}  created_at={}  fingerprint={}",
+                "{}  {}  {:?}  created_at={}  fingerprint={}  -- {}",
                 activity.id,
                 activity.r#type.as_str_name(),
                 activity.status,
                 created_at,
-                activity.fingerprint
+                activity.fingerprint,
+                summary
             );
         }
         Ok(())
@@ -1180,7 +1368,8 @@ pub fn dismiss_invite(args: &DismissInviteArgs) -> Result<()> {
 
 /// Fetch an activity's fingerprint, the artifact `approve_activity`/`reject_activity`
 /// sign over (not the activity id).
-async fn fetch_fingerprint(auth: &Auth, activity_id: &str) -> Result<String> {
+/// Fetch a single activity by id (full payload: intent/result/votes/fingerprint).
+async fn fetch_activity(auth: &Auth, activity_id: &str) -> Result<Activity> {
     let response = auth
         .client
         .get_activity(GetActivityRequest {
@@ -1189,10 +1378,63 @@ async fn fetch_fingerprint(auth: &Auth, activity_id: &str) -> Result<String> {
         })
         .await
         .map_err(|e| anyhow!("get_activity failed: {e}"))?;
-    let activity = response
+    response
         .activity
-        .ok_or_else(|| anyhow!("get_activity returned no activity for {activity_id}"))?;
-    Ok(activity.fingerprint)
+        .ok_or_else(|| anyhow!("get_activity returned no activity for {activity_id}"))
+}
+
+async fn fetch_fingerprint(auth: &Auth, activity_id: &str) -> Result<String> {
+    fetch_activity(auth, activity_id)
+        .await
+        .map(|a| a.fingerprint)
+}
+
+/// Decode a single activity's intent into a readable summary, plus its
+/// status/votes -- for inspecting one activity (e.g. one flagged by
+/// `list-activities`) without cross-referencing tag/user ids by hand.
+pub fn view_activity(args: &ActivityIdArgs) -> Result<()> {
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
+        let activity = fetch_activity(&auth, &args.activity_id).await?;
+        let names = NameLookup::from_org_data(&fetch_org_data(&auth).await?);
+
+        let created_at = activity
+            .created_at
+            .as_ref()
+            .map(|t| t.seconds.as_str())
+            .unwrap_or("?");
+        println!("id:          {}", activity.id);
+        println!("type:        {}", activity.r#type.as_str_name());
+        println!("status:      {:?}", activity.status);
+        println!("created_at:  {created_at}");
+        println!("fingerprint: {}", activity.fingerprint);
+        println!();
+        let summary = decode_intent(
+            activity.r#type,
+            activity.intent.as_ref().and_then(|i| i.inner.as_ref()),
+            &names,
+        );
+        println!("summary:     {summary}");
+
+        if !activity.votes.is_empty() {
+            println!();
+            println!("votes:");
+            for vote in &activity.votes {
+                let who = vote
+                    .user
+                    .as_ref()
+                    .map(|u| u.user_name.clone())
+                    .unwrap_or_else(|| names.user(&vote.user_id));
+                println!("  {}  selection={}", who, vote.selection);
+            }
+        }
+
+        if let Some(failure) = &activity.failure {
+            println!();
+            println!("failure: {} (code {})", failure.message, failure.code);
+        }
+        Ok(())
+    })?
 }
 
 pub fn approve_activity(args: &ActivityIdArgs) -> Result<()> {
@@ -1649,5 +1891,88 @@ mod tests {
             policies[0].consensus.as_deref(),
             Some("approvers.any(user, user.tags.contains('readonly-uuid'))")
         );
+    }
+
+    fn test_names() -> NameLookup {
+        NameLookup {
+            tag_names: HashMap::from([("tag-1".to_string(), "protocols-solana".to_string())]),
+            user_names: HashMap::from([("user-1".to_string(), "Alice Example".to_string())]),
+        }
+    }
+
+    #[test]
+    fn name_lookup_from_org_data_populates_tag_and_user_maps() {
+        let org_data: turnkey_client::generated::external::data::v1::OrganizationData =
+            serde_json::from_value(serde_json::json!({
+                "organizationId": "org",
+                "name": "org",
+                "tags": [{"tagId": "tag-1", "tagName": "protocols-solana", "tagType": "TAG_TYPE_USER"}],
+                "users": [{"userId": "user-1", "userName": "Alice Example"}],
+            }))
+            .unwrap();
+        let names = NameLookup::from_org_data(&org_data);
+        assert_eq!(names.tag("tag-1"), "protocols-solana");
+        assert_eq!(names.user("user-1"), "Alice Example");
+    }
+
+    #[test]
+    fn decode_intent_update_user_tag_resolves_names() {
+        let intent = intent::Inner::UpdateUserTagIntent(UpdateUserTagIntent {
+            user_tag_id: "tag-1".to_string(),
+            new_user_tag_name: None,
+            add_user_ids: vec!["user-1".to_string()],
+            remove_user_ids: vec![],
+        });
+        let summary = decode_intent(ActivityType::UpdateUserTag, Some(&intent), &test_names());
+        assert!(summary.contains("protocols-solana"), "{summary}");
+        assert!(summary.contains("adds Alice Example"), "{summary}");
+    }
+
+    #[test]
+    fn decode_intent_falls_back_to_placeholder_for_unresolvable_id() {
+        let intent = intent::Inner::UpdateUserTagIntent(UpdateUserTagIntent {
+            user_tag_id: "tag-1".to_string(),
+            new_user_tag_name: None,
+            add_user_ids: vec!["some-unknown-user-id".to_string()],
+            remove_user_ids: vec![],
+        });
+        let summary = decode_intent(ActivityType::UpdateUserTag, Some(&intent), &test_names());
+        assert!(summary.contains("<unknown user"), "{summary}");
+    }
+
+    #[test]
+    fn decode_intent_falls_back_to_type_name_for_unhandled_variant() {
+        let intent =
+            intent::Inner::DeletePolicyIntent(turnkey_client::generated::DeletePolicyIntent {
+                policy_id: "policy-1".to_string(),
+            });
+        let summary = decode_intent(ActivityType::DeletePolicy, Some(&intent), &test_names());
+        assert_eq!(summary, ActivityType::DeletePolicy.as_str_name());
+    }
+
+    #[test]
+    fn decode_intent_create_policies_lists_names() {
+        let intent = intent::Inner::CreatePoliciesIntent(CreatePoliciesIntent {
+            policies: vec![
+                CreatePolicyIntentV3 {
+                    policy_name: "allow releasers".to_string(),
+                    effect: Effect::Allow,
+                    condition: None,
+                    consensus: None,
+                    notes: String::new(),
+                },
+                CreatePolicyIntentV3 {
+                    policy_name: "allow initiators".to_string(),
+                    effect: Effect::Allow,
+                    condition: None,
+                    consensus: None,
+                    notes: String::new(),
+                },
+            ],
+        });
+        let summary = decode_intent(ActivityType::CreatePolicies, Some(&intent), &test_names());
+        assert!(summary.contains("2 policies"), "{summary}");
+        assert!(summary.contains("allow releasers"), "{summary}");
+        assert!(summary.contains("allow initiators"), "{summary}");
     }
 }

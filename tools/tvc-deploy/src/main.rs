@@ -63,6 +63,8 @@ enum Command {
     RejectActivity(invite::ActivityIdArgs),
     /// List an org's activities, newest first, with optional status/type filters
     ListActivities(invite::ListActivitiesArgs),
+    /// Decode a single activity's intent + votes into a human-readable summary
+    ViewActivity(invite::ActivityIdArgs),
     /// Create a user tag, optionally seeding it with existing user ids
     CreateTag(invite::CreateTagArgs),
     /// Add/remove existing users from a tag, or rename it
@@ -136,6 +138,7 @@ fn run() -> Result<()> {
         Command::ApproveActivity(args) => invite::approve_activity(&args),
         Command::RejectActivity(args) => invite::reject_activity(&args),
         Command::ListActivities(args) => invite::list_activities(&args),
+        Command::ViewActivity(args) => invite::view_activity(&args),
         Command::CreateTag(args) => invite::create_tag(&args),
         Command::UpdateTag(args) => invite::update_tag(&args),
         Command::ListTags(args) => invite::list_tags(&args),
