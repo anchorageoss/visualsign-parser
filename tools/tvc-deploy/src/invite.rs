@@ -1150,29 +1150,54 @@ pub fn list_activities(args: &ListActivitiesArgs) -> Result<()> {
         // Only fetched for the human-readable path; --json is for
         // raw/scripted consumption and shouldn't pay for this extra query.
         let names = NameLookup::from_org_data(&fetch_org_data(&auth).await?);
-        for activity in activities {
-            let created_at = activity
-                .created_at
-                .as_ref()
-                .map(|t| t.seconds.as_str())
-                .unwrap_or("?");
-            let summary = decode_intent(
-                activity.r#type,
-                activity.intent.as_ref().and_then(|i| i.inner.as_ref()),
-                &names,
-            );
-            println!(
-                "{}  {}  {:?}  created_at={}  fingerprint={}  -- {}",
-                activity.id,
-                activity.r#type.as_str_name(),
-                activity.status,
-                created_at,
-                activity.fingerprint,
-                summary
-            );
-        }
+        let rows: Vec<[String; 5]> = activities
+            .iter()
+            .map(|activity| {
+                let created_at = activity
+                    .created_at
+                    .as_ref()
+                    .map(|t| t.seconds.as_str())
+                    .unwrap_or("?");
+                let summary = decode_intent(
+                    activity.r#type,
+                    activity.intent.as_ref().and_then(|i| i.inner.as_ref()),
+                    &names,
+                );
+                [
+                    activity.id.clone(),
+                    short_activity_type_name(activity.r#type).to_string(),
+                    format!("{:?}", activity.status),
+                    created_at.to_string(),
+                    summary,
+                ]
+            })
+            .collect();
+        print_table(["ID", "TYPE", "STATUS", "CREATED_AT", "SUMMARY"], &rows);
         Ok(())
     })?
+}
+
+/// `ACTIVITY_TYPE_UPDATE_USER_TAG` -> `UPDATE_USER_TAG`; the `ACTIVITY_TYPE_`
+/// prefix is redundant in a table where every row is an activity.
+fn short_activity_type_name(t: ActivityType) -> &'static str {
+    t.as_str_name()
+        .strip_prefix("ACTIVITY_TYPE_")
+        .unwrap_or(t.as_str_name())
+}
+
+/// Print a borderless, terminal-width-aware table (comfy-table wraps long
+/// cells -- e.g. a decoded summary or an image URL -- instead of running
+/// them past the terminal edge).
+fn print_table<const N: usize>(header: [&str; N], rows: &[[String; N]]) {
+    let mut table = comfy_table::Table::new();
+    table
+        .load_preset(comfy_table::presets::NOTHING)
+        .set_content_arrangement(comfy_table::ContentArrangement::Dynamic)
+        .set_header(header);
+    for row in rows {
+        table.add_row(row);
+    }
+    println!("{table}");
 }
 
 /// Activities still awaiting consensus for a `create_tvc_deployment` targeting

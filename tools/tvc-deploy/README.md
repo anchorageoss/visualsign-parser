@@ -28,10 +28,11 @@ the org requires it):
 
    `tvc-deploy list-activities --org <alias>` lists activities newest-first,
    with `--status`/`--activity-type` filters and `--limit`. Its default
-   (non-`--json`) output decodes each activity's `intent` into a short
-   summary -- e.g. `updates tag 'releaser' (adds <user's display name>)`
-   instead of just `ACTIVITY_TYPE_UPDATE_USER_TAG` -- resolving tag/user ids
-   to their display names, so you don't have to cross-reference
+   (non-`--json`) output is a table (id/type/status/created_at/summary) that
+   wraps to your terminal width, and decodes each activity's `intent` into a
+   short summary -- e.g. `updates tag 'releaser' (adds <user's display
+   name>)` instead of just `ACTIVITY_TYPE_UPDATE_USER_TAG` -- resolving
+   tag/user ids to their display names, so you don't have to cross-reference
    `list-tags`/`list-users` by hand. Add `--json` to dump the full raw activity (intent, votes,
    fingerprint) instead -- handy for comparing two activities that look like
    duplicates, since the dashboard doesn't make that easy either. A
