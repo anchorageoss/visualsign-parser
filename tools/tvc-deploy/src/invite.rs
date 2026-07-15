@@ -476,6 +476,17 @@ struct InviteesFile {
 /// is left blank here; the caller fills it in once resolved.
 fn build_invitations(args: &InviteArgs) -> Result<Vec<(InvitationParams, bool)>> {
     if let Some(path) = &args.file {
+        if args.user_name.is_some()
+            || args.email.is_some()
+            || args.tags.is_some()
+            || args.allow_existing
+        {
+            bail!(
+                "--file is a batch invite; --user-name/--email/--tags/--allow-existing only \
+                 apply to a single invite and are ignored in --file mode -- set them per-invitee \
+                 or at the file's top level instead (see README)"
+            );
+        }
         let content = std::fs::read_to_string(path).with_context(|| format!("read {path}"))?;
         let file: InviteesFile =
             serde_json::from_str(&content).with_context(|| format!("parse {path}"))?;
@@ -537,7 +548,7 @@ fn build_invitations(args: &InviteArgs) -> Result<Vec<(InvitationParams, bool)>>
 /// `Alice+dev1@Co.com` and `alice@co.com` compare equal -- plus-addressed
 /// aliases of the same mailbox map to the same canonical identity.
 fn canonical_email(email: &str) -> String {
-    let email = email.to_lowercase();
+    let email = email.trim().to_lowercase();
     match email.split_once('@') {
         Some((local, domain)) => {
             let base_local = local.split('+').next().unwrap_or(local);
@@ -596,11 +607,16 @@ pub fn invite(args: &InviteArgs) -> Result<()> {
                 .collect();
 
             let (kept, skipped) = partition_existing(invitations_with_allow, &existing_emails);
+            let bypass_hint = if args.file.is_some() {
+                "set \"allowExisting\": true for this invitee, or at the top level of the file, \
+                 to invite it anyway"
+            } else {
+                "pass --allow-existing to invite it anyway"
+            };
             for s in &skipped {
                 println!(
                     "skipping {} <{}>: matches an existing member or pending invitation in org {} \
-                     (set \"allowExisting\": true for this invitee, or at the top level of \
-                     the file, to invite it anyway)",
+                     ({bypass_hint})",
                     s.receiver_user_name, s.receiver_user_email, auth.org_id
                 );
             }
@@ -812,6 +828,19 @@ fn load_policies_file(path: &str, vars_path: Option<&str>) -> Result<Vec<CreateP
         );
     }
     let rendered = render_template(&content, &vars);
+
+    // A --vars value can itself contain "{{...}}" (e.g. pasted from another
+    // template), which would otherwise bake an unresolved placeholder into
+    // the policy submitted to Turnkey -- re-check the rendered output, not
+    // just the raw template text checked above.
+    let unresolved = find_placeholders(&rendered);
+    if !unresolved.is_empty() {
+        bail!(
+            "{path} still contains unresolved placeholders after rendering (a --vars value \
+             likely contains its own {{{{...}}}} token): {}",
+            unresolved.join(", ")
+        );
+    }
 
     let file: PoliciesFile =
         serde_json::from_str(&rendered).with_context(|| format!("parse rendered {path}"))?;
@@ -1253,6 +1282,10 @@ pub fn list_users(args: &OrgArgs) -> Result<()> {
 }
 
 pub fn update_tag(args: &UpdateTagArgs) -> Result<()> {
+    if args.add_user_ids.is_none() && args.remove_user_ids.is_none() && args.name.is_none() {
+        bail!("nothing to update: pass at least one of --add-user-ids, --remove-user-ids, --name");
+    }
+
     let add_user_ids = args
         .add_user_ids
         .as_deref()
@@ -1786,6 +1819,57 @@ mod tests {
     }
 
     #[test]
+    fn build_invitations_rejects_file_combined_with_single_invitee_flags() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(
+            file,
+            r#"{{"invitees": [{{"userName": "Alice", "email": "alice@example.com"}}]}}"#
+        )
+        .unwrap();
+        let path = file.path().to_str().unwrap();
+
+        let mut args = invite_args(Some(path), Some("Bob"), None);
+        assert!(build_invitations(&args)
+            .unwrap_err()
+            .to_string()
+            .contains("--file"));
+
+        let mut args2 = invite_args(Some(path), None, Some("bob@example.com"));
+        assert!(build_invitations(&args2)
+            .unwrap_err()
+            .to_string()
+            .contains("--file"));
+
+        args = invite_args(Some(path), None, None);
+        args.tags = Some("tag-a".to_string());
+        assert!(build_invitations(&args)
+            .unwrap_err()
+            .to_string()
+            .contains("--file"));
+
+        args2 = invite_args(Some(path), None, None);
+        args2.allow_existing = true;
+        assert!(build_invitations(&args2)
+            .unwrap_err()
+            .to_string()
+            .contains("--file"));
+    }
+
+    #[test]
+    fn update_tag_rejects_when_nothing_to_change() {
+        let args = UpdateTagArgs {
+            tag_id: "tag-uuid".to_string(),
+            add_user_ids: None,
+            remove_user_ids: None,
+            name: None,
+            org: OrgArgs { org: None },
+        };
+
+        let err = update_tag(&args).unwrap_err();
+        assert!(err.to_string().contains("nothing to update"));
+    }
+
+    #[test]
     fn parse_access_type_accepts_known_values_case_insensitively() {
         assert_eq!(parse_access_type("WEB").unwrap(), AccessType::Web);
         assert_eq!(parse_access_type("api").unwrap(), AccessType::Api);
@@ -1851,6 +1935,25 @@ mod tests {
 
         let err = load_policies_file(file.path().to_str().unwrap(), None).unwrap_err();
         assert!(err.to_string().contains("MISSING"));
+    }
+
+    #[test]
+    fn load_policies_file_errors_on_nested_placeholder_in_vars_value() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(
+            file,
+            r#"{{"policies": [{{"policyName": "p", "effect": "deny", "consensus": "{{{{FOO}}}}", "notes": ""}}]}}"#
+        )
+        .unwrap();
+        let mut vars = NamedTempFile::new().unwrap();
+        write!(vars, r#"{{"FOO": "{{{{BAR}}}}"}}"#).unwrap();
+
+        let err = load_policies_file(
+            file.path().to_str().unwrap(),
+            Some(vars.path().to_str().unwrap()),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("BAR"));
     }
 
     #[test]

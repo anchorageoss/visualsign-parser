@@ -8,11 +8,11 @@
       "notes": ""
     },
     {
-      "policyName": "Allow users with releaser tag to update and delete deployments",
+      "policyName": "Allow users with releaser tag to update, delete, and restore deployments",
       "effect": "allow",
-      "condition": "activity.type == 'ACTIVITY_TYPE_UPDATE_TVC_APP_LIVE_DEPLOYMENT' || activity.type == 'ACTIVITY_TYPE_DELETE_TVC_DEPLOYMENT'",
+      "condition": "activity.type == 'ACTIVITY_TYPE_UPDATE_TVC_APP_LIVE_DEPLOYMENT' || activity.type == 'ACTIVITY_TYPE_DELETE_TVC_DEPLOYMENT' || activity.type == 'ACTIVITY_TYPE_RESTORE_TVC_DEPLOYMENT'",
       "consensus": "approvers.any(user, user.tags.contains('{{RELEASER_TAG_ID}}'))",
-      "notes": ""
+      "notes": "Releaser tag can point/update the live deployment and delete a deployment; also grants restore so a delete by this same role can be undone."
     },
     {
       "policyName": "Allow users with initiators tag to create TVC deployments",

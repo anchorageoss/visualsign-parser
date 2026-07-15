@@ -122,23 +122,6 @@ tvc-deploy create-policies --file templates/releaser-initiator-policies.json \
   --vars prod-vars.json --org prod                                # actually create
 ```
 
-## Deploying
-
-`tvc-deploy deploy` refuses to run if the target `--app-id` already has a
-`create_tvc_deployment` activity awaiting consensus, since Turnkey has no
-dedup for this -- submitting the same deploy twice (e.g. a retry before the
-first finished consensus) creates a second, independent activity rather than
-reusing the pending one:
-
-```
-error: app <app-id> already has 1 deployment activity(ies) awaiting consensus: <activity-id>
-approve or reject the existing one first (tvc-deploy approve-activity / reject-activity --activity-id <id>), or pass --force to submit anyway
-```
-
-Resolve the existing activity (approve or reject it) and re-run, or pass
-`--force` to submit anyway. The check uses the active org by default; pass
-`--org <alias>` on `deploy` if the deployment's org differs from it.
-
 ### Basic / read-only access
 
 `accessType` on an invite only controls *how* a user authenticates (web
@@ -159,3 +142,20 @@ activities that change state:
 tvc-deploy create-policies --file templates/readonly-policy.json \
   --vars readonly-vars.json --org <alias>
 ```
+
+## Deploying
+
+`tvc-deploy deploy` refuses to run if the target `--app-id` already has a
+`create_tvc_deployment` activity awaiting consensus, since Turnkey has no
+dedup for this -- submitting the same deploy twice (e.g. a retry before the
+first finished consensus) creates a second, independent activity rather than
+reusing the pending one:
+
+```
+error: app <app-id> already has 1 deployment activity(ies) awaiting consensus: <activity-id>
+approve or reject the existing one first (tvc-deploy approve-activity / reject-activity --activity-id <id>), or pass --force to submit anyway
+```
+
+Resolve the existing activity (approve or reject it) and re-run, or pass
+`--force` to submit anyway. The check uses the active org by default; pass
+`--org <alias>` on `deploy` if the deployment's org differs from it.
