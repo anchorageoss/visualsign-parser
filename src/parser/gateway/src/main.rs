@@ -59,6 +59,10 @@ struct TurnkeyRequest {
     unsigned_payload: String,
     chain: String,
     chain_metadata: Option<ChainMetadataInput>,
+    /// Opt-in for the chain-specific `intermediate_output` blob. Defaults to
+    /// false so existing REST callers that omit it behave exactly as before.
+    #[serde(default)]
+    include_intermediate_output: bool,
 }
 
 #[derive(Serialize)]
@@ -222,6 +226,7 @@ async fn parse_handler(
         unsigned_payload: wrapper.request.unsigned_payload,
         chain,
         chain_metadata: wrapper.request.chain_metadata.map(ChainMetadata::from),
+        include_intermediate_output: wrapper.request.include_intermediate_output,
     });
 
     let response = match tokio::time::timeout(PARSE_TIMEOUT, grpc_client.parse(request)).await {

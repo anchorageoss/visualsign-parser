@@ -18,6 +18,11 @@ const SERDE_DEFAULT: &str = "#[cfg_attr(feature = \"serde_derive\", serde(defaul
 const SERDE_ABI_TYPE: &str =
     "#[cfg_attr(feature = \"serde_derive\", serde(with = \"crate::abi_type_serde\", default))]";
 const BORSH_ENUM_DISC_ATTR: &str = "#[borsh(use_discriminant=true)]";
+// Exclude a field from the derived Borsh encoding. Used for
+// `ParsedTransactionPayload.intermediate_output` so the derived
+// `borsh::to_vec` stays byte-identical to the legacy four-field encoding; the
+// signing path appends the field's bytes to the digest only when non-empty.
+const BORSH_SKIP: &str = "#[borsh(skip)]";
 const TONIC_FEATURE_GATE: &str = "#[cfg(feature = \"tonic_types\")]";
 const BORSH_DERIVE: &str = "#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]";
 
@@ -59,6 +64,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // BORSH - Used for QOS sha256 checks
         .type_attribute(".parser.ParsedTransactionPayload", BORSH_DERIVE)
         .enum_attribute(".parser.ParsedTransactionPayload", BORSH_ENUM_DISC_ATTR)
+        .field_attribute(
+            ".parser.ParsedTransactionPayload.intermediate_output",
+            BORSH_SKIP,
+        )
         .type_attribute(".parser.Metadata", BORSH_DERIVE)
         .enum_attribute(".parser.Metadata", BORSH_ENUM_DISC_ATTR)
         .type_attribute(".parser.SolanaMetadata", BORSH_DERIVE)

@@ -198,6 +198,7 @@ pub mod test_utils {
         transaction_string_to_visual_sign(
             data,
             VisualSignOptions {
+                include_intermediate_output: false,
                 metadata: None,
                 decode_transfers: true,
                 transaction_name: None,

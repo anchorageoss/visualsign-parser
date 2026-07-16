@@ -52,6 +52,12 @@ pub struct ParseRequest {
     pub chain: i32,
     #[prost(message, optional, tag = "3")]
     pub chain_metadata: ::core::option::Option<ChainMetadata>,
+    /// Opt-in: when true, the parser emits `intermediate_output` on the response
+    /// (chain-specific structured decode for downstream policy validation).
+    /// Default false preserves the pre-feature behavior byte-for-byte: the parser
+    /// emits an empty `intermediate_output` and the signed digest is unchanged.
+    #[prost(bool, tag = "4")]
+    pub include_intermediate_output: bool,
 }
 #[cfg_attr(
     feature = "serde_derive",
@@ -150,6 +156,16 @@ pub struct ParsedTransactionPayload {
     /// Legacy field. Will be removed, please do not use!
     #[prost(string, tag = "4")]
     pub signable_payload: ::prost::alloc::string::String,
+    /// Borsh-serialized, chain-specific structured decode of the transaction for
+    /// downstream policy validation (e.g. Solana instruction args). Empty when not
+    /// requested (see ParseRequest.include_intermediate_output) or unsupported for
+    /// the chain. This field is EXCLUDED from the derived Borsh encoding of this
+    /// message (codegen applies `#\[borsh(skip)\]`); the signing path appends its
+    /// bytes to the digest only when non-empty, so an empty value keeps the digest
+    /// byte-for-byte identical to the pre-feature four-field encoding.
+    #[prost(bytes = "vec", tag = "5")]
+    #[borsh(skip)]
+    pub intermediate_output: ::prost::alloc::vec::Vec<u8>,
 }
 #[cfg_attr(
     feature = "serde_derive",

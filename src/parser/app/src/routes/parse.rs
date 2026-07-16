@@ -51,14 +51,17 @@ pub(crate) fn parse_with_registry(
         transaction_name: None,
         metadata: parse_request.chain_metadata.clone(),
         developer_config: None, // Production API: only accept unsigned transactions
+        include_intermediate_output: parse_request.include_intermediate_output,
     };
     let proto_chain = ProtoChain::try_from(parse_request.chain)
         .map_err(|_| GrpcError::new(Code::InvalidArgument, "invalid chain"))?;
     let registry_chain: VisualSignRegistryChain = chain_conversion::proto_to_registry(proto_chain);
 
-    let signable_payload = registry
+    let conversion = registry
         .convert_transaction(&registry_chain, request_payload, options)
         .map_err(|e| GrpcError::new(Code::InvalidArgument, &format!("{e}")))?;
+    let signable_payload = conversion.payload;
+    let intermediate_output = conversion.intermediate_output;
 
     // Defense-in-depth: validate the charset of the SignablePayload unconditionally
     // on the signing path, regardless of which converter produced it. Per-converter
@@ -98,9 +101,13 @@ pub(crate) fn parse_with_registry(
         metadata_digest: qos_hex::encode(&sha_256(&metadata_bytes)),
         // TODO: remove me once clients have migrated and rely on the fields above
         signable_payload: parsed_payload_str,
+        // Move the converter's bytes in verbatim. The digest below is computed
+        // from this same field (see `signing_digest_bytes`), so the bytes that
+        // are transported are, by construction, the bytes that are signed.
+        intermediate_output: intermediate_output.unwrap_or_default(),
     };
 
-    let digest = sha_256(&borsh::to_vec(&payload).expect("payload implements borsh::Serialize"));
+    let digest = sha_256(&signing_digest_bytes(&payload));
     let sig = ephemeral_key
         .sign(&digest)
         .map_err(|e| GrpcError::new(Code::Internal, &format!("{e:?}")))?;
@@ -120,13 +127,40 @@ pub(crate) fn parse_with_registry(
     })
 }
 
+/// Compute the bytes the ephemeral key signs over for a `ParsedTransactionPayload`.
+///
+/// This is the single source of truth for the signed digest, derived entirely
+/// from the `payload` argument — so the `intermediate_output` that is signed is
+/// exactly the field carried on the response, never a separately-held copy.
+///
+/// Backward-compatibility contract: `intermediate_output` is excluded from the
+/// derived Borsh encoding (`#[borsh(skip)]`, applied by codegen). When it is
+/// empty, this returns exactly `borsh(payload)` — byte-for-byte identical to
+/// the pre-feature four-field encoding, so existing signatures/consumers are
+/// unaffected. When it is non-empty, its Borsh `Vec<u8>` encoding (u32-LE
+/// length prefix followed by the raw bytes, matching a downstream borsh
+/// encoder) is appended. Presence is out-of-band (no tag byte), so an
+/// intermediate-unaware consumer that also appends nothing agrees on the empty
+/// case and correctly rejects the non-empty case it cannot verify.
+fn signing_digest_bytes(payload: &ParsedTransactionPayload) -> Vec<u8> {
+    let mut bytes = borsh::to_vec(payload).expect("payload implements borsh::Serialize");
+    if !payload.intermediate_output.is_empty() {
+        bytes.extend_from_slice(
+            &borsh::to_vec(&payload.intermediate_output)
+                .expect("Vec<u8> implements borsh::Serialize"),
+        );
+    }
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata};
     use std::collections::BTreeMap;
     use visualsign::vsptrait::{
-        Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
+        ConversionResult, Transaction, TransactionParseError, VisualSignConverter,
+        VisualSignConverterFromString,
     };
     use visualsign::{
         SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
@@ -238,8 +272,8 @@ mod tests {
             &self,
             _transaction: StubTransaction,
             _options: VisualSignOptions,
-        ) -> Result<SignablePayload, VisualSignError> {
-            Ok(SignablePayload::new(
+        ) -> Result<ConversionResult, VisualSignError> {
+            Ok(ConversionResult::new(SignablePayload::new(
                 0,
                 "Stub Transaction".to_string(),
                 None,
@@ -253,7 +287,7 @@ mod tests {
                     },
                 }],
                 "StubTx".to_string(),
-            ))
+            )))
         }
 
         /// Intentionally skips the default's `validate_charset()` call so the
@@ -264,7 +298,7 @@ mod tests {
             &self,
             transaction: StubTransaction,
             options: VisualSignOptions,
-        ) -> Result<SignablePayload, VisualSignError> {
+        ) -> Result<ConversionResult, VisualSignError> {
             self.to_visual_sign_payload(transaction, options)
         }
     }
@@ -283,8 +317,8 @@ mod tests {
             &self,
             _transaction: StubTransaction,
             _options: VisualSignOptions,
-        ) -> Result<SignablePayload, VisualSignError> {
-            Ok(SignablePayload::new(
+        ) -> Result<ConversionResult, VisualSignError> {
+            Ok(ConversionResult::new(SignablePayload::new(
                 0,
                 "Stub Transaction".to_string(),
                 None,
@@ -298,7 +332,7 @@ mod tests {
                     },
                 }],
                 "StubTx".to_string(),
-            ))
+            )))
         }
     }
 
@@ -307,7 +341,7 @@ mod tests {
             &self,
             transaction_data: &str,
             options: VisualSignOptions,
-        ) -> Result<SignablePayload, VisualSignError> {
+        ) -> Result<ConversionResult, VisualSignError> {
             // NOTE: intentionally calls `to_visual_sign_payload` directly,
             // skipping `to_validated_visual_sign_payload`. Mirrors the
             // production Ethereum override.
@@ -324,6 +358,7 @@ mod tests {
     /// `RegistryChain::Tron`, which is what we register the stub under.
     fn stub_request() -> ParseRequest {
         ParseRequest {
+            include_intermediate_output: false,
             unsigned_payload: "stub".to_string(),
             chain: ProtoChain::Tron as i32,
             chain_metadata: None,
@@ -408,5 +443,56 @@ mod tests {
              converter skips its inner validate_charset call",
         );
         assert_eq!(err.code, Code::InvalidArgument);
+    }
+
+    fn sample_payload(intermediate_output: Vec<u8>) -> ParsedTransactionPayload {
+        ParsedTransactionPayload {
+            parsed_payload: "parsed".to_string(),
+            input_payload_digest: "input".to_string(),
+            metadata_digest: "meta".to_string(),
+            signable_payload: "signable".to_string(),
+            intermediate_output,
+        }
+    }
+
+    /// Backward-compatibility: with an empty `intermediate_output`, the bytes we
+    /// sign are byte-for-byte identical to the legacy four-field Borsh encoding.
+    /// A parser/HSM that predates the field computes the same digest, so existing
+    /// signatures keep verifying and rollout is incremental.
+    #[test]
+    fn signing_digest_is_backward_compatible_when_intermediate_empty() {
+        let payload = sample_payload(vec![]);
+        // `intermediate_output` is `#[borsh(skip)]`, so `borsh::to_vec` yields the
+        // exact pre-feature four-field encoding.
+        let legacy = borsh::to_vec(&payload).expect("borsh");
+        assert_eq!(
+            signing_digest_bytes(&payload),
+            legacy,
+            "empty intermediate_output must not change the signed bytes",
+        );
+    }
+
+    /// When present, the intermediate bytes are appended as a Borsh `Vec<u8>`
+    /// (u32-LE length prefix + raw bytes) after the unchanged four-field prefix.
+    #[test]
+    fn signing_digest_appends_intermediate_when_present() {
+        let base = signing_digest_bytes(&sample_payload(vec![]));
+        let payload = sample_payload(vec![1, 2, 3, 4]);
+
+        // The four-field Borsh prefix is unchanged by the skipped field.
+        assert_eq!(
+            borsh::to_vec(&payload).expect("borsh"),
+            base,
+            "the derived Borsh encoding must ignore intermediate_output",
+        );
+
+        let mut expected = base.clone();
+        expected.extend_from_slice(&borsh::to_vec(&payload.intermediate_output).expect("borsh"));
+        assert_eq!(
+            signing_digest_bytes(&payload),
+            expected,
+            "present intermediate_output must be appended as borsh(Vec<u8>)",
+        );
+        assert!(signing_digest_bytes(&payload).len() > base.len());
     }
 }

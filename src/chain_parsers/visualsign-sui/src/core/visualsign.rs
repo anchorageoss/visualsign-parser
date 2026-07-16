@@ -16,8 +16,8 @@ use visualsign::{
     SignablePayload, SignablePayloadField,
     encodings::SupportedEncodings,
     vsptrait::{
-        Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
-        VisualSignError, VisualSignOptions,
+        ConversionResult, Transaction, TransactionParseError, VisualSignConverter,
+        VisualSignConverterFromString, VisualSignError, VisualSignOptions,
     },
 };
 
@@ -66,14 +66,17 @@ impl VisualSignConverter<SuiTransactionWrapper> for SuiVisualSignConverter {
         &self,
         transaction_wrapper: SuiTransactionWrapper,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
+    ) -> Result<ConversionResult, VisualSignError> {
         let transaction = transaction_wrapper.inner();
 
-        convert_to_visual_sign_payload(
+        // Sui has no intermediate_output schema yet; envelope-ready via
+        // `ConversionResult::with_intermediate` when one is added.
+        let payload = convert_to_visual_sign_payload(
             transaction,
             options.decode_transfers,
             options.transaction_name,
-        )
+        )?;
+        Ok(ConversionResult::new(payload))
     }
 }
 
@@ -127,7 +130,9 @@ pub fn transaction_to_visual_sign(
     transaction: TransactionData,
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
-    SuiVisualSignConverter.to_visual_sign_payload(SuiTransactionWrapper::new(transaction), options)
+    SuiVisualSignConverter
+        .to_visual_sign_payload(SuiTransactionWrapper::new(transaction), options)
+        .map(|r| r.payload)
 }
 
 /// Public API function for string-based transactions.
@@ -140,7 +145,9 @@ pub fn transaction_string_to_visual_sign(
     transaction_data: &str,
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
-    SuiVisualSignConverter.to_visual_sign_payload_from_string(transaction_data, options)
+    SuiVisualSignConverter
+        .to_visual_sign_payload_from_string(transaction_data, options)
+        .map(|r| r.payload)
 }
 
 #[cfg(test)]

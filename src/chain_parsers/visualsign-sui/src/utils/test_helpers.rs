@@ -69,6 +69,7 @@ pub fn payload_from_b64(data: &str) -> SignablePayload {
     transaction_string_to_visual_sign(
         data,
         VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: true,
             transaction_name: None,
             metadata: None,
@@ -83,6 +84,7 @@ pub fn payload_from_b64_with_context(data: &str, context: &str) -> SignablePaylo
     match transaction_string_to_visual_sign(
         data,
         VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: true,
             transaction_name: None,
             metadata: None,

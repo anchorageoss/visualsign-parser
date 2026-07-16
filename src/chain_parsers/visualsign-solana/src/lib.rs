@@ -7,6 +7,10 @@ pub use cli_plugin::{SolanaArgs, SolanaPlugin};
 mod core;
 mod idl;
 mod integrations;
+/// Chain-specific structured decode emitted as
+/// `ParsedTransactionPayload.intermediate_output`. Published so downstream
+/// consumers can `borsh::from_slice` into the same schema the parser produces.
+pub mod intermediate;
 mod presets;
 pub mod utils;
 
@@ -37,13 +41,15 @@ mod tests {
                 .to_visual_sign_payload(
                     transaction_wrapper,
                     VisualSignOptions {
+                        include_intermediate_output: false,
                         metadata: None,
                         decode_transfers: true,
                         transaction_name: Some(description.to_string()),
                         developer_config: None,
                     },
                 )
-                .unwrap_or_else(|e| panic!("Failed to convert {description} to payload: {e:?}"));
+                .unwrap_or_else(|e| panic!("Failed to convert {description} to payload: {e:?}"))
+                .payload;
 
             // Test charset validation
             let validation_result = payload.validate_charset();
@@ -94,13 +100,15 @@ mod tests {
             .to_visual_sign_payload(
                 transaction_wrapper,
                 VisualSignOptions {
+                    include_intermediate_output: false,
                     metadata: None,
                     decode_transfers: true,
                     transaction_name: Some("Unicode Escape Test".to_string()),
                     developer_config: None,
                 },
             )
-            .expect("Should convert to payload successfully");
+            .expect("Should convert to payload successfully")
+            .payload;
 
         // Convert to JSON
         let json_result = payload

@@ -92,6 +92,7 @@ fn validate_safe_charset(json_str: &str) {
 async fn parser_e2e() {
     async fn test(test_args: TestArgs) {
         let parse_request = ParseRequest {
+            include_intermediate_output: false,
             unsigned_payload: "unsignedpayload".to_string(),
             chain: Chain::Unspecified as i32,
             chain_metadata: None,
@@ -132,6 +133,7 @@ async fn parser_e2e() {
 async fn propagates_grpc_errors() {
     async fn test(test_args: TestArgs) {
         let parse_request = ParseRequest {
+            include_intermediate_output: false,
             unsigned_payload: "no-no-that-is-not-valid-base64".to_string(),
             chain: Chain::Ethereum as i32,
             chain_metadata: None,
@@ -207,6 +209,7 @@ async fn parser_solana_native_transfer_e2e() {
         );
         tracing::debug!("Solana transaction: {}", solana_tx);
         let parse_request = ParseRequest {
+            include_intermediate_output: false,
             unsigned_payload: solana_tx,
             chain: Chain::Solana as i32,
             chain_metadata: None,
@@ -399,6 +402,7 @@ async fn parser_ethereum_native_transfer_e2e() {
         let ethereum_tx_hex = "0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83";
 
         let parse_request = ParseRequest {
+            include_intermediate_output: false,
             unsigned_payload: ethereum_tx_hex.to_string(),
             chain: Chain::Ethereum as i32,
             chain_metadata: None,
@@ -508,6 +512,7 @@ async fn parser_charset_validation_all_chains() {
 
         for (chain, transaction, description) in test_cases {
             let parse_request = ParseRequest {
+                include_intermediate_output: false,
                 unsigned_payload: transaction.to_string(),
                 chain: chain as i32,
                 chain_metadata: None,
@@ -565,6 +570,7 @@ async fn parser_sui_native_transfer_e2e() {
         let sui_tx_b64 = "AAACACCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJCrze8SNFZ4kAAIAMqaOwAAAAACAgABAQEAAQECAAABAADW6S4ALibDr7IIgAHBtYILZPK8NRv9paI0Ksv59cHKwgHLSF74CguvkHmmIcQsiwy2XOmYbhyB/RbuiAOPAEpa7Rua1BcAAAAAIGOAX4LpV/FYmnpiNGs3y1rsDwwf9O10x5SdK7vXP+9Q1ukuAC4mw6+yCIABwbWCC2TyvDUb/aWiNCrL+fXBysLoAwAAAAAAAEBLTAAAAAAAAA==";
 
         let parse_request = ParseRequest {
+            include_intermediate_output: false,
             unsigned_payload: sui_tx_b64.to_string(),
             chain: Chain::Sui as i32,
             chain_metadata: None,

@@ -85,7 +85,8 @@ async fn surfpool_jupiter_swap_roundtrip() {
 
     let payload = SolanaVisualSignConverter
         .to_visual_sign_payload(wrapper, options)
-        .expect("converter should succeed");
+        .expect("converter should succeed")
+        .payload;
 
     assert!(
         !payload.fields.is_empty(),

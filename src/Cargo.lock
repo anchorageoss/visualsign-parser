@@ -6553,6 +6553,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "generated",
+ "hex",
  "serde",
  "serde_json",
  "tracing",

@@ -98,7 +98,7 @@ struct FileResponse<'a> {
 /// see edits.
 pub fn run(args: &ServeArgs) -> Result<(), String> {
     let plugins = args.chains.build_plugins();
-    let runtime = prepare_runtime(&args.chain, args.network.clone(), &plugins)?;
+    let runtime = prepare_runtime(&args.chain, args.network.clone(), &plugins, false)?;
 
     validate_dir(&args.dir)?;
 
@@ -448,7 +448,13 @@ mod tests {
 
     fn make_runtime() -> Runtime {
         let plugins = ChainArgs::default().build_plugins();
-        prepare_runtime("ethereum", Some("ETHEREUM_MAINNET".to_string()), &plugins).unwrap()
+        prepare_runtime(
+            "ethereum",
+            Some("ETHEREUM_MAINNET".to_string()),
+            &plugins,
+            false,
+        )
+        .unwrap()
     }
 
     /// A real EIP-1559 ETH transfer, also used by the integration fixture.

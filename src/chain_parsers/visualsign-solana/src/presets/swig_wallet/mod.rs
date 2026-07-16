@@ -2340,6 +2340,7 @@ mod tests {
             .to_visual_sign_payload(
                 tx_wrapper,
                 VisualSignOptions {
+                    include_intermediate_output: false,
                     decode_transfers: true,
                     transaction_name: Some(description.to_string()),
                     metadata: None,
@@ -2347,6 +2348,7 @@ mod tests {
                 },
             )
             .expect("visualization should succeed")
+            .payload
     }
 
     fn assert_text_field(fields: &[AnnotatedPayloadField], label: &str, expected: &str) {
