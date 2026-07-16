@@ -10,6 +10,7 @@ use axum::{
     http::StatusCode,
     routing::{get, post},
 };
+use base64::Engine as _;
 use generated::grpc::health::v1::{
     HealthCheckRequest, health_check_response::ServingStatus, health_client::HealthClient,
 };
@@ -140,6 +141,12 @@ struct TurnkeyPayload {
     signable_payload: String,
     metadata_digest: String,
     input_payload_digest: String,
+    /// Chain-specific, borsh-serialized structured decode, base64-encoded (proto
+    /// `bytes` JSON convention). Empty and omitted from the response when the
+    /// request did not opt in or the chain has no intermediate output, so
+    /// responses to existing consumers stay byte-identical.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    intermediate_output: String,
 }
 
 #[derive(Serialize)]
@@ -302,6 +309,11 @@ async fn parse_handler(
                         signable_payload: payload.parsed_payload,
                         metadata_digest: payload.metadata_digest,
                         input_payload_digest: payload.input_payload_digest,
+                        // base64 of an empty Vec is "", which serde omits (see
+                        // skip_serializing_if) so the non-intermediate response
+                        // is unchanged.
+                        intermediate_output: base64::engine::general_purpose::STANDARD
+                            .encode(&payload.intermediate_output),
                     },
                     signature,
                 },
@@ -323,6 +335,7 @@ fn error_response(msg: String) -> TurnkeyResponseWrapper {
                     signable_payload: String::new(),
                     metadata_digest: EMPTY_SHA256.to_string(),
                     input_payload_digest: EMPTY_SHA256.to_string(),
+                    intermediate_output: String::new(),
                 },
                 signature: None,
             },
@@ -409,6 +422,39 @@ mod tests {
         assert_eq!(payload.input_payload_digest, EMPTY_SHA256);
         assert!(payload.signable_payload.is_empty());
         assert_eq!(resp.error.as_deref(), Some("something broke"));
+    }
+
+    #[test]
+    fn intermediate_output_present_serializes_as_camelcase_base64() {
+        let payload = TurnkeyPayload {
+            signable_payload: "sp".to_string(),
+            metadata_digest: "md".to_string(),
+            input_payload_digest: "ipd".to_string(),
+            intermediate_output: "AQID".to_string(), // base64 of [1,2,3]
+        };
+        let value = serde_json::to_value(&payload).unwrap();
+        assert_eq!(
+            value.get("intermediateOutput").and_then(|v| v.as_str()),
+            Some("AQID"),
+            "non-empty intermediate output must serialize under the camelCase key"
+        );
+    }
+
+    #[test]
+    fn intermediate_output_empty_is_omitted() {
+        // Existing consumers and existing-parser responses must see byte-identical
+        // JSON when there is no intermediate output: the key is absent, not "".
+        let payload = TurnkeyPayload {
+            signable_payload: "sp".to_string(),
+            metadata_digest: "md".to_string(),
+            input_payload_digest: "ipd".to_string(),
+            intermediate_output: String::new(),
+        };
+        let value = serde_json::to_value(&payload).unwrap();
+        assert!(
+            value.get("intermediateOutput").is_none(),
+            "empty intermediate output must be omitted from the response"
+        );
     }
 
     #[test]
