@@ -222,12 +222,17 @@ pub fn parse_and_display(
     // be captured verbatim as a downstream (e.g. C++) test fixture. Decoding
     // into a typed schema is chain-specific and intentionally left to the
     // consumer; the CLI stays chain-agnostic and passes the bytes through.
+    //
+    // Emitted to stderr so stdout stays a clean, single JSON (or text) document
+    // for scripted consumers even when `--with-intermediate` is combined with
+    // `--output json`. This mirrors the human-format hint above, which also
+    // uses `eprintln!` to keep stdout clean.
     if let Some(bytes) = &conversion.intermediate_output {
-        println!(
+        eprintln!(
             "\n=== intermediate_output ({} bytes, borsh) ===",
             bytes.len()
         );
-        println!("{}", hex::encode(bytes));
+        eprintln!("{}", hex::encode(bytes));
     }
     Ok(())
 }

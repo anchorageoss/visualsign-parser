@@ -235,7 +235,12 @@ fn decode_file(
     let payload = registry
         .convert_transaction(&chain, trimmed, options.clone())
         .map_err(|e| format!("{e:?}"))?;
-    serde_json::to_value(&payload).map_err(|e| format!("serialize: {e}"))
+    // `convert_transaction` returns a `ConversionResult` (payload + optional
+    // intermediate_output); only the inner `SignablePayload` is `Serialize`, so
+    // serialize that. The `serve` UI is interactive triage and never opts into
+    // `include_intermediate_output`, so the intermediate blob is `None` here
+    // anyway.
+    serde_json::to_value(&payload.payload).map_err(|e| format!("serialize: {e}"))
 }
 
 async fn load_entries(state: &AppState) -> Result<Vec<DecodedEntry>, String> {

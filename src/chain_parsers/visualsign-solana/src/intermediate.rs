@@ -16,7 +16,11 @@
 //! - All maps use `BTreeMap` so Borsh encoding is byte-deterministic.
 //! - `program_call_args` is emitted as a canonical JSON string
 //!   (`program_call_args_json`) because `serde_json::Value` does not implement
-//!   `BorshSerialize`. Keys are alphabetized.
+//!   `BorshSerialize`. Keys are alphabetized at *every* nesting level: the
+//!   `serde_json::Value` tree is walked and re-keyed into sorted order, so the
+//!   output is independent of `serde_json`'s `preserve_order` build feature
+//!   (which is enabled transitively elsewhere in the workspace and would
+//!   otherwise serialize nested objects in insertion order).
 
 use std::collections::BTreeMap;
 
@@ -107,8 +111,10 @@ pub struct SolanaParsedInstructionDataIo {
     pub instruction_name: String,
     pub discriminator: String,
     pub named_accounts: BTreeMap<String, String>,
-    /// Canonical JSON string with alphabetized keys. Built from a `BTreeMap`
-    /// view so byte-identical inputs produce byte-identical encodings.
+    /// Canonical JSON string with alphabetized keys at every nesting level.
+    /// Built by recursively re-keying the `serde_json::Value` tree into sorted
+    /// order, so byte-identical inputs produce byte-identical encodings
+    /// regardless of `serde_json`'s `preserve_order` build feature.
     pub program_call_args_json: String,
     /// `"BuiltIn"` (with the inner program-type discriminant collapsed) or
     /// `"Custom"`. Empty when no IDL was used.
@@ -181,13 +187,47 @@ fn idl_source_string(source: &IdlSource) -> String {
 }
 
 fn canonical_args_json(args: &serde_json::Map<String, Value>) -> String {
-    // Re-key into a BTreeMap so JSON output is alphabetized regardless of
-    // upstream insertion order. We hold references to avoid cloning Values.
-    let ordered: BTreeMap<&String, &Value> = args.iter().collect();
-    // serde_json::to_string never fails on a Map<String, Value>; on the
-    // off-chance it does we fall back to an empty object so the surrounding
-    // borsh encoding stays well-formed.
-    serde_json::to_string(&ordered).unwrap_or_else(|_| "{}".to_string())
+    // Canonicalize recursively so *every* nesting level is alphabetized, not
+    // just the top-level map. serde_json::to_string never fails on a
+    // Map<String, Value>; on the off-chance it does we fall back to an empty
+    // object so the surrounding borsh encoding stays well-formed.
+    let canonical = Value::Object(canonicalize_map(args));
+    serde_json::to_string(&canonical).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Recursively re-key every nested JSON object so its keys appear in sorted
+/// order, independent of `serde_json`'s `preserve_order` build feature.
+///
+/// `serde_json` is built with `preserve_order` elsewhere in the workspace
+/// (pulled in transitively by the Sui chain parser and the integration crate
+/// via `indexmap`), which makes `serde_json::Map` an `IndexMap` that serializes
+/// keys in *insertion* order. Without this walk, only the top-level map would
+/// be alphabetized (by the `BTreeMap` re-key in [`canonicalize_map`]) and
+/// nested objects would leak insertion order into the canonical string —
+/// silently breaking byte-determinism for consumers that mirror this schema.
+/// Arrays are traversed element-wise; scalars are returned unchanged.
+fn canonicalize_value(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(canonicalize_map(map)),
+        Value::Array(items) => Value::Array(items.iter().map(canonicalize_value).collect()),
+        _ => value.clone(),
+    }
+}
+
+/// Build a new `serde_json::Map` whose entries are those of `map`, inserted in
+/// sorted key order and with values recursively canonicalized.
+///
+/// Inserting in sorted order makes the serialized output alphabetized
+/// regardless of whether `serde_json::Map` is backed by `BTreeMap` (default) or
+/// `IndexMap` (`preserve_order`): a `BTreeMap` stays sorted; an `IndexMap`
+/// preserves the (sorted) insertion order we feed it.
+fn canonicalize_map(map: &serde_json::Map<String, Value>) -> serde_json::Map<String, Value> {
+    let sorted: BTreeMap<&String, &Value> = map.iter().collect();
+    let mut out = serde_json::Map::with_capacity(map.len());
+    for (k, v) in sorted {
+        out.insert(k.clone(), canonicalize_value(v));
+    }
+    out
 }
 
 impl From<&SolanaParsedInstructionData> for SolanaParsedInstructionDataIo {
@@ -347,6 +387,50 @@ mod tests {
             canonical_args_json(&map_a).find("alpha").unwrap()
                 < canonical_args_json(&map_a).find("zeta").unwrap()
         );
+    }
+
+    #[test]
+    fn canonical_args_json_alphabetizes_nested_keys() {
+        // Same content, different insertion order at the top level, inside a
+        // nested object, and inside an object that is an array element. With
+        // `preserve_order` enabled transitively in the workspace, serde_json
+        // serializes nested objects in insertion order, so a top-level-only
+        // sort would let nested insertion order leak through and the two
+        // encodings would differ. Recursive canonicalization must make them
+        // byte-identical.
+        let map_a = args_map(&[
+            ("zeta", json!({"nzeta": 1, "nalpha": 2})),
+            ("alpha", json!([{"bzeta": 3, "balpha": 4}])),
+        ]);
+        let map_b = args_map(&[
+            ("alpha", json!([{"balpha": 4, "bzeta": 3}])),
+            ("zeta", json!({"nalpha": 2, "nzeta": 1})),
+        ]);
+        let canonical_a = canonical_args_json(&map_a);
+        let canonical_b = canonical_args_json(&map_b);
+        assert_eq!(
+            canonical_a, canonical_b,
+            "nested insertion order must not affect canonical output"
+        );
+
+        // The canonical form must have keys in sorted order at every level.
+        // Parse it back and walk key order (works whether or not
+        // `preserve_order` is active: the serialized string is sorted, so the
+        // parsed Map is sorted by insertion/BTree either way).
+        let parsed: serde_json::Value =
+            serde_json::from_str(&canonical_a).expect("canonical output is valid JSON");
+        let top = parsed.as_object().expect("top-level is an object");
+        let top_keys: Vec<&String> = top.keys().collect();
+        assert_eq!(top_keys, vec!["alpha", "zeta"]);
+
+        let zeta_obj = top.get("zeta").unwrap().as_object().unwrap();
+        let zeta_keys: Vec<&String> = zeta_obj.keys().collect();
+        assert_eq!(zeta_keys, vec!["nalpha", "nzeta"]);
+
+        let alpha_arr = top.get("alpha").unwrap().as_array().unwrap();
+        let arr_obj = alpha_arr[0].as_object().unwrap();
+        let arr_keys: Vec<&String> = arr_obj.keys().collect();
+        assert_eq!(arr_keys, vec!["balpha", "bzeta"]);
     }
 
     #[test]

@@ -333,30 +333,24 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
         #[cfg(feature = "diagnostics")]
         let lint_config = visualsign::lint::LintConfig::default();
 
-        let (payload, message_hex) = match &transaction_wrapper {
-            SolanaTransactionWrapper::Legacy(transaction) => {
-                let payload = convert_to_visual_sign_payload(
-                    transaction,
-                    options.decode_transfers,
-                    options.transaction_name.clone(),
-                    &options,
-                    #[cfg(feature = "diagnostics")]
-                    &lint_config,
-                )?;
-                let hex = hex::encode(transaction.message.serialize());
-                (payload, hex)
-            }
+        let payload = match &transaction_wrapper {
+            SolanaTransactionWrapper::Legacy(transaction) => convert_to_visual_sign_payload(
+                transaction,
+                options.decode_transfers,
+                options.transaction_name.clone(),
+                &options,
+                #[cfg(feature = "diagnostics")]
+                &lint_config,
+            )?,
             SolanaTransactionWrapper::Versioned(versioned_tx) => {
-                let payload = convert_versioned_to_visual_sign_payload(
+                convert_versioned_to_visual_sign_payload(
                     versioned_tx,
                     options.decode_transfers,
                     options.transaction_name.clone(),
                     &options,
                     #[cfg(feature = "diagnostics")]
                     &lint_config,
-                )?;
-                let hex = hex::encode(versioned_tx.message.serialize());
-                (payload, hex)
+                )?
             }
         };
 
@@ -365,6 +359,21 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
         if !options.include_intermediate_output {
             return Ok(ConversionResult::new(payload));
         }
+
+        // Defer the message serialize + hex-encode to here (rather than the
+        // match above) so the default signing path — which never reads
+        // `message_hex` — pays nothing for a blob it does not use. This avoids
+        // a third full message serialize on the hot path (`decode_transfers`
+        // already serializes the message once). `transaction_wrapper` is still
+        // owned here because the match above borrowed it.
+        let message_hex = match &transaction_wrapper {
+            SolanaTransactionWrapper::Legacy(transaction) => {
+                hex::encode(transaction.message.serialize())
+            }
+            SolanaTransactionWrapper::Versioned(versioned_tx) => {
+                hex::encode(versioned_tx.message.serialize())
+            }
+        };
 
         let idl_registry = create_idl_registry_from_options(&options)?;
         Ok(
@@ -383,6 +392,33 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
 /// we drop the intermediate output rather than fail the whole conversion. The
 /// SignablePayload is still returned so visual signing keeps working; only
 /// policy-engine evaluation degrades to "no metadata".
+///
+/// # Dual-decoder divergence
+///
+/// This structured decode is produced by `solana_parser::parse_transaction_with_idls`,
+/// a *separate* decoder from the `instructions::decode_instructions` path that
+/// builds the human-readable `SignablePayload`. On the same bytes the two can
+/// in principle diverge — the classic "user sees X, policy consumes Y" surface
+/// for visual signing. Mitigations in place today:
+///
+/// - Both the `SignablePayload` and these bytes are bound into the signed
+///   digest (see `parser::app::routes::parse::signing_digest_bytes`), so a
+///   consumer that verifies the signature also commits to the intermediate.
+/// - Emission is opt-in (`include_intermediate_output`), so the existing
+///   signing boundary is preserved until a caller explicitly asks for metadata.
+/// - Transfers and accounts stay faithful because `decode_transfers` also
+///   routes through `solana_parser`.
+/// - On any parse failure the intermediate is dropped to `None` here, so
+///   policy degrades to "no metadata" rather than *wrong* metadata.
+///
+/// The eventual architecture (tracked, not yet implemented — see
+/// [`extract_solana_intermediate_output`]) is to make the structured decode the
+/// single source of truth from which the `SignablePayload` is generated and
+/// pass these bytes through as-is, eliminating the re-parse. Until that lands,
+/// a drift test that cross-checks the intermediate against the `SignablePayload`
+/// for known transactions is the guard against silent divergence; see
+/// `intermediate_output_emitted_for_known_transfer` for an initial cross-check
+/// (transfer amount) and add more cases as the schema grows.
 fn build_intermediate_bytes(
     message_hex: &str,
     idl_registry: &crate::idl::IdlRegistry,
@@ -671,6 +707,7 @@ fn convert_v0_to_visual_sign_payload(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use crate::intermediate::{SOLANA_INTERMEDIATE_SCHEMA_VERSION, SolanaIntermediateOutput};
     use crate::test_utils::payload_from_b64;
     use crate::utils::create_transaction_with_empty_signatures;
 
@@ -684,6 +721,81 @@ mod tests {
         SolanaVisualSignConverter
             .to_visual_sign_payload(wrapper, options)
             .map(|r| r.payload)
+    }
+
+    /// End-to-end exercise of the opt-in intermediate-output path: a known
+    /// Solana System Program transfer is converted with
+    /// `include_intermediate_output: true`, the emitted borsh bytes are decoded
+    /// back into the published schema, and the decoded transfer amount is
+    /// cross-checked against the human-readable `SignablePayload`.
+    ///
+    /// This is the only test that drives the production branch
+    /// `to_visual_sign_payload` -> `build_intermediate_bytes` ->
+    /// `extract_solana_intermediate_output` -> borsh ->
+    /// `ConversionResult::with_intermediate`, whose output is signed into the
+    /// digest and consumed by policy. The cross-check also serves as an
+    /// initial drift guard between the two decoders (see
+    /// `build_intermediate_bytes`).
+    #[test]
+    fn intermediate_output_emitted_for_known_transfer() {
+        let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
+        let solana_transfer_transaction =
+            create_transaction_with_empty_signatures(solana_transfer_message);
+        let wrapper = SolanaTransactionWrapper::from_string(&solana_transfer_transaction)
+            .expect("known transfer parses");
+
+        let options = VisualSignOptions {
+            include_intermediate_output: true,
+            decode_transfers: true,
+            transaction_name: Some("Solana Transaction".to_string()),
+            ..VisualSignOptions::default()
+        };
+        let result = SolanaVisualSignConverter
+            .to_visual_sign_payload(wrapper, options)
+            .expect("conversion succeeds with intermediate output opted in");
+
+        let bytes = result
+            .intermediate_output
+            .as_ref()
+            .expect("intermediate_output should be emitted when opted in");
+        assert!(!bytes.is_empty(), "emitted blob must be non-empty");
+
+        // The emitted bytes must round-trip through the published schema.
+        let decoded: SolanaIntermediateOutput =
+            borsh::from_slice(bytes).expect("emitted bytes decode into the published schema");
+        assert_eq!(decoded.schema_version, SOLANA_INTERMEDIATE_SCHEMA_VERSION);
+
+        // Cross-check (drift guard): the intermediate's transfer amount must
+        // agree with the human-readable SignablePayload. The known tx transfers
+        // 1_000_000_000 lamports via the System Program.
+        let payload_text = serde_json::to_string(&result.payload).unwrap_or_default();
+        assert!(
+            payload_text.contains("1000000000"),
+            "SignablePayload should reference the transfer amount: {payload_text}"
+        );
+        assert!(
+            !decoded.transfers.is_empty(),
+            "intermediate should decode the System transfer"
+        );
+        assert_eq!(
+            decoded.transfers[0].amount, "1000000000",
+            "intermediate transfer amount must match the SignablePayload"
+        );
+    }
+
+    /// The intermediate-output path is best-effort: when `solana_parser` cannot
+    /// decode the message, `build_intermediate_bytes` must degrade to `None`
+    /// rather than panic or surface an error, so the converter still returns
+    /// the `SignablePayload` and policy degrades to "no metadata".
+    #[test]
+    fn build_intermediate_bytes_returns_none_on_undecodable() {
+        // `deadbeef` is not a valid Solana message; the best-effort extract
+        // must fail and the helper must return `None`.
+        let registry = IdlRegistry::new();
+        assert!(
+            build_intermediate_bytes("deadbeef", &registry).is_none(),
+            "undecodable input must degrade to None, not panic or error"
+        );
     }
 
     #[test]
