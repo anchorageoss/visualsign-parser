@@ -1591,7 +1591,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_email_lowercases_and_strips_plus_suffix() {
+    fn canonical_email_lowercases_strips_plus_suffix_and_trims() {
         assert_eq!(
             canonical_email("Alice+dev1@Example.com"),
             "alice@example.com"
@@ -1601,6 +1601,14 @@ mod tests {
             canonical_email("ALICE+DEV2@EXAMPLE.COM"),
             "alice@example.com"
         );
+        // Padded emails (a realistic spreadsheet/Slack paste artifact) must
+        // canonicalize the same as their trimmed form so the existing-member
+        // skip check is not silently defeated.
+        assert_eq!(
+            canonical_email("  alice@example.com  "),
+            "alice@example.com"
+        );
+        assert_eq!(canonical_email("\talice@example.com"), "alice@example.com");
     }
 
     #[test]
