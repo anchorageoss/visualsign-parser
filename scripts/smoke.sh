@@ -39,6 +39,16 @@
 #   TURNKEY_CLIENT                how to invoke the client (overrides all resolution)
 #   VSP_SMOKE_TURNKEY_CLIENT_PATH local fallback path (same as --turnkey-client-path)
 #
+# `~/.config/turnkey/keys/<name>.{public,private}` is a distinct local credential
+# store from the one `tvc login` populates (`~/.config/turnkey/orgs/<org>/api_key.json`)
+# — the two are not interchangeable, and `tvc login` alone will not satisfy
+# VSP_SMOKE_KEY. If your org's credential only exists in the `orgs/` form, convert
+# it with `scripts/import-turnkey-api-key.sh --org <org-name>` (matches an
+# `[orgs.<org-name>]` entry in ~/.config/turnkey/tvc.config.toml), then point
+# VSP_SMOKE_KEY at the resulting key name.
+#
+# Requires `jq` on PATH (parses the client's JSON response for the assertions below).
+#
 # Exit: 0 = rendered + verified (pass) OR endpoint unreachable (skip; not ours);
 #       1 = endpoint up but parser failed to render / verify / assertions failed;
 #       2 = smoke could not run the client (e.g. missing/unpullable image or
