@@ -45,6 +45,17 @@ done
 [ -n "$ORG" ] || { echo "ERROR: --org is required" >&2; exit 2; }
 [ -n "$KEY_NAME" ] || KEY_NAME="$ORG"
 
+# Both values become path components below; reject anything that could escape
+# the intended orgs/keys directories (e.g. --key-name ../../etc/foo).
+case "$ORG" in
+  */* | .*) echo "ERROR: --org must not contain '/' or start with '.': $ORG" >&2; exit 2 ;;
+esac
+case "$KEY_NAME" in
+  */* | .*) echo "ERROR: --key-name must not contain '/' or start with '.': $KEY_NAME" >&2; exit 2 ;;
+esac
+
+command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required" >&2; exit 2; }
+
 SRC="$HOME/.config/turnkey/orgs/$ORG/api_key.json"
 [ -f "$SRC" ] || {
   echo "ERROR: no such org credential: $SRC" >&2
@@ -62,9 +73,9 @@ for f in "$PUB_FILE" "$PRIV_FILE" "$META_FILE"; do
   [ ! -e "$f" ] || { echo "ERROR: refusing to overwrite existing file: $f" >&2; exit 2; }
 done
 
-PUBLIC_KEY="$(jq -r '.public_key' "$SRC")"
-PRIVATE_KEY="$(jq -r '.private_key' "$SRC")"
-CURVE="$(jq -r '.curve' "$SRC")"
+PUBLIC_KEY="$(jq -e -r '.public_key' "$SRC")" || { echo "ERROR: $SRC missing/null public_key" >&2; exit 2; }
+PRIVATE_KEY="$(jq -e -r '.private_key' "$SRC")" || { echo "ERROR: $SRC missing/null private_key" >&2; exit 2; }
+CURVE="$(jq -e -r '.curve' "$SRC")" || { echo "ERROR: $SRC missing/null curve" >&2; exit 2; }
 
 case "$CURVE" in
   p256) SCHEME="SIGNATURE_SCHEME_TK_API_P256" ;;
