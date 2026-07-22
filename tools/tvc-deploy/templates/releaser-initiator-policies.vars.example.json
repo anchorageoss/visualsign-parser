@@ -1,0 +1,4 @@
+{
+  "RELEASER_TAG_ID": "<prod releaser user-tag uuid, from `tvc-deploy list-tags`>",
+  "INITIATORS_TAG_ID": "<prod initiators user-tag uuid, from `tvc-deploy list-tags`>"
+}

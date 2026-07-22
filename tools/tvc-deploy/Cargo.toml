@@ -10,10 +10,19 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.102"
-lexopt = "0.3.2"
+clap = { version = "4", features = ["derive"] }
+comfy-table = "7"
 qos_p256 = { version = "0.6.1", default-features = false }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
+tokio = { version = "1", features = ["rt", "macros"] }
+turnkey_api_key_stamper = "0.10"
+turnkey_client = "0.10"
 xshell = "0.2.7"
+
+[dev-dependencies]
+tempfile = "3"
 
 # Own workspace root so this stays independent of the parser cargo workspace
 # under ../../src and compiles fast on its own.

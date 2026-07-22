@@ -1,0 +1,11 @@
+{
+  "policies": [
+    {
+      "policyName": "Deny all activities for users with readonly tag",
+      "effect": "deny",
+      "condition": "true",
+      "consensus": "approvers.any(user, user.tags.contains('{{READONLY_TAG_ID}}'))",
+      "notes": "Explicit deny-all guardrail for a basic/read-only tag: blocks every activity type for anyone with this tag, regardless of any other allow policy that might apply to them (EFFECT_DENY always wins). Queries (list_*/get_*) are not gated by policies at all, so tagged users can still browse the org, wallets, policies, etc. via the dashboard or API -- this only blocks state-changing activities."
+    }
+  ]
+}
