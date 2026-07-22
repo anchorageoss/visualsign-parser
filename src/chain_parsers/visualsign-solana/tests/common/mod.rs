@@ -96,6 +96,7 @@ pub fn options_with_idl(program_id: &Pubkey, idl_json: &str, name: &str) -> Visu
         },
     );
     VisualSignOptions {
+        include_intermediate_output: false,
         metadata: Some(ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Solana(SolanaMetadata {
                 // Boundary conversion: generated proto type uses HashMap; we keep

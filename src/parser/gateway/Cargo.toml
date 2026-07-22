@@ -5,6 +5,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+base64 = { workspace = true }
 generated = { path = "../../generated", features = ["tonic_types", "serde_derive"] }
 health_check = { path = "../../health_check" }
 host_primitives = { path = "../../host_primitives" }

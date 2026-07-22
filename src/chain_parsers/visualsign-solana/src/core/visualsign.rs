@@ -24,10 +24,12 @@ use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
     encodings::SupportedEncodings,
     vsptrait::{
-        Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
-        VisualSignError, VisualSignOptions,
+        ConversionResult, Transaction, TransactionParseError, VisualSignConverter,
+        VisualSignConverterFromString, VisualSignError, VisualSignOptions,
     },
 };
+
+use crate::intermediate::extract_solana_intermediate_output;
 
 /// Maximum size for IDL JSON from proto messages (1 MB).
 ///
@@ -327,28 +329,111 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
         &self,
         transaction_wrapper: SolanaTransactionWrapper,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
+    ) -> Result<ConversionResult, VisualSignError> {
         #[cfg(feature = "diagnostics")]
         let lint_config = visualsign::lint::LintConfig::default();
-        match transaction_wrapper {
+
+        let payload = match &transaction_wrapper {
             SolanaTransactionWrapper::Legacy(transaction) => convert_to_visual_sign_payload(
-                &transaction,
+                transaction,
                 options.decode_transfers,
                 options.transaction_name.clone(),
                 &options,
                 #[cfg(feature = "diagnostics")]
                 &lint_config,
-            ),
+            )?,
             SolanaTransactionWrapper::Versioned(versioned_tx) => {
                 convert_versioned_to_visual_sign_payload(
-                    &versioned_tx,
+                    versioned_tx,
                     options.decode_transfers,
                     options.transaction_name.clone(),
                     &options,
                     #[cfg(feature = "diagnostics")]
                     &lint_config,
-                )
+                )?
             }
+        };
+
+        // Only emit intermediate output when the caller opts in; otherwise the
+        // response and signed digest stay byte-identical to the pre-feature path.
+        if !options.include_intermediate_output {
+            return Ok(ConversionResult::new(payload));
+        }
+
+        // Defer the message serialize + hex-encode to here (rather than the
+        // match above) so the default signing path — which never reads
+        // `message_hex` — pays nothing for a blob it does not use. This avoids
+        // a third full message serialize on the hot path (`decode_transfers`
+        // already serializes the message once). `transaction_wrapper` is still
+        // owned here because the match above borrowed it.
+        let message_hex = match &transaction_wrapper {
+            SolanaTransactionWrapper::Legacy(transaction) => {
+                hex::encode(transaction.message.serialize())
+            }
+            SolanaTransactionWrapper::Versioned(versioned_tx) => {
+                hex::encode(versioned_tx.message.serialize())
+            }
+        };
+
+        let idl_registry = create_idl_registry_from_options(&options)?;
+        Ok(
+            match build_intermediate_bytes(&message_hex, &idl_registry) {
+                Some(bytes) => ConversionResult::with_intermediate(payload, bytes),
+                None => ConversionResult::new(payload),
+            },
+        )
+    }
+}
+
+/// Build the borsh-encoded intermediate output for a Solana transaction.
+///
+/// Best-effort: if `solana_parser::parse_transaction_with_idls` cannot parse
+/// the message (e.g. an obscure variant we still display via fallback paths)
+/// we drop the intermediate output rather than fail the whole conversion. The
+/// SignablePayload is still returned so visual signing keeps working; only
+/// policy-engine evaluation degrades to "no metadata".
+///
+/// # Dual-decoder divergence
+///
+/// This structured decode is produced by `solana_parser::parse_transaction_with_idls`,
+/// a *separate* decoder from the `instructions::decode_instructions` path that
+/// builds the human-readable `SignablePayload`. On the same bytes the two can
+/// in principle diverge — the classic "user sees X, policy consumes Y" surface
+/// for visual signing. Mitigations in place today:
+///
+/// - Both the `SignablePayload` and these bytes are bound into the signed
+///   digest (see `parser::app::routes::parse::signing_digest_bytes`), so a
+///   consumer that verifies the signature also commits to the intermediate.
+/// - Emission is opt-in (`include_intermediate_output`), so the existing
+///   signing boundary is preserved until a caller explicitly asks for metadata.
+/// - Transfers and accounts stay faithful because `decode_transfers` also
+///   routes through `solana_parser`.
+/// - On any parse failure the intermediate is dropped to `None` here, so
+///   policy degrades to "no metadata" rather than *wrong* metadata.
+///
+/// The eventual architecture (tracked, not yet implemented — see
+/// [`extract_solana_intermediate_output`]) is to make the structured decode the
+/// single source of truth from which the `SignablePayload` is generated and
+/// pass these bytes through as-is, eliminating the re-parse. Until that lands,
+/// a drift test that cross-checks the intermediate against the `SignablePayload`
+/// for known transactions is the guard against silent divergence; see
+/// `intermediate_output_emitted_for_known_transfer` for an initial cross-check
+/// (transfer amount) and add more cases as the schema grows.
+fn build_intermediate_bytes(
+    message_hex: &str,
+    idl_registry: &crate::idl::IdlRegistry,
+) -> Option<Vec<u8>> {
+    match extract_solana_intermediate_output(message_hex, false, idl_registry) {
+        Ok(output) => match borsh::to_vec(&output) {
+            Ok(bytes) => Some(bytes),
+            Err(err) => {
+                tracing::warn!("Failed to borsh-encode Solana intermediate output: {err}");
+                None
+            }
+        },
+        Err(err) => {
+            tracing::warn!("Failed to extract Solana intermediate output: {err}");
+            None
         }
     }
 }
@@ -362,6 +447,7 @@ pub fn transaction_to_visual_sign(
 ) -> Result<SignablePayload, VisualSignError> {
     SolanaVisualSignConverter
         .to_visual_sign_payload(SolanaTransactionWrapper::new_legacy(transaction), options)
+        .map(|r| r.payload)
 }
 
 /// Public API function for versioned transactions
@@ -369,10 +455,12 @@ pub fn versioned_transaction_to_visual_sign(
     transaction: VersionedTransaction,
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
-    SolanaVisualSignConverter.to_visual_sign_payload(
-        SolanaTransactionWrapper::new_versioned(transaction),
-        options,
-    )
+    SolanaVisualSignConverter
+        .to_visual_sign_payload(
+            SolanaTransactionWrapper::new_versioned(transaction),
+            options,
+        )
+        .map(|r| r.payload)
 }
 
 /// Public API function for string-based transactions
@@ -380,7 +468,9 @@ pub fn transaction_string_to_visual_sign(
     transaction_data: &str,
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
-    SolanaVisualSignConverter.to_visual_sign_payload_from_string(transaction_data, options)
+    SolanaVisualSignConverter
+        .to_visual_sign_payload_from_string(transaction_data, options)
+        .map(|r| r.payload)
 }
 
 /// Convert Solana transaction to visual sign payload
@@ -617,8 +707,96 @@ fn convert_v0_to_visual_sign_payload(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use crate::intermediate::{SOLANA_INTERMEDIATE_SCHEMA_VERSION, SolanaIntermediateOutput};
     use crate::test_utils::payload_from_b64;
     use crate::utils::create_transaction_with_empty_signatures;
+
+    /// Test helper: run the converter and unwrap the `ConversionResult` to the
+    /// `SignablePayload` these tests assert against. Intermediate output is
+    /// covered separately (see `intermediate.rs` and the fixture-dump path).
+    fn to_payload(
+        wrapper: SolanaTransactionWrapper,
+        options: VisualSignOptions,
+    ) -> Result<SignablePayload, VisualSignError> {
+        SolanaVisualSignConverter
+            .to_visual_sign_payload(wrapper, options)
+            .map(|r| r.payload)
+    }
+
+    /// End-to-end exercise of the opt-in intermediate-output path: a known
+    /// Solana System Program transfer is converted with
+    /// `include_intermediate_output: true`, the emitted borsh bytes are decoded
+    /// back into the published schema, and the decoded transfer amount is
+    /// cross-checked against the human-readable `SignablePayload`.
+    ///
+    /// This is the only test that drives the production branch
+    /// `to_visual_sign_payload` -> `build_intermediate_bytes` ->
+    /// `extract_solana_intermediate_output` -> borsh ->
+    /// `ConversionResult::with_intermediate`, whose output is signed into the
+    /// digest and consumed by policy. The cross-check also serves as an
+    /// initial drift guard between the two decoders (see
+    /// `build_intermediate_bytes`).
+    #[test]
+    fn intermediate_output_emitted_for_known_transfer() {
+        let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
+        let solana_transfer_transaction =
+            create_transaction_with_empty_signatures(solana_transfer_message);
+        let wrapper = SolanaTransactionWrapper::from_string(&solana_transfer_transaction)
+            .expect("known transfer parses");
+
+        let options = VisualSignOptions {
+            include_intermediate_output: true,
+            decode_transfers: true,
+            transaction_name: Some("Solana Transaction".to_string()),
+            ..VisualSignOptions::default()
+        };
+        let result = SolanaVisualSignConverter
+            .to_visual_sign_payload(wrapper, options)
+            .expect("conversion succeeds with intermediate output opted in");
+
+        let bytes = result
+            .intermediate_output
+            .as_ref()
+            .expect("intermediate_output should be emitted when opted in");
+        assert!(!bytes.is_empty(), "emitted blob must be non-empty");
+
+        // The emitted bytes must round-trip through the published schema.
+        let decoded: SolanaIntermediateOutput =
+            borsh::from_slice(bytes).expect("emitted bytes decode into the published schema");
+        assert_eq!(decoded.schema_version, SOLANA_INTERMEDIATE_SCHEMA_VERSION);
+
+        // Cross-check (drift guard): the intermediate's transfer amount must
+        // agree with the human-readable SignablePayload. The known tx transfers
+        // 1_000_000_000 lamports via the System Program.
+        let payload_text = serde_json::to_string(&result.payload).unwrap_or_default();
+        assert!(
+            payload_text.contains("1000000000"),
+            "SignablePayload should reference the transfer amount: {payload_text}"
+        );
+        assert!(
+            !decoded.transfers.is_empty(),
+            "intermediate should decode the System transfer"
+        );
+        assert_eq!(
+            decoded.transfers[0].amount, "1000000000",
+            "intermediate transfer amount must match the SignablePayload"
+        );
+    }
+
+    /// The intermediate-output path is best-effort: when `solana_parser` cannot
+    /// decode the message, `build_intermediate_bytes` must degrade to `None`
+    /// rather than panic or surface an error, so the converter still returns
+    /// the `SignablePayload` and policy degrades to "no metadata".
+    #[test]
+    fn build_intermediate_bytes_returns_none_on_undecodable() {
+        // `deadbeef` is not a valid Solana message; the best-effort extract
+        // must fail and the helper must return `None`.
+        let registry = IdlRegistry::new();
+        assert!(
+            build_intermediate_bytes("deadbeef", &registry).is_none(),
+            "undecodable input must degrade to None, not panic or error"
+        );
+    }
 
     #[test]
     fn test_solana_transaction_to_vsp() {
@@ -671,9 +849,10 @@ mod tests {
         let solana_tx = solana_tx_result.unwrap();
 
         // Convert to VisualSign payload using the converter
-        let payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
+        let payload_result = to_payload(
             solana_tx,
             VisualSignOptions {
+                include_intermediate_output: false,
                 metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("Solana Transaction".to_string()),
@@ -754,9 +933,10 @@ mod tests {
         assert_eq!(solana_tx.transaction_type(), "Solana (V0)");
 
         // Convert to VisualSign payload using the converter
-        let payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
+        let payload_result = to_payload(
             solana_tx,
             VisualSignOptions {
+                include_intermediate_output: false,
                 metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("V0 Transaction".to_string()),
@@ -921,9 +1101,10 @@ mod tests {
         assert!(legacy_result.is_ok());
 
         let legacy_tx = legacy_result.unwrap();
-        let legacy_payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
+        let legacy_payload_result = to_payload(
             legacy_tx,
             VisualSignOptions {
+                include_intermediate_output: false,
                 metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("Legacy Transfer Test".to_string()),
@@ -965,9 +1146,10 @@ mod tests {
         assert!(v0_result.is_ok());
 
         let v0_tx = v0_result.unwrap();
-        let v0_payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
+        let v0_payload_result = to_payload(
             v0_tx,
             VisualSignOptions {
+                include_intermediate_output: false,
                 metadata: None,
                 decode_transfers: true,
                 transaction_name: Some("V0 Transfer Test".to_string()),
@@ -1092,9 +1274,10 @@ mod tests {
 
                 // Test full payload conversion
                 let wrapper = SolanaTransactionWrapper::Versioned(versioned_transaction);
-                let payload_result = SolanaVisualSignConverter.to_visual_sign_payload(
+                let payload_result = to_payload(
                     wrapper,
                     VisualSignOptions {
+                        include_intermediate_output: false,
                         metadata: None,
                         decode_transfers: true,
                         transaction_name: Some("Manual V0 Transfer Test".to_string()),
@@ -1242,17 +1425,17 @@ mod tests {
 
         let tx = SolanaTransactionWrapper::from_string(tokenkeg_tx)
             .expect("Should parse TokenKeg transaction");
-        let payload = SolanaVisualSignConverter
-            .to_visual_sign_payload(
-                tx,
-                VisualSignOptions {
-                    metadata: None,
-                    decode_transfers: true,
-                    transaction_name: Some("SPL Token Test".to_string()),
-                    developer_config: None,
-                },
-            )
-            .expect("Should convert TokenKeg transaction to payload");
+        let payload = to_payload(
+            tx,
+            VisualSignOptions {
+                include_intermediate_output: false,
+                metadata: None,
+                decode_transfers: true,
+                transaction_name: Some("SPL Token Test".to_string()),
+                developer_config: None,
+            },
+        )
+        .expect("Should convert TokenKeg transaction to payload");
 
         let instruction_fields: Vec<_> = payload
             .fields
@@ -1319,17 +1502,17 @@ mod tests {
             message,
         };
 
-        let payload = SolanaVisualSignConverter
-            .to_visual_sign_payload(
-                SolanaTransactionWrapper::Legacy(transaction),
-                VisualSignOptions {
-                    decode_transfers: false,
-                    metadata: None,
-                    transaction_name: Some("Unknown Program Test".to_string()),
-                    developer_config: None,
-                },
-            )
-            .expect("Should convert unknown program transaction to payload");
+        let payload = to_payload(
+            SolanaTransactionWrapper::Legacy(transaction),
+            VisualSignOptions {
+                include_intermediate_output: false,
+                decode_transfers: false,
+                metadata: None,
+                transaction_name: Some("Unknown Program Test".to_string()),
+                developer_config: None,
+            },
+        )
+        .expect("Should convert unknown program transaction to payload");
 
         let instruction_fields: Vec<_> = payload
             .fields
@@ -1387,6 +1570,7 @@ mod tests {
             message: VersionedMessage::V0(v0_message.clone()),
         };
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             metadata: None,
             decode_transfers: false,
             transaction_name: None,
@@ -1453,6 +1637,7 @@ mod tests {
 
         fn default_options() -> VisualSignOptions {
             VisualSignOptions {
+                include_intermediate_output: false,
                 metadata: None,
                 decode_transfers: false,
                 transaction_name: Some("V0 ALT Regression".to_string()),
@@ -1581,6 +1766,7 @@ mod tests {
         let mut idl_mappings: BTreeMap<String, generated::parser::Idl> = BTreeMap::new();
         idl_mappings.insert(program_id.to_string(), idl);
         VisualSignOptions {
+            include_intermediate_output: false,
             metadata: Some(generated::parser::ChainMetadata {
                 metadata: Some(generated::parser::chain_metadata::Metadata::Solana(
                     generated::parser::SolanaMetadata {

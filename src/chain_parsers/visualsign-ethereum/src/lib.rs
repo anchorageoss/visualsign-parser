@@ -18,7 +18,7 @@ use visualsign::{
     registry::LayeredRegistry,
     signing::SignerAllowlist,
     vsptrait::{
-        DeveloperConfig, Transaction, TransactionParseError, VisualSignConverter,
+        ConversionResult, DeveloperConfig, Transaction, TransactionParseError, VisualSignConverter,
         VisualSignConverterFromString, VisualSignError, VisualSignOptions,
     },
 };
@@ -291,8 +291,13 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
         &self,
         transaction_wrapper: EthereumTransactionWrapper,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
-        self.convert_transaction_inner(transaction_wrapper.inner().clone(), options)
+    ) -> Result<ConversionResult, VisualSignError> {
+        // Ethereum has no intermediate_output schema yet; the envelope is
+        // ready for one (return `ConversionResult::with_intermediate`) without
+        // further plumbing changes.
+        let payload =
+            self.convert_transaction_inner(transaction_wrapper.inner().clone(), options)?;
+        Ok(ConversionResult::new(payload))
     }
 }
 
@@ -301,7 +306,7 @@ impl VisualSignConverterFromString<EthereumTransactionWrapper> for EthereumVisua
         &self,
         transaction_data: &str,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
+    ) -> Result<ConversionResult, VisualSignError> {
         let wrapper = EthereumTransactionWrapper::from_string_with_options(
             transaction_data,
             options.developer_config.as_ref(),
@@ -854,7 +859,9 @@ pub fn transaction_to_visual_sign(
 ) -> Result<SignablePayload, VisualSignError> {
     let wrapper = EthereumTransactionWrapper::new(transaction);
     let converter = EthereumVisualSignConverter::new();
-    converter.to_visual_sign_payload(wrapper, options)
+    converter
+        .to_visual_sign_payload(wrapper, options)
+        .map(|r| r.payload)
 }
 
 pub fn transaction_string_to_visual_sign(
@@ -862,12 +869,36 @@ pub fn transaction_string_to_visual_sign(
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     let converter = EthereumVisualSignConverter::new();
-    converter.to_visual_sign_payload_from_string(transaction_data, options)
+    converter
+        .to_visual_sign_payload_from_string(transaction_data, options)
+        .map(|r| r.payload)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Test-only adapter: call the converter and unwrap the `ConversionResult`
+    // to the `SignablePayload` these tests assert against, while preserving the
+    // specific converter instance (e.g. `with_signers`).
+    trait TestConvertExt {
+        fn to_payload(
+            &self,
+            wrapper: EthereumTransactionWrapper,
+            options: VisualSignOptions,
+        ) -> Result<SignablePayload, VisualSignError>;
+    }
+    impl TestConvertExt for EthereumVisualSignConverter {
+        fn to_payload(
+            &self,
+            wrapper: EthereumTransactionWrapper,
+            options: VisualSignOptions,
+        ) -> Result<SignablePayload, VisualSignError> {
+            self.to_visual_sign_payload(wrapper, options)
+                .map(|r| r.payload)
+        }
+    }
+
     use crate::contracts::core::erc20::IERC20;
     use crate::registry::ContractRegistry;
     use crate::token_metadata::{ErcStandard, TokenMetadata};
@@ -1178,6 +1209,7 @@ mod tests {
         .collect();
 
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: true,
             transaction_name: None,
             metadata: Some(ChainMetadata {
@@ -1190,7 +1222,7 @@ mod tests {
         };
 
         let wrapper = EthereumTransactionWrapper::new(tx);
-        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
+        let payload = converter.to_payload(wrapper, options).unwrap();
 
         // The built-in ERC20 visualizer emits a PreviewLayout titled
         // "ERC20 Transfer" with a "Recipient" address field and an "Amount"
@@ -1331,6 +1363,7 @@ mod tests {
         // metadata is a hard error so no ABI -- malicious or otherwise -- gets
         // bound to the payload.
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: true,
             transaction_name: None,
             metadata: Some(ChainMetadata {
@@ -1343,9 +1376,7 @@ mod tests {
         };
 
         let wrapper = EthereumTransactionWrapper::new(tx);
-        let err = converter
-            .to_visual_sign_payload(wrapper, options)
-            .unwrap_err();
+        let err = converter.to_payload(wrapper, options).unwrap_err();
         assert!(
             matches!(err, VisualSignError::ValidationError(_)),
             "mismatched tx/metadata chain_id must be rejected: {err:?}",
@@ -1439,6 +1470,7 @@ mod tests {
         // Attacker points `network_id` at Polygon (no USDC entry in our local
         // registry) so any chain-id-based lookup that trusts metadata misses.
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: true,
             transaction_name: None,
             metadata: Some(ChainMetadata {
@@ -1451,7 +1483,7 @@ mod tests {
         };
 
         let wrapper = EthereumTransactionWrapper::new(tx);
-        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
+        let payload = converter.to_payload(wrapper, options).unwrap();
 
         let preview = payload
             .fields
@@ -1535,6 +1567,7 @@ mod tests {
         });
 
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: true,
             transaction_name: None,
             metadata: None,
@@ -1542,7 +1575,7 @@ mod tests {
         };
 
         let wrapper = EthereumTransactionWrapper::new(tx);
-        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
+        let payload = converter.to_payload(wrapper, options).unwrap();
 
         // No PreviewLayout should be emitted: ERC721 has no decoder, the
         // ERC20 fallback is skipped for known non-ERC20 tokens, and the
@@ -1628,6 +1661,7 @@ mod tests {
         });
 
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: true,
             transaction_name: None,
             metadata: None,
@@ -1635,7 +1669,7 @@ mod tests {
         };
 
         let wrapper = EthereumTransactionWrapper::new(tx);
-        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
+        let payload = converter.to_payload(wrapper, options).unwrap();
 
         // A PreviewLayout from the built-in ERC1155 decoder is expected, not a
         // raw-hex fallback.
@@ -1774,6 +1808,7 @@ mod tests {
         .collect();
 
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: true,
             transaction_name: None,
             metadata: Some(ChainMetadata {
@@ -1786,7 +1821,7 @@ mod tests {
         };
 
         let wrapper = EthereumTransactionWrapper::new(tx);
-        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
+        let payload = converter.to_payload(wrapper, options).unwrap();
 
         // The built-in ERC20 visualizer emits a PreviewLayout titled
         // "ERC20 Transfer" with a "Recipient" address field and an "Amount"
@@ -1927,6 +1962,7 @@ mod tests {
         // metadata is a hard error so no ABI -- malicious or otherwise -- gets
         // bound to the payload.
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: true,
             transaction_name: None,
             metadata: Some(ChainMetadata {
@@ -1939,9 +1975,7 @@ mod tests {
         };
 
         let wrapper = EthereumTransactionWrapper::new(tx);
-        let err = converter
-            .to_visual_sign_payload(wrapper, options)
-            .unwrap_err();
+        let err = converter.to_payload(wrapper, options).unwrap_err();
         assert!(
             matches!(err, VisualSignError::ValidationError(_)),
             "mismatched tx/metadata chain_id must be rejected: {err:?}",
@@ -2019,6 +2053,7 @@ mod tests {
         });
 
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: true,
             transaction_name: None,
             metadata: None,
@@ -2026,7 +2061,7 @@ mod tests {
         };
 
         let wrapper = EthereumTransactionWrapper::new(tx);
-        let payload = converter.to_visual_sign_payload(wrapper, options).unwrap();
+        let payload = converter.to_payload(wrapper, options).unwrap();
 
         // No PreviewLayout should be emitted: ERC721 has no decoder, the
         // ERC20 fallback is skipped for known non-ERC20 tokens, and the
@@ -2149,6 +2184,7 @@ mod tests {
         });
 
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: false,
             transaction_name: Some("Custom Transaction Title".to_string()),
             metadata: None,
@@ -2455,6 +2491,7 @@ mod tests {
             transaction_string_to_visual_sign(
                 &unsigned_to_hex(&tx),
                 VisualSignOptions {
+                    include_intermediate_output: false,
                     decode_transfers: true,
                     transaction_name: Some("Test Transaction".to_string()),
                     metadata: None,
@@ -2615,6 +2652,7 @@ mod tests {
             input: Bytes::from(vec![0xde, 0xad, 0xbe, 0xef]),
         });
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: false,
             transaction_name: None,
             metadata: Some(ChainMetadata {
@@ -2628,7 +2666,7 @@ mod tests {
 
         let converter = EthereumVisualSignConverter::new();
         let payload = converter
-            .to_visual_sign_payload(EthereumTransactionWrapper::new(tx), options)
+            .to_payload(EthereumTransactionWrapper::new(tx), options)
             .unwrap();
 
         assert!(
@@ -2679,6 +2717,7 @@ mod tests {
             input: Bytes::from(vec![0x00, 0x01, 0x02, 0x03]),
         });
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: false,
             transaction_name: None,
             metadata: Some(ChainMetadata {
@@ -2692,7 +2731,7 @@ mod tests {
 
         let converter = EthereumVisualSignConverter::new();
         let payload = converter
-            .to_visual_sign_payload(EthereumTransactionWrapper::new(tx), options)
+            .to_payload(EthereumTransactionWrapper::new(tx), options)
             .unwrap();
 
         let impl_field = payload
@@ -2765,6 +2804,7 @@ mod tests {
             input: Bytes::from(do_thing_selector.to_vec()),
         });
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: false,
             transaction_name: None,
             metadata: Some(ChainMetadata {
@@ -2778,7 +2818,7 @@ mod tests {
 
         let converter = EthereumVisualSignConverter::new();
         let payload = converter
-            .to_visual_sign_payload(EthereumTransactionWrapper::new(tx), options)
+            .to_payload(EthereumTransactionWrapper::new(tx), options)
             .unwrap();
 
         // C's ABI must not have been used — single-hop stops at B.

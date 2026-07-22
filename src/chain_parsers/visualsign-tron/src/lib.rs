@@ -21,8 +21,8 @@ use visualsign::{
     SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
     encodings::SupportedEncodings,
     vsptrait::{
-        Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
-        VisualSignError, VisualSignOptions,
+        ConversionResult, Transaction, TransactionParseError, VisualSignConverter,
+        VisualSignConverterFromString, VisualSignError, VisualSignOptions,
     },
 };
 
@@ -126,8 +126,11 @@ impl VisualSignConverter<TronTransactionWrapper> for TronVisualSignConverter {
         &self,
         transaction_wrapper: TronTransactionWrapper,
         options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
-        convert_to_visual_sign_payload(transaction_wrapper.inner().clone(), options)
+    ) -> Result<ConversionResult, VisualSignError> {
+        // Tron has no intermediate_output schema yet; envelope-ready via
+        // `ConversionResult::with_intermediate` when one is added.
+        let payload = convert_to_visual_sign_payload(transaction_wrapper.inner().clone(), options)?;
+        Ok(ConversionResult::new(payload))
     }
 }
 
@@ -487,7 +490,9 @@ pub fn transaction_to_visual_sign(
 ) -> Result<SignablePayload, VisualSignError> {
     let wrapper = TronTransactionWrapper::new(transaction);
     let converter = TronVisualSignConverter;
-    converter.to_visual_sign_payload(wrapper, options)
+    converter
+        .to_visual_sign_payload(wrapper, options)
+        .map(|r| r.payload)
 }
 
 pub fn transaction_string_to_visual_sign(
@@ -495,7 +500,9 @@ pub fn transaction_string_to_visual_sign(
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     let converter = TronVisualSignConverter;
-    converter.to_visual_sign_payload_from_string(transaction_data, options)
+    converter
+        .to_visual_sign_payload_from_string(transaction_data, options)
+        .map(|r| r.payload)
 }
 
 // Tron mainnet addresses are 21 bytes: 0x41 prefix + 20-byte hash, encoded as base58check
@@ -564,6 +571,18 @@ mod tests {
     use protobuf::MessageField;
     use protobuf::well_known_types::any::Any;
     use visualsign::{SignablePayloadField, vsptrait::VisualSignOptions};
+
+    /// Test helper: run the converter and unwrap the `ConversionResult` to the
+    /// `SignablePayload` these tests assert against (Tron emits no intermediate
+    /// output). Keeps the call sites unchanged apart from the receiver.
+    fn to_payload(
+        wrapper: TronTransactionWrapper,
+        options: VisualSignOptions,
+    ) -> Result<SignablePayload, VisualSignError> {
+        TronVisualSignConverter
+            .to_visual_sign_payload(wrapper, options)
+            .map(|r| r.payload)
+    }
 
     fn find_field<'a>(
         payload: &'a SignablePayload,
@@ -672,9 +691,7 @@ mod tests {
 
     fn decode_hex(hex_tx: &str) -> SignablePayload {
         let wrapper = TronTransactionWrapper::from_string(hex_tx).expect("parse");
-        TronVisualSignConverter
-            .to_visual_sign_payload(wrapper, VisualSignOptions::default())
-            .expect("convert")
+        to_payload(wrapper, VisualSignOptions::default()).expect("convert")
     }
 
     // The five `real_onchain_*` tests below pin against actual mainnet transactions
@@ -786,9 +803,7 @@ mod tests {
         let hex_tx = "0a730a02049d22080f1beff095be0cfd40a097a684e5335a55083612510a34747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e467265657a6542616c616e63655632436f6e747261637412190a15416a6ca578c7937e1bf6aea4be657f9d22716c424d100570a0df8cdbe433";
 
         let wrapper = TronTransactionWrapper::from_string(hex_tx).expect("parse");
-        let payload = TronVisualSignConverter
-            .to_visual_sign_payload(wrapper, VisualSignOptions::default())
-            .expect("convert");
+        let payload = to_payload(wrapper, VisualSignOptions::default()).expect("convert");
 
         assert_eq!(payload.payload_type, "TronTx");
         assert_eq!(payload.title, "Tron Transaction");
@@ -825,9 +840,7 @@ mod tests {
         let hex_tx = encode_hex(&raw);
 
         let wrapper = TronTransactionWrapper::from_string(&hex_tx).expect("parse");
-        let payload = TronVisualSignConverter
-            .to_visual_sign_payload(wrapper, VisualSignOptions::default())
-            .expect("convert");
+        let payload = to_payload(wrapper, VisualSignOptions::default()).expect("convert");
 
         assert_eq!(
             text_value(find_field(&payload, "Contract Type").unwrap()),
@@ -854,12 +867,11 @@ mod tests {
             "type.googleapis.com/protocol.UnfreezeBalanceV2Contract",
             inner.write_to_bytes().unwrap(),
         );
-        let payload = TronVisualSignConverter
-            .to_visual_sign_payload(
-                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
-                VisualSignOptions::default(),
-            )
-            .unwrap();
+        let payload = to_payload(
+            TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+            VisualSignOptions::default(),
+        )
+        .unwrap();
 
         assert_eq!(
             text_value(find_field(&payload, "Contract Type").unwrap()),
@@ -883,12 +895,11 @@ mod tests {
             "type.googleapis.com/protocol.WithdrawExpireUnfreezeContract",
             inner.write_to_bytes().unwrap(),
         );
-        let payload = TronVisualSignConverter
-            .to_visual_sign_payload(
-                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
-                VisualSignOptions::default(),
-            )
-            .unwrap();
+        let payload = to_payload(
+            TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+            VisualSignOptions::default(),
+        )
+        .unwrap();
 
         assert_eq!(
             text_value(find_field(&payload, "Contract Type").unwrap()),
@@ -907,12 +918,11 @@ mod tests {
             "type.googleapis.com/protocol.WithdrawBalanceContract",
             inner.write_to_bytes().unwrap(),
         );
-        let payload = TronVisualSignConverter
-            .to_visual_sign_payload(
-                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
-                VisualSignOptions::default(),
-            )
-            .unwrap();
+        let payload = to_payload(
+            TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+            VisualSignOptions::default(),
+        )
+        .unwrap();
 
         assert_eq!(
             text_value(find_field(&payload, "Contract Type").unwrap()),
@@ -939,12 +949,11 @@ mod tests {
             "type.googleapis.com/protocol.DelegateResourceContract",
             inner.write_to_bytes().unwrap(),
         );
-        let payload = TronVisualSignConverter
-            .to_visual_sign_payload(
-                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
-                VisualSignOptions::default(),
-            )
-            .unwrap();
+        let payload = to_payload(
+            TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+            VisualSignOptions::default(),
+        )
+        .unwrap();
 
         assert_eq!(
             text_value(find_field(&payload, "Contract Type").unwrap()),
@@ -977,12 +986,11 @@ mod tests {
             "type.googleapis.com/protocol.UnDelegateResourceContract",
             inner.write_to_bytes().unwrap(),
         );
-        let payload = TronVisualSignConverter
-            .to_visual_sign_payload(
-                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
-                VisualSignOptions::default(),
-            )
-            .unwrap();
+        let payload = to_payload(
+            TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+            VisualSignOptions::default(),
+        )
+        .unwrap();
 
         assert_eq!(
             text_value(find_field(&payload, "Contract Type").unwrap()),
@@ -997,12 +1005,11 @@ mod tests {
     #[test]
     fn unknown_contract_falls_through_to_text() {
         let raw = build_raw_with_contract("type.googleapis.com/protocol.UnknownContract", vec![]);
-        let payload = TronVisualSignConverter
-            .to_visual_sign_payload(
-                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
-                VisualSignOptions::default(),
-            )
-            .unwrap();
+        let payload = to_payload(
+            TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+            VisualSignOptions::default(),
+        )
+        .unwrap();
 
         let contract_type = find_field(&payload, "Contract Type").unwrap();
         assert_eq!(
@@ -1067,12 +1074,11 @@ mod tests {
         let bytes = build_vote_witness_bytes(&owner, &[(&sr1, 1000), (&sr2, 500)]);
         let raw =
             build_raw_with_contract("type.googleapis.com/protocol.VoteWitnessContract", bytes);
-        let payload = TronVisualSignConverter
-            .to_visual_sign_payload(
-                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
-                VisualSignOptions::default(),
-            )
-            .unwrap();
+        let payload = to_payload(
+            TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+            VisualSignOptions::default(),
+        )
+        .unwrap();
 
         assert_eq!(
             text_value(find_field(&payload, "Contract Type").unwrap()),
@@ -1135,12 +1141,11 @@ mod tests {
         let bytes = build_vote_witness_bytes(&owner, &[]);
         let raw =
             build_raw_with_contract("type.googleapis.com/protocol.VoteWitnessContract", bytes);
-        let payload = TronVisualSignConverter
-            .to_visual_sign_payload(
-                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
-                VisualSignOptions::default(),
-            )
-            .unwrap();
+        let payload = to_payload(
+            TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+            VisualSignOptions::default(),
+        )
+        .unwrap();
 
         let votes_field = find_field(&payload, "Votes").expect("Votes preview layout");
         assert_eq!(preview_layout_subtitle(votes_field), "0 votes across 0 SRs");
@@ -1212,12 +1217,11 @@ mod tests {
             contract: vec![contract],
             ..Default::default()
         };
-        let payload = TronVisualSignConverter
-            .to_visual_sign_payload(
-                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
-                VisualSignOptions::default(),
-            )
-            .unwrap();
+        let payload = to_payload(
+            TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+            VisualSignOptions::default(),
+        )
+        .unwrap();
         let ct = find_field(&payload, "Contract Type").expect("Contract Type marker");
         assert_eq!(text_value(ct), "<missing parameter>");
     }
@@ -1240,12 +1244,11 @@ mod tests {
             "type.googleapis.com/protocol.DelegateResourceContract",
             inner.write_to_bytes().unwrap(),
         );
-        let payload = TronVisualSignConverter
-            .to_visual_sign_payload(
-                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
-                VisualSignOptions::default(),
-            )
-            .unwrap();
+        let payload = to_payload(
+            TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+            VisualSignOptions::default(),
+        )
+        .unwrap();
         assert_eq!(text_value(find_field(&payload, "Lock").unwrap()), "true");
         assert_eq!(
             text_value(find_field(&payload, "Lock Period").unwrap()),
@@ -1302,12 +1305,11 @@ mod tests {
             "type.googleapis.com/protocol.TransferContract",
             inner.write_to_bytes().unwrap(),
         );
-        let payload = TronVisualSignConverter
-            .to_visual_sign_payload(
-                TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
-                VisualSignOptions::default(),
-            )
-            .unwrap();
+        let payload = to_payload(
+            TronTransactionWrapper::from_string(&encode_hex(&raw)).unwrap(),
+            VisualSignOptions::default(),
+        )
+        .unwrap();
 
         assert!(address_value(find_field(&payload, "From").unwrap()).starts_with('T'));
         assert!(address_value(find_field(&payload, "To").unwrap()).starts_with('T'));

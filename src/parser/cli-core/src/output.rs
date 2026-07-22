@@ -194,12 +194,13 @@ pub fn parse_and_display(
     condensed_only: bool,
 ) -> Result<(), String> {
     let registry_chain = parse_chain(chain);
-    let payload = registry
+    let conversion = registry
         .convert_transaction(&registry_chain, raw_tx, options)
         .map_err(|err| err.to_string())?;
+    let payload = &conversion.payload;
     match output_format {
         OutputFormat::Json => {
-            let json_output = serde_json::to_string_pretty(&payload)
+            let json_output = serde_json::to_string_pretty(payload)
                 .map_err(|err| format!("Failed to serialize output as JSON: {err}"))?;
             println!("{json_output}");
         }
@@ -207,7 +208,7 @@ pub fn parse_and_display(
             println!("{payload:#?}");
         }
         OutputFormat::Human => {
-            let formatter = HumanReadableFormatter::new(&payload, condensed_only);
+            let formatter = HumanReadableFormatter::new(payload, condensed_only);
             println!("{formatter}");
             if !condensed_only {
                 eprintln!(
@@ -215,6 +216,23 @@ pub fn parse_and_display(
                 );
             }
         }
+    }
+    // When requested, dump the raw borsh `intermediate_output` bytes as hex.
+    // These are the exact bytes signed into `ParsedTransactionPayload` and can
+    // be captured verbatim as a downstream (e.g. C++) test fixture. Decoding
+    // into a typed schema is chain-specific and intentionally left to the
+    // consumer; the CLI stays chain-agnostic and passes the bytes through.
+    //
+    // Emitted to stderr so stdout stays a clean, single JSON (or text) document
+    // for scripted consumers even when `--with-intermediate` is combined with
+    // `--output json`. This mirrors the human-format hint above, which also
+    // uses `eprintln!` to keep stdout clean.
+    if let Some(bytes) = &conversion.intermediate_output {
+        eprintln!(
+            "\n=== intermediate_output ({} bytes, borsh) ===",
+            bytes.len()
+        );
+        eprintln!("{}", hex::encode(bytes));
     }
     Ok(())
 }

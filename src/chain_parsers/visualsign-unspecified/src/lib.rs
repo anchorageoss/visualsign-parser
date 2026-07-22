@@ -1,8 +1,8 @@
 use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon, SignablePayloadFieldTextV2,
     vsptrait::{
-        Transaction, TransactionParseError, VisualSignConverter, VisualSignConverterFromString,
-        VisualSignError, VisualSignOptions,
+        ConversionResult, Transaction, TransactionParseError, VisualSignConverter,
+        VisualSignConverterFromString, VisualSignError, VisualSignOptions,
     },
 };
 
@@ -43,7 +43,7 @@ impl VisualSignConverter<UnspecifiedTransactionWrapper> for UnspecifiedVisualSig
         &self,
         transaction_wrapper: UnspecifiedTransactionWrapper,
         _options: VisualSignOptions,
-    ) -> Result<SignablePayload, VisualSignError> {
+    ) -> Result<ConversionResult, VisualSignError> {
         // Return the exact payload expected by the e2e test
         let fields = vec![
             SignablePayloadField::TextV2 {
@@ -66,13 +66,13 @@ impl VisualSignConverter<UnspecifiedTransactionWrapper> for UnspecifiedVisualSig
             },
         ];
 
-        Ok(SignablePayload::new(
+        Ok(ConversionResult::new(SignablePayload::new(
             0,
             "Unspecified Transaction".to_string(),
             None,
             fields,
             "fill in parsed signable payload".to_string(), // This is what the test expects
-        ))
+        )))
     }
 }
 
@@ -88,7 +88,9 @@ pub fn transaction_to_visual_sign(
 ) -> Result<SignablePayload, VisualSignError> {
     let wrapper = UnspecifiedTransactionWrapper::new(raw_data);
     let converter = UnspecifiedVisualSignConverter;
-    converter.to_visual_sign_payload(wrapper, options)
+    converter
+        .to_visual_sign_payload(wrapper, options)
+        .map(|r| r.payload)
 }
 
 pub fn transaction_string_to_visual_sign(
@@ -96,5 +98,7 @@ pub fn transaction_string_to_visual_sign(
     options: VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     let converter = UnspecifiedVisualSignConverter;
-    converter.to_visual_sign_payload_from_string(transaction_data, options)
+    converter
+        .to_visual_sign_payload_from_string(transaction_data, options)
+        .map(|r| r.payload)
 }

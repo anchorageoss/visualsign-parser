@@ -9,9 +9,30 @@ use generated::parser::{
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use visualsign::SignablePayload;
 use visualsign::vsptrait::{VisualSignConverterFromString, VisualSignError, VisualSignOptions};
 use visualsign_ethereum::EthereumVisualSignConverter;
 use visualsign_ethereum::transaction_string_to_visual_sign;
+
+/// Test-only adapter mirroring the crate's internal helper: unwrap the
+/// `ConversionResult` to its `SignablePayload`.
+trait TestConvertExt {
+    fn to_payload_from_string(
+        &self,
+        data: &str,
+        options: VisualSignOptions,
+    ) -> Result<SignablePayload, VisualSignError>;
+}
+impl TestConvertExt for EthereumVisualSignConverter {
+    fn to_payload_from_string(
+        &self,
+        data: &str,
+        options: VisualSignOptions,
+    ) -> Result<SignablePayload, VisualSignError> {
+        self.to_visual_sign_payload_from_string(data, options)
+            .map(|r| r.payload)
+    }
+}
 
 /// Build a valid proto `SignatureMetadata` for `abi_json`, bound to `address` on
 /// chain 1, using a deterministic test key. Unsigned entries are rejected by the
@@ -109,6 +130,7 @@ fn test_with_fixtures() {
 
         // Create options for the transaction
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: true,
             transaction_name: None,
             metadata: None,
@@ -177,6 +199,7 @@ fn test_ethereum_charset_validation() {
 
         // Create options for the transaction
         let options = VisualSignOptions {
+            include_intermediate_output: false,
             decode_transfers: true,
             transaction_name: None,
             metadata: None,
@@ -243,6 +266,7 @@ fn test_trait_path_without_abi_metadata() {
     let transaction_hex = transaction_hex.trim();
 
     let options = VisualSignOptions {
+        include_intermediate_output: false,
         decode_transfers: true,
         transaction_name: None,
         metadata: None,
@@ -322,6 +346,7 @@ fn test_abi_from_metadata_decodes_function() {
     // `HashMap` in generated code. The crate-wide rule (clippy.toml) keeps us
     // on `BTreeMap` internally and we collect at the FFI point.
     let options = VisualSignOptions {
+        include_intermediate_output: false,
         decode_transfers: true,
         transaction_name: None,
         metadata: Some(ChainMetadata {
@@ -334,9 +359,7 @@ fn test_abi_from_metadata_decodes_function() {
     };
 
     let converter = EthereumVisualSignConverter::with_signers(test_abi_signer_allowlist());
-    let result = converter
-        .to_visual_sign_payload_from_string(&tx_hex, options)
-        .unwrap();
+    let result = converter.to_payload_from_string(&tx_hex, options).unwrap();
 
     // The ABI from metadata should decode the function name.
     // Without abi_mappings, this address is unknown and would show raw hex.
@@ -424,6 +447,7 @@ fn test_proxy_decodes_via_implementation_abi() {
     );
 
     let options = VisualSignOptions {
+        include_intermediate_output: false,
         decode_transfers: true,
         transaction_name: None,
         metadata: Some(ChainMetadata {
@@ -437,7 +461,7 @@ fn test_proxy_decodes_via_implementation_abi() {
 
     let converter = EthereumVisualSignConverter::with_signers(test_abi_signer_allowlist());
     let json = converter
-        .to_visual_sign_payload_from_string(&tx_hex, options)
+        .to_payload_from_string(&tx_hex, options)
         .unwrap()
         .to_json()
         .unwrap();
@@ -516,6 +540,7 @@ fn test_proxy_entry_cannot_override_canonical_token() {
     );
 
     let options = VisualSignOptions {
+        include_intermediate_output: false,
         decode_transfers: true,
         transaction_name: None,
         metadata: Some(ChainMetadata {
@@ -529,7 +554,7 @@ fn test_proxy_entry_cannot_override_canonical_token() {
 
     let converter = EthereumVisualSignConverter::with_signers(test_abi_signer_allowlist());
     let json = converter
-        .to_visual_sign_payload_from_string(&tx_hex, options)
+        .to_payload_from_string(&tx_hex, options)
         .unwrap()
         .to_json()
         .unwrap();
@@ -570,6 +595,7 @@ fn test_chain_id_mismatch_rejected() {
     // Metadata claims POLYGON_MAINNET (chain_id = 137), which disagrees with
     // the tx-declared chain_id in the transaction bytes. Parser must refuse.
     let options = VisualSignOptions {
+        include_intermediate_output: false,
         decode_transfers: true,
         transaction_name: None,
         metadata: Some(ChainMetadata {
@@ -583,7 +609,7 @@ fn test_chain_id_mismatch_rejected() {
 
     let converter = EthereumVisualSignConverter::new();
     let err = converter
-        .to_visual_sign_payload_from_string(&tx_hex, options)
+        .to_payload_from_string(&tx_hex, options)
         .expect_err("mismatched network_id vs tx-declared chain_id must be rejected");
 
     let msg = err.to_string();
@@ -629,6 +655,7 @@ fn test_chain_id_matching_metadata_succeeds() {
     let tx_hex = format!("0x{}", hex::encode(&buf));
 
     let options = VisualSignOptions {
+        include_intermediate_output: false,
         decode_transfers: true,
         transaction_name: None,
         metadata: Some(ChainMetadata {
@@ -642,7 +669,7 @@ fn test_chain_id_matching_metadata_succeeds() {
 
     let converter = EthereumVisualSignConverter::with_signers(test_abi_signer_allowlist());
     let payload = converter
-        .to_visual_sign_payload_from_string(&tx_hex, options)
+        .to_payload_from_string(&tx_hex, options)
         .expect("matching network_id and chain_id should parse cleanly");
     let json = payload.to_json().unwrap();
     assert!(
@@ -675,6 +702,7 @@ fn test_non_ascii_payload_is_rejected_by_converter() {
         .to_string();
 
     let options = VisualSignOptions {
+        include_intermediate_output: false,
         decode_transfers: true,
         transaction_name: Some("Send \u{202E}evil".to_string()),
         metadata: None,
@@ -682,7 +710,7 @@ fn test_non_ascii_payload_is_rejected_by_converter() {
     };
 
     let converter = EthereumVisualSignConverter::new();
-    let result = converter.to_visual_sign_payload_from_string(&transaction_hex, options);
+    let result = converter.to_payload_from_string(&transaction_hex, options);
 
     match result {
         Ok(payload) => panic!(

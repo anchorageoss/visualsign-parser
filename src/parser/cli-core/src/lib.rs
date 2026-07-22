@@ -65,6 +65,12 @@ pub struct SharedArgs {
     #[arg(long)]
     pub condensed_only: bool,
 
+    /// Request and display the chain-specific `intermediate_output` blob (the
+    /// borsh-serialized structured decode used by downstream policy engines).
+    /// Prints the raw bytes as hex so they can be captured as a test fixture.
+    #[arg(long)]
+    pub with_intermediate: bool,
+
     /// Network identifier (chain ID or canonical name).
     #[arg(
         long,
@@ -97,6 +103,7 @@ pub fn prepare_runtime(
     chain_str: &str,
     network: Option<String>,
     plugins: &[Box<dyn ChainPlugin>],
+    include_intermediate_output: bool,
 ) -> Result<Runtime, String> {
     let chain = chains::parse_chain(chain_str);
     let mut registry = TransactionConverterRegistry::new();
@@ -124,6 +131,7 @@ pub fn prepare_runtime(
 
     let chain_metadata = plugin.create_metadata(network)?;
     let options = VisualSignOptions {
+        include_intermediate_output,
         decode_transfers: true,
         transaction_name: None,
         metadata: chain_metadata,
@@ -138,8 +146,12 @@ pub fn prepare_runtime(
 /// CLI entry point. Pass the shared args plus an ordered list of chain plugins.
 /// The first plugin whose `chain()` matches `shared.chain` handles the transaction.
 pub fn run(shared: &SharedArgs, plugins: &[Box<dyn ChainPlugin>]) -> Result<(), String> {
-    let Runtime { registry, options } =
-        prepare_runtime(&shared.chain, shared.network.clone(), plugins)?;
+    let Runtime { registry, options } = prepare_runtime(
+        &shared.chain,
+        shared.network.clone(),
+        plugins,
+        shared.with_intermediate,
+    )?;
 
     let raw_tx =
         tx_input::resolve_transaction_input(&shared.transaction).map_err(|e| e.to_string())?;

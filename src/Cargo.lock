@@ -6553,6 +6553,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "generated",
+ "hex",
  "serde",
  "serde_json",
  "tracing",
@@ -6564,6 +6565,7 @@ name = "parser_gateway"
 version = "0.1.0"
 dependencies = [
  "axum 0.6.20",
+ "base64 0.22.1",
  "generated",
  "health_check",
  "host_primitives",

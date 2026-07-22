@@ -98,7 +98,7 @@ struct FileResponse<'a> {
 /// see edits.
 pub fn run(args: &ServeArgs) -> Result<(), String> {
     let plugins = args.chains.build_plugins();
-    let runtime = prepare_runtime(&args.chain, args.network.clone(), &plugins)?;
+    let runtime = prepare_runtime(&args.chain, args.network.clone(), &plugins, false)?;
 
     validate_dir(&args.dir)?;
 
@@ -235,7 +235,12 @@ fn decode_file(
     let payload = registry
         .convert_transaction(&chain, trimmed, options.clone())
         .map_err(|e| format!("{e:?}"))?;
-    serde_json::to_value(&payload).map_err(|e| format!("serialize: {e}"))
+    // `convert_transaction` returns a `ConversionResult` (payload + optional
+    // intermediate_output); only the inner `SignablePayload` is `Serialize`, so
+    // serialize that. The `serve` UI is interactive triage and never opts into
+    // `include_intermediate_output`, so the intermediate blob is `None` here
+    // anyway.
+    serde_json::to_value(&payload.payload).map_err(|e| format!("serialize: {e}"))
 }
 
 async fn load_entries(state: &AppState) -> Result<Vec<DecodedEntry>, String> {
@@ -448,7 +453,13 @@ mod tests {
 
     fn make_runtime() -> Runtime {
         let plugins = ChainArgs::default().build_plugins();
-        prepare_runtime("ethereum", Some("ETHEREUM_MAINNET".to_string()), &plugins).unwrap()
+        prepare_runtime(
+            "ethereum",
+            Some("ETHEREUM_MAINNET".to_string()),
+            &plugins,
+            false,
+        )
+        .unwrap()
     }
 
     /// A real EIP-1559 ETH transfer, also used by the integration fixture.
