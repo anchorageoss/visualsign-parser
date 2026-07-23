@@ -207,6 +207,14 @@ Guards:
 - `--keep` must be `>= 1`.
 - A deployment with no matching `create_tvc_deployment` activity (so it can't be
   dated) is protected and flagged, not deleted.
+- `prune` enumerates deployments by shelling out to `tvc app status`, which has
+  no `--org` flag of its own: it always uses env-var auth (if
+  `TVC_ORG_ID`/`TVC_API_KEY_PUBLIC`/`TVC_API_KEY_PRIVATE` are all set) or
+  otherwise the config file's active org. So `--org` is rejected outright under
+  env-var auth (it would be silently ignored by `tvc app status` otherwise),
+  and under config auth `--org` must resolve to the same org as the config's
+  active org, or `prune` fails fast rather than enumerate one org and delete
+  against another.
 
 Consensus works the same as everywhere else: `prune`/`delete-deployment` only
 surface the activity id, and a quorum member runs `tvc-deploy approve-activity

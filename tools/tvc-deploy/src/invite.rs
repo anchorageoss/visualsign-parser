@@ -396,6 +396,26 @@ fn org_override_matches_active(config: &TvcConfig, org_override: Option<&str>) -
     }
 }
 
+/// Env-var auth (`resolve_from_env`) ignores `--org` entirely: the org is
+/// whatever `TVC_ORG_ID` says, for both this process and the `tvc` child
+/// process `prune` shells out to. If `--org` is *also* given, an operator
+/// could reasonably believe they're targeting that org when the env var
+/// silently wins instead, the exact silent cross-org mismatch
+/// `ensure_status_will_use_same_org` exists to prevent. Fail fast rather than
+/// let `--org` be silently ignored.
+fn check_org_override_allowed_under_env_auth(org_override: Option<&str>) -> Result<()> {
+    if let Some(given) = org_override {
+        bail!(
+            "--org {given:?} was given, but env-var auth ({ENV_ORG_ID}/{ENV_API_KEY_PUBLIC}/\
+             {ENV_API_KEY_PRIVATE}) is active and always wins over --org; `tvc app status` \
+             (used by `prune` to enumerate deployments) has no --org flag either and always \
+             uses the env vars, so enumeration and deletion would silently target {ENV_ORG_ID} \
+             instead of --org's org. Unset the env vars to use --org, or omit --org.",
+        );
+    }
+    Ok(())
+}
+
 /// `prune` enumerates deployments by shelling out to the external `tvc`
 /// binary (`tvc app status`), which has no `--org` flag: it always resolves
 /// auth the same way `tvc` itself would, i.e. env vars if all three `TVC_*`
@@ -408,7 +428,10 @@ fn org_override_matches_active(config: &TvcConfig, org_override: Option<&str>) -
 fn ensure_status_will_use_same_org(org_override: Option<&str>) -> Result<()> {
     if resolve_from_env()?.is_some() {
         // Env vars apply uniformly to this process and to the child `tvc`
-        // process, so both agree on the org.
+        // process, so both agree on the org; but if `--org` was also given,
+        // that's a conflicting signal worth failing fast on (see
+        // `check_org_override_allowed_under_env_auth`).
+        check_org_override_allowed_under_env_auth(org_override)?;
         return Ok(());
     }
     let config_path = dirs_config_path()?;
@@ -1599,7 +1622,12 @@ pub fn prune(sh: &Shell, args: &PruneArgs) -> Result<()> {
             println!("  {action} {}  created_at={}{}", d.id, d.created_at, live);
         }
         for id in &undateable {
-            println!("  KEEP   {id}  (no create activity found; protected)");
+            let live = if live_id.as_deref() == Some(id.as_str()) {
+                " (live)"
+            } else {
+                ""
+            };
+            println!("  KEEP   {id}  (no create activity found; protected){live}");
         }
 
         if to_delete.is_empty() {
@@ -2113,6 +2141,16 @@ mod tests {
         // Not this check's job to report unknown orgs; resolve_auth handles that.
         let config = test_config();
         assert!(org_override_matches_active(&config, Some("nonexistent")));
+    }
+
+    #[test]
+    fn org_override_rejected_under_env_auth() {
+        assert!(check_org_override_allowed_under_env_auth(Some("prod")).is_err());
+    }
+
+    #[test]
+    fn no_org_override_allowed_under_env_auth() {
+        assert!(check_org_override_allowed_under_env_auth(None).is_ok());
     }
 
     #[test]
