@@ -203,7 +203,8 @@ pub struct PruneArgs {
     /// ID of the app whose old deployments to prune
     #[arg(long)]
     pub app_id: String,
-    /// Number of newest deployments to keep, on top of the live one (always protected)
+    /// Number of newest non-live deployments to keep, in addition to the live
+    /// one (always protected)
     #[arg(long, default_value_t = 2)]
     pub keep: usize,
     /// Print the keep/delete plan and exit without deleting anything
@@ -1413,7 +1414,10 @@ fn sort_newest_first(deployments: &mut [DatedDeployment]) {
     });
 }
 
-/// Ids to delete: everything except the live deployment and the `keep` newest.
+/// Ids to delete: everything except the live deployment and the `keep` newest
+/// *non-live* deployments. The live deployment never counts against the
+/// `keep` budget, so it's always protected in addition to those `keep`
+/// newest, not merely counted among them -- matching `--keep`'s help text.
 /// `deployments` must already be sorted newest-first (see `sort_newest_first`).
 /// Never returns `live_id`. Callers must reject `keep < 1` before this.
 fn select_for_deletion(
@@ -1421,11 +1425,17 @@ fn select_for_deletion(
     live_id: Option<&str>,
     keep: usize,
 ) -> Vec<String> {
+    let mut non_live_rank = 0usize;
     deployments
         .iter()
-        .enumerate()
-        .filter(|(idx, d)| *idx >= keep && live_id != Some(d.id.as_str()))
-        .map(|(_, d)| d.id.clone())
+        .filter_map(|d| {
+            if live_id == Some(d.id.as_str()) {
+                return None;
+            }
+            let rank = non_live_rank;
+            non_live_rank += 1;
+            (rank >= keep).then(|| d.id.clone())
+        })
         .collect()
 }
 
@@ -2581,17 +2591,19 @@ Deployment: deploy-a
     }
 
     #[test]
-    fn select_for_deletion_deletes_two_oldest_when_keep_plus_two() {
+    fn select_for_deletion_keeps_live_plus_keep_newest_non_live() {
         // Newest-first: a(200), b(150), c(100), e(50). keep=2, live is newest.
+        // Live doesn't count against the keep budget, so the two newest
+        // *non-live* deployments (b, c) are kept alongside it; only e is
+        // deleted (total kept = 3 = live + keep, not keep).
         let deployments = vec![
             dated("a", 200),
             dated("b", 150),
             dated("c", 100),
             dated("e", 50),
         ];
-        let mut got = select_for_deletion(&deployments, Some("a"), 2);
-        got.sort();
-        assert_eq!(got, vec!["c".to_owned(), "e".to_owned()]);
+        let got = select_for_deletion(&deployments, Some("a"), 2);
+        assert_eq!(got, vec!["e".to_owned()]);
     }
 
     #[test]
