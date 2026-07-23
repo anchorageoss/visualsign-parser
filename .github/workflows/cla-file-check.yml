@@ -33,12 +33,18 @@ jobs:
 
       - name: Check for username in .cla-signed-users
         id: check_user
+        env:
+          PR_USER: ${{ github.event.pull_request.user.login }}
         run: |
-          if grep -v '^#' .cla-signed-users | grep -q -w "${{ github.event.pull_request.user.login }}"; then
+          # Fixed-string, whole-line match (grep -Fxq): GitHub logins like
+          # `github-actions[bot]` contain regex metacharacters, so `grep -w`
+          # would misbehave. A missing file is treated as "not signed" rather
+          # than erroring the workflow.
+          if [ -f .cla-signed-users ] && grep -v '^#' .cla-signed-users | grep -Fxq "$PR_USER"; then
             echo "✅ User found in .cla-signed-users file."
             echo "is_signed=true" >> $GITHUB_OUTPUT
           else
-            echo "❌ User not found. Please acknowledge the CLA."
+            echo "❌ User not found (or CLA file missing). Please acknowledge the CLA."
             echo "is_signed=false" >> $GITHUB_OUTPUT
           fi
 
