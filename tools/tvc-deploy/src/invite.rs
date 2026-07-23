@@ -10,6 +10,7 @@
 //! (written by `tvc login`), selecting --org or the active org.
 
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -20,14 +21,16 @@ use turnkey_client::generated::external::data::v1::InvitationStatus;
 use turnkey_client::generated::external::options::v1::Pagination;
 use turnkey_client::generated::immutable::common::v1::{AccessType, Effect};
 use turnkey_client::generated::{
-    intent, Activity, ActivityStatus, ActivityType, ApproveActivityIntent, CreateInvitationsIntent,
-    CreatePoliciesIntent, CreatePolicyIntentV3, CreateUserTagIntent, DeleteInvitationIntent,
-    GetActivitiesRequest, GetActivityRequest, GetOrganizationRequest, GetOrganizationResponse,
-    GetPoliciesRequest, GetUsersRequest, GetWhoamiRequest, InvitationParams, ListUserTagsRequest,
-    RejectActivityIntent, UpdateUserTagIntent,
+    intent, result, Activity, ActivityStatus, ActivityType, ApproveActivityIntent,
+    CreateInvitationsIntent, CreatePoliciesIntent, CreatePolicyIntentV3, CreateUserTagIntent,
+    DeleteInvitationIntent, DeleteTvcDeploymentIntent, GetActivitiesRequest, GetActivityRequest,
+    GetOrganizationRequest, GetOrganizationResponse, GetPoliciesRequest, GetUsersRequest,
+    GetWhoamiRequest, InvitationParams, ListUserTagsRequest, RejectActivityIntent,
+    UpdateUserTagIntent,
 };
 use turnkey_client::TurnkeyP256ApiKey;
 use turnkey_client::{TurnkeyClient, TurnkeyClientError, TurnkeySecp256k1ApiKey};
+use xshell::{cmd, Shell};
 
 const DEFAULT_API_BASE_URL: &str = "https://api.turnkey.com";
 const ENV_ORG_ID: &str = "TVC_ORG_ID";
@@ -179,6 +182,36 @@ pub struct CreatePoliciesArgs {
     /// Render and print the batch without submitting, to check a template before it hits an org
     #[arg(long)]
     pub dry_run: bool,
+    #[command(flatten)]
+    pub org: OrgArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct DeleteDeploymentArgs {
+    /// ID of the deployment to delete
+    #[arg(long)]
+    pub deploy_id: String,
+    /// Skip the confirmation prompt (for automation)
+    #[arg(long)]
+    pub yes: bool,
+    #[command(flatten)]
+    pub org: OrgArgs,
+}
+
+#[derive(Args, Debug)]
+pub struct PruneArgs {
+    /// ID of the app whose old deployments to prune
+    #[arg(long)]
+    pub app_id: String,
+    /// Number of newest deployments to keep, on top of the live one (always protected)
+    #[arg(long, default_value_t = 2)]
+    pub keep: usize,
+    /// Print the keep/delete plan and exit without deleting anything
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Skip the confirmation prompt (for automation)
+    #[arg(long)]
+    pub yes: bool,
     #[command(flatten)]
     pub org: OrgArgs,
 }
@@ -391,6 +424,15 @@ fn current_timestamp_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+/// A Turnkey `Timestamp`'s `seconds` field as `i64`, or 0 if missing/unparsable.
+/// Shared by `fetch_activities`'s newest-first sort and
+/// `deployment_created_at_map`'s ordering signal for `prune`.
+fn timestamp_seconds(t: &Option<turnkey_client::generated::external::data::v1::Timestamp>) -> i64 {
+    t.as_ref()
+        .and_then(|t| t.seconds.parse::<i64>().ok())
         .unwrap_or(0)
 }
 
@@ -1146,14 +1188,7 @@ async fn fetch_activities(
     // Newest first, so a burst of near-duplicate activities (e.g. an
     // accidental double-submit) lines up together for comparison.
     let mut activities = response.activities;
-    activities.sort_by(|a, b| {
-        let seconds = |t: &Option<turnkey_client::generated::external::data::v1::Timestamp>| {
-            t.as_ref()
-                .and_then(|t| t.seconds.parse::<i64>().ok())
-                .unwrap_or(0)
-        };
-        seconds(&b.created_at).cmp(&seconds(&a.created_at))
-    });
+    activities.sort_by_key(|a| std::cmp::Reverse(timestamp_seconds(&a.created_at)));
     Ok(activities)
 }
 
@@ -1229,6 +1264,16 @@ fn print_table<const N: usize>(header: [&str; N], rows: &[[String; N]]) {
     println!("{table}");
 }
 
+/// True if `activity`'s intent is a `create_tvc_deployment` targeting `app_id`.
+/// Shared by `find_pending_deployments` and `deployment_created_at_map`, which
+/// filter the same activity type down to one app by the same intent field.
+fn targets_app(activity: &Activity, app_id: &str) -> bool {
+    matches!(
+        activity.intent.as_ref().and_then(|i| i.inner.as_ref()),
+        Some(intent::Inner::CreateTvcDeploymentIntent(i)) if i.app_id == app_id
+    )
+}
+
 /// Activities still awaiting consensus for a `create_tvc_deployment` targeting
 /// `app_id`, newest first. Used by `deploy` to warn before creating a second,
 /// independent activity for a deployment that's already pending approval --
@@ -1245,11 +1290,262 @@ pub fn find_pending_deployments(org_override: Option<&str>, app_id: &str) -> Res
         .await?;
         Ok(activities
             .into_iter()
-            .filter(|a| match a.intent.as_ref().and_then(|i| i.inner.as_ref()) {
-                Some(intent::Inner::CreateTvcDeploymentIntent(i)) => i.app_id == app_id,
-                _ => false,
-            })
+            .filter(|a| targets_app(a, app_id))
             .collect())
+    })?
+}
+
+/// One deployment row parsed out of `tvc app status` output.
+#[derive(Debug, Clone, PartialEq)]
+struct ParsedDeployment {
+    id: String,
+    /// True when this id matches the `Targeted Deployment:` header, i.e. the
+    /// set-live target Turnkey refuses to delete.
+    is_live: bool,
+}
+
+/// Parse `tvc app status` output into the deployments it lists, flagging the one
+/// matching the `Targeted Deployment:` header as live. The `Targeted Deployment:`
+/// header and any lines outside a `Deployment:` block are not deployment rows.
+/// Mirrors `deployment_health`'s block-scanning in `main.rs`.
+fn parse_deployments(status: &str) -> Vec<ParsedDeployment> {
+    let mut targeted: Option<String> = None;
+    let mut deployments: Vec<ParsedDeployment> = Vec::new();
+    for line in status.lines() {
+        let t = line.trim();
+        // Check the "Targeted Deployment:" header before the bare "Deployment:"
+        // prefix -- the header line does not start with "Deployment:", but
+        // ordering the checks this way keeps the intent obvious.
+        if let Some(rest) = t.strip_prefix("Targeted Deployment:") {
+            let id = rest.trim();
+            targeted = (!id.is_empty()).then(|| id.to_owned());
+        } else if let Some(rest) = t.strip_prefix("Deployment:") {
+            let id = rest.trim();
+            if !id.is_empty() {
+                deployments.push(ParsedDeployment {
+                    id: id.to_owned(),
+                    is_live: false,
+                });
+            }
+        }
+    }
+    if let Some(targeted) = &targeted {
+        for d in &mut deployments {
+            d.is_live = &d.id == targeted;
+        }
+    }
+    deployments
+}
+
+/// A deployment paired with the `created_at` of its `create_tvc_deployment`
+/// activity, the ordering signal for retention ("newest N").
+#[derive(Debug, Clone, PartialEq)]
+struct DatedDeployment {
+    id: String,
+    created_at: i64,
+}
+
+/// Sort deployments newest-first by `created_at`, ties broken by id (desc) so
+/// the order is deterministic. Shared by `select_for_deletion` and the plan
+/// printout in `prune`, which must agree on ordering.
+fn sort_newest_first(deployments: &mut [DatedDeployment]) {
+    deployments.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| b.id.cmp(&a.id))
+    });
+}
+
+/// Ids to delete: everything except the live deployment and the `keep` newest.
+/// `deployments` must already be sorted newest-first (see `sort_newest_first`).
+/// Never returns `live_id`. Callers must reject `keep < 1` before this.
+fn select_for_deletion(
+    deployments: &[DatedDeployment],
+    live_id: Option<&str>,
+    keep: usize,
+) -> Vec<String> {
+    deployments
+        .iter()
+        .enumerate()
+        .filter(|(idx, d)| *idx >= keep && live_id != Some(d.id.as_str()))
+        .map(|(_, d)| d.id.clone())
+        .collect()
+}
+
+/// Map each of `app_id`'s deployment ids to the `created_at` (unix seconds) of
+/// the completed `create_tvc_deployment` activity that produced it. The app id
+/// comes from the intent, the deployment id from the result -- both on the same
+/// activity. Used to order deployments for `prune`.
+async fn deployment_created_at_map(auth: &Auth, app_id: &str) -> Result<HashMap<String, i64>> {
+    let activities = fetch_activities(
+        auth,
+        vec![ActivityStatus::Completed],
+        vec![ActivityType::CreateTvcDeployment],
+        None,
+    )
+    .await?;
+
+    let mut map = HashMap::new();
+    for activity in activities {
+        if !targets_app(&activity, app_id) {
+            continue;
+        }
+        let deployment_id = match activity.result.as_ref().and_then(|r| r.inner.as_ref()) {
+            Some(result::Inner::CreateTvcDeploymentResult(res)) => res.deployment_id.clone(),
+            _ => continue,
+        };
+        map.insert(deployment_id, timestamp_seconds(&activity.created_at));
+    }
+    Ok(map)
+}
+
+/// Submit a single `DeleteTvcDeploymentIntent`, reporting the activity id (or the
+/// approve command when consensus is needed) exactly like the invite/policy
+/// flows. Turnkey deletion carries no manifest, so this goes SDK-direct.
+async fn submit_delete_deployment(auth: &Auth, deployment_id: &str) -> Result<()> {
+    let outcome = auth
+        .client
+        .delete_tvc_deployment(
+            auth.org_id.clone(),
+            current_timestamp_ms(),
+            DeleteTvcDeploymentIntent {
+                deployment_id: deployment_id.to_owned(),
+            },
+        )
+        .await;
+
+    match outcome {
+        Ok(result) => {
+            println!("activity {} status={:?}", result.activity_id, result.status);
+            println!("deleted deployment id: {}", result.result.deployment_id);
+            Ok(())
+        }
+        Err(TurnkeyClientError::ActivityRequiresApproval(activity_id)) => {
+            println!(
+                "activity {activity_id} needs consensus; approve it with:\n  \
+                 tvc-deploy approve-activity --activity-id {activity_id} --org <alias-or-id>"
+            );
+            Ok(())
+        }
+        Err(e) => Err(anyhow!("delete_tvc_deployment failed: {e}")),
+    }
+}
+
+/// Prompt on stdout and read a line from stdin; true only for `y`/`yes`.
+fn confirm(prompt: &str) -> Result<bool> {
+    print!("{prompt}");
+    std::io::stdout().flush().ok();
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .context("read stdin")?;
+    let answer = input.trim().to_ascii_lowercase();
+    Ok(answer == "y" || answer == "yes")
+}
+
+/// Primitive: delete one deployment by id. Confirms first unless `--yes`.
+pub fn delete_deployment(args: &DeleteDeploymentArgs) -> Result<()> {
+    if !args.yes && !confirm(&format!("delete deployment {}? [y/N] ", args.deploy_id))? {
+        println!("aborted");
+        return Ok(());
+    }
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
+        submit_delete_deployment(&auth, &args.deploy_id).await
+    })?
+}
+
+/// Convenience: keep the live deployment plus the `--keep` newest for `--app-id`,
+/// delete the rest. Prints the keep/delete plan and (unless `--yes`) confirms
+/// before submitting; `--dry-run` prints the plan and exits. Deployments with no
+/// matching `create_tvc_deployment` activity can't be dated, so they're
+/// protected (never auto-deleted) and flagged for manual handling.
+pub fn prune(sh: &Shell, args: &PruneArgs) -> Result<()> {
+    if args.keep < 1 {
+        bail!("--keep must be >= 1 (refusing to delete every deployment)");
+    }
+
+    let app_id = &args.app_id;
+    let status_out = cmd!(sh, "tvc app status --app-id {app_id}")
+        .read()
+        .context("tvc app status")?;
+    let parsed = parse_deployments(&status_out);
+    if parsed.is_empty() {
+        println!("app {app_id} has no deployments; nothing to prune");
+        return Ok(());
+    }
+    let live_id = parsed.iter().find(|d| d.is_live).map(|d| d.id.clone());
+
+    block_on(async {
+        let auth = resolve_auth(args.org.as_deref())?;
+        let created = deployment_created_at_map(&auth, app_id).await?;
+
+        // Split existing deployments into ones we can date and ones we can't.
+        // An undateable deployment (no matching create activity in the query
+        // window) is protected -- we won't delete something we can't age.
+        let mut dated: Vec<DatedDeployment> = Vec::new();
+        let mut undateable: Vec<String> = Vec::new();
+        for d in &parsed {
+            match created.get(&d.id) {
+                Some(ts) => dated.push(DatedDeployment {
+                    id: d.id.clone(),
+                    created_at: *ts,
+                }),
+                None => undateable.push(d.id.clone()),
+            }
+        }
+
+        sort_newest_first(&mut dated);
+        let to_delete = select_for_deletion(&dated, live_id.as_deref(), args.keep);
+        let delete_set: HashSet<&str> = to_delete.iter().map(String::as_str).collect();
+
+        println!(
+            "prune plan for app {app_id} (keep newest {} + live):",
+            args.keep
+        );
+        for d in &dated {
+            let action = if delete_set.contains(d.id.as_str()) {
+                "DELETE"
+            } else {
+                "KEEP  "
+            };
+            let live = if live_id.as_deref() == Some(d.id.as_str()) {
+                " (live)"
+            } else {
+                ""
+            };
+            println!("  {action} {}  created_at={}{}", d.id, d.created_at, live);
+        }
+        for id in &undateable {
+            println!("  KEEP   {id}  (no create activity found; protected)");
+        }
+
+        if to_delete.is_empty() {
+            println!("nothing to prune");
+            return Ok(());
+        }
+        if args.dry_run {
+            println!(
+                "dry run: {} deployment(s) would be deleted",
+                to_delete.len()
+            );
+            return Ok(());
+        }
+        if !args.yes && !confirm(&format!("delete {} deployment(s)? [y/N] ", to_delete.len()))? {
+            println!("aborted");
+            return Ok(());
+        }
+
+        for id in &to_delete {
+            // Hard guard: never delete the live deployment, even if the
+            // selection logic ever regresses (Turnkey also refuses server-side).
+            if live_id.as_deref() == Some(id.as_str()) {
+                bail!("refusing to delete live deployment {id}");
+            }
+            println!("deleting deployment {id}...");
+            submit_delete_deployment(&auth, id).await?;
+        }
+        Ok(())
     })?
 }
 
@@ -2110,5 +2406,110 @@ mod tests {
         assert!(summary.contains("2 policies"), "{summary}");
         assert!(summary.contains("allow releasers"), "{summary}");
         assert!(summary.contains("allow initiators"), "{summary}");
+    }
+
+    #[test]
+    fn parse_deployments_marks_targeted_as_live_and_lists_all() {
+        let status = "\
+App ID: app-1
+Targeted Deployment: deploy-b
+Egress: disabled
+
+Deployment: deploy-a
+  Healthy / Desired Replicas: 3/3
+  Last Updated: 100.000000000s
+
+Deployment: deploy-b
+  Healthy / Desired Replicas: 3/3
+  Last Updated: 200.000000000s
+";
+        assert_eq!(
+            parse_deployments(status),
+            vec![
+                ParsedDeployment {
+                    id: "deploy-a".to_owned(),
+                    is_live: false,
+                },
+                ParsedDeployment {
+                    id: "deploy-b".to_owned(),
+                    is_live: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_deployments_ignores_lines_outside_a_block_and_handles_no_target() {
+        // A stray ratio line before any block must not become a deployment row,
+        // and with no `Targeted Deployment:` header nothing is flagged live.
+        let status = "\
+Healthy / Desired Replicas: 9/9
+Deployment: deploy-a
+  Healthy / Desired Replicas: 1/2
+";
+        assert_eq!(
+            parse_deployments(status),
+            vec![ParsedDeployment {
+                id: "deploy-a".to_owned(),
+                is_live: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn parse_deployments_empty_when_no_deployments() {
+        let status = "App ID: app-1\nTargeted Deployment: \n\nNo deployments found.\n";
+        assert!(parse_deployments(status).is_empty());
+    }
+
+    fn dated(id: &str, created_at: i64) -> DatedDeployment {
+        DatedDeployment {
+            id: id.to_owned(),
+            created_at,
+        }
+    }
+
+    #[test]
+    fn select_for_deletion_deletes_nothing_when_fewer_than_keep() {
+        let deployments = vec![dated("a", 100)];
+        assert!(select_for_deletion(&deployments, Some("a"), 2).is_empty());
+    }
+
+    #[test]
+    fn select_for_deletion_deletes_nothing_when_exactly_keep() {
+        let deployments = vec![dated("a", 100), dated("b", 200)];
+        assert!(select_for_deletion(&deployments, None, 2).is_empty());
+    }
+
+    #[test]
+    fn select_for_deletion_deletes_two_oldest_when_keep_plus_two() {
+        // Newest-first: a(200), b(150), c(100), e(50). keep=2, live is newest.
+        let deployments = vec![
+            dated("a", 200),
+            dated("b", 150),
+            dated("c", 100),
+            dated("e", 50),
+        ];
+        let mut got = select_for_deletion(&deployments, Some("a"), 2);
+        got.sort();
+        assert_eq!(got, vec!["c".to_owned(), "e".to_owned()]);
+    }
+
+    #[test]
+    fn select_for_deletion_never_deletes_live_even_when_oldest() {
+        // Same four, but the live deployment is the oldest -- it stays protected,
+        // so only the one non-live, non-newest deployment (c) is deleted.
+        let deployments = vec![
+            dated("a", 200),
+            dated("b", 150),
+            dated("c", 100),
+            dated("e", 50),
+        ];
+        let got = select_for_deletion(&deployments, Some("e"), 2);
+        assert!(
+            !got.contains(&"e".to_owned()),
+            "live must be protected: {got:?}"
+        );
+        assert_eq!(got, vec!["c".to_owned()]);
     }
 }

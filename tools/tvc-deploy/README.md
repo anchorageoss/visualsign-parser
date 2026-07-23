@@ -159,3 +159,55 @@ approve or reject the existing one first (tvc-deploy approve-activity / reject-a
 Resolve the existing activity (approve or reject it) and re-run, or pass
 `--force` to submit anyway. The check uses the active org by default; pass
 `--org <alias>` on `deploy` if the deployment's org differs from it.
+
+## Pruning deployments
+
+Deployments accumulate: every `deploy` creates a new one, and old ones are not
+cleaned up automatically. Two subcommands remove them. The delete itself goes
+straight to the Turnkey API (a delete carries no manifest, so unlike `deploy` it
+doesn't shell out to `tvc` to submit it); `prune` additionally shells out to
+`tvc app status` to enumerate an app's deployments before deleting. Each surfaces
+the activity id + the `approve-activity` follow-up when the org needs consensus,
+exactly like invite/policy.
+
+`delete-deployment` is the primitive, one deployment by id:
+
+```
+tvc-deploy delete-deployment --deploy-id <id> --org <alias>
+```
+
+`prune` is the convenience wrapper: keep the live deployment plus the `--keep`
+newest (default 2), delete the rest.
+
+```
+# eyeball the plan first, nothing is deleted
+tvc-deploy prune --app-id <app-id> --keep 2 --org <alias> --dry-run
+
+# then for real (prompts before deleting; --yes bypasses for automation)
+tvc-deploy prune --app-id <app-id> --keep 2 --org <alias>
+```
+
+`prune` lists deployments from `tvc app status`, orders them by the `created_at`
+of their `create_tvc_deployment` activity (newest first), and prints a
+`KEEP`/`DELETE` plan before doing anything:
+
+```
+prune plan for app <app-id> (keep newest 2 + live):
+  KEEP   deploy-d  created_at=1737000400 (live)
+  KEEP   deploy-c  created_at=1737000300
+  DELETE deploy-b  created_at=1737000200
+  DELETE deploy-a  created_at=1737000100
+```
+
+Guards:
+
+- The live deployment (the `Targeted Deployment:` in `tvc app status`) is never
+  deleted. Turnkey also refuses this server-side; to remove the live one, set a
+  different deployment live first, or delete the whole app.
+- `--keep` must be `>= 1`.
+- A deployment with no matching `create_tvc_deployment` activity (so it can't be
+  dated) is protected and flagged, not deleted.
+
+Consensus works the same as everywhere else: `prune`/`delete-deployment` only
+surface the activity id, and a quorum member runs `tvc-deploy approve-activity
+--activity-id <id> --org <alias>` authenticated as themselves.

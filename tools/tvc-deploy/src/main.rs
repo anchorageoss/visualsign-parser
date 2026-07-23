@@ -51,6 +51,10 @@ enum Command {
     GenOperatorKey(GenOperatorKeyArgs),
     /// Deploy parser_app: digest-gate, create, approve, poll healthy, set live
     Deploy(DeployArgs),
+    /// Delete a single deployment by id (consensus via approve-activity)
+    DeleteDeployment(invite::DeleteDeploymentArgs),
+    /// Prune old deployments for an app, keeping the live one + newest --keep
+    Prune(invite::PruneArgs),
     /// Invite one person, or a batch from --file (see README)
     Invite(invite::InviteArgs),
     /// Delete an existing invitation
@@ -132,6 +136,8 @@ fn run() -> Result<()> {
     match cli.command {
         Command::GenOperatorKey(args) => gen_operator_key(&args),
         Command::Deploy(args) => deploy(&sh, &args),
+        Command::DeleteDeployment(args) => invite::delete_deployment(&args),
+        Command::Prune(args) => invite::prune(&sh, &args),
         Command::Invite(args) => invite::invite(&args),
         Command::DismissInvite(args) => invite::dismiss_invite(&args),
         Command::ListInvitations(args) => invite::list_invitations(&args),
