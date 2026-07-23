@@ -375,6 +375,63 @@ fn resolve_org<'a>(config: &'a TvcConfig, org_override: Option<&str>) -> Option<
     }
 }
 
+/// True when the org `org_override` resolves to (or the active org, if
+/// `None`) is the same org the config's `active_org` points at. Exposed
+/// separately from the I/O in `ensure_status_will_use_same_org` so it's
+/// testable against an in-memory `TvcConfig`.
+fn org_override_matches_active(config: &TvcConfig, org_override: Option<&str>) -> bool {
+    let Some(target) = resolve_org(config, org_override) else {
+        // Unresolvable org is reported by `resolve_auth`/`resolve_from_config`
+        // itself; not this check's job.
+        return true;
+    };
+    match config
+        .active_org
+        .as_ref()
+        .and_then(|alias| config.orgs.get(alias))
+    {
+        Some(active) => active.id == target.id,
+        None => true, // no active org configured; nothing to compare against
+    }
+}
+
+/// `prune` enumerates deployments by shelling out to the external `tvc`
+/// binary (`tvc app status`), which has no `--org` flag: it always resolves
+/// auth the same way `tvc` itself would, i.e. env vars if all three `TVC_*`
+/// vars are set (inherited by the child process, so it agrees with
+/// `resolve_auth`'s env path), otherwise the config file's `active_org`. If
+/// `--org` picks a *different* org than the config's active one, the child
+/// process would enumerate deployments for the active org while deletions
+/// happen against `--org`'s org, a silent cross-org mismatch. Fail fast
+/// before doing anything instead.
+fn ensure_status_will_use_same_org(org_override: Option<&str>) -> Result<()> {
+    if resolve_from_env()?.is_some() {
+        // Env vars apply uniformly to this process and to the child `tvc`
+        // process, so both agree on the org.
+        return Ok(());
+    }
+    let config_path = dirs_config_path()?;
+    let content = std::fs::read_to_string(&config_path).with_context(|| {
+        format!(
+            "no TVC_ORG_ID/TVC_API_KEY_PUBLIC/TVC_API_KEY_PRIVATE env vars, and no config at {}; run `tvc login` first",
+            config_path.display()
+        )
+    })?;
+    let config: TvcConfig =
+        toml::from_str(&content).with_context(|| format!("parse {}", config_path.display()))?;
+    if !org_override_matches_active(&config, org_override) {
+        bail!(
+            "--org {:?} resolves to a different org than the active one in {}; `tvc app status` \
+             (used by `prune` to enumerate deployments) has no --org flag and always targets the \
+             active org, so enumeration and deletion would run against different orgs. Run \
+             `tvc login` to switch the active org to match, or omit --org.",
+            org_override.unwrap_or("<none>"),
+            config_path.display()
+        );
+    }
+    Ok(())
+}
+
 fn resolve_from_config(org_override: Option<&str>) -> Result<ResolvedCreds> {
     let config_path = dirs_config_path()?;
     let content = std::fs::read_to_string(&config_path).with_context(|| {
@@ -1376,6 +1433,11 @@ fn select_for_deletion(
 /// the completed `create_tvc_deployment` activity that produced it. The app id
 /// comes from the intent, the deployment id from the result -- both on the same
 /// activity. Used to order deployments for `prune`.
+///
+/// Entries with a missing/unparsable `created_at` are skipped rather than
+/// mapped to `0`: `prune` treats an id absent from this map as undateable and
+/// protects it, whereas a `0` would look artificially old and become
+/// deletion-eligible.
 async fn deployment_created_at_map(auth: &Auth, app_id: &str) -> Result<HashMap<String, i64>> {
     let activities = fetch_activities(
         auth,
@@ -1394,7 +1456,14 @@ async fn deployment_created_at_map(auth: &Auth, app_id: &str) -> Result<HashMap<
             Some(result::Inner::CreateTvcDeploymentResult(res)) => res.deployment_id.clone(),
             _ => continue,
         };
-        map.insert(deployment_id, timestamp_seconds(&activity.created_at));
+        let Some(created_at) = activity
+            .created_at
+            .as_ref()
+            .and_then(|t| t.seconds.parse::<i64>().ok())
+        else {
+            continue;
+        };
+        map.insert(deployment_id, created_at);
     }
     Ok(map)
 }
@@ -1466,6 +1535,7 @@ pub fn prune(sh: &Shell, args: &PruneArgs) -> Result<()> {
     }
 
     let app_id = &args.app_id;
+    ensure_status_will_use_same_org(args.org.as_deref())?;
     let status_out = cmd!(sh, "tvc app status --app-id {app_id}")
         .read()
         .context("tvc app status")?;
@@ -2002,6 +2072,35 @@ mod tests {
     fn resolve_org_returns_none_for_unknown_alias_or_id() {
         let config = test_config();
         assert!(resolve_org(&config, Some("nonexistent")).is_none());
+    }
+
+    #[test]
+    fn org_override_matches_active_when_same_as_active_org() {
+        let config = test_config();
+        assert!(org_override_matches_active(&config, Some("dev")));
+        assert!(org_override_matches_active(
+            &config,
+            Some("11111111-1111-1111-1111-111111111111")
+        ));
+    }
+
+    #[test]
+    fn org_override_matches_active_when_none_given() {
+        let config = test_config();
+        assert!(org_override_matches_active(&config, None));
+    }
+
+    #[test]
+    fn org_override_does_not_match_active_when_different_org_given() {
+        let config = test_config();
+        assert!(!org_override_matches_active(&config, Some("prod")));
+    }
+
+    #[test]
+    fn org_override_matches_active_when_unresolvable() {
+        // Not this check's job to report unknown orgs; resolve_auth handles that.
+        let config = test_config();
+        assert!(org_override_matches_active(&config, Some("nonexistent")));
     }
 
     #[test]
