@@ -486,8 +486,10 @@ fn current_timestamp_ms() -> u128 {
 }
 
 /// A Turnkey `Timestamp`'s `seconds` field as `i64`, or 0 if missing/unparsable.
-/// Shared by `fetch_activities`'s newest-first sort and
-/// `deployment_created_at_map`'s ordering signal for `prune`.
+/// Used by `fetch_activities`'s newest-first sort, where a missing timestamp
+/// sorting as "oldest" is the desired fallback. `deployment_created_at_map`
+/// has its own parsing (see its doc comment) since it needs the opposite
+/// behavior: skip rather than default to 0.
 fn timestamp_seconds(t: &Option<turnkey_client::generated::external::data::v1::Timestamp>) -> i64 {
     t.as_ref()
         .and_then(|t| t.seconds.parse::<i64>().ok())
@@ -1513,7 +1515,7 @@ async fn submit_delete_deployment(auth: &Auth, deployment_id: &str) -> Result<()
 /// Prompt on stdout and read a line from stdin; true only for `y`/`yes`.
 fn confirm(prompt: &str) -> Result<bool> {
     print!("{prompt}");
-    std::io::stdout().flush().ok();
+    std::io::stdout().flush().context("flush stdout")?;
     let mut input = String::new();
     std::io::stdin()
         .read_line(&mut input)
