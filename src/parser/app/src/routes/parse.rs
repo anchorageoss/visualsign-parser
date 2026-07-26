@@ -30,9 +30,9 @@ pub fn parse(
     parse_with_registry(parse_request, ephemeral_key, &registry)
 }
 
-/// Same as [`parse`] but accepts a caller-provided registry. Exists primarily as
-/// a test seam so unit tests can inject stub converters and exercise the
-/// `parse()` pipeline without depending on the full production registry.
+/// Same as [`parse`] but accepts a caller-provided registry. This is the
+/// pipeline behind both [`parse`] and `service::Processor` (each builds a
+/// fresh registry per request); tests also use it to inject stub converters.
 pub(crate) fn parse_with_registry(
     parse_request: &ParseRequest,
     ephemeral_key: &P256Pair,
@@ -55,7 +55,11 @@ pub(crate) fn parse_with_registry(
     };
     let proto_chain = ProtoChain::try_from(parse_request.chain)
         .map_err(|_| GrpcError::new(Code::InvalidArgument, "invalid chain"))?;
-    let registry_chain: VisualSignRegistryChain = chain_conversion::proto_to_registry(proto_chain);
+    let registry_chain: VisualSignRegistryChain = chain_conversion::proto_to_registry(
+        proto_chain,
+        parse_request.custom_chain_name.as_deref(),
+    )
+    .map_err(|e| GrpcError::new(Code::InvalidArgument, &e))?;
 
     let conversion = registry
         .convert_transaction(&registry_chain, request_payload, options)
@@ -362,7 +366,56 @@ mod tests {
             unsigned_payload: "stub".to_string(),
             chain: ProtoChain::Tron as i32,
             chain_metadata: None,
+            custom_chain_name: None,
         }
+    }
+
+    /// Builds a `CHAIN_CUSTOM` request addressing `custom_chain_name`.
+    fn custom_request(custom_chain_name: Option<&str>) -> ParseRequest {
+        ParseRequest {
+            include_intermediate_output: false,
+            unsigned_payload: "stub".to_string(),
+            chain: ProtoChain::Custom as i32,
+            chain_metadata: None,
+            custom_chain_name: custom_chain_name.map(str::to_string),
+        }
+    }
+
+    /// An external chain registered under `Chain::Custom(name)` (as an
+    /// external workspace's converter would be) resolves via `CHAIN_CUSTOM` +
+    /// `custom_chain_name` exactly like a built-in chain resolves by variant.
+    #[test]
+    fn parse_resolves_custom_chain_by_name() {
+        let mut registry = TransactionConverterRegistry::new();
+        registry.register::<StubTransaction, _>(
+            VisualSignRegistryChain::Custom("near".to_string()),
+            StubConverter {
+                label_text: "benign label".to_string(),
+            },
+        );
+
+        let key = P256Pair::generate().expect("generate ephemeral key");
+        let response = parse_with_registry(&custom_request(Some("near")), &key, &registry)
+            .expect("a converter registered under Chain::Custom(\"near\") must resolve");
+        assert!(response.parsed_transaction.is_some());
+    }
+
+    /// Without a `custom_chain_name`, `CHAIN_CUSTOM` must be rejected rather
+    /// than silently resolving to some placeholder chain.
+    #[test]
+    fn parse_rejects_custom_chain_without_name() {
+        let mut registry = TransactionConverterRegistry::new();
+        registry.register::<StubTransaction, _>(
+            VisualSignRegistryChain::Custom("near".to_string()),
+            StubConverter {
+                label_text: "benign label".to_string(),
+            },
+        );
+
+        let key = P256Pair::generate().expect("generate ephemeral key");
+        let err = parse_with_registry(&custom_request(None), &key, &registry)
+            .expect_err("CHAIN_CUSTOM without custom_chain_name must be rejected");
+        assert_eq!(err.code, Code::InvalidArgument);
     }
 
     /// Regression: when the converter overrides

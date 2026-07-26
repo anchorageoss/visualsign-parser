@@ -10,6 +10,8 @@ use qos_core::{
     handles::EphemeralKeyHandle,
     parser::{GetParserForOptions, OptionsParser, Parser, Token},
 };
+#[cfg(feature = "external-chains")]
+use visualsign::registry::TransactionConverterRegistry;
 
 const HOST_IP: &str = "host-ip";
 const HOST_PORT: &str = "host-port";
@@ -95,6 +97,41 @@ impl Cli {
     ///
     /// Panics if the socket server cannot start
     pub async fn execute() {
+        Self::execute_with(Box::new(crate::registry::create_registry)).await;
+    }
+
+    /// Same as [`Self::execute`] but serving a caller-provided registry
+    /// factory: the composition entry point for a downstream workspace's own
+    /// enclave binary. Such a binary extends the built-in set with its own
+    /// chains and inherits this crate's full serving stack (CLI args, host
+    /// server, health checks, signing) unchanged:
+    ///
+    /// ```ignore
+    /// parser_app::cli::Cli::execute_with_registry_factory(|| {
+    ///     let mut registry = parser_app::registry::create_registry();
+    ///     registry.register::<NearTransaction, _>(
+    ///         Chain::Custom("near".to_string()),
+    ///         NearVisualSignConverter,
+    ///     );
+    ///     registry
+    /// })
+    /// .await;
+    /// ```
+    ///
+    /// The factory runs once per request, never cached, so converter state
+    /// cannot outlive a request (see `service::RegistryFactory`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the socket server cannot start
+    #[cfg(feature = "external-chains")]
+    pub async fn execute_with_registry_factory(
+        registry_factory: impl Fn() -> TransactionConverterRegistry + Send + Sync + 'static,
+    ) {
+        Self::execute_with(Box::new(registry_factory)).await;
+    }
+
+    async fn execute_with(registry_factory: crate::service::RegistryFactory) {
         let mut args: Vec<String> = std::env::args().collect();
 
         let opts = ParserOpts::new(&mut args);
@@ -104,8 +141,10 @@ impl Cli {
         } else if opts.parsed.help() {
             println!("{}", opts.parsed.info());
         } else {
-            let processor =
-                crate::service::Processor::new(EphemeralKeyHandle::new(opts.ephemeral_file()));
+            let processor = crate::service::Processor::with_registry_factory(
+                EphemeralKeyHandle::new(opts.ephemeral_file()),
+                registry_factory,
+            );
 
             println!(
                 "---- Starting Parser server (version: {}) -----",

@@ -44,6 +44,14 @@ tron = ["dep:visualsign-tron"]
 unspecified = ["dep:visualsign-unspecified"]
 diagnostics = ["visualsign/diagnostics", "visualsign-solana?/diagnostics"]
 vsock = ["qos_core/vm"]
+# Exposes `cli::Cli::execute_with_registry_factory`, letting a downstream
+# workspace compose its own enclave binary serving chains outside this repo
+# (registered under `Chain::Custom(name)`, addressed over the wire via
+# `CHAIN_CUSTOM` + `custom_chain_name`) on this crate's unmodified
+# serving/signing stack. Not in `default`: it adds no dependency and changes
+# no default behavior, but it's a production-signing-relevant surface, so it
+# stays opt-in like `diagnostics`/`vsock` above.
+external-chains = []
 
 [lints]
 workspace = true

@@ -58,6 +58,11 @@ pub struct ParseRequest {
     /// emits an empty `intermediate_output` and the signed digest is unchanged.
     #[prost(bool, tag = "4")]
     pub include_intermediate_output: bool,
+    /// Required when `chain == CHAIN_CUSTOM`: names the chain a caller-supplied
+    /// registry (see `parser_app`'s `external-chains` feature) has registered
+    /// under `Chain::Custom(name)`. Ignored for every other `chain` value.
+    #[prost(string, optional, tag = "5")]
+    pub custom_chain_name: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[cfg_attr(
     feature = "serde_derive",
