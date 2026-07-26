@@ -8,7 +8,8 @@ mod logger;
 mod serve;
 
 use clap::{Args as ClapArgs, Parser, Subcommand};
-use parser_cli_core::{ChainPlugin, SharedArgs};
+use parser_cli_core::SharedArgs;
+use visualsign::registry::ChainPlugin;
 
 #[derive(Parser, Debug)]
 #[command(name = "visualsign-parser")]

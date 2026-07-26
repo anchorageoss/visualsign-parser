@@ -19,8 +19,8 @@ fn chain_string_mapping() -> BTreeMap<&'static str, Chain> {
 /// Known chain names (case-insensitive) map to their dedicated variant,
 /// including `"unspecified"` -> `Chain::Unspecified`. Any other string maps
 /// to `Chain::Custom`, so a chain contributed by an external
-/// [`crate::ChainPlugin`] is selected by the plugin that registered under
-/// the matching `Chain::Custom`.
+/// [`ChainPlugin`](visualsign::registry::ChainPlugin) is selected by the
+/// plugin that registered under the matching `Chain::Custom`.
 #[must_use]
 pub fn parse_chain(chain_str: &str) -> Chain {
     Chain::from_str(chain_str).unwrap_or_else(|()| Chain::Custom(chain_str.to_string()))

@@ -4,7 +4,7 @@ use clap::Args as ClapArgs;
 use generated::parser::{
     ChainMetadata, Idl, SolanaIdlType, SolanaMetadata, chain_metadata::Metadata,
 };
-use visualsign::registry::{Chain, TransactionConverterRegistry};
+use visualsign::registry::{Chain, ChainPlugin, TransactionConverterRegistry};
 
 use parser_cli_core::mapping_parser;
 
@@ -20,7 +20,7 @@ pub struct SolanaArgs {
     pub idl_json_mappings: Vec<String>,
 }
 
-/// [`parser_cli_core::ChainPlugin`] implementation for Solana.
+/// [`ChainPlugin`] implementation for Solana.
 pub struct SolanaPlugin {
     args: SolanaArgs,
 }
@@ -33,7 +33,7 @@ impl SolanaPlugin {
     }
 }
 
-impl parser_cli_core::ChainPlugin for SolanaPlugin {
+impl ChainPlugin for SolanaPlugin {
     fn chain(&self) -> Chain {
         Chain::Solana
     }

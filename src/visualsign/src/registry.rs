@@ -3,6 +3,8 @@ use std::marker::PhantomData;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use generated::parser::ChainMetadata;
+
 use crate::vsptrait::{
     ConversionResult, Transaction, VisualSignConverter, VisualSignConverterFromString,
     VisualSignError, VisualSignOptions,
@@ -185,6 +187,28 @@ impl TransactionConverterRegistry {
     pub fn supported_chains(&self) -> Vec<Chain> {
         self.converters.keys().cloned().collect()
     }
+}
+
+/// Trait for integrating a chain into a consumer of this registry (the CLI,
+/// the gRPC/enclave server, or an external workspace's own binary).
+///
+/// Implement this in a chain crate (e.g. `visualsign-ethereum::cli_plugin::EthereumPlugin`),
+/// then the consuming binary composes a `Vec<Box<dyn ChainPlugin>>` and hands
+/// it to whichever entry point it's using (e.g. `parser_cli_core::run`).
+///
+/// `Send + Sync` so a `Box<dyn ChainPlugin>` can be held across `.await`
+/// points by an async consumer (e.g. a tonic gRPC service handling concurrent
+/// requests), not just the CLI's single-threaded use.
+pub trait ChainPlugin: Send + Sync {
+    /// The chain this plugin handles.
+    fn chain(&self) -> Chain;
+
+    /// Register the chain's converter in the registry.
+    fn register(&self, registry: &mut TransactionConverterRegistry);
+
+    /// Build chain-specific metadata from the shared `--network` flag and any
+    /// chain-specific args owned by the plugin.
+    fn create_metadata(&self, network: Option<String>) -> Result<Option<ChainMetadata>, String>;
 }
 
 /// Generic layered registry for combining global and request-scoped data.

@@ -4,7 +4,7 @@ use crate::abi_metadata::sign_abi_for_cli;
 use crate::networks::{network_id_to_chain_id, parse_network};
 use clap::Args as ClapArgs;
 use generated::parser::{Abi, AbiType, ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
-use visualsign::registry::{Chain, TransactionConverterRegistry};
+use visualsign::registry::{Chain, ChainPlugin, TransactionConverterRegistry};
 
 use parser_cli_core::mapping_parser;
 
@@ -27,7 +27,7 @@ pub struct EthereumArgs {
     pub abi_proxy_mappings: Vec<String>,
 }
 
-/// [`parser_cli_core::ChainPlugin`] implementation for Ethereum.
+/// [`ChainPlugin`] implementation for Ethereum.
 pub struct EthereumPlugin {
     args: EthereumArgs,
 }
@@ -40,7 +40,7 @@ impl EthereumPlugin {
     }
 }
 
-impl parser_cli_core::ChainPlugin for EthereumPlugin {
+impl ChainPlugin for EthereumPlugin {
     fn chain(&self) -> Chain {
         Chain::Ethereum
     }
