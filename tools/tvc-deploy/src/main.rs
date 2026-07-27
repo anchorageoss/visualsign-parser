@@ -51,6 +51,8 @@ enum Command {
     GenOperatorKey(GenOperatorKeyArgs),
     /// Deploy parser_app: digest-gate, create, approve, poll healthy, set live
     Deploy(DeployArgs),
+    /// Run only the digest gate: extract /parser_app from the image and compare its sha256
+    VerifyDigest(VerifyDigestArgs),
     /// Delete a single deployment by id (consensus via approve-activity)
     DeleteDeployment(invite::DeleteDeploymentArgs),
     /// Prune old deployments for an app, keeping the live one + newest --keep
@@ -120,6 +122,15 @@ struct DeployArgs {
     org: invite::OrgArgs,
 }
 
+#[derive(clap::Args)]
+struct VerifyDigestArgs {
+    #[arg(long)]
+    image_url: String,
+    /// Expected sha256 of the image's /parser_app binary (64 hex chars)
+    #[arg(long)]
+    expected_digest: String,
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -136,6 +147,7 @@ fn run() -> Result<()> {
     match cli.command {
         Command::GenOperatorKey(args) => gen_operator_key(&args),
         Command::Deploy(args) => deploy(&sh, &args),
+        Command::VerifyDigest(args) => verify_digest(&sh, &args),
         Command::DeleteDeployment(args) => invite::delete_deployment(&args),
         Command::Prune(args) => invite::prune(&sh, &args),
         Command::Invite(args) => invite::invite(&args),
@@ -280,6 +292,15 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
     let deploy_id = outcome?;
     println!("deployment {deploy_id} is healthy and live");
     Ok(())
+}
+
+/// Standalone digest gate, for callers that must record the expected digest
+/// somewhere else before `deploy` runs. `deploy`'s own gate only fires once it
+/// is running, too late to stop a wrong digest being committed elsewhere first.
+/// Same check, same message, one implementation.
+fn verify_digest(sh: &Shell, args: &VerifyDigestArgs) -> Result<()> {
+    validate_digest(&args.expected_digest)?;
+    verify_image_digest(sh, &args.image_url, &args.expected_digest)
 }
 
 /// Extract `/parser_app` from the image and sha256 it; it MUST equal the

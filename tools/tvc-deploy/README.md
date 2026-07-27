@@ -160,6 +160,24 @@ Resolve the existing activity (approve or reject it) and re-run, or pass
 `--force` to submit anyway. The check uses the active org by default; pass
 `--org <alias>` on `deploy` if the deployment's org differs from it.
 
+### Verifying the digest on its own
+
+`deploy` runs the digest gate itself, so a normal deploy needs nothing extra.
+`verify-digest` exposes the same gate as a standalone command:
+
+```
+tvc-deploy verify-digest \
+  --image-url "$IMAGE_URL" --expected-digest "$PIVOT_DIGEST"
+```
+
+Useful when the expected digest has to be recorded somewhere else before the
+deployment is created. `deploy` verifies the digest, but only once it is already
+running, which is too late to stop a wrong digest from being committed
+elsewhere first. Run this, record the digest, then deploy.
+
+No Turnkey auth needed, just Docker: it creates a container from the image,
+extracts `/parser_app`, sha256s it, and exits non-zero on a mismatch.
+
 ## Pruning deployments
 
 Deployments accumulate: every `deploy` creates a new one, and old ones are not
