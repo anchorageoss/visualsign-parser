@@ -127,10 +127,12 @@ impl FromIterator<Vec<u8>> for SignerAllowlist {
 /// life of the process. Nothing in a request can move the parser between the two
 /// variants: a caller cannot opt itself into leniency by omitting a signature,
 /// and cannot opt itself into strictness either. That is the point of the type.
-/// Because the choice lives on the parser's cmdline (for the enclave binary, in
-/// the `pivotArgs` of the signed TVC manifest), a signer can verify out of band
-/// which posture the deployment they are signing against actually runs, instead
-/// of trusting a per-request signal or a log line that no one sees.
+/// The intent is for the choice to live on the parser's cmdline (for the
+/// enclave binary, in the `pivotArgs` of the signed TVC manifest), so a signer
+/// can verify out of band which posture the deployment they are signing against
+/// actually runs, instead of trusting a per-request signal or a log line that no
+/// one sees. Wiring the enclave binary and gRPC server to a cmdline flag is a
+/// planned follow-up; today only `parser_cli` constructs an explicit posture.
 ///
 /// The two variants are mutually exclusive by construction:
 ///
