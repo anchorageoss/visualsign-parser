@@ -82,7 +82,7 @@ fn sign_abi_for_test(abi_json: &str, address: &alloy_primitives::Address) -> Sig
 /// (seed `[0x42u8; 32]`). In the integration-test build the `dev-signing` feature is
 /// off and no env var is set, so `authorized_abi_signers()` is empty (fail-closed).
 /// Tests that submit a signed ABI and expect it to be accepted inject this explicit
-/// allowlist via `EthereumVisualSignConverter::with_signers`.
+/// allowlist via `EthereumVisualSignConverter::with_policy`.
 fn test_abi_signer_allowlist() -> visualsign::signing::SignerAllowlist {
     let seed: [u8; 32] = [0x42u8; 32];
     let signing_key = k256::ecdsa::SigningKey::from_bytes(&seed).expect("valid key");
@@ -358,7 +358,11 @@ fn test_abi_from_metadata_decodes_function() {
         developer_config: None,
     };
 
-    let converter = EthereumVisualSignConverter::with_signers(test_abi_signer_allowlist());
+    let converter = EthereumVisualSignConverter::with_policy(
+        visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
+            test_abi_signer_allowlist(),
+        ),
+    );
     let result = converter.to_payload_from_string(&tx_hex, options).unwrap();
 
     // The ABI from metadata should decode the function name.
@@ -459,7 +463,11 @@ fn test_proxy_decodes_via_implementation_abi() {
         developer_config: None,
     };
 
-    let converter = EthereumVisualSignConverter::with_signers(test_abi_signer_allowlist());
+    let converter = EthereumVisualSignConverter::with_policy(
+        visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
+            test_abi_signer_allowlist(),
+        ),
+    );
     let json = converter
         .to_payload_from_string(&tx_hex, options)
         .unwrap()
@@ -552,7 +560,11 @@ fn test_proxy_entry_cannot_override_canonical_token() {
         developer_config: None,
     };
 
-    let converter = EthereumVisualSignConverter::with_signers(test_abi_signer_allowlist());
+    let converter = EthereumVisualSignConverter::with_policy(
+        visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
+            test_abi_signer_allowlist(),
+        ),
+    );
     let json = converter
         .to_payload_from_string(&tx_hex, options)
         .unwrap()
@@ -667,7 +679,11 @@ fn test_chain_id_matching_metadata_succeeds() {
         developer_config: None,
     };
 
-    let converter = EthereumVisualSignConverter::with_signers(test_abi_signer_allowlist());
+    let converter = EthereumVisualSignConverter::with_policy(
+        visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
+            test_abi_signer_allowlist(),
+        ),
+    );
     let payload = converter
         .to_payload_from_string(&tx_hex, options)
         .expect("matching network_id and chain_id should parse cleanly");

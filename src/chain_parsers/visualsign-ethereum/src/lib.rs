@@ -16,7 +16,7 @@ use visualsign::{
     SignablePayloadFieldAmountV2, SignablePayloadFieldCommon, SignablePayloadFieldTextV2,
     encodings::SupportedEncodings,
     registry::LayeredRegistry,
-    signing::SignerAllowlist,
+    signing::MetadataTrustPolicy,
     vsptrait::{
         ConversionResult, DeveloperConfig, Transaction, TransactionParseError, VisualSignConverter,
         VisualSignConverterFromString, VisualSignError, VisualSignOptions,
@@ -165,60 +165,58 @@ impl EthereumTransactionWrapper {
 pub struct EthereumVisualSignConverter {
     registry: Arc<registry::ContractRegistry>,
     visualizer_registry: visualizer::EthereumVisualizerRegistry,
-    abi_signers: SignerAllowlist,
+    abi_trust: MetadataTrustPolicy,
 }
 
 impl EthereumVisualSignConverter {
     /// Creates a new converter with a custom registry wrapped in Arc.
     ///
-    /// The ABI-signer allowlist is the default from
-    /// [`abi_metadata::authorized_abi_signers`]. Use [`Self::with_registry_and_signers`]
-    /// to inject an explicit allowlist.
+    /// Uses the permissive [`MetadataTrustPolicy::AcceptUnsigned`] posture. See
+    /// [`Self::new`] for why, and use [`Self::with_registry_and_policy`] to pin an
+    /// explicit posture.
     pub fn with_registry(registry: Arc<registry::ContractRegistry>) -> Self {
-        Self {
-            registry,
-            visualizer_registry: visualizer::EthereumVisualizerRegistryBuilder::new().build(),
-            abi_signers: abi_metadata::authorized_abi_signers(),
-        }
+        Self::with_registry_and_policy(registry, MetadataTrustPolicy::AcceptUnsigned)
     }
 
-    /// Creates a converter with a custom registry and an explicit ABI-signer
-    /// allowlist. Intended for tests and configured deployments that need to control
-    /// which signers are authorized rather than relying on the compile-time/env
-    /// defaults.
-    pub fn with_registry_and_signers(
+    /// Creates a converter with a custom registry and an explicit caller-metadata
+    /// trust posture.
+    pub fn with_registry_and_policy(
         registry: Arc<registry::ContractRegistry>,
-        abi_signers: SignerAllowlist,
+        abi_trust: MetadataTrustPolicy,
     ) -> Self {
         Self {
             registry,
             visualizer_registry: visualizer::EthereumVisualizerRegistryBuilder::new().build(),
-            abi_signers,
+            abi_trust,
         }
     }
 
     /// Creates a converter with the default registry (all known protocols) and an
-    /// explicit ABI-signer allowlist. Mirrors [`Self::new`] but overrides the signer
-    /// allowlist.
-    pub fn with_signers(abi_signers: SignerAllowlist) -> Self {
+    /// explicit caller-metadata trust posture. Mirrors [`Self::new`] but pins the
+    /// posture instead of taking the permissive default.
+    ///
+    /// This is the constructor a deployment should use: `parser_app` and the gRPC
+    /// server build the posture from their cmdline so it is fixed at deploy time and
+    /// auditable, rather than implied by what each request happens to contain.
+    pub fn with_policy(abi_trust: MetadataTrustPolicy) -> Self {
         let (contract_registry, visualizer_builder) =
             registry::ContractRegistry::with_default_protocols();
         Self {
             registry: Arc::new(contract_registry),
             visualizer_registry: visualizer_builder.build(),
-            abi_signers,
+            abi_trust,
         }
     }
 
-    /// Creates a new converter with a default registry including all known protocols.
+    /// Creates a new converter with a default registry including all known protocols
+    /// and the permissive [`MetadataTrustPolicy::AcceptUnsigned`] posture.
+    ///
+    /// This is the library/embedding default and preserves the behaviour every
+    /// in-process caller had before the posture became explicit. Deployments must
+    /// NOT rely on it: they choose a posture on the cmdline and construct via
+    /// [`Self::with_policy`], so a signer can check which mode the deployment runs.
     pub fn new() -> Self {
-        let (contract_registry, visualizer_builder) =
-            registry::ContractRegistry::with_default_protocols();
-        Self {
-            registry: Arc::new(contract_registry),
-            visualizer_registry: visualizer_builder.build(),
-            abi_signers: abi_metadata::authorized_abi_signers(),
-        }
+        Self::with_policy(MetadataTrustPolicy::AcceptUnsigned)
     }
 
     /// Creates a layered registry for the current request.
@@ -267,7 +265,7 @@ impl EthereumVisualSignConverter {
 
         // Resolve chain_id: metadata > transaction > default (1 for legacy).
         let chain_id = resolve_chain_id(&transaction, &options)?;
-        let metadata_abi = extract_metadata_abi(&options, chain_id, &self.abi_signers);
+        let metadata_abi = extract_metadata_abi(&options, chain_id, &self.abi_trust);
 
         convert_to_visual_sign_payload(
             transaction,
@@ -480,9 +478,9 @@ fn resolve_chain_id(
 fn extract_metadata_abi(
     options: &VisualSignOptions,
     chain_id: u64,
-    allowlist: &SignerAllowlist,
+    policy: &MetadataTrustPolicy,
 ) -> Option<abi_registry::AbiRegistry> {
-    abi_metadata::try_extract_from_chain_metadata(options.metadata.as_ref(), chain_id, allowlist)
+    abi_metadata::try_extract_from_chain_metadata(options.metadata.as_ref(), chain_id, policy)
 }
 
 /// Known-token short-circuit: if the destination is a token registered in the
@@ -880,7 +878,7 @@ mod tests {
 
     // Test-only adapter: call the converter and unwrap the `ConversionResult`
     // to the `SignablePayload` these tests assert against, while preserving the
-    // specific converter instance (e.g. `with_signers`).
+    // specific converter instance (e.g. `with_policy`).
     trait TestConvertExt {
         fn to_payload(
             &self,

@@ -46,9 +46,18 @@ impl parser_cli_core::ChainPlugin for EthereumPlugin {
     }
 
     fn register(&self, registry: &mut TransactionConverterRegistry) {
+        // The CLI signs every ABI it loads with the local dev key (see
+        // `build_abi_mappings_from_files`), so it runs the strict posture against
+        // that key: locally-loaded ABIs are accepted, anything unsigned is not.
+        // Deployments take their posture from their own cmdline instead; see
+        // `abi_metadata::authorized_abi_signers`.
         registry.register::<crate::EthereumTransactionWrapper, _>(
             Chain::Ethereum,
-            crate::EthereumVisualSignConverter::new(),
+            crate::EthereumVisualSignConverter::with_policy(
+                visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
+                    crate::abi_metadata::authorized_abi_signers(),
+                ),
+            ),
         );
     }
 
@@ -539,8 +548,11 @@ mod tests {
             Some(&extracted),
             1,
             // dev-signing is enabled for the CLI, so this allowlists the dev key the
-            // CLI signed the synthesized proxy with.
-            &crate::abi_metadata::authorized_abi_signers(),
+            // CLI signed the synthesized proxy with. Strict posture on purpose: the
+            // point of the assertion is that the entry survives BECAUSE it is signed.
+            &visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
+                crate::abi_metadata::authorized_abi_signers(),
+            ),
         )
         .expect("metadata with a signed synthesized proxy must extract");
         assert!(

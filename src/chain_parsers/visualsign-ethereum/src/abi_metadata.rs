@@ -13,7 +13,7 @@ use k256::ecdsa::SigningKey;
 use k256::ecdsa::signature::hazmat::PrehashSigner;
 use k256::ecdsa::signature::hazmat::PrehashVerifier;
 use k256::ecdsa::{Signature, VerifyingKey};
-use visualsign::signing::SignerAllowlist;
+use visualsign::signing::{MetadataTrustPolicy, SignerAllowlist};
 
 /// Maximum size for ABI JSON from proto messages (1 MB).
 /// File-based ABI loading has a 10 MB cap; proto-supplied ABIs use a tighter bound
@@ -37,32 +37,41 @@ enum AbiSignatureError {
 ///
 /// # Security notes
 ///
-/// - **Unsigned ABIs are accepted, but logged as unverified.** Not every caller
-///   signs its ABI mappings yet, so an entry with `signature: None` is registered
-///   rather than dropped; unsigned entries are counted and reported in a single
-///   aggregated warning once per request (no per-entry flag or marker is stored
-///   in the registry). This is acceptable because the whole caller-supplied ABI
-///   path is display-only and untrusted regardless of signature status (see
-///   below).
-/// - **When present, a signature is validated**, using secp256k1 over a
-///   domain-separated prehash that binds the chain id and the contract address to
-///   the ABI JSON (see [`visualsign::signing::ethereum_metadata_prehash`]). An entry
-///   that carries a signature but fails validation (bad signature, or signer not in
-///   the allowlist) is still rejected outright: a present-but-invalid signature is a
-///   stronger signal of tampering than simply omitting one.
+/// - **Whether unsigned ABIs are accepted is a deploy-time decision, not a
+///   request-time one.** `policy` is fixed when the parser process starts (for
+///   `parser_app`, by the `--accept-unsigned-abis` / `--accept-signatures-from-pubkey`
+///   cmdline flags that land in the signed TVC manifest's `pivotArgs`). A caller
+///   cannot move the parser between postures by omitting a signature, and a signer
+///   can verify out of band which posture the deployment runs. See
+///   [`MetadataTrustPolicy`].
+/// - **Under [`MetadataTrustPolicy::RequireAllowlistedSigner`]**, every entry must
+///   carry a signature that verifies AND whose key is allowlisted. Missing,
+///   malformed and unauthorized signatures are all rejected. An empty allowlist
+///   rejects everything (fail-closed).
+/// - **Under [`MetadataTrustPolicy::AcceptUnsigned`]**, an entry with
+///   `signature: None` is registered rather than dropped; unsigned entries are
+///   counted and reported in a single aggregated warning once per request (no
+///   per-entry flag or marker is stored in the registry, tracked in PRS-555). An
+///   entry that DOES carry a signature must still verify for integrity, since a
+///   present-but-invalid signature is a stronger signal of tampering than simply
+///   omitting one. The signer's *identity* is not checked in this posture: a
+///   deployment that accepts unsigned ABIs gains nothing from an allowlist an
+///   attacker sidesteps by dropping the signature, and the previous behaviour
+///   (accept unsigned, but reject a correctly signed entry whose signer is not
+///   allowlisted) was strictly worse than either coherent posture.
+/// - **Signature validation** uses secp256k1 over a domain-separated prehash that
+///   binds the chain id and the contract address to the ABI JSON (see
+///   [`visualsign::signing::ethereum_metadata_prehash`]).
 /// - **Signatures bind chain id + contract address.** The prehash commits to the
 ///   resolved `chain_id` and the entry's map-key address, so a signature minted for
 ///   an ABI at one (chain, address) no longer verifies when replayed under a
 ///   different address or chain. Existing signatures must be re-issued.
-/// - **Signers are checked against an authorized allowlist.** A verified signature
-///   only proves the ABI was signed by *some* secp256k1 key. Validation additionally
-///   requires the verifying key supplied in `SignatureMetadata` (the one the
-///   signature is checked against, not a key recovered from the signature) to
-///   appear in an authorized-signer allowlist (see
-///   [`authorized_abi_signers`]); unauthorized signers are rejected even when their
-///   signature verifies. An EMPTY allowlist rejects all signed ABIs (fail-closed),
-///   which is the secure default because the whole caller-supplied ABI path is
-///   display-only and untrusted.
+/// - **Signers are checked against an authorized allowlist** (require-signed
+///   posture only). A verified signature only proves the ABI was signed by *some*
+///   secp256k1 key; validation additionally requires the verifying key supplied in
+///   `SignatureMetadata` (the one the signature is checked against, not a key
+///   recovered from the signature) to appear in the allowlist. Unauthorized signers
+///   are rejected even when their signature verifies.
 /// - **`abi_type` and `implementation_address` are NOT covered by the ABI
 ///   signature.** The signature is computed over `abi.value` (the JSON ABI string)
 ///   only, so a man-in-the-middle could flip a signed implementation ABI to
@@ -76,7 +85,7 @@ enum AbiSignatureError {
 pub fn try_extract_from_chain_metadata(
     chain_metadata: Option<&ChainMetadata>,
     chain_id: u64,
-    allowlist: &SignerAllowlist,
+    policy: &MetadataTrustPolicy,
 ) -> Option<AbiRegistry> {
     let chain_metadata = chain_metadata?;
     let chain_metadata::Metadata::Ethereum(ethereum) = chain_metadata.metadata.as_ref()? else {
@@ -107,22 +116,37 @@ pub fn try_extract_from_chain_metadata(
             continue;
         }
 
-        // Signatures aren't required to register an entry: not every caller signs
-        // its ABI mappings yet, and this whole path is display-only and untrusted
-        // regardless. An entry that DOES carry a signature must still validate,
-        // since a present-but-invalid signature signals tampering rather than
-        // simply an unsigned source.
+        // Whether an unsigned entry is acceptable is fixed by the deployment's
+        // posture, not by the request. Under require-signed, a missing signature
+        // is a rejection; under accept-unsigned it is registered and counted. In
+        // both postures a signature that IS present must validate, since a
+        // present-but-invalid signature signals tampering rather than simply an
+        // unsigned source.
         let is_unsigned = abi.signature.is_none();
-        if let Some(proto_sig) = abi.signature.as_ref() {
-            let signature = convert_proto_signature(proto_sig);
-            if let Err(e) =
-                validate_abi_signature(&abi.value, &parsed_address, chain_id, &signature, allowlist)
-            {
+        match abi.signature.as_ref() {
+            Some(proto_sig) => {
+                let signature = convert_proto_signature(proto_sig);
+                if let Err(e) = validate_abi_signature(
+                    &abi.value,
+                    &parsed_address,
+                    chain_id,
+                    &signature,
+                    policy.signer_allowlist(),
+                ) {
+                    log::warn!(
+                        "Skipping ABI mapping for '{address}': signature validation failed: {e}"
+                    );
+                    continue;
+                }
+            }
+            None if !policy.accepts_unsigned() => {
                 log::warn!(
-                    "Skipping ABI mapping for '{address}': signature validation failed: {e}"
+                    "Skipping ABI mapping for '{address}': this deployment requires \
+                     signed ABI mappings (started with --accept-signatures-from-pubkey)"
                 );
                 continue;
             }
+            None => {}
         }
 
         // Determine the kind of contract this ABI describes. An unset or
@@ -243,26 +267,33 @@ struct SignatureMetadata {
     timestamp: Option<String>,
 }
 
-/// Validate ABI using secp256k1 signature, enforcing an authorized-signer allowlist.
+/// Validate ABI using secp256k1 signature, optionally enforcing an
+/// authorized-signer allowlist.
 ///
 /// The prehash is domain-separated and binds the chain id and contract address to
 /// the ABI JSON, so a signature minted for one (chain, address) does not verify when
 /// replayed under another. See [`visualsign::signing::ethereum_metadata_prehash`].
 ///
-/// Both checks must pass: the signature must verify over the prehash AND the
-/// `public_key` it was verified against must appear in `allowlist`. An empty
-/// allowlist rejects every signed ABI (fail-closed); see
-/// [`authorized_abi_signers`].
+/// The signature must always verify over the prehash (integrity). Whether the
+/// signer's *identity* is also enforced depends on the deployment posture and is
+/// expressed by `allowlist`:
+///
+/// * `Some(allow)` - the `public_key` the signature was verified against must also
+///   appear in `allow`. An empty allowlist rejects every signed ABI (fail-closed).
+/// * `None` - integrity only. Used by the accept-unsigned posture, where an
+///   identity check would be theatre: an attacker gets a weaker requirement by
+///   dropping the signature entirely. See [`MetadataTrustPolicy`].
 ///
 /// # Arguments
 /// * `abi_json` - The ABI JSON string that was signed
 /// * `address` - The contract address the ABI is bound to (the entry's map key)
 /// * `chain_id` - The resolved chain id the ABI is bound to
 /// * `signature` - Signature and metadata for validation
-/// * `allowlist` - Authorized signer public keys (canonical uncompressed bytes)
+/// * `allowlist` - Authorized signer public keys (canonical uncompressed bytes), or
+///   `None` to check integrity without checking signer identity
 ///
 /// # Returns
-/// * `Ok(())` if the signature is valid and the signer is authorized
+/// * `Ok(())` if the signature is valid and (when enforced) the signer is authorized
 /// * `Err(AbiSignatureError)` if signature validation fails or the signer is not
 ///   in the allowlist
 fn validate_abi_signature(
@@ -270,7 +301,7 @@ fn validate_abi_signature(
     address: &alloy_primitives::Address,
     chain_id: u64,
     signature: &SignatureMetadata,
-    allowlist: &SignerAllowlist,
+    allowlist: Option<&SignerAllowlist>,
 ) -> Result<(), AbiSignatureError> {
     // 1. Get algorithm - must be secp256k1
     let algorithm = signature
@@ -320,33 +351,44 @@ fn validate_abi_signature(
         AbiSignatureError::Validation(format!("Signature verification failed: {e}"))
     })?;
 
-    // 7. Enforce the authorized-signer allowlist. A verified signature only proves
-    //    the ABI was signed by some secp256k1 key; it must also be an authorized
-    //    one. Compare on the canonical uncompressed SEC1 encoding so the lookup
-    //    matches how keys are stored in the allowlist. An empty allowlist contains
-    //    nothing, so this rejects every signed ABI (fail-closed).
-    let signer_pubkey = verifying_key.to_encoded_point(false);
-    if !allowlist.contains(signer_pubkey.as_bytes()) {
-        return Err(AbiSignatureError::Validation(
-            "signer not in allowlist".to_string(),
-        ));
+    // 7. Enforce the authorized-signer allowlist, when the posture enforces
+    //    identity. A verified signature only proves the ABI was signed by some
+    //    secp256k1 key; it must also be an authorized one. Compare on the canonical
+    //    uncompressed SEC1 encoding so the lookup matches how keys are stored in the
+    //    allowlist. An empty allowlist contains nothing, so this rejects every signed
+    //    ABI (fail-closed).
+    if let Some(allowlist) = allowlist {
+        let signer_pubkey = verifying_key.to_encoded_point(false);
+        if !allowlist.contains(signer_pubkey.as_bytes()) {
+            return Err(AbiSignatureError::Validation(
+                "signer not in allowlist".to_string(),
+            ));
+        }
     }
 
     Ok(())
 }
 
-/// Build the authorized ABI-signer allowlist from compile-time + runtime sources.
+/// Build the local-tooling ABI-signer allowlist from compile-time + runtime sources.
 ///
 /// Under the `dev-signing` feature (and in this crate's own tests) the dev key
 /// derived from [`CLI_DEV_SIGNING_KEY_SEED`] is allowlisted, so locally-signed ABIs
 /// are accepted. The env var `VISUALSIGN_ETH_ABI_SIGNERS` (comma-separated hex
-/// secp256k1 public keys, any SEC1 encoding) extends the allowlist for configured
-/// deployments. Each runtime entry is canonicalized to its uncompressed encoding so
-/// compressed and uncompressed inputs for the same key match.
+/// secp256k1 public keys, any SEC1 encoding) extends the allowlist. Each runtime
+/// entry is canonicalized to its uncompressed encoding so compressed and
+/// uncompressed inputs for the same key match; invalid entries are warned about and
+/// skipped.
 ///
 /// An empty result (no dev key, no env entries) rejects all signed ABIs
-/// (fail-closed), which is the secure default for the untrusted, display-only
-/// caller-ABI path.
+/// (fail-closed).
+///
+/// **This is not how a deployment picks its trust posture.** `parser_app` and the
+/// gRPC server take the posture from their cmdline
+/// (`--accept-unsigned-abis` / `--accept-signatures-from-pubkey`, parsed into a
+/// [`MetadataTrustPolicy`] via [`signer_allowlist_from_hex`]) so the choice is
+/// auditable in the signed deployment manifest and cannot be influenced per
+/// request. This function backs `parser_cli`, which signs the ABI files it loads
+/// with the dev key and therefore runs require-signed against that key.
 #[must_use]
 pub fn authorized_abi_signers() -> SignerAllowlist {
     let mut allow = SignerAllowlist::new();
@@ -369,6 +411,31 @@ pub fn authorized_abi_signers() -> SignerAllowlist {
     }
 
     allow
+}
+
+/// Build a [`SignerAllowlist`] from deploy-time hex secp256k1 public keys (one per
+/// `--accept-signatures-from-pubkey` occurrence, any SEC1 encoding, optional `0x`
+/// prefix).
+///
+/// Unlike [`authorized_abi_signers`], a bad key is an error rather than a warning:
+/// these come from the deployment's cmdline, so a typo must stop the process at
+/// startup instead of silently producing a smaller (or empty, fail-closed)
+/// allowlist that quietly drops every caller-supplied ABI.
+///
+/// # Errors
+/// Returns `Err` if `entries` is empty, or if any entry is not a valid secp256k1
+/// public key.
+pub fn signer_allowlist_from_hex(entries: &[String]) -> Result<SignerAllowlist, String> {
+    if entries.is_empty() {
+        return Err("no authorized ABI signer public keys were provided".to_string());
+    }
+    let mut allow = SignerAllowlist::new();
+    for entry in entries {
+        let key = canonical_pubkey_from_hex(entry.trim())
+            .ok_or_else(|| format!("invalid secp256k1 public key: '{entry}'"))?;
+        allow.insert(key);
+    }
+    Ok(allow)
 }
 
 /// Parse a hex secp256k1 public key (optionally `0x`- or `0X`-prefixed, any
@@ -555,6 +622,37 @@ mod tests {
         allow
     }
 
+    /// Require-signed posture over an explicit allowlist.
+    fn require_signed(allow: SignerAllowlist) -> MetadataTrustPolicy {
+        MetadataTrustPolicy::RequireAllowlistedSigner(allow)
+    }
+
+    /// Require-signed posture authorizing only the deterministic test signer. This is
+    /// the posture most extraction tests run under, since their fixtures are signed.
+    fn test_require_signed() -> MetadataTrustPolicy {
+        require_signed(test_signer_allowlist())
+    }
+
+    /// Metadata carrying a single valid-but-unsigned ABI at `TEST_ADDRESS`. Shared by
+    /// the two posture tests so they compare identical caller input.
+    fn unsigned_metadata() -> ChainMetadata {
+        ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![(
+                    TEST_ADDRESS,
+                    Abi {
+                        value: VALID_ABI.to_string(),
+                        signature: None,
+                        ..Default::default()
+                    },
+                )])
+                .into_iter()
+                .collect(),
+            })),
+        }
+    }
+
     #[test]
     fn test_valid_signature_verification() {
         let addr = TEST_ADDRESS.parse::<Address>().expect("valid test address");
@@ -568,7 +666,8 @@ mod tests {
             timestamp: None,
         };
 
-        let result = validate_abi_signature(VALID_ABI, &addr, 1, &sig, &test_signer_allowlist());
+        let result =
+            validate_abi_signature(VALID_ABI, &addr, 1, &sig, Some(&test_signer_allowlist()));
         assert!(
             result.is_ok(),
             "Valid signature should verify: {:?}",
@@ -599,17 +698,17 @@ mod tests {
         let allow = test_signer_allowlist();
         // Valid for the exact (chain, address) it was produced for.
         assert!(
-            validate_abi_signature(VALID_ABI, &addr_a, 1, &sig, &allow).is_ok(),
+            validate_abi_signature(VALID_ABI, &addr_a, 1, &sig, Some(&allow)).is_ok(),
             "signature must verify for the bound (chain, address)"
         );
         // Same chain, different address: rejected.
         assert!(
-            validate_abi_signature(VALID_ABI, &addr_b, 1, &sig, &allow).is_err(),
+            validate_abi_signature(VALID_ABI, &addr_b, 1, &sig, Some(&allow)).is_err(),
             "signature must not verify when replayed under a different address"
         );
         // Same address, different chain: rejected.
         assert!(
-            validate_abi_signature(VALID_ABI, &addr_a, 137, &sig, &allow).is_err(),
+            validate_abi_signature(VALID_ABI, &addr_a, 137, &sig, Some(&allow)).is_err(),
             "signature must not verify when replayed under a different chain"
         );
     }
@@ -630,7 +729,7 @@ mod tests {
         // Allowlist holds the test signer's uncompressed key bytes.
         let allow = test_signer_allowlist();
         assert!(
-            validate_abi_signature(VALID_ABI, &addr, 1, &sig, &allow).is_ok(),
+            validate_abi_signature(VALID_ABI, &addr, 1, &sig, Some(&allow)).is_ok(),
             "a verified signature from an allowlisted signer must be accepted"
         );
     }
@@ -652,7 +751,7 @@ mod tests {
         // absent even though its signature verifies.
         let mut allow = SignerAllowlist::new();
         allow.insert(pubkey_bytes_from_seed(&[0x43u8; 32]));
-        let result = validate_abi_signature(VALID_ABI, &addr, 1, &sig, &allow);
+        let result = validate_abi_signature(VALID_ABI, &addr, 1, &sig, Some(&allow));
         assert!(
             result.is_err(),
             "a verified signature from an unlisted signer must be rejected"
@@ -679,7 +778,7 @@ mod tests {
 
         let empty = SignerAllowlist::new();
         assert!(empty.is_empty(), "precondition: allowlist is empty");
-        let result = validate_abi_signature(VALID_ABI, &addr, 1, &sig, &empty);
+        let result = validate_abi_signature(VALID_ABI, &addr, 1, &sig, Some(&empty));
         assert!(
             result.is_err(),
             "an empty allowlist must reject all signed ABIs (fail-closed)"
@@ -701,7 +800,8 @@ mod tests {
 
         // Try to verify with tampered ABI
         let tampered_abi = r#"[{"type":"function","name":"approve"}]"#;
-        let result = validate_abi_signature(tampered_abi, &addr, 1, &sig, &test_signer_allowlist());
+        let result =
+            validate_abi_signature(tampered_abi, &addr, 1, &sig, Some(&test_signer_allowlist()));
         assert!(result.is_err(), "Tampered content should fail verification");
     }
 
@@ -716,7 +816,8 @@ mod tests {
             timestamp: None,
         };
 
-        let result = validate_abi_signature(VALID_ABI, &addr, 1, &sig, &test_signer_allowlist());
+        let result =
+            validate_abi_signature(VALID_ABI, &addr, 1, &sig, Some(&test_signer_allowlist()));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Missing algorithm"), "Error: {err}");
@@ -733,7 +834,8 @@ mod tests {
             timestamp: None,
         };
 
-        let result = validate_abi_signature(VALID_ABI, &addr, 1, &sig, &test_signer_allowlist());
+        let result =
+            validate_abi_signature(VALID_ABI, &addr, 1, &sig, Some(&test_signer_allowlist()));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Missing public_key"), "Error: {err}");
@@ -750,7 +852,8 @@ mod tests {
             timestamp: None,
         };
 
-        let result = validate_abi_signature(VALID_ABI, &addr, 1, &sig, &test_signer_allowlist());
+        let result =
+            validate_abi_signature(VALID_ABI, &addr, 1, &sig, Some(&test_signer_allowlist()));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Unsupported algorithm"), "Error: {err}");
@@ -767,7 +870,8 @@ mod tests {
             timestamp: None,
         };
 
-        let result = validate_abi_signature(VALID_ABI, &addr, 1, &sig, &test_signer_allowlist());
+        let result =
+            validate_abi_signature(VALID_ABI, &addr, 1, &sig, Some(&test_signer_allowlist()));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Invalid signature hex"), "Error: {err}");
@@ -836,7 +940,7 @@ mod tests {
 
     #[test]
     fn test_try_extract_no_metadata() {
-        assert!(try_extract_from_chain_metadata(None, 1, &test_signer_allowlist()).is_none());
+        assert!(try_extract_from_chain_metadata(None, 1, &test_require_signed()).is_none());
     }
 
     #[test]
@@ -849,7 +953,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist()).is_none()
+            try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed()).is_none()
         );
     }
 
@@ -862,7 +966,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist()).is_none()
+            try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed()).is_none()
         );
     }
 
@@ -879,9 +983,8 @@ mod tests {
                 .collect(),
             })),
         };
-        let registry =
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
-                .expect("should contain ABI");
+        let registry = try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed())
+            .expect("should contain ABI");
         assert!(registry.list_abis().contains(&TEST_ADDRESS));
     }
 
@@ -912,44 +1015,46 @@ mod tests {
             })),
         };
 
-        let registry =
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
-                .expect("tampering with abi_type must NOT invalidate the body signature");
+        let registry = try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed())
+            .expect("tampering with abi_type must NOT invalidate the body signature");
         assert!(
             registry.list_abis().contains(&TEST_ADDRESS),
             "entry must still be accepted: abi_type/implementation_address are outside the signed scope"
         );
     }
 
-    /// An ABI mapping that omits the signature is still registered: not every
-    /// caller signs its ABI mappings yet, and this whole path is display-only and
-    /// untrusted regardless of signature status.
+    /// Under the accept-unsigned posture an ABI mapping that omits the signature is
+    /// registered rather than dropped. That is the deployment's explicit choice, not
+    /// a per-request default.
     #[test]
-    fn test_try_extract_unsigned_abi_accepted() {
-        let metadata = ChainMetadata {
-            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
-                network_id: Some("ETHEREUM_MAINNET".to_string()),
-                abi_mappings: make_abi_mappings(vec![(
-                    TEST_ADDRESS,
-                    Abi {
-                        value: VALID_ABI.to_string(),
-                        signature: None,
-                        ..Default::default()
-                    },
-                )])
-                .into_iter()
-                .collect(),
-            })),
-        };
-        let registry =
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
-                .expect("unsigned ABI entries must still be registered");
+    fn test_try_extract_unsigned_abi_accepted_under_accept_unsigned() {
+        let metadata = unsigned_metadata();
+        let registry = try_extract_from_chain_metadata(
+            Some(&metadata),
+            1,
+            &MetadataTrustPolicy::AcceptUnsigned,
+        )
+        .expect("unsigned ABI entries must be registered under accept-unsigned");
         assert!(registry.list_abis().contains(&TEST_ADDRESS));
     }
 
-    /// Mixed signed and unsigned entries: neither one blocks the other. The signed
-    /// entry is verified, the unsigned entry is accepted unverified, and both end
-    /// up in the registry.
+    /// The core of PRS-556: the SAME unsigned request that the accept-unsigned
+    /// posture registers is rejected outright under require-signed. The caller's
+    /// payload is identical in both cases, so the difference comes purely from the
+    /// deployment's cmdline.
+    #[test]
+    fn test_try_extract_unsigned_abi_rejected_under_require_signed() {
+        let metadata = unsigned_metadata();
+        assert!(
+            try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed()).is_none(),
+            "require-signed must reject an unsigned ABI mapping, even though the \
+             accept-unsigned posture registers the very same request"
+        );
+    }
+
+    /// Mixed signed and unsigned entries under accept-unsigned: neither one blocks
+    /// the other. The signed entry is verified, the unsigned entry is accepted
+    /// unverified, and both end up in the registry.
     #[test]
     fn test_try_extract_mixed_signed_and_unsigned_both_accepted() {
         let unsigned_address = "0x3333333333333333333333333333333333333333";
@@ -971,9 +1076,12 @@ mod tests {
                 .collect(),
             })),
         };
-        let registry =
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
-                .expect("should contain both entries");
+        let registry = try_extract_from_chain_metadata(
+            Some(&metadata),
+            1,
+            &MetadataTrustPolicy::AcceptUnsigned,
+        )
+        .expect("should contain both entries");
         assert!(
             registry.list_abis().contains(&unsigned_address),
             "unsigned entry must be registered alongside the signed one"
@@ -982,6 +1090,99 @@ mod tests {
             registry.list_abis().contains(&TEST_ADDRESS),
             "signed entry must still be registered"
         );
+    }
+
+    /// Under require-signed, the unsigned half of a mixed request is dropped while
+    /// the properly signed half survives. Rejection is per entry, not all-or-nothing.
+    #[test]
+    fn test_try_extract_mixed_drops_only_unsigned_under_require_signed() {
+        let unsigned_address = "0x3333333333333333333333333333333333333333";
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![
+                    (
+                        unsigned_address,
+                        Abi {
+                            value: VALID_ABI.to_string(),
+                            signature: None,
+                            ..Default::default()
+                        },
+                    ),
+                    (TEST_ADDRESS, signed_abi(VALID_ABI, TEST_ADDRESS)),
+                ])
+                .into_iter()
+                .collect(),
+            })),
+        };
+        let registry = try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed())
+            .expect("the signed entry must still register");
+        assert!(
+            !registry.list_abis().contains(&unsigned_address),
+            "require-signed must drop the unsigned entry"
+        );
+        assert!(
+            registry.list_abis().contains(&TEST_ADDRESS),
+            "require-signed must keep the properly signed entry"
+        );
+    }
+
+    /// Accept-unsigned still checks signature INTEGRITY when a signature is present:
+    /// a tampered body is rejected even in the permissive posture, so a
+    /// present-but-invalid signature never degrades to "accept and log".
+    #[test]
+    fn test_accept_unsigned_still_rejects_tampered_signature() {
+        // Signature is minted over VALID_ABI, then the body is swapped out.
+        let mut abi = signed_abi(VALID_ABI, TEST_ADDRESS);
+        abi.value = r#"[{"type":"function","name":"approve"}]"#.to_string();
+
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![(TEST_ADDRESS, abi)])
+                    .into_iter()
+                    .collect(),
+            })),
+        };
+        assert!(
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                1,
+                &MetadataTrustPolicy::AcceptUnsigned
+            )
+            .is_none(),
+            "a present-but-invalid signature must be rejected even under accept-unsigned"
+        );
+    }
+
+    /// Accept-unsigned does NOT enforce signer identity: a validly signed entry from
+    /// a signer that would fail any allowlist is accepted, because the same entry
+    /// with the signature stripped would be accepted anyway. This pins the
+    /// intentional posture so a future change that starts enforcing identity here
+    /// (recreating the old incoherent "unsigned ok, signed-by-stranger rejected"
+    /// behaviour) fails loudly.
+    #[test]
+    fn test_accept_unsigned_does_not_enforce_signer_identity() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![(
+                    TEST_ADDRESS,
+                    signed_abi(VALID_ABI, TEST_ADDRESS),
+                )])
+                .into_iter()
+                .collect(),
+            })),
+        };
+        // Same fixture rejected by `test_try_extract_unauthorized_signer_still_rejected`
+        // under require-signed with a foreign allowlist.
+        let registry = try_extract_from_chain_metadata(
+            Some(&metadata),
+            1,
+            &MetadataTrustPolicy::AcceptUnsigned,
+        )
+        .expect("accept-unsigned checks integrity only, so this must register");
+        assert!(registry.list_abis().contains(&TEST_ADDRESS));
     }
 
     /// An entry that DOES carry a signature but fails validation (signer not on
@@ -1007,7 +1208,8 @@ mod tests {
         let mut unlisted_allow = SignerAllowlist::new();
         unlisted_allow.insert(pubkey_bytes_from_seed(&[0x43u8; 32]));
         assert!(
-            try_extract_from_chain_metadata(Some(&metadata), 1, &unlisted_allow).is_none(),
+            try_extract_from_chain_metadata(Some(&metadata), 1, &require_signed(unlisted_allow))
+                .is_none(),
             "a signature present but failing validation must still be rejected"
         );
     }
@@ -1068,9 +1270,8 @@ mod tests {
                 .collect(),
             })),
         };
-        let registry =
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
-                .expect("should contain ABI");
+        let registry = try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed())
+            .expect("should contain ABI");
         assert!(registry.list_abis().contains(&TEST_ADDRESS));
     }
 
@@ -1108,7 +1309,7 @@ mod tests {
         };
         // Invalid entries are skipped; with no valid entries left, result is None
         assert!(
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist()).is_none()
+            try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed()).is_none()
         );
     }
 
@@ -1129,7 +1330,7 @@ mod tests {
         // The signature is valid, so this exercises the JSON parse rejection path
         // rather than short-circuiting on the unsigned check.
         assert!(
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist()).is_none()
+            try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed()).is_none()
         );
     }
 
@@ -1148,10 +1349,60 @@ mod tests {
             })),
         };
         // The valid entry should be registered; the invalid one skipped
-        let registry =
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
-                .expect("should contain the valid ABI");
+        let registry = try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed())
+            .expect("should contain the valid ABI");
         assert!(registry.list_abis().contains(&valid_address));
+    }
+
+    // --- deploy-time signer allowlist parsing ---
+
+    /// The happy path for `--accept-signatures-from-pubkey`: a hex key from the
+    /// cmdline lands in the allowlist and authorizes that signer's ABIs.
+    #[test]
+    fn signer_allowlist_from_hex_accepts_valid_key() {
+        let key = hex::encode(pubkey_bytes_from_seed(&[0x42u8; 32]));
+        let allow = signer_allowlist_from_hex(&[key]).expect("valid key must parse");
+        assert_eq!(allow.len(), 1);
+        assert!(allow.contains(&pubkey_bytes_from_seed(&[0x42u8; 32])));
+    }
+
+    /// Compressed and uncompressed encodings of the same key canonicalize to the
+    /// same allowlist entry, and both match the uncompressed form the verifier
+    /// derives from the signature.
+    #[test]
+    fn signer_allowlist_from_hex_canonicalizes_compressed_keys() {
+        let signing_key = SigningKey::from_bytes(&[0x42u8; 32]).expect("valid key");
+        let verifying_key = VerifyingKey::from(&signing_key);
+        let compressed = hex::encode(verifying_key.to_encoded_point(true).as_bytes());
+        let uncompressed = hex::encode(verifying_key.to_encoded_point(false).as_bytes());
+
+        let allow = signer_allowlist_from_hex(&[format!("0x{compressed}"), uncompressed])
+            .expect("both encodings must parse");
+        assert_eq!(
+            allow.len(),
+            1,
+            "compressed and uncompressed forms of one key must collapse to one entry"
+        );
+        assert!(allow.contains(&pubkey_bytes_from_seed(&[0x42u8; 32])));
+    }
+
+    /// A typo on the deployment cmdline must fail loudly at startup rather than
+    /// silently shrinking the allowlist (which would fail-closed and drop every
+    /// caller-supplied ABI for reasons nobody can see).
+    #[test]
+    fn signer_allowlist_from_hex_rejects_invalid_key() {
+        let valid = hex::encode(pubkey_bytes_from_seed(&[0x42u8; 32]));
+        let err = signer_allowlist_from_hex(&[valid, "not-a-key".to_string()])
+            .expect_err("an invalid key must be an error, not a skipped entry");
+        assert!(err.contains("invalid secp256k1 public key"), "error: {err}");
+    }
+
+    /// Require-signed with no keys at all is a configuration error, not an
+    /// accidentally-empty (reject-everything) allowlist.
+    #[test]
+    fn signer_allowlist_from_hex_rejects_empty_input() {
+        let err = signer_allowlist_from_hex(&[]).expect_err("empty input must be an error");
+        assert!(err.contains("no authorized ABI signer"), "error: {err}");
     }
 
     // --- proxy / abi_type tests ---
@@ -1176,9 +1427,8 @@ mod tests {
                 .collect(),
             })),
         };
-        let registry =
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
-                .expect("has ABI");
+        let registry = try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed())
+            .expect("has ABI");
         assert_eq!(
             registry.get_abi_kind(1, parse_addr(TEST_ADDRESS)),
             Some(AbiKind::Implementation)
@@ -1205,9 +1455,8 @@ mod tests {
                 .collect(),
             })),
         };
-        let registry =
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
-                .expect("has ABIs");
+        let registry = try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed())
+            .expect("has ABIs");
 
         assert_eq!(
             registry.get_abi_kind(1, parse_addr(PROXY_ADDRESS)),
@@ -1239,9 +1488,8 @@ mod tests {
                 .collect(),
             })),
         };
-        let registry =
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
-                .expect("has ABI");
+        let registry = try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed())
+            .expect("has ABI");
         // Entry is kept as a proxy, but with no resolvable implementation link.
         assert_eq!(
             registry.get_abi_kind(1, parse_addr(PROXY_ADDRESS)),
@@ -1260,11 +1508,11 @@ mod tests {
         );
     }
 
-    /// End-to-end regression for the reported bug: an UNSIGNED proxy entry
-    /// pointing at an UNSIGNED implementation entry must still resolve and
-    /// register both, so the implementation ABI is available for decoding.
-    /// Previously, omitting `signature` on either entry caused it to be
-    /// dropped outright, silently breaking proxy resolution.
+    /// End-to-end regression for the bug fixed in #406: under the accept-unsigned
+    /// posture, an UNSIGNED proxy entry pointing at an UNSIGNED implementation entry
+    /// must still resolve and register both, so the implementation ABI is available
+    /// for decoding. Before #406, omitting `signature` on either entry caused it to
+    /// be dropped outright, silently breaking proxy resolution.
     #[test]
     fn test_extract_unsigned_proxy_links_to_unsigned_implementation() {
         let metadata = ChainMetadata {
@@ -1293,9 +1541,12 @@ mod tests {
                 .collect(),
             })),
         };
-        let registry =
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_signer_allowlist())
-                .expect("has ABIs, even though neither entry is signed");
+        let registry = try_extract_from_chain_metadata(
+            Some(&metadata),
+            1,
+            &MetadataTrustPolicy::AcceptUnsigned,
+        )
+        .expect("has ABIs, even though neither entry is signed");
 
         assert_eq!(
             registry.get_abi_kind(1, parse_addr(PROXY_ADDRESS)),

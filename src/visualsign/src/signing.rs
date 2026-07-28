@@ -120,6 +120,71 @@ impl FromIterator<Vec<u8>> for SignerAllowlist {
     }
 }
 
+/// Deploy-time trust posture for caller-supplied metadata (Ethereum ABI
+/// mappings today; the Solana IDL path still uses a bare [`SignerAllowlist`]).
+///
+/// The posture is picked once by whoever deploys the parser and is fixed for the
+/// life of the process. Nothing in a request can move the parser between the two
+/// variants: a caller cannot opt itself into leniency by omitting a signature,
+/// and cannot opt itself into strictness either. That is the point of the type.
+/// Because the choice lives on the parser's cmdline (for the enclave binary, in
+/// the `pivotArgs` of the signed TVC manifest), a signer can verify out of band
+/// which posture the deployment they are signing against actually runs, instead
+/// of trusting a per-request signal or a log line that no one sees.
+///
+/// The two variants are mutually exclusive by construction:
+///
+/// - [`Self::AcceptUnsigned`]: metadata with no signature is accepted. A
+///   signature that IS present must still verify (integrity), but the signer's
+///   identity is not checked, because a deployment that accepts unsigned
+///   metadata gains nothing from an identity check an attacker can sidestep by
+///   simply dropping the signature.
+/// - [`Self::RequireAllowlistedSigner`]: every entry must carry a signature that
+///   verifies AND whose key is in the allowlist. Missing, malformed, and
+///   unauthorized signatures are all rejected. An empty allowlist rejects
+///   everything (fail-closed).
+///
+/// There is deliberately no `Default`: a deployment has to say which posture it
+/// runs.
+#[derive(Debug, Clone)]
+pub enum MetadataTrustPolicy {
+    /// Accept unsigned metadata; verify integrity only when a signature is present.
+    AcceptUnsigned,
+    /// Reject any metadata not signed by one of the allowlisted keys.
+    RequireAllowlistedSigner(SignerAllowlist),
+}
+
+impl MetadataTrustPolicy {
+    /// Returns `true` if metadata with no signature at all is accepted.
+    #[must_use]
+    pub fn accepts_unsigned(&self) -> bool {
+        matches!(self, Self::AcceptUnsigned)
+    }
+
+    /// The allowlist a present signature's signer must appear in, or `None` when
+    /// the posture only checks signature integrity (see [`Self::AcceptUnsigned`]).
+    #[must_use]
+    pub fn signer_allowlist(&self) -> Option<&SignerAllowlist> {
+        match self {
+            Self::AcceptUnsigned => None,
+            Self::RequireAllowlistedSigner(allow) => Some(allow),
+        }
+    }
+}
+
+impl std::fmt::Display for MetadataTrustPolicy {
+    /// Human-readable posture, for the one-line startup log that tells an
+    /// operator which mode the process came up in.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AcceptUnsigned => write!(f, "accept-unsigned"),
+            Self::RequireAllowlistedSigner(allow) => {
+                write!(f, "require-signed ({} authorized signer(s))", allow.len())
+            }
+        }
+    }
+}
+
 /// Domain separation tag for the v1 metadata signing prehash.
 ///
 /// Version-stamps the construction so prehashes from different format versions
@@ -301,6 +366,60 @@ mod tests {
         assert!(allow.contains(b"key-a"));
         assert!(allow.contains(b"key-b"));
         assert!(!allow.contains(b"key-c"));
+    }
+
+    #[test]
+    fn test_accept_unsigned_policy_skips_signer_identity() {
+        let policy = MetadataTrustPolicy::AcceptUnsigned;
+        assert!(policy.accepts_unsigned());
+        assert!(
+            policy.signer_allowlist().is_none(),
+            "accept-unsigned must not enforce signer identity: an attacker can \
+             always drop the signature instead"
+        );
+    }
+
+    #[test]
+    fn test_require_signed_policy_exposes_allowlist() {
+        let mut allow = SignerAllowlist::new();
+        allow.insert(b"key-a".to_vec());
+        let policy = MetadataTrustPolicy::RequireAllowlistedSigner(allow);
+
+        assert!(
+            !policy.accepts_unsigned(),
+            "require-signed must reject unsigned metadata"
+        );
+        let enforced = policy.signer_allowlist().expect("allowlist is enforced");
+        assert!(enforced.contains(b"key-a"));
+        assert!(!enforced.contains(b"key-b"));
+    }
+
+    #[test]
+    fn test_policy_display_names_the_posture() {
+        assert_eq!(
+            MetadataTrustPolicy::AcceptUnsigned.to_string(),
+            "accept-unsigned"
+        );
+
+        let mut allow = SignerAllowlist::new();
+        allow.insert(b"key-a".to_vec());
+        allow.insert(b"key-b".to_vec());
+        assert_eq!(
+            MetadataTrustPolicy::RequireAllowlistedSigner(allow).to_string(),
+            "require-signed (2 authorized signer(s))"
+        );
+    }
+
+    /// An empty allowlist under require-signed authorizes nothing, so the posture
+    /// rejects every entry (fail-closed) rather than degrading to accept-unsigned.
+    #[test]
+    fn test_require_signed_with_empty_allowlist_authorizes_nothing() {
+        let policy = MetadataTrustPolicy::RequireAllowlistedSigner(SignerAllowlist::new());
+        assert!(!policy.accepts_unsigned());
+        assert!(policy
+            .signer_allowlist()
+            .expect("allowlist is enforced")
+            .is_empty());
     }
 
     #[test]
