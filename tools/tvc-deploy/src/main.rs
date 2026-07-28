@@ -216,6 +216,9 @@ fn write_secret_file(path: &Path, contents: &str) -> Result<()> {
 
 fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
     validate_digest(&args.expected_digest)?;
+    for key in &args.accept_signatures_from_pubkey {
+        validate_signer_pubkey(key)?;
+    }
 
     if !args.force {
         // Turnkey has no dedup for create_tvc_deployment: submitting the same
@@ -250,13 +253,12 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
         }
     };
     let cfg_path = temp_path("tvc-deploy", "json");
-    let (app_id, image, digest, operator_id, qos, host_ip, host_port) = (
+    let (app_id, image, digest, operator_id, qos, host_port) = (
         &args.app_id,
         &args.image_url,
         &args.expected_digest,
         &args.operator_id,
         &args.qos_version,
-        &args.host_ip,
         args.host_port,
     );
 
@@ -270,7 +272,7 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
             "qosVersion": qos,
             "pivotContainerImageUrl": image,
             "pivotPath": "/parser_app",
-            "pivotArgs": pivot_args(host_ip, host_port, args),
+            "pivotArgs": pivot_args(args),
             "expectedPivotDigest": digest,
             "debugMode": false,
             "healthCheckType": "TVC_HEALTH_CHECK_TYPE_GRPC",
@@ -315,12 +317,12 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
 /// reads the posture straight off `pivotArgs` instead of trusting a per-request
 /// signal or parser logs (which Turnkey does not surface today). Clap's arg group
 /// guarantees exactly one of the two is set, so this always appends one posture.
-fn pivot_args(host_ip: &str, host_port: u16, args: &DeployArgs) -> Vec<String> {
+fn pivot_args(args: &DeployArgs) -> Vec<String> {
     let mut pivot = vec![
         "--host-ip".to_string(),
-        host_ip.to_string(),
+        args.host_ip.to_string(),
         "--host-port".to_string(),
-        host_port.to_string(),
+        args.host_port.to_string(),
     ];
     if args.accept_unsigned_abis {
         pivot.push("--accept-unsigned-abis".to_string());
@@ -469,6 +471,41 @@ fn validate_digest(d: &str) -> Result<()> {
     }
 }
 
+/// Format-only check that a hex signer pubkey looks like a SEC1-encoded
+/// secp256k1 point (33-byte compressed with a 02/03/05 prefix, or 65-byte
+/// uncompressed with a 04 prefix) before it's baked into the manifest a human
+/// signs. 05 is SEC1's "compact" tag: same 33-byte length as compressed, but
+/// the y-coordinate is derived rather than carried, and `canonical_pubkey_from_hex`
+/// (what `parser_app` actually runs on `--accept-signatures-from-pubkey`) accepts
+/// it same as 02/03/04, so it must not be rejected here. This crate has no
+/// elliptic-curve dependency of its own, so it can't confirm the point is
+/// actually on the curve the way `parser_app` does at startup; it only catches
+/// the truncated/typo'd inputs cheaply, here, instead of after a consensus round
+/// is spent standing up an enclave that immediately fails this same decode and
+/// never reports healthy.
+fn validate_signer_pubkey(hex_str: &str) -> Result<()> {
+    let stripped = hex_str
+        .strip_prefix("0x")
+        .or_else(|| hex_str.strip_prefix("0X"))
+        .unwrap_or(hex_str);
+    let valid_len = matches!(stripped.len(), 66 | 130);
+    let valid_prefix = match stripped.len() {
+        66 => {
+            stripped.starts_with("02") || stripped.starts_with("03") || stripped.starts_with("05")
+        }
+        130 => stripped.starts_with("04"),
+        _ => false,
+    };
+    if valid_len && valid_prefix && stripped.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        bail!(
+            "--accept-signatures-from-pubkey must be a 33-byte (02/03/05-prefixed) or \
+             65-byte (04-prefixed) hex secp256k1 public key, got {hex_str:?}"
+        );
+    }
+}
+
 /// Resolve the operator seed to a file path, returning `(path, cleanup)` or
 /// `None`. Prefers `--operator-seed <path>`; else reads the hex seed from env
 /// `TVC_CI_OPERATOR_SEED` into a temp 0600 file (cleanup=true so the caller
@@ -581,7 +618,7 @@ mod tests {
     fn pivot_args_carry_accept_unsigned() {
         let args = deploy_args(&["--accept-unsigned-abis"]);
         assert_eq!(
-            pivot_args(&args.host_ip, args.host_port, &args),
+            pivot_args(&args),
             vec![
                 "--host-ip",
                 "0.0.0.0",
@@ -602,7 +639,7 @@ mod tests {
             "04bb",
         ]);
         assert_eq!(
-            pivot_args(&args.host_ip, args.host_port, &args),
+            pivot_args(&args),
             vec![
                 "--host-ip",
                 "0.0.0.0",
@@ -694,6 +731,30 @@ Deployment: deploy-123
         assert!(validate_digest(&"a".repeat(65)).is_err());
         assert!(validate_digest(&("g".repeat(64))).is_err());
         assert!(validate_digest("").is_err());
+    }
+
+    #[test]
+    fn validate_signer_pubkey_accepts_compressed_and_uncompressed() {
+        assert!(validate_signer_pubkey(&format!("02{}", "a".repeat(64))).is_ok());
+        assert!(validate_signer_pubkey(&format!("03{}", "a".repeat(64))).is_ok());
+        assert!(validate_signer_pubkey(&format!("04{}", "a".repeat(128))).is_ok());
+        // 0x-prefixed, case-insensitive.
+        assert!(validate_signer_pubkey(&format!("0x04{}", "A".repeat(128))).is_ok());
+        // SEC1 "compact" tag: same 33-byte length as compressed, and accepted by
+        // `canonical_pubkey_from_hex` (what parser_app actually runs), so a false
+        // rejection here would block a legitimate deployment.
+        assert!(validate_signer_pubkey(&format!("05{}", "a".repeat(64))).is_ok());
+    }
+
+    #[test]
+    fn validate_signer_pubkey_rejects_truncated_or_malformed() {
+        // The exact truncated shape used elsewhere in this file's own tests.
+        assert!(validate_signer_pubkey("04aa").is_err());
+        assert!(validate_signer_pubkey("").is_err());
+        assert!(validate_signer_pubkey(&format!("06{}", "a".repeat(64))).is_err());
+        assert!(validate_signer_pubkey(&format!("02{}", "g".repeat(64))).is_err());
+        // Wrong length for its prefix (compressed prefix, uncompressed length).
+        assert!(validate_signer_pubkey(&format!("02{}", "a".repeat(128))).is_err());
     }
 
     #[test]

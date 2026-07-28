@@ -46,7 +46,7 @@ on:
         required: false
         default: "3000"
       abi_signer_pubkey:
-        description: "Deploy require-signed ABI mappings: hex secp256k1 signer pubkey. Leave empty to deploy --accept-unsigned-abis instead."
+        description: "ABI trust posture: hex secp256k1 signer pubkey to require-signed ABI mappings, or the literal 'unsigned' to explicitly deploy --accept-unsigned-abis. No default: workflow_dispatch must state a posture (app_id is free text here, so a blank default could silently deploy the permissive posture to a non-test app)."
         required: false
         default: ""
       turnkey_client_version:
@@ -118,12 +118,21 @@ jobs:
           QOS_VERSION: ${{ inputs.qos_version || '0.12.0' }}
           HOST_IP: ${{ inputs.host_ip || '0.0.0.0' }}
           HOST_PORT: ${{ inputs.host_port || '3000' }}
-          # ABI trust posture, baked into the manifest's pivotArgs. Empty means
-          # deploy the permissive posture, which is what the dev TEST app and the
-          # PR-label path want (their smoke fixtures send unsigned abi_mappings).
+          # ABI trust posture, baked into the manifest's pivotArgs. The PR-label
+          # path has no `inputs` context (always blank here) and only ever
+          # targets the dev TEST app, so it keeps the permissive default. A
+          # workflow_dispatch run takes a free-text app_id, so it must state the
+          # posture explicitly: pass a hex signer pubkey, or the literal
+          # "unsigned" to opt into --accept-unsigned-abis on purpose.
           ABI_SIGNER_PUBKEY: ${{ inputs.abi_signer_pubkey || '' }}
         run: |
-          if [ -n "$ABI_SIGNER_PUBKEY" ]; then
+          if [ -z "$ABI_SIGNER_PUBKEY" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "::error::abi_signer_pubkey is required for workflow_dispatch: pass a hex secp256k1 signer pubkey, or the literal 'unsigned' to explicitly deploy --accept-unsigned-abis."
+            exit 1
+          fi
+          if [ "$ABI_SIGNER_PUBKEY" = "unsigned" ]; then
+            abi_trust_args=(--accept-unsigned-abis)
+          elif [ -n "$ABI_SIGNER_PUBKEY" ]; then
             abi_trust_args=(--accept-signatures-from-pubkey "$ABI_SIGNER_PUBKEY")
           else
             abi_trust_args=(--accept-unsigned-abis)
