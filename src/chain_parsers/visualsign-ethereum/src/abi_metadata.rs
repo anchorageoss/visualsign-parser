@@ -444,10 +444,10 @@ fn validate_abi_signature(
 /// **This is not how a deployment picks its trust posture.** This function backs
 /// `parser_cli`, which signs the ABI files it loads with the dev key and
 /// therefore runs require-signed against that key. Wiring `parser_app` and the
-/// gRPC server to their own cmdline flags (parsed into a [`MetadataTrustPolicy`]
-/// via [`signer_allowlist_from_hex`], so the choice is auditable in the signed
-/// deployment manifest and cannot be influenced per request) is planned as a
-/// follow-up and is not part of this change.
+/// gRPC server to their own cmdline flags (so the choice is auditable in the
+/// signed deployment manifest and cannot be influenced per request) is planned as
+/// a follow-up and is not part of this change; the flag and the parser that turns
+/// its occurrences into a [`MetadataTrustPolicy`] land together in that change.
 #[must_use]
 pub fn authorized_abi_signers() -> SignerAllowlist {
     let mut allow = SignerAllowlist::new();
@@ -470,31 +470,6 @@ pub fn authorized_abi_signers() -> SignerAllowlist {
     }
 
     allow
-}
-
-/// Build a [`SignerAllowlist`] from deploy-time hex secp256k1 public keys (one per
-/// occurrence of the planned per-signer cmdline flag, any SEC1 encoding, optional
-/// `0x` prefix).
-///
-/// Unlike [`authorized_abi_signers`], a bad key is an error rather than a warning:
-/// these come from the deployment's cmdline, so a typo must stop the process at
-/// startup instead of silently producing a smaller (or empty, fail-closed)
-/// allowlist that quietly drops every caller-supplied ABI.
-///
-/// # Errors
-/// Returns `Err` if `entries` is empty, or if any entry is not a valid secp256k1
-/// public key.
-pub fn signer_allowlist_from_hex(entries: &[String]) -> Result<SignerAllowlist, String> {
-    if entries.is_empty() {
-        return Err("no authorized ABI signer public keys were provided".to_string());
-    }
-    let mut allow = SignerAllowlist::new();
-    for entry in entries {
-        let key = canonical_pubkey_from_hex(entry.trim())
-            .ok_or_else(|| format!("invalid secp256k1 public key: '{entry}'"))?;
-        allow.insert(key);
-    }
-    Ok(allow)
 }
 
 /// Parse a hex secp256k1 public key (optionally `0x`- or `0X`-prefixed, any
@@ -1622,57 +1597,6 @@ mod tests {
             .registry
             .expect("should contain the valid ABI");
         assert!(registry.list_abis().contains(&valid_address));
-    }
-
-    // --- deploy-time signer allowlist parsing ---
-
-    /// The happy path for the planned deploy-time signer flag: a hex key from the
-    /// cmdline lands in the allowlist and authorizes that signer's ABIs.
-    #[test]
-    fn signer_allowlist_from_hex_accepts_valid_key() {
-        let key = hex::encode(pubkey_bytes_from_seed(&[0x42u8; 32]));
-        let allow = signer_allowlist_from_hex(&[key]).expect("valid key must parse");
-        assert_eq!(allow.len(), 1);
-        assert!(allow.contains(&pubkey_bytes_from_seed(&[0x42u8; 32])));
-    }
-
-    /// Compressed and uncompressed encodings of the same key canonicalize to the
-    /// same allowlist entry, and both match the uncompressed form the verifier
-    /// derives from the signature.
-    #[test]
-    fn signer_allowlist_from_hex_canonicalizes_compressed_keys() {
-        let signing_key = SigningKey::from_bytes(&[0x42u8; 32]).expect("valid key");
-        let verifying_key = VerifyingKey::from(&signing_key);
-        let compressed = hex::encode(verifying_key.to_encoded_point(true).as_bytes());
-        let uncompressed = hex::encode(verifying_key.to_encoded_point(false).as_bytes());
-
-        let allow = signer_allowlist_from_hex(&[format!("0x{compressed}"), uncompressed])
-            .expect("both encodings must parse");
-        assert_eq!(
-            allow.len(),
-            1,
-            "compressed and uncompressed forms of one key must collapse to one entry"
-        );
-        assert!(allow.contains(&pubkey_bytes_from_seed(&[0x42u8; 32])));
-    }
-
-    /// A typo on the deployment cmdline must fail loudly at startup rather than
-    /// silently shrinking the allowlist (which would fail-closed and drop every
-    /// caller-supplied ABI for reasons nobody can see).
-    #[test]
-    fn signer_allowlist_from_hex_rejects_invalid_key() {
-        let valid = hex::encode(pubkey_bytes_from_seed(&[0x42u8; 32]));
-        let err = signer_allowlist_from_hex(&[valid, "not-a-key".to_string()])
-            .expect_err("an invalid key must be an error, not a skipped entry");
-        assert!(err.contains("invalid secp256k1 public key"), "error: {err}");
-    }
-
-    /// Require-signed with no keys at all is a configuration error, not an
-    /// accidentally-empty (reject-everything) allowlist.
-    #[test]
-    fn signer_allowlist_from_hex_rejects_empty_input() {
-        let err = signer_allowlist_from_hex(&[]).expect_err("empty input must be an error");
-        assert!(err.contains("no authorized ABI signer"), "error: {err}");
     }
 
     // --- proxy / abi_type tests ---
