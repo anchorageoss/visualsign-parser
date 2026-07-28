@@ -132,10 +132,15 @@ if [ -z "$ORG" ]; then
   exit 2
 fi
 IMAGE="ghcr.io/anchorageoss/visualsign-turnkeyclient:${CLIENT_VERSION}"
-# The published image runs as `nonroot` with HOME=/home/nonroot, and the client
-# resolves the key pair from $HOME/.config/turnkey/keys, so the mount target has
-# to match that HOME (not /root, which the client never looks in).
-CONTAINER_CLIENT="docker run --rm -v $HOME/.config/turnkey/keys:/home/nonroot/.config/turnkey/keys:ro $IMAGE"
+# The client resolves its key pair from $HOME/.config/turnkey/keys, so the mount
+# target has to match the container's HOME (not /root, which it never looks in).
+# Two further wrinkles, both of which this invocation handles:
+#   - run as the invoking uid, so a key file with sane 0600 permissions is
+#     readable. The image's own user is `nonroot`, which cannot read a key owned
+#     by you unless you widen it to 0644; a prod credential should not need that.
+#   - mount under a neutral HOME rather than the image's /home/nonroot, which is
+#     not traversable by any other uid, so --user alone would still hit EACCES.
+CONTAINER_CLIENT="docker run --rm --user $(id -u):$(id -g) -e HOME=/tkhome -v $HOME/.config/turnkey/keys:/tkhome/.config/turnkey/keys:ro $IMAGE"
 
 # Resolve a local fallback path to a runnable client: an executable is used
 # directly; a directory is treated as the turnkey-client source and built
