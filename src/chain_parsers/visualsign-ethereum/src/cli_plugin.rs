@@ -346,6 +346,12 @@ pub(crate) fn create_chain_metadata(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use alloy_consensus::TxEip1559;
+    use alloy_primitives::U256;
+    use alloy_rlp::Encodable;
+    use alloy_sol_types::{SolCall, sol};
+    use parser_cli_core::ChainPlugin;
+    use visualsign::vsptrait::VisualSignOptions;
 
     fn write_temp_json(name: &str, content: &str) -> std::path::PathBuf {
         parser_cli_core::test_utils::write_temp_json("vsp_eth_tests", name, content)
@@ -560,6 +566,116 @@ mod tests {
         assert!(
             registry.list_abis().contains(&PROXY),
             "signed synthesized proxy must survive extraction",
+        );
+    }
+
+    /// The posture must be pinned through `register`, not through the helper that
+    /// feeds it.
+    ///
+    /// Asserting on `cli_trust_policy()` in isolation proves nothing about what the
+    /// CLI actually runs: editing `register` back to
+    /// `EthereumVisualSignConverter::new()` leaves such an assertion passing and
+    /// silently reverts the CLI to accept-unsigned. So this goes through the plugin,
+    /// converts a real transaction, and observes the decode.
+    ///
+    /// `customFoo` is deliberately a function no built-in visualizer knows, so the
+    /// unsigned metadata ABI is the only thing that could decode it. The
+    /// accept-unsigned control converter proves the fixture is good, so the
+    /// registered converter's refusal cannot be a false negative.
+    #[test]
+    fn test_register_installs_require_signed_posture() {
+        sol! {
+            function customFoo(uint256 x) external;
+        }
+
+        let contract: alloy_primitives::Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        let calldata = customFooCall {
+            x: U256::from(7u64),
+        }
+        .abi_encode();
+        let selector_hex = hex::encode(&calldata[..4]);
+
+        let tx = TxEip1559 {
+            chain_id: 1,
+            nonce: 0,
+            gas_limit: 100_000,
+            max_fee_per_gas: 1_000_000_000,
+            max_priority_fee_per_gas: 1_000_000,
+            to: alloy_primitives::TxKind::Call(contract),
+            input: calldata.into(),
+            ..Default::default()
+        };
+        let mut buf = vec![0x02]; // EIP-1559 type byte
+        tx.encode(&mut buf);
+        let tx_hex = format!("0x{}", hex::encode(&buf));
+
+        // Deliberately unsigned: this is the entry the CLI's posture must refuse.
+        let build_options = || {
+            let mut abi_mappings = BTreeMap::new();
+            abi_mappings.insert(
+                contract.to_string(),
+                Abi {
+                    value: r#"[{
+                        "type": "function",
+                        "name": "customFoo",
+                        "inputs": [{"name": "x", "type": "uint256"}],
+                        "outputs": [],
+                        "stateMutability": "nonpayable"
+                    }]"#
+                    .to_string(),
+                    signature: None,
+                    ..Default::default()
+                },
+            );
+            VisualSignOptions {
+                include_intermediate_output: false,
+                decode_transfers: true,
+                transaction_name: None,
+                metadata: Some(ChainMetadata {
+                    metadata: Some(Metadata::Ethereum(EthereumMetadata {
+                        network_id: Some("ETHEREUM_MAINNET".to_string()),
+                        abi_mappings: abi_mappings.into_iter().collect(),
+                    })),
+                }),
+                developer_config: None,
+            }
+        };
+
+        // Control: a converter on the permissive posture decodes the same fixture.
+        let mut permissive_registry = TransactionConverterRegistry::new();
+        permissive_registry.register::<crate::EthereumTransactionWrapper, _>(
+            Chain::Ethereum,
+            crate::EthereumVisualSignConverter::new(),
+        );
+        let permissive = permissive_registry
+            .convert_transaction(&Chain::Ethereum, &tx_hex, build_options())
+            .unwrap()
+            .payload
+            .to_json()
+            .unwrap();
+        assert!(
+            permissive.contains("customFoo"),
+            "accept-unsigned must decode the unsigned metadata ABI, got: {permissive}"
+        );
+
+        // The converter the CLI plugin actually installs must refuse it.
+        let mut registry = TransactionConverterRegistry::new();
+        EthereumPlugin::new(EthereumArgs::default()).register(&mut registry);
+        let rendered = registry
+            .convert_transaction(&Chain::Ethereum, &tx_hex, build_options())
+            .unwrap()
+            .payload
+            .to_json()
+            .unwrap();
+        assert!(
+            !rendered.contains("customFoo"),
+            "the converter `register` installs must not decode an unsigned metadata ABI, got: {rendered}"
+        );
+        assert!(
+            rendered.contains(&selector_hex),
+            "dropping the unsigned ABI must leave the raw selector {selector_hex}, got: {rendered}"
         );
     }
 
