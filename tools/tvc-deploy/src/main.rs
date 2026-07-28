@@ -95,6 +95,13 @@ struct GenOperatorKeyArgs {
 }
 
 #[derive(clap::Args)]
+// The deployed parser's ABI trust posture. Exactly one of the two flags below must
+// be given: they become `pivotArgs` in the manifest the operators sign, so the
+// posture the enclave runs is fixed at deploy time and auditable out of band
+// instead of being implied by what each request happens to contain (PRS-556).
+#[command(group(
+    clap::ArgGroup::new("abi_trust").required(true).multiple(false)
+))]
 struct DeployArgs {
     #[arg(long)]
     app_id: String,
@@ -115,6 +122,14 @@ struct DeployArgs {
     host_ip: String,
     #[arg(long, default_value_t = 3000)]
     host_port: u16,
+    /// Deploy a parser that accepts caller-supplied ABI mappings with no signature
+    /// (integrity and provenance unverified)
+    #[arg(long, group = "abi_trust")]
+    accept_unsigned_abis: bool,
+    /// Deploy a parser that only accepts caller-supplied ABI mappings signed by this
+    /// hex secp256k1 public key. Repeatable
+    #[arg(long, group = "abi_trust", value_name = "HEX_PUBKEY")]
+    accept_signatures_from_pubkey: Vec<String>,
     /// Skip the check for an existing pending deploy activity for this app-id
     #[arg(long)]
     force: bool,
@@ -255,7 +270,7 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
             "qosVersion": qos,
             "pivotContainerImageUrl": image,
             "pivotPath": "/parser_app",
-            "pivotArgs": ["--host-ip", host_ip, "--host-port", host_port.to_string()],
+            "pivotArgs": pivot_args(host_ip, host_port, args),
             "expectedPivotDigest": digest,
             "debugMode": false,
             "healthCheckType": "TVC_HEALTH_CHECK_TYPE_GRPC",
@@ -292,6 +307,29 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
     let deploy_id = outcome?;
     println!("deployment {deploy_id} is healthy and live");
     Ok(())
+}
+
+/// Build the pivot cmdline the manifest commits to.
+///
+/// The ABI trust flags are part of it on purpose: a signer verifying a deployment
+/// reads the posture straight off `pivotArgs` instead of trusting a per-request
+/// signal or parser logs (which Turnkey does not surface today). Clap's arg group
+/// guarantees exactly one of the two is set, so this always appends one posture.
+fn pivot_args(host_ip: &str, host_port: u16, args: &DeployArgs) -> Vec<String> {
+    let mut pivot = vec![
+        "--host-ip".to_string(),
+        host_ip.to_string(),
+        "--host-port".to_string(),
+        host_port.to_string(),
+    ];
+    if args.accept_unsigned_abis {
+        pivot.push("--accept-unsigned-abis".to_string());
+    }
+    for key in &args.accept_signatures_from_pubkey {
+        pivot.push("--accept-signatures-from-pubkey".to_string());
+        pivot.push(key.clone());
+    }
+    pivot
 }
 
 /// Standalone digest gate, for callers that must record the expected digest
@@ -483,6 +521,122 @@ mod tests {
     #[test]
     fn cli_parses_all_subcommands() {
         Cli::command().debug_assert();
+    }
+
+    /// Parse a `deploy` invocation, returning just its args.
+    fn deploy_args(extra: &[&str]) -> DeployArgs {
+        let digest = "a".repeat(64);
+        let base = [
+            "tvc-deploy",
+            "deploy",
+            "--app-id",
+            "app",
+            "--image-url",
+            "img",
+            "--expected-digest",
+            &digest,
+            "--operator-id",
+            "op",
+        ];
+        let argv: Vec<String> = base
+            .iter()
+            .map(|s| (*s).to_string())
+            .chain(extra.iter().map(|s| (*s).to_string()))
+            .collect();
+        match Cli::parse_from(argv).command {
+            Command::Deploy(args) => args,
+            _ => panic!("expected the deploy subcommand"),
+        }
+    }
+
+    /// Parse a `deploy` invocation expected to fail, returning clap's error kind.
+    fn deploy_error_kind(extra: &[&str]) -> clap::error::ErrorKind {
+        let digest = "a".repeat(64);
+        let base = [
+            "tvc-deploy",
+            "deploy",
+            "--app-id",
+            "app",
+            "--image-url",
+            "img",
+            "--expected-digest",
+            &digest,
+            "--operator-id",
+            "op",
+        ];
+        let argv: Vec<String> = base
+            .iter()
+            .map(|s| (*s).to_string())
+            .chain(extra.iter().map(|s| (*s).to_string()))
+            .collect();
+        Cli::try_parse_from(argv)
+            .map(|_| ())
+            .expect_err("these args must not parse")
+            .kind()
+    }
+
+    /// The permissive posture is appended to the pivot cmdline the manifest commits
+    /// to, so a signer can read the posture straight off the deployment.
+    #[test]
+    fn pivot_args_carry_accept_unsigned() {
+        let args = deploy_args(&["--accept-unsigned-abis"]);
+        assert_eq!(
+            pivot_args(&args.host_ip, args.host_port, &args),
+            vec![
+                "--host-ip",
+                "0.0.0.0",
+                "--host-port",
+                "3000",
+                "--accept-unsigned-abis"
+            ]
+        );
+    }
+
+    /// Every signer key is carried through, in order, each with its own flag.
+    #[test]
+    fn pivot_args_carry_every_signer_pubkey() {
+        let args = deploy_args(&[
+            "--accept-signatures-from-pubkey",
+            "04aa",
+            "--accept-signatures-from-pubkey",
+            "04bb",
+        ]);
+        assert_eq!(
+            pivot_args(&args.host_ip, args.host_port, &args),
+            vec![
+                "--host-ip",
+                "0.0.0.0",
+                "--host-port",
+                "3000",
+                "--accept-signatures-from-pubkey",
+                "04aa",
+                "--accept-signatures-from-pubkey",
+                "04bb"
+            ]
+        );
+    }
+
+    /// A deploy with no posture is rejected, so `pivot_args` can never emit a
+    /// cmdline `parser_app` would refuse to start on.
+    #[test]
+    fn deploy_requires_a_posture() {
+        assert_eq!(
+            deploy_error_kind(&[]),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+    }
+
+    /// The two postures are mutually exclusive.
+    #[test]
+    fn deploy_rejects_both_postures() {
+        assert_eq!(
+            deploy_error_kind(&[
+                "--accept-unsigned-abis",
+                "--accept-signatures-from-pubkey",
+                "04aa",
+            ]),
+            clap::error::ErrorKind::ArgumentConflict
+        );
     }
 
     #[test]

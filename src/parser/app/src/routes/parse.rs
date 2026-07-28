@@ -1,6 +1,6 @@
 //! Parsing endpoint for `VisualSign`
 
-use crate::{chain_conversion, errors::GrpcError, registry::create_registry};
+use crate::{chain_conversion, config::ParserConfig, errors::GrpcError, registry::create_registry};
 use generated::parser::Chain as ProtoChain;
 use generated::{
     google::rpc::Code,
@@ -25,8 +25,9 @@ use visualsign::vsptrait::VisualSignOptions;
 pub fn parse(
     parse_request: &ParseRequest,
     ephemeral_key: &P256Pair,
+    config: &ParserConfig,
 ) -> Result<ParseResponse, GrpcError> {
-    let registry = create_registry();
+    let registry = create_registry(config);
     parse_with_registry(parse_request, ephemeral_key, &registry)
 }
 

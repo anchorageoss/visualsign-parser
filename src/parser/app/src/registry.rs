@@ -8,8 +8,15 @@
 /// feature is disabled are omitted; requests for those chains hit the
 /// registry-miss path in `convert_transaction` and surface as
 /// `InvalidArgument` at the gRPC layer.
+///
+/// `config` carries the deploy-time settings the converters need, chiefly the ABI
+/// trust posture. It is threaded in rather than read from a global so the posture
+/// is set once at startup and cannot vary between requests.
 #[must_use]
-pub fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
+#[cfg_attr(not(feature = "ethereum"), allow(unused_variables))]
+pub fn create_registry(
+    config: &crate::config::ParserConfig,
+) -> visualsign::registry::TransactionConverterRegistry {
     #[allow(unused_mut)] // mut is unused when no chain features are enabled
     let mut registry = visualsign::registry::TransactionConverterRegistry::new();
     // TODO: Create a ChainRegistry trait that all chains can implement for token metadata,
@@ -17,7 +24,7 @@ pub fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
     #[cfg(feature = "ethereum")]
     registry.register::<visualsign_ethereum::EthereumTransactionWrapper, _>(
         visualsign::registry::Chain::Ethereum,
-        visualsign_ethereum::EthereumVisualSignConverter::new(),
+        visualsign_ethereum::EthereumVisualSignConverter::with_policy(config.abi_trust.clone()),
     );
     #[cfg(feature = "solana")]
     registry.register::<visualsign_solana::SolanaTransactionWrapper, _>(

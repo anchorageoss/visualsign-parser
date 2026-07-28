@@ -6584,6 +6584,7 @@ dependencies = [
  "qos_p256",
  "tokio",
  "tokio-stream",
+ "visualsign",
 ]
 
 [[package]]

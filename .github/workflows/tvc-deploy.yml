@@ -45,6 +45,10 @@ on:
         description: "parser_app listen port"
         required: false
         default: "3000"
+      abi_signer_pubkey:
+        description: "Deploy require-signed ABI mappings: hex secp256k1 signer pubkey. Leave empty to deploy --accept-unsigned-abis instead."
+        required: false
+        default: ""
       turnkey_client_version:
         description: "turnkey-client image tag for the smoke check (approved version, not latest)"
         required: false
@@ -114,7 +118,16 @@ jobs:
           QOS_VERSION: ${{ inputs.qos_version || '0.12.0' }}
           HOST_IP: ${{ inputs.host_ip || '0.0.0.0' }}
           HOST_PORT: ${{ inputs.host_port || '3000' }}
+          # ABI trust posture, baked into the manifest's pivotArgs. Empty means
+          # deploy the permissive posture, which is what the dev TEST app and the
+          # PR-label path want (their smoke fixtures send unsigned abi_mappings).
+          ABI_SIGNER_PUBKEY: ${{ inputs.abi_signer_pubkey || '' }}
         run: |
+          if [ -n "$ABI_SIGNER_PUBKEY" ]; then
+            abi_trust_args=(--accept-signatures-from-pubkey "$ABI_SIGNER_PUBKEY")
+          else
+            abi_trust_args=(--accept-unsigned-abis)
+          fi
           ./tools/tvc-deploy/target/release/tvc-deploy deploy \
             --app-id "$APP_ID" \
             --image-url "$IMAGE_URL" \
@@ -123,7 +136,8 @@ jobs:
             --operator-seed "$RUNNER_TEMP/operator.seed" \
             --qos-version "$QOS_VERSION" \
             --host-ip "$HOST_IP" \
-            --host-port "$HOST_PORT"
+            --host-port "$HOST_PORT" \
+            "${abi_trust_args[@]}"
 
       # Post-deploy smoke: against the live dev endpoint (/visualsign-dev), run
       # `turnkey-client verify` on a V0+ALT tx and assert it both RENDERS and

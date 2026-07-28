@@ -1,6 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use generated::health::{AppHealthRequest, AppHealthResponse};
-use generated::parser::{Chain, ParseRequest};
+use generated::parser::{
+    Abi, Chain, ChainMetadata, EthereumMetadata, ParseRequest, chain_metadata::Metadata,
+};
 use integration::TestArgs;
 use qos_crypto::sha_256;
 use tonic::Code;
@@ -751,4 +753,119 @@ async fn parser_sui_native_transfer_e2e() {
     }
 
     integration::Builder::new().execute(test).await
+}
+
+// ---------------------------------------------------------------------------
+// Deploy-time ABI trust posture (PRS-556)
+// ---------------------------------------------------------------------------
+//
+// The two tests below send the SAME request to two parser_app instances that
+// differ only in the cmdline they were started with. That is the property the
+// deploy-time flag buys: whether an unverified ABI is honoured is decided by the
+// deployment, not by what the caller put in (or left out of) the request.
+
+/// Unsigned EIP-1559 call to an otherwise-unknown contract, carrying
+/// `frobnicate(uint256,address)` calldata (selector `5c04b43b`). The function is
+/// deliberately one no compiled-in visualizer knows, so whether it renders as a
+/// named call depends ONLY on whether the caller-supplied ABI was honoured.
+const ABI_TX_HEX: &str = "0x02f86c0180830f4240843b9aca00830186a094111111111111111111111111111111111111111180b8445c04b43b00000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000deadc0";
+
+/// The contract `ABI_TX_HEX` calls.
+const ABI_TX_CONTRACT: &str = "0x1111111111111111111111111111111111111111";
+
+/// A valid uncompressed secp256k1 public key (scalar `[0x42; 32]`). Used only to
+/// put the parser into the strict posture; nothing in these tests signs with it.
+const ABI_SIGNER_PUBKEY: &str = "0424653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c119fc5009a032aa9fe47f5e149bb8442f71f884ccb516590686d8ff6ab91c613";
+
+/// A request supplying an UNSIGNED ABI mapping for `ABI_TX_CONTRACT`.
+fn unsigned_abi_parse_request() -> ParseRequest {
+    let abi_json = r#"[{
+        "type": "function",
+        "name": "frobnicate",
+        "inputs": [
+            {"name": "amount", "type": "uint256"},
+            {"name": "beneficiary", "type": "address"}
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+    }]"#;
+
+    let mut abi_mappings = std::collections::BTreeMap::new();
+    abi_mappings.insert(
+        ABI_TX_CONTRACT.to_string(),
+        Abi {
+            value: abi_json.to_string(),
+            signature: None,
+            ..Default::default()
+        },
+    );
+
+    ParseRequest {
+        include_intermediate_output: false,
+        unsigned_payload: ABI_TX_HEX.to_string(),
+        chain: Chain::Ethereum as i32,
+        chain_metadata: Some(ChainMetadata {
+            metadata: Some(Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: abi_mappings.into_iter().collect(),
+            })),
+        }),
+    }
+}
+
+/// Send `unsigned_abi_parse_request` and return the rendered payload JSON.
+async fn parsed_payload_for_unsigned_abi(test_args: TestArgs) -> String {
+    let parse_response = test_args
+        .parser_client
+        .unwrap()
+        .parse(tonic::Request::new(unsigned_abi_parse_request()))
+        .await
+        .unwrap()
+        .into_inner();
+
+    parse_response
+        .parsed_transaction
+        .unwrap()
+        .payload
+        .unwrap()
+        .parsed_payload
+}
+
+/// A parser deployed with `--accept-unsigned-abis` honours the unsigned ABI: the
+/// calldata is decoded and the function name shows up in the payload.
+#[tokio::test]
+async fn accept_unsigned_abis_deployment_decodes_unsigned_abi() {
+    async fn test(test_args: TestArgs) {
+        let payload = parsed_payload_for_unsigned_abi(test_args).await;
+        assert!(
+            payload.contains("frobnicate"),
+            "accept-unsigned deployment should decode the unsigned ABI, got: {payload}"
+        );
+    }
+
+    integration::Builder::new().execute(test).await
+}
+
+/// The same request against a parser deployed with
+/// `--accept-signatures-from-pubkey` is NOT honoured: the unsigned ABI is dropped,
+/// so the calldata falls back to raw hex and the function name never appears. Only
+/// the cmdline differs from the test above.
+#[tokio::test]
+async fn require_signed_abis_deployment_drops_unsigned_abi() {
+    async fn test(test_args: TestArgs) {
+        let payload = parsed_payload_for_unsigned_abi(test_args).await;
+        assert!(
+            !payload.contains("frobnicate"),
+            "require-signed deployment must not decode an unsigned ABI, got: {payload}"
+        );
+        assert!(
+            payload.contains("5c04b43b"),
+            "the undecoded calldata should fall back to raw hex, got: {payload}"
+        );
+    }
+
+    integration::Builder::new()
+        .require_signed_abis(ABI_SIGNER_PUBKEY)
+        .execute(test)
+        .await
 }
