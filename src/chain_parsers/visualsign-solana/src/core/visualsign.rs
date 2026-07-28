@@ -139,7 +139,8 @@ impl SolanaTransactionWrapper {
 ///
 /// # Security
 ///
-/// Mirrors `visualsign-ethereum::abi_metadata::try_extract_from_chain_metadata`:
+/// Structured after `visualsign-ethereum::abi_metadata::try_extract_from_chain_metadata`,
+/// but no longer at parity with it on trust posture: see step 4.
 /// 1. The program_id must be a valid base58 Solana `Pubkey`; otherwise the
 ///    entry is skipped.
 /// 2. Mappings whose `program_id` is a trusted built-in (i.e.
@@ -169,6 +170,17 @@ impl SolanaTransactionWrapper {
 ///    IDLs are still accepted so the feature degrades gracefully; callers that
 ///    need mandatory signatures must enforce that at the API boundary. This
 ///    check refuses to plumb attacker-tampered IDL bodies into the registry.
+///
+///    **This pairing is not deliberate, and Ethereum no longer matches it.**
+///    Accepting unsigned IDLs while rejecting a correctly signed one from an
+///    unlisted signer means an attacker gets a weaker requirement by dropping the
+///    signature than by supplying one, so the identity check buys nothing while
+///    making the strictly worse input the accepted one. PRS-556 removed exactly
+///    this combination on the Ethereum ABI path (see
+///    `visualsign::signing::MetadataTrustPolicy`), which is chain-neutral so
+///    extending it here is mechanical. Doing so is out of scope for that change
+///    and wants its own ticket; until then, treat this as a known gap rather than
+///    as the intended design.
 /// 5. The resolved `program_name` (from proto, IDL metadata, or fallback)
 ///    must not be a reserved canonical name. Step 2 already rejects when
 ///    the *program_id* is trusted, so by this step `program_id` has no
@@ -255,8 +267,10 @@ fn extract_idl_mappings_with_signers(
         }
 
         // 4. If a signature is provided it must verify AND the signer must be
-        //    allowlisted; unsigned IDLs are accepted (parity with the Ethereum
-        //    ABI path).
+        //    allowlisted; unsigned IDLs are accepted. This is the pairing PRS-556
+        //    removed from the Ethereum ABI path for being strictly worse than
+        //    either coherent posture, so it is a known gap here, NOT parity with
+        //    Ethereum. See the security notes on this function.
         if let Some(proto_sig) = idl.signature.as_ref() {
             let local_sig = convert_proto_signature(proto_sig);
             if let Err(e) =
@@ -1782,9 +1796,14 @@ mod tests {
         }
     }
 
-    /// Unsigned IDL mappings are still accepted (parity with the Ethereum ABI
-    /// path). The trusted-builtin-name protection in `IdlRegistry` is what
-    /// stops the attacker-controlled name from being rendered.
+    /// Unsigned IDL mappings are still accepted. The trusted-builtin-name
+    /// protection in `IdlRegistry` is what stops the attacker-controlled name from
+    /// being rendered.
+    ///
+    /// Note this is no longer parity with the Ethereum ABI path: Ethereum accepts
+    /// unsigned metadata only under an explicit `AcceptUnsigned` posture, and it
+    /// stopped pairing that with an identity check. This path still does both. See
+    /// the security notes on `extract_idl_mappings`.
     #[test]
     fn test_extract_idl_mappings_accepts_unsigned_idl() {
         let options = make_options_with_idl_mapping(
