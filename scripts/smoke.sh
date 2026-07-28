@@ -47,7 +47,10 @@
 #   VSP_SMOKE_HOST                 API host    (default https://api.turnkey.com)
 #   VSP_SMOKE_TARGET              dev|prod (same as --target)
 #   VSP_SMOKE_KEY                 key name under ~/.config/turnkey/keys/<key>.{public,private}
-#                                 (default: dev for --target dev, default for prod)
+#                                 for whichever target is selected; wins over the
+#                                 two below
+#   VSP_SMOKE_KEY_DEV             key name for --target dev   (default: dev)
+#   VSP_SMOKE_KEY_PROD            key name for --target prod  (default: default)
 #
 # The org ids are deliberately not defaulted in this script: the repo is public.
 # Keep them in CI secrets and in a private local env file, not here.
@@ -113,11 +116,11 @@ done
 case "$TARGET" in
   dev)
     ORG="${ORG:-${VSP_SMOKE_ORG_DEV:-}}"
-    KEY="${KEY:-dev}"
+    KEY="${KEY:-${VSP_SMOKE_KEY_DEV:-dev}}"
     PATH_ARGS=(--dev-path) ;;
   prod)
     ORG="${ORG:-${VSP_SMOKE_ORG_PROD:-}}"
-    KEY="${KEY:-default}"
+    KEY="${KEY:-${VSP_SMOKE_KEY_PROD:-default}}"
     PATH_ARGS=() ;;
   *) echo "--target must be dev or prod (got: $TARGET)" >&2; exit 2 ;;
 esac
