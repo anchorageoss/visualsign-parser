@@ -40,24 +40,27 @@ impl EthereumPlugin {
     }
 }
 
+/// The CLI's ABI trust posture: signs every ABI it loads with the local dev key
+/// (see `build_abi_mappings_from_files`), so it runs the strict posture against
+/// that key. Locally-loaded ABIs are accepted, anything unsigned is not.
+/// Deployments are meant to take their posture from their own cmdline instead;
+/// that wiring is a planned follow-up, see
+/// `abi_metadata::signer_allowlist_from_hex`.
+fn cli_trust_policy() -> visualsign::signing::MetadataTrustPolicy {
+    visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
+        crate::abi_metadata::authorized_abi_signers(),
+    )
+}
+
 impl parser_cli_core::ChainPlugin for EthereumPlugin {
     fn chain(&self) -> Chain {
         Chain::Ethereum
     }
 
     fn register(&self, registry: &mut TransactionConverterRegistry) {
-        // The CLI signs every ABI it loads with the local dev key (see
-        // `build_abi_mappings_from_files`), so it runs the strict posture against
-        // that key: locally-loaded ABIs are accepted, anything unsigned is not.
-        // Deployments take their posture from their own cmdline instead; see
-        // `abi_metadata::authorized_abi_signers`.
         registry.register::<crate::EthereumTransactionWrapper, _>(
             Chain::Ethereum,
-            crate::EthereumVisualSignConverter::with_policy(
-                visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
-                    crate::abi_metadata::authorized_abi_signers(),
-                ),
-            ),
+            crate::EthereumVisualSignConverter::with_policy(cli_trust_policy()),
         );
     }
 
@@ -116,15 +119,14 @@ fn build_abi_mappings_from_files(
         "ContractAddress",
         validate_eth_address,
         |components, json| {
-            // The metadata-ABI extraction path accepts unsigned entries too, but the
-            // CLI attaches an integrity signature using a deterministic local dev key
-            // so locally-loaded ABIs extract as verified rather than logged as
-            // unverified. This is integrity, not identity, the CLI is a local dev tool
-            // that already trusts its input files; production trust comes from the
-            // service running the parser, which validates the signature and checks the
-            // signer's public key against an allowlist during extraction (see
-            // `abi_metadata::try_extract_from_chain_metadata`), not from the gRPC
-            // caller.
+            // The CLI attaches an integrity signature using a deterministic local dev
+            // key, and registers its converter under the require-signed posture (see
+            // `cli_trust_policy`), so a locally-loaded ABI extracts only because it is
+            // signed. This is integrity, not identity, the CLI is a local dev tool that
+            // already trusts its input files. Whether a deployment requires signatures
+            // at all is its own posture decision, taken at construction time rather
+            // than per request (see `abi_metadata::try_extract_from_chain_metadata`),
+            // never something the gRPC caller picks.
             //
             // The signature binds the contract address and chain id, so it must be
             // produced for the same (chain, address) the parser verifies with. The
@@ -414,8 +416,8 @@ mod tests {
             .get("0xdac17f958d2ee523a2206206994597c13d831ec7")
             .expect("mapping present");
         assert!(abi.value.contains("swap"));
-        // CLI signs locally-loaded ABIs so they extract as verified rather than
-        // logged as unverified by the metadata-ABI extractor.
+        // CLI signs locally-loaded ABIs so they survive the require-signed posture
+        // the CLI registers its converter under.
         assert!(
             abi.signature.is_some(),
             "CLI should attach a dev-key signature to locally-loaded ABIs"
@@ -531,12 +533,20 @@ mod tests {
         assert_eq!(proxy_abi.value, "[]");
         assert_eq!(proxy_abi.abi_type, Some(AbiType::Proxy as i32));
         assert_eq!(proxy_abi.implementation_address.as_deref(), Some(IMPL));
-        // Regression guard: the CLI still signs the synthesized proxy ABI so it
-        // extracts as verified, even though the extractor now also accepts
-        // unsigned entries.
+        // Regression guard: the CLI still signs the synthesized proxy ABI, which is
+        // what lets it survive the require-signed posture the CLI registers under.
         assert!(
             proxy_abi.signature.is_some(),
             "synthesized proxy ABI must be signed so the extractor treats it as verified",
+        );
+
+        // Pin the CLI's posture itself. A signed entry survives under either posture
+        // (accept-unsigned still integrity-checks a signature that is present), so the
+        // extraction assertion below cannot tell the two apart. Without this, flipping
+        // `cli_trust_policy` to accept-unsigned would leave the whole suite green.
+        assert!(
+            !super::cli_trust_policy().accepts_unsigned(),
+            "the CLI must register the require-signed posture",
         );
 
         // End-to-end: the signed synthesized proxy survives extraction. `list_abis`
@@ -548,11 +558,8 @@ mod tests {
             Some(&extracted),
             1,
             // dev-signing is enabled for the CLI, so this allowlists the dev key the
-            // CLI signed the synthesized proxy with. Strict posture on purpose: the
-            // point of the assertion is that the entry survives BECAUSE it is signed.
-            &visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
-                crate::abi_metadata::authorized_abi_signers(),
-            ),
+            // CLI signed the synthesized proxy with.
+            &super::cli_trust_policy(),
         )
         .expect("metadata with a signed synthesized proxy must extract");
         assert!(
