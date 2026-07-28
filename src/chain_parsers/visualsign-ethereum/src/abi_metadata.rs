@@ -52,13 +52,17 @@ enum AbiSignatureError {
 ///   `signature: None` is registered rather than dropped; unsigned entries are
 ///   counted and reported in a single aggregated warning once per request (no
 ///   per-entry flag or marker is stored in the registry, tracked in PRS-555). An
-///   entry that DOES carry a signature must still verify for integrity, since a
+///   entry that DOES carry a signature must still verify against the public key
+///   supplied alongside it in the same (untrusted) `SignatureMetadata`, since a
 ///   present-but-invalid signature is a stronger signal of tampering than simply
-///   omitting one. The signer's *identity* is not checked in this posture: a
-///   deployment that accepts unsigned ABIs gains nothing from an allowlist an
-///   attacker sidesteps by dropping the signature, and the previous behaviour
-///   (accept unsigned, but reject a correctly signed entry whose signer is not
-///   allowlisted) was strictly worse than either coherent posture.
+///   omitting one; because that key is not checked against an allowlist here, this
+///   only catches a tamperer who mutates `abi.value` without also re-signing it,
+///   not one who controls the whole entry. The signer's *identity* is not checked
+///   in this posture: a deployment that accepts unsigned ABIs gains nothing from
+///   an allowlist an attacker sidesteps by dropping the signature (or re-signing
+///   with a key of their own), and the previous behaviour (accept unsigned, but
+///   reject a correctly signed entry whose signer is not allowlisted) was
+///   strictly worse than either coherent posture.
 /// - **Signature validation** uses secp256k1 over a domain-separated prehash that
 ///   binds the chain id and the contract address to the ABI JSON (see
 ///   [`visualsign::signing::ethereum_metadata_prehash`]).

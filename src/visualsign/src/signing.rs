@@ -135,10 +135,13 @@ impl FromIterator<Vec<u8>> for SignerAllowlist {
 /// The two variants are mutually exclusive by construction:
 ///
 /// - [`Self::AcceptUnsigned`]: metadata with no signature is accepted. A
-///   signature that IS present must still verify (integrity), but the signer's
-///   identity is not checked, because a deployment that accepts unsigned
-///   metadata gains nothing from an identity check an attacker can sidestep by
-///   simply dropping the signature.
+///   signature that IS present must still verify against the public key carried
+///   alongside it in the same untrusted metadata (so a mutated payload under an
+///   unchanged signature/key pair is still rejected), but that key's identity is
+///   not checked against an allowlist, because a deployment that accepts
+///   unsigned metadata gains nothing from an identity check an attacker can
+///   sidestep by simply dropping the signature (or re-signing with a key of
+///   their own choosing).
 /// - [`Self::RequireAllowlistedSigner`]: every entry must carry a signature that
 ///   verifies AND whose key is in the allowlist. Missing, malformed, and
 ///   unauthorized signatures are all rejected. An empty allowlist rejects
