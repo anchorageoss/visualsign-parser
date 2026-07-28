@@ -44,8 +44,8 @@ impl EthereumPlugin {
 /// (see `build_abi_mappings_from_files`), so it runs the strict posture against
 /// that key. Locally-loaded ABIs are accepted, anything unsigned is not.
 /// Deployments are meant to take their posture from their own cmdline instead;
-/// that wiring is a planned follow-up, see
-/// `abi_metadata::signer_allowlist_from_hex`.
+/// that wiring is a planned follow-up, and the flag plus the parser that turns it
+/// into a `MetadataTrustPolicy` land together there rather than here.
 fn cli_trust_policy() -> visualsign::signing::MetadataTrustPolicy {
     visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
         crate::abi_metadata::authorized_abi_signers(),
@@ -540,17 +540,11 @@ mod tests {
             "synthesized proxy ABI must be signed so the extractor treats it as verified",
         );
 
-        // Pin the CLI's posture itself. A signed entry survives under either posture
-        // (accept-unsigned still integrity-checks a signature that is present), so the
-        // extraction assertion below cannot tell the two apart. Without this, flipping
-        // `cli_trust_policy` to accept-unsigned would leave the whole suite green.
-        assert!(
-            !super::cli_trust_policy().accepts_unsigned(),
-            "the CLI must register the require-signed posture",
-        );
-
-        // End-to-end: the signed synthesized proxy survives extraction. `list_abis`
-        // returns each registered entry's address string.
+        // End-to-end: the signed synthesized proxy survives extraction under the
+        // CLI's posture. This is about proxy synthesis, not about which posture
+        // `register` installs: a signed entry is accepted under either posture, so
+        // it cannot tell them apart. `test_register_installs_require_signed_posture`
+        // is what pins the posture. `list_abis` returns each entry's address string.
         let extracted = ChainMetadata {
             metadata: Some(Metadata::Ethereum(eth)),
         };
@@ -561,6 +555,7 @@ mod tests {
             // CLI signed the synthesized proxy with.
             &super::cli_trust_policy(),
         )
+        .registry
         .expect("metadata with a signed synthesized proxy must extract");
         assert!(
             registry.list_abis().contains(&PROXY),
