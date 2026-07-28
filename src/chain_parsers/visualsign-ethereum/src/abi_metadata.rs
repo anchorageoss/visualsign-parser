@@ -579,14 +579,49 @@ mod tests {
         }
     ]"#;
 
+    /// A second well-formed ABI, used as the swapped-in body in tampering tests.
+    ///
+    /// It has to parse cleanly on its own, otherwise `register_embedded_abi` drops
+    /// the entry before `validate_abi_signature` ever runs and the test passes
+    /// without exercising the signature check at all.
+    const OTHER_VALID_ABI: &str = r#"[
+        {
+            "type": "function",
+            "name": "approve",
+            "inputs": [
+                {"name": "spender", "type": "address"},
+                {"name": "amount", "type": "uint256"}
+            ],
+            "outputs": [{"name": "", "type": "bool"}],
+            "stateMutability": "nonpayable"
+        }
+    ]"#;
+
+    /// A seed that is deliberately NOT the dev key and NOT in any test allowlist.
+    ///
+    /// Needed to test signer identity: [`CLI_DEV_SIGNING_KEY_SEED`] is allowlisted by
+    /// `authorized_abi_signers()` under `cfg(test)`, so a fixture signed with it is
+    /// accepted on identity grounds and cannot distinguish "identity enforced" from
+    /// "identity ignored".
+    const FOREIGN_SIGNER_SEED: [u8; 32] = [0x43u8; 32];
+
     /// Helper to create a valid signature for testing.
     ///
     /// The signature is over the domain-separated prehash binding `chain_id` and
     /// `address` to `abi_json`, matching what [`validate_abi_signature`] verifies.
     fn create_test_signature(abi_json: &str, address: &Address, chain_id: u64) -> (String, String) {
-        // Use a deterministic test seed
-        let seed: [u8; 32] = [0x42u8; 32];
-        let signing_key = SigningKey::from_bytes(&seed).expect("valid key");
+        create_test_signature_with_seed(abi_json, address, chain_id, &CLI_DEV_SIGNING_KEY_SEED)
+    }
+
+    /// [`create_test_signature`] with an explicit signing seed, so a test can sign as
+    /// a signer that no allowlist authorizes.
+    fn create_test_signature_with_seed(
+        abi_json: &str,
+        address: &Address,
+        chain_id: u64,
+        seed: &[u8; 32],
+    ) -> (String, String) {
+        let signing_key = SigningKey::from_bytes(seed).expect("valid key");
         let verifying_key = VerifyingKey::from(&signing_key);
 
         // Compute the shared domain-separated prehash.
@@ -917,8 +952,15 @@ mod tests {
     /// earlier address parse and are skipped before signature verification, so the
     /// bound address is never actually checked.
     fn signed_abi(abi_json: &str, address: &str) -> Abi {
+        signed_abi_with_seed(abi_json, address, &CLI_DEV_SIGNING_KEY_SEED)
+    }
+
+    /// [`signed_abi`] with an explicit signing seed. Pass [`FOREIGN_SIGNER_SEED`] to
+    /// build an entry whose signature verifies but whose signer no allowlist knows.
+    fn signed_abi_with_seed(abi_json: &str, address: &str, seed: &[u8; 32]) -> Abi {
         let addr = address.parse::<Address>().unwrap_or(Address::ZERO);
-        let (signature_hex, public_key_hex) = create_test_signature(abi_json, &addr, 1);
+        let (signature_hex, public_key_hex) =
+            create_test_signature_with_seed(abi_json, &addr, 1, seed);
         let proto_sig = generated::parser::SignatureMetadata {
             value: signature_hex,
             metadata: vec![
@@ -1133,9 +1175,11 @@ mod tests {
     /// present-but-invalid signature never degrades to "accept and log".
     #[test]
     fn test_accept_unsigned_still_rejects_tampered_signature() {
-        // Signature is minted over VALID_ABI, then the body is swapped out.
+        // Signature is minted over VALID_ABI, then the body is swapped out for a
+        // different ABI that is itself well-formed, so the only thing that can
+        // reject this entry is the signature check.
         let mut abi = signed_abi(VALID_ABI, TEST_ADDRESS);
-        abi.value = r#"[{"type":"function","name":"approve"}]"#.to_string();
+        abi.value = OTHER_VALID_ABI.to_string();
 
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
@@ -1162,6 +1206,11 @@ mod tests {
     /// intentional posture so a future change that starts enforcing identity here
     /// (recreating the old incoherent "unsigned ok, signed-by-stranger rejected"
     /// behaviour) fails loudly.
+    ///
+    /// The fixture must be signed with [`FOREIGN_SIGNER_SEED`], not the dev seed:
+    /// `authorized_abi_signers()` allowlists the dev key under `cfg(test)`, so a
+    /// dev-signed fixture passes an identity check too and the test would hold even
+    /// if identity were being enforced.
     #[test]
     fn test_accept_unsigned_does_not_enforce_signer_identity() {
         let metadata = ChainMetadata {
@@ -1169,14 +1218,16 @@ mod tests {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
                 abi_mappings: make_abi_mappings(vec![(
                     TEST_ADDRESS,
-                    signed_abi(VALID_ABI, TEST_ADDRESS),
+                    signed_abi_with_seed(VALID_ABI, TEST_ADDRESS, &FOREIGN_SIGNER_SEED),
                 )])
                 .into_iter()
                 .collect(),
             })),
         };
-        // Same fixture rejected by `test_try_extract_unauthorized_signer_still_rejected`
-        // under require-signed with a foreign allowlist.
+        // This signer is in no allowlist, so require-signed would reject the same
+        // entry. `test_try_extract_unauthorized_signer_still_rejected` asserts that
+        // rejection using the mirror arrangement: a dev-signed entry against an
+        // allowlist that authorizes only FOREIGN_SIGNER_SEED.
         let registry = try_extract_from_chain_metadata(
             Some(&metadata),
             1,
@@ -1192,8 +1243,8 @@ mod tests {
     /// simply omitting one, so it must not be downgraded to "accept and log".
     #[test]
     fn test_try_extract_unauthorized_signer_still_rejected() {
-        // `signed_abi` signs with seed 0x42, so pass an allowlist that only
-        // authorizes seed 0x43: the signature verifies but the signer is
+        // `signed_abi` signs with the dev seed, so pass an allowlist that only
+        // authorizes FOREIGN_SIGNER_SEED: the signature verifies but the signer is
         // unauthorized (mirrors `validate_abi_signature_rejects_unlisted_signer`).
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
@@ -1207,7 +1258,7 @@ mod tests {
             })),
         };
         let mut unlisted_allow = SignerAllowlist::new();
-        unlisted_allow.insert(pubkey_bytes_from_seed(&[0x43u8; 32]));
+        unlisted_allow.insert(pubkey_bytes_from_seed(&FOREIGN_SIGNER_SEED));
         assert!(
             try_extract_from_chain_metadata(Some(&metadata), 1, &require_signed(unlisted_allow))
                 .is_none(),
@@ -1291,6 +1342,12 @@ mod tests {
         assert!(local_sig.timestamp.is_none());
     }
 
+    /// An entry whose map key is not an address is dropped by the address parse,
+    /// before any signature handling.
+    ///
+    /// Runs under accept-unsigned on purpose. The fixture is unsigned, so under
+    /// require-signed the posture check would drop it too and the address parse
+    /// would stop being the reason this test passes.
     #[test]
     fn test_try_extract_invalid_address_skipped() {
         let metadata = ChainMetadata {
@@ -1310,7 +1367,12 @@ mod tests {
         };
         // Invalid entries are skipped; with no valid entries left, result is None
         assert!(
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed()).is_none()
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                1,
+                &MetadataTrustPolicy::AcceptUnsigned
+            )
+            .is_none()
         );
     }
 
@@ -1357,7 +1419,7 @@ mod tests {
 
     // --- deploy-time signer allowlist parsing ---
 
-    /// The happy path for `--accept-signatures-from-pubkey`: a hex key from the
+    /// The happy path for the planned deploy-time signer flag: a hex key from the
     /// cmdline lands in the allowlist and authorizes that signer's ABIs.
     #[test]
     fn signer_allowlist_from_hex_accepts_valid_key() {
