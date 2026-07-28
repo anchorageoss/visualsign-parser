@@ -130,8 +130,7 @@ jobs:
       # cryptographically VERIFIES (AWS Nitro attestation + enclave signature).
       # The API key is reconstructed from the same TVC_API_KEY_* secrets. Pins an
       # approved turnkey-client image version rather than :latest.
-      # NOTE: requires the turnkey-client image on GHCR (visualsign-turnkeyclient
-      # docker.yml / #23); until that's published this step can't pull the image.
+      # smoke.sh defaults to --target dev, which is what this workflow deploys.
       - name: Smoke (dev verify endpoint)
         if: success()
         env:
