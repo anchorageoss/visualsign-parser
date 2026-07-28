@@ -38,12 +38,13 @@ enum AbiSignatureError {
 /// # Security notes
 ///
 /// - **Whether unsigned ABIs are accepted is a deploy-time decision, not a
-///   request-time one.** `policy` is fixed when the parser process starts (for
-///   `parser_app`, by the `--accept-unsigned-abis` / `--accept-signatures-from-pubkey`
-///   cmdline flags that land in the signed TVC manifest's `pivotArgs`). A caller
-///   cannot move the parser between postures by omitting a signature, and a signer
-///   can verify out of band which posture the deployment runs. See
-///   [`MetadataTrustPolicy`].
+///   request-time one.** `policy` is fixed by whichever constructor built the
+///   converter, not by anything in the request. Today `parser_cli` pins
+///   [`MetadataTrustPolicy::RequireAllowlistedSigner`] against its dev key; wiring
+///   `parser_app` and the gRPC server to their own cmdline flags (so the posture is
+///   fixed at deploy time and auditable in the signed TVC manifest) is planned as a
+///   follow-up and is not part of this change. A caller cannot move the parser
+///   between postures by omitting a signature. See [`MetadataTrustPolicy`].
 /// - **Under [`MetadataTrustPolicy::RequireAllowlistedSigner`]**, every entry must
 ///   carry a signature that verifies AND whose key is allowlisted. Missing,
 ///   malformed and unauthorized signatures are all rejected. An empty allowlist
@@ -127,30 +128,26 @@ pub fn try_extract_from_chain_metadata(
         // present-but-invalid signature signals tampering rather than simply an
         // unsigned source.
         let is_unsigned = abi.signature.is_none();
-        match abi.signature.as_ref() {
-            Some(proto_sig) => {
-                let signature = convert_proto_signature(proto_sig);
-                if let Err(e) = validate_abi_signature(
-                    &abi.value,
-                    &parsed_address,
-                    chain_id,
-                    &signature,
-                    policy.signer_allowlist(),
-                ) {
-                    log::warn!(
-                        "Skipping ABI mapping for '{address}': signature validation failed: {e}"
-                    );
-                    continue;
-                }
-            }
-            None if !policy.accepts_unsigned() => {
+        if let Some(proto_sig) = abi.signature.as_ref() {
+            let signature = convert_proto_signature(proto_sig);
+            if let Err(e) = validate_abi_signature(
+                &abi.value,
+                &parsed_address,
+                chain_id,
+                &signature,
+                policy.signer_allowlist(),
+            ) {
                 log::warn!(
-                    "Skipping ABI mapping for '{address}': this deployment requires \
-                     signed ABI mappings (started with --accept-signatures-from-pubkey)"
+                    "Skipping ABI mapping for '{address}': signature validation failed: {e}"
                 );
                 continue;
             }
-            None => {}
+        } else if !policy.accepts_unsigned() {
+            log::warn!(
+                "Skipping ABI mapping for '{address}': this deployment requires \
+                 signed ABI mappings"
+            );
+            continue;
         }
 
         // Determine the kind of contract this ABI describes. An unset or
@@ -386,13 +383,13 @@ fn validate_abi_signature(
 /// An empty result (no dev key, no env entries) rejects all signed ABIs
 /// (fail-closed).
 ///
-/// **This is not how a deployment picks its trust posture.** `parser_app` and the
-/// gRPC server take the posture from their cmdline
-/// (`--accept-unsigned-abis` / `--accept-signatures-from-pubkey`, parsed into a
-/// [`MetadataTrustPolicy`] via [`signer_allowlist_from_hex`]) so the choice is
-/// auditable in the signed deployment manifest and cannot be influenced per
-/// request. This function backs `parser_cli`, which signs the ABI files it loads
-/// with the dev key and therefore runs require-signed against that key.
+/// **This is not how a deployment picks its trust posture.** This function backs
+/// `parser_cli`, which signs the ABI files it loads with the dev key and
+/// therefore runs require-signed against that key. Wiring `parser_app` and the
+/// gRPC server to their own cmdline flags (parsed into a [`MetadataTrustPolicy`]
+/// via [`signer_allowlist_from_hex`], so the choice is auditable in the signed
+/// deployment manifest and cannot be influenced per request) is planned as a
+/// follow-up and is not part of this change.
 #[must_use]
 pub fn authorized_abi_signers() -> SignerAllowlist {
     let mut allow = SignerAllowlist::new();
@@ -418,8 +415,8 @@ pub fn authorized_abi_signers() -> SignerAllowlist {
 }
 
 /// Build a [`SignerAllowlist`] from deploy-time hex secp256k1 public keys (one per
-/// `--accept-signatures-from-pubkey` occurrence, any SEC1 encoding, optional `0x`
-/// prefix).
+/// occurrence of the planned per-signer cmdline flag, any SEC1 encoding, optional
+/// `0x` prefix).
 ///
 /// Unlike [`authorized_abi_signers`], a bad key is an error rather than a warning:
 /// these come from the deployment's cmdline, so a typo must stop the process at
