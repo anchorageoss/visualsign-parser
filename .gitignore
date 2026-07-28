@@ -14,9 +14,9 @@ docs/superpowers/
 .claude/statsig/
 .claude/settings.local.json
 .claude/runbooks/
+.claude/worktrees/
 
 # Coverage artifacts (see TESTING.md)
 lcov.info
 *.profraw
 *.profdata
-.claude/worktrees/

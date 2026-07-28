@@ -42,13 +42,17 @@
 # Env (the target's org id is REQUIRED, the rest are optional):
 #   VSP_SMOKE_ORG_DEV             org id for --target dev (dev + staging share it)
 #   VSP_SMOKE_ORG_PROD            org id for --target prod
-#   VSP_SMOKE_ORG                 org id for whichever target is selected; wins
-#                                 over the two above (this is what CI passes)
+#   VSP_SMOKE_ORG                 org id fallback for whichever target is selected,
+#                                 used only when that target's own var above is
+#                                 unset (this is what CI passes). The per-target
+#                                 vars win so a VSP_SMOKE_ORG left exported from a
+#                                 dev run cannot point the dev org at prod.
 #   VSP_SMOKE_HOST                 API host    (default https://api.turnkey.com)
 #   VSP_SMOKE_TARGET              dev|prod (same as --target)
-#   VSP_SMOKE_KEY                 key name under ~/.config/turnkey/keys/<key>.{public,private}
-#                                 for whichever target is selected; wins over the
-#                                 two below
+#   VSP_SMOKE_KEY                 key name fallback under
+#                                 ~/.config/turnkey/keys/<key>.{public,private},
+#                                 used only when the selected target's own key var
+#                                 below is unset
 #   VSP_SMOKE_KEY_DEV             key name for --target dev   (default: dev)
 #   VSP_SMOKE_KEY_PROD            key name for --target prod  (default: default)
 #
@@ -75,8 +79,9 @@
 set -euo pipefail
 
 HOST="${VSP_SMOKE_HOST:-https://api.turnkey.com}"
-# Org/key defaults depend on --target, so they are resolved after arg parsing;
-# an explicit env value still wins over the target's default.
+# Org/key defaults depend on --target, so they are resolved after arg parsing.
+# These two are only the target-agnostic fallback: the selected target's own
+# VSP_SMOKE_{ORG,KEY}_{DEV,PROD} wins over them.
 ORG="${VSP_SMOKE_ORG:-}"
 KEY="${VSP_SMOKE_KEY:-}"
 TARGET="${VSP_SMOKE_TARGET:-dev}"
@@ -112,15 +117,21 @@ done
 #
 # Org ids are NOT baked in. This repo is public and the ids identify Anchorage's
 # Turnkey orgs, so they come from the environment (CI secrets, or a private local
-# env file); the deploy runbook lists which id goes with which target.
+# env file); the parser_app deploy runbook in Notion lists which id goes with
+# which target.
+#
+# The target's own var wins over the target-agnostic VSP_SMOKE_ORG /
+# VSP_SMOKE_KEY: an operator who keeps those exported for dev runs would
+# otherwise point the dev org and dev key at prod's canonical /visualsign
+# endpoint, and the resulting failure would read as a bad deploy.
 case "$TARGET" in
   dev)
-    ORG="${ORG:-${VSP_SMOKE_ORG_DEV:-}}"
-    KEY="${KEY:-${VSP_SMOKE_KEY_DEV:-dev}}"
+    ORG="${VSP_SMOKE_ORG_DEV:-$ORG}"
+    KEY="${VSP_SMOKE_KEY_DEV:-${KEY:-dev}}"
     PATH_ARGS=(--dev-path) ;;
   prod)
-    ORG="${ORG:-${VSP_SMOKE_ORG_PROD:-}}"
-    KEY="${KEY:-${VSP_SMOKE_KEY_PROD:-default}}"
+    ORG="${VSP_SMOKE_ORG_PROD:-$ORG}"
+    KEY="${VSP_SMOKE_KEY_PROD:-${KEY:-default}}"
     PATH_ARGS=() ;;
   *) echo "--target must be dev or prod (got: $TARGET)" >&2; exit 2 ;;
 esac
@@ -131,7 +142,7 @@ if [ -z "$ORG" ]; then
     dev) var=VSP_SMOKE_ORG_DEV ;;
     *) var=VSP_SMOKE_ORG_PROD ;;
   esac
-  echo "ERROR: no organization id for --target $TARGET; set $var (or VSP_SMOKE_ORG). See the parser_app deploy runbook for the id." >&2
+  echo "ERROR: no organization id for --target $TARGET; set $var (or VSP_SMOKE_ORG). The id is in the parser_app deploy runbook in Notion (search \"parser_app deploy\"), or in your private local env file." >&2
   exit 2
 fi
 IMAGE="ghcr.io/anchorageoss/visualsign-turnkeyclient:${CLIENT_VERSION}"
@@ -188,7 +199,10 @@ trap 'rm -f "$ERRFILE"' EXIT
 
 echo "smoking target=$TARGET org=$ORG key=$KEY" >&2
 set +e
-OUT="$($CLIENT verify "${PATH_ARGS[@]}" --host "$HOST" --organization-id "$ORG" \
+# The `${PATH_ARGS[@]+...}` guard matters: expanding an empty array under `set -u`
+# is an unbound-variable error on bash < 4.4 (macOS ships 3.2), which would kill
+# every `--target prod` run before the client is ever invoked.
+OUT="$($CLIENT verify ${PATH_ARGS[@]+"${PATH_ARGS[@]}"} --host "$HOST" --organization-id "$ORG" \
   --key-name "$KEY" --unsigned-payload "$PAYLOAD" --chain CHAIN_SOLANA 2>"$ERRFILE")"
 RC=$?
 set -e
@@ -213,7 +227,7 @@ if [ "$RC" -ne 0 ]; then
   if grep -qiE \
     'connection refused|connection reset|no such host|dial tcp|tls handshake|network is unreachable|server misbehaving|temporary failure in name resolution' \
     "$ERRFILE"; then
-    echo "SKIP: dev endpoint unreachable / outage — not a regression" >&2
+    echo "SKIP: $TARGET endpoint unreachable / outage - not a regression" >&2
     exit 0
   fi
   # A timeout, dropped connection (EOF), or context-deadline reaching an
