@@ -13,9 +13,8 @@ use crate::idl::signature::{
 };
 use base64::{self, Engine};
 use solana_sdk::{
-    message::{MESSAGE_VERSION_PREFIX, VersionedMessage},
+    message::VersionedMessage,
     pubkey::Pubkey,
-    short_vec::decode_shortu16_len,
     transaction::{Transaction as SolanaTransaction, VersionedTransaction},
 };
 use std::collections::BTreeMap;
@@ -43,29 +42,13 @@ const MAX_IDL_JSON_BYTES: usize = 1_024 * 1_024;
 ///
 /// `v1` puts its `VersionByte` first and its signatures last, so unlike
 /// legacy/v0 this byte sits at offset 0 of the payload. Legacy and v0 both
-/// start with a compact-u16 signature count instead, and `0x81` there decodes
-/// to `1 + 128 * next_byte` (>= 129) signatures, which needs >= 8256 bytes of
-/// signature data. No legacy/v0 transaction can be that large, so this byte is
-/// an unambiguous `v1` marker rather than a heuristic.
-const TRANSACTION_V1_VERSION_BYTE: u8 = 129;
-
-/// Read the message version prefix of a legacy/v0-framed payload, returning the
-/// version number when it is one we cannot decode.
-///
-/// The envelope is `[compact-u16 signature count][64-byte signatures..][message]`
-/// and a versioned message leads with `MESSAGE_VERSION_PREFIX | version`. Returns
-/// `None` for legacy (no high bit) and for v0, which we both support, and for
-/// payloads too short or malformed to locate the byte in.
-fn unsupported_message_version(bytes: &[u8]) -> Option<u8> {
-    let (sig_count, prefix_len) = decode_shortu16_len(bytes).ok()?;
-    let message_start = prefix_len.checked_add(sig_count.checked_mul(64)?)?;
-    let version_byte = *bytes.get(message_start)?;
-    if version_byte & MESSAGE_VERSION_PREFIX == 0 {
-        return None;
-    }
-    let version = version_byte & !MESSAGE_VERSION_PREFIX;
-    (version != 0).then_some(version)
-}
+/// start with a compact-u16 *outer* signature count instead, and that count
+/// can also encode to a first byte of `0x81` (e.g. 129, 257, ... signatures,
+/// congruent to 1 mod 128) -- this parser enforces no size cap that would rule
+/// that out, so the byte alone is not a reliable marker. It only becomes
+/// unambiguous once both real decoders below have already failed to read the
+/// payload as legacy or versioned.
+const TRANSACTION_V1_VERSION_BYTE: u8 = 0x80 | 1;
 
 /// Append decode errors as diagnostics and lint diagnostics to the output fields.
 /// decode::visualizer_error is intentionally not routed through LintConfig --
@@ -116,30 +99,49 @@ impl Transaction for SolanaTransactionWrapper {
                 .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?,
         };
 
-        // Reject SIMD-0385 v1 up front. It shares no framing with legacy/v0
-        // (fixed-width counts, no compact-u16, trailing signatures), so neither
-        // decoder below can read it and both would report a bincode EOF that
-        // says nothing about the real cause.
-        if bytes.first() == Some(&TRANSACTION_V1_VERSION_BYTE) {
-            return Err(TransactionParseError::UnsupportedVersion(
-                "Solana transaction format v1 (SIMD-0385) is not supported".to_string(),
-            ));
-        }
-
-        // First try to decode as a VersionedTransaction
+        // First try to decode as a VersionedTransaction.
         let versioned_err = match bincode::deserialize::<VersionedTransaction>(&bytes) {
             Ok(versioned_tx) => return Ok(Self::Versioned(versioned_tx)),
             Err(e) => e,
         };
 
         // Fallback to legacy transaction parsing. A well-formed legacy transaction
-        // is wire-identical to VersionedTransaction::Legacy, so if the legacy
-        // attempt also fails we report the versioned error: for an unsupported
-        // message version it carries solana-sdk's precise diagnostic, whereas the
-        // legacy attempt has already misread the version prefix as a header byte.
-        bincode::deserialize(&bytes)
-            .map_err(|_| Self::classify_decode_failure(&bytes, &versioned_err))
-            .map(Self::Legacy)
+        // is wire-identical to VersionedTransaction::Legacy, so this only succeeds
+        // where the versioned attempt above did not.
+        if let Ok(legacy_tx) = bincode::deserialize(&bytes) {
+            return Ok(Self::Legacy(legacy_tx));
+        }
+
+        // Both real decoders failed. Only now is the leading byte inspected: a
+        // legacy/v0 payload can legitimately start with 0x81 (a compact-u16
+        // outer signature count of 129, 257, ...), so checking it any earlier
+        // would misclassify a decodable transaction as v1 before ever trying to
+        // decode it. Once both decoders agree the bytes are not a real
+        // legacy/v0 or versioned transaction, 0x81 is unambiguous: SIMD-0385 v1
+        // shares no framing with legacy/v0 (fixed-width counts, no compact-u16,
+        // trailing signatures), so no legacy/v0 payload can ever reach here
+        // with that leading byte and still be a real transaction we rejected in
+        // error.
+        // This is a leading-byte heuristic, not a decode: a short garbage blob
+        // or a corrupt legacy transaction can also start with 0x81, so the
+        // underlying decode error is appended rather than asserting v1 with
+        // total certainty.
+        if bytes.first() == Some(&TRANSACTION_V1_VERSION_BYTE) {
+            return Err(TransactionParseError::UnsupportedVersion(format!(
+                "Solana transaction format v1 (SIMD-0385) is not supported \
+                 (leading byte 0x81 matches the v1 version marker; decode error: {versioned_err})"
+            )));
+        }
+
+        // Otherwise report the versioned decoder's error verbatim. For an
+        // unsupported message version or an off-chain message (version 127),
+        // solana-sdk's own deserializer already produces a precise diagnostic
+        // ("invalid value: integer `N`, expected a valid transaction message
+        // version" / "off-chain messages are not accepted"); for anything else
+        // it is the most informative decode failure we have.
+        Err(TransactionParseError::DecodeError(
+            versioned_err.to_string(),
+        ))
     }
 
     fn transaction_type(&self) -> String {
@@ -154,23 +156,6 @@ impl Transaction for SolanaTransactionWrapper {
 }
 
 impl SolanaTransactionWrapper {
-    /// Turn a failed legacy/v0 decode into the most specific error available.
-    ///
-    /// Both decoders read the same envelope, so reaching here means the payload
-    /// is either malformed or uses a message version we do not implement. bincode
-    /// only reports where it ran out of bytes, so check for the latter explicitly.
-    fn classify_decode_failure(
-        bytes: &[u8],
-        versioned_err: &bincode::Error,
-    ) -> TransactionParseError {
-        match unsupported_message_version(bytes) {
-            Some(version) => TransactionParseError::UnsupportedVersion(format!(
-                "Solana message version {version} is not supported (only legacy and v0)"
-            )),
-            None => TransactionParseError::DecodeError(versioned_err.to_string()),
-        }
-    }
-
     pub fn new_legacy(transaction: SolanaTransaction) -> Self {
         Self::Legacy(transaction)
     }
@@ -1665,25 +1650,27 @@ mod tests {
         );
     }
 
-    // Regression tests for V0 transactions that reference address lookup table
-    // entries. The parser cannot resolve ALT contents offline, so these render
-    // with graceful degradation (ALT-backed accounts surface as placeholders)
-    // rather than being rejected outright. The earlier fail-closed behavior
-    // (#324) blocked all ALT-backed V0 transactions from being signed and was
-    // reverted pending a design that passes resolved ALT data into the parser.
     /// Version-prefix handling at the envelope boundary.
     ///
     /// We support legacy and v0 only. SIMD-0296 raises the Solana transaction
     /// size cap to 4096 bytes but only for the SIMD-0385 `v1` format, which
     /// shares no framing with legacy/v0 (fixed-width counts instead of
-    /// compact-u16, and signatures trailing rather than leading). These tests
-    /// pin that we reject anything we cannot decode, and that we say why.
+    /// compact-u16, and signatures trailing rather than leading). `from_string`
+    /// always tries both real decoders (versioned, then legacy) first; the
+    /// `0x81` leading-byte check for `v1` only runs once both have failed, so
+    /// it can never shadow a payload that is actually decodable. These tests
+    /// pin that behavior: we reject anything neither decoder can read, we say
+    /// why, and a legacy/v0 payload that merely happens to start with `0x81`
+    /// (an outer compact-u16 signature count of 129, 257, ...) still decodes.
     mod unsupported_versions {
         use super::*;
         use solana_sdk::hash::Hash;
         use solana_sdk::instruction::CompiledInstruction;
+        use solana_sdk::message::MESSAGE_VERSION_PREFIX;
+        use solana_sdk::message::Message;
         use solana_sdk::message::MessageHeader;
         use solana_sdk::message::v0::Message as V0Message;
+        use solana_sdk::signature::SIGNATURE_BYTES;
         use solana_sdk::signature::Signature;
 
         /// Build a spec-shaped SIMD-0385 `v1` transaction.
@@ -1708,9 +1695,18 @@ mod tests {
             b.extend_from_slice(&[0, 1]); // InstructionAccountIndexes
             b.extend(std::iter::repeat_n(0xAB, data_len as usize)); // InstructionData
             for _ in 0..num_required_sigs {
-                b.extend_from_slice(&[0x11; 64]); // Signatures trail in v1
+                b.extend_from_slice(&[0x11; SIGNATURE_BYTES]); // Signatures trail in v1
             }
             b
+        }
+
+        /// Build a legacy/v0-framed envelope: a compact-u16 count of one
+        /// signature, the signature itself, then `suffix` as the message bytes.
+        fn legacy_envelope(suffix: &[u8]) -> Vec<u8> {
+            let mut bytes = vec![0x01]; // compact-u16 signature count
+            bytes.extend_from_slice(&[0u8; SIGNATURE_BYTES]); // one signature
+            bytes.extend_from_slice(suffix);
+            bytes
         }
 
         /// A `v1` payload must be named as such, not reported as a bincode EOF.
@@ -1726,9 +1722,18 @@ mod tests {
             assert!(err.to_string().contains("SIMD-0385"), "got {err}");
         }
 
-        /// Sweep the legal `v1` envelope (signature/address/instruction-data caps
-        /// from SIMD-0385, up to the 4096-byte size cap) so no shape slips through
-        /// into the legacy fallback and gets rendered under a wrong interpretation.
+        /// Sweeps `build_v1`'s signature/address/instruction-data-length knobs
+        /// across the SIMD-0385 caps (and the 4096-byte size cap) and confirms
+        /// every resulting payload is rejected as `UnsupportedVersion`, not
+        /// decoded as legacy or versioned. The reason none of these ever
+        /// decode is arithmetic, not shape: the `0x81` leading byte forces
+        /// short_vec's outer signature count to be at least 129, which alone
+        /// needs at least 129 * 64 = 8256 signature bytes, far past the
+        /// 4096-byte `v1` cap, so this sweep is really a length check dressed
+        /// as a shape check. It still earns its keep as a regression guard
+        /// against `build_v1` emitting an over-cap payload for some knob
+        /// combination, or against the classification becoming
+        /// shape-sensitive in a way that misfires for a subset of these.
         #[test]
         fn rejects_v1_across_the_whole_legal_envelope() {
             let mut checked = 0;
@@ -1753,25 +1758,87 @@ mod tests {
         }
 
         /// A legacy/v0-framed envelope carrying a message version we do not
-        /// implement should report that version, not a truncation error from the
-        /// legacy fallback that has already misread the prefix as a header byte.
+        /// implement must surface solana-sdk's own diagnostic (from the
+        /// `VersionedMessage` deserializer) rather than a truncation error from
+        /// the legacy fallback that has already misread the prefix as a header
+        /// byte. It is reported as a `DecodeError`, not `UnsupportedVersion`:
+        /// only the `v1` leading-byte marker gets that distinguished treatment,
+        /// since that's the one case we can name with certainty.
         #[test]
         fn reports_the_version_for_an_unknown_versioned_message_prefix() {
-            let mut bytes = vec![0x01]; // compact-u16 signature count
-            bytes.extend_from_slice(&[0u8; 64]); // one signature
-            bytes.extend_from_slice(&[MESSAGE_VERSION_PREFIX | 2, 0x00, 0x00]); // version 2
+            let bytes = legacy_envelope(&[MESSAGE_VERSION_PREFIX | 2, 0x00, 0x00]); // version 2
 
             let err = SolanaTransactionWrapper::from_string(&hex::encode(&bytes))
                 .expect_err("message version 2 must not parse");
 
             assert!(
-                matches!(err, TransactionParseError::UnsupportedVersion(_)),
-                "expected UnsupportedVersion, got {err:?}"
+                matches!(err, TransactionParseError::DecodeError(_)),
+                "expected DecodeError, got {err:?}"
             );
-            assert!(err.to_string().contains("version 2"), "got {err}");
+            assert!(
+                err.to_string()
+                    .contains("expected a valid transaction message version"),
+                "got {err}"
+            );
         }
 
-        /// The v1 short-circuit keys off byte 0, so guard that a real v0
+        /// Version 127 (0xff) is solana-sdk's dedicated off-chain-message marker.
+        /// Its own deserializer already names it distinctly ("off-chain messages
+        /// are not accepted") rather than folding it into the generic
+        /// "invalid value" wording, and that diagnostic survives unchanged
+        /// through our `DecodeError` wrapping.
+        #[test]
+        fn names_version_127_as_an_off_chain_message() {
+            let bytes = legacy_envelope(&[MESSAGE_VERSION_PREFIX | 127, 0x00, 0x00]);
+
+            let err = SolanaTransactionWrapper::from_string(&hex::encode(&bytes))
+                .expect_err("off-chain message must not parse as a transaction");
+
+            assert!(
+                matches!(err, TransactionParseError::DecodeError(_)),
+                "expected DecodeError, got {err:?}"
+            );
+            assert!(err.to_string().contains("off-chain"), "got {err}");
+        }
+
+        /// A legacy transaction whose outer compact-u16 signature count happens
+        /// to encode to a leading `0x81` byte (129 signatures, congruent to 1
+        /// mod 128) must still decode as legacy. The `v1` leading-byte check
+        /// only runs after both real decoders have failed, so it can never
+        /// shadow this payload the way it used to when the check ran first.
+        #[test]
+        fn accepts_legacy_with_129_signatures_despite_leading_v1_marker_byte() {
+            let message = Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 1,
+                },
+                account_keys: vec![Pubkey::new_unique(), Pubkey::new_unique()],
+                recent_blockhash: Hash::default(),
+                instructions: vec![CompiledInstruction {
+                    program_id_index: 1,
+                    accounts: vec![0],
+                    data: vec![],
+                }],
+            };
+            let tx = SolanaTransaction {
+                signatures: vec![Signature::default(); 129],
+                message,
+            };
+            let bytes = bincode::serialize(&tx).unwrap();
+            assert_eq!(
+                bytes.first(),
+                Some(&TRANSACTION_V1_VERSION_BYTE),
+                "sanity check: 129 outer signatures must encode to a leading 0x81 byte"
+            );
+
+            let parsed = SolanaTransactionWrapper::from_string(&hex::encode(&bytes))
+                .expect("a real legacy transaction must still decode, not be misclassified as v1");
+            assert_eq!(parsed.transaction_type(), "Solana (Legacy)");
+        }
+
+        /// The v1 marker check runs after both decoders, so guard that a real v0
         /// transaction still decodes as v0.
         #[test]
         fn still_accepts_v0() {
@@ -1798,27 +1865,14 @@ mod tests {
             let parsed = SolanaTransactionWrapper::from_string(&hex::encode(&bytes)).unwrap();
             assert_eq!(parsed.transaction_type(), "Solana (V0)");
         }
-
-        /// The helper must stay silent on the versions we do handle, otherwise a
-        /// well-formed-but-truncated payload would be mislabelled as unsupported.
-        #[test]
-        fn version_probe_ignores_legacy_and_v0() {
-            let mut legacy = vec![0x01];
-            legacy.extend_from_slice(&[0u8; 64]);
-            legacy.extend_from_slice(&[0x01, 0x00, 0x00]); // no high bit: legacy
-            assert_eq!(unsupported_message_version(&legacy), None);
-
-            let mut v0 = vec![0x01];
-            v0.extend_from_slice(&[0u8; 64]);
-            v0.push(MESSAGE_VERSION_PREFIX); // version 0
-            assert_eq!(unsupported_message_version(&v0), None);
-
-            // Truncated before the message: nothing to classify.
-            assert_eq!(unsupported_message_version(&[0x01, 0x00]), None);
-            assert_eq!(unsupported_message_version(&[]), None);
-        }
     }
 
+    // Regression tests for V0 transactions that reference address lookup table
+    // entries. The parser cannot resolve ALT contents offline, so these render
+    // with graceful degradation (ALT-backed accounts surface as placeholders)
+    // rather than being rejected outright. The earlier fail-closed behavior
+    // (#324) blocked all ALT-backed V0 transactions from being signed and was
+    // reverted pending a design that passes resolved ALT data into the parser.
     mod v0_alt_rendering {
         use super::*;
         use solana_sdk::instruction::CompiledInstruction;
