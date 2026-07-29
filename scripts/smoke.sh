@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Post-deploy smoke test for the live dev VisualSign parser.
+# Post-deploy smoke test for the live VisualSign parser, dev/staging or prod.
 #
 # Runs a known Solana V0 transaction (referencing address lookup tables) through
-# the deployed parser (the /visualsign-dev endpoint) via `turnkey-client verify`
-# and asserts BOTH:
+# the deployed parser via `turnkey-client verify` and asserts BOTH:
 #   - it RENDERS  — a regression guard for the "Cannot render V0 ... refusing to
 #     display a partial transaction" failure; and
 #   - it VERIFIES — the AWS Nitro attestation and the enclave signature are
@@ -14,15 +13,24 @@
 # goes to stderr, which this script passes through by default so you can SEE the
 # client ran and what it verified.
 #
-# When the container image is unavailable (e.g. not yet published), point
+# When the container image is unavailable (e.g. not pullable without registry
+# auth, or a pinned tag that does not exist), point
 # --turnkey-client-path at a local fallback: an executable client binary, or a
 # turnkey-client source dir that is built (`make build`) and run from
 # bin/visualsign-turnkeyclient.
 #
-# Usage: smoke.sh [--turnkey-client-path <binary-or-source-dir>]
+# Usage: smoke.sh [--target dev|prod] [--turnkey-client-path <binary-or-source-dir>]
 #                 [--turnkey-client-version <tag>] [--quiet]
 #
 # Flags:
+#   --target dev|prod           which deployment to smoke (default dev, which
+#                               also covers staging: they share one Turnkey app
+#                               and org). Picks the endpoint path AND the default
+#                               org + key: dev routes to /visualsign-dev via
+#                               `--dev-path`, prod to the canonical /visualsign.
+#                               Pointing --target prod at the dev org (or vice
+#                               versa) smokes an endpoint that doesn't serve that
+#                               org, so change org/key and target together.
 #   --turnkey-client-path P     local client used only when the container image
 #                               is unavailable (or VSP_SMOKE_TURNKEY_CLIENT_PATH)
 #   --turnkey-client-version T  container image tag to pull (default: latest);
@@ -31,10 +39,25 @@
 #   --quiet, -q                 suppress the client's output on success (failures
 #                               stay verbose); default shows it
 #
-# Env (all optional; defaults target the dev endpoint/app):
+# Env (the target's org id is REQUIRED, the rest are optional):
+#   VSP_SMOKE_ORG_DEV             org id for --target dev (dev + staging share it)
+#   VSP_SMOKE_ORG_PROD            org id for --target prod
+#   VSP_SMOKE_ORG                 org id fallback for whichever target is selected,
+#                                 used only when that target's own var above is
+#                                 unset (this is what CI passes). The per-target
+#                                 vars win so a VSP_SMOKE_ORG left exported from a
+#                                 dev run cannot point the dev org at prod.
 #   VSP_SMOKE_HOST                 API host    (default https://api.turnkey.com)
-#   VSP_SMOKE_ORG                 organization id
-#   VSP_SMOKE_KEY                 key name under ~/.config/turnkey/keys/<key>.{public,private}
+#   VSP_SMOKE_TARGET              dev|prod (same as --target)
+#   VSP_SMOKE_KEY                 key name fallback under
+#                                 ~/.config/turnkey/keys/<key>.{public,private},
+#                                 used only when the selected target's own key var
+#                                 below is unset
+#   VSP_SMOKE_KEY_DEV             key name for --target dev   (default: dev)
+#   VSP_SMOKE_KEY_PROD            key name for --target prod  (default: default)
+#
+# The org ids are deliberately not defaulted in this script: the repo is public.
+# Keep them in CI secrets and in a private local env file, not here.
 #   VSP_SMOKE_CLIENT_VERSION      container image tag (same as --turnkey-client-version)
 #   TURNKEY_CLIENT                how to invoke the client (overrides all resolution)
 #   VSP_SMOKE_TURNKEY_CLIENT_PATH local fallback path (same as --turnkey-client-path)
@@ -56,13 +79,21 @@
 set -euo pipefail
 
 HOST="${VSP_SMOKE_HOST:-https://api.turnkey.com}"
-ORG="${VSP_SMOKE_ORG:-d7f51c3d-fb9d-47c1-9b2e-a02b1cd5ff14}"
-KEY="${VSP_SMOKE_KEY:-dev}"
+# Org/key defaults depend on --target, so they are resolved after arg parsing.
+# These two are only the target-agnostic fallback: the selected target's own
+# VSP_SMOKE_{ORG,KEY}_{DEV,PROD} wins over them.
+ORG="${VSP_SMOKE_ORG:-}"
+KEY="${VSP_SMOKE_KEY:-}"
+TARGET="${VSP_SMOKE_TARGET:-dev}"
 CLIENT_PATH="${VSP_SMOKE_TURNKEY_CLIENT_PATH:-}"
 CLIENT_VERSION="${VSP_SMOKE_CLIENT_VERSION:-latest}"
 QUIET=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --target)
+      [ "$#" -ge 2 ] || { echo "--target requires a value" >&2; exit 2; }
+      TARGET="$2"; shift 2 ;;
+    --target=*) TARGET="${1#*=}"; shift ;;
     --turnkey-client-path)
       [ "$#" -ge 2 ] || { echo "--turnkey-client-path requires a value" >&2; exit 2; }
       CLIENT_PATH="$2"; shift 2 ;;
@@ -73,13 +104,57 @@ while [ "$#" -gt 0 ]; do
     --turnkey-client-version=*) CLIENT_VERSION="${1#*=}"; shift ;;
     -q | --quiet) QUIET=1; shift ;;
     -h | --help)
-      echo "usage: smoke.sh [--turnkey-client-path <binary-or-source-dir>] [--turnkey-client-version <tag>] [--quiet]" >&2
+      echo "usage: smoke.sh [--target dev|prod] [--turnkey-client-path <binary-or-source-dir>] [--turnkey-client-version <tag>] [--quiet]" >&2
       exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# Resolve the target's endpoint path + default org/key. dev/staging share one
+# Turnkey app and org, so `dev` covers both. An unknown target is a usage error,
+# never a silent fall back to dev: that would smoke the wrong deployment and
+# report it as a pass.
+#
+# Org ids are NOT baked in. This repo is public and the ids identify Anchorage's
+# Turnkey orgs, so they come from the environment (CI secrets, or a private local
+# env file); the parser_app deploy runbook in Notion lists which id goes with
+# which target.
+#
+# The target's own var wins over the target-agnostic VSP_SMOKE_ORG /
+# VSP_SMOKE_KEY: an operator who keeps those exported for dev runs would
+# otherwise point the dev org and dev key at prod's canonical /visualsign
+# endpoint, and the resulting failure would read as a bad deploy.
+case "$TARGET" in
+  dev)
+    ORG="${VSP_SMOKE_ORG_DEV:-$ORG}"
+    KEY="${VSP_SMOKE_KEY_DEV:-${KEY:-dev}}"
+    PATH_ARGS=(--dev-path) ;;
+  prod)
+    ORG="${VSP_SMOKE_ORG_PROD:-$ORG}"
+    KEY="${VSP_SMOKE_KEY_PROD:-${KEY:-default}}"
+    PATH_ARGS=() ;;
+  *) echo "--target must be dev or prod (got: $TARGET)" >&2; exit 2 ;;
+esac
+if [ -z "$ORG" ]; then
+  # Exit 2, not 1: nothing was smoked, so this is a harness/config failure and
+  # must not be reportable as either a pass or a parser regression.
+  case "$TARGET" in
+    dev) var=VSP_SMOKE_ORG_DEV ;;
+    *) var=VSP_SMOKE_ORG_PROD ;;
+  esac
+  echo "ERROR: no organization id for --target $TARGET; set $var (or VSP_SMOKE_ORG). The id is in the parser_app deploy runbook in Notion (search \"parser_app deploy\"), or in your private local env file." >&2
+  exit 2
+fi
 IMAGE="ghcr.io/anchorageoss/visualsign-turnkeyclient:${CLIENT_VERSION}"
-CONTAINER_CLIENT="docker run --rm -v $HOME/.config/turnkey/keys:/root/.config/turnkey/keys:ro $IMAGE"
+# The client resolves its key pair from $HOME/.config/turnkey/keys, so the mount
+# target has to match the container's HOME (not /root, which it never looks in).
+# Two further wrinkles, both of which this invocation handles:
+#   - run as the invoking uid, so a key file with sane 0600 permissions is
+#     readable. The image's own user is `nonroot`, which cannot read a key owned
+#     by you unless you widen it to 0644; a prod credential should not need that.
+#   - mount under a neutral HOME rather than the image's /home/nonroot, which is
+#     not traversable by any other uid, so --user alone would still hit EACCES.
+CONTAINER_CLIENT="docker run --rm --user $(id -u):$(id -g) -e HOME=/tkhome -v $HOME/.config/turnkey/keys:/tkhome/.config/turnkey/keys:ro $IMAGE"
 
 # Resolve a local fallback path to a runnable client: an executable is used
 # directly; a directory is treated as the turnkey-client source and built
@@ -122,8 +197,12 @@ PAYLOAD="$(tr -d '[:space:]' < "$DIR/testdata/solana_v0_alt.b64")"
 ERRFILE="$(mktemp)"
 trap 'rm -f "$ERRFILE"' EXIT
 
+echo "smoking target=$TARGET org=$ORG key=$KEY" >&2
 set +e
-OUT="$($CLIENT verify --dev-path --host "$HOST" --organization-id "$ORG" \
+# The `${PATH_ARGS[@]+...}` guard matters: expanding an empty array under `set -u`
+# is an unbound-variable error on bash < 4.4 (macOS ships 3.2), which would kill
+# every `--target prod` run before the client is ever invoked.
+OUT="$($CLIENT verify ${PATH_ARGS[@]+"${PATH_ARGS[@]}"} --host "$HOST" --organization-id "$ORG" \
   --key-name "$KEY" --unsigned-payload "$PAYLOAD" --chain CHAIN_SOLANA 2>"$ERRFILE")"
 RC=$?
 set -e
@@ -148,7 +227,7 @@ if [ "$RC" -ne 0 ]; then
   if grep -qiE \
     'connection refused|connection reset|no such host|dial tcp|tls handshake|network is unreachable|server misbehaving|temporary failure in name resolution' \
     "$ERRFILE"; then
-    echo "SKIP: dev endpoint unreachable / outage — not a regression" >&2
+    echo "SKIP: $TARGET endpoint unreachable / outage - not a regression" >&2
     exit 0
   fi
   # A timeout, dropped connection (EOF), or context-deadline reaching an
@@ -188,4 +267,4 @@ fi
 
 chars="$(printf '%s' "$OUT" | jq -r '.signablePayload | length')"
 module="$(printf '%s' "$OUT" | jq -r '.moduleId // "unknown"')"
-echo "PASS: turnkey-client verify succeeded; V0+ALT rendered ($chars chars, no \"Cannot render V0\"); attestation + signature cryptographically verified (executed in AWS Nitro enclave); moduleId=$module"
+echo "PASS: turnkey-client verify succeeded on target=$TARGET (org=$ORG); V0+ALT rendered ($chars chars, no \"Cannot render V0\"); attestation + signature cryptographically verified (executed in AWS Nitro enclave); moduleId=$module"
