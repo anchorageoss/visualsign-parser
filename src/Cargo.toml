@@ -14,6 +14,7 @@ members = [
   "parser/grpc-server",
   "visualsign",
   "chain_parsers/visualsign-ethereum",
+  "chain_parsers/visualsign-near",
   "chain_parsers/visualsign-solana",
   "chain_parsers/visualsign-sui",
   "chain_parsers/visualsign-tron",
@@ -73,6 +74,24 @@ tracing = "0.1.41"
 
 # Pin visualsign dependencies
 visualsign = { path = "./visualsign" }
+
+# NEAR: near-sdk's `non-contract-usage` feature routes the defuse crates'
+# env::{sha256, keccak256, ed25519_verify, ecrecover} calls to pure-Rust
+# crypto so intent verification runs natively (no NEAR VM).
+near-sdk = { version = "5.24", features = ["non-contract-usage"] }
+
+# NEAR Intents (defuse) signing/verification crates, from the public
+# near/intents repo at the release tag. One pin point for the whole set.
+defuse-core        = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
+defuse-crypto      = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
+defuse-deadline    = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
+defuse-erc191      = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
+defuse-nep413      = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
+defuse-sep53       = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
+defuse-tip191      = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
+defuse-token-id    = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2", default-features = false }
+defuse-ton-connect = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2", default-features = false, features = ["text"] }
+defuse-webauthn    = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
