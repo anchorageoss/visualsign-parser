@@ -5375,6 +5375,7 @@ dependencies = [
  "once_cell",
  "serdect",
  "sha2 0.10.9",
+ "signature 2.0.0",
 ]
 
 [[package]]
@@ -14991,6 +14992,7 @@ dependencies = [
  "defuse-deadline",
  "generated",
  "hex",
+ "k256 0.13.4",
  "near-crypto",
  "near-primitives",
  "near-sdk",

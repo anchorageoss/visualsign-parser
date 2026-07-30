@@ -26,6 +26,7 @@ defuse-crypto = { workspace = true }
 defuse-deadline = { workspace = true }
 
 [dev-dependencies]
+k256 = "0.13"
 near-crypto = "0.35.1"
 
 [features]
