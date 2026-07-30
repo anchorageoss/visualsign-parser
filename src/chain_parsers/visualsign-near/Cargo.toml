@@ -16,10 +16,6 @@ serde_json = "1.0"
 thiserror = "2.0.12"
 visualsign = { workspace = true }
 
-# NEAR Intents (defuse) crates: the canonical implementations of the
-# protocol's signature standards and intent types. near-sdk's
-# non-contract-usage feature (set at the workspace pin) routes their env
-# crypto calls to pure Rust.
 near-sdk = { workspace = true }
 
 defuse-core = { workspace = true }
