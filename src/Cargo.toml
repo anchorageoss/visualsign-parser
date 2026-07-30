@@ -77,8 +77,12 @@ visualsign = { path = "./visualsign" }
 
 # NEAR: near-sdk's `non-contract-usage` feature routes the defuse crates'
 # env::{sha256, keccak256, ed25519_verify, ecrecover} calls to pure-Rust
-# crypto so intent verification runs natively (no NEAR VM).
-near-sdk = { version = "5.24", features = ["non-contract-usage"] }
+# crypto so intent verification runs natively (no NEAR VM). >=5.27 is a
+# floor, not a preference: earlier versions call an unresolvable native
+# host symbol from their panic path, which fails to link outside the NEAR
+# VM; 5.27 restructured that path (the near-sdk-env crate) to a plain Rust
+# panic on native targets.
+near-sdk = { version = "5.27", features = ["non-contract-usage"] }
 
 # NEAR Intents (defuse) signing/verification crates, from the public
 # near/intents repo at the release tag. One pin point for the whole set.
