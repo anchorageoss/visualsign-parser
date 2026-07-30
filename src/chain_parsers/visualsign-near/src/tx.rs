@@ -1,26 +1,25 @@
-//! NEAR transaction envelope decoding.
+//! NEAR input decoding: a borsh transaction, or a pre-signature NEAR Intents
+//! envelope (`DefusePayload` JSON, the `near::sign_intent` payload).
+//!
+//! Borsh bytes are never valid JSON, so the two formats are distinguished
+//! unambiguously: a successful borsh decode is a transaction, otherwise the
+//! input is validated as an envelope. Input that is neither is rejected.
 
 use near_primitives::transaction::{SignedTransaction, Transaction};
 use visualsign::encodings::SupportedEncodings;
 use visualsign::vsptrait::{DeveloperConfig, TransactionParseError};
 
-/// VSP wrapper over `near-primitives` Transaction. Owns the borsh decoding logic.
+/// A NEAR input: an on-chain transaction, or a pre-signature intents envelope.
 #[derive(Debug, Clone)]
-pub struct NearTransaction {
-    inner: Transaction,
+pub enum NearTransaction {
+    /// A borsh-decoded NEAR transaction (`near::sign_transaction`).
+    OnChain(Transaction),
+    /// A pre-signature `DefusePayload` JSON envelope (`near::sign_intent`),
+    /// kept as the validated raw text -- rendering re-parses it.
+    Intent(String),
 }
 
 impl NearTransaction {
-    #[must_use]
-    pub fn new(inner: Transaction) -> Self {
-        Self { inner }
-    }
-
-    #[must_use]
-    pub fn inner(&self) -> &Transaction {
-        &self.inner
-    }
-
     /// Decode unsigned first. Only when `developer_config.allow_signed_transactions`
     /// is set does a `SignedTransaction` envelope get accepted, with its signature
     /// discarded to render the inner unsigned transaction -- production callers
@@ -29,36 +28,52 @@ impl NearTransaction {
         s: &str,
         developer_config: Option<&DeveloperConfig>,
     ) -> Result<Self, TransactionParseError> {
-        let bytes = decode_input(s.trim())?;
-        let unsigned_err = match borsh::from_slice::<Transaction>(&bytes) {
-            Ok(unsigned) => return Ok(Self::new(unsigned)),
-            Err(e) => e,
-        };
-        let allow_signed = developer_config
-            .map(|c| c.allow_signed_transactions)
-            .unwrap_or(false);
-        if allow_signed {
-            match borsh::from_slice::<SignedTransaction>(&bytes) {
-                Ok(signed) => {
-                    // Developer-only posture: production callers pass `None`, so
-                    // reaching here in production means a misconfiguration and
-                    // must leave a trail.
-                    tracing::warn!(
-                        "accepted a signed NEAR transaction and discarded its signature; \
-                         allow_signed_transactions is a developer-only setting"
-                    );
-                    return Ok(Self::new(signed.transaction));
+        let trimmed = s.trim();
+        let mut borsh_failure: Option<String> = None;
+        if let Ok(bytes) = decode_input(trimmed) {
+            let unsigned_err = match borsh::from_slice::<Transaction>(&bytes) {
+                Ok(unsigned) => return Ok(Self::OnChain(unsigned)),
+                Err(e) => e,
+            };
+            let allow_signed = developer_config
+                .map(|c| c.allow_signed_transactions)
+                .unwrap_or(false);
+            if allow_signed {
+                match borsh::from_slice::<SignedTransaction>(&bytes) {
+                    Ok(signed) => {
+                        // Developer-only posture: production callers pass `None`, so
+                        // reaching here in production means a misconfiguration and
+                        // must leave a trail.
+                        tracing::warn!(
+                            "accepted a signed NEAR transaction and discarded its signature; \
+                             allow_signed_transactions is a developer-only setting"
+                        );
+                        return Ok(Self::OnChain(signed.transaction));
+                    }
+                    Err(signed_err) => {
+                        borsh_failure =
+                            Some(format!("unsigned={unsigned_err}, signed={signed_err}"));
+                    }
                 }
-                Err(signed_err) => {
-                    return Err(TransactionParseError::DecodeError(format!(
-                        "near borsh decode: unsigned={unsigned_err}, signed={signed_err}"
-                    )));
-                }
+            } else {
+                borsh_failure = Some(unsigned_err.to_string());
             }
         }
-        Err(TransactionParseError::DecodeError(format!(
-            "near borsh decode: {unsigned_err}"
-        )))
+        // Validate eagerly so malformed input is rejected at parse time
+        // rather than at render time.
+        serde_json::from_str::<
+            defuse_core::payload::DefusePayload<defuse_core::intents::DefuseIntents>,
+        >(trimmed)
+        .map_err(|e| {
+            let borsh_cause = borsh_failure
+                .as_deref()
+                .unwrap_or("input is not hex or base64");
+            TransactionParseError::DecodeError(format!(
+                "input is neither a NEAR borsh transaction (near borsh decode: {borsh_cause}) \
+                 nor a DefusePayload JSON envelope: {e}"
+            ))
+        })?;
+        Ok(Self::Intent(trimmed.to_string()))
     }
 }
 
@@ -68,7 +83,10 @@ impl visualsign::vsptrait::Transaction for NearTransaction {
     }
 
     fn transaction_type(&self) -> String {
-        "NEAR".to_string()
+        match self {
+            Self::OnChain(_) => "NEAR".to_string(),
+            Self::Intent(_) => "NEAR Intent".to_string(),
+        }
     }
 }
 
@@ -95,19 +113,29 @@ mod tests {
     /// Borsh-encoded unsigned NEAR Transfer: alice.near -> bob.near, 1 NEAR.
     const TRANSFER_HEX: &str = "0a000000616c6963652e6e656172000000000000000000000000000000000000000000000000000000000000000000010000000000000008000000626f622e6e65617200000000000000000000000000000000000000000000000000000000000000000100000003000000a1edccce1bc2d3000000000000";
 
+    const SWAP_INTENT: &str = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2100-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
+
+    fn onchain(tx: &NearTransaction) -> &Transaction {
+        match tx {
+            NearTransaction::OnChain(inner) => inner,
+            NearTransaction::Intent(_) => panic!("expected OnChain"),
+        }
+    }
+
     #[test]
     fn decode_rejects_garbage() {
-        let result = NearTransaction::from_string("not-hex-not-base64");
+        let result = NearTransaction::from_string("not-hex-not-base64-not-json");
         assert!(result.is_err());
     }
 
     #[test]
     fn decode_hex_transfer() {
         let tx = NearTransaction::from_string(TRANSFER_HEX).expect("decode hex");
-        assert_eq!(tx.inner().signer_id().as_str(), "alice.near");
-        assert_eq!(tx.inner().receiver_id().as_str(), "bob.near");
-        assert_eq!(tx.inner().actions().len(), 1);
-        let near_primitives::action::Action::Transfer(transfer) = &tx.inner().actions()[0] else {
+        let inner = onchain(&tx);
+        assert_eq!(inner.signer_id().as_str(), "alice.near");
+        assert_eq!(inner.receiver_id().as_str(), "bob.near");
+        assert_eq!(inner.actions().len(), 1);
+        let near_primitives::action::Action::Transfer(transfer) = &inner.actions()[0] else {
             panic!("expected Transfer");
         };
         assert_eq!(
@@ -131,7 +159,7 @@ mod tests {
     #[test]
     fn decode_hex_with_0x_prefix() {
         let tx = NearTransaction::from_string(&format!("0x{TRANSFER_HEX}")).expect("decode 0x-hex");
-        assert_eq!(tx.inner().signer_id().as_str(), "alice.near");
+        assert_eq!(onchain(&tx).signer_id().as_str(), "alice.near");
     }
 
     #[test]
@@ -140,8 +168,9 @@ mod tests {
         let bytes = hex::decode(TRANSFER_HEX).expect("hex");
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
         let tx = NearTransaction::from_string(&b64).expect("decode base64");
-        assert_eq!(tx.inner().signer_id().as_str(), "alice.near");
-        assert_eq!(tx.inner().receiver_id().as_str(), "bob.near");
+        let inner = onchain(&tx);
+        assert_eq!(inner.signer_id().as_str(), "alice.near");
+        assert_eq!(inner.receiver_id().as_str(), "bob.near");
     }
 
     fn signed_transfer_bytes() -> Vec<u8> {
@@ -169,6 +198,28 @@ mod tests {
         };
         let tx = NearTransaction::from_string_with_options(&hex, Some(&developer_config))
             .expect("decode signed");
-        assert_eq!(tx.inner().signer_id().as_str(), "alice.near");
+        assert_eq!(onchain(&tx).signer_id().as_str(), "alice.near");
+    }
+
+    #[test]
+    fn decode_json_envelope_is_intent() {
+        let tx = NearTransaction::from_string(SWAP_INTENT).expect("decode intent");
+        match tx {
+            NearTransaction::Intent(json) => assert_eq!(json, SWAP_INTENT),
+            NearTransaction::OnChain(_) => panic!("expected Intent"),
+        }
+        assert_eq!(
+            NearTransaction::from_string(SWAP_INTENT)
+                .expect("decode intent")
+                .transaction_type(),
+            "NEAR Intent"
+        );
+    }
+
+    #[test]
+    fn decode_rejects_malformed_json() {
+        // Valid JSON, but not a DefusePayload shape.
+        let result = NearTransaction::from_string(r#"{"foo":"bar"}"#);
+        assert!(result.is_err());
     }
 }
