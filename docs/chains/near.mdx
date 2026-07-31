@@ -1,0 +1,128 @@
+---
+title: NEAR
+description: NEAR transactions and NEAR Intents (Defuse Protocol) signing
+---
+
+The NEAR module decodes raw NEAR transactions into VisualSign payloads, and renders both halves of the [NEAR Intents](https://docs.near-intents.org) protocol: the pre-signature intent a user is about to sign, and the signed batch a `execute_intents` call submits on-chain.
+
+## Architecture overview
+
+### Two input formats, one chain identity
+
+NEAR carries two distinct payload shapes under a single `CHAIN_NEAR` identity, discriminated purely by input format:
+
+- **A borsh-encoded transaction** (`near::sign_transaction`) — the standard NEAR wire format (`near-primitives::Transaction`, signed or unsigned), hex or base64 encoded.
+- **A pre-signature intents envelope** (`near::sign_intent`) — a bare `DefusePayload` JSON object, the message a user signs before it is wrapped in a signature standard and submitted to solvers.
+
+Borsh bytes are never valid JSON, so the two formats never collide: the parser attempts a borsh decode first, and only falls back to validating the input as a JSON envelope if that fails. Input that is neither is rejected — never guessed at or partially reinterpreted.
+
+### Account model
+
+NEAR is account-based. Accounts are either **named** (`alice.near`) or **implicit** — derived deterministically from a public key, with no on-chain registration step. HSM-generated keys always produce implicit accounts: a 64-character hex string for ed25519 keys, an EVM-style `0x…` address for secp256k1 keys. A single user signing on multiple chains therefore appears as multiple, unlinked implicit accounts on `intents.near` — one per key.
+
+### Key components
+
+For a borsh transaction, the parser produces:
+- Top-level fields: `Network`, `From`, `To`.
+- Per-action fields — a native `Transfer` renders an `Amount`; a `FunctionCall` renders `Method` plus, for the three token-movement methods the parser understands (`ft_transfer`, `ft_transfer_call`, `ft_withdraw`), the resolved recipient and amount. An `execute_intents` call to `intents.near` additionally decodes and renders the full signed intent batch inline. Any other action or method renders its generic label only — a partially understood call never masquerades as a fully decoded one.
+
+For an intents envelope (either pre-signature or inside a decoded `execute_intents` batch), the parser produces:
+- Envelope fields: `Signer`, `Verifying Contract`, `Deadline`, `Nonce`.
+- For a signed batch specifically, a `Standard` and `Signature` (or a signature-invalid warning) per entry, since verification and structural decode are independent — a bad signature still renders the intents it wraps.
+- Per-intent fields, one section per intent in the batch.
+
+## Supported intent types
+
+| Intent | Fields surfaced |
+|---|---|
+| `token_diff` | `Send`/`Receive` per token, Memo, Referral |
+| `transfer` | To, Amount per token, Memo |
+| `ft_withdraw` | Token, To, Amount, Memo, Message, Storage Deposit |
+| `nft_withdraw` | Token, To, NFT Token Id, Memo, Message, Storage Deposit |
+| `mt_withdraw` | Token, To, MT Token (per token id/amount), Message, Storage Deposit |
+| `native_withdraw` | To, Amount |
+| `add_public_key` | Add Public Key |
+| `remove_public_key` | Remove Public Key |
+| `set_auth_by_predecessor_id` | Auth By Predecessor |
+| `storage_deposit` | Contract, For Account, Amount |
+| `auth_call` | Contract, Message, Attached Deposit |
+
+`ft_withdraw`, `nft_withdraw`, and `mt_withdraw` each carry an optional `storage_deposit` (a second, unconditional wNEAR debit alongside the withdrawal, never refunded on failure) and `msg` (which switches the call into its `_transfer_call` form) — both render when present, since either changes what the withdrawal actually does beyond moving the named asset.
+
+## Signature standards
+
+The intents preset verifies all seven signature standards the protocol defines — NEP-413, ERC-191, TIP-191, raw ed25519, WebAuthn, TonConnect, and SEP-53 — using the protocol's own canonical implementation ([`near/intents`](https://github.com/near/intents)) rather than a reimplementation, so new intent variants and signing standards stay correct as the protocol evolves. Verification recovers a signing key; it does not prove that key controls the claimed account (no on-chain state is available to the parser to check that binding).
+
+ERC-191 and TIP-191 recover a secp256k1 key rather than pass/fail: a well-formed signature always recovers *some* key, so a tampered message recovers a different key rather than failing outright. A malformed recovery byte is rejected before it reaches verification, since the native `ecrecover` backend otherwise panics on out-of-range input — a malformed payload must be treated as invalid input, never a crash.
+
+## Visualization strategy
+
+- **Amounts in native units where resolvable** — a `wrap.near` (wNEAR) transfer renders as `1 wNEAR`, not `1000000000000000000000000` raw units. Unresolved assets render the raw base-unit amount tagged with the asset id, rather than guessing at decimals — a wrong decimals value would silently misrender an amount.
+- **Fail-closed method-args decoding** — `ft_transfer`, `ft_transfer_call`, and `ft_withdraw` args decode only when they parse as exactly the known shape (`deny_unknown_fields`); anything else falls back to the generic `FunctionCall` view rather than rendering a partial, possibly misleading subset of fields.
+- **Deadlines and invalid signatures render as soft findings alongside the content they qualify** — the intents still render even when a deadline has passed or a signature fails verification, with the problem surfaced as a warning field rather than blocking the render outright.
+
+## Using parser_cli
+
+The CLI accepts either input format directly — hex/base64 for a transaction, or raw JSON for an intents envelope:
+
+```bash
+cargo run --bin parser_cli -- decode \
+  --chain near \
+  --output human \
+  -t 0a000000616c6963652e6e656172000000000000000000000000000000000000000000000000000000000000000000010000000000000008000000626f622e6e65617200000000000000000000000000000000000000000000000000000000000000000100000003000000a1edccce1bc2d3000000000000
+```
+
+Output:
+
+```
+┌─ Transaction: Transfer
+│  Version: 0
+│  Type: VisualSign
+│
+└─ Fields:
+   ├─ Network: NEAR Mainnet
+   ├─ From: alice.near
+   ├─ To: bob.near
+   └─ Amount: 1 NEAR
+```
+
+An intents envelope decodes the same way:
+
+```bash
+cargo run --bin parser_cli -- decode \
+  --chain near \
+  --output human \
+  -t '{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2100-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}'
+```
+
+Output:
+
+```
+┌─ Transaction: NEAR Intent
+│  Version: 0
+│  Type: VisualSign
+│
+└─ Fields:
+   ├─ Signer: alice.near
+   ├─ Verifying Contract: intents.near
+   ├─ Deadline: 2100-01-01T00:00:00+00:00
+   ├─ Nonce: 0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f
+   ├─ Token: wrap.near
+   ├─ To: bob.near
+   └─ Amount: 1 wNEAR
+```
+
+The `--network` flag is accepted for parity with other chains but isn't used today; the NEAR parser has no chain-metadata plumbing.
+
+## Implementation details
+
+Source code available at:
+- [NEAR Parser](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-near)
+- [Intents preset](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-near/src/presets/intents)
+- [parser_cli NEAR plugin](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-near/src/cli_plugin.rs)
+
+## Resources
+
+- [NEAR Intents documentation](https://docs.near-intents.org)
+- [near/intents (Defuse Protocol) repository](https://github.com/near/intents)
+- [NEAR Protocol documentation](https://docs.near.org)
