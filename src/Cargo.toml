@@ -75,19 +75,6 @@ tracing = "0.1.41"
 # Pin visualsign dependencies
 visualsign = { path = "./visualsign" }
 
-near-sdk = { version = "5.27", features = ["non-contract-usage"] }
-
-defuse-core        = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
-defuse-crypto      = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
-defuse-deadline    = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
-defuse-erc191      = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
-defuse-nep413      = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
-defuse-sep53       = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
-defuse-tip191      = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
-defuse-token-id    = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2", default-features = false }
-defuse-ton-connect = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2", default-features = false, features = ["text"] }
-defuse-webauthn    = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
-
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
