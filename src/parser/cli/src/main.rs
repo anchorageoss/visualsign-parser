@@ -42,6 +42,10 @@ pub(crate) struct ChainArgs {
     #[command(flatten)]
     pub(crate) solana: visualsign_solana::SolanaArgs,
 
+    #[cfg(feature = "near")]
+    #[command(flatten)]
+    pub(crate) near: visualsign_near::NearArgs,
+
     #[cfg(feature = "tron")]
     #[command(flatten)]
     pub(crate) tron: visualsign_tron::TronArgs,
@@ -59,6 +63,10 @@ impl ChainArgs {
         #[cfg(feature = "solana")]
         plugins.push(Box::new(visualsign_solana::SolanaPlugin::new(
             self.solana.clone(),
+        )));
+        #[cfg(feature = "near")]
+        plugins.push(Box::new(visualsign_near::NearPlugin::new(
+            self.near.clone(),
         )));
         #[cfg(feature = "tron")]
         plugins.push(Box::new(visualsign_tron::TronPlugin::new(

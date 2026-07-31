@@ -34,6 +34,11 @@ pub fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
         visualsign::registry::Chain::Tron,
         visualsign_tron::TronVisualSignConverter,
     );
+    #[cfg(feature = "near")]
+    registry.register::<visualsign_near::NearTransaction, _>(
+        visualsign::registry::Chain::Near,
+        visualsign_near::NearVisualSignConverter::new(),
+    );
     #[cfg(feature = "unspecified")]
     registry.register::<visualsign_unspecified::UnspecifiedTransactionWrapper, _>(
         visualsign::registry::Chain::Unspecified,

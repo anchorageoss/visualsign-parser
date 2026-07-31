@@ -11,6 +11,7 @@ fn chain_string_mapping() -> BTreeMap<&'static str, Chain> {
     mapping.insert("aptos", Chain::Aptos);
     mapping.insert("polkadot", Chain::Polkadot);
     mapping.insert("tron", Chain::Tron);
+    mapping.insert("near", Chain::Near);
     mapping
 }
 
@@ -50,6 +51,9 @@ mod tests {
 
     #[test]
     fn parse_chain_maps_unknown_to_custom() {
-        assert_eq!(parse_chain("near"), Chain::Custom("near".to_string()));
+        assert_eq!(
+            parse_chain("made-up-chain"),
+            Chain::Custom("made-up-chain".to_string())
+        );
     }
 }

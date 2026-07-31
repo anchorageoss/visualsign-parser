@@ -19,6 +19,7 @@ pub enum Chain {
     Aptos,
     Polkadot,
     Tron,
+    Near,
     // Add other chains as needed
     Custom(String), // For extensibility without modifying the enum
 }
@@ -34,6 +35,7 @@ impl Chain {
             Chain::Aptos => "Aptos",
             Chain::Polkadot => "Polkadot",
             Chain::Tron => "Tron",
+            Chain::Near => "Near",
             Chain::Custom(name) => name.as_str(),
         }
     }
@@ -52,6 +54,7 @@ impl FromStr for Chain {
             "aptos" => Chain::Aptos,
             "polkadot" => Chain::Polkadot,
             "tron" => Chain::Tron,
+            "near" => Chain::Near,
             _ => Chain::Custom(s.to_string()),
         })
     }
