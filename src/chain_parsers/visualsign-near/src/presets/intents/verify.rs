@@ -235,7 +235,7 @@ mod tests {
             SignatureCheck::Valid { recovered_key } => assert_eq!(recovered_key, expected),
             SignatureCheck::Invalid => panic!("expected a valid signature"),
         }
-        assert!(extracted.is_some(), "inner payload must extract");
+        assert!(extracted.is_ok(), "inner payload must extract");
     }
 
     #[test]
