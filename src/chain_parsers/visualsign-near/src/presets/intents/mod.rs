@@ -17,8 +17,8 @@ pub(crate) const NEAR_DECIMALS: u8 = 24;
 
 #[derive(Debug, Error)]
 pub enum NearIntentsError {
-    #[error("execute_intents args were not valid JSON: {0}")]
-    ArgsNotJson(String),
+    #[error("input was not valid JSON: {0}")]
+    InputNotJson(String),
     #[error("Unknown intent action variant: {0}")]
     UnknownAction(String),
     #[error("Malformed asset identifier: {0}")]
@@ -73,7 +73,7 @@ pub fn try_render_single_intent(
 ) -> Result<Vec<visualsign::SignablePayloadField>, NearIntentsError> {
     let payload: defuse_core::payload::DefusePayload<defuse_core::intents::DefuseIntents> =
         serde_json::from_slice(payload_json)
-            .map_err(|e| NearIntentsError::ArgsNotJson(e.to_string()))?;
+            .map_err(|e| NearIntentsError::InputNotJson(e.to_string()))?;
     render::render_single(&payload, token_registry)
         .map_err(|e| NearIntentsError::Render(e.to_string()))
 }
@@ -217,7 +217,7 @@ mod tests {
         let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
         let err = try_render_single_intent(b"not json", &reg, &VisualSignOptions::default())
             .expect_err("malformed JSON should error");
-        assert!(matches!(err, NearIntentsError::ArgsNotJson(_)));
+        assert!(matches!(err, NearIntentsError::InputNotJson(_)));
     }
 
     #[test]

@@ -101,8 +101,12 @@ pub(crate) fn section(
         create_text_field("Signed Intent", &format!("{index} of {total}"))?.signable_payload_field,
     ];
     fields.extend(render_signature(standard_name(mp), &check)?);
-    if let Some(payload) = &extracted {
-        fields.extend(render_single(payload, registry)?);
+    match &extracted {
+        Ok(payload) => fields.extend(render_single(payload, registry)?),
+        Err(e) => fields.push(diagnostic(
+            "extraction",
+            &format!("could not extract the envelope/intents: {e}"),
+        )?),
     }
     Ok(fields)
 }
@@ -353,6 +357,32 @@ mod tests {
             super::super::test_support::is_warning_diagnostic(&fields[1], "signature"),
             "expected a signature warning, got {:?}",
             fields[1]
+        );
+    }
+
+    /// When the inner `payload` string doesn't parse as a `DefusePayload`,
+    /// `section()` must surface why nothing rendered rather than silently
+    /// omitting the envelope/intents.
+    #[test]
+    fn section_surfaces_extraction_failure_instead_of_silently_omitting_envelope() {
+        let mp: MultiPayload = serde_json::from_str(
+            r#"{"standard":"raw_ed25519","payload":"not a valid defuse payload","public_key":"ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN","signature":"ed25519:3vtbNQJHZfuV1s5DykzyjkbNLc583hnkrhTz57eDhd966iqzkor6Twgr4Loh2C195SCSEsiGfrd6KcxpjNq9ZbVj"}"#,
+        )
+        .expect("multi payload json");
+
+        let fields = section(1, 1, &mp, &empty_reg()).expect("render");
+
+        let has_extraction_warning = fields
+            .iter()
+            .any(|f| super::super::test_support::is_warning_diagnostic(f, "extraction"));
+        assert!(
+            has_extraction_warning,
+            "expected an extraction warning, got {fields:?}"
+        );
+        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
+        assert!(
+            !labels.contains(&"Signer"),
+            "envelope must not render when extraction failed: {labels:?}"
         );
     }
 

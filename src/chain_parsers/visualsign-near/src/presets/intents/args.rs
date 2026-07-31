@@ -18,7 +18,7 @@ struct ExecuteIntentsArgs {
 /// public crate boundary.
 pub(crate) fn decode_args(args: &[u8]) -> Result<Vec<MultiPayload>, NearIntentsError> {
     let parsed: ExecuteIntentsArgs =
-        serde_json::from_slice(args).map_err(|e| NearIntentsError::ArgsNotJson(e.to_string()))?;
+        serde_json::from_slice(args).map_err(|e| NearIntentsError::InputNotJson(e.to_string()))?;
     Ok(parsed.signed)
 }
 

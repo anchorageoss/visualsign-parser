@@ -19,10 +19,13 @@ pub(crate) enum SignatureCheck {
 ///
 /// `verify()` and `extract_defuse_payload()` are independent: a payload with an
 /// invalid signature or an unparseable inner body can still yield the other
-/// half, so both are attempted and reported separately.
+/// half, so both are attempted and reported separately. Extraction failure
+/// keeps its error message (rather than collapsing to `None`) so the caller
+/// can surface *why* no envelope/intents rendered instead of silently
+/// omitting them.
 pub(crate) fn verify_and_extract(
     payload: &MultiPayload,
-) -> (SignatureCheck, Option<DefusePayload<DefuseIntents>>) {
+) -> (SignatureCheck, Result<DefusePayload<DefuseIntents>, String>) {
     let check = if has_invalid_secp256k1_recovery_id(payload) {
         SignatureCheck::Invalid
     } else {
@@ -33,7 +36,10 @@ pub(crate) fn verify_and_extract(
             None => SignatureCheck::Invalid,
         }
     };
-    let extracted = payload.clone().extract_defuse_payload().ok();
+    let extracted = payload
+        .clone()
+        .extract_defuse_payload()
+        .map_err(|e| e.to_string());
     (check, extracted)
 }
 
