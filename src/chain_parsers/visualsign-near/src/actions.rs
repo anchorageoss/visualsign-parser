@@ -19,17 +19,29 @@ use crate::fmt::{format_near, format_tgas};
 const NEAR_SYMBOL: &str = "NEAR";
 
 /// Render the action-specific fields for a single [`Action`].
-pub fn render_action(action: &Action) -> Result<Vec<SignablePayloadField>, VisualSignError> {
+///
+/// `total_actions` is the number of actions in the transaction this action
+/// belongs to. When there is more than one, `Transfer` and `FunctionCall`
+/// (the two variants decoded in detail) are prefixed with an `"Action"`
+/// boundary field, the same label the fallback branch below always uses --
+/// otherwise a multi-action transaction with e.g. two transfers renders two
+/// identically-labelled `"Amount"` fields with no indication which action
+/// each belongs to.
+pub fn render_action(
+    action: &Action,
+    total_actions: usize,
+) -> Result<Vec<SignablePayloadField>, VisualSignError> {
     match action {
         Action::Transfer(transfer) => {
+            let mut fields = action_boundary_field(action, total_actions)?;
             let amount = format_near(transfer.deposit.as_yoctonear());
-            Ok(vec![
-                create_amount_field("Amount", &amount, NEAR_SYMBOL)?.signable_payload_field,
-            ])
+            fields
+                .push(create_amount_field("Amount", &amount, NEAR_SYMBOL)?.signable_payload_field);
+            Ok(fields)
         }
         Action::FunctionCall(fc) => {
-            let mut fields =
-                vec![create_text_field("Method", &fc.method_name)?.signable_payload_field];
+            let mut fields = action_boundary_field(action, total_actions)?;
+            fields.push(create_text_field("Method", &fc.method_name)?.signable_payload_field);
             if let Some(args_fields) = decode_known_method_args(&fc.method_name, &fc.args)? {
                 fields.extend(args_fields);
             }
@@ -47,10 +59,28 @@ pub fn render_action(action: &Action) -> Result<Vec<SignablePayloadField>, Visua
             Ok(fields)
         }
         // Other variants are not yet decoded in detail; surface the action
-        // kind so the payload still names what is being signed.
+        // kind so the payload still names what is being signed. This is
+        // already an unconditional "Action" field, so it needs no
+        // total_actions-gated boundary marker of its own.
         other => Ok(vec![
             create_text_field("Action", action_label(other))?.signable_payload_field,
         ]),
+    }
+}
+
+/// The `"Action"` boundary field prepended to a decoded action's own fields
+/// when `total_actions > 1`; empty otherwise, since a single-action
+/// transaction's fields need no boundary to disambiguate.
+fn action_boundary_field(
+    action: &Action,
+    total_actions: usize,
+) -> Result<Vec<SignablePayloadField>, VisualSignError> {
+    if total_actions > 1 {
+        Ok(vec![
+            create_text_field("Action", action_label(action))?.signable_payload_field,
+        ])
+    } else {
+        Ok(Vec::new())
     }
 }
 
@@ -174,7 +204,7 @@ mod tests {
         let action = Action::Transfer(TransferAction {
             deposit: Balance::from_yoctonear(1_500_000_000_000_000_000_000_000),
         });
-        let fields = render_action(&action).expect("render");
+        let fields = render_action(&action, 1).expect("render");
         assert_eq!(fields.len(), 1);
         match &fields[0] {
             SignablePayloadField::AmountV2 { common, amount_v2 } => {
@@ -197,7 +227,7 @@ mod tests {
             gas: Gas::from_gas(100_000_000_000_000),
             deposit: Balance::from_yoctonear(1),
         }));
-        let fields = render_action(&action).expect("render");
+        let fields = render_action(&action, 1).expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Method", "Recipient", "Amount", "Deposit", "Gas"]);
         // Empty msg is skipped, not rendered as an empty field.
@@ -215,7 +245,7 @@ mod tests {
             gas: Gas::from_gas(100_000_000_000_000),
             deposit: Balance::from_yoctonear(1),
         }));
-        let fields = render_action(&action).expect("render");
+        let fields = render_action(&action, 1).expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(
             labels,
@@ -251,7 +281,7 @@ mod tests {
                 gas: Gas::from_gas(1_000_000_000_000),
                 deposit: Balance::from_yoctonear(0),
             }));
-            let fields = render_action(&action).expect("render");
+            let fields = render_action(&action, 1).expect("render");
             let labels: Vec<&str> = fields.iter().map(field_label).collect();
             assert_eq!(labels, ["Method", "Gas"], "case: {method}");
         }
@@ -270,7 +300,7 @@ mod tests {
     #[test]
     fn unsupported_action_renders_label_text_field() {
         let action = Action::CreateAccount(CreateAccountAction {});
-        let fields = render_action(&action).expect("render");
+        let fields = render_action(&action, 1).expect("render");
         assert_eq!(fields.len(), 1);
         match &fields[0] {
             SignablePayloadField::TextV2 { common, text_v2 } => {
@@ -279,5 +309,54 @@ mod tests {
             }
             other => panic!("expected TextV2, got {other:?}"),
         }
+    }
+
+    // Regression coverage for a rendering-ambiguity gap: without a boundary
+    // marker, two Transfers in one transaction would both render as a bare
+    // "Amount" field with nothing distinguishing which action each belongs
+    // to.
+    #[test]
+    fn multi_action_transfer_gets_action_boundary_label() {
+        let action = Action::Transfer(TransferAction {
+            deposit: Balance::from_yoctonear(1_500_000_000_000_000_000_000_000),
+        });
+        let fields = render_action(&action, 2).expect("render");
+        let labels: Vec<&str> = fields.iter().map(field_label).collect();
+        assert_eq!(labels, ["Action", "Amount"]);
+        match &fields[0] {
+            SignablePayloadField::TextV2 { text_v2, .. } => assert_eq!(text_v2.text, "Transfer"),
+            other => panic!("expected TextV2, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn multi_action_function_call_gets_action_boundary_label() {
+        use near_primitives::action::FunctionCallAction;
+        use near_primitives::types::Gas;
+        let action = Action::FunctionCall(Box::new(FunctionCallAction {
+            method_name: "do_something".to_string(),
+            args: Vec::new(),
+            gas: Gas::from_gas(1_000_000_000_000),
+            deposit: Balance::from_yoctonear(0),
+        }));
+        let fields = render_action(&action, 2).expect("render");
+        let labels: Vec<&str> = fields.iter().map(field_label).collect();
+        assert_eq!(labels, ["Action", "Method", "Gas"]);
+        match &fields[0] {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                assert_eq!(text_v2.text, "Function Call");
+            }
+            other => panic!("expected TextV2, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn single_action_transfer_has_no_boundary_label() {
+        let action = Action::Transfer(TransferAction {
+            deposit: Balance::from_yoctonear(1),
+        });
+        let fields = render_action(&action, 1).expect("render");
+        let labels: Vec<&str> = fields.iter().map(field_label).collect();
+        assert_eq!(labels, ["Amount"]);
     }
 }

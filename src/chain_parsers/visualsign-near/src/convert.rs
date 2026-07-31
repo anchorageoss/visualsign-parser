@@ -14,8 +14,9 @@ use crate::tx::NearTransaction;
 
 /// Payload version emitted for NEAR transactions.
 const PAYLOAD_VERSION: i64 = 0;
-/// Payload type tag emitted for NEAR transactions.
-const PAYLOAD_TYPE: &str = "VisualSign";
+/// Payload type tag emitted for NEAR transactions, matching the other chain
+/// crates' convention (`"SolanaTx"`, `"TronTx"`).
+const PAYLOAD_TYPE: &str = "NearTx";
 
 /// Converts a [`NearTransaction`] into a VisualSign [`SignablePayload`].
 #[derive(Debug, Clone, Copy, Default)]
@@ -57,8 +58,9 @@ impl VisualSignConverter<NearTransaction> for NearVisualSignConverter {
             create_address_field("To", tx.receiver_id().as_str(), None, None, None, None)?
                 .signable_payload_field,
         );
+        let total_actions = tx.actions().len();
         for action in tx.actions() {
-            fields.extend(render_action(action)?);
+            fields.extend(render_action(action, total_actions)?);
         }
 
         Ok(ConversionResult::new(SignablePayload::new(
