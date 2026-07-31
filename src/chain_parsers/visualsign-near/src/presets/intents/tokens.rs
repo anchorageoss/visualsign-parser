@@ -10,8 +10,24 @@ use super::{NearTokenRegistry, TokenMeta};
 /// before being added; a wrong `decimals` silently misrenders amounts, so
 /// anything not confidently verified is omitted and falls back to the raw
 /// asset id. `wrap.near` is the canonical wrapped-NEAR contract (24 decimals,
-/// matching native NEAR).
-const SEEDS: &[(&str, &str, u8)] = &[("nep141:wrap.near", "wNEAR", 24)];
+/// matching native NEAR). The bridged entries below resolve through
+/// `omni.bridge.near`'s own `get_token_id`/`get_native_token_id` registry via
+/// `scripts/gen_near_token_seeds.sh`, not a hand-typed guess at the
+/// `<chain>-<address>.omft.near` naming convention.
+const SEEDS: &[(&str, &str, u8)] = &[
+    ("nep141:wrap.near", "wNEAR", 24),
+    (
+        "nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near",
+        "USDC.e",
+        6,
+    ),
+    (
+        "nep141:dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near",
+        "USDT.e",
+        6,
+    ),
+    ("nep141:eth.bridge.near", "ETH", 18),
+];
 
 /// Largest `decimals` [`format_units`] can scale by: `10^39` exceeds `u128`.
 const MAX_DECIMALS: u8 = 38;
@@ -75,6 +91,17 @@ mod tests {
         let meta = resolve("nep141:wrap.near", &empty()).expect("seeded");
         assert_eq!(meta.symbol, "wNEAR");
         assert_eq!(meta.decimals, 24);
+    }
+
+    #[test]
+    fn seeded_bridged_token_resolves() {
+        let meta = resolve(
+            "nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near",
+            &empty(),
+        )
+        .expect("seeded");
+        assert_eq!(meta.symbol, "USDC.e");
+        assert_eq!(meta.decimals, 6);
     }
 
     #[test]

@@ -57,7 +57,7 @@ ERC-191 and TIP-191 recover a secp256k1 key rather than pass/fail: a well-formed
 
 ## Visualization strategy
 
-- **Amounts in native units where resolvable** — a `wrap.near` (wNEAR) transfer renders as `1 wNEAR`, not `1000000000000000000000000` raw units. Unresolved assets render the raw base-unit amount tagged with the asset id, rather than guessing at decimals — a wrong decimals value would silently misrender an amount.
+- **Amounts in native units where resolvable** — a `wrap.near` (wNEAR) transfer renders as `1 wNEAR`, not `1000000000000000000000000` raw units. Unresolved assets render the raw base-unit amount tagged with the asset id, rather than guessing at decimals — a wrong decimals value would silently misrender an amount. Beyond the compiled-in seed table, a wallet can supply symbol/decimals for additional asset ids per request, optionally signed by a curator key whose curve is chosen by the asset's origin chain (NEAR, Ethereum, or Solana) rather than a single NEAR-wide curve — see [Chain Metadata](/wallet-integration/core-concepts/chain-metadata#near-token-metadata).
 - **Fail-closed method-args decoding** — `ft_transfer`, `ft_transfer_call`, and `ft_withdraw` args decode only when they parse as exactly the known shape (`deny_unknown_fields`); anything else falls back to the generic `FunctionCall` view rather than rendering a partial, possibly misleading subset of fields.
 - **Deadlines and invalid signatures render as soft findings alongside the content they qualify** — the intents still render even when a deadline has passed or a signature fails verification, with the problem surfaced as a warning field rather than blocking the render outright.
 

@@ -122,6 +122,7 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                 network_id: Some("NEAR_TESTNET".to_string()),
+                token_mappings: Default::default(),
             })),
         };
         assert_eq!(
