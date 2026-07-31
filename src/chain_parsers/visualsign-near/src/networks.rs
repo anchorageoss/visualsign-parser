@@ -1,4 +1,4 @@
-//! NearNetwork enum and system-account recognition.
+//! NearNetwork enum and display names.
 //!
 //! NEAR transaction envelopes carry no numeric chain id, so the network is
 //! supplied out of band (defaulting to mainnet for wallet display).

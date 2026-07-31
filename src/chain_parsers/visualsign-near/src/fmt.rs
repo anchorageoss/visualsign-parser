@@ -1,4 +1,4 @@
-//! yoctoNEAR, Tgas, base58 formatting helpers.
+//! yoctoNEAR, Tgas formatting helpers.
 
 /// Render `units / 10^decimals` as a decimal string with trailing-zero trim.
 ///

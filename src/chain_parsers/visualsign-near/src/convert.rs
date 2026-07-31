@@ -29,6 +29,12 @@ impl NearVisualSignConverter {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Construct a converter for a specific [`NearNetwork`] (e.g. testnet).
+    #[must_use]
+    pub fn with_network(network: NearNetwork) -> Self {
+        Self { network }
+    }
 }
 
 impl VisualSignConverter<NearTransaction> for NearVisualSignConverter {
@@ -101,5 +107,14 @@ mod tests {
     #[test]
     fn title_no_action_is_generic() {
         assert_eq!(title_for(&[]), "NEAR Transaction");
+    }
+
+    #[test]
+    fn with_network_sets_the_configured_network() {
+        assert_eq!(
+            NearVisualSignConverter::with_network(NearNetwork::Testnet).network,
+            NearNetwork::Testnet
+        );
+        assert_eq!(NearVisualSignConverter::new().network, NearNetwork::Mainnet);
     }
 }
