@@ -803,7 +803,7 @@ async fn parser_near_native_transfer_e2e() {
                     "Type": "amount_v2"
                 }
             ],
-            "PayloadType": "VisualSign",
+            "PayloadType": "NearTx",
             "Title": "Transfer",
             "Version": "0"
         });
@@ -888,7 +888,7 @@ async fn parser_near_intent_envelope_e2e() {
                     "Type": "amount_v2"
                 }
             ],
-            "PayloadType": "VisualSign",
+            "PayloadType": "NearTx",
             "Title": "NEAR Intent",
             "Version": "0"
         });
