@@ -14,8 +14,28 @@ use visualsign::{SignablePayload, SignablePayloadField};
 
 use crate::actions::render_action;
 use crate::networks::{NearNetwork, extract_network_from_metadata};
-use crate::presets::intents::NearTokenRegistry;
+use crate::presets::intents::{
+    NearTokenRegistry, authorized_token_metadata_signers,
+    try_extract_token_metadata_from_chain_metadata,
+};
 use crate::tx::NearTransaction;
+
+/// Build the token-registry override layer for this request: the compiled-in
+/// seeds as the global layer, plus whatever `options.metadata` supplies
+/// (verified per [`crate::presets::intents::TokenMetadataSignerAllowlists`]) as
+/// the request-scoped layer.
+fn token_registry_for(options: &VisualSignOptions) -> LayeredRegistry<NearTokenRegistry> {
+    let request = try_extract_token_metadata_from_chain_metadata(
+        options.metadata.as_ref(),
+        authorized_token_metadata_signers(),
+    );
+    match request {
+        Some(request) => {
+            LayeredRegistry::with_request(Arc::new(NearTokenRegistry::default()), request)
+        }
+        None => LayeredRegistry::new(Arc::new(NearTokenRegistry::default())),
+    }
+}
 
 /// Payload version emitted for NEAR payloads.
 const PAYLOAD_VERSION: i64 = 0;
@@ -140,7 +160,7 @@ fn decode_intents(
     if fc.method_name != "execute_intents" {
         return Ok(vec![]);
     }
-    let registry = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+    let registry = token_registry_for(options);
     crate::presets::intents::try_decode_execute_intents(&fc.args, &registry, options)
         .map_err(|e| VisualSignError::ConversionError(e.to_string()))
 }
@@ -151,7 +171,7 @@ fn render_intent_envelope(
     json: &str,
     options: &VisualSignOptions,
 ) -> Result<ConversionResult, VisualSignError> {
-    let registry = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+    let registry = token_registry_for(options);
     let fields =
         crate::presets::intents::try_render_single_intent(json.as_bytes(), &registry, options)
             .map_err(|e| VisualSignError::ConversionError(e.to_string()))?;
@@ -282,6 +302,7 @@ mod tests {
             metadata: Some(ChainMetadata {
                 metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                     network_id: Some("NEAR_TESTNET".to_string()),
+                    token_mappings: Default::default(),
                 })),
             }),
             ..Default::default()

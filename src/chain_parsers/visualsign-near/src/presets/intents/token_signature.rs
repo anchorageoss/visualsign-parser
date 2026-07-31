@@ -1,0 +1,855 @@
+//! NEAR Intents token-metadata extraction and signature validation.
+//!
+//! Mirrors `visualsign-ethereum::abi_metadata` and
+//! `visualsign-solana::idl::signature`: converts `ChainMetadata.near.token_mappings`
+//! into a [`NearTokenRegistry`] override layer, optionally validating a signature
+//! attached to each entry. Like `Abi.value`/`Idl.value`, `TokenMetadataEntry.value`
+//! is signed verbatim as supplied -- the signature covers exactly those bytes,
+//! not a re-derived encoding, so there is no field-order/escaping contract for
+//! an external signer to get right.
+//!
+//! # Trust model: dispatch by asset origin, not by NEAR itself
+//!
+//! Every asset id renders as a NEAR-side identity (`nep141:...`), but the
+//! underlying value may live on NEAR itself or have been bridged in from another
+//! chain. Rather than a single NEAR-wide curator key, the signature curve is
+//! chosen per entry by [`TokenOriginChain`]: `Ethereum` (and every EVM twin the
+//! omni-bridge lists: Arbitrum, Base, BNB, Polygon, Abstract, HyperEVM) verifies
+//! with secp256k1, reusing the same curve family as `visualsign-ethereum`'s ABI
+//! curator identity; `Solana` (and its SVM twin, Fogo) verifies with ed25519,
+//! matching `visualsign-solana`'s IDL curator identity; `Near` (and unset, which
+//! defaults to it) verifies with ed25519 under a distinct, NEAR-only curator
+//! identity. Chains the omni-bridge lists but this parser has no existing curve
+//! support for (Bitcoin, Zcash, Starknet, Aptos) are not given bespoke curve
+//! verification here; entries for such assets should omit `origin_chain` (or
+//! leave it unset) and rely on the NEAR-native curator, or ship unsigned.
+//!
+//! Each curve has its own domain-separated prehash
+//! ([`visualsign::signing::near_token_metadata_prehash`],
+//! [`visualsign::signing::ethereum_token_metadata_prehash`],
+//! [`visualsign::signing::solana_token_metadata_prehash`]) and its own
+//! allowlist, kept separate from the Ethereum ABI / Solana IDL allowlists even
+//! though the same physical key may be enrolled in both: revoking "trusted to
+//! vouch for ABI decoding" must not silently also revoke (or, worse, leave
+//! standing) "trusted to vouch for token metadata."
+//!
+//! As with the ABI/IDL paths, an unsigned entry is still accepted (not every
+//! caller signs yet), while a signature that is present but fails to validate
+//! is rejected outright: a present-but-invalid signature is a stronger signal
+//! of tampering than simply omitting one.
+
+use std::sync::OnceLock;
+
+use ed25519_dalek::{Signature as Ed25519Signature, VerifyingKey as Ed25519VerifyingKey};
+use generated::parser::{ChainMetadata, TokenOriginChain, chain_metadata};
+use k256::EncodedPoint;
+#[cfg(any(test, feature = "dev-signing"))]
+use k256::ecdsa::SigningKey as Secp256k1SigningKey;
+use k256::ecdsa::signature::hazmat::PrehashVerifier;
+use k256::ecdsa::{Signature as Secp256k1Signature, VerifyingKey as Secp256k1VerifyingKey};
+use serde::Deserialize;
+use visualsign::signing::SignerAllowlist;
+
+use super::{NearTokenRegistry, TokenMeta};
+
+/// The only supported ed25519 algorithm tag (Near and Solana origins).
+const ED25519_ALGORITHM: &str = "ed25519";
+/// The only supported secp256k1 algorithm tag (Ethereum origin).
+const SECP256K1_ALGORITHM: &str = "secp256k1";
+
+const ED25519_PUBLIC_KEY_LEN: usize = 32;
+const ED25519_SIGNATURE_LEN: usize = 64;
+
+/// Maximum size for a `TokenMetadataEntry.value` JSON string. Token metadata is
+/// inherently tiny (a symbol and a decimals count); this bounds the untrusted,
+/// per-request proto field before it is deserialized, mirroring
+/// `MAX_ABI_JSON_BYTES` in `visualsign-ethereum::abi_metadata`.
+const MAX_TOKEN_METADATA_VALUE_BYTES: usize = 1024;
+
+/// Error type for token-metadata signature validation.
+#[derive(Debug, thiserror::Error)]
+pub enum TokenMetadataSignatureError {
+    #[error("token metadata signature validation failed: {0}")]
+    Validation(String),
+}
+
+/// Token-metadata signature metadata for validation. Mirrors the protobuf
+/// `SignatureMetadata` structure in a local type.
+#[derive(Debug, Clone)]
+struct SignatureMetadata {
+    value: String,
+    algorithm: Option<String>,
+    public_key: Option<String>,
+}
+
+fn convert_proto_signature(proto: &generated::parser::SignatureMetadata) -> SignatureMetadata {
+    let get = |key: &str| -> Option<String> {
+        proto
+            .metadata
+            .iter()
+            .find(|m| m.key == key)
+            .map(|m| m.value.clone())
+    };
+    SignatureMetadata {
+        value: proto.value.clone(),
+        algorithm: get("algorithm"),
+        public_key: get("public_key"),
+    }
+}
+
+/// The shape of `TokenMetadataEntry.value` once parsed.
+#[derive(Deserialize)]
+struct TokenMetadataValue {
+    symbol: String,
+    decimals: u8,
+}
+
+fn decode_hex_fixed<const N: usize>(
+    value: &str,
+    what: &str,
+) -> Result<[u8; N], TokenMetadataSignatureError> {
+    let bytes = visualsign::encodings::decode_hex(value)
+        .map_err(|e| TokenMetadataSignatureError::Validation(format!("Invalid {what} hex: {e}")))?;
+    bytes.try_into().map_err(|v: Vec<u8>| {
+        TokenMetadataSignatureError::Validation(format!(
+            "Invalid {what} length: expected {N} bytes, got {}",
+            v.len()
+        ))
+    })
+}
+
+/// Per-origin-chain allowlists for token-metadata curator keys, built once and
+/// cached. Kept separate from the Ethereum ABI / Solana IDL allowlists (see
+/// module docs).
+pub struct TokenMetadataSignerAllowlists {
+    near: SignerAllowlist,
+    ethereum: SignerAllowlist,
+    solana: SignerAllowlist,
+}
+
+/// Build the authorized token-metadata-signer allowlists from env-configured
+/// production lists, cached for the lifetime of the process.
+///
+/// - `VISUALSIGN_NEAR_TOKEN_SIGNERS`: comma-separated hex ed25519 public keys.
+/// - `VISUALSIGN_ETH_TOKEN_SIGNERS`: comma-separated hex secp256k1 public keys
+///   (any SEC1 encoding).
+/// - `VISUALSIGN_SOL_TOKEN_SIGNERS`: comma-separated hex ed25519 public keys.
+///
+/// An unset (or entirely invalid) env var leaves that chain's allowlist empty,
+/// which rejects every signed entry for that origin chain (fail-closed).
+/// Unsigned entries are unaffected.
+#[must_use]
+pub fn authorized_token_metadata_signers() -> &'static TokenMetadataSignerAllowlists {
+    static ALLOW: OnceLock<TokenMetadataSignerAllowlists> = OnceLock::new();
+    ALLOW.get_or_init(|| TokenMetadataSignerAllowlists {
+        near: build_ed25519_allowlist("VISUALSIGN_NEAR_TOKEN_SIGNERS"),
+        ethereum: build_secp256k1_allowlist("VISUALSIGN_ETH_TOKEN_SIGNERS"),
+        solana: build_ed25519_allowlist("VISUALSIGN_SOL_TOKEN_SIGNERS"),
+    })
+}
+
+fn build_ed25519_allowlist(env_var: &str) -> SignerAllowlist {
+    let mut allow = SignerAllowlist::new();
+    if let Ok(list) = std::env::var(env_var) {
+        for entry in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            match canonical_ed25519_pubkey_from_hex(entry) {
+                Some(bytes) => allow.insert(bytes),
+                None => tracing::warn!("Ignoring invalid pubkey in {env_var}"),
+            }
+        }
+    }
+    allow
+}
+
+fn build_secp256k1_allowlist(env_var: &str) -> SignerAllowlist {
+    let mut allow = SignerAllowlist::new();
+    if let Ok(list) = std::env::var(env_var) {
+        for entry in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            match canonical_secp256k1_pubkey_from_hex(entry) {
+                Some(bytes) => allow.insert(bytes),
+                None => tracing::warn!("Ignoring invalid pubkey in {env_var}"),
+            }
+        }
+    }
+    allow
+}
+
+fn canonical_ed25519_pubkey_from_hex(hex_str: &str) -> Option<Vec<u8>> {
+    let bytes = decode_hex_fixed::<ED25519_PUBLIC_KEY_LEN>(hex_str, "public key").ok()?;
+    let verifying_key = Ed25519VerifyingKey::from_bytes(&bytes).ok()?;
+    Some(verifying_key.to_bytes().to_vec())
+}
+
+fn canonical_secp256k1_pubkey_from_hex(hex_str: &str) -> Option<Vec<u8>> {
+    let bytes = visualsign::encodings::decode_hex(hex_str).ok()?;
+    let encoded_point = EncodedPoint::from_bytes(&bytes).ok()?;
+    let verifying_key = Secp256k1VerifyingKey::from_encoded_point(&encoded_point).ok()?;
+    Some(verifying_key.to_encoded_point(false).as_bytes().to_vec())
+}
+
+/// Validate a token-metadata entry's signature over `value`'s raw bytes,
+/// dispatching curve and allowlist by `origin_chain`.
+/// `TokenOriginChain::Unspecified` is treated as `Near`.
+fn validate_token_metadata_signature(
+    asset_id: &str,
+    value: &str,
+    origin_chain: TokenOriginChain,
+    signature: &SignatureMetadata,
+    allowlists: &TokenMetadataSignerAllowlists,
+) -> Result<(), TokenMetadataSignatureError> {
+    match origin_chain {
+        TokenOriginChain::Unspecified | TokenOriginChain::Near => validate_ed25519(
+            asset_id,
+            value,
+            signature,
+            &allowlists.near,
+            visualsign::signing::near_token_metadata_prehash,
+        ),
+        TokenOriginChain::Ethereum => {
+            validate_secp256k1(asset_id, value, signature, &allowlists.ethereum)
+        }
+        TokenOriginChain::Solana => validate_ed25519(
+            asset_id,
+            value,
+            signature,
+            &allowlists.solana,
+            visualsign::signing::solana_token_metadata_prehash,
+        ),
+    }
+}
+
+fn validate_ed25519(
+    asset_id: &str,
+    value: &str,
+    signature: &SignatureMetadata,
+    allowlist: &SignerAllowlist,
+    prehash: fn(&str, &[u8]) -> [u8; 32],
+) -> Result<(), TokenMetadataSignatureError> {
+    let algorithm = signature
+        .algorithm
+        .as_deref()
+        .ok_or_else(|| TokenMetadataSignatureError::Validation("Missing algorithm".to_string()))?;
+    if algorithm != ED25519_ALGORITHM {
+        return Err(TokenMetadataSignatureError::Validation(format!(
+            "Unsupported algorithm: {algorithm}. Only {ED25519_ALGORITHM} is supported for this origin chain."
+        )));
+    }
+    let public_key_hex = signature
+        .public_key
+        .as_deref()
+        .ok_or_else(|| TokenMetadataSignatureError::Validation("Missing public_key".to_string()))?;
+
+    let hash = prehash(asset_id, value.as_bytes());
+    let sig_bytes = decode_hex_fixed::<ED25519_SIGNATURE_LEN>(&signature.value, "signature")?;
+    let sig = Ed25519Signature::from_bytes(&sig_bytes);
+    let pubkey_bytes = decode_hex_fixed::<ED25519_PUBLIC_KEY_LEN>(public_key_hex, "public key")?;
+    let verifying_key = Ed25519VerifyingKey::from_bytes(&pubkey_bytes)
+        .map_err(|e| TokenMetadataSignatureError::Validation(format!("Invalid public key: {e}")))?;
+
+    verifying_key.verify_strict(&hash, &sig).map_err(|e| {
+        TokenMetadataSignatureError::Validation(format!("Signature verification failed: {e}"))
+    })?;
+
+    if !allowlist.contains(&verifying_key.to_bytes()) {
+        return Err(TokenMetadataSignatureError::Validation(
+            "signer not in allowlist".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_secp256k1(
+    asset_id: &str,
+    value: &str,
+    signature: &SignatureMetadata,
+    allowlist: &SignerAllowlist,
+) -> Result<(), TokenMetadataSignatureError> {
+    let algorithm = signature
+        .algorithm
+        .as_deref()
+        .ok_or_else(|| TokenMetadataSignatureError::Validation("Missing algorithm".to_string()))?;
+    if algorithm != SECP256K1_ALGORITHM {
+        return Err(TokenMetadataSignatureError::Validation(format!(
+            "Unsupported algorithm: {algorithm}. Only {SECP256K1_ALGORITHM} is supported for this origin chain."
+        )));
+    }
+    let public_key_hex = signature
+        .public_key
+        .as_deref()
+        .ok_or_else(|| TokenMetadataSignatureError::Validation("Missing public_key".to_string()))?;
+
+    let hash = visualsign::signing::ethereum_token_metadata_prehash(asset_id, value.as_bytes());
+    let sig_bytes = visualsign::encodings::decode_hex(&signature.value).map_err(|e| {
+        TokenMetadataSignatureError::Validation(format!("Invalid signature hex: {e}"))
+    })?;
+    let sig = Secp256k1Signature::from_der(&sig_bytes).map_err(|e| {
+        TokenMetadataSignatureError::Validation(format!("Invalid DER signature: {e}"))
+    })?;
+    let pubkey_bytes = visualsign::encodings::decode_hex(public_key_hex).map_err(|e| {
+        TokenMetadataSignatureError::Validation(format!("Invalid public key hex: {e}"))
+    })?;
+    let encoded_point = EncodedPoint::from_bytes(&pubkey_bytes).map_err(|e| {
+        TokenMetadataSignatureError::Validation(format!("Invalid public key point: {e}"))
+    })?;
+    let verifying_key = Secp256k1VerifyingKey::from_encoded_point(&encoded_point).map_err(|e| {
+        TokenMetadataSignatureError::Validation(format!("Invalid verifying key: {e}"))
+    })?;
+
+    verifying_key.verify_prehash(&hash, &sig).map_err(|e| {
+        TokenMetadataSignatureError::Validation(format!("Signature verification failed: {e}"))
+    })?;
+
+    let signer_pubkey = verifying_key.to_encoded_point(false);
+    if !allowlist.contains(signer_pubkey.as_bytes()) {
+        return Err(TokenMetadataSignatureError::Validation(
+            "signer not in allowlist".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Extract and validate token-metadata entries from `ChainMetadata`, if
+/// present.
+///
+/// Navigates `ChainMetadata -> Near -> token_mappings`. Returns `None` if the
+/// metadata contains no NEAR token mappings (or no metadata at all), matching
+/// the Ethereum ABI / Solana IDL extraction functions' convention so callers
+/// can plug the result straight into a
+/// [`visualsign::registry::LayeredRegistry`] request layer.
+#[must_use]
+pub fn try_extract_from_chain_metadata(
+    chain_metadata: Option<&ChainMetadata>,
+    allowlists: &TokenMetadataSignerAllowlists,
+) -> Option<NearTokenRegistry> {
+    let chain_metadata = chain_metadata?;
+    let chain_metadata::Metadata::Near(near) = chain_metadata.metadata.as_ref()? else {
+        return None;
+    };
+    if near.token_mappings.is_empty() {
+        return None;
+    }
+
+    let mut registry = NearTokenRegistry::default();
+    let mut unsigned_count: usize = 0;
+    for (asset_id, entry) in &near.token_mappings {
+        if entry.value.len() > MAX_TOKEN_METADATA_VALUE_BYTES {
+            tracing::warn!(
+                "Skipping token metadata for '{asset_id}': exceeds size limit ({} bytes > {MAX_TOKEN_METADATA_VALUE_BYTES})",
+                entry.value.len()
+            );
+            continue;
+        }
+
+        let origin_chain = entry
+            .origin_chain
+            .and_then(|v| TokenOriginChain::try_from(v).ok())
+            .unwrap_or(TokenOriginChain::Unspecified);
+
+        // Signatures aren't required to register an entry (not every caller
+        // signs yet), but one that IS present must validate: a present-but-
+        // invalid signature signals tampering rather than simply an unsigned
+        // source, so it is rejected outright rather than downgraded.
+        let is_unsigned = entry.signature.is_none();
+        if let Some(proto_sig) = entry.signature.as_ref() {
+            let signature = convert_proto_signature(proto_sig);
+            if let Err(e) = validate_token_metadata_signature(
+                asset_id,
+                &entry.value,
+                origin_chain,
+                &signature,
+                allowlists,
+            ) {
+                tracing::warn!("Skipping token metadata for '{asset_id}': {e}");
+                continue;
+            }
+        }
+
+        let parsed: TokenMetadataValue = match serde_json::from_str(&entry.value) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("Skipping token metadata for '{asset_id}': invalid value JSON: {e}");
+                continue;
+            }
+        };
+
+        registry.by_asset_id.insert(
+            asset_id.clone(),
+            TokenMeta {
+                symbol: parsed.symbol,
+                decimals: parsed.decimals,
+            },
+        );
+        if is_unsigned {
+            unsigned_count += 1;
+        }
+    }
+    if unsigned_count > 0 {
+        tracing::warn!(
+            "Accepted {unsigned_count} unsigned token metadata entr(y/ies): integrity/provenance unverified"
+        );
+    }
+    if registry.by_asset_id.is_empty() {
+        return None;
+    }
+    Some(registry)
+}
+
+/// Deterministic 32-byte seeds used to sign token metadata in local dev
+/// tooling and this module's own tests. Not production keys.
+#[cfg(any(test, feature = "dev-signing"))]
+pub const DEV_NEAR_SIGNING_KEY_SEED: [u8; 32] = [0x51u8; 32];
+#[cfg(any(test, feature = "dev-signing"))]
+pub const DEV_ETHEREUM_SIGNING_KEY_SEED: [u8; 32] = [0x52u8; 32];
+#[cfg(any(test, feature = "dev-signing"))]
+pub const DEV_SOLANA_SIGNING_KEY_SEED: [u8; 32] = [0x53u8; 32];
+
+/// Sign `value` (the exact `TokenMetadataEntry.value` bytes) with an ed25519
+/// seed (Near or Solana origin) and return a proto `SignatureMetadata` ready
+/// to drop into `TokenMetadataEntry.signature`.
+#[cfg(any(test, feature = "dev-signing"))]
+pub fn sign_token_metadata_ed25519(
+    asset_id: &str,
+    value: &str,
+    seed: &[u8; 32],
+    prehash: fn(&str, &[u8]) -> [u8; 32],
+) -> generated::parser::SignatureMetadata {
+    use ed25519_dalek::{Signer, SigningKey};
+    let signing_key = SigningKey::from_bytes(seed);
+    let verifying_key = signing_key.verifying_key();
+    let hash = prehash(asset_id, value.as_bytes());
+    let signature = signing_key.sign(&hash);
+    generated::parser::SignatureMetadata {
+        value: hex::encode(signature.to_bytes()),
+        metadata: vec![
+            generated::parser::Metadata {
+                key: "algorithm".to_string(),
+                value: ED25519_ALGORITHM.to_string(),
+            },
+            generated::parser::Metadata {
+                key: "public_key".to_string(),
+                value: hex::encode(verifying_key.to_bytes()),
+            },
+        ],
+    }
+}
+
+/// Sign `value` (the exact `TokenMetadataEntry.value` bytes) with a secp256k1
+/// seed (Ethereum origin) and return a proto `SignatureMetadata` ready to drop
+/// into `TokenMetadataEntry.signature`.
+#[cfg(any(test, feature = "dev-signing"))]
+pub fn sign_token_metadata_secp256k1(
+    asset_id: &str,
+    value: &str,
+    seed: &[u8; 32],
+) -> Result<generated::parser::SignatureMetadata, String> {
+    use k256::ecdsa::signature::hazmat::PrehashSigner;
+    let signing_key = Secp256k1SigningKey::from_bytes(seed.into())
+        .map_err(|e| format!("invalid secp256k1 signing key seed: {e}"))?;
+    let verifying_key = Secp256k1VerifyingKey::from(&signing_key);
+    let hash = visualsign::signing::ethereum_token_metadata_prehash(asset_id, value.as_bytes());
+    let signature: Secp256k1Signature = signing_key
+        .sign_prehash(&hash)
+        .map_err(|e| format!("failed to sign token metadata hash: {e}"))?;
+    Ok(generated::parser::SignatureMetadata {
+        value: hex::encode(signature.to_der().as_bytes()),
+        metadata: vec![
+            generated::parser::Metadata {
+                key: "algorithm".to_string(),
+                value: SECP256K1_ALGORITHM.to_string(),
+            },
+            generated::parser::Metadata {
+                key: "public_key".to_string(),
+                value: hex::encode(verifying_key.to_encoded_point(false).as_bytes()),
+            },
+        ],
+    })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use generated::parser::{NearMetadata, TokenMetadataEntry};
+
+    const ASSET_ID: &str = "nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near";
+    const VALUE: &str = r#"{"symbol":"USDC.e","decimals":6}"#;
+
+    fn near_allowlist() -> TokenMetadataSignerAllowlists {
+        let mut near = SignerAllowlist::new();
+        near.insert(
+            ed25519_dalek::SigningKey::from_bytes(&DEV_NEAR_SIGNING_KEY_SEED)
+                .verifying_key()
+                .to_bytes()
+                .to_vec(),
+        );
+        TokenMetadataSignerAllowlists {
+            near,
+            ethereum: SignerAllowlist::new(),
+            solana: SignerAllowlist::new(),
+        }
+    }
+
+    fn ethereum_allowlist() -> TokenMetadataSignerAllowlists {
+        let signing_key =
+            Secp256k1SigningKey::from_bytes((&DEV_ETHEREUM_SIGNING_KEY_SEED).into()).unwrap();
+        let verifying_key = Secp256k1VerifyingKey::from(&signing_key);
+        let mut ethereum = SignerAllowlist::new();
+        ethereum.insert(verifying_key.to_encoded_point(false).as_bytes().to_vec());
+        TokenMetadataSignerAllowlists {
+            near: SignerAllowlist::new(),
+            ethereum,
+            solana: SignerAllowlist::new(),
+        }
+    }
+
+    fn solana_allowlist() -> TokenMetadataSignerAllowlists {
+        let mut solana = SignerAllowlist::new();
+        solana.insert(
+            ed25519_dalek::SigningKey::from_bytes(&DEV_SOLANA_SIGNING_KEY_SEED)
+                .verifying_key()
+                .to_bytes()
+                .to_vec(),
+        );
+        TokenMetadataSignerAllowlists {
+            near: SignerAllowlist::new(),
+            ethereum: SignerAllowlist::new(),
+            solana,
+        }
+    }
+
+    fn empty_allowlists() -> TokenMetadataSignerAllowlists {
+        TokenMetadataSignerAllowlists {
+            near: SignerAllowlist::new(),
+            ethereum: SignerAllowlist::new(),
+            solana: SignerAllowlist::new(),
+        }
+    }
+
+    #[test]
+    fn near_origin_valid_signature_verifies() {
+        let sig_meta = sign_token_metadata_ed25519(
+            ASSET_ID,
+            VALUE,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        let sig = convert_proto_signature(&sig_meta);
+        assert!(
+            validate_token_metadata_signature(
+                ASSET_ID,
+                VALUE,
+                TokenOriginChain::Near,
+                &sig,
+                &near_allowlist()
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn unspecified_origin_defaults_to_near_curve() {
+        let sig_meta = sign_token_metadata_ed25519(
+            ASSET_ID,
+            VALUE,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        let sig = convert_proto_signature(&sig_meta);
+        assert!(
+            validate_token_metadata_signature(
+                ASSET_ID,
+                VALUE,
+                TokenOriginChain::Unspecified,
+                &sig,
+                &near_allowlist()
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn ethereum_origin_valid_signature_verifies() {
+        let sig_meta =
+            sign_token_metadata_secp256k1(ASSET_ID, VALUE, &DEV_ETHEREUM_SIGNING_KEY_SEED).unwrap();
+        let sig = convert_proto_signature(&sig_meta);
+        assert!(
+            validate_token_metadata_signature(
+                ASSET_ID,
+                VALUE,
+                TokenOriginChain::Ethereum,
+                &sig,
+                &ethereum_allowlist()
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn solana_origin_valid_signature_verifies() {
+        let sig_meta = sign_token_metadata_ed25519(
+            ASSET_ID,
+            VALUE,
+            &DEV_SOLANA_SIGNING_KEY_SEED,
+            visualsign::signing::solana_token_metadata_prehash,
+        );
+        let sig = convert_proto_signature(&sig_meta);
+        assert!(
+            validate_token_metadata_signature(
+                ASSET_ID,
+                VALUE,
+                TokenOriginChain::Solana,
+                &sig,
+                &solana_allowlist()
+            )
+            .is_ok()
+        );
+    }
+
+    /// A Near-origin signature must not verify under a different origin
+    /// chain's tag.
+    #[test]
+    fn signature_does_not_cross_origin_chains() {
+        let sig_meta = sign_token_metadata_ed25519(
+            ASSET_ID,
+            VALUE,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        let sig = convert_proto_signature(&sig_meta);
+        assert!(
+            validate_token_metadata_signature(
+                ASSET_ID,
+                VALUE,
+                TokenOriginChain::Solana,
+                &sig,
+                &near_allowlist()
+            )
+            .is_err(),
+            "a Near-tagged signature must not verify under the Solana tag"
+        );
+    }
+
+    #[test]
+    fn tampered_value_rejected() {
+        let sig_meta = sign_token_metadata_ed25519(
+            ASSET_ID,
+            VALUE,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        let sig = convert_proto_signature(&sig_meta);
+        let tampered = r#"{"symbol":"PHISH","decimals":6}"#;
+        assert!(
+            validate_token_metadata_signature(
+                ASSET_ID,
+                tampered,
+                TokenOriginChain::Near,
+                &sig,
+                &near_allowlist()
+            )
+            .is_err()
+        );
+    }
+
+    /// A signature is valid only for the exact asset id it was produced for.
+    #[test]
+    fn signature_bound_to_asset_id_rejects_replay() {
+        let sig_meta = sign_token_metadata_ed25519(
+            ASSET_ID,
+            VALUE,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        let sig = convert_proto_signature(&sig_meta);
+        assert!(
+            validate_token_metadata_signature(
+                "nep141:a-different-token.near",
+                VALUE,
+                TokenOriginChain::Near,
+                &sig,
+                &near_allowlist()
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn unlisted_signer_rejected() {
+        let sig_meta = sign_token_metadata_ed25519(
+            ASSET_ID,
+            VALUE,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        let sig = convert_proto_signature(&sig_meta);
+        let result = validate_token_metadata_signature(
+            ASSET_ID,
+            VALUE,
+            TokenOriginChain::Near,
+            &sig,
+            &empty_allowlists(),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not in allowlist"));
+    }
+
+    fn make_mappings(
+        entries: Vec<(&str, TokenMetadataEntry)>,
+    ) -> std::collections::BTreeMap<String, TokenMetadataEntry> {
+        entries
+            .into_iter()
+            .map(|(id, entry)| (id.to_string(), entry))
+            .collect()
+    }
+
+    #[test]
+    fn extract_no_metadata_is_none() {
+        assert!(try_extract_from_chain_metadata(None, &near_allowlist()).is_none());
+    }
+
+    #[test]
+    fn extract_non_near_metadata_is_none() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(
+                generated::parser::EthereumMetadata {
+                    network_id: None,
+                    abi_mappings: Default::default(),
+                },
+            )),
+        };
+        assert!(try_extract_from_chain_metadata(Some(&metadata), &near_allowlist()).is_none());
+    }
+
+    #[test]
+    fn extract_unsigned_entry_accepted() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("NEAR_MAINNET".to_string()),
+                token_mappings: make_mappings(vec![(
+                    ASSET_ID,
+                    TokenMetadataEntry {
+                        value: VALUE.to_string(),
+                        signature: None,
+                        origin_chain: None,
+                    },
+                )]),
+            })),
+        };
+        let registry = try_extract_from_chain_metadata(Some(&metadata), &near_allowlist())
+            .expect("unsigned entry must still be registered");
+        let meta = registry.by_asset_id.get(ASSET_ID).expect("present");
+        assert_eq!(meta.symbol, "USDC.e");
+        assert_eq!(meta.decimals, 6);
+    }
+
+    #[test]
+    fn extract_signed_entry_verifies_and_registers() {
+        let sig_meta = sign_token_metadata_ed25519(
+            ASSET_ID,
+            VALUE,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("NEAR_MAINNET".to_string()),
+                token_mappings: make_mappings(vec![(
+                    ASSET_ID,
+                    TokenMetadataEntry {
+                        value: VALUE.to_string(),
+                        signature: Some(sig_meta),
+                        origin_chain: Some(TokenOriginChain::Near as i32),
+                    },
+                )]),
+            })),
+        };
+        let registry = try_extract_from_chain_metadata(Some(&metadata), &near_allowlist())
+            .expect("signed entry must verify and register");
+        assert!(registry.by_asset_id.contains_key(ASSET_ID));
+    }
+
+    /// An entry that carries a signature that fails validation (unauthorized
+    /// signer) must be rejected outright, not silently downgraded to unsigned.
+    #[test]
+    fn extract_rejects_entry_with_unauthorized_signature() {
+        let sig_meta = sign_token_metadata_ed25519(
+            ASSET_ID,
+            VALUE,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("NEAR_MAINNET".to_string()),
+                token_mappings: make_mappings(vec![(
+                    ASSET_ID,
+                    TokenMetadataEntry {
+                        value: VALUE.to_string(),
+                        signature: Some(sig_meta),
+                        origin_chain: Some(TokenOriginChain::Near as i32),
+                    },
+                )]),
+            })),
+        };
+        // No allowlist authorizes the dev seed used above.
+        assert!(try_extract_from_chain_metadata(Some(&metadata), &empty_allowlists()).is_none());
+    }
+
+    #[test]
+    fn extract_invalid_value_json_skipped() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: None,
+                token_mappings: make_mappings(vec![(
+                    ASSET_ID,
+                    TokenMetadataEntry {
+                        value: "not valid json".to_string(),
+                        signature: None,
+                        origin_chain: None,
+                    },
+                )]),
+            })),
+        };
+        assert!(try_extract_from_chain_metadata(Some(&metadata), &near_allowlist()).is_none());
+    }
+
+    #[test]
+    fn extract_decimals_out_of_range_skipped() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: None,
+                token_mappings: make_mappings(vec![(
+                    ASSET_ID,
+                    TokenMetadataEntry {
+                        value: r#"{"symbol":"BROKEN","decimals":999}"#.to_string(),
+                        signature: None,
+                        origin_chain: None,
+                    },
+                )]),
+            })),
+        };
+        assert!(try_extract_from_chain_metadata(Some(&metadata), &near_allowlist()).is_none());
+    }
+
+    #[test]
+    fn extract_oversized_value_skipped() {
+        let oversized = format!(
+            r#"{{"symbol":"{}","decimals":6}}"#,
+            "A".repeat(MAX_TOKEN_METADATA_VALUE_BYTES)
+        );
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: None,
+                token_mappings: make_mappings(vec![(
+                    ASSET_ID,
+                    TokenMetadataEntry {
+                        value: oversized,
+                        signature: None,
+                        origin_chain: None,
+                    },
+                )]),
+            })),
+        };
+        assert!(try_extract_from_chain_metadata(Some(&metadata), &near_allowlist()).is_none());
+    }
+}

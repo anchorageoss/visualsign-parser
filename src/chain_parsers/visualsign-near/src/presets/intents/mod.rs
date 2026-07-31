@@ -6,8 +6,23 @@
 
 mod args;
 mod render;
+mod token_signature;
 mod tokens;
 mod verify;
+
+pub use token_signature::{
+    TokenMetadataSignerAllowlists, authorized_token_metadata_signers,
+    try_extract_from_chain_metadata as try_extract_token_metadata_from_chain_metadata,
+};
+
+/// Dev/CLI signing helpers for constructing signed `TokenMetadataEntry` proto
+/// values (e.g. for local test fixtures). Gated the same way as the
+/// underlying implementation; see `token_signature` module docs.
+#[cfg(any(test, feature = "dev-signing"))]
+pub use token_signature::{
+    DEV_ETHEREUM_SIGNING_KEY_SEED, DEV_NEAR_SIGNING_KEY_SEED, DEV_SOLANA_SIGNING_KEY_SEED,
+    sign_token_metadata_ed25519, sign_token_metadata_secp256k1,
+};
 
 use thiserror::Error;
 

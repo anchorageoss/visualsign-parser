@@ -351,6 +351,13 @@ mod tests {
     }
 
     #[test]
+    fn chain_metadata_input_near_deserializes() {
+        let json = r#"{"chain":"CHAIN_NEAR","networkId":"NEAR_MAINNET"}"#;
+        let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
+        assert!(matches!(parsed, ChainMetadataInput::Near(_)));
+    }
+
+    #[test]
     fn ethereum_metadata_abi_mappings_defaults_when_omitted() {
         let json = r#"{"networkId":"ETHEREUM_MAINNET"}"#;
         let parsed: EthereumMetadata = serde_json::from_str(json).unwrap();

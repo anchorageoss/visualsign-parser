@@ -49,6 +49,7 @@ impl parser_cli_core::ChainPlugin for NearPlugin {
         Ok(Some(ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                 network_id: Some(network.to_uppercase()),
+                token_mappings: Default::default(),
             })),
         }))
     }
@@ -80,6 +81,7 @@ mod tests {
             ChainMetadata {
                 metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                     network_id: Some("NEAR_TESTNET".to_string()),
+                    token_mappings: Default::default(),
                 })),
             }
         );
