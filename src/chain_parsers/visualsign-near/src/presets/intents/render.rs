@@ -238,6 +238,13 @@ fn render_nft_withdraw(w: &NftWithdraw) -> Result<Fields, VisualSignError> {
 }
 
 fn render_mt_withdraw(w: &MtWithdraw) -> Result<Fields, VisualSignError> {
+    if w.token_ids.len() != w.amounts.len() {
+        return Err(VisualSignError::ValidationError(format!(
+            "mt_withdraw token_ids/amounts length mismatch: {} token_ids vs {} amounts",
+            w.token_ids.len(),
+            w.amounts.len()
+        )));
+    }
     let mut fields = vec![
         create_text_field("Token", w.token.as_str())?.signable_payload_field,
         create_text_field("To", w.receiver_id.as_str())?.signable_payload_field,
@@ -266,8 +273,11 @@ pub(crate) fn render_signature(
     let mut fields = vec![create_text_field("Standard", standard)?.signable_payload_field];
     match check {
         SignatureCheck::Valid { recovered_key } => fields.push(
-            create_text_field("Signature", &format!("valid (recovered {recovered_key})"))?
-                .signable_payload_field,
+            create_text_field(
+                "Signature",
+                &format!("valid for key {recovered_key} (key-to-account binding not verified)"),
+            )?
+            .signable_payload_field,
         ),
         SignatureCheck::Invalid => {
             fields.push(diagnostic("signature", "signature verification failed")?);
@@ -523,6 +533,20 @@ mod tests {
         let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
         assert!(labels.contains(&"Message"), "labels: {labels:?}");
         assert!(labels.contains(&"Storage Deposit"), "labels: {labels:?}");
+    }
+
+    // Regression coverage for a signing-integrity gap: token_ids/amounts are
+    // two independent vectors with no length agreement enforced at deserialize
+    // time, and `zip` silently drops the extras rather than erroring -- the
+    // same class of gap as the storage_deposit/message tests above, but here
+    // attacker-controlled input rather than an oversight.
+    #[test]
+    fn mt_withdraw_rejects_token_ids_amounts_length_mismatch() {
+        let intent = intent_from(
+            r#"{"intent":"mt_withdraw","token":"mt.near","receiver_id":"alice.near","token_ids":["gold","silver","bronze"],"amounts":["5"]}"#,
+        );
+        let result = render_intent(&intent, &empty_reg());
+        assert!(matches!(result, Err(VisualSignError::ValidationError(_))));
     }
 
     #[test]

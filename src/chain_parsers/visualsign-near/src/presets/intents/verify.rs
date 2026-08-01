@@ -51,7 +51,13 @@ fn has_invalid_secp256k1_recovery_id(payload: &MultiPayload) -> bool {
     let signature = match payload {
         MultiPayload::Erc191(signed) => &signed.signature,
         MultiPayload::Tip191(signed) => &signed.signature,
-        _ => return false,
+        // Ed25519/P256 standards have no recovery id, so ecrecover's
+        // out-of-range panic path cannot be reached for these variants.
+        MultiPayload::Nep413(_)
+        | MultiPayload::RawEd25519(_)
+        | MultiPayload::WebAuthn(_)
+        | MultiPayload::TonConnect(_)
+        | MultiPayload::Sep53(_) => return false,
     };
     signature[64] >= 4
 }
