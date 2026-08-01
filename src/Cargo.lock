@@ -3198,6 +3198,7 @@ checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
 dependencies = [
  "curve25519-dalek 4.1.3",
  "ed25519 2.2.3",
+ "rand_core 0.6.4",
  "serde",
  "sha2 0.10.9",
  "subtle",
@@ -6063,6 +6064,7 @@ dependencies = [
  "near-schema-checker-lib",
  "near-stdx",
  "primitive-types 0.10.1",
+ "rand 0.8.5",
  "secp256k1 0.27.0",
  "serde",
  "serde_json",
@@ -14473,7 +14475,9 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "borsh 1.6.0",
+ "generated",
  "hex",
+ "near-crypto",
  "near-primitives",
  "serde",
  "serde_json",

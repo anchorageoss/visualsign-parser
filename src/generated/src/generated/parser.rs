@@ -68,7 +68,7 @@ pub struct ParseRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ChainMetadata {
-    #[prost(oneof = "chain_metadata::Metadata", tags = "1, 2")]
+    #[prost(oneof = "chain_metadata::Metadata", tags = "1, 2, 3")]
     pub metadata: ::core::option::Option<chain_metadata::Metadata>,
 }
 /// Nested message and enum types in `ChainMetadata`.
@@ -88,6 +88,8 @@ pub mod chain_metadata {
         Ethereum(super::EthereumMetadata),
         #[prost(message, tag = "2")]
         Solana(super::SolanaMetadata),
+        #[prost(message, tag = "3")]
+        Near(super::NearMetadata),
     }
 }
 #[cfg_attr(
@@ -242,6 +244,19 @@ pub struct SolanaMetadata {
         ::prost::alloc::string::String,
         Idl,
     >,
+}
+#[cfg_attr(
+    feature = "serde_derive",
+    derive(::serde::Serialize, ::serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
+#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NearMetadata {
+    /// Network identifier string (e.g., "NEAR_MAINNET", "NEAR_TESTNET")
+    #[prost(string, optional, tag = "1")]
+    pub network_id: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[cfg_attr(
     feature = "serde_derive",

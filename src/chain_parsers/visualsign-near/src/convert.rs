@@ -9,7 +9,7 @@ use visualsign::vsptrait::{
 use visualsign::{SignablePayload, SignablePayloadField};
 
 use crate::actions::render_action;
-use crate::networks::NearNetwork;
+use crate::networks::{NearNetwork, extract_network_from_metadata};
 use crate::tx::NearTransaction;
 
 /// Payload version emitted for NEAR transactions.
@@ -42,14 +42,21 @@ impl VisualSignConverter<NearTransaction> for NearVisualSignConverter {
     fn to_visual_sign_payload(
         &self,
         transaction: NearTransaction,
-        _options: VisualSignOptions,
+        options: VisualSignOptions,
     ) -> Result<ConversionResult, VisualSignError> {
         let tx = &transaction.inner;
 
+        if tx.actions().is_empty() {
+            return Err(VisualSignError::ValidationError(
+                "NEAR transaction has no actions".to_string(),
+            ));
+        }
+
+        let network =
+            extract_network_from_metadata(options.metadata.as_ref()).unwrap_or(self.network);
+
         let mut fields: Vec<SignablePayloadField> = Vec::new();
-        fields.push(
-            create_text_field("Network", self.network.display_name())?.signable_payload_field,
-        );
+        fields.push(create_text_field("Network", network.display_name())?.signable_payload_field);
         fields.push(
             create_address_field("From", tx.signer_id().as_str(), None, None, None, None)?
                 .signable_payload_field,
@@ -84,15 +91,33 @@ fn title_for(actions: &[Action]) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use generated::parser::{ChainMetadata, NearMetadata, chain_metadata};
+    use near_crypto::{KeyType, PublicKey};
     use near_primitives::action::{CreateAccountAction, TransferAction};
+    use near_primitives::hash::CryptoHash;
+    use near_primitives::transaction::TransactionV0;
     use near_primitives::types::Balance;
 
     fn transfer() -> Action {
         Action::Transfer(TransferAction {
             deposit: Balance::from_yoctonear(1),
         })
+    }
+
+    fn near_tx(actions: Vec<Action>) -> NearTransaction {
+        NearTransaction {
+            inner: near_primitives::transaction::Transaction::V0(TransactionV0 {
+                signer_id: "alice.near".parse().expect("valid account id"),
+                public_key: PublicKey::empty(KeyType::ED25519),
+                nonce: 0,
+                receiver_id: "bob.near".parse().expect("valid account id"),
+                block_hash: CryptoHash::default(),
+                actions,
+            }),
+        }
     }
 
     #[test]
@@ -118,5 +143,46 @@ mod tests {
             NearNetwork::Testnet
         );
         assert_eq!(NearVisualSignConverter::new().network, NearNetwork::Mainnet);
+    }
+
+    #[test]
+    fn rejects_transaction_with_no_actions() {
+        let converter = NearVisualSignConverter::new();
+        let result =
+            converter.to_visual_sign_payload(near_tx(vec![]), VisualSignOptions::default());
+        assert!(matches!(result, Err(VisualSignError::ValidationError(_))));
+    }
+
+    fn field_text(field: &SignablePayloadField) -> &str {
+        let SignablePayloadField::TextV2 { text_v2, .. } = field else {
+            panic!("expected a TextV2 field, got {field:?}");
+        };
+        &text_v2.text
+    }
+
+    #[test]
+    fn renders_constructed_network_when_metadata_absent() {
+        let converter = NearVisualSignConverter::with_network(NearNetwork::Testnet);
+        let result = converter
+            .to_visual_sign_payload(near_tx(vec![transfer()]), VisualSignOptions::default())
+            .expect("conversion succeeds");
+        assert_eq!(field_text(&result.payload.fields[0]), "NEAR Testnet");
+    }
+
+    #[test]
+    fn metadata_network_overrides_constructed_network() {
+        let converter = NearVisualSignConverter::new();
+        let options = VisualSignOptions {
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                    network_id: Some("NEAR_TESTNET".to_string()),
+                })),
+            }),
+            ..Default::default()
+        };
+        let result = converter
+            .to_visual_sign_payload(near_tx(vec![transfer()]), options)
+            .expect("conversion succeeds");
+        assert_eq!(field_text(&result.payload.fields[0]), "NEAR Testnet");
     }
 }

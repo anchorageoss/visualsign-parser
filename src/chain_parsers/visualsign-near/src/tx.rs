@@ -63,10 +63,13 @@ mod tests {
         assert_eq!(tx.inner.signer_id().as_str(), "alice.near");
         assert_eq!(tx.inner.receiver_id().as_str(), "bob.near");
         assert_eq!(tx.inner.actions().len(), 1);
-        assert!(matches!(
-            tx.inner.actions()[0],
-            near_primitives::action::Action::Transfer(_)
-        ));
+        let near_primitives::action::Action::Transfer(transfer) = &tx.inner.actions()[0] else {
+            panic!("expected Transfer");
+        };
+        assert_eq!(
+            transfer.deposit.as_yoctonear(),
+            1_000_000_000_000_000_000_000_000
+        );
     }
 
     #[test]
