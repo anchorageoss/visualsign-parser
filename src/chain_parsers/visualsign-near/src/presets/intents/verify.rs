@@ -8,9 +8,19 @@ use defuse_crypto::SignedPayload;
 
 /// Outcome of verifying one payload's signature.
 pub(crate) enum SignatureCheck {
-    /// Signature is cryptographically valid; `recovered_key` is the public key
-    /// the signature recovers to (NOT a proof of account binding).
-    Valid { recovered_key: String },
+    /// Signature is cryptographically valid.
+    Valid {
+        /// The public key the signature recovers to.
+        recovered_key: String,
+        /// The account id `recovered_key` implies under NEAR's (or defuse's
+        /// EVM-style) implicit-account convention. Comparable against a
+        /// payload's `signer_id` when that id has the same shape -- see
+        /// `render.rs::looks_like_implicit_account`. For a named account
+        /// (e.g. `alice.near`), this comparison says nothing: named accounts'
+        /// access keys are registered on-chain, decoupled from any implicit
+        /// derivation.
+        implied_account_id: String,
+    },
     /// Signature did not verify.
     Invalid,
 }
@@ -32,6 +42,7 @@ pub(crate) fn verify_and_extract(
         match payload.verify() {
             Some(key) => SignatureCheck::Valid {
                 recovered_key: key.to_string(),
+                implied_account_id: key.to_implicit_account_id().to_string(),
             },
             None => SignatureCheck::Invalid,
         }

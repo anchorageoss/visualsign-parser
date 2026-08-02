@@ -97,10 +97,11 @@ pub(crate) fn section(
     registry: &Reg,
 ) -> Result<Fields, VisualSignError> {
     let (check, extracted) = super::verify::verify_and_extract(mp);
+    let signer_id = extracted.as_ref().ok().map(|p| p.signer_id.as_str());
     let mut fields = vec![
         create_text_field("Signed Intent", &format!("{index} of {total}"))?.signable_payload_field,
     ];
-    fields.extend(render_signature(standard_name(mp), &check)?);
+    fields.extend(render_signature(standard_name(mp), &check, signer_id)?);
     match &extracted {
         Ok(payload) => fields.extend(render_single(payload, registry)?),
         Err(e) => fields.push(diagnostic(
@@ -265,20 +266,74 @@ fn render_native_withdraw(w: &NativeWithdraw) -> Result<Fields, VisualSignError>
     ])
 }
 
+/// Whether `signer_id` has the shape of a key-derived implicit account --
+/// NEAR's 64-hex-char convention, or defuse's own `"0x"` + 40-hex convention
+/// for EVM-style signers -- rather than a human-chosen named account (e.g.
+/// `alice.near`). Only for these shapes is key-to-account binding checkable
+/// offline: a named account's access keys are registered on-chain, decoupled
+/// from any implicit derivation, so comparing against one would produce
+/// false-positive mismatches on entirely legitimate transactions.
+fn looks_like_implicit_account(signer_id: &str) -> bool {
+    let is_hex = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_hexdigit());
+    (signer_id.len() == 64 && is_hex(signer_id))
+        || signer_id
+            .strip_prefix("0x")
+            .is_some_and(|rest| rest.len() == 40 && is_hex(rest))
+}
+
 /// Render the standard + signature-status fields for one signed payload.
+///
+/// `signer_id` is the payload's claimed signer, when extraction succeeded.
+/// When it has an implicit-account shape, the recovered key's own implied
+/// account id is compared against it -- a real pass/fail check, not a hedge.
+/// For any other shape (a named account) the binding genuinely requires
+/// chain access this parser doesn't have, so it stays a hedge.
 pub(crate) fn render_signature(
     standard: &str,
     check: &SignatureCheck,
+    signer_id: Option<&str>,
 ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
     let mut fields = vec![create_text_field("Standard", standard)?.signable_payload_field];
     match check {
-        SignatureCheck::Valid { recovered_key } => fields.push(
-            create_text_field(
-                "Signature",
-                &format!("valid for key {recovered_key} (key-to-account binding not verified)"),
-            )?
-            .signable_payload_field,
-        ),
+        SignatureCheck::Valid {
+            recovered_key,
+            implied_account_id,
+        } => match signer_id.filter(|id| looks_like_implicit_account(id)) {
+            Some(id) if id == implied_account_id => {
+                fields.push(
+                        create_text_field(
+                            "Signature",
+                            &format!(
+                                "valid for key {recovered_key} (account binding confirmed: matches {id})"
+                            ),
+                        )?
+                        .signable_payload_field,
+                    );
+            }
+            Some(id) => {
+                fields.push(
+                    create_text_field("Signature", &format!("valid for key {recovered_key}"))?
+                        .signable_payload_field,
+                );
+                fields.push(diagnostic(
+                        "account-binding",
+                        &format!(
+                            "signer_id {id} does not match the key that signed this payload (implies {implied_account_id})"
+                        ),
+                    )?);
+            }
+            None => {
+                fields.push(
+                    create_text_field(
+                        "Signature",
+                        &format!(
+                            "valid for key {recovered_key} (key-to-account binding not verified)"
+                        ),
+                    )?
+                    .signable_payload_field,
+                );
+            }
+        },
         SignatureCheck::Invalid => {
             fields.push(diagnostic("signature", "signature verification failed")?);
         }
@@ -348,26 +403,153 @@ mod tests {
     }
 
     #[test]
+    fn looks_like_implicit_account_accepts_both_recognized_shapes() {
+        assert!(looks_like_implicit_account(
+            "74affa71ab030d400fdfa1bed033dfa6fd3ae34f92d17c046ebe368e80d53751"
+        ));
+        assert!(looks_like_implicit_account(
+            "0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025"
+        ));
+    }
+
+    #[test]
+    fn looks_like_implicit_account_rejects_named_and_malformed_ids() {
+        assert!(!looks_like_implicit_account("alice.near"));
+        assert!(!looks_like_implicit_account(""));
+        // 63 hex chars: one short of the implicit-account length.
+        assert!(!looks_like_implicit_account(
+            "4affa71ab030d400fdfa1bed033dfa6fd3ae34f92d17c046ebe368e80d53751"
+        ));
+        // 64 chars but not all hex.
+        assert!(!looks_like_implicit_account(
+            "74affa71ab030d400fdfa1bed033dfa6fd3ae34f92d17c046ebe368e80d5375g"
+        ));
+        // 0x + 39 hex chars: one short of the EVM-address length.
+        assert!(!looks_like_implicit_account(
+            "0x7c5185167401ed00cf5f5b2fc97d9bbfdb7d025"
+        ));
+        // 0x + 40 chars but not all hex.
+        assert!(!looks_like_implicit_account(
+            "0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d0zz"
+        ));
+        // No 0x prefix at all, despite being 40 hex chars.
+        assert!(!looks_like_implicit_account(
+            "17c5185167401ed00cf5f5b2fc97d9bbfdb7d025"
+        ));
+    }
+
+    fn valid_check(implied_account_id: &str) -> SignatureCheck {
+        SignatureCheck::Valid {
+            recovered_key: "ed25519:abc".to_string(),
+            implied_account_id: implied_account_id.to_string(),
+        }
+    }
+
+    #[test]
     fn signature_fields_present_for_valid() {
-        let fields = render_signature(
-            "nep413",
-            &SignatureCheck::Valid {
-                recovered_key: "ed25519:abc".to_string(),
-            },
-        )
-        .expect("render");
+        // signer_id is a named account: binding genuinely isn't checkable,
+        // so this stays the two-field (Standard, Signature) hedge shape.
+        let fields = render_signature("nep413", &valid_check("64hex..."), Some("alice.near"))
+            .expect("render");
         let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
         assert_eq!(labels, ["Standard", "Signature"]);
     }
 
     #[test]
     fn invalid_signature_renders_warning() {
-        let fields = render_signature("erc191", &SignatureCheck::Invalid).expect("render");
+        let fields = render_signature("erc191", &SignatureCheck::Invalid, None).expect("render");
         assert!(
             super::super::test_support::is_warning_diagnostic(&fields[1], "signature"),
             "expected a signature warning, got {:?}",
             fields[1]
         );
+    }
+
+    #[test]
+    fn signature_binding_confirmed_when_implicit_signer_matches() {
+        let id = "74affa71ab030d400fdfa1bed033dfa6fd3ae34f92d17c046ebe368e80d53751";
+        let fields = render_signature("raw_ed25519", &valid_check(id), Some(id)).expect("render");
+        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
+        assert_eq!(labels, ["Standard", "Signature"]);
+        match &fields[1] {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                assert!(
+                    text_v2.text.contains("account binding confirmed"),
+                    "{}",
+                    text_v2.text
+                );
+            }
+            other => panic!("expected TextV2, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn signature_binding_confirmed_when_evm_style_signer_matches() {
+        // Real signer_id from the pinned _vector_erc191.input fixture.
+        let id = "0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025";
+        let fields = render_signature("erc191", &valid_check(id), Some(id)).expect("render");
+        match &fields[1] {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                assert!(
+                    text_v2.text.contains("account binding confirmed"),
+                    "{}",
+                    text_v2.text
+                );
+            }
+            other => panic!("expected TextV2, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn signature_binding_mismatch_is_a_diagnostic_not_a_hedge() {
+        // The key recovers to the pinned fixture's real address, but the
+        // payload claims an unrelated one -- e.g. attacker.near substituting
+        // their own signer_id onto someone else's signature.
+        let fields = render_signature(
+            "erc191",
+            &valid_check("0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025"),
+            Some("0x00000000000000000000000000000000000000ff"),
+        )
+        .expect("render");
+        assert!(
+            super::super::test_support::is_warning_diagnostic(&fields[2], "account-binding"),
+            "expected an account-binding warning, got {fields:?}"
+        );
+    }
+
+    #[test]
+    fn signature_binding_mismatch_detected_for_implicit_ed25519_signer() {
+        let fields = render_signature(
+            "raw_ed25519",
+            &valid_check("74affa71ab030d400fdfa1bed033dfa6fd3ae34f92d17c046ebe368e80d53751"),
+            Some("000000000000000000000000000000000000000000000000000000000000dead"),
+        )
+        .expect("render");
+        assert!(
+            super::super::test_support::is_warning_diagnostic(&fields[2], "account-binding"),
+            "expected an account-binding warning, got {fields:?}"
+        );
+    }
+
+    #[test]
+    fn signature_binding_not_checked_for_named_account_even_with_valid_key() {
+        // Named accounts' keys are registered on-chain; an implicit-derived
+        // id has nothing to compare against, so this must stay a hedge, not
+        // a false mismatch.
+        let fields = render_signature(
+            "nep413",
+            &valid_check("74affa71ab030d400fdfa1bed033dfa6fd3ae34f92d17c046ebe368e80d53751"),
+            Some("alice.near"),
+        )
+        .expect("render");
+        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
+        assert_eq!(labels, ["Standard", "Signature"]);
+        match &fields[1] {
+            SignablePayloadField::TextV2 { text_v2, .. } => {
+                assert!(text_v2.text.contains("not verified"), "{}", text_v2.text);
+            }
+            other => panic!("expected TextV2, got {other:?}"),
+        }
     }
 
     /// When the inner `payload` string doesn't parse as a `DefusePayload`,
