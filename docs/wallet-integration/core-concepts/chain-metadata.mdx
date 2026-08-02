@@ -232,7 +232,7 @@ See [Library Integration](../library/getting-started) for the full end-to-end ex
 | Source | How to get |
 |--------|------------|
 | Token contract | `ft_metadata` view call on the NEP-141 account |
-| Omni Bridge registry | `get_token_id` / `get_token_decimals` view calls on `omni.bridge.near` |
+| Omni Bridge registry | `get_token_id` / `get_native_token_id` view calls on `omni.bridge.near` resolve to a NEP-141 account, whose `ft_metadata` then gives symbol/decimals |
 
 ## Without metadata
 
