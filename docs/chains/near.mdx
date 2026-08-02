@@ -3,7 +3,7 @@ title: NEAR
 description: NEAR transactions and NEAR Intents (Defuse Protocol) signing
 ---
 
-The NEAR module decodes raw NEAR transactions into VisualSign payloads, and renders both halves of the [NEAR Intents](https://docs.near-intents.org) protocol: the pre-signature intent a user is about to sign, and the signed batch a `execute_intents` call submits on-chain.
+The NEAR module decodes raw NEAR transactions into VisualSign payloads, and renders both halves of the [NEAR Intents](https://docs.near-intents.org) protocol: the pre-signature intent a user is about to sign, and the signed batch an `execute_intents` call submits on-chain.
 
 ## Architecture overview
 
@@ -11,7 +11,7 @@ The NEAR module decodes raw NEAR transactions into VisualSign payloads, and rend
 
 NEAR carries two distinct payload shapes under a single `CHAIN_NEAR` identity, discriminated purely by input format:
 
-- **A borsh-encoded transaction** (`near::sign_transaction`) — the standard NEAR wire format (`near-primitives::Transaction`, signed or unsigned), hex or base64 encoded.
+- **A borsh-encoded transaction** (`near::sign_transaction`) — the standard NEAR wire format (`near_primitives::transaction::Transaction` or `SignedTransaction`), hex or base64 encoded.
 - **A pre-signature intents envelope** (`near::sign_intent`) — a bare `DefusePayload` JSON object, the message a user signs before it is wrapped in a signature standard and submitted to solvers.
 
 Borsh bytes are never valid JSON, so the two formats never collide: the parser attempts a borsh decode first, and only falls back to validating the input as a JSON envelope if that fails. Input that is neither is rejected — never guessed at or partially reinterpreted.
@@ -51,7 +51,7 @@ For an intents envelope (either pre-signature or inside a decoded `execute_inten
 
 ## Signature standards
 
-The intents preset verifies all seven signature standards the protocol defines — NEP-413, ERC-191, TIP-191, raw ed25519, WebAuthn, TonConnect, and SEP-53 — using the protocol's own canonical implementation ([`near/intents`](https://github.com/near/intents)) rather than a reimplementation, so new intent variants and signing standards stay correct as the protocol evolves. Verification recovers a signing key; it does not prove that key controls the claimed account (no on-chain state is available to the parser to check that binding).
+The intents preset verifies all seven signature standards the protocol defines — NEP-413, ERC-191, TIP-191, raw ed25519, WebAuthn, TonConnect, and SEP-53 — using the protocol's own canonical implementation ([`near/intents`](https://github.com/near/intents)) rather than a reimplementation, so new intent variants and signing standards stay correct as the protocol evolves. Verification recovers a signing key; whether that key is checked against the claimed account depends on the account's shape. For an implicit account, the account id is itself derived from the key, so the recovered key is compared against it directly — a mismatch renders as a hard finding, not a hedge. For a named account (`alice.near`), that key-to-account relationship lives in on-chain access-key state the parser doesn't have, so it renders as an explicit "not verified" caveat instead.
 
 ERC-191 and TIP-191 recover a secp256k1 key rather than pass/fail: a well-formed signature always recovers *some* key, so a tampered message recovers a different key rather than failing outright. A malformed recovery byte is rejected before it reaches verification, since the native `ecrecover` backend otherwise panics on out-of-range input — a malformed payload must be treated as invalid input, never a crash.
 
@@ -77,7 +77,7 @@ Output:
 ```
 ┌─ Transaction: Transfer
 │  Version: 0
-│  Type: VisualSign
+│  Type: NearTx
 │
 └─ Fields:
    ├─ Network: NEAR Mainnet
@@ -100,7 +100,7 @@ Output:
 ```
 ┌─ Transaction: NEAR Intent
 │  Version: 0
-│  Type: VisualSign
+│  Type: NearTx
 │
 └─ Fields:
    ├─ Signer: alice.near
@@ -112,7 +112,7 @@ Output:
    └─ Amount: 1 wNEAR
 ```
 
-The `--network` flag is accepted for parity with other chains but isn't used today; the NEAR parser has no chain-metadata plumbing.
+The `--network` flag selects the rendered `Network` header — `NEAR_MAINNET` (the default) or `NEAR_TESTNET`. An unrecognized value errors before anything renders, rather than silently falling back to mainnet.
 
 ## Implementation details
 
