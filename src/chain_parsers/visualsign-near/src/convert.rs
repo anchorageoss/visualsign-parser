@@ -20,10 +20,12 @@ use crate::presets::intents::{
 };
 use crate::tx::NearTransaction;
 
-/// Build the token-registry override layer for this request: the compiled-in
-/// seeds as the global layer, plus whatever `options.metadata` supplies
-/// (verified per [`crate::presets::intents::TokenMetadataSignerAllowlists`]) as
-/// the request-scoped layer.
+/// Build the token registry for this request: an empty global layer, plus
+/// whatever `options.metadata` supplies (verified per
+/// [`crate::presets::intents::TokenMetadataSignerAllowlists`]) as the
+/// request-scoped layer. The compiled-in seed table lives separately in
+/// `tokens::SEEDS`, consulted by `tokens::resolve` only after this registry's
+/// own lookup misses.
 fn token_registry_for(options: &VisualSignOptions) -> LayeredRegistry<NearTokenRegistry> {
     let request = try_extract_token_metadata_from_chain_metadata(
         options.metadata.as_ref(),

@@ -66,6 +66,13 @@ const ED25519_SIGNATURE_LEN: usize = 64;
 /// `MAX_ABI_JSON_BYTES` in `visualsign-ethereum::abi_metadata`.
 const MAX_TOKEN_METADATA_VALUE_BYTES: usize = 1024;
 
+/// Maximum accepted `decimals` value. `tokens::format_units` computes
+/// `10u128.pow(u32::from(decimals))`, which overflows above 38 -- a remote
+/// panic (debug) or a silently wrapped, wrong-looking amount (release, where
+/// `overflow-checks` isn't enabled) from an unauthenticated request field, so
+/// it is bounded here at ingest rather than defensively inside formatting.
+const MAX_TOKEN_DECIMALS: u8 = 38;
+
 /// Error type for token-metadata signature validation.
 #[derive(Debug, thiserror::Error)]
 pub enum TokenMetadataSignatureError {
@@ -371,6 +378,13 @@ pub fn try_extract_from_chain_metadata(
                 continue;
             }
         };
+        if parsed.decimals > MAX_TOKEN_DECIMALS {
+            tracing::warn!(
+                "Skipping token metadata for '{asset_id}': decimals {} out of range",
+                parsed.decimals
+            );
+            continue;
+        }
 
         registry.by_asset_id.insert(
             asset_id.clone(),
@@ -822,6 +836,28 @@ mod tests {
                     ASSET_ID,
                     TokenMetadataEntry {
                         value: r#"{"symbol":"BROKEN","decimals":999}"#.to_string(),
+                        signature: None,
+                        origin_chain: None,
+                    },
+                )]),
+            })),
+        };
+        assert!(try_extract_from_chain_metadata(Some(&metadata), &near_allowlist()).is_none());
+    }
+
+    // Regression coverage for a remote panic: 999 above is caught by u8
+    // deserialization failing outright, but 39 is a perfectly valid u8 that
+    // still overflows `10u128.pow(decimals)` in `tokens::format_units` --
+    // reachable without a signature, from an unauthenticated request field.
+    #[test]
+    fn extract_decimals_within_u8_but_over_format_bound_skipped() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: None,
+                token_mappings: make_mappings(vec![(
+                    ASSET_ID,
+                    TokenMetadataEntry {
+                        value: r#"{"symbol":"BROKEN","decimals":39}"#.to_string(),
                         signature: None,
                         origin_chain: None,
                     },
