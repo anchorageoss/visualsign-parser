@@ -573,6 +573,7 @@ mod tests {
         assert_eq!(Chain::from_str("aptos"), Ok(Chain::Aptos));
         assert_eq!(Chain::from_str("polkadot"), Ok(Chain::Polkadot));
         assert_eq!(Chain::from_str("tron"), Ok(Chain::Tron));
+        assert_eq!(Chain::from_str("near"), Ok(Chain::Near));
         assert_eq!(
             Chain::from_str("unknown"),
             Ok(Chain::Custom("unknown".to_string()))
@@ -588,6 +589,7 @@ mod tests {
         assert_eq!(Chain::Aptos.as_str(), "Aptos");
         assert_eq!(Chain::Polkadot.as_str(), "Polkadot");
         assert_eq!(Chain::Tron.as_str(), "Tron");
+        assert_eq!(Chain::Near.as_str(), "Near");
         assert_eq!(Chain::Custom("MyChain".to_string()).as_str(), "MyChain");
     }
 
