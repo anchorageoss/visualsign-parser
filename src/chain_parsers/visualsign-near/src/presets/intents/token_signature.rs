@@ -33,10 +33,13 @@
 //! vouch for ABI decoding" must not silently also revoke (or, worse, leave
 //! standing) "trusted to vouch for token metadata."
 //!
-//! As with the ABI/IDL paths, an unsigned entry is still accepted (not every
-//! caller signs yet), while a signature that is present but fails to validate
-//! is rejected outright: a present-but-invalid signature is a stronger signal
-//! of tampering than simply omitting one.
+//! As with the ABI/IDL paths, a signature that is present but fails to
+//! validate is rejected outright: a present-but-invalid signature is a
+//! stronger signal of tampering than simply omitting one. An unsigned entry
+//! may still be accepted (not every caller signs yet), but only when the
+//! deployment's [`MetadataTrustPolicy`] allows it and the asset isn't already
+//! covered by the compiled-in `tokens::SEEDS` table -- an unsigned entry
+//! fills a gap, it never overrides a curated value.
 
 use std::sync::OnceLock;
 
@@ -48,9 +51,9 @@ use k256::ecdsa::SigningKey as Secp256k1SigningKey;
 use k256::ecdsa::signature::hazmat::PrehashVerifier;
 use k256::ecdsa::{Signature as Secp256k1Signature, VerifyingKey as Secp256k1VerifyingKey};
 use serde::Deserialize;
-use visualsign::signing::SignerAllowlist;
+use visualsign::signing::{MetadataTrustPolicy, SignerAllowlist};
 
-use super::{NearTokenRegistry, TokenMeta};
+use super::{NearTokenRegistry, TokenMeta, tokens};
 
 /// The only supported ed25519 algorithm tag (Near and Solana origins).
 const ED25519_ALGORITHM: &str = "ed25519";
@@ -143,8 +146,12 @@ pub struct TokenMetadataSignerAllowlists {
 /// - `VISUALSIGN_SOL_TOKEN_SIGNERS`: comma-separated hex ed25519 public keys.
 ///
 /// An unset (or entirely invalid) env var leaves that chain's allowlist empty,
-/// which rejects every signed entry for that origin chain (fail-closed).
-/// Unsigned entries are unaffected.
+/// which rejects every signed entry for that origin chain (fail-closed). These
+/// allowlists gate only entries that carry a signature; whether an unsigned
+/// entry is accepted at all is controlled separately by the deployment's
+/// [`MetadataTrustPolicy`] and by the gap-fill-only rule in
+/// [`try_extract_from_chain_metadata`] (an unsigned entry is only accepted for
+/// an asset `tokens::SEEDS` doesn't already cover).
 #[must_use]
 pub fn authorized_token_metadata_signers() -> &'static TokenMetadataSignerAllowlists {
     static ALLOW: OnceLock<TokenMetadataSignerAllowlists> = OnceLock::new();
@@ -323,10 +330,19 @@ fn validate_secp256k1(
 /// the Ethereum ABI / Solana IDL extraction functions' convention so callers
 /// can plug the result straight into a
 /// [`visualsign::registry::LayeredRegistry`] request layer.
+///
+/// `trust_policy` gates only whether an entry with no signature at all is
+/// accepted ([`MetadataTrustPolicy::accepts_unsigned`]); a present signature
+/// is always checked against the relevant origin-chain allowlist in
+/// `allowlists`, regardless of posture. Unlike the Ethereum ABI path (a
+/// single allowlist), NEAR already dispatches identity checks per origin
+/// chain, so the allowlist a `MetadataTrustPolicy::RequireAllowlistedSigner`
+/// carries is not itself consulted here -- only the posture it selects is.
 #[must_use]
 pub fn try_extract_from_chain_metadata(
     chain_metadata: Option<&ChainMetadata>,
     allowlists: &TokenMetadataSignerAllowlists,
+    trust_policy: &MetadataTrustPolicy,
 ) -> Option<NearTokenRegistry> {
     let chain_metadata = chain_metadata?;
     let chain_metadata::Metadata::Near(near) = chain_metadata.metadata.as_ref()? else {
@@ -357,6 +373,33 @@ pub fn try_extract_from_chain_metadata(
         // invalid signature signals tampering rather than simply an unsigned
         // source, so it is rejected outright rather than downgraded.
         let is_unsigned = entry.signature.is_none();
+
+        // Whether an unsigned entry is acceptable at all is fixed by the
+        // deployment's posture, not by the request: under
+        // RequireAllowlistedSigner, a missing signature is always a
+        // rejection, regardless of the asset id.
+        if is_unsigned && !trust_policy.accepts_unsigned() {
+            tracing::warn!(
+                "Skipping token metadata for '{asset_id}': this deployment requires signed entries"
+            );
+            continue;
+        }
+
+        // An unsigned entry may fill a gap for an asset the compiled-in table
+        // doesn't cover, but must never override an already-curated one:
+        // tokens::resolve checks this registry before SEEDS unconditionally,
+        // so an unsigned override would let an unauthenticated caller shadow
+        // verified data with no signature at all -- turning, e.g., 1 wNEAR
+        // into 1000000 wNEAR by claiming the wrong decimals. A signed entry
+        // from an allowlisted signer is still a trusted correction and may
+        // override normally.
+        if is_unsigned && tokens::is_seeded(asset_id) {
+            tracing::warn!(
+                "Skipping unsigned token metadata for '{asset_id}': would override a curated seed"
+            );
+            continue;
+        }
+
         if let Some(proto_sig) = entry.signature.as_ref() {
             let signature = convert_proto_signature(proto_sig);
             if let Err(e) = validate_token_metadata_signature(
@@ -391,6 +434,7 @@ pub fn try_extract_from_chain_metadata(
             TokenMeta {
                 symbol: parsed.symbol,
                 decimals: parsed.decimals,
+                verified: !is_unsigned,
             },
         );
         if is_unsigned {
@@ -487,6 +531,19 @@ mod tests {
 
     const ASSET_ID: &str = "nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near";
     const VALUE: &str = r#"{"symbol":"USDC.e","decimals":6}"#;
+    /// Deliberately NOT in `tokens::SEEDS`. Tests exercising an unsigned
+    /// entry's own validation (JSON shape, decimals bound) use this instead
+    /// of `ASSET_ID` so the gap-fill-only guard doesn't intercept first and
+    /// mask what they're actually testing.
+    const UNSEEDED_ASSET_ID: &str = "nep141:new-unlisted-token.near";
+
+    fn accept_unsigned_policy() -> MetadataTrustPolicy {
+        MetadataTrustPolicy::AcceptUnsigned
+    }
+
+    fn require_signed_policy() -> MetadataTrustPolicy {
+        MetadataTrustPolicy::RequireAllowlistedSigner(SignerAllowlist::new())
+    }
 
     fn near_allowlist() -> TokenMetadataSignerAllowlists {
         let mut near = SignerAllowlist::new();
@@ -718,7 +775,10 @@ mod tests {
 
     #[test]
     fn extract_no_metadata_is_none() {
-        assert!(try_extract_from_chain_metadata(None, &near_allowlist()).is_none());
+        assert!(
+            try_extract_from_chain_metadata(None, &near_allowlist(), &accept_unsigned_policy())
+                .is_none()
+        );
     }
 
     #[test]
@@ -731,16 +791,26 @@ mod tests {
                 },
             )),
         };
-        assert!(try_extract_from_chain_metadata(Some(&metadata), &near_allowlist()).is_none());
+        assert!(
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                &near_allowlist(),
+                &accept_unsigned_policy()
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn extract_unsigned_entry_accepted() {
+        // Not seeded: unsigned entries fill gaps for assets SEEDS doesn't
+        // cover. See extract_unsigned_entry_for_seeded_asset_rejected for the
+        // (disallowed) other case.
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                 network_id: Some("NEAR_MAINNET".to_string()),
                 token_mappings: make_mappings(vec![(
-                    ASSET_ID,
+                    UNSEEDED_ASSET_ID,
                     TokenMetadataEntry {
                         value: VALUE.to_string(),
                         signature: None,
@@ -749,11 +819,120 @@ mod tests {
                 )]),
             })),
         };
-        let registry = try_extract_from_chain_metadata(Some(&metadata), &near_allowlist())
-            .expect("unsigned entry must still be registered");
-        let meta = registry.by_asset_id.get(ASSET_ID).expect("present");
+        let registry = try_extract_from_chain_metadata(
+            Some(&metadata),
+            &near_allowlist(),
+            &accept_unsigned_policy(),
+        )
+        .expect("unsigned entry must still be registered");
+        let meta = registry
+            .by_asset_id
+            .get(UNSEEDED_ASSET_ID)
+            .expect("present");
         assert_eq!(meta.symbol, "USDC.e");
         assert_eq!(meta.decimals, 6);
+        assert!(
+            !meta.verified,
+            "an unsigned gap-fill entry must not be marked verified"
+        );
+    }
+
+    // Regression coverage for the shadowing finding: an unsigned entry must
+    // not override a curated SEEDS value, since tokens::resolve checks this
+    // registry before SEEDS unconditionally -- an unsigned override would let
+    // an unauthenticated caller turn 1 wNEAR into 1000000 wNEAR by claiming
+    // the wrong decimals, with no signature required at all.
+    #[test]
+    fn extract_unsigned_entry_for_seeded_asset_rejected() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("NEAR_MAINNET".to_string()),
+                token_mappings: make_mappings(vec![(
+                    ASSET_ID, // seeded as USDC.e/6 in tokens::SEEDS
+                    TokenMetadataEntry {
+                        value: r#"{"symbol":"USDC.e","decimals":30}"#.to_string(),
+                        signature: None,
+                        origin_chain: None,
+                    },
+                )]),
+            })),
+        };
+        assert!(
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                &near_allowlist(),
+                &accept_unsigned_policy()
+            )
+            .is_none()
+        );
+    }
+
+    // Regression coverage for adopting MetadataTrustPolicy: an unsigned entry
+    // for an asset SEEDS doesn't cover -- normally accepted (see
+    // extract_unsigned_entry_accepted) -- must be rejected outright once the
+    // deployment's posture is RequireAllowlistedSigner, regardless of asset id.
+    #[test]
+    fn extract_unsigned_entry_rejected_under_require_signed_policy() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("NEAR_MAINNET".to_string()),
+                token_mappings: make_mappings(vec![(
+                    UNSEEDED_ASSET_ID,
+                    TokenMetadataEntry {
+                        value: VALUE.to_string(),
+                        signature: None,
+                        origin_chain: None,
+                    },
+                )]),
+            })),
+        };
+        assert!(
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                &near_allowlist(),
+                &require_signed_policy()
+            )
+            .is_none()
+        );
+    }
+
+    // A validly signed, allowlisted entry still registers under the strict
+    // posture: MetadataTrustPolicy gates only whether a MISSING signature is
+    // acceptable, not the per-origin-chain allowlist check a present one
+    // already goes through unconditionally.
+    #[test]
+    fn extract_signed_entry_still_registers_under_require_signed_policy() {
+        let sig_meta = sign_token_metadata_ed25519(
+            ASSET_ID,
+            VALUE,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("NEAR_MAINNET".to_string()),
+                token_mappings: make_mappings(vec![(
+                    ASSET_ID,
+                    TokenMetadataEntry {
+                        value: VALUE.to_string(),
+                        signature: Some(sig_meta),
+                        origin_chain: Some(TokenOriginChain::Near as i32),
+                    },
+                )]),
+            })),
+        };
+        let registry = try_extract_from_chain_metadata(
+            Some(&metadata),
+            &near_allowlist(),
+            &require_signed_policy(),
+        )
+        .expect("signed entry must still be registered under the strict posture");
+        let meta = registry.by_asset_id.get(ASSET_ID).expect("present");
+        assert_eq!(meta.symbol, "USDC.e");
+        assert!(
+            meta.verified,
+            "a signed, allowlisted entry must be marked verified"
+        );
     }
 
     #[test]
@@ -777,8 +956,12 @@ mod tests {
                 )]),
             })),
         };
-        let registry = try_extract_from_chain_metadata(Some(&metadata), &near_allowlist())
-            .expect("signed entry must verify and register");
+        let registry = try_extract_from_chain_metadata(
+            Some(&metadata),
+            &near_allowlist(),
+            &accept_unsigned_policy(),
+        )
+        .expect("signed entry must verify and register");
         assert!(registry.by_asset_id.contains_key(ASSET_ID));
     }
 
@@ -806,7 +989,14 @@ mod tests {
             })),
         };
         // No allowlist authorizes the dev seed used above.
-        assert!(try_extract_from_chain_metadata(Some(&metadata), &empty_allowlists()).is_none());
+        assert!(
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                &empty_allowlists(),
+                &accept_unsigned_policy()
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -815,7 +1005,7 @@ mod tests {
             metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                 network_id: None,
                 token_mappings: make_mappings(vec![(
-                    ASSET_ID,
+                    UNSEEDED_ASSET_ID,
                     TokenMetadataEntry {
                         value: "not valid json".to_string(),
                         signature: None,
@@ -824,7 +1014,14 @@ mod tests {
                 )]),
             })),
         };
-        assert!(try_extract_from_chain_metadata(Some(&metadata), &near_allowlist()).is_none());
+        assert!(
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                &near_allowlist(),
+                &accept_unsigned_policy()
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -833,7 +1030,7 @@ mod tests {
             metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                 network_id: None,
                 token_mappings: make_mappings(vec![(
-                    ASSET_ID,
+                    UNSEEDED_ASSET_ID,
                     TokenMetadataEntry {
                         value: r#"{"symbol":"BROKEN","decimals":999}"#.to_string(),
                         signature: None,
@@ -842,7 +1039,14 @@ mod tests {
                 )]),
             })),
         };
-        assert!(try_extract_from_chain_metadata(Some(&metadata), &near_allowlist()).is_none());
+        assert!(
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                &near_allowlist(),
+                &accept_unsigned_policy()
+            )
+            .is_none()
+        );
     }
 
     // Regression coverage for a remote panic: 999 above is caught by u8
@@ -855,7 +1059,7 @@ mod tests {
             metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                 network_id: None,
                 token_mappings: make_mappings(vec![(
-                    ASSET_ID,
+                    UNSEEDED_ASSET_ID,
                     TokenMetadataEntry {
                         value: r#"{"symbol":"BROKEN","decimals":39}"#.to_string(),
                         signature: None,
@@ -864,7 +1068,14 @@ mod tests {
                 )]),
             })),
         };
-        assert!(try_extract_from_chain_metadata(Some(&metadata), &near_allowlist()).is_none());
+        assert!(
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                &near_allowlist(),
+                &accept_unsigned_policy()
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -886,6 +1097,13 @@ mod tests {
                 )]),
             })),
         };
-        assert!(try_extract_from_chain_metadata(Some(&metadata), &near_allowlist()).is_none());
+        assert!(
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                &near_allowlist(),
+                &accept_unsigned_policy()
+            )
+            .is_none()
+        );
     }
 }

@@ -44,23 +44,39 @@ fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualS
 
 /// Render one token amount, resolving symbol/decimals when the asset is known;
 /// otherwise show the raw base-unit amount tagged with the unresolved asset id.
+/// Metadata resolved from an unsigned request entry (a gap-fill for an asset
+/// `SEEDS` doesn't cover) carries an extra diagnostic alongside the amount, so
+/// the signer sees the caveat rather than just an operator log.
 fn token_amount_field(
     label: &str,
     asset_id: &str,
     raw: u128,
     registry: &Reg,
-) -> Result<SignablePayloadField, VisualSignError> {
+) -> Result<Fields, VisualSignError> {
     match tokens::resolve(asset_id, registry) {
-        Some(meta) => Ok(create_amount_field(
-            label,
-            &tokens::format_units(raw, meta.decimals),
-            &meta.symbol,
-        )?
-        .signable_payload_field),
-        None => Ok(
+        Some(meta) => {
+            let mut fields = vec![
+                create_amount_field(
+                    label,
+                    &tokens::format_units(raw, meta.decimals),
+                    &meta.symbol,
+                )?
+                .signable_payload_field,
+            ];
+            if !meta.verified {
+                fields.push(diagnostic(
+                    "unverified-token-metadata",
+                    &format!(
+                        "symbol/decimals for {asset_id} came from an unsigned request entry, not a verified source"
+                    ),
+                )?);
+            }
+            Ok(fields)
+        }
+        None => Ok(vec![
             create_text_field(label, &format!("{raw} (unresolved {asset_id})"))?
                 .signable_payload_field,
-        ),
+        ]),
     }
 }
 
@@ -186,7 +202,7 @@ fn render_token_diff(td: &TokenDiff, registry: &Reg) -> Result<Fields, VisualSig
             )));
         }
         let label = if *delta < 0 { "Send" } else { "Receive" };
-        fields.push(token_amount_field(
+        fields.extend(token_amount_field(
             label,
             &token_id.to_string(),
             (*delta).unsigned_abs(),
@@ -205,7 +221,7 @@ fn render_token_diff(td: &TokenDiff, registry: &Reg) -> Result<Fields, VisualSig
 fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignError> {
     let mut fields = vec![create_text_field("To", t.receiver_id.as_str())?.signable_payload_field];
     for (token_id, amount) in t.tokens.iter() {
-        fields.push(token_amount_field(
+        fields.extend(token_amount_field(
             "Amount",
             &token_id.to_string(),
             *amount,
@@ -255,13 +271,13 @@ fn render_ft_withdraw(w: &FtWithdraw, registry: &Reg) -> Result<Fields, VisualSi
     let mut fields = vec![
         create_text_field("Token", w.token.as_str())?.signable_payload_field,
         create_text_field("To", w.receiver_id.as_str())?.signable_payload_field,
-        token_amount_field(
-            "Amount",
-            &format!("nep141:{}", w.token),
-            w.amount.0,
-            registry,
-        )?,
     ];
+    fields.extend(token_amount_field(
+        "Amount",
+        &format!("nep141:{}", w.token),
+        w.amount.0,
+        registry,
+    )?);
     if let Some(memo) = &w.memo {
         fields.push(create_text_field("Memo", memo)?.signable_payload_field);
     }
@@ -450,6 +466,21 @@ mod tests {
 
     fn empty_reg() -> Reg {
         LayeredRegistry::new(Arc::new(NearTokenRegistry::default()))
+    }
+
+    /// A registry whose request-scoped layer has one entry for `asset_id`,
+    /// carrying the given `verified` provenance.
+    fn reg_with_entry(asset_id: &str, verified: bool) -> Reg {
+        let mut request = NearTokenRegistry::default();
+        request.by_asset_id.insert(
+            asset_id.to_string(),
+            super::super::TokenMeta {
+                symbol: "TEST".to_string(),
+                decimals: 6,
+                verified,
+            },
+        );
+        LayeredRegistry::with_request(Arc::new(NearTokenRegistry::default()), request)
     }
 
     fn intent_from(json: &str) -> Intent {
@@ -754,6 +785,48 @@ mod tests {
         let intent = intent_from(r#"{"intent":"token_diff","diff":{}}"#);
         let err = render_intent(&intent, &empty_reg()).expect_err("empty diff must be refused");
         assert!(err.to_string().contains("no entries"), "{err}");
+    }
+
+    #[test]
+    fn token_amount_flags_unverified_metadata_with_a_diagnostic() {
+        let asset_id = "nep141:unsigned-gap-fill.near";
+        let fields = token_amount_field(
+            "Amount",
+            asset_id,
+            1_000_000,
+            &reg_with_entry(asset_id, false),
+        )
+        .expect("render");
+        assert!(
+            fields
+                .iter()
+                .any(|f| super::super::test_support::is_warning_diagnostic(
+                    f,
+                    "unverified-token-metadata"
+                )),
+            "expected an unverified-token-metadata warning, got {fields:?}"
+        );
+    }
+
+    #[test]
+    fn token_amount_omits_diagnostic_for_verified_metadata() {
+        let asset_id = "nep141:verified-token.near";
+        let fields = token_amount_field(
+            "Amount",
+            asset_id,
+            1_000_000,
+            &reg_with_entry(asset_id, true),
+        )
+        .expect("render");
+        assert!(
+            !fields
+                .iter()
+                .any(|f| super::super::test_support::is_warning_diagnostic(
+                    f,
+                    "unverified-token-metadata"
+                )),
+            "unexpected unverified-token-metadata warning: {fields:?}"
+        );
     }
 
     #[test]
