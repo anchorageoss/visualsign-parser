@@ -13,3 +13,13 @@ For complete contribution guidelines, including PR workflow, code standards, and
 ## Questions?
 
 Reach out through the [issue tracker](https://github.com/anchorageoss/visualsign-parser/issues).
+
+## Agent setup (Claude Code & pi)
+
+Shared agent configuration lives in tracked files and applies to both Claude Code and pi:
+
+- `CLAUDE.md` (also symlinked as `AGENTS.md`) — project instructions both agents load at startup.
+- `.claude/` — Claude Code settings, hooks (`hooks/format-on-edit.sh` runs `rustfmt` after edits), and skills.
+- `.pi/extensions/` — pi extensions: `protect-build-artifacts.ts` (blocks edits to generated paths) and `format-on-edit.ts` (mirrors the Claude rustfmt hook for pi).
+
+Per-user scratch (`.claude/settings.local.json`, `.claude/worktrees/`, etc.) is gitignored and never committed. To trust pi's project-local extensions for the first time, run `/trust`.
