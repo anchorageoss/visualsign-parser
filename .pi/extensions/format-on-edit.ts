@@ -20,7 +20,7 @@ export default function (pi: ExtensionAPI) {
 		// Don't bother formatting if the edit itself failed.
 		if (event.isError) return undefined;
 
-		const path = String(event.input?.path ?? "");
+		const path = String(event.input.path ?? "");
 		if (!path.endsWith(".rs")) return undefined;
 
 		await new Promise<void>((resolve) => {
