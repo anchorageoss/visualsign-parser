@@ -28,8 +28,21 @@ export default function (pi: ExtensionAPI) {
 				stdio: "ignore",
 				signal: ctx.signal,
 			});
-			child.on("error", () => resolve());
-			child.on("close", () => resolve());
+			let notified = false;
+			const warn = (msg: string) => {
+				if (!notified) {
+					notified = true;
+					ctx.ui.notify?.(msg, "warning");
+				}
+			};
+			child.on("error", () => {
+				if (!ctx.signal?.aborted) warn(`rustfmt failed to run for ${path}`);
+				resolve();
+			});
+			child.on("close", (code) => {
+				if (code !== 0 && !ctx.signal?.aborted) warn(`rustfmt exited ${code ?? "<killed>"} for ${path}`);
+				resolve();
+			});
 		});
 
 		return undefined;
