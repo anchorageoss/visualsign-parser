@@ -49,6 +49,12 @@ pub struct NearTokenRegistry {
 pub struct TokenMeta {
     pub symbol: String,
     pub decimals: u8,
+    /// Whether this metadata is trustworthy: resolved from the compiled-in
+    /// `tokens::SEEDS` table, or from a signed, allowlisted request entry.
+    /// `false` for an unsigned request entry (fills a gap for an asset
+    /// `SEEDS` doesn't cover -- accepted, but unauthenticated). Rendering
+    /// surfaces this so the signer sees the caveat, not just an operator log.
+    pub verified: bool,
 }
 
 /// Decode `execute_intents` args and render them as `SignablePayloadField`s.

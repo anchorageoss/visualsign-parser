@@ -25,6 +25,19 @@ impl NearPlugin {
     }
 }
 
+/// The CLI always runs the strict `RequireAllowlistedSigner` posture,
+/// matching `visualsign-ethereum`'s CLI plugin (see its `cli_trust_policy`).
+/// The wrapped allowlist is inert here: unlike Ethereum's single-allowlist
+/// ABI path, NEAR already dispatches identity checks for a present signature
+/// per origin chain (see `authorized_token_metadata_signers`), so only the
+/// posture this variant selects -- reject any entry with no signature at
+/// all -- is consulted.
+fn cli_trust_policy() -> visualsign::signing::MetadataTrustPolicy {
+    visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
+        visualsign::signing::SignerAllowlist::new(),
+    )
+}
+
 impl parser_cli_core::ChainPlugin for NearPlugin {
     fn chain(&self) -> Chain {
         Chain::Near
@@ -33,7 +46,7 @@ impl parser_cli_core::ChainPlugin for NearPlugin {
     fn register(&self, registry: &mut TransactionConverterRegistry) {
         registry.register::<crate::NearTransaction, _>(
             Chain::Near,
-            crate::NearVisualSignConverter::new(),
+            crate::NearVisualSignConverter::with_trust_policy(cli_trust_policy()),
         );
     }
 

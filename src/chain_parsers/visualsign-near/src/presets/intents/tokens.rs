@@ -40,6 +40,11 @@ fn usable(meta: TokenMeta) -> Option<TokenMeta> {
     (meta.decimals <= MAX_DECIMALS).then_some(meta)
 }
 
+/// Whether `asset_id` has a compiled-in, verified entry in [`SEEDS`].
+pub(crate) fn is_seeded(asset_id: &str) -> bool {
+    SEEDS.iter().any(|(id, _, _)| *id == asset_id)
+}
+
 /// Resolve an asset id to its metadata: request-scoped override layer first
 /// (via the registry), then the compiled-in seed table.
 pub(crate) fn resolve(
@@ -55,6 +60,7 @@ pub(crate) fn resolve(
         .map(|(_, symbol, decimals)| TokenMeta {
             symbol: (*symbol).to_string(),
             decimals: *decimals,
+            verified: true,
         })
         .and_then(usable)
 }
@@ -123,6 +129,7 @@ mod tests {
             TokenMeta {
                 symbol: "BROKEN".to_string(),
                 decimals: 39,
+                verified: false,
             },
         );
         let registry =
@@ -139,6 +146,7 @@ mod tests {
             TokenMeta {
                 symbol: "WIDE".to_string(),
                 decimals: MAX_DECIMALS,
+                verified: false,
             },
         );
         let registry =
@@ -147,6 +155,12 @@ mod tests {
         assert_eq!(meta.decimals, MAX_DECIMALS);
         // The bound is exactly what `format_units` can scale by.
         assert_eq!(format_units(0, MAX_DECIMALS), "0");
+    }
+
+    #[test]
+    fn is_seeded_matches_seeds_table() {
+        assert!(is_seeded("nep141:wrap.near"));
+        assert!(!is_seeded("nep141:not-a-real-token.near"));
     }
 
     #[test]
