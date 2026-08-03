@@ -383,6 +383,111 @@ fn test_abi_from_metadata_decodes_function() {
     );
 }
 
+/// The converter must honour the posture it was CONSTRUCTED with.
+///
+/// Feeds the same UNSIGNED mapping to both postures and asserts they diverge:
+/// accept-unsigned decodes it, require-signed drops it and leaves the raw selector.
+///
+/// This is what pins the policy actually reaching extraction. Every other metadata-ABI
+/// test here supplies a correctly signed mapping, which is accepted under either
+/// posture, so a converter that ignored its stored policy and always accepted unsigned
+/// metadata would keep the whole suite green.
+///
+/// `customFoo` is deliberately a function no built-in visualizer knows, so the metadata
+/// ABI is the only thing that can decode it. A built-in-decodable selector (an ERC-20
+/// `transfer`, say) renders the same under both postures and would prove nothing.
+#[test]
+fn test_converter_honours_stored_require_signed_posture() {
+    sol! {
+        function customFoo(uint256 x) external;
+    }
+
+    let calldata = customFooCall {
+        x: U256::from(7u64),
+    }
+    .abi_encode();
+    let selector_hex = hex::encode(&calldata[..4]);
+
+    let unknown_contract: alloy_primitives::Address = "0x1111111111111111111111111111111111111111"
+        .parse()
+        .unwrap();
+
+    let tx = TxEip1559 {
+        chain_id: 1,
+        nonce: 0,
+        gas_limit: 100_000,
+        max_fee_per_gas: 1_000_000_000,
+        max_priority_fee_per_gas: 1_000_000,
+        to: alloy_primitives::TxKind::Call(unknown_contract),
+        input: calldata.into(),
+        ..Default::default()
+    };
+
+    let mut buf = Vec::new();
+    buf.push(0x02); // EIP-1559 type byte
+    tx.encode(&mut buf);
+    let tx_hex = format!("0x{}", hex::encode(&buf));
+
+    let abi_json = r#"[{
+        "type": "function",
+        "name": "customFoo",
+        "inputs": [{"name": "x", "type": "uint256"}],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+    }]"#;
+
+    // Deliberately unsigned: this is the entry the strict posture has to reject.
+    let build_options = || {
+        let mut abi_mappings = BTreeMap::new();
+        abi_mappings.insert(
+            unknown_contract.to_string(),
+            Abi {
+                value: abi_json.to_string(),
+                signature: None,
+                ..Default::default()
+            },
+        );
+        VisualSignOptions {
+            include_intermediate_output: false,
+            decode_transfers: true,
+            transaction_name: None,
+            metadata: Some(ChainMetadata {
+                metadata: Some(Metadata::Ethereum(EthereumMetadata {
+                    network_id: Some("ETHEREUM_MAINNET".to_string()),
+                    abi_mappings: abi_mappings.into_iter().collect(),
+                })),
+            }),
+            developer_config: None,
+        }
+    };
+
+    // Control: the permissive posture accepts the unsigned mapping and decodes it, so
+    // the fixture is known-good and the strict result below cannot be a false negative.
+    let permissive = EthereumVisualSignConverter::new()
+        .to_payload_from_string(&tx_hex, build_options())
+        .unwrap()
+        .to_json()
+        .unwrap();
+    assert!(
+        permissive.contains("customFoo"),
+        "accept-unsigned must decode the unsigned metadata ABI, got: {permissive}"
+    );
+
+    let strict = require_signed_converter()
+        .to_payload_from_string(&tx_hex, build_options())
+        .unwrap()
+        .to_json()
+        .unwrap();
+    assert!(
+        !strict.contains("customFoo"),
+        "require-signed must not decode an unsigned metadata ABI, got: {strict}"
+    );
+    assert!(
+        strict.contains(&selector_hex),
+        "dropping the unsigned ABI must leave the raw selector {selector_hex}, got: {strict}"
+    );
+}
+
 #[test]
 fn test_proxy_decodes_via_implementation_abi() {
     // A transaction to a proxy address should be decoded against the linked

@@ -13,6 +13,8 @@ docs/superpowers/
 .claude/shell-snapshots/
 .claude/statsig/
 .claude/settings.local.json
+.claude/runbooks/
+.claude/worktrees/
 
 # Coverage artifacts (see TESTING.md)
 lcov.info

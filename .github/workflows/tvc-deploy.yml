@@ -153,8 +153,8 @@ jobs:
       # cryptographically VERIFIES (AWS Nitro attestation + enclave signature).
       # The API key is reconstructed from the same TVC_API_KEY_* secrets. Pins an
       # approved turnkey-client image version rather than :latest.
-      # NOTE: requires the turnkey-client image on GHCR (visualsign-turnkeyclient
-      # docker.yml / #23); until that's published this step can't pull the image.
+      # Passes --target dev explicitly so the invariant holds here rather than
+      # resting on the script default and on VSP_SMOKE_TARGET being absent.
       - name: Smoke (dev verify endpoint)
         if: success()
         env:
@@ -170,7 +170,7 @@ jobs:
           mkdir -p "$HOME/.config/turnkey/keys"
           printf '%s' "$TVC_API_KEY_PUBLIC"       > "$HOME/.config/turnkey/keys/dev.public"
           printf '%s:p256' "$TVC_API_KEY_PRIVATE" > "$HOME/.config/turnkey/keys/dev.private"
-          ./scripts/smoke.sh
+          ./scripts/smoke.sh --target dev
 
       - name: Scrub secrets
         if: always()

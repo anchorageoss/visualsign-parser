@@ -6520,6 +6520,7 @@ dependencies = [
  "tokio",
  "visualsign",
  "visualsign-ethereum",
+ "visualsign-near",
  "visualsign-solana",
  "visualsign-sui",
  "visualsign-tron",
@@ -14061,6 +14062,13 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.17",
  "visualsign",
+]
+
+[[package]]
+name = "visualsign-near"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.17",
 ]
 
 [[package]]
