@@ -76,6 +76,12 @@ const MAX_TOKEN_METADATA_VALUE_BYTES: usize = 1024;
 /// it is bounded here at ingest rather than defensively inside formatting.
 const MAX_TOKEN_DECIMALS: u8 = 38;
 
+/// Maximum accepted `symbol` length. Real NEP-141/ERC-20 symbols (even
+/// bridged ones like `USDC.e`) are a handful of characters; this bounds an
+/// unauthenticated request field before it reaches a rendered field, the
+/// same reasoning as `MAX_TOKEN_DECIMALS`.
+const MAX_TOKEN_SYMBOL_LEN: usize = 32;
+
 /// Error type for token-metadata signature validation.
 #[derive(Debug, thiserror::Error)]
 pub enum TokenMetadataSignatureError {
@@ -425,6 +431,13 @@ pub fn try_extract_from_chain_metadata(
             tracing::warn!(
                 "Skipping token metadata for '{asset_id}': decimals {} out of range",
                 parsed.decimals
+            );
+            continue;
+        }
+        if parsed.symbol.is_empty() || parsed.symbol.len() > MAX_TOKEN_SYMBOL_LEN {
+            tracing::warn!(
+                "Skipping token metadata for '{asset_id}': symbol length {} out of range",
+                parsed.symbol.len()
             );
             continue;
         }
@@ -1062,6 +1075,59 @@ mod tests {
                     UNSEEDED_ASSET_ID,
                     TokenMetadataEntry {
                         value: r#"{"symbol":"BROKEN","decimals":39}"#.to_string(),
+                        signature: None,
+                        origin_chain: None,
+                    },
+                )]),
+            })),
+        };
+        assert!(
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                &near_allowlist(),
+                &accept_unsigned_policy()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn extract_empty_symbol_skipped() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: None,
+                token_mappings: make_mappings(vec![(
+                    UNSEEDED_ASSET_ID,
+                    TokenMetadataEntry {
+                        value: r#"{"symbol":"","decimals":6}"#.to_string(),
+                        signature: None,
+                        origin_chain: None,
+                    },
+                )]),
+            })),
+        };
+        assert!(
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                &near_allowlist(),
+                &accept_unsigned_policy()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn extract_oversized_symbol_skipped() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: None,
+                token_mappings: make_mappings(vec![(
+                    UNSEEDED_ASSET_ID,
+                    TokenMetadataEntry {
+                        value: format!(
+                            r#"{{"symbol":"{}","decimals":6}}"#,
+                            "A".repeat(MAX_TOKEN_SYMBOL_LEN + 1)
+                        ),
                         signature: None,
                         origin_chain: None,
                     },
