@@ -456,7 +456,9 @@ pub fn try_extract_from_chain_metadata(
     }
     if unsigned_count > 0 {
         tracing::warn!(
-            "Accepted {unsigned_count} unsigned token metadata entr(y/ies): integrity/provenance unverified"
+            "Accepted {unsigned_count} unsigned token metadata entr(y/ies): integrity/provenance \
+             unverified -- each also carries an `unverified-token-metadata` diagnostic on its \
+             rendered amount, so this log is a count, not the only place this surfaces"
         );
     }
     if registry.by_asset_id.is_empty() {
