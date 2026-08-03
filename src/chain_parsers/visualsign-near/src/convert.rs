@@ -493,6 +493,72 @@ mod tests {
         );
     }
 
+    /// Proves the `unverified-token-metadata` diagnostic (see
+    /// `presets::intents::render::token_amount_field`) reaches the actual
+    /// serialized payload from real `options.metadata`, not just the render
+    /// helper in isolation: `options.metadata` -> `token_registry_for` ->
+    /// `decode_intents` -> the field the signer sees.
+    #[test]
+    fn unsigned_gap_fill_metadata_surfaces_a_diagnostic_end_to_end() {
+        let inner = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"gap-fill-token.near","receiver_id":"bob.near","amount":"1000000"}]}"#;
+        let args = serde_json::json!({"signed":[{
+            "standard": "raw_ed25519",
+            "payload": inner,
+            "public_key": "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN",
+            "signature": "ed25519:3vtbNQJHZfuV1s5DykzyjkbNLc583hnkrhTz57eDhd966iqzkor6Twgr4Loh2C195SCSEsiGfrd6KcxpjNq9ZbVj"
+        }]});
+
+        let txv0 = TransactionV0 {
+            signer_id: "alice.near".parse().unwrap(),
+            public_key: "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"
+                .parse()
+                .unwrap(),
+            nonce: 1,
+            receiver_id: "intents.near".parse().unwrap(),
+            block_hash: CryptoHash::default(),
+            actions: vec![Action::FunctionCall(Box::new(FunctionCallAction {
+                method_name: "execute_intents".to_string(),
+                args: serde_json::to_vec(&args).unwrap(),
+                gas: Gas::from_gas(30_000_000_000_000),
+                deposit: Balance::from_yoctonear(0),
+            }))],
+        };
+        let near_tx = NearTransaction::OnChain(Transaction::V0(txv0));
+
+        let options = VisualSignOptions {
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                    network_id: Some("NEAR_MAINNET".to_string()),
+                    token_mappings: [(
+                        "nep141:gap-fill-token.near".to_string(),
+                        generated::parser::TokenMetadataEntry {
+                            value: r#"{"symbol":"GAPFILL","decimals":6}"#.to_string(),
+                            signature: None,
+                            origin_chain: None,
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                })),
+            }),
+            ..Default::default()
+        };
+
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(near_tx, options)
+            .expect("convert");
+        let json = payload.payload.to_json().expect("json");
+
+        assert!(
+            json.contains("GAPFILL"),
+            "unsigned gap-fill entry must still resolve the symbol: {json}"
+        );
+        assert!(
+            json.contains("unverified-token-metadata"),
+            "unsigned gap-fill entry must carry its provenance into the render: {json}"
+        );
+    }
+
     #[test]
     fn intent_envelope_renders_without_signature_section() {
         let swap = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2100-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
