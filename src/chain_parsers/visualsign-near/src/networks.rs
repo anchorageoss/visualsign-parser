@@ -140,6 +140,7 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                 network_id: Some("testnet".to_string()),
+                token_mappings: Default::default(),
             })),
         };
         assert!(extract_network_from_metadata(Some(&metadata)).is_err());
