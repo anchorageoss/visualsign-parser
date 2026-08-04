@@ -149,7 +149,12 @@ impl FromIterator<Vec<u8>> for SignerAllowlist {
 ///
 /// There is deliberately no `Default`: a deployment has to say which posture it
 /// runs.
+///
+/// Marked `#[non_exhaustive]` so a third posture can be added without breaking
+/// downstream crates that match on this enum. Every match today lives in this
+/// module; consumers only construct variants.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum MetadataTrustPolicy {
     /// Accept unsigned metadata; verify integrity only when a signature is present.
     AcceptUnsigned,
