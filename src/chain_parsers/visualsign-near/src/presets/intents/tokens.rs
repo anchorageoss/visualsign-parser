@@ -13,6 +13,17 @@ use super::{NearTokenRegistry, TokenMeta};
 /// matching native NEAR).
 const SEEDS: &[(&str, &str, u8)] = &[("nep141:wrap.near", "wNEAR", 24)];
 
+/// Largest `decimals` [`format_units`] can scale by: `10^39` exceeds `u128`.
+const MAX_DECIMALS: u8 = 38;
+
+/// Metadata whose `decimals` [`format_units`] cannot scale by. Refusing it here
+/// keeps that overflow unreachable, and renders the amount in its honest
+/// unresolved form (raw base units plus the asset id) rather than scaled by a
+/// wrapped-around divisor.
+fn usable(meta: TokenMeta) -> Option<TokenMeta> {
+    (meta.decimals <= MAX_DECIMALS).then_some(meta)
+}
+
 /// Resolve an asset id to its metadata: request-scoped override layer first
 /// (via the registry), then the compiled-in seed table.
 pub(crate) fn resolve(
@@ -20,7 +31,7 @@ pub(crate) fn resolve(
     registry: &LayeredRegistry<NearTokenRegistry>,
 ) -> Option<TokenMeta> {
     if let Some(meta) = registry.lookup(|r| r.by_asset_id.get(asset_id).cloned()) {
-        return Some(meta);
+        return usable(meta);
     }
     SEEDS
         .iter()
@@ -29,10 +40,14 @@ pub(crate) fn resolve(
             symbol: (*symbol).to_string(),
             decimals: *decimals,
         })
+        .and_then(usable)
 }
 
 /// Format `units / 10^decimals` as an exact decimal string, trailing zeros
 /// trimmed (e.g. `1_500_000` @ 6 -> `"1.5"`, `0` -> `"0"`).
+///
+/// `decimals` must be within [`MAX_DECIMALS`]; [`resolve`] is the only source
+/// of registry-supplied values and refuses anything larger.
 pub(crate) fn format_units(units: u128, decimals: u8) -> String {
     let scale = 10u128.pow(u32::from(decimals));
     let whole = units / scale;
@@ -65,6 +80,46 @@ mod tests {
     #[test]
     fn unknown_token_is_none() {
         assert!(resolve("nep141:not-a-real-token.near", &empty()).is_none());
+    }
+
+    // `format_units` scales by `10^decimals`, which overflows `u128` above 38.
+    // An override carrying such a value must not resolve: the amount then
+    // renders as raw base units plus the asset id, rather than overflowing (or,
+    // with overflow checks off, dividing by a wrapped-around scale and
+    // misrendering the amount being signed).
+    #[test]
+    fn override_with_unscalable_decimals_does_not_resolve() {
+        let asset_id = "nep141:broken.near";
+        let mut request = NearTokenRegistry::default();
+        request.by_asset_id.insert(
+            asset_id.to_string(),
+            TokenMeta {
+                symbol: "BROKEN".to_string(),
+                decimals: 39,
+            },
+        );
+        let registry =
+            LayeredRegistry::with_request(Arc::new(NearTokenRegistry::default()), request);
+        assert!(resolve(asset_id, &registry).is_none());
+    }
+
+    #[test]
+    fn override_at_the_decimals_bound_resolves() {
+        let asset_id = "nep141:wide.near";
+        let mut request = NearTokenRegistry::default();
+        request.by_asset_id.insert(
+            asset_id.to_string(),
+            TokenMeta {
+                symbol: "WIDE".to_string(),
+                decimals: MAX_DECIMALS,
+            },
+        );
+        let registry =
+            LayeredRegistry::with_request(Arc::new(NearTokenRegistry::default()), request);
+        let meta = resolve(asset_id, &registry).expect("resolves at the bound");
+        assert_eq!(meta.decimals, MAX_DECIMALS);
+        // The bound is exactly what `format_units` can scale by.
+        assert_eq!(format_units(0, MAX_DECIMALS), "0");
     }
 
     #[test]
