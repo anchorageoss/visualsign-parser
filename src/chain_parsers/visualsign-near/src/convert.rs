@@ -375,6 +375,7 @@ mod tests {
             metadata: Some(ChainMetadata {
                 metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                     network_id: Some("testnet".to_string()),
+                    token_mappings: Default::default(),
                 })),
             }),
             ..Default::default()
