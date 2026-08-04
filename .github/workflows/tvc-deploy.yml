@@ -126,7 +126,7 @@ jobs:
           # "unsigned" to opt into --accept-unsigned-abis on purpose.
           ABI_SIGNER_PUBKEY: ${{ inputs.abi_signer_pubkey || '' }}
         run: |
-          if [ -z "$ABI_SIGNER_PUBKEY" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ -z "$ABI_SIGNER_PUBKEY" ] && [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             echo "::error::abi_signer_pubkey is required for workflow_dispatch: pass a hex secp256k1 signer pubkey, or the literal 'unsigned' to explicitly deploy --accept-unsigned-abis."
             exit 1
           fi
