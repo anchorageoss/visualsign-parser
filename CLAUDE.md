@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents (Claude Code and pi) when working with code in this repository. It is symlinked as `AGENTS.md` so both agents load the same instructions.
 
 ## Build & Development Commands
 
@@ -16,11 +16,13 @@ make -C src grpc-server    # Run the gRPC server locally
 ```
 
 Run a single test:
+
 ```bash
 cargo test -p visualsign-ethereum test_name
 ```
 
 Parse a transaction locally:
+
 ```bash
 cargo run --bin parser_cli -- decode --chain ethereum --network ETHEREUM_MAINNET --output human -t <hex>
 
@@ -85,6 +87,7 @@ A unified Docker container (see `images/parser_app/Containerfile`) bundles parse
 ### Workspace Lint Policy
 
 Workspace-level clippy lints are enforced in `src/Cargo.toml`:
+
 - **`unwrap_used = "deny"`** — Use `?` operator or explicit error handling instead of `.unwrap()`
 - **`expect_used = "deny"`** — Same; use `?` or `.ok_or_else(|| ...)?`
 - **`panic = "deny"`** — Return `Err(...)` instead of `panic!()`

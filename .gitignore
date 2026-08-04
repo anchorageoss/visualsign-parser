@@ -16,6 +16,12 @@ docs/superpowers/
 .claude/runbooks/
 .claude/worktrees/
 
+# pi per-user/working files. The shared team config under .pi/extensions/ IS
+# tracked and intentionally not matched here; everything below is per-user
+# scratch that must never be committed (mirrors the .claude/ treatment above).
+# Trust decisions live in the global ~/.pi/agent store, not in the repo.
+.pi/mega-compact/
+
 # Coverage artifacts (see TESTING.md)
 lcov.info
 *.profraw
