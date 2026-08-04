@@ -235,23 +235,43 @@ pub struct InstructionView {
 
 impl InstructionView {
     pub fn from_context(context: &VisualizerContext) -> Self {
-        let program_id = match context.program_id() {
-            ProgramRef::Resolved(pk) => pk.to_string(),
-            ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
-        };
+        let program_id = resolve_program_display(context);
         let accounts = (0..context.num_accounts())
-            .map(|i| match context.account(i) {
-                Some(AccountRef::Resolved(pk)) => pk.to_string(),
-                Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
-                // `i` is in `0..num_accounts()`, so this arm is unreachable in
-                // practice, but we keep a total fallback to preserve infallibility.
-                None => format!("unresolved(oob:{i})"),
-            })
+            .map(|i| resolve_account_display(context, i))
             .collect();
         Self {
             program_id,
             accounts,
         }
+    }
+}
+
+/// Resolves the instruction's program to its display string.
+///
+/// This is the single definition of the program placeholder vocabulary;
+/// [`InstructionView`] and presets that need only the program both route
+/// through it so the two cannot drift apart.
+pub fn resolve_program_display(context: &VisualizerContext) -> String {
+    match context.program_id() {
+        ProgramRef::Resolved(pk) => pk.to_string(),
+        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
+    }
+}
+
+/// Resolves a single account index to its display string.
+///
+/// This is the single definition of the account placeholder vocabulary. Presets
+/// that need one account at a known position call it directly; presets that need
+/// every account get the same strings via [`InstructionView`].
+pub fn resolve_account_display(context: &VisualizerContext, position: usize) -> String {
+    match context.account(position) {
+        Some(AccountRef::Resolved(pk)) => pk.to_string(),
+        Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
+        // Callers iterating `0..num_accounts()` never reach this arm; callers
+        // naming a fixed position do when the instruction carries fewer accounts
+        // than the layout expects. The placeholder keeps resolution infallible
+        // and carries the position that produced it.
+        None => format!("unresolved(oob:{position})"),
     }
 }
 
@@ -450,5 +470,33 @@ mod tests {
         assert_eq!(view.accounts[0], keys[0].to_string());
         assert_eq!(view.accounts[1], "unresolved(50)");
         assert_eq!(ctx.data(), &[0xDE, 0xAD]);
+    }
+
+    #[test]
+    fn test_resolve_account_display_matches_instruction_view() {
+        let keys = vec![Pubkey::new_unique()]; // only 1 key
+        let ci = CompiledInstruction {
+            program_id_index: 0,
+            accounts: vec![0, 50], // index 50 is OOB (simulates ALT)
+            data: vec![],
+        };
+        let sender = SolanaAccount {
+            account_key: keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
+        let registry = crate::idl::IdlRegistry::new();
+        let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry, 0);
+
+        // Position-addressed resolution agrees with the whole-instruction view,
+        // so a preset reading one account renders the same string either way.
+        let view = InstructionView::from_context(&ctx);
+        assert_eq!(resolve_account_display(&ctx, 0), view.accounts[0]);
+        assert_eq!(resolve_account_display(&ctx, 1), view.accounts[1]);
+        assert_eq!(resolve_program_display(&ctx), view.program_id);
+
+        // A position past the instruction's account list stays infallible and
+        // reports the position that produced it.
+        assert_eq!(resolve_account_display(&ctx, 2), "unresolved(oob:2)");
     }
 }
