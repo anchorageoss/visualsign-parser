@@ -144,6 +144,12 @@ pub fn render_action(
                 )?
                 .signable_payload_field,
             );
+            // `state_init` (the derived account's code/data) has no cheap
+            // field-level render, same as DeployContract's raw wasm; flag it
+            // rather than implying the deposit is the whole picture.
+            fields.push(
+                create_text_field("State Init", "(not fully decoded)")?.signable_payload_field,
+            );
             Ok(fields)
         }
         // A NEP-366 meta-transaction: `sender_id`/`receiver_id` distinct from
@@ -217,8 +223,9 @@ struct FtWithdrawArgs {
 /// Decode args for the token-movement methods a deposit/withdraw flow uses,
 /// so the true beneficiary is displayed rather than opaque bytes. Fail-closed:
 /// anything that does not parse as exactly the known shape (unknown fields
-/// included) renders nothing extra, leaving the generic view -- a partially
-/// decoded arg set must not masquerade as a fully understood call.
+/// included) returns `None`, leaving the caller to fall back to a raw-data
+/// field -- a partially decoded arg set must not masquerade as a fully
+/// understood call.
 fn decode_known_method_args(
     method: &str,
     args: &[u8],
@@ -230,8 +237,15 @@ fn decode_known_method_args(
                 return Ok(None);
             };
             fields.push(
-                create_address_field("Recipient", &parsed.receiver_id, None, None, None, None)?
-                    .signable_payload_field,
+                create_address_field(
+                    "Recipient",
+                    &charset_safe(&parsed.receiver_id),
+                    None,
+                    None,
+                    None,
+                    None,
+                )?
+                .signable_payload_field,
             );
             push_amount_and_notes(&mut fields, &parsed.amount, &parsed.memo, &parsed.msg)?;
         }
@@ -240,12 +254,26 @@ fn decode_known_method_args(
                 return Ok(None);
             };
             fields.push(
-                create_address_field("Token", &parsed.token, None, None, None, None)?
-                    .signable_payload_field,
+                create_address_field(
+                    "Token",
+                    &charset_safe(&parsed.token),
+                    None,
+                    None,
+                    None,
+                    None,
+                )?
+                .signable_payload_field,
             );
             fields.push(
-                create_address_field("Recipient", &parsed.receiver_id, None, None, None, None)?
-                    .signable_payload_field,
+                create_address_field(
+                    "Recipient",
+                    &charset_safe(&parsed.receiver_id),
+                    None,
+                    None,
+                    None,
+                    None,
+                )?
+                .signable_payload_field,
             );
             push_amount_and_notes(&mut fields, &parsed.amount, &parsed.memo, &parsed.msg)?;
         }
@@ -468,6 +496,30 @@ mod tests {
         assert!(!text_v2.text.contains('\n'));
     }
 
+    #[test]
+    fn receiver_id_and_token_with_embedded_newline_are_sanitized() {
+        use near_primitives::action::FunctionCallAction;
+        use near_primitives::types::Gas;
+        let action = Action::FunctionCall(Box::new(FunctionCallAction {
+            method_name: "ft_withdraw".to_string(),
+            args: br#"{"token":"wrap.near\nAmount: 999 NEAR","receiver_id":"bob.near\nAmount: 999 NEAR","amount":"7"}"#.to_vec(),
+            gas: Gas::from_gas(100_000_000_000_000),
+            deposit: Balance::from_yoctonear(1),
+        }));
+        let fields = render_action(&action, 1).expect("render");
+        for label in ["Token", "Recipient"] {
+            let field = fields
+                .iter()
+                .find(|f| field_label(f) == label)
+                .unwrap_or_else(|| panic!("{label} field present"));
+            let SignablePayloadField::AddressV2 { common, address_v2 } = field else {
+                panic!("expected AddressV2, got {field:?}");
+            };
+            assert!(!common.fallback_text.contains('\n'), "field: {label}");
+            assert!(!address_v2.address.contains('\n'), "field: {label}");
+        }
+    }
+
     fn field_label(field: &SignablePayloadField) -> &str {
         match field {
             SignablePayloadField::TextV2 { common, .. }
@@ -658,7 +710,7 @@ mod tests {
     }
 
     #[test]
-    fn deterministic_state_init_renders_deposit() {
+    fn deterministic_state_init_renders_deposit_and_flags_state_init_as_undecoded() {
         use near_primitives::action::DeterministicStateInitAction;
         use near_primitives::deterministic_account_id::{
             DeterministicAccountStateInit, DeterministicAccountStateInitV1,
@@ -674,7 +726,12 @@ mod tests {
         }));
         let fields = render_action(&action, 1).expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
-        assert_eq!(labels, ["Deposit"]);
+        assert_eq!(labels, ["Deposit", "State Init"]);
+        let state_init_field = &fields[1];
+        let SignablePayloadField::TextV2 { text_v2, .. } = state_init_field else {
+            panic!("expected TextV2, got {state_init_field:?}");
+        };
+        assert!(text_v2.text.contains("not fully decoded"));
     }
 
     #[test]

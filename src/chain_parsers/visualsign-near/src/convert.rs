@@ -85,7 +85,20 @@ impl VisualSignConverter<NearTransaction> for NearVisualSignConverter {
     }
 }
 
-impl VisualSignConverterFromString<NearTransaction> for NearVisualSignConverter {}
+impl VisualSignConverterFromString<NearTransaction> for NearVisualSignConverter {
+    fn to_visual_sign_payload_from_string(
+        &self,
+        transaction_data: &str,
+        options: VisualSignOptions,
+    ) -> Result<ConversionResult, VisualSignError> {
+        let transaction = NearTransaction::from_string_with_options(
+            transaction_data,
+            options.developer_config.as_ref(),
+        )
+        .map_err(VisualSignError::ParseError)?;
+        self.to_validated_visual_sign_payload(transaction, options)
+    }
+}
 
 /// Title for the payload: a single action names itself, otherwise a generic label.
 fn title_for(actions: &[Action]) -> String {
@@ -113,11 +126,12 @@ fn network_mismatch(signer_id: &str, network: NearNetwork) -> Option<String> {
 mod tests {
     use super::*;
     use generated::parser::{ChainMetadata, NearMetadata, chain_metadata};
-    use near_crypto::{KeyType, PublicKey};
+    use near_crypto::{KeyType, PublicKey, Signature};
     use near_primitives::action::{CreateAccountAction, TransferAction};
     use near_primitives::hash::CryptoHash;
-    use near_primitives::transaction::TransactionV0;
+    use near_primitives::transaction::{SignedTransaction, TransactionV0};
     use near_primitives::types::Balance;
+    use visualsign::vsptrait::DeveloperConfig;
 
     fn transfer() -> Action {
         Action::Transfer(TransferAction {
@@ -231,5 +245,34 @@ mod tests {
         let tx = near_tx_as("alice.testnet", "bob.testnet", vec![transfer()]);
         let result = converter.to_visual_sign_payload(tx, VisualSignOptions::default());
         assert!(matches!(result, Err(VisualSignError::ValidationError(_))));
+    }
+
+    fn signed_transfer_hex() -> String {
+        let unsigned = near_tx(vec![transfer()]).inner().clone();
+        let signed = SignedTransaction::new(Signature::empty(KeyType::ED25519), unsigned);
+        hex::encode(borsh::to_vec(&signed).expect("borsh encode"))
+    }
+
+    #[test]
+    fn converter_rejects_signed_transaction_by_default() {
+        let converter = NearVisualSignConverter::new();
+        let result = converter.to_visual_sign_payload_from_string(
+            &signed_transfer_hex(),
+            VisualSignOptions::default(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn converter_accepts_signed_transaction_when_developer_config_allows_it() {
+        let converter = NearVisualSignConverter::new();
+        let options = VisualSignOptions {
+            developer_config: Some(DeveloperConfig {
+                allow_signed_transactions: true,
+            }),
+            ..Default::default()
+        };
+        let result = converter.to_visual_sign_payload_from_string(&signed_transfer_hex(), options);
+        assert!(result.is_ok());
     }
 }
