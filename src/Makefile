@@ -46,6 +46,8 @@ test: build
 	@# diagnostics ON: parser_cli + lib tests gated behind the feature.
 	cargo test -p parser_cli --all-targets
 	cargo test -p visualsign --features diagnostics --lib
+	cargo test -p parser_cli_core --features diagnostics --lib
+	cargo test -p visualsign-near --features diagnostics --lib
 	cargo test -p visualsign-solana --features diagnostics --lib
 
 # Solana preset sources, which `cargo fmt` cannot reach. `presets/mod.rs`
@@ -72,6 +74,8 @@ lint:
 	cargo clippy --workspace --exclude parser_cli --all-targets -- -D warnings
 	cargo clippy -p parser_cli --all-targets -- -D warnings
 	cargo clippy -p visualsign --features diagnostics --lib -- -D warnings
+	cargo clippy -p parser_cli_core --features diagnostics --lib -- -D warnings
+	cargo clippy -p visualsign-near --features diagnostics --lib -- -D warnings
 	cargo clippy -p visualsign-solana --features diagnostics --lib -- -D warnings
 
 .PHONY: narrow-build-check
@@ -140,9 +144,9 @@ feature-matrix-check:
 	@# $(PARSER_APP_CHAINS) above.
 	@#
 	@# Note: `diagnostics` propagates to the always-on `visualsign` core
-	@# crate, and weakly to `visualsign-solana` via the `?` syntax. The
-	@# non-solana + diagnostics combos still exercise the weak-dep path
-	@# (resolving to a no-op for visualsign-solana).
+	@# crate, and weakly to `visualsign-near`/`visualsign-solana` via the
+	@# `?` syntax. Combos without those chains still exercise the weak-dep
+	@# path (resolving to a no-op for the absent crate).
 	@#
 	@# Uses `cargo check` for the same reason as narrow-build-check
 	@# above -- the goal is compile-level regression detection, not

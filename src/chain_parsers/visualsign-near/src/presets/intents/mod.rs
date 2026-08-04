@@ -11,10 +11,13 @@ mod tokens;
 mod verify;
 
 pub use token_signature::{
-    TokenMetadataDomain, authorized_token_metadata_signers, insert_token_metadata_signer,
+    RejectedTokenMetadata, TokenMetadataDomain, TokenMetadataExtraction,
+    authorized_token_metadata_signers, insert_token_metadata_signer,
     sign_token_metadata_for_cli,
     try_extract_from_chain_metadata as try_extract_token_metadata_from_chain_metadata,
 };
+
+pub(crate) use render::rejected_metadata_diagnostics;
 
 /// Dev/CLI signing helpers for constructing signed `TokenMetadataEntry` proto
 /// values (e.g. for local test fixtures). Gated the same way as the

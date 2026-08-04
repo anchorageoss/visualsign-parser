@@ -36,11 +36,20 @@ use crate::tx::NearTransaction;
 /// present signature is checked against -- its own under the strict posture,
 /// the deployment's `authorized_token_metadata_signers` under the permissive
 /// one. A present signature is checked against that list under either.
+///
+/// Returns the registry plus a diagnostic field for every entry the extraction
+/// refused. Callers render those once per payload, not once per action.
 fn token_registry_for(
     options: &VisualSignOptions,
     network: NearNetwork,
     trust_policy: &MetadataTrustPolicy,
-) -> LayeredRegistry<NearTokenRegistry> {
+) -> Result<
+    (
+        LayeredRegistry<NearTokenRegistry>,
+        Vec<SignablePayloadField>,
+    ),
+    VisualSignError,
+> {
     // Identity decides whether an entry renders as verified and whether it may
     // override a curated seed, neither of which the posture itself answers, so a
     // list is needed under both postures. The strict posture carries its own;
@@ -59,18 +68,22 @@ fn token_registry_for(
         MetadataTrustPolicy::AcceptUnsigned => authorized_token_metadata_signers(),
         _ => &no_signers,
     };
-    let request = try_extract_token_metadata_from_chain_metadata(
+    let extraction = try_extract_token_metadata_from_chain_metadata(
         options.metadata.as_ref(),
         network,
         allowlist,
         trust_policy,
     );
-    match request {
+    let registry = match extraction.registry {
         Some(request) => {
             LayeredRegistry::with_request(Arc::new(NearTokenRegistry::default()), request)
         }
         None => LayeredRegistry::new(Arc::new(NearTokenRegistry::default())),
-    }
+    };
+    Ok((
+        registry,
+        crate::presets::intents::rejected_metadata_diagnostics(&extraction.rejected)?,
+    ))
 }
 
 /// Resolve the network for one request: the `network_id` the request supplied,
@@ -215,6 +228,14 @@ impl NearVisualSignConverter {
             create_address_field("To", tx.receiver_id().as_str(), None, None, None, None)?
                 .signable_payload_field,
         );
+        // Built once for the whole transaction: the metadata is request-scoped,
+        // so a rejection is a property of the request, not of each action that
+        // consults the registry. Building it per action would repeat every
+        // rejection diagnostic for a multi-action transaction.
+        let (registry, rejection_diagnostics) =
+            token_registry_for(options, network, &self.trust_policy)?;
+        fields.extend(rejection_diagnostics);
+
         let total_actions = tx.actions().len();
         for action in tx.actions() {
             fields.extend(render_action(action, total_actions)?);
@@ -222,8 +243,8 @@ impl NearVisualSignConverter {
                 tx.receiver_id().as_str(),
                 action,
                 options,
+                &registry,
                 network,
-                &self.trust_policy,
             )?);
         }
 
@@ -260,8 +281,8 @@ fn decode_intents(
     receiver_id: &str,
     action: &Action,
     options: &VisualSignOptions,
+    registry: &LayeredRegistry<NearTokenRegistry>,
     network: NearNetwork,
-    trust_policy: &MetadataTrustPolicy,
 ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
     if receiver_id != "intents.near" {
         return Ok(vec![]);
@@ -272,8 +293,7 @@ fn decode_intents(
     if fc.method_name != "execute_intents" {
         return Ok(vec![]);
     }
-    let registry = token_registry_for(options, network, trust_policy);
-    crate::presets::intents::try_decode_execute_intents(&fc.args, &registry, options, network)
+    crate::presets::intents::try_decode_execute_intents(&fc.args, registry, options, network)
         .map_err(intents_error)
 }
 
@@ -297,12 +317,13 @@ fn render_intent_envelope(
     network: NearNetwork,
     trust_policy: &MetadataTrustPolicy,
 ) -> Result<ConversionResult, VisualSignError> {
-    let registry = token_registry_for(options, network, trust_policy);
+    let (registry, rejection_diagnostics) = token_registry_for(options, network, trust_policy)?;
     // The resolved network is part of every token-metadata signed scope, so the
     // payload has to show which network that scope was checked against -- the
     // same field, for the same reason, as the on-chain path renders.
     let mut fields =
         vec![create_text_field("Network", network.display_name())?.signable_payload_field];
+    fields.extend(rejection_diagnostics);
     fields.extend(
         crate::presets::intents::try_render_single_intent(
             json.as_bytes(),
@@ -829,5 +850,172 @@ mod tests {
             assert!(json.contains(expected), "missing {expected}: {json}");
         }
         assert!(!json.contains("Standard"), "unexpected signature section");
+    }
+
+    /// Metadata the parser refuses must be visible in the payload, not just in
+    /// an operator log.
+    ///
+    /// The refusal here is the `require-signed` posture dropping an unsigned
+    /// entry. Without the diagnostic, the signer sees an amount in raw base
+    /// units against an `unresolved` asset id and has no way to tell that
+    /// metadata was supplied at all.
+    #[test]
+    fn rejected_metadata_surfaces_a_diagnostic_end_to_end() {
+        let asset_id = "nep141:rejected-token.near";
+        let options = VisualSignOptions {
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                    network_id: Some("NEAR_MAINNET".to_string()),
+                    token_mappings: [(
+                        asset_id.to_string(),
+                        generated::parser::TokenMetadataEntry {
+                            value: r#"{"symbol":"DROPPED","decimals":6}"#.to_string(),
+                            signature: None,
+                            origin_chain: None,
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                })),
+            }),
+            ..Default::default()
+        };
+
+        let envelope = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"rejected-token.near","receiver_id":"bob.near","amount":"1000000"}]}"#.to_string();
+        let payload = NearVisualSignConverter::with_trust_policy(
+            MetadataTrustPolicy::RequireAllowlistedSigner(SignerAllowlist::new()),
+        )
+        .to_visual_sign_payload(NearTransaction::Intent(envelope), options)
+        .expect("convert");
+        let fields = &payload.payload.fields;
+
+        assert!(
+            fields.iter().any(
+                |f| crate::presets::intents::test_support::is_warning_diagnostic(
+                    f,
+                    "rejected-token-metadata"
+                )
+            ),
+            "a refused entry must report itself in the payload: {fields:?}"
+        );
+        let json = payload.payload.to_json().expect("json");
+        assert!(
+            !json.contains("DROPPED"),
+            "the refused entry must not resolve the symbol: {json}"
+        );
+        assert!(
+            json.contains(asset_id),
+            "the diagnostic must name the asset id it refused: {json}"
+        );
+    }
+
+    /// The rejection is a property of the request's metadata, so it reports
+    /// once even when several actions consult the registry.
+    #[test]
+    fn rejected_metadata_reports_once_for_a_multi_action_transaction() {
+        let asset_id = "nep141:rejected-token.near";
+        let inner = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"rejected-token.near","receiver_id":"bob.near","amount":"1000000"}]}"#;
+        let args = serde_json::json!({"signed":[{
+            "standard": "raw_ed25519",
+            "payload": inner,
+            "public_key": "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN",
+            "signature": "ed25519:3vtbNQJHZfuV1s5DykzyjkbNLc583hnkrhTz57eDhd966iqzkor6Twgr4Loh2C195SCSEsiGfrd6KcxpjNq9ZbVj"
+        }]});
+        let call = || {
+            Action::FunctionCall(Box::new(FunctionCallAction {
+                method_name: "execute_intents".to_string(),
+                args: serde_json::to_vec(&args).unwrap(),
+                gas: Gas::from_gas(30_000_000_000_000),
+                deposit: Balance::from_yoctonear(0),
+            }))
+        };
+        let txv0 = TransactionV0 {
+            signer_id: "alice.near".parse().unwrap(),
+            public_key: PublicKey::empty(KeyType::ED25519),
+            nonce: 1,
+            receiver_id: "intents.near".parse().unwrap(),
+            block_hash: CryptoHash::default(),
+            actions: vec![call(), call()],
+        };
+
+        let options = VisualSignOptions {
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                    network_id: Some("NEAR_MAINNET".to_string()),
+                    token_mappings: [(
+                        asset_id.to_string(),
+                        generated::parser::TokenMetadataEntry {
+                            value: "not valid json".to_string(),
+                            signature: None,
+                            origin_chain: None,
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                })),
+            }),
+            ..Default::default()
+        };
+
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(NearTransaction::OnChain(Transaction::V0(txv0)), options)
+            .expect("convert");
+        let count = payload
+            .payload
+            .fields
+            .iter()
+            .filter(|f| {
+                crate::presets::intents::test_support::is_warning_diagnostic(
+                    f,
+                    "rejected-token-metadata",
+                )
+            })
+            .count();
+        assert_eq!(
+            count, 1,
+            "two actions must not each repeat the request's one rejection"
+        );
+    }
+
+    /// A caller-controlled asset id cannot smuggle a newline into the rejection
+    /// diagnostic, which would render as extra apparent fields on the signing
+    /// screen. Same class as the `memo`/`msg`/`method_name` filtering in
+    /// `actions.rs`, reached through a different field.
+    #[test]
+    fn rejected_metadata_diagnostic_strips_newlines_from_the_asset_id() {
+        let hostile = "nep141:x.near\nAmount: 1000000 NEAR";
+        let options = VisualSignOptions {
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                    network_id: Some("NEAR_MAINNET".to_string()),
+                    token_mappings: [(
+                        hostile.to_string(),
+                        generated::parser::TokenMetadataEntry {
+                            value: "not valid json".to_string(),
+                            signature: None,
+                            origin_chain: None,
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                })),
+            }),
+            ..Default::default()
+        };
+
+        let envelope = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000"}]}"#;
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(NearTransaction::Intent(envelope.to_string()), options)
+            .expect("convert");
+        let json = payload.payload.to_json().expect("json");
+
+        assert!(
+            json.contains("rejected-token-metadata"),
+            "the refusal must still be reported: {json}"
+        );
+        assert!(
+            !json.contains("x.near\\nAmount"),
+            "the newline must be filtered out of the rendered text: {json}"
+        );
     }
 }
