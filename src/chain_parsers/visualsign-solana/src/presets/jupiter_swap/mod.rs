@@ -3,7 +3,7 @@
 mod config;
 
 use crate::core::{
-    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
+    InstructionView, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
     VisualizerKind,
 };
 use crate::utils::{SwapTokenInfo, get_token_info};
@@ -85,15 +85,7 @@ impl InstructionVisualizer for JupiterSwapVisualizer {
         &self,
         context: &VisualizerContext,
     ) -> Result<AnnotatedPayloadField, VisualSignError> {
-        let instruction_accounts: Vec<String> = (0..context.num_accounts())
-            .map(|i| match context.account(i) {
-                Some(AccountRef::Resolved(pk)) => pk.to_string(),
-                Some(AccountRef::Unresolved { raw_index }) => {
-                    format!("unresolved({raw_index})")
-                }
-                None => "unknown".to_string(),
-            })
-            .collect();
+        let instruction_accounts = InstructionView::from_context(context).accounts;
 
         let jupiter_instruction =
             parse_jupiter_swap_instruction(context.data(), &instruction_accounts)
