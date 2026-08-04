@@ -49,8 +49,10 @@ const PROTECTED: ReadonlyArray<{
 ];
 
 // Repo-relative, forward-slash path. resolve() handles both absolute and
-// relative tool inputs; relative() re-roots them at the project dir so a path
-// outside the repo can't match (it yields a `..` prefix).
+// relative tool inputs; relative() re-roots them at the project dir. A path
+// outside the repo yields a `..` prefix, which the handler short-circuits so an
+// ancestor dir (e.g. `~/target/visualsign-parser` -> `../target/...`) can't trip
+// the `/target/` rule.
 function toRel(cwd: string, raw: string): string {
 	const rel = relative(cwd, resolve(cwd, raw));
 	return sep === "/" ? rel : rel.split(sep).join("/");
@@ -63,7 +65,13 @@ export default function (pi: ExtensionAPI) {
 		const path = String(event.input.path ?? "");
 		if (!path) return undefined;
 
-		const match = PROTECTED.find((p) => p.match(toRel(ctx.cwd, path)));
+		const rel = toRel(ctx.cwd, path);
+		// Outside the repo (relative path escapes via ..) -> not a repo build
+		// artifact, and skipping avoids the /target/ substring matching an
+		// ancestor directory again.
+		if (rel.startsWith("..")) return undefined;
+
+		const match = PROTECTED.find((p) => p.match(rel));
 		if (match) {
 			ctx.ui.notify?.(`Blocked write to build artifact: ${path}`, "warning");
 			return { block: true, reason: `"${path}" is ${match.reason}` };
