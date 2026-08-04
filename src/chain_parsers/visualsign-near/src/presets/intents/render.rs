@@ -367,6 +367,9 @@ pub(crate) fn render_signature(
         SignatureCheck::Invalid => {
             fields.push(diagnostic("signature", "signature verification failed")?);
         }
+        SignatureCheck::MalformedEncoding(reason) => {
+            fields.push(diagnostic("signature", reason)?);
+        }
     }
     Ok(fields)
 }
@@ -488,6 +491,30 @@ mod tests {
     #[test]
     fn invalid_signature_renders_warning() {
         let fields = render_signature("erc191", &SignatureCheck::Invalid, None).expect("render");
+        assert!(
+            super::super::test_support::is_warning_diagnostic(&fields[1], "signature"),
+            "expected a signature warning, got {:?}",
+            fields[1]
+        );
+    }
+
+    /// A malformed recovery-id encoding has to reach the screen as its own
+    /// finding. Without this, the arm could be dropped or mislabelled and a
+    /// cryptographically-sound wallet signature would render no signature
+    /// field at all -- `verify`'s reason string alone proves nothing about
+    /// what a signer sees.
+    #[test]
+    fn malformed_encoding_renders_its_reason_as_a_warning() {
+        let check = SignatureCheck::MalformedEncoding(
+            "malformed signature encoding: recovery id 28, expected 0-3 (Ethereum v=27/28 must be normalized)"
+                .to_string(),
+        );
+        let fields = render_signature("erc191", &check, None).expect("render");
+        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
+        assert!(
+            !labels.contains(&"Signature"),
+            "a malformed encoding must not claim a Signature field: {labels:?}"
+        );
         assert!(
             super::super::test_support::is_warning_diagnostic(&fields[1], "signature"),
             "expected a signature warning, got {:?}",

@@ -7,6 +7,7 @@ use defuse_core::payload::{DefusePayload, ExtractDefusePayload};
 use defuse_crypto::SignedPayload;
 
 /// Outcome of verifying one payload's signature.
+#[derive(Debug)]
 pub(crate) enum SignatureCheck {
     /// Signature is cryptographically valid.
     Valid {
@@ -23,6 +24,12 @@ pub(crate) enum SignatureCheck {
     },
     /// Signature did not verify.
     Invalid,
+    /// Cryptographically well-formed but encodes a recovery-id convention
+    /// this wire format doesn't accept (e.g. Ethereum's v=27/28 instead of
+    /// the 0-3 this format expects). Not a proof of tampering -- rendered
+    /// with its own diagnostic rather than folded into `Invalid`, whose
+    /// wording implies the cryptography itself failed.
+    MalformedEncoding(String),
 }
 
 /// Verify the signature and extract the inner intents payload.
@@ -36,16 +43,15 @@ pub(crate) enum SignatureCheck {
 pub(crate) fn verify_and_extract(
     payload: &MultiPayload,
 ) -> (SignatureCheck, Result<DefusePayload<DefuseIntents>, String>) {
-    let check = if has_invalid_secp256k1_recovery_id(payload) {
-        SignatureCheck::Invalid
-    } else {
-        match payload.verify() {
+    let check = match invalid_secp256k1_recovery_id_reason(payload) {
+        Some(reason) => SignatureCheck::MalformedEncoding(reason),
+        None => match payload.verify() {
             Some(key) => SignatureCheck::Valid {
                 recovered_key: key.to_string(),
                 implied_account_id: key.to_implicit_account_id().to_string(),
             },
             None => SignatureCheck::Invalid,
-        }
+        },
     };
     let extracted = payload
         .clone()
@@ -58,7 +64,14 @@ pub(crate) fn verify_and_extract(
 /// they reach `verify()`: near-crypto's native `ecrecover` backend panics on
 /// an invalid recovery id rather than returning `None`, and a signing service
 /// must treat a malformed payload as invalid input, never as a crash.
-fn has_invalid_secp256k1_recovery_id(payload: &MultiPayload) -> bool {
+///
+/// Returns the human-readable reason when rejected, `None` when the
+/// signature's recovery id is in range (or the standard has none). The most
+/// common out-of-range case is Ethereum's v=27/28 convention (`recovery_id +
+/// 27`, per MetaMask/`personal_sign`) landing on a wire format that expects
+/// the raw 0-3 recovery id -- flagged with a specific hint, since that's a
+/// wrong encoding, not a broken signature.
+fn invalid_secp256k1_recovery_id_reason(payload: &MultiPayload) -> Option<String> {
     let signature = match payload {
         MultiPayload::Erc191(signed) => &signed.signature,
         MultiPayload::Tip191(signed) => &signed.signature,
@@ -68,7 +81,18 @@ fn has_invalid_secp256k1_recovery_id(payload: &MultiPayload) -> bool {
         | MultiPayload::RawEd25519(_)
         | MultiPayload::WebAuthn(_)
         | MultiPayload::TonConnect(_)
-        | MultiPayload::Sep53(_) => return false,
+        | MultiPayload::Sep53(_) => return None,
     };
-    signature[64] >= 4
+    let recovery_id = signature[64];
+    if recovery_id < 4 {
+        return None;
+    }
+    let hint = if recovery_id == 27 || recovery_id == 28 {
+        " (Ethereum v=27/28 must be normalized)"
+    } else {
+        ""
+    };
+    Some(format!(
+        "malformed signature encoding: recovery id {recovery_id}, expected 0-3{hint}"
+    ))
 }
