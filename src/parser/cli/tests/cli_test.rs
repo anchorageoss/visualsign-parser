@@ -52,6 +52,8 @@ fn test_cli_with_fixtures() {
     let disabled_chain_prefixes: &[&str] = &[
         #[cfg(not(feature = "ethereum"))]
         "ethereum",
+        #[cfg(not(feature = "near"))]
+        "near",
         #[cfg(not(feature = "solana"))]
         "solana",
         #[cfg(not(feature = "tron"))]

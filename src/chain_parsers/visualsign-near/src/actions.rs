@@ -339,7 +339,7 @@ fn push_amount_and_notes(
 /// deliberately permits so field text can carry real embedded JSON -- and
 /// `ft_transfer_call`'s `msg` is exactly such a field, so deleting its quotes
 /// would strip structure a signer needs to read literally.
-fn charset_safe(text: &str) -> String {
+pub(crate) fn charset_safe(text: &str) -> String {
     text.chars()
         .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '\\'))
         .collect()
