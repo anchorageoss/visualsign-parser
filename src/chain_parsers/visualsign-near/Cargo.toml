@@ -31,6 +31,7 @@ defuse-deadline = { workspace = true }
 
 [dev-dependencies]
 near-crypto = "0.35.1"
+parser_cli_core = { path = "../../parser/cli-core", features = ["test-utils"] }
 
 [features]
 default = ["cli-plugin"]
