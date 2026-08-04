@@ -141,12 +141,27 @@ pub(crate) fn render_intent(intent: &Intent, registry: &Reg) -> Result<Fields, V
                 .signable_payload_field,
             near_amount_field("Amount", s.amount.as_yoctonear())?,
         ]),
-        Intent::AuthCall(c) => Ok(vec![
-            create_text_field("Contract", c.contract_id.as_str())?.signable_payload_field,
-            create_text_field("Message", &c.msg)?.signable_payload_field,
-            near_amount_field("Attached Deposit", c.attached_deposit.as_yoctonear())?,
-        ]),
+        Intent::AuthCall(c) => {
+            let mut fields = vec![
+                create_text_field("Contract", c.contract_id.as_str())?.signable_payload_field,
+                create_text_field("Message", &c.msg)?.signable_payload_field,
+                near_amount_field("Attached Deposit", c.attached_deposit.as_yoctonear())?,
+            ];
+            if c.state_init.is_some() {
+                fields.push(state_init_field()?);
+            }
+            Ok(fields)
+        }
     }
+}
+
+/// Flags an attached NEP-616 `state_init`: a global-contract id plus initial
+/// state, which initializes the callee's contract in the same receipt. The
+/// code/data have no cheap field-level render, so surface that the attachment
+/// exists rather than let the other fields imply the whole picture -- the same
+/// treatment `actions.rs` gives NEAR's own `DeterministicStateInit` action.
+fn state_init_field() -> Result<SignablePayloadField, VisualSignError> {
+    Ok(create_text_field("State Init", "(not fully decoded)")?.signable_payload_field)
 }
 
 fn render_token_diff(td: &TokenDiff, registry: &Reg) -> Result<Fields, VisualSignError> {
@@ -181,6 +196,17 @@ fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignErr
     }
     if let Some(memo) = &t.memo {
         fields.push(create_text_field("Memo", memo)?.signable_payload_field);
+    }
+    // A `Transfer`'s optional notification changes what the transfer does
+    // beyond moving the named tokens: `msg` calls `mt_on_transfer` on
+    // `receiver_id` (the internal-transfer counterpart of the withdraws'
+    // `_transfer_call` form), and `state_init` initializes the receiver's
+    // contract in the same receipt.
+    if let Some(notification) = &t.notification {
+        fields.push(create_text_field("Message", &notification.msg)?.signable_payload_field);
+        if notification.state_init.is_some() {
+            fields.push(state_init_field()?);
+        }
     }
     Ok(fields)
 }
@@ -285,9 +311,15 @@ fn looks_like_implicit_account(signer_id: &str) -> bool {
 ///
 /// `signer_id` is the payload's claimed signer, when extraction succeeded.
 /// When it has an implicit-account shape, the recovered key's own implied
-/// account id is compared against it -- a real pass/fail check, not a hedge.
-/// For any other shape (a named account) the binding genuinely requires
-/// chain access this parser doesn't have, so it stays a hedge.
+/// account id is compared against it and the outcome stated literally: the key
+/// either derives `signer_id` or it doesn't. Neither outcome settles
+/// authorization, because the contract accepts a key that either derives the
+/// account id *or* sits in the account's on-chain key set
+/// (`Account::has_public_key`, `defuse/v0.4.2`): a derivation match can still
+/// be rejected on-chain (an account may remove its implicit key), and a
+/// non-match is expected for any account that added keys via `AddPublicKey`.
+/// For any other shape (a named account) there is nothing to compare against
+/// at all, so no claim is made.
 pub(crate) fn render_signature(
     standard: &str,
     check: &SignatureCheck,
@@ -301,14 +333,12 @@ pub(crate) fn render_signature(
         } => match signer_id.filter(|id| looks_like_implicit_account(id)) {
             Some(id) if id == implied_account_id => {
                 fields.push(
-                        create_text_field(
-                            "Signature",
-                            &format!(
-                                "valid for key {recovered_key} (account binding confirmed: matches {id})"
-                            ),
-                        )?
-                        .signable_payload_field,
-                    );
+                    create_text_field(
+                        "Signature",
+                        &format!("valid for key {recovered_key} (derives signer_id {id})"),
+                    )?
+                    .signable_payload_field,
+                );
             }
             Some(id) => {
                 fields.push(
@@ -318,7 +348,7 @@ pub(crate) fn render_signature(
                 fields.push(diagnostic(
                         "account-binding",
                         &format!(
-                            "signer_id {id} does not match the key that signed this payload (implies {implied_account_id})"
+                            "the signing key does not derive signer_id {id} (it derives {implied_account_id}); the account may still have authorized this key on-chain, which this parser cannot check"
                         ),
                     )?);
             }
@@ -474,7 +504,7 @@ mod tests {
         match &fields[1] {
             SignablePayloadField::TextV2 { text_v2, .. } => {
                 assert!(
-                    text_v2.text.contains("account binding confirmed"),
+                    text_v2.text.contains("derives signer_id"),
                     "{}",
                     text_v2.text
                 );
@@ -491,7 +521,7 @@ mod tests {
         match &fields[1] {
             SignablePayloadField::TextV2 { text_v2, .. } => {
                 assert!(
-                    text_v2.text.contains("account binding confirmed"),
+                    text_v2.text.contains("derives signer_id"),
                     "{}",
                     text_v2.text
                 );
@@ -740,6 +770,71 @@ mod tests {
         let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
         assert!(labels.contains(&"Message"), "labels: {labels:?}");
         assert!(labels.contains(&"Storage Deposit"), "labels: {labels:?}");
+    }
+
+    /// A NEP-616 `state_init` attached to an intent, in defuse's JSON shape:
+    /// an externally-tagged `StateInit::V1` wrapping a global-contract id.
+    const STATE_INIT: &str =
+        r#"{"V1":{"code":{"hash":"11111111111111111111111111111111"},"data":{}}}"#;
+
+    // Regression coverage for a signing-integrity gap: `Transfer` carries an
+    // optional flattened notification whose `msg` calls `mt_on_transfer` on the
+    // receiver, and whose `state_init` initializes the receiver's contract in
+    // the same receipt. Neither is implied by the To/Amount fields, so both
+    // must reach the screen -- the same class of gap as the withdraws'
+    // storage_deposit/msg coverage above.
+    #[test]
+    fn transfer_renders_notification_message_and_state_init() {
+        let intent = intent_from(&format!(
+            r#"{{"intent":"transfer","receiver_id":"attacker.near","tokens":{{"nep141:wrap.near":"1000000000000000000000000"}},"msg":"notify","state_init":{STATE_INIT}}}"#
+        ));
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
+        assert!(labels.contains(&"Message"), "labels: {labels:?}");
+        assert!(labels.contains(&"State Init"), "labels: {labels:?}");
+    }
+
+    #[test]
+    fn transfer_renders_notification_message_without_state_init() {
+        let intent = intent_from(
+            r#"{"intent":"transfer","receiver_id":"attacker.near","tokens":{"nep141:wrap.near":"1"},"msg":"notify"}"#,
+        );
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
+        assert!(labels.contains(&"Message"), "labels: {labels:?}");
+        assert!(!labels.contains(&"State Init"), "labels: {labels:?}");
+    }
+
+    #[test]
+    fn transfer_omits_notification_fields_when_absent() {
+        let intent = intent_from(
+            r#"{"intent":"transfer","receiver_id":"bob.near","tokens":{"nep141:wrap.near":"1"}}"#,
+        );
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
+        assert_eq!(labels, ["To", "Amount"]);
+    }
+
+    #[test]
+    fn auth_call_renders_state_init() {
+        let intent = intent_from(&format!(
+            r#"{{"intent":"auth_call","contract_id":"evil.near","msg":"{{}}","state_init":{STATE_INIT}}}"#
+        ));
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
+        assert_eq!(
+            labels,
+            ["Contract", "Message", "Attached Deposit", "State Init"]
+        );
+    }
+
+    #[test]
+    fn auth_call_omits_state_init_when_absent() {
+        let intent =
+            intent_from(r#"{"intent":"auth_call","contract_id":"callee.near","msg":"{}"}"#);
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
+        assert_eq!(labels, ["Contract", "Message", "Attached Deposit"]);
     }
 
     #[test]
