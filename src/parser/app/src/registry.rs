@@ -142,4 +142,40 @@ mod tests {
             "a decoded call must not fall back to the raw selector, got: {rendered}"
         );
     }
+
+    /// The mirror of the test above, for the posture that actually enforces something.
+    ///
+    /// Asserting only the accept-unsigned direction would leave the security-relevant
+    /// wiring unpinned: a `create_registry` that dropped `config.abi_trust` and always
+    /// built a permissive converter would still pass the accept-unsigned test. Here the
+    /// same unsigned fixture must be refused and fall back to the raw selector, so the
+    /// posture has to reach the converter for the test to hold.
+    #[test]
+    fn create_registry_runs_the_require_signed_abi_posture() {
+        let config = crate::config::ParserConfig::new(
+            visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
+                visualsign::signing::SignerAllowlist::new(),
+            ),
+        );
+        let rendered = super::create_registry(&config)
+            .convert_transaction(
+                &Chain::Ethereum,
+                CUSTOM_FOO_TX_HEX,
+                options_with_unsigned_abi(),
+            )
+            .expect("fixture transaction must convert")
+            .payload
+            .to_json()
+            .expect("payload must serialize");
+
+        assert!(
+            !rendered.contains("customFoo"),
+            "require-signed must drop the unsigned caller ABI; decoding it means the \
+             posture never reached the converter. Got: {rendered}"
+        );
+        assert!(
+            rendered.contains(CUSTOM_FOO_SELECTOR),
+            "dropping the ABI must leave the raw selector {CUSTOM_FOO_SELECTOR}, got: {rendered}"
+        );
+    }
 }

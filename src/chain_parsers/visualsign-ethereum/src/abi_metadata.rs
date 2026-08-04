@@ -31,7 +31,10 @@ enum AbiSignatureError {
 ///
 /// Navigates `ChainMetadata -> Ethereum -> abi_mappings` and registers each ABI
 /// with its contract address. Returns `None` if the metadata doesn't contain
-/// any Ethereum ABI mappings.
+/// any Ethereum ABI mappings, and *also* if mappings were supplied but every one
+/// was rejected (bad address, oversized JSON, unparseable ABI, or refused by
+/// `policy`). Callers cannot distinguish "no metadata" from "total refusal" from
+/// the return value alone.
 ///
 /// The `chain_id` is needed to register address-to-ABI mappings in the registry.
 ///
@@ -582,14 +585,28 @@ mod tests {
         }
     ]"#;
 
+    /// A signing seed no allowlist in this crate authorizes. Distinct from
+    /// [`CLI_DEV_SIGNING_KEY_SEED`], which `authorized_abi_signers()` allowlists under
+    /// `cfg(test)`.
+    const FOREIGN_SIGNER_SEED: [u8; 32] = [0x43u8; 32];
+
     /// Helper to create a valid signature for testing.
     ///
     /// The signature is over the domain-separated prehash binding `chain_id` and
     /// `address` to `abi_json`, matching what [`validate_abi_signature`] verifies.
     fn create_test_signature(abi_json: &str, address: &Address, chain_id: u64) -> (String, String) {
-        // Use a deterministic test seed
-        let seed: [u8; 32] = [0x42u8; 32];
-        let signing_key = SigningKey::from_bytes(&seed).expect("valid key");
+        create_test_signature_with_seed(abi_json, address, chain_id, &CLI_DEV_SIGNING_KEY_SEED)
+    }
+
+    /// [`create_test_signature`] with an explicit signing seed, so a test can sign as
+    /// a signer that no allowlist authorizes.
+    fn create_test_signature_with_seed(
+        abi_json: &str,
+        address: &Address,
+        chain_id: u64,
+        seed: &[u8; 32],
+    ) -> (String, String) {
+        let signing_key = SigningKey::from_bytes(seed).expect("valid key");
         let verifying_key = VerifyingKey::from(&signing_key);
 
         // Compute the shared domain-separated prehash.
@@ -920,8 +937,15 @@ mod tests {
     /// earlier address parse and are skipped before signature verification, so the
     /// bound address is never actually checked.
     fn signed_abi(abi_json: &str, address: &str) -> Abi {
+        signed_abi_with_seed(abi_json, address, &CLI_DEV_SIGNING_KEY_SEED)
+    }
+
+    /// [`signed_abi`] with an explicit signing seed. Pass [`FOREIGN_SIGNER_SEED`] to
+    /// build an entry whose signature verifies but whose signer no allowlist knows.
+    fn signed_abi_with_seed(abi_json: &str, address: &str, seed: &[u8; 32]) -> Abi {
         let addr = address.parse::<Address>().unwrap_or(Address::ZERO);
-        let (signature_hex, public_key_hex) = create_test_signature(abi_json, &addr, 1);
+        let (signature_hex, public_key_hex) =
+            create_test_signature_with_seed(abi_json, &addr, 1, seed);
         let proto_sig = generated::parser::SignatureMetadata {
             value: signature_hex,
             metadata: vec![
@@ -1172,14 +1196,16 @@ mod tests {
                 network_id: Some("ETHEREUM_MAINNET".to_string()),
                 abi_mappings: make_abi_mappings(vec![(
                     TEST_ADDRESS,
-                    signed_abi(VALID_ABI, TEST_ADDRESS),
+                    signed_abi_with_seed(VALID_ABI, TEST_ADDRESS, &FOREIGN_SIGNER_SEED),
                 )])
                 .into_iter()
                 .collect(),
             })),
         };
-        // Same fixture rejected by `test_try_extract_unauthorized_signer_still_rejected`
-        // under require-signed with a foreign allowlist.
+        // The fixture must be signed with `FOREIGN_SIGNER_SEED`, not the dev seed:
+        // `authorized_abi_signers()` allowlists the dev key under `cfg(test)`, so a
+        // dev-signed fixture would pass an identity check too and the test would hold
+        // even if identity were being enforced.
         let registry = try_extract_from_chain_metadata(
             Some(&metadata),
             1,
@@ -1311,9 +1337,16 @@ mod tests {
                 .collect(),
             })),
         };
-        // Invalid entries are skipped; with no valid entries left, result is None
+        // Run under accept-unsigned deliberately: the fixture carries no signature, so
+        // under require-signed the posture would drop it before the address is ever
+        // parsed and this would pass even if address validation were removed.
         assert!(
-            try_extract_from_chain_metadata(Some(&metadata), 1, &test_require_signed()).is_none()
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                1,
+                &MetadataTrustPolicy::AcceptUnsigned
+            )
+            .is_none()
         );
     }
 

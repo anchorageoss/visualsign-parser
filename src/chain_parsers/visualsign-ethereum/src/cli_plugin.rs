@@ -116,10 +116,10 @@ fn build_abi_mappings_from_files(
         "ContractAddress",
         validate_eth_address,
         |components, json| {
-            // The metadata-ABI extraction path accepts unsigned entries too, but the
-            // CLI attaches an integrity signature using a deterministic local dev key
-            // so locally-loaded ABIs extract as verified rather than logged as
-            // unverified. This is integrity, not identity, the CLI is a local dev tool
+            // The CLI runs the require-signed posture against its own dev key (see
+            // `register`), so an unsigned entry is dropped outright. Signing
+            // locally-loaded ABIs with that deterministic dev key is what keeps them
+            // extractable at all. This is integrity, not identity, the CLI is a local dev tool
             // that already trusts its input files; production trust comes from the
             // service running the parser, which validates the signature and checks the
             // signer's public key against an allowlist during extraction (see
@@ -135,7 +135,7 @@ fn build_abi_mappings_from_files(
             // If parsing or signing fails (e.g. an invalid seed in future refactors),
             // surface the failure as a `load_mappings` rejection so the entry is
             // skipped and the success count stays accurate, rather than emitting an
-            // `Abi` the extractor would register as unverified instead of signed.
+            // unsigned `Abi` the extractor would then drop under the CLI's posture.
             let addr = components
                 .identifier
                 .parse::<alloy_primitives::Address>()
@@ -210,7 +210,7 @@ fn apply_proxy_mappings(
 
         // Ensure the proxy has an entry to stamp. If it has no own ABI file, synthesize
         // an empty "[]" ABI, signed with the same dev key used for file-loaded ABIs so
-        // it extracts as verified rather than logged as unverified.
+        // the CLI's require-signed posture does not drop it during extraction.
         if !abi_mappings.contains_key(&proxy_key) {
             if attempted_abi_addresses.contains(&proxy_key) {
                 eprintln!(
@@ -344,6 +344,12 @@ pub(crate) fn create_chain_metadata(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use alloy_consensus::TxEip1559;
+    use alloy_primitives::U256;
+    use alloy_rlp::Encodable;
+    use alloy_sol_types::{SolCall, sol};
+    use parser_cli_core::ChainPlugin;
+    use visualsign::vsptrait::VisualSignOptions;
 
     fn write_temp_json(name: &str, content: &str) -> std::path::PathBuf {
         parser_cli_core::test_utils::write_temp_json("vsp_eth_tests", name, content)
@@ -414,8 +420,8 @@ mod tests {
             .get("0xdac17f958d2ee523a2206206994597c13d831ec7")
             .expect("mapping present");
         assert!(abi.value.contains("swap"));
-        // CLI signs locally-loaded ABIs so they extract as verified rather than
-        // logged as unverified by the metadata-ABI extractor.
+        // CLI signs locally-loaded ABIs because its own posture is require-signed:
+        // without the dev-key signature the extractor would drop them.
         assert!(
             abi.signature.is_some(),
             "CLI should attach a dev-key signature to locally-loaded ABIs"
@@ -531,12 +537,11 @@ mod tests {
         assert_eq!(proxy_abi.value, "[]");
         assert_eq!(proxy_abi.abi_type, Some(AbiType::Proxy as i32));
         assert_eq!(proxy_abi.implementation_address.as_deref(), Some(IMPL));
-        // Regression guard: the CLI still signs the synthesized proxy ABI so it
-        // extracts as verified, even though the extractor now also accepts
-        // unsigned entries.
+        // Regression guard: the CLI still signs the synthesized proxy ABI, without
+        // which its own require-signed posture would drop the entry.
         assert!(
             proxy_abi.signature.is_some(),
-            "synthesized proxy ABI must be signed so the extractor treats it as verified",
+            "synthesized proxy ABI must be signed so the extractor does not drop it",
         );
 
         // End-to-end: the signed synthesized proxy survives extraction. `list_abis`
@@ -558,6 +563,116 @@ mod tests {
         assert!(
             registry.list_abis().contains(&PROXY),
             "signed synthesized proxy must survive extraction",
+        );
+    }
+
+    /// The posture must be pinned through `register`, not through the helper that
+    /// feeds it.
+    ///
+    /// Asserting on the allowlist helper in isolation proves nothing about what the
+    /// CLI actually runs: editing `register` back to
+    /// `EthereumVisualSignConverter::new()` leaves such an assertion passing and
+    /// silently reverts the CLI to accept-unsigned. So this goes through the plugin,
+    /// converts a real transaction, and observes the decode.
+    ///
+    /// `customFoo` is deliberately a function no built-in visualizer knows, so the
+    /// unsigned metadata ABI is the only thing that could decode it. The
+    /// accept-unsigned control converter proves the fixture is good, so the
+    /// registered converter's refusal cannot be a false negative.
+    #[test]
+    fn test_register_installs_require_signed_posture() {
+        sol! {
+            function customFoo(uint256 x) external;
+        }
+
+        let contract: alloy_primitives::Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        let calldata = customFooCall {
+            x: U256::from(7u64),
+        }
+        .abi_encode();
+        let selector_hex = hex::encode(&calldata[..4]);
+
+        let tx = TxEip1559 {
+            chain_id: 1,
+            nonce: 0,
+            gas_limit: 100_000,
+            max_fee_per_gas: 1_000_000_000,
+            max_priority_fee_per_gas: 1_000_000,
+            to: alloy_primitives::TxKind::Call(contract),
+            input: calldata.into(),
+            ..Default::default()
+        };
+        let mut buf = vec![0x02]; // EIP-1559 type byte
+        tx.encode(&mut buf);
+        let tx_hex = format!("0x{}", hex::encode(&buf));
+
+        // Deliberately unsigned: this is the entry the CLI's posture must refuse.
+        let build_options = || {
+            let mut abi_mappings = BTreeMap::new();
+            abi_mappings.insert(
+                contract.to_string(),
+                Abi {
+                    value: r#"[{
+                        "type": "function",
+                        "name": "customFoo",
+                        "inputs": [{"name": "x", "type": "uint256"}],
+                        "outputs": [],
+                        "stateMutability": "nonpayable"
+                    }]"#
+                    .to_string(),
+                    signature: None,
+                    ..Default::default()
+                },
+            );
+            VisualSignOptions {
+                include_intermediate_output: false,
+                decode_transfers: true,
+                transaction_name: None,
+                metadata: Some(ChainMetadata {
+                    metadata: Some(Metadata::Ethereum(EthereumMetadata {
+                        network_id: Some("ETHEREUM_MAINNET".to_string()),
+                        abi_mappings: abi_mappings.into_iter().collect(),
+                    })),
+                }),
+                developer_config: None,
+            }
+        };
+
+        // Control: a converter on the permissive posture decodes the same fixture.
+        let mut permissive_registry = TransactionConverterRegistry::new();
+        permissive_registry.register::<crate::EthereumTransactionWrapper, _>(
+            Chain::Ethereum,
+            crate::EthereumVisualSignConverter::new(),
+        );
+        let permissive = permissive_registry
+            .convert_transaction(&Chain::Ethereum, &tx_hex, build_options())
+            .unwrap()
+            .payload
+            .to_json()
+            .unwrap();
+        assert!(
+            permissive.contains("customFoo"),
+            "accept-unsigned must decode the unsigned metadata ABI, got: {permissive}"
+        );
+
+        // The converter the CLI plugin actually installs must refuse it.
+        let mut registry = TransactionConverterRegistry::new();
+        EthereumPlugin::new(EthereumArgs::default()).register(&mut registry);
+        let rendered = registry
+            .convert_transaction(&Chain::Ethereum, &tx_hex, build_options())
+            .unwrap()
+            .payload
+            .to_json()
+            .unwrap();
+        assert!(
+            !rendered.contains("customFoo"),
+            "the converter `register` installs must not decode an unsigned metadata ABI, got: {rendered}"
+        );
+        assert!(
+            rendered.contains(&selector_hex),
+            "dropping the unsigned ABI must leave the raw selector {selector_hex}, got: {rendered}"
         );
     }
 
