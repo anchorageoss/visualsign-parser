@@ -3,6 +3,8 @@
 //! NEAR transaction envelopes carry no numeric chain id, so the network is
 //! supplied out of band (defaulting to mainnet for wallet display).
 
+use visualsign::errors::VisualSignError;
+
 /// A NEAR network. Used for the rendered `Network` header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NearNetwork {
@@ -35,25 +37,36 @@ impl NearNetwork {
 
 /// Extracts a [`NearNetwork`] from per-request [`ChainMetadata`], if present.
 ///
-/// Returns `None` when metadata is absent, carries another chain's variant, or
-/// its `network_id` doesn't parse -- callers fall back to whatever network the
-/// converter was constructed with.
+/// Returns `Ok(None)` when metadata is absent or carries another chain's
+/// variant -- callers fall back to whatever network the converter was
+/// constructed with. Returns `Err` when a `network_id` is present but doesn't
+/// parse, rather than treating it the same as "absent"; a caller-supplied but
+/// unrecognized network must not silently resolve to Mainnet.
 ///
 /// [`ChainMetadata`]: generated::parser::ChainMetadata
-#[must_use]
 pub fn extract_network_from_metadata(
     chain_metadata: Option<&generated::parser::ChainMetadata>,
-) -> Option<NearNetwork> {
+) -> Result<Option<NearNetwork>, VisualSignError> {
     use generated::parser::chain_metadata;
 
-    let metadata = chain_metadata?;
-    let inner_metadata = metadata.metadata.as_ref()?;
+    let Some(metadata) = chain_metadata else {
+        return Ok(None);
+    };
+    let Some(inner_metadata) = metadata.metadata.as_ref() else {
+        return Ok(None);
+    };
 
     let chain_metadata::Metadata::Near(near_metadata) = inner_metadata else {
-        return None;
+        return Ok(None);
     };
-    let network_id = near_metadata.network_id.as_ref()?;
+    let Some(network_id) = near_metadata.network_id.as_ref() else {
+        return Ok(None);
+    };
     NearNetwork::from_network_id(network_id)
+        .map(Some)
+        .ok_or_else(|| {
+            VisualSignError::ValidationError(format!("Invalid NEAR network_id: {network_id}"))
+        })
 }
 
 #[cfg(test)]
@@ -86,7 +99,7 @@ mod tests {
 
     #[test]
     fn extract_network_from_metadata_none_when_absent() {
-        assert_eq!(extract_network_from_metadata(None), None);
+        assert_eq!(extract_network_from_metadata(None), Ok(None));
     }
 
     #[test]
@@ -99,7 +112,7 @@ mod tests {
                 abi_mappings: Default::default(),
             })),
         };
-        assert_eq!(extract_network_from_metadata(Some(&metadata)), None);
+        assert_eq!(extract_network_from_metadata(Some(&metadata)), Ok(None));
     }
 
     #[test]
@@ -113,7 +126,21 @@ mod tests {
         };
         assert_eq!(
             extract_network_from_metadata(Some(&metadata)),
-            Some(NearNetwork::Testnet)
+            Ok(Some(NearNetwork::Testnet))
         );
+    }
+
+    #[test]
+    fn extract_network_from_metadata_rejects_unrecognized_network_id() {
+        use generated::parser::{ChainMetadata, NearMetadata, chain_metadata};
+
+        // "testnet" is the canonical `networkId` near-api-js and the NEAR CLI
+        // emit; it is not one of the two strings `from_network_id` accepts.
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("testnet".to_string()),
+            })),
+        };
+        assert!(extract_network_from_metadata(Some(&metadata)).is_err());
     }
 }
