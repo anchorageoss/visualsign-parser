@@ -19,10 +19,6 @@ pub(crate) const NEAR_DECIMALS: u8 = 24;
 pub enum NearIntentsError {
     #[error("input was not valid JSON: {0}")]
     InputNotJson(String),
-    #[error("Unknown intent action variant: {0}")]
-    UnknownAction(String),
-    #[error("Malformed asset identifier: {0}")]
-    MalformedAssetId(String),
     #[error("Failed to render intents: {0}")]
     Render(String),
 }
