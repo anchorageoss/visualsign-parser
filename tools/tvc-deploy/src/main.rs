@@ -496,13 +496,52 @@ fn validate_signer_pubkey(hex_str: &str) -> Result<()> {
         130 => stripped.starts_with("04"),
         _ => false,
     };
-    if valid_len && valid_prefix && stripped.bytes().all(|b| b.is_ascii_hexdigit()) {
-        Ok(())
-    } else {
+    if !(valid_len && valid_prefix && stripped.bytes().all(|b| b.is_ascii_hexdigit())) {
         bail!(
             "--accept-signatures-from-pubkey must be a 33-byte (02/03/05-prefixed) or \
-             65-byte (04-prefixed) hex secp256k1 public key, got {hex_str:?}"
+             65-byte (04-prefixed) hex secp256k1 public key, got {}",
+            truncate_for_error(hex_str)
         );
+    }
+
+    // Format alone is not enough: a well-formed hex string can still fail to decode
+    // to a point on the curve. parser_app decodes it for real at startup, so catching
+    // it here is the difference between a local error and a burned quorum round.
+    let bytes = decode_hex_bytes(stripped)?;
+    if k256::PublicKey::from_sec1_bytes(&bytes).is_err() {
+        bail!(
+            "--accept-signatures-from-pubkey is well-formed hex but does not decode to a \
+             point on the secp256k1 curve, got {}",
+            truncate_for_error(hex_str)
+        );
+    }
+    Ok(())
+}
+
+/// Decode an even-length ASCII hex string that has already been charset-checked.
+fn decode_hex_bytes(stripped: &str) -> Result<Vec<u8>> {
+    (0..stripped.len())
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(&stripped[i..i + 2], 16)
+                .map_err(|e| anyhow::anyhow!("invalid hex byte at offset {i}: {e}"))
+        })
+        .collect()
+}
+
+/// Bound an operator-supplied value echoed back in an error, so a mistaken paste of
+/// a whole file does not land verbatim in CI logs.
+fn truncate_for_error(value: &str) -> String {
+    const MAX: usize = 64;
+    if value.chars().count() <= MAX {
+        format!("{value:?}")
+    } else {
+        // Truncate on char boundaries: the value is operator-supplied and need not be ASCII.
+        let head: String = value.chars().take(MAX).collect();
+        format!(
+            "{head:?} (truncated, {} chars total)",
+            value.chars().count()
+        )
     }
 }
 
@@ -733,17 +772,40 @@ Deployment: deploy-123
         assert!(validate_digest("").is_err());
     }
 
+    fn hex_of(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// A real secp256k1 public key, in the requested SEC1 encoding. Derived rather
+    /// than hardcoded so the fixtures stay on the curve now that `validate_signer_pubkey`
+    /// decodes them for real.
+    fn real_pubkey_hex(compressed: bool) -> String {
+        use k256::elliptic_curve::sec1::ToEncodedPoint;
+        let sk = k256::SecretKey::from_slice(&[0x42u8; 32]).expect("valid scalar");
+        hex_of(sk.public_key().to_encoded_point(compressed).as_bytes())
+    }
+
+    /// SEC1 "compact" form: `0x05 || x`. Built from a real key's x-coordinate, which
+    /// is by construction an x that has a square root.
+    fn real_compact_pubkey_hex() -> String {
+        let uncompressed = real_pubkey_hex(false);
+        // Skip the "04" tag, keep the 32-byte x coordinate.
+        format!("05{}", &uncompressed[2..66])
+    }
+
     #[test]
     fn validate_signer_pubkey_accepts_compressed_and_uncompressed() {
-        assert!(validate_signer_pubkey(&format!("02{}", "a".repeat(64))).is_ok());
-        assert!(validate_signer_pubkey(&format!("03{}", "a".repeat(64))).is_ok());
-        assert!(validate_signer_pubkey(&format!("04{}", "a".repeat(128))).is_ok());
+        let compressed = real_pubkey_hex(true);
+        assert!(validate_signer_pubkey(&compressed).is_ok());
+        assert!(validate_signer_pubkey(&real_pubkey_hex(false)).is_ok());
         // 0x-prefixed, case-insensitive.
-        assert!(validate_signer_pubkey(&format!("0x04{}", "A".repeat(128))).is_ok());
+        assert!(
+            validate_signer_pubkey(&format!("0x{}", real_pubkey_hex(false).to_uppercase())).is_ok()
+        );
         // SEC1 "compact" tag: same 33-byte length as compressed, and accepted by
         // `canonical_pubkey_from_hex` (what parser_app actually runs), so a false
         // rejection here would block a legitimate deployment.
-        assert!(validate_signer_pubkey(&format!("05{}", "a".repeat(64))).is_ok());
+        assert!(validate_signer_pubkey(&real_compact_pubkey_hex()).is_ok());
     }
 
     #[test]
@@ -755,6 +817,40 @@ Deployment: deploy-123
         assert!(validate_signer_pubkey(&format!("02{}", "g".repeat(64))).is_err());
         // Wrong length for its prefix (compressed prefix, uncompressed length).
         assert!(validate_signer_pubkey(&format!("02{}", "a".repeat(128))).is_err());
+    }
+
+    #[test]
+    fn validate_signer_pubkey_rejects_well_formed_hex_that_is_off_curve() {
+        // Correct length and tag, valid hex, but not a point on secp256k1. This is the
+        // case the format-only check used to wave through into the signed manifest.
+        // `ff..ff` exceeds the field prime, so it is not even a valid x coordinate.
+        let err = validate_signer_pubkey(&format!("02{}", "f".repeat(64)))
+            .expect_err("an off-curve key must be rejected locally");
+        assert!(
+            err.to_string().contains("does not decode to a point"),
+            "unexpected error: {err}"
+        );
+        assert!(validate_signer_pubkey(&format!("04{}", "f".repeat(128))).is_err());
+    }
+
+    #[test]
+    fn validate_signer_pubkey_error_truncates_a_huge_paste() {
+        let huge = format!("02{}", "a".repeat(4096));
+        let err = validate_signer_pubkey(&huge).expect_err("wrong length must be rejected");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("truncated"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            !rendered.contains(&huge),
+            "error must not echo the whole paste verbatim"
+        );
+        assert!(
+            rendered.len() < 300,
+            "error should stay bounded, got {} chars",
+            rendered.len()
+        );
     }
 
     #[test]
