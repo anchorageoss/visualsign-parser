@@ -9,6 +9,7 @@ borsh = "1.5"
 bs58 = "0.5.1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 generated = { path = "../../generated" }
+hex = "0.4.3"
 # Pulls in ~34 transitive crates as mandatory (non-dev) dependencies, including
 # serde_yaml 0.9 (unsafe-libyaml) and the arbitrary fuzzing derive.
 near-primitives = "0.35.1"
@@ -25,7 +26,6 @@ defuse-crypto = { workspace = true }
 defuse-deadline = { workspace = true }
 
 [dev-dependencies]
-hex = "0.4.3"
 near-crypto = "0.35.1"
 
 [features]
