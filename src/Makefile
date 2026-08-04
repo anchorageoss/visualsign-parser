@@ -27,9 +27,11 @@ all: generated
 .PHONY: build
 build:
 	@# Split to avoid Cargo feature unification across the workspace.
-	@# parser_cli enables visualsign-solana/diagnostics and
-	@# visualsign-ethereum/dev-signing; building it together with
-	@# parser_app/grpc-server would unify those features ON for both.
+	@# parser_cli enables visualsign-solana/diagnostics,
+	@# visualsign-ethereum/dev-signing, and visualsign-near/dev-signing;
+	@# building it together with parser_app/grpc-server would unify those
+	@# features ON for both, putting the CLI dev signing keys (and the
+	@# allowlist entries that trust them) into the production binaries.
 	cargo build --workspace --exclude parser_cli
 	cargo build -p parser_cli
 

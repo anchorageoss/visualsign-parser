@@ -143,16 +143,24 @@ pub struct TokenMetadataSignerAllowlists {
     solana: SignerAllowlist,
 }
 
-/// Build the authorized token-metadata-signer allowlists from env-configured
-/// production lists, cached for the lifetime of the process.
+/// Build the authorized token-metadata-signer allowlists from compile-time +
+/// env-configured production lists, cached for the lifetime of the process.
 ///
 /// - `VISUALSIGN_NEAR_TOKEN_SIGNERS`: comma-separated hex ed25519 public keys.
 /// - `VISUALSIGN_ETH_TOKEN_SIGNERS`: comma-separated hex secp256k1 public keys
 ///   (any SEC1 encoding).
 /// - `VISUALSIGN_SOL_TOKEN_SIGNERS`: comma-separated hex ed25519 public keys.
 ///
-/// An unset (or entirely invalid) env var leaves that chain's allowlist empty,
-/// which rejects every signed entry for that origin chain (fail-closed). These
+/// Under the `dev-signing` feature (and this crate's own tests), the NEAR
+/// dev key derived from [`DEV_NEAR_SIGNING_KEY_SEED`] is also allowlisted,
+/// matching `visualsign-ethereum`'s `authorized_abi_signers()` -- without
+/// this, `sign_token_metadata_for_cli`'s own signature would never verify,
+/// since it always signs with that key and the env var alone is empty in a
+/// local dev run.
+///
+/// An unset (or entirely invalid) env var leaves that chain's allowlist with
+/// only the dev-signing entry above (empty outside `dev-signing`), which
+/// rejects every other signed entry for that origin chain (fail-closed). These
 /// allowlists gate only entries that carry a signature; whether an unsigned
 /// entry is accepted at all is controlled separately by the deployment's
 /// [`MetadataTrustPolicy`] and by the gap-fill-only rule in
@@ -162,10 +170,30 @@ pub struct TokenMetadataSignerAllowlists {
 pub fn authorized_token_metadata_signers() -> &'static TokenMetadataSignerAllowlists {
     static ALLOW: OnceLock<TokenMetadataSignerAllowlists> = OnceLock::new();
     ALLOW.get_or_init(|| TokenMetadataSignerAllowlists {
-        near: build_ed25519_allowlist("VISUALSIGN_NEAR_TOKEN_SIGNERS"),
+        near: with_near_dev_signer(build_ed25519_allowlist("VISUALSIGN_NEAR_TOKEN_SIGNERS")),
         ethereum: build_secp256k1_allowlist("VISUALSIGN_ETH_TOKEN_SIGNERS"),
         solana: build_ed25519_allowlist("VISUALSIGN_SOL_TOKEN_SIGNERS"),
     })
+}
+
+/// Add the NEAR dev key to `allow`, so entries signed by
+/// [`sign_token_metadata_for_cli`] verify in a local dev run.
+#[cfg(any(test, feature = "dev-signing"))]
+fn with_near_dev_signer(mut allow: SignerAllowlist) -> SignerAllowlist {
+    allow.insert(
+        ed25519_dalek::SigningKey::from_bytes(&DEV_NEAR_SIGNING_KEY_SEED)
+            .verifying_key()
+            .to_bytes()
+            .to_vec(),
+    );
+    allow
+}
+
+/// Without `dev-signing` the dev key is not linked, so the allowlist carries
+/// only what the env var configured.
+#[cfg(not(any(test, feature = "dev-signing")))]
+fn with_near_dev_signer(allow: SignerAllowlist) -> SignerAllowlist {
+    allow
 }
 
 fn build_ed25519_allowlist(env_var: &str) -> SignerAllowlist {
@@ -575,6 +603,56 @@ pub fn sign_token_metadata_secp256k1(
             },
         ],
     })
+}
+
+/// CLI entry point for token-metadata signing, decoupled from the
+/// `dev-signing` cargo feature so the `cli_plugin` module compiles regardless
+/// of whether `dev-signing` is enabled.
+///
+/// `cli_plugin` is a default feature of `visualsign-near` (like every other
+/// chain crate's), so it is compiled into every consumer -- including the
+/// production `parser_app`, which enables `cli-plugin` transitively but NOT
+/// `dev-signing`. The underlying [`sign_token_metadata_ed25519`] and
+/// [`DEV_NEAR_SIGNING_KEY_SEED`] are `dev-signing`-gated, so calling them
+/// directly from `cli_plugin` breaks any `cli-plugin`-without-`dev-signing`
+/// build. This wrapper is always present: under `dev-signing` (or tests) it
+/// signs with the dev key; otherwise it returns an error.
+///
+/// Always signs as NEAR-origin (ed25519, the NEAR-only curator dev key): the
+/// CLI has no per-mapping `origin_chain` input yet, so every CLI-supplied
+/// entry defaults to the origin the verifier itself treats as the default
+/// (`Unspecified`/`Near`). Ethereum/Solana-origin CLI signing is not wired up
+/// yet.
+///
+/// # Errors
+/// Returns `Err` if the binary was built without `dev-signing` (in which case
+/// token-metadata signing is unavailable by design).
+#[cfg(any(test, feature = "dev-signing"))]
+pub fn sign_token_metadata_for_cli(
+    asset_id: &str,
+    value: &str,
+) -> Result<generated::parser::SignatureMetadata, String> {
+    Ok(sign_token_metadata_ed25519(
+        asset_id,
+        value,
+        &DEV_NEAR_SIGNING_KEY_SEED,
+        visualsign::signing::near_token_metadata_prehash,
+    ))
+}
+
+/// See the `dev-signing`-enabled variant above. Without `dev-signing` the dev
+/// key is not linked, so token-metadata signing is unavailable and this
+/// returns an error.
+#[cfg(not(any(test, feature = "dev-signing")))]
+pub fn sign_token_metadata_for_cli(
+    _asset_id: &str,
+    _value: &str,
+) -> Result<generated::parser::SignatureMetadata, String> {
+    Err(
+        "token metadata signing is unavailable: this binary was built without the \
+         dev-signing feature"
+            .to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -1276,6 +1354,31 @@ mod tests {
                 &accept_unsigned_policy()
             )
             .is_none()
+        );
+    }
+
+    /// A CLI-signed entry must verify under `authorized_token_metadata_signers`
+    /// itself, the allowlist the decode path consults.
+    ///
+    /// The test module's own `near_allowlist()` helper enrolls the dev key
+    /// directly, so asserting against it proves only that the signature is
+    /// well-formed. Without the dev-signing carve-out in the real function, a
+    /// CLI-signed entry signs fine and is then dropped as an untrusted signer
+    /// when the CLI decodes it.
+    #[test]
+    fn authorized_token_metadata_signers_allowlists_the_cli_dev_key() {
+        let sig = sign_token_metadata_for_cli(ASSET_ID, VALUE).expect("cli signing must succeed");
+        let local_sig = convert_proto_signature(&sig);
+        assert!(
+            validate_token_metadata_signature(
+                ASSET_ID,
+                VALUE,
+                TokenOriginChain::Near,
+                &local_sig,
+                authorized_token_metadata_signers()
+            )
+            .is_ok(),
+            "a CLI-signed entry must verify under the allowlist the decode path consults"
         );
     }
 }
