@@ -103,6 +103,17 @@ mod tests {
     use super::*;
     use crate::presets::intents::args::decode_args;
 
+    /// The signed payload is verbatim from the pinned dependency's own test
+    /// suite -- `defuse/v0.4.2`, `core/src/payload/multi.rs:120` (`fn
+    /// raw_ed25519`) -- so its provenance is checkable by diffing against that
+    /// file rather than by trusting this comment.
+    ///
+    /// Its inner body carries `"deadline":{"timestamp":...}`, the pre-v0.4.x
+    /// object form, so it exercises signature verification only: v0.4.2's
+    /// `Deadline` accepts an RFC-3339 string, and the signature covers the body
+    /// byte-for-byte, so the format cannot be updated without invalidating the
+    /// vector. Extraction of a current-format ed25519 envelope is covered by
+    /// `super::tests::pipeline_decodes_and_renders_intent_section`.
     const VECTOR: &[u8] = include_bytes!("../../../tests/fixtures/_vector_raw_ed25519.input");
 
     #[test]
@@ -110,7 +121,7 @@ mod tests {
         // Proves defuse's canonical RawEd25519 verification runs off-chain
         // (pure-Rust crypto via near-sdk's non-contract-usage mode).
         let payloads = decode_args(VECTOR).expect("decode");
-        let (check, _) = verify_and_extract(&payloads[0]);
+        let (check, extracted) = verify_and_extract(&payloads[0]);
         match check {
             SignatureCheck::Valid { recovered_key, .. } => assert_eq!(
                 recovered_key,
@@ -118,6 +129,11 @@ mod tests {
             ),
             other => panic!("expected a valid signature, got {other:?}"),
         }
+        // Asserted rather than discarded: this vector's deadline predates the
+        // pinned format (see VECTOR), so a silently-dropped error here would
+        // let the fixture read as a fully valid intents payload.
+        let err = extracted.expect_err("pre-v0.4.x deadline must not extract");
+        assert!(err.contains("RFC 3339"), "{err}");
     }
 
     #[test]
@@ -321,47 +337,158 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
-    // MetaMask provenance pin: an independent check that our ERC-191
-    // generator produces byte-for-byte what a real wallet would. The key
-    // and expected signature are copied verbatim from near/intents' own
-    // `erc191` crate test suite (a signature MetaMask actually produced);
-    // reproducing it here means our generated vector above carries the
-    // same provenance without a wallet in the loop.
+    // Real-wallet reference vectors, verbatim from the pinned dependency's own
+    // test suites, so provenance is checkable by diffing against those files:
+    //   ERC-191: defuse/v0.4.2 erc191/src/lib.rs:72-95 -- "Signature
+    //            constructed in Metamask, using private key: a4b3...ca56"
+    //   TIP-191: defuse/v0.4.2 tip191/src/lib.rs:83-95 -- the same key,
+    //            signed as TRON
+    // Both wallets signed with the same private key, hence one shared pubkey.
     // ---------------------------------------------------------------
+
+    const REFERENCE_KEY_HEX: &str =
+        "a4b319a82adfc43584e4537fec97a80516e16673db382cd91eba97abbab8ca56";
+    const REFERENCE_PUBKEY_HEX: &str = "85a66984273f338ce4ef7b85e5430b008307e8591bb7c1b980852cf6423770b801f41e9438155eb53a5e20f748640093bb42ae3aeca035f7b7fd7a1a21f22f68";
+
+    const METAMASK_MESSAGE: &str = "Hello world!";
+    const METAMASK_SIGNATURE_HEX: &str = "7800a70d05cde2c49ed546a6ce887ce6027c2c268c0285f6efef0cdfc4366b23643790f67a86468ee8301ed12cfffcb07c6530f90a9327ec057800fabd332e471c";
+
+    const TRON_MESSAGE: &str = "Hello, TRON!";
+    const TRON_SIGNATURE_HEX: &str = "eea1651a60600ec4d9c45e8ae81da1a78377f789f0ac2019de66ad943459913015ef9256809ee0e6bb76e303a0b4802e475c1d26ade5d585292b80c9fe9cb10c1c";
+
+    fn sig65(hex_str: &str) -> [u8; 65] {
+        hex::decode(hex_str)
+            .expect("valid hex")
+            .try_into()
+            .expect("65 bytes")
+    }
+
+    /// Ethereum and TRON wallets emit `v = recovery_id + 27`; this wire format
+    /// expects the raw 0-3 id.
+    fn normalize_v(mut sig: [u8; 65]) -> [u8; 65] {
+        sig[64] -= 27;
+        sig
+    }
+
+    /// The bs58 `secp256k1:` form of the shared reference public key, in the
+    /// shape `verify_and_extract` reports a recovered key.
+    fn reference_recovered_key() -> String {
+        let pubkey64: [u8; 64] = hex::decode(REFERENCE_PUBKEY_HEX)
+            .expect("valid hex")
+            .try_into()
+            .expect("64 bytes");
+        format!("secp256k1:{}", bs58::encode(pubkey64).into_string())
+    }
+
+    /// Wrap a raw `r||s||v` signature and the message it covers as a
+    /// single-payload `execute_intents` args blob, so a reference vector runs
+    /// the same `decode_args` -> `verify_and_extract` path as production input.
+    fn secp256k1_reference_payload(standard: &str, message: &str, sig: [u8; 65]) -> MultiPayload {
+        let args = serde_json::json!({
+            "signed": [{
+                "standard": standard,
+                "payload": message,
+                "signature": format!("secp256k1:{}", bs58::encode(sig).into_string()),
+            }],
+        })
+        .to_string();
+        decode_args(args.as_bytes()).expect("decode").remove(0)
+    }
 
     #[test]
     fn erc191_generator_reproduces_metamask_reference_signature() {
-        const KEY_HEX: &str = "a4b319a82adfc43584e4537fec97a80516e16673db382cd91eba97abbab8ca56";
-        const MESSAGE: &str = "Hello world!";
-        const EXPECTED_SIGNATURE_HEX: &str = "7800a70d05cde2c49ed546a6ce887ce6027c2c268c0285f6efef0cdfc4366b23643790f67a86468ee8301ed12cfffcb07c6530f90a9327ec057800fabd332e471c";
-
-        let key: [u8; 32] = hex::decode(KEY_HEX)
+        let key: [u8; 32] = hex::decode(REFERENCE_KEY_HEX)
             .expect("valid hex")
             .try_into()
             .expect("32 bytes");
-        let expected: [u8; 65] = hex::decode(EXPECTED_SIGNATURE_HEX)
-            .expect("valid hex")
-            .try_into()
-            .expect("65 bytes");
+        let expected = sig65(METAMASK_SIGNATURE_HEX);
 
         let prehash = [
-            format!("\x19Ethereum Signed Message:\n{}", MESSAGE.len()).into_bytes(),
-            MESSAGE.as_bytes().to_vec(),
+            format!("\x19Ethereum Signed Message:\n{}", METAMASK_MESSAGE.len()).into_bytes(),
+            METAMASK_MESSAGE.as_bytes().to_vec(),
         ]
         .concat();
         let hash = near_sdk::env::keccak256_array(&prehash);
         let sk = k256::ecdsa::SigningKey::from_bytes((&key).into()).expect("valid key");
         let (sig, recovery_id) = sk.sign_prehash_recoverable(&hash).expect("sign");
 
-        let mut sig65 = [0u8; 65];
-        sig65[..64].copy_from_slice(&sig.to_bytes());
+        let mut produced = [0u8; 65];
+        produced[..64].copy_from_slice(&sig.to_bytes());
         // MetaMask/Ethereum's v convention is recovery_id + 27, not the raw
         // 0/1 this crate uses on the wire elsewhere in this module.
-        sig65[64] = recovery_id.to_byte() + 27;
+        produced[64] = recovery_id.to_byte() + 27;
 
         assert_eq!(
-            sig65, expected,
+            produced, expected,
             "generator must reproduce the MetaMask-produced reference signature byte-for-byte"
         );
+    }
+
+    #[test]
+    fn erc191_metamask_reference_signature_recovers_its_key_end_to_end() {
+        // The bytes MetaMask actually produced, through the production
+        // verification path -- not just the signing helper that generates the
+        // fixture. This is what makes the provenance pin load-bearing.
+        let payload = secp256k1_reference_payload(
+            "erc191",
+            METAMASK_MESSAGE,
+            normalize_v(sig65(METAMASK_SIGNATURE_HEX)),
+        );
+        let (check, extracted) = verify_and_extract(&payload);
+        match check {
+            SignatureCheck::Valid { recovered_key, .. } => {
+                assert_eq!(recovered_key, reference_recovered_key());
+            }
+            other => panic!("expected a valid signature, got {other:?}"),
+        }
+        // The signed message is "Hello world!", not an intents envelope.
+        assert!(extracted.is_err(), "a bare message must not extract");
+    }
+
+    #[test]
+    fn erc191_metamask_signature_as_emitted_is_malformed_encoding() {
+        // The same real signature with the v byte left as MetaMask emits it
+        // (28). Backs the synthetic v=27 case above with an actual wallet's
+        // bytes: this is the encoding a real EVM wallet hands over.
+        let raw = sig65(METAMASK_SIGNATURE_HEX);
+        assert_eq!(raw[64], 28, "reference signature should carry v=28");
+        let payload = secp256k1_reference_payload("erc191", METAMASK_MESSAGE, raw);
+        match verify_and_extract(&payload).0 {
+            SignatureCheck::MalformedEncoding(reason) => {
+                assert!(reason.contains("v=27/28"), "{reason}");
+            }
+            other => panic!("expected MalformedEncoding, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tip191_tron_reference_signature_recovers_its_key_end_to_end() {
+        // TIP-191 shares the recovery-id guard with ERC-191 but has no other
+        // coverage. Same key as the MetaMask vector, signed under TRON's
+        // prefix, so a prehash regression in either standard shows up here.
+        let payload = secp256k1_reference_payload(
+            "tip191",
+            TRON_MESSAGE,
+            normalize_v(sig65(TRON_SIGNATURE_HEX)),
+        );
+        let (check, _) = verify_and_extract(&payload);
+        match check {
+            SignatureCheck::Valid { recovered_key, .. } => {
+                assert_eq!(recovered_key, reference_recovered_key());
+            }
+            other => panic!("expected a valid signature, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tip191_shares_the_recovery_id_guard() {
+        let payload =
+            secp256k1_reference_payload("tip191", TRON_MESSAGE, sig65(TRON_SIGNATURE_HEX));
+        match verify_and_extract(&payload).0 {
+            SignatureCheck::MalformedEncoding(reason) => {
+                assert!(reason.contains("v=27/28"), "{reason}");
+            }
+            other => panic!("expected MalformedEncoding, got {other:?}"),
+        }
     }
 }
