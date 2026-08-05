@@ -5,8 +5,9 @@
 //! converter; an action renderer contributes only what is intrinsic to the
 //! action (e.g. a Transfer's amount).
 
-use near_primitives::account::AccessKeyPermission;
+use near_primitives::account::{AccessKeyPermission, FunctionCallPermission, GasKeyInfo};
 use near_primitives::action::Action;
+use near_primitives::types::AccountId;
 use serde::Deserialize;
 use visualsign::SignablePayloadField;
 use visualsign::errors::VisualSignError;
@@ -89,10 +90,7 @@ pub fn render_action(
             fields.push(
                 create_text_field("Public Key", &a.public_key.to_string())?.signable_payload_field,
             );
-            fields.push(
-                create_text_field("Permission", permission_label(&a.access_key.permission))?
-                    .signable_payload_field,
-            );
+            push_permission_fields(&mut fields, &a.access_key.permission)?;
             Ok(fields)
         }
         Action::DeleteKey(a) => {
@@ -124,12 +122,22 @@ pub fn render_action(
                 )?
                 .signable_payload_field,
             );
+            // An account can hold several gas keys, so the amount alone does
+            // not say which one is funded.
+            fields.push(
+                create_text_field("Gas Key Public Key", &a.public_key.to_string())?
+                    .signable_payload_field,
+            );
             Ok(fields)
         }
         Action::WithdrawFromGasKey(a) => {
             let mut fields = action_boundary_field(action, total_actions)?;
             fields.push(
                 create_amount_field("Amount", &format_near(a.amount.as_yoctonear()), NEAR_SYMBOL)?
+                    .signable_payload_field,
+            );
+            fields.push(
+                create_text_field("Gas Key Public Key", &a.public_key.to_string())?
                     .signable_payload_field,
             );
             Ok(fields)
@@ -196,10 +204,14 @@ fn action_boundary_field(
 
 /// NEP-141 `ft_transfer` / `ft_transfer_call` args (the deposit flow calls
 /// the token contract with the verifier as `receiver_id`).
+///
+/// `receiver_id` is an [`AccountId`], not a `String`, so an id the chain would
+/// reject fails the decode and falls through to the raw-args field rather than
+/// rendering as a filtered address.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FtTransferArgs {
-    receiver_id: String,
+    receiver_id: AccountId,
     amount: String,
     #[serde(default)]
     memo: Option<String>,
@@ -211,8 +223,8 @@ struct FtTransferArgs {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FtWithdrawArgs {
-    token: String,
-    receiver_id: String,
+    token: AccountId,
+    receiver_id: AccountId,
     amount: String,
     #[serde(default)]
     memo: Option<String>,
@@ -239,7 +251,7 @@ fn decode_known_method_args(
             fields.push(
                 create_address_field(
                     "Recipient",
-                    &charset_safe(&parsed.receiver_id),
+                    parsed.receiver_id.as_str(),
                     None,
                     None,
                     None,
@@ -254,20 +266,13 @@ fn decode_known_method_args(
                 return Ok(None);
             };
             fields.push(
-                create_address_field(
-                    "Token",
-                    &charset_safe(&parsed.token),
-                    None,
-                    None,
-                    None,
-                    None,
-                )?
-                .signable_payload_field,
+                create_address_field("Token", parsed.token.as_str(), None, None, None, None)?
+                    .signable_payload_field,
             );
             fields.push(
                 create_address_field(
                     "Recipient",
-                    &charset_safe(&parsed.receiver_id),
+                    parsed.receiver_id.as_str(),
                     None,
                     None,
                     None,
@@ -309,9 +314,19 @@ fn push_amount_and_notes(
 /// `\n` as the wallet's documented multi-line separator, so an unfiltered
 /// attacker-controlled string can render as extra apparent confirmed fields
 /// on the signing screen.
+///
+/// A literal backslash is stripped too, on availability grounds rather than
+/// spoofing: it serializes as `\\`, so a backslash before `u`/`t`/`r`/`b`/`f`
+/// or `/` puts a `FORBIDDEN_JSON_ESCAPES` substring in the serialized payload
+/// and `SignablePayload::validate_charset` rejects the whole transaction.
+///
+/// Double quotes are kept. They serialize as `\"`, which the core validator
+/// deliberately permits so field text can carry real embedded JSON -- and
+/// `ft_transfer_call`'s `msg` is exactly such a field, so deleting its quotes
+/// would strip structure a signer needs to read literally.
 fn charset_safe(text: &str) -> String {
     text.chars()
-        .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '"' && c != '\\'))
+        .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '\\'))
         .collect()
 }
 
@@ -335,14 +350,110 @@ pub(crate) fn action_label(action: &Action) -> &'static str {
     }
 }
 
-/// Human-readable label for an access key's permission scope.
-fn permission_label(permission: &AccessKeyPermission) -> &'static str {
+/// Render an access key's permission scope as fields.
+///
+/// A bare label cannot carry this: a `FunctionCall` permission's bounds are
+/// each optional, and their absent forms *widen* the grant -- `method_names:
+/// []` means any method, `allowance: None` means unlimited spend. A key scoped
+/// to one method with a cap and a key that can call anything on the contract
+/// without limit are the same variant, so each bound is rendered explicitly
+/// and an absent bound names itself.
+fn push_permission_fields(
+    fields: &mut Vec<SignablePayloadField>,
+    permission: &AccessKeyPermission,
+) -> Result<(), VisualSignError> {
     match permission {
-        AccessKeyPermission::FullAccess => "Full Access",
-        AccessKeyPermission::FunctionCall(_) => "Function Call (Restricted)",
-        AccessKeyPermission::GasKeyFullAccess(_) => "Gas Key (Full Access)",
-        AccessKeyPermission::GasKeyFunctionCall(..) => "Gas Key (Function Call, Restricted)",
+        AccessKeyPermission::FullAccess => {
+            fields.push(create_text_field("Permission", "Full Access")?.signable_payload_field);
+        }
+        AccessKeyPermission::FunctionCall(fc) => {
+            fields.push(create_text_field("Permission", "Function Call")?.signable_payload_field);
+            push_function_call_permission_fields(fields, fc)?;
+        }
+        AccessKeyPermission::GasKeyFullAccess(info) => {
+            fields.push(
+                create_text_field("Permission", "Gas Key (Full Access)")?.signable_payload_field,
+            );
+            push_gas_key_info_fields(fields, info)?;
+        }
+        AccessKeyPermission::GasKeyFunctionCall(info, fc) => {
+            fields.push(
+                create_text_field("Permission", "Gas Key (Function Call)")?.signable_payload_field,
+            );
+            push_gas_key_info_fields(fields, info)?;
+            push_function_call_permission_fields(fields, fc)?;
+        }
     }
+    Ok(())
+}
+
+/// The three bounds of a `FunctionCall` permission. `receiver_id` is a plain
+/// `String` in `near-primitives` rather than an `AccountId` (testnet genesis
+/// holds records that fail account-id validation), so it is charset-filtered
+/// like any other unvalidated string.
+fn push_function_call_permission_fields(
+    fields: &mut Vec<SignablePayloadField>,
+    permission: &FunctionCallPermission,
+) -> Result<(), VisualSignError> {
+    fields.push(
+        create_address_field(
+            "Contract",
+            &charset_safe(&permission.receiver_id),
+            None,
+            None,
+            None,
+            None,
+        )?
+        .signable_payload_field,
+    );
+    // Newline, not a comma: a method name is an arbitrary attacker-chosen
+    // string that may itself contain a comma, and `charset_safe` has already
+    // removed any newline, so one name per line is the only unambiguous join.
+    let methods = if permission.method_names.is_empty() {
+        "Any method".to_string()
+    } else {
+        permission
+            .method_names
+            .iter()
+            .map(|m| charset_safe(m))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    fields.push(create_text_field("Allowed Methods", &methods)?.signable_payload_field);
+    match permission.allowance {
+        Some(allowance) => fields.push(
+            create_amount_field(
+                "Allowance",
+                &format_near(allowance.as_yoctonear()),
+                NEAR_SYMBOL,
+            )?
+            .signable_payload_field,
+        ),
+        None => {
+            fields.push(create_text_field("Allowance", "Unlimited")?.signable_payload_field);
+        }
+    }
+    Ok(())
+}
+
+/// The prepaid balance and nonce-slot count carried by a gas key.
+fn push_gas_key_info_fields(
+    fields: &mut Vec<SignablePayloadField>,
+    info: &GasKeyInfo,
+) -> Result<(), VisualSignError> {
+    fields.push(
+        create_amount_field(
+            "Gas Key Balance",
+            &format_near(info.balance.as_yoctonear()),
+            NEAR_SYMBOL,
+        )?
+        .signable_payload_field,
+    );
+    fields.push(
+        create_number_field("Gas Key Nonces", &info.num_nonces.to_string(), "")?
+            .signable_payload_field,
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -496,8 +607,12 @@ mod tests {
         assert!(!text_v2.text.contains('\n'));
     }
 
+    /// `receiver_id`/`token` are typed as `AccountId`, so an id carrying a
+    /// spoofing payload fails validation during decode and the whole arg set
+    /// drops to the raw-data field -- no address is rendered from a string the
+    /// chain would reject.
     #[test]
-    fn receiver_id_and_token_with_embedded_newline_are_sanitized() {
+    fn receiver_id_and_token_with_embedded_newline_fall_back_to_raw_data() {
         use near_primitives::action::FunctionCallAction;
         use near_primitives::types::Gas;
         let action = Action::FunctionCall(Box::new(FunctionCallAction {
@@ -507,16 +622,56 @@ mod tests {
             deposit: Balance::from_yoctonear(1),
         }));
         let fields = render_action(&action, 1).expect("render");
-        for label in ["Token", "Recipient"] {
-            let field = fields
-                .iter()
-                .find(|f| field_label(f) == label)
-                .unwrap_or_else(|| panic!("{label} field present"));
-            let SignablePayloadField::AddressV2 { common, address_v2 } = field else {
-                panic!("expected AddressV2, got {field:?}");
-            };
-            assert!(!common.fallback_text.contains('\n'), "field: {label}");
-            assert!(!address_v2.address.contains('\n'), "field: {label}");
+        let labels: Vec<&str> = fields.iter().map(field_label).collect();
+        assert_eq!(labels, ["Method", "Raw Data", "Deposit", "Gas"]);
+    }
+
+    /// Quotes survive the filter: `msg` routinely carries nested JSON, and the
+    /// core validator permits `\"` precisely so that structure renders.
+    #[test]
+    fn msg_keeps_embedded_json_quotes() {
+        use near_primitives::action::FunctionCallAction;
+        use near_primitives::types::Gas;
+        let action = Action::FunctionCall(Box::new(FunctionCallAction {
+            method_name: "ft_transfer_call".to_string(),
+            args: br#"{"receiver_id":"intents.near","amount":"1","msg":"{\"deposit\":{\"account\":\"alice.near\"}}"}"#.to_vec(),
+            gas: Gas::from_gas(100_000_000_000_000),
+            deposit: Balance::from_yoctonear(1),
+        }));
+        let fields = render_action(&action, 1).expect("render");
+        let message = fields
+            .iter()
+            .find(|f| field_label(f) == "Message")
+            .expect("Message field present");
+        assert_eq!(text_of(message), r#"{"deposit":{"account":"alice.near"}}"#);
+    }
+
+    /// A literal backslash is stripped even though the core validator permits
+    /// `\\`: `\` followed by `u` serializes to a forbidden escape substring
+    /// and would reject the entire payload.
+    #[test]
+    fn backslash_in_msg_is_stripped_so_the_payload_still_validates() {
+        use near_primitives::action::FunctionCallAction;
+        use near_primitives::types::Gas;
+        let action = Action::FunctionCall(Box::new(FunctionCallAction {
+            method_name: "ft_transfer_call".to_string(),
+            args: br#"{"receiver_id":"intents.near","amount":"1","msg":"pay \\u0041 now"}"#
+                .to_vec(),
+            gas: Gas::from_gas(100_000_000_000_000),
+            deposit: Balance::from_yoctonear(1),
+        }));
+        let fields = render_action(&action, 1).expect("render");
+        let message = fields
+            .iter()
+            .find(|f| field_label(f) == "Message")
+            .expect("Message field present");
+        assert_eq!(text_of(message), "pay u0041 now");
+    }
+
+    fn text_of(field: &SignablePayloadField) -> &str {
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => &text_v2.text,
+            other => panic!("expected TextV2, got {other:?}"),
         }
     }
 
@@ -633,8 +788,11 @@ mod tests {
         }
     }
 
+    /// A `FunctionCall` permission with no allowance and no method list can
+    /// call anything on the contract with no spend cap; the render must say so
+    /// rather than assert a restriction.
     #[test]
-    fn add_key_function_call_permission_is_labeled_restricted() {
+    fn add_key_unbounded_function_call_permission_renders_any_method_and_unlimited() {
         use near_crypto::{KeyType, PublicKey};
         use near_primitives::account::{AccessKey, AccessKeyPermission, FunctionCallPermission};
         use near_primitives::action::AddKeyAction;
@@ -650,11 +808,146 @@ mod tests {
             },
         }));
         let fields = render_action(&action, 1).expect("render");
-        match &fields[1] {
-            SignablePayloadField::TextV2 { text_v2, .. } => {
-                assert_eq!(text_v2.text, "Function Call (Restricted)");
+        let labels: Vec<&str> = fields.iter().map(field_label).collect();
+        assert_eq!(
+            labels,
+            [
+                "Public Key",
+                "Permission",
+                "Contract",
+                "Allowed Methods",
+                "Allowance"
+            ]
+        );
+        assert_eq!(text_of(&fields[1]), "Function Call");
+        assert_eq!(text_of(&fields[3]), "Any method");
+        assert_eq!(text_of(&fields[4]), "Unlimited");
+    }
+
+    /// The bounded counterpart must render differently from the unbounded one
+    /// above -- the two grants are the same variant and differ only in fields.
+    #[test]
+    fn add_key_bounded_function_call_permission_renders_methods_and_allowance() {
+        use near_crypto::{KeyType, PublicKey};
+        use near_primitives::account::{AccessKey, AccessKeyPermission, FunctionCallPermission};
+        use near_primitives::action::AddKeyAction;
+        let action = Action::AddKey(Box::new(AddKeyAction {
+            public_key: PublicKey::empty(KeyType::ED25519),
+            access_key: AccessKey {
+                nonce: 0,
+                permission: AccessKeyPermission::FunctionCall(FunctionCallPermission {
+                    allowance: Some(Balance::from_yoctonear(250_000_000_000_000_000_000_000)),
+                    receiver_id: "contract.near".to_string(),
+                    method_names: vec!["ft_transfer".to_string(), "storage_deposit".to_string()],
+                }),
+            },
+        }));
+        let fields = render_action(&action, 1).expect("render");
+        assert_eq!(text_of(&fields[3]), "ft_transfer\nstorage_deposit");
+        match &fields[4] {
+            SignablePayloadField::AmountV2 { common, amount_v2 } => {
+                assert_eq!(common.label, "Allowance");
+                assert_eq!(amount_v2.amount, "0.25");
             }
-            other => panic!("expected TextV2, got {other:?}"),
+            other => panic!("expected AmountV2, got {other:?}"),
+        }
+    }
+
+    /// A method name is an arbitrary string, so a comma inside one must not
+    /// read as a list boundary and inflate the apparent number of methods.
+    #[test]
+    fn method_name_containing_a_comma_stays_one_line() {
+        use near_crypto::{KeyType, PublicKey};
+        use near_primitives::account::{AccessKey, AccessKeyPermission, FunctionCallPermission};
+        use near_primitives::action::AddKeyAction;
+        let action = Action::AddKey(Box::new(AddKeyAction {
+            public_key: PublicKey::empty(KeyType::ED25519),
+            access_key: AccessKey {
+                nonce: 0,
+                permission: AccessKeyPermission::FunctionCall(FunctionCallPermission {
+                    allowance: None,
+                    receiver_id: "contract.near".to_string(),
+                    method_names: vec!["ft_transfer, storage_deposit".to_string()],
+                }),
+            },
+        }));
+        let fields = render_action(&action, 1).expect("render");
+        assert_eq!(text_of(&fields[3]), "ft_transfer, storage_deposit");
+        assert!(!text_of(&fields[3]).contains('\n'));
+    }
+
+    #[test]
+    fn add_key_gas_key_permission_renders_balance_and_bounds() {
+        use near_crypto::{KeyType, PublicKey};
+        use near_primitives::account::{
+            AccessKey, AccessKeyPermission, FunctionCallPermission, GasKeyInfo,
+        };
+        use near_primitives::action::AddKeyAction;
+        let action = Action::AddKey(Box::new(AddKeyAction {
+            public_key: PublicKey::empty(KeyType::ED25519),
+            access_key: AccessKey {
+                nonce: 0,
+                permission: AccessKeyPermission::GasKeyFunctionCall(
+                    GasKeyInfo {
+                        balance: Balance::from_yoctonear(2_000_000_000_000_000_000_000_000),
+                        num_nonces: 4,
+                    },
+                    FunctionCallPermission {
+                        allowance: None,
+                        receiver_id: "contract.near".to_string(),
+                        method_names: Vec::new(),
+                    },
+                ),
+            },
+        }));
+        let fields = render_action(&action, 1).expect("render");
+        let labels: Vec<&str> = fields.iter().map(field_label).collect();
+        assert_eq!(
+            labels,
+            [
+                "Public Key",
+                "Permission",
+                "Gas Key Balance",
+                "Gas Key Nonces",
+                "Contract",
+                "Allowed Methods",
+                "Allowance"
+            ]
+        );
+        assert_eq!(text_of(&fields[1]), "Gas Key (Function Call)");
+    }
+
+    #[test]
+    fn add_key_gas_key_full_access_renders_prefunded_balance() {
+        use near_crypto::{KeyType, PublicKey};
+        use near_primitives::account::{AccessKey, AccessKeyPermission, GasKeyInfo};
+        use near_primitives::action::AddKeyAction;
+        let action = Action::AddKey(Box::new(AddKeyAction {
+            public_key: PublicKey::empty(KeyType::ED25519),
+            access_key: AccessKey {
+                nonce: 0,
+                permission: AccessKeyPermission::GasKeyFullAccess(GasKeyInfo {
+                    balance: Balance::from_yoctonear(500_000_000_000_000_000_000_000),
+                    num_nonces: 1,
+                }),
+            },
+        }));
+        let fields = render_action(&action, 1).expect("render");
+        let labels: Vec<&str> = fields.iter().map(field_label).collect();
+        assert_eq!(
+            labels,
+            [
+                "Public Key",
+                "Permission",
+                "Gas Key Balance",
+                "Gas Key Nonces"
+            ]
+        );
+        match &fields[2] {
+            SignablePayloadField::AmountV2 { amount_v2, .. } => {
+                assert_eq!(amount_v2.amount, "0.5");
+            }
+            other => panic!("expected AmountV2, got {other:?}"),
         }
     }
 
@@ -684,7 +977,7 @@ mod tests {
     }
 
     #[test]
-    fn transfer_to_gas_key_renders_amount() {
+    fn transfer_to_gas_key_renders_amount_and_key() {
         use near_crypto::{KeyType, PublicKey};
         use near_primitives::action::TransferToGasKeyAction;
         let action = Action::TransferToGasKey(Box::new(TransferToGasKeyAction {
@@ -693,11 +986,15 @@ mod tests {
         }));
         let fields = render_action(&action, 1).expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
-        assert_eq!(labels, ["Amount"]);
+        assert_eq!(labels, ["Amount", "Gas Key Public Key"]);
+        assert_eq!(
+            text_of(&fields[1]),
+            PublicKey::empty(KeyType::ED25519).to_string()
+        );
     }
 
     #[test]
-    fn withdraw_from_gas_key_renders_amount() {
+    fn withdraw_from_gas_key_renders_amount_and_key() {
         use near_crypto::{KeyType, PublicKey};
         use near_primitives::action::WithdrawFromGasKeyAction;
         let action = Action::WithdrawFromGasKey(Box::new(WithdrawFromGasKeyAction {
@@ -706,7 +1003,7 @@ mod tests {
         }));
         let fields = render_action(&action, 1).expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
-        assert_eq!(labels, ["Amount"]);
+        assert_eq!(labels, ["Amount", "Gas Key Public Key"]);
     }
 
     #[test]

@@ -76,6 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(".parser.EthereumMetadata", BORSH_DERIVE)
         .enum_attribute(".parser.EthereumMetadata", BORSH_ENUM_DISC_ATTR)
         .type_attribute(".parser.NearMetadata", BORSH_DERIVE)
+        .enum_attribute(".parser.NearMetadata", BORSH_ENUM_DISC_ATTR)
         .type_attribute(".parser.Abi", BORSH_DERIVE)
         .enum_attribute(".parser.Abi", BORSH_ENUM_DISC_ATTR)
         .type_attribute(".parser.Idl", BORSH_DERIVE)

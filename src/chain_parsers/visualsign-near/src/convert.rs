@@ -56,8 +56,13 @@ impl VisualSignConverter<NearTransaction> for NearVisualSignConverter {
             Some(network) => network,
             None => self.network,
         };
-        if let Some(mismatch) = network_mismatch(tx.signer_id().as_str(), network) {
-            return Err(VisualSignError::ValidationError(mismatch));
+        for (role, account_id) in [
+            ("signer", tx.signer_id().as_str()),
+            ("receiver", tx.receiver_id().as_str()),
+        ] {
+            if let Some(mismatch) = network_mismatch(role, account_id, network) {
+                return Err(VisualSignError::ValidationError(mismatch));
+            }
         }
 
         let mut fields: Vec<SignablePayloadField> = Vec::new();
@@ -108,16 +113,17 @@ fn title_for(actions: &[Action]) -> String {
     }
 }
 
-/// Detects a signer account whose top-level suffix contradicts the resolved
-/// network (`.testnet` under Mainnet, or `.near` under Testnet). Implicit
+/// Detects an account whose top-level suffix contradicts the resolved network
+/// (`.testnet` under Mainnet, or `.near` under Testnet). `role` names which
+/// account failed, so the error distinguishes signer from receiver. Implicit
 /// 64-hex accounts carry no suffix and are not guarded here.
-fn network_mismatch(signer_id: &str, network: NearNetwork) -> Option<String> {
+fn network_mismatch(role: &str, account_id: &str, network: NearNetwork) -> Option<String> {
     let mismatched = match network {
-        NearNetwork::Mainnet => signer_id.ends_with(".testnet"),
-        NearNetwork::Testnet => signer_id.ends_with(".near"),
+        NearNetwork::Mainnet => account_id.ends_with(".testnet"),
+        NearNetwork::Testnet => account_id.ends_with(".near"),
     };
     mismatched.then(|| {
-        format!("signer account '{signer_id}' does not match resolved network {network:?}")
+        format!("{role} account '{account_id}' does not match resolved network {network:?}")
     })
 }
 
@@ -245,6 +251,22 @@ mod tests {
         let tx = near_tx_as("alice.testnet", "bob.testnet", vec![transfer()]);
         let result = converter.to_visual_sign_payload(tx, VisualSignOptions::default());
         assert!(matches!(result, Err(VisualSignError::ValidationError(_))));
+    }
+
+    /// The receiver renders as `To` alongside `Network`, so a receiver whose
+    /// suffix contradicts the resolved network is the same contradiction as a
+    /// signer's.
+    #[test]
+    fn rejects_testnet_receiver_under_resolved_mainnet_network() {
+        let converter = NearVisualSignConverter::new();
+        let tx = near_tx_as("alice.near", "bob.testnet", vec![transfer()]);
+        let err = converter
+            .to_visual_sign_payload(tx, VisualSignOptions::default())
+            .expect_err("mainnet network with a .testnet receiver is rejected");
+        let VisualSignError::ValidationError(message) = err else {
+            panic!("expected ValidationError, got {err:?}");
+        };
+        assert!(message.contains("receiver account"), "message: {message}");
     }
 
     fn signed_transfer_hex() -> String {
