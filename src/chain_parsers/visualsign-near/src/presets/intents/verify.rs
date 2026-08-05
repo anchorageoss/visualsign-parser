@@ -112,11 +112,11 @@ mod tests {
         let payloads = decode_args(VECTOR).expect("decode");
         let (check, _) = verify_and_extract(&payloads[0]);
         match check {
-            SignatureCheck::Valid { recovered_key } => assert_eq!(
+            SignatureCheck::Valid { recovered_key, .. } => assert_eq!(
                 recovered_key,
                 "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"
             ),
-            SignatureCheck::Invalid => panic!("expected a valid signature"),
+            other => panic!("expected a valid signature, got {other:?}"),
         }
     }
 
@@ -144,6 +144,14 @@ mod tests {
 
     /// Throwaway test-only signing key (any fixed valid scalar).
     const ERC191_TEST_KEY: [u8; 32] = [0x42; 32];
+
+    /// The pinned ERC-191 fixture. Verification tests decode this directly
+    /// (matching `VECTOR` for raw_ed25519 above) rather than a freshly built
+    /// vector, so a generator regression shows up as a signature that no
+    /// longer verifies, not as a fixture that silently rewrites itself under
+    /// `UPDATE_TESTDATA=1` and still "passes". `build_erc191_vector()` is used
+    /// solely by the drift check below.
+    const ERC191_VECTOR: &[u8] = include_bytes!("../../../tests/fixtures/_vector_erc191.input");
 
     fn erc191_vector_path() -> String {
         format!(
@@ -225,15 +233,15 @@ mod tests {
     fn erc191_valid_signature_recovers_the_signer_key() {
         // Proves defuse's canonical ERC-191 verification (keccak prehash +
         // ecrecover) runs off-chain, and recovers exactly the signing key.
-        let payloads = decode_args(build_erc191_vector().as_bytes()).expect("decode");
+        let payloads = decode_args(ERC191_VECTOR).expect("decode");
         let (check, extracted) = verify_and_extract(&payloads[0]);
         let expected = format!(
             "secp256k1:{}",
             bs58::encode(erc191_test_pubkey64()).into_string()
         );
         match check {
-            SignatureCheck::Valid { recovered_key } => assert_eq!(recovered_key, expected),
-            SignatureCheck::Invalid => panic!("expected a valid signature"),
+            SignatureCheck::Valid { recovered_key, .. } => assert_eq!(recovered_key, expected),
+            other => panic!("expected a valid signature, got {other:?}"),
         }
         assert!(extracted.is_ok(), "inner payload must extract");
     }
@@ -245,7 +253,8 @@ mod tests {
         // verification -- it recovers a different key than the signer's.
         // Account binding is therefore the comparison against the claimed
         // signer, not the recovery itself.
-        let tampered = build_erc191_vector().replace("\\\"998\\\"", "\\\"999\\\"");
+        let good = String::from_utf8(ERC191_VECTOR.to_vec()).expect("utf8");
+        let tampered = good.replace("\\\"998\\\"", "\\\"999\\\"");
         let payloads = decode_args(tampered.as_bytes()).expect("decode");
         let (check, _) = verify_and_extract(&payloads[0]);
         let signer = format!(
@@ -253,25 +262,23 @@ mod tests {
             bs58::encode(erc191_test_pubkey64()).into_string()
         );
         match check {
-            SignatureCheck::Valid { recovered_key } => assert_ne!(
+            SignatureCheck::Valid { recovered_key, .. } => assert_ne!(
                 recovered_key, signer,
                 "a tampered message must not recover the signer's key"
             ),
             // Some tampers land on an unrecoverable point; also acceptable.
             SignatureCheck::Invalid => {}
+            other => panic!("expected Valid or Invalid, got {other:?}"),
         }
     }
 
-    #[test]
-    fn erc191_invalid_recovery_byte_fails_verification() {
-        // v outside {0..3} makes ecrecover fail outright.
-        let good = build_erc191_vector();
-        let payloads = decode_args(good.as_bytes()).expect("decode");
+    fn erc191_with_recovery_id(recovery_id: u8) -> MultiPayload {
+        let payloads = decode_args(ERC191_VECTOR).expect("decode");
         let MultiPayload::Erc191(signed) = &payloads[0] else {
             panic!("expected erc191 payload");
         };
         let mut sig = signed.signature;
-        sig[64] = 29; // invalid recovery id
+        sig[64] = recovery_id;
         let bad = serde_json::json!({
             "signed": [{
                 "standard": "erc191",
@@ -280,9 +287,37 @@ mod tests {
             }],
         })
         .to_string();
-        let payloads = decode_args(bad.as_bytes()).expect("decode");
-        let (check, _) = verify_and_extract(&payloads[0]);
-        assert!(matches!(check, SignatureCheck::Invalid));
+        decode_args(bad.as_bytes()).expect("decode").remove(0)
+    }
+
+    #[test]
+    fn erc191_arbitrary_out_of_range_recovery_id_is_malformed_encoding() {
+        // v outside {0..3} makes ecrecover fail outright, but this is a
+        // malformed-encoding finding, not a proof of tampering -- see
+        // erc191_ethereum_v27_recovery_id_is_malformed_encoding_not_invalid.
+        let (check, _) = verify_and_extract(&erc191_with_recovery_id(29));
+        match check {
+            SignatureCheck::MalformedEncoding(reason) => {
+                assert!(reason.contains("recovery id 29"), "{reason}");
+            }
+            other => panic!("expected MalformedEncoding, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn erc191_ethereum_v27_recovery_id_is_malformed_encoding_not_invalid() {
+        // Real wallets (MetaMask) emit v = recovery_id + 27, not this wire
+        // format's 0-3 -- see erc191_generator_reproduces_metamask_reference_signature
+        // below. The cryptography is fine here; only the encoding convention
+        // differs, so this must not read as "signature verification failed"
+        // (which implies tampering/fraud on a signing screen).
+        let (check, _) = verify_and_extract(&erc191_with_recovery_id(27));
+        match check {
+            SignatureCheck::MalformedEncoding(reason) => {
+                assert!(reason.contains("v=27/28"), "{reason}");
+            }
+            other => panic!("expected MalformedEncoding, got {other:?}"),
+        }
     }
 
     // ---------------------------------------------------------------
