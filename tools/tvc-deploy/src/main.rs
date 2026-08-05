@@ -507,11 +507,28 @@ fn validate_signer_pubkey(hex_str: &str) -> Result<()> {
     // Format alone is not enough: a well-formed hex string can still fail to decode
     // to a point on the curve. parser_app decodes it for real at startup, so catching
     // it here is the difference between a local error and a burned quorum round.
+    //
+    // k256::PublicKey::from_sec1_bytes accepts all four SEC1 tags: 02/03 (compressed),
+    // 04 (uncompressed), and 05 (compact — same 33-byte length as compressed, with the
+    // y-coordinate derived rather than carried). Tested explicitly in
+    // `validate_signer_pubkey_compact_through_k256` below; if a future k256 release ever
+    // drops 05 support, that test will catch it before a deployment reaches the enclave.
     let bytes = decode_hex_bytes(stripped)?;
+    let key_len = bytes.len();
     if k256::PublicKey::from_sec1_bytes(&bytes).is_err() {
+        let tag = if key_len == 33 {
+            match bytes.first() {
+                Some(0x02) => "02 (compressed)",
+                Some(0x03) => "03 (compressed)",
+                Some(0x05) => "05 (compact)",
+                _ => "unknown",
+            }
+        } else {
+            "04 (uncompressed)"
+        };
         bail!(
-            "--accept-signatures-from-pubkey is well-formed hex but does not decode to a \
-             point on the secp256k1 curve, got {}",
+            "--accept-signatures-from-pubkey is well-formed hex (SEC1 {tag}, {key_len} bytes) \
+             but does not decode to a point on the secp256k1 curve, got {}",
             truncate_for_error(hex_str)
         );
     }
@@ -806,6 +823,24 @@ Deployment: deploy-123
         // `canonical_pubkey_from_hex` (what parser_app actually runs), so a false
         // rejection here would block a legitimate deployment.
         assert!(validate_signer_pubkey(&real_compact_pubkey_hex()).is_ok());
+    }
+
+    /// Prove `k256::PublicKey::from_sec1_bytes` accepts SEC1 "compact" form (05
+    /// prefix). The format-only check passes 05 through; this test ensures the
+    /// downstream k256 decode the error message names does the same. If a future
+    /// k256 release ever drops compact support, this test will catch it before the
+    /// error message becomes misleading.
+    #[test]
+    fn validate_signer_pubkey_compact_through_k256() {
+        let compact = real_compact_pubkey_hex();
+        let bytes = (0..compact.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&compact[i..i + 2], 16).expect("valid hex"))
+            .collect::<Vec<u8>>();
+        assert_eq!(bytes[0], 0x05, "compact tag");
+        assert_eq!(bytes.len(), 33, "compact is 33 bytes");
+        k256::PublicKey::from_sec1_bytes(&bytes)
+            .expect("k256 must accept SEC1 compact (05) form");
     }
 
     #[test]

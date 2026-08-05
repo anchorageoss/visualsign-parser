@@ -20,3 +20,4 @@ docs/superpowers/
 lcov.info
 *.profraw
 *.profdata
+.pi/

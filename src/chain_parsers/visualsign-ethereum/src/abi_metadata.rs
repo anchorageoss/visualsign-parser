@@ -147,9 +147,14 @@ pub fn try_extract_from_chain_metadata(
                 }
             }
             None if !policy.accepts_unsigned() => {
+                let hint = match policy.signer_allowlist() {
+                    Some(a) if a.is_empty() => ": no authorized signers configured (empty allowlist)".to_string(),
+                    Some(a) => format!(" ({} authorized signer(s))", a.len()),
+                    None => String::new(),
+                };
                 log::warn!(
                     "Skipping ABI mapping for '{address}': this deployment requires \
-                     signed ABI mappings (started with --accept-signatures-from-pubkey)"
+                     signed ABI mappings{hint}"
                 );
                 continue;
             }
@@ -182,7 +187,8 @@ pub fn try_extract_from_chain_metadata(
     }
     if unsigned_count > 0 {
         log::warn!(
-            "Accepted {unsigned_count} unsigned ABI mapping(s): integrity/provenance unverified"
+            "Accepted {unsigned_count} unsigned ABI mapping(s): \
+             integrity enforced but provenance unverified"
         );
     }
     if registry.list_abis().is_empty() {
