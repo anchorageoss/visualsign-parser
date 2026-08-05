@@ -67,6 +67,10 @@ pub fn render_action(
             );
             Ok(fields)
         }
+        // The only variant whose entire render *is* the action label, so it
+        // needs no `total_actions`-gated boundary field: the label is already
+        // unconditional. A variant that gains sub-fields must switch to
+        // `action_boundary_field`.
         Action::CreateAccount(_) => Ok(vec![
             create_text_field("Action", action_label(action))?.signable_payload_field,
         ]),
@@ -177,13 +181,24 @@ pub fn render_action(
         other @ (Action::DeployContract(_)
         | Action::DeployGlobalContract(_)
         | Action::UseGlobalContract(_)) => Ok(vec![
-            create_text_field(
-                "Action",
-                &format!("{} (not fully decoded)", action_label(other)),
-            )?
-            .signable_payload_field,
+            create_text_field("Action", &partially_decoded_label(other))?.signable_payload_field,
         ]),
     }
+}
+
+/// True for the variants whose payload has no field-level render (raw wasm, a
+/// bare contract identifier), so the label is all a signer gets.
+pub(crate) fn is_partially_decoded(action: &Action) -> bool {
+    matches!(
+        action,
+        Action::DeployContract(_) | Action::DeployGlobalContract(_) | Action::UseGlobalContract(_)
+    )
+}
+
+/// The label for a [`is_partially_decoded`] action, carrying the qualifier so
+/// neither the field nor the payload title overstates what was understood.
+pub(crate) fn partially_decoded_label(action: &Action) -> String {
+    format!("{} (not fully decoded)", action_label(action))
 }
 
 /// The `"Action"` boundary field prepended to a decoded action's own fields

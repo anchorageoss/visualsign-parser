@@ -105,9 +105,15 @@ impl VisualSignConverterFromString<NearTransaction> for NearVisualSignConverter 
     }
 }
 
-/// Title for the payload: a single action names itself, otherwise a generic label.
+/// Title for the payload: a single action names itself, otherwise a generic
+/// label. An action whose fields are only partially decoded carries the same
+/// qualifier in the title as in its field, so the headline does not claim more
+/// than the body.
 fn title_for(actions: &[Action]) -> String {
     match actions {
+        [single] if crate::actions::is_partially_decoded(single) => {
+            crate::actions::partially_decoded_label(single)
+        }
         [single] => crate::actions::action_label(single).to_string(),
         _ => "NEAR Transaction".to_string(),
     }
@@ -267,6 +273,20 @@ mod tests {
             panic!("expected ValidationError, got {err:?}");
         };
         assert!(message.contains("receiver account"), "message: {message}");
+    }
+
+    /// The suffix check is a convention heuristic, so a 64-hex implicit
+    /// account -- which carries no suffix on either network -- must render
+    /// rather than be rejected under whichever network is resolved.
+    #[test]
+    fn implicit_hex_account_is_not_rejected_by_the_suffix_check() {
+        let implicit = "98793cd91a3f870fb126f66285808c7e094afcfc4eda8a970f6648cdf0dbd6de";
+        for network in [NearNetwork::Mainnet, NearNetwork::Testnet] {
+            let converter = NearVisualSignConverter::with_network(network);
+            let tx = near_tx_as(implicit, implicit, vec![transfer()]);
+            let result = converter.to_visual_sign_payload(tx, VisualSignOptions::default());
+            assert!(result.is_ok(), "network: {network:?}");
+        }
     }
 
     fn signed_transfer_hex() -> String {

@@ -14481,6 +14481,7 @@ dependencies = [
  "near-primitives",
  "serde",
  "serde_json",
+ "tracing",
  "visualsign",
 ]
 

@@ -38,8 +38,22 @@ impl NearTransaction {
             .map(|c| c.allow_signed_transactions)
             .unwrap_or(false);
         if allow_signed {
-            if let Ok(signed) = borsh::from_slice::<SignedTransaction>(&bytes) {
-                return Ok(Self::new(signed.transaction));
+            match borsh::from_slice::<SignedTransaction>(&bytes) {
+                Ok(signed) => {
+                    // Developer-only posture: production callers pass `None`, so
+                    // reaching here in production means a misconfiguration and
+                    // must leave a trail.
+                    tracing::warn!(
+                        "accepted a signed NEAR transaction and discarded its signature; \
+                         allow_signed_transactions is a developer-only setting"
+                    );
+                    return Ok(Self::new(signed.transaction));
+                }
+                Err(signed_err) => {
+                    return Err(TransactionParseError::DecodeError(format!(
+                        "near borsh decode: unsigned={unsigned_err}, signed={signed_err}"
+                    )));
+                }
             }
         }
         Err(TransactionParseError::DecodeError(format!(
@@ -100,6 +114,18 @@ mod tests {
             transfer.deposit.as_yoctonear(),
             1_000_000_000_000_000_000_000_000
         );
+    }
+
+    /// `borsh::from_slice` fails unless the whole buffer is consumed, so bytes
+    /// appended after a valid transaction cannot be silently dropped from the
+    /// render while remaining in what gets signed.
+    #[test]
+    fn decode_rejects_trailing_bytes_after_a_valid_transaction() {
+        let result = NearTransaction::from_string(&format!("{TRANSFER_HEX}00"));
+        let Err(TransactionParseError::DecodeError(message)) = result else {
+            panic!("expected a DecodeError for trailing bytes");
+        };
+        assert!(message.contains("Not all bytes read"), "message: {message}");
     }
 
     #[test]

@@ -235,6 +235,9 @@ pub fn extract_chain_id_from_metadata(
     let metadata = chain_metadata?;
     let inner_metadata = metadata.metadata.as_ref()?;
 
+    // Deliberately not an exhaustive match: this crate reads Ethereum metadata
+    // and has no business naming the other chains' variants. Any non-Ethereum
+    // metadata carries no Ethereum chain id by definition.
     let chain_metadata::Metadata::Ethereum(eth_metadata) = inner_metadata else {
         return None;
     };
