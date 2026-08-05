@@ -471,18 +471,19 @@ fn validate_digest(d: &str) -> Result<()> {
     }
 }
 
-/// Format-only check that a hex signer pubkey looks like a SEC1-encoded
-/// secp256k1 point (33-byte compressed with a 02/03/05 prefix, or 65-byte
-/// uncompressed with a 04 prefix) before it's baked into the manifest a human
-/// signs. 05 is SEC1's "compact" tag: same 33-byte length as compressed, but
+/// Two-phase validation of a hex signer pubkey.
+///
+/// Phase 1 (format): rejects inputs that aren't even well-formed hex SEC1.
+/// Accepts 33-byte compressed (02/03/05 prefix) and 65-byte uncompressed (04
+/// prefix).  05 is SEC1's "compact" tag: same 33-byte length as compressed, but
 /// the y-coordinate is derived rather than carried, and `canonical_pubkey_from_hex`
 /// (what `parser_app` actually runs on `--accept-signatures-from-pubkey`) accepts
-/// it same as 02/03/04, so it must not be rejected here. This crate has no
-/// elliptic-curve dependency of its own, so it can't confirm the point is
-/// actually on the curve the way `parser_app` does at startup; it only catches
-/// the truncated/typo'd inputs cheaply, here, instead of after a consensus round
-/// is spent standing up an enclave that immediately fails this same decode and
-/// never reports healthy.
+/// it same as 02/03/04, so it must not be rejected here.
+///
+/// Phase 2 (on-curve): decodes the bytes through `k256::PublicKey::from_sec1_bytes`
+/// to confirm the point is actually on the secp256k1 curve.  Catching an off-curve
+/// key here, at deploy time, avoids burning a consensus round on an enclave that
+/// would immediately fail the same decode at startup and never report healthy.
 fn validate_signer_pubkey(hex_str: &str) -> Result<()> {
     let stripped = hex_str
         .strip_prefix("0x")

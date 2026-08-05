@@ -84,6 +84,11 @@ fn abi_trust_from_args() -> Result<MetadataTrustPolicy, String> {
                 let key = args
                     .next()
                     .ok_or("--accept-signatures-from-pubkey needs a hex public key")?;
+                if key.starts_with("--") {
+                    return Err(format!(
+                        "--accept-signatures-from-pubkey expects a hex public key, got flag '{key}'"
+                    ));
+                }
                 signer_pubkeys.push(key);
             }
             other => return Err(format!("unexpected argument '{other}'; {USAGE}")),

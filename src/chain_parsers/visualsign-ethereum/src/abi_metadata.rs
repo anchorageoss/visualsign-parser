@@ -148,7 +148,9 @@ pub fn try_extract_from_chain_metadata(
             }
             None if !policy.accepts_unsigned() => {
                 let hint = match policy.signer_allowlist() {
-                    Some(a) if a.is_empty() => ": no authorized signers configured (empty allowlist)".to_string(),
+                    Some(a) if a.is_empty() => {
+                        ": no authorized signers configured (empty allowlist)".to_string()
+                    }
                     Some(a) => format!(" ({} authorized signer(s))", a.len()),
                     None => String::new(),
                 };
