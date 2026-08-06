@@ -369,10 +369,31 @@ pub fn try_extract_from_chain_metadata(
             continue;
         }
 
-        let origin_chain = entry
-            .origin_chain
-            .and_then(|v| TokenOriginChain::try_from(v).ok())
-            .unwrap_or(TokenOriginChain::Unspecified);
+        // An unrecognized discriminant and an omitted field both land on
+        // Unspecified (NEAR's ed25519 curve), so each is logged before it gets
+        // there. Otherwise a wrong-curve entry fails later as "Unsupported
+        // algorithm", which points at the algorithm rather than at the
+        // origin_chain that was silently substituted.
+        let origin_chain = match entry.origin_chain {
+            Some(v) => TokenOriginChain::try_from(v).unwrap_or_else(|_| {
+                tracing::warn!(
+                    "Token metadata for '{asset_id}': unrecognized origin_chain {v}, treating as \
+                     Unspecified (NEAR ed25519); a signature for another chain's curve will not \
+                     verify"
+                );
+                TokenOriginChain::Unspecified
+            }),
+            None => {
+                if entry.signature.is_some() {
+                    tracing::debug!(
+                        "Token metadata for '{asset_id}': signed entry omits origin_chain, \
+                         defaulting to NEAR ed25519; a secp256k1 signature needs origin_chain set \
+                         explicitly"
+                    );
+                }
+                TokenOriginChain::Unspecified
+            }
+        };
 
         // Signatures aren't required to register an entry (not every caller
         // signs yet), but one that IS present must validate: a present-but-
@@ -438,6 +459,24 @@ pub fn try_extract_from_chain_metadata(
             tracing::warn!(
                 "Skipping token metadata for '{asset_id}': symbol length {} out of range",
                 parsed.symbol.len()
+            );
+            continue;
+        }
+        // The symbol is embedded verbatim in an amount's abbreviation and
+        // fallback text, so its character content decides what a signer reads.
+        // Restricting it to printable ASCII keeps a bidi override (U+202E), a
+        // zero-width character or a control byte from reordering or hiding the
+        // asset name on the signing screen. Rejected rather than filtered: a
+        // symbol is short and operator-supplied, so silently rewriting it
+        // would show an asset name nobody chose.
+        if !parsed
+            .symbol
+            .chars()
+            .all(|c| c.is_ascii_graphic() || c == ' ')
+        {
+            tracing::warn!(
+                "Skipping token metadata for '{asset_id}': symbol contains characters outside \
+                 printable ASCII"
             );
             continue;
         }
@@ -947,6 +986,71 @@ mod tests {
         assert!(
             meta.verified,
             "a signed, allowlisted entry must be marked verified"
+        );
+    }
+
+    #[test]
+    fn extract_rejects_a_symbol_with_a_bidi_override() {
+        // U+202E RIGHT-TO-LEFT OVERRIDE would reorder the asset name where the
+        // symbol is rendered, so the entry is refused rather than displayed.
+        let value = format!("{{\"symbol\":\"BTC{}\",\"decimals\":8}}", '\u{202E}');
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("NEAR_MAINNET".to_string()),
+                token_mappings: make_mappings(vec![(
+                    "nep141:spoofed.near",
+                    TokenMetadataEntry {
+                        value: value.to_string(),
+                        signature: None,
+                        origin_chain: None,
+                    },
+                )]),
+            })),
+        };
+        assert!(
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                &near_allowlist(),
+                &accept_unsigned_policy()
+            )
+            .is_none(),
+            "a symbol carrying a bidi override must not register"
+        );
+    }
+
+    #[test]
+    fn extract_treats_an_unrecognized_origin_chain_as_unspecified() {
+        // An out-of-range discriminant falls back to Unspecified (NEAR's
+        // ed25519 curve), so an ed25519 signature over the value still
+        // validates and the entry registers.
+        let sig_meta = sign_token_metadata_ed25519(
+            ASSET_ID,
+            VALUE,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("NEAR_MAINNET".to_string()),
+                token_mappings: make_mappings(vec![(
+                    ASSET_ID,
+                    TokenMetadataEntry {
+                        value: VALUE.to_string(),
+                        signature: Some(sig_meta),
+                        origin_chain: Some(9999),
+                    },
+                )]),
+            })),
+        };
+        let registry = try_extract_from_chain_metadata(
+            Some(&metadata),
+            &near_allowlist(),
+            &require_signed_policy(),
+        )
+        .expect("an unrecognized origin_chain falls back to the NEAR curve");
+        assert_eq!(
+            registry.by_asset_id.get(ASSET_ID).expect("present").symbol,
+            "USDC.e"
         );
     }
 
