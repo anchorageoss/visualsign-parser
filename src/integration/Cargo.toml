@@ -45,6 +45,7 @@ hex = { workspace = true }
 [dev-dependencies]
 visualsign-solana = { path = "../chain_parsers/visualsign-solana" }
 tracing = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
 
 [lints]
 workspace = true
