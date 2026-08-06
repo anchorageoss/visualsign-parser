@@ -95,6 +95,13 @@ struct GenOperatorKeyArgs {
 }
 
 #[derive(clap::Args)]
+// The deployed parser's ABI trust posture. Exactly one of the two flags below must
+// be given: they become `pivotArgs` in the manifest the operators sign, so the
+// posture the enclave runs is fixed at deploy time and auditable out of band
+// instead of being implied by what each request happens to contain (PRS-556).
+#[command(group(
+    clap::ArgGroup::new("abi_trust").required(true).multiple(false)
+))]
 struct DeployArgs {
     #[arg(long)]
     app_id: String,
@@ -115,6 +122,14 @@ struct DeployArgs {
     host_ip: String,
     #[arg(long, default_value_t = 3000)]
     host_port: u16,
+    /// Deploy a parser that accepts caller-supplied ABI mappings with no signature
+    /// (integrity and provenance unverified)
+    #[arg(long, group = "abi_trust")]
+    accept_unsigned_abis: bool,
+    /// Deploy a parser that only accepts caller-supplied ABI mappings signed by this
+    /// hex secp256k1 public key. Repeatable
+    #[arg(long, group = "abi_trust", value_name = "HEX_PUBKEY")]
+    accept_signatures_from_pubkey: Vec<String>,
     /// Skip the check for an existing pending deploy activity for this app-id
     #[arg(long)]
     force: bool,
@@ -201,6 +216,9 @@ fn write_secret_file(path: &Path, contents: &str) -> Result<()> {
 
 fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
     validate_digest(&args.expected_digest)?;
+    for key in &args.accept_signatures_from_pubkey {
+        validate_signer_pubkey(key)?;
+    }
 
     if !args.force {
         // Turnkey has no dedup for create_tvc_deployment: submitting the same
@@ -235,13 +253,12 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
         }
     };
     let cfg_path = temp_path("tvc-deploy", "json");
-    let (app_id, image, digest, operator_id, qos, host_ip, host_port) = (
+    let (app_id, image, digest, operator_id, qos, host_port) = (
         &args.app_id,
         &args.image_url,
         &args.expected_digest,
         &args.operator_id,
         &args.qos_version,
-        &args.host_ip,
         args.host_port,
     );
 
@@ -255,7 +272,7 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
             "qosVersion": qos,
             "pivotContainerImageUrl": image,
             "pivotPath": "/parser_app",
-            "pivotArgs": ["--host-ip", host_ip, "--host-port", host_port.to_string()],
+            "pivotArgs": pivot_args(args),
             "expectedPivotDigest": digest,
             "debugMode": false,
             "healthCheckType": "TVC_HEALTH_CHECK_TYPE_GRPC",
@@ -292,6 +309,29 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
     let deploy_id = outcome?;
     println!("deployment {deploy_id} is healthy and live");
     Ok(())
+}
+
+/// Build the pivot cmdline the manifest commits to.
+///
+/// The ABI trust flags are part of it on purpose: a signer verifying a deployment
+/// reads the posture straight off `pivotArgs` instead of trusting a per-request
+/// signal or parser logs (which Turnkey does not surface today). Clap's arg group
+/// guarantees exactly one of the two is set, so this always appends one posture.
+fn pivot_args(args: &DeployArgs) -> Vec<String> {
+    let mut pivot = vec![
+        "--host-ip".to_string(),
+        args.host_ip.to_string(),
+        "--host-port".to_string(),
+        args.host_port.to_string(),
+    ];
+    if args.accept_unsigned_abis {
+        pivot.push("--accept-unsigned-abis".to_string());
+    }
+    for key in &args.accept_signatures_from_pubkey {
+        pivot.push("--accept-signatures-from-pubkey".to_string());
+        pivot.push(key.clone());
+    }
+    pivot
 }
 
 /// Standalone digest gate, for callers that must record the expected digest
@@ -431,6 +471,98 @@ fn validate_digest(d: &str) -> Result<()> {
     }
 }
 
+/// Two-phase validation of a hex signer pubkey.
+///
+/// Phase 1 (format): rejects inputs that aren't even well-formed hex SEC1.
+/// Accepts 33-byte compressed (02/03/05 prefix) and 65-byte uncompressed (04
+/// prefix).  05 is SEC1's "compact" tag: same 33-byte length as compressed, but
+/// the y-coordinate is derived rather than carried, and `canonical_pubkey_from_hex`
+/// (what `parser_app` actually runs on `--accept-signatures-from-pubkey`) accepts
+/// it same as 02/03/04, so it must not be rejected here.
+///
+/// Phase 2 (on-curve): decodes the bytes through `k256::PublicKey::from_sec1_bytes`
+/// to confirm the point is actually on the secp256k1 curve.  Catching an off-curve
+/// key here, at deploy time, avoids burning a consensus round on an enclave that
+/// would immediately fail the same decode at startup and never report healthy.
+fn validate_signer_pubkey(hex_str: &str) -> Result<()> {
+    let stripped = hex_str
+        .strip_prefix("0x")
+        .or_else(|| hex_str.strip_prefix("0X"))
+        .unwrap_or(hex_str);
+    let valid_len = matches!(stripped.len(), 66 | 130);
+    let valid_prefix = match stripped.len() {
+        66 => {
+            stripped.starts_with("02") || stripped.starts_with("03") || stripped.starts_with("05")
+        }
+        130 => stripped.starts_with("04"),
+        _ => false,
+    };
+    if !(valid_len && valid_prefix && stripped.bytes().all(|b| b.is_ascii_hexdigit())) {
+        bail!(
+            "--accept-signatures-from-pubkey must be a 33-byte (02/03/05-prefixed) or \
+             65-byte (04-prefixed) hex secp256k1 public key, got {}",
+            truncate_for_error(hex_str)
+        );
+    }
+
+    // Format alone is not enough: a well-formed hex string can still fail to decode
+    // to a point on the curve. parser_app decodes it for real at startup, so catching
+    // it here is the difference between a local error and a burned quorum round.
+    //
+    // k256::PublicKey::from_sec1_bytes accepts all four SEC1 tags: 02/03 (compressed),
+    // 04 (uncompressed), and 05 (compact — same 33-byte length as compressed, with the
+    // y-coordinate derived rather than carried). Tested explicitly in
+    // `validate_signer_pubkey_compact_through_k256` below; if a future k256 release ever
+    // drops 05 support, that test will catch it before a deployment reaches the enclave.
+    let bytes = decode_hex_bytes(stripped)?;
+    let key_len = bytes.len();
+    if k256::PublicKey::from_sec1_bytes(&bytes).is_err() {
+        let tag = if key_len == 33 {
+            match bytes.first() {
+                Some(0x02) => "02 (compressed)",
+                Some(0x03) => "03 (compressed)",
+                Some(0x05) => "05 (compact)",
+                _ => "unknown",
+            }
+        } else {
+            "04 (uncompressed)"
+        };
+        bail!(
+            "--accept-signatures-from-pubkey is well-formed hex (SEC1 {tag}, {key_len} bytes) \
+             but does not decode to a point on the secp256k1 curve, got {}",
+            truncate_for_error(hex_str)
+        );
+    }
+    Ok(())
+}
+
+/// Decode an even-length ASCII hex string that has already been charset-checked.
+fn decode_hex_bytes(stripped: &str) -> Result<Vec<u8>> {
+    (0..stripped.len())
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(&stripped[i..i + 2], 16)
+                .map_err(|e| anyhow::anyhow!("invalid hex byte at offset {i}: {e}"))
+        })
+        .collect()
+}
+
+/// Bound an operator-supplied value echoed back in an error, so a mistaken paste of
+/// a whole file does not land verbatim in CI logs.
+fn truncate_for_error(value: &str) -> String {
+    const MAX: usize = 64;
+    if value.chars().count() <= MAX {
+        format!("{value:?}")
+    } else {
+        // Truncate on char boundaries: the value is operator-supplied and need not be ASCII.
+        let head: String = value.chars().take(MAX).collect();
+        format!(
+            "{head:?} (truncated, {} chars total)",
+            value.chars().count()
+        )
+    }
+}
+
 /// Resolve the operator seed to a file path, returning `(path, cleanup)` or
 /// `None`. Prefers `--operator-seed <path>`; else reads the hex seed from env
 /// `TVC_CI_OPERATOR_SEED` into a temp 0600 file (cleanup=true so the caller
@@ -483,6 +615,122 @@ mod tests {
     #[test]
     fn cli_parses_all_subcommands() {
         Cli::command().debug_assert();
+    }
+
+    /// Parse a `deploy` invocation, returning just its args.
+    fn deploy_args(extra: &[&str]) -> DeployArgs {
+        let digest = "a".repeat(64);
+        let base = [
+            "tvc-deploy",
+            "deploy",
+            "--app-id",
+            "app",
+            "--image-url",
+            "img",
+            "--expected-digest",
+            &digest,
+            "--operator-id",
+            "op",
+        ];
+        let argv: Vec<String> = base
+            .iter()
+            .map(|s| (*s).to_string())
+            .chain(extra.iter().map(|s| (*s).to_string()))
+            .collect();
+        match Cli::parse_from(argv).command {
+            Command::Deploy(args) => args,
+            _ => panic!("expected the deploy subcommand"),
+        }
+    }
+
+    /// Parse a `deploy` invocation expected to fail, returning clap's error kind.
+    fn deploy_error_kind(extra: &[&str]) -> clap::error::ErrorKind {
+        let digest = "a".repeat(64);
+        let base = [
+            "tvc-deploy",
+            "deploy",
+            "--app-id",
+            "app",
+            "--image-url",
+            "img",
+            "--expected-digest",
+            &digest,
+            "--operator-id",
+            "op",
+        ];
+        let argv: Vec<String> = base
+            .iter()
+            .map(|s| (*s).to_string())
+            .chain(extra.iter().map(|s| (*s).to_string()))
+            .collect();
+        Cli::try_parse_from(argv)
+            .map(|_| ())
+            .expect_err("these args must not parse")
+            .kind()
+    }
+
+    /// The permissive posture is appended to the pivot cmdline the manifest commits
+    /// to, so a signer can read the posture straight off the deployment.
+    #[test]
+    fn pivot_args_carry_accept_unsigned() {
+        let args = deploy_args(&["--accept-unsigned-abis"]);
+        assert_eq!(
+            pivot_args(&args),
+            vec![
+                "--host-ip",
+                "0.0.0.0",
+                "--host-port",
+                "3000",
+                "--accept-unsigned-abis"
+            ]
+        );
+    }
+
+    /// Every signer key is carried through, in order, each with its own flag.
+    #[test]
+    fn pivot_args_carry_every_signer_pubkey() {
+        let args = deploy_args(&[
+            "--accept-signatures-from-pubkey",
+            "04aa",
+            "--accept-signatures-from-pubkey",
+            "04bb",
+        ]);
+        assert_eq!(
+            pivot_args(&args),
+            vec![
+                "--host-ip",
+                "0.0.0.0",
+                "--host-port",
+                "3000",
+                "--accept-signatures-from-pubkey",
+                "04aa",
+                "--accept-signatures-from-pubkey",
+                "04bb"
+            ]
+        );
+    }
+
+    /// A deploy with no posture is rejected, so `pivot_args` can never emit a
+    /// cmdline `parser_app` would refuse to start on.
+    #[test]
+    fn deploy_requires_a_posture() {
+        assert_eq!(
+            deploy_error_kind(&[]),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+    }
+
+    /// The two postures are mutually exclusive.
+    #[test]
+    fn deploy_rejects_both_postures() {
+        assert_eq!(
+            deploy_error_kind(&[
+                "--accept-unsigned-abis",
+                "--accept-signatures-from-pubkey",
+                "04aa",
+            ]),
+            clap::error::ErrorKind::ArgumentConflict
+        );
     }
 
     #[test]
@@ -540,6 +788,104 @@ Deployment: deploy-123
         assert!(validate_digest(&"a".repeat(65)).is_err());
         assert!(validate_digest(&("g".repeat(64))).is_err());
         assert!(validate_digest("").is_err());
+    }
+
+    fn hex_of(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// A real secp256k1 public key, in the requested SEC1 encoding. Derived rather
+    /// than hardcoded so the fixtures stay on the curve now that `validate_signer_pubkey`
+    /// decodes them for real.
+    fn real_pubkey_hex(compressed: bool) -> String {
+        use k256::elliptic_curve::sec1::ToEncodedPoint;
+        let sk = k256::SecretKey::from_slice(&[0x42u8; 32]).expect("valid scalar");
+        hex_of(sk.public_key().to_encoded_point(compressed).as_bytes())
+    }
+
+    /// SEC1 "compact" form: `0x05 || x`. Built from a real key's x-coordinate, which
+    /// is by construction an x that has a square root.
+    fn real_compact_pubkey_hex() -> String {
+        let uncompressed = real_pubkey_hex(false);
+        // Skip the "04" tag, keep the 32-byte x coordinate.
+        format!("05{}", &uncompressed[2..66])
+    }
+
+    #[test]
+    fn validate_signer_pubkey_accepts_compressed_and_uncompressed() {
+        let compressed = real_pubkey_hex(true);
+        assert!(validate_signer_pubkey(&compressed).is_ok());
+        assert!(validate_signer_pubkey(&real_pubkey_hex(false)).is_ok());
+        // 0x-prefixed, case-insensitive.
+        assert!(
+            validate_signer_pubkey(&format!("0x{}", real_pubkey_hex(false).to_uppercase())).is_ok()
+        );
+        // SEC1 "compact" tag: same 33-byte length as compressed, and accepted by
+        // `canonical_pubkey_from_hex` (what parser_app actually runs), so a false
+        // rejection here would block a legitimate deployment.
+        assert!(validate_signer_pubkey(&real_compact_pubkey_hex()).is_ok());
+    }
+
+    /// Prove `k256::PublicKey::from_sec1_bytes` accepts SEC1 "compact" form (05
+    /// prefix). The format-only check passes 05 through; this test ensures the
+    /// downstream k256 decode the error message names does the same. If a future
+    /// k256 release ever drops compact support, this test will catch it before the
+    /// error message becomes misleading.
+    #[test]
+    fn validate_signer_pubkey_compact_through_k256() {
+        let compact = real_compact_pubkey_hex();
+        let bytes = (0..compact.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&compact[i..i + 2], 16).expect("valid hex"))
+            .collect::<Vec<u8>>();
+        assert_eq!(bytes[0], 0x05, "compact tag");
+        assert_eq!(bytes.len(), 33, "compact is 33 bytes");
+        k256::PublicKey::from_sec1_bytes(&bytes).expect("k256 must accept SEC1 compact (05) form");
+    }
+
+    #[test]
+    fn validate_signer_pubkey_rejects_truncated_or_malformed() {
+        // The exact truncated shape used elsewhere in this file's own tests.
+        assert!(validate_signer_pubkey("04aa").is_err());
+        assert!(validate_signer_pubkey("").is_err());
+        assert!(validate_signer_pubkey(&format!("06{}", "a".repeat(64))).is_err());
+        assert!(validate_signer_pubkey(&format!("02{}", "g".repeat(64))).is_err());
+        // Wrong length for its prefix (compressed prefix, uncompressed length).
+        assert!(validate_signer_pubkey(&format!("02{}", "a".repeat(128))).is_err());
+    }
+
+    #[test]
+    fn validate_signer_pubkey_rejects_well_formed_hex_that_is_off_curve() {
+        // Correct length and tag, valid hex, but not a point on secp256k1. This is the
+        // case the format-only check used to wave through into the signed manifest.
+        // `ff..ff` exceeds the field prime, so it is not even a valid x coordinate.
+        let err = validate_signer_pubkey(&format!("02{}", "f".repeat(64)))
+            .expect_err("an off-curve key must be rejected locally");
+        assert!(
+            err.to_string().contains("does not decode to a point"),
+            "unexpected error: {err}"
+        );
+        assert!(validate_signer_pubkey(&format!("04{}", "f".repeat(128))).is_err());
+    }
+
+    #[test]
+    fn validate_signer_pubkey_error_truncates_a_huge_paste() {
+        let huge = format!("02{}", "a".repeat(4096));
+        let err = validate_signer_pubkey(&huge).expect_err("wrong length must be rejected");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("truncated"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            !rendered.contains(&huge),
+            "error must not echo the whole paste verbatim"
+        );
+        assert!(
+            rendered.len() < 300,
+            "error should stay bounded, got {} chars",
+            rendered.len()
+        );
     }
 
     #[test]
