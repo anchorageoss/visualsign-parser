@@ -38,14 +38,22 @@ generated = { git = "https://github.com/anchorageoss/visualsign-parser", package
 ### Basic usage
 
 ```rust
+use parser_app::config::ParserConfig;
 use parser_app::registry::create_registry;
 use visualsign::registry::Chain;
+use visualsign::signing::MetadataTrustPolicy;
 use visualsign::vsptrait::{VisualSignOptions, DeveloperConfig};
 use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 
 fn main() {
+    // Pick the trust posture for caller-supplied ABI mappings up front. It is fixed
+    // for the life of the registry, not per call. `AcceptUnsigned` is the permissive
+    // choice and is fine when you supply no ABI mappings, or when you already trust
+    // whoever produced them; see "ABI trust posture" below.
+    let config = ParserConfig::new(MetadataTrustPolicy::AcceptUnsigned);
+
     // Create the parser registry (includes all supported chains)
-    let registry = create_registry();
+    let registry = create_registry(&config);
 
     // Raw transaction hex (with or without 0x prefix)
     // This is a complete EIP-1559 transaction
@@ -163,11 +171,44 @@ let options = VisualSignOptions {
     ..Default::default()
 };
 
-// Parse using the standard registry; ABIs are extracted from metadata automatically
-let registry = create_registry();
+// Parse using the standard registry; ABIs are extracted from metadata automatically.
+// These mappings are unsigned, so the registry must be built on the accept-unsigned
+// posture, otherwise they are dropped and the call renders as raw calldata.
+let config = ParserConfig::new(MetadataTrustPolicy::AcceptUnsigned);
+let registry = create_registry(&config);
 let payload = registry.convert_transaction(&Chain::Ethereum, raw_tx, options)
     .expect("failed to parse transaction");
 ```
+
+### ABI trust posture
+
+Whether caller-supplied ABI mappings are honoured when they carry no signature is a
+property of the registry, chosen once when you build it. It cannot be varied per
+call, and nothing in a transaction or its metadata can move the parser between the
+two postures.
+
+`MetadataTrustPolicy::AcceptUnsigned` registers mappings that carry no signature. A
+signature that *is* present must still verify against the public key supplied
+alongside it, so a payload mutated under an unchanged signature is rejected, but the
+signer's identity is not checked against an allowlist.
+
+`MetadataTrustPolicy::RequireAllowlistedSigner(allowlist)` requires every mapping to
+carry a signature that verifies *and* whose key is in `allowlist`. Unsigned,
+malformed, and foreign-signed mappings are all dropped. An empty allowlist rejects
+everything.
+
+```rust
+use visualsign::signing::{MetadataTrustPolicy, SignerAllowlist};
+
+let mut allowlist = SignerAllowlist::new();
+allowlist.insert(signer_pubkey_bytes); // uncompressed SEC1 secp256k1 public key
+let config = ParserConfig::new(MetadataTrustPolicy::RequireAllowlistedSigner(allowlist));
+let registry = create_registry(&config);
+```
+
+A dropped mapping is not an error. The transaction still parses, and the affected
+call renders as raw calldata rather than decoded fields, so if you deploy the strict
+posture make sure the ABIs you ship are signed by a key in your allowlist.
 
 ### Adding custom IDLs (Solana)
 
