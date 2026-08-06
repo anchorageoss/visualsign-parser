@@ -58,17 +58,28 @@ fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualS
 /// apparent fields on the signing screen.
 pub(crate) fn rejected_metadata_diagnostics(
     rejected: &[super::token_signature::RejectedTokenMetadata],
-) -> Result<Fields, VisualSignError> {
+) -> Fields {
+    // Infallible by construction: reporting a refusal must never be able to
+    // withhold the transaction. A field that fails to build (an empty message
+    // after charset filtering, say) is logged and dropped, leaving the signer
+    // a payload minus one caveat rather than no payload at all.
     rejected
         .iter()
-        .map(|r| {
-            diagnostic(
-                "rejected-token-metadata",
-                &crate::actions::charset_safe(&format!(
-                    "token metadata supplied for {} was rejected and not used: {}",
-                    r.asset_id, r.reason
-                )),
-            )
+        .filter_map(|r| {
+            let message = crate::actions::charset_safe(&format!(
+                "token metadata supplied for {} was rejected and not used: {}",
+                r.asset_id, r.reason
+            ));
+            match diagnostic("rejected-token-metadata", &message) {
+                Ok(field) => Some(field),
+                Err(e) => {
+                    tracing::warn!(
+                        "could not render the rejection diagnostic for '{}': {e}",
+                        r.asset_id
+                    );
+                    None
+                }
+            }
         })
         .collect()
 }

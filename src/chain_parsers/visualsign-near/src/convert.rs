@@ -43,13 +43,10 @@ fn token_registry_for(
     options: &VisualSignOptions,
     network: NearNetwork,
     trust_policy: &MetadataTrustPolicy,
-) -> Result<
-    (
-        LayeredRegistry<NearTokenRegistry>,
-        Vec<SignablePayloadField>,
-    ),
-    VisualSignError,
-> {
+) -> (
+    LayeredRegistry<NearTokenRegistry>,
+    Vec<SignablePayloadField>,
+) {
     // Identity decides whether an entry renders as verified and whether it may
     // override a curated seed, neither of which the posture itself answers, so a
     // list is needed under both postures. The strict posture carries its own;
@@ -80,10 +77,10 @@ fn token_registry_for(
         }
         None => LayeredRegistry::new(Arc::new(NearTokenRegistry::default())),
     };
-    Ok((
+    (
         registry,
-        crate::presets::intents::rejected_metadata_diagnostics(&extraction.rejected)?,
-    ))
+        crate::presets::intents::rejected_metadata_diagnostics(&extraction.rejected),
+    )
 }
 
 /// Resolve the network for one request: the `network_id` the request supplied,
@@ -233,7 +230,7 @@ impl NearVisualSignConverter {
         // consults the registry. Building it per action would repeat every
         // rejection diagnostic for a multi-action transaction.
         let (registry, rejection_diagnostics) =
-            token_registry_for(options, network, &self.trust_policy)?;
+            token_registry_for(options, network, &self.trust_policy);
         fields.extend(rejection_diagnostics);
 
         let total_actions = tx.actions().len();
@@ -317,7 +314,7 @@ fn render_intent_envelope(
     network: NearNetwork,
     trust_policy: &MetadataTrustPolicy,
 ) -> Result<ConversionResult, VisualSignError> {
-    let (registry, rejection_diagnostics) = token_registry_for(options, network, trust_policy)?;
+    let (registry, rejection_diagnostics) = token_registry_for(options, network, trust_policy);
     // The resolved network is part of every token-metadata signed scope, so the
     // payload has to show which network that scope was checked against -- the
     // same field, for the same reason, as the on-chain path renders.
@@ -883,7 +880,9 @@ mod tests {
 
         let envelope = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"rejected-token.near","receiver_id":"bob.near","amount":"1000000"}]}"#.to_string();
         let payload = NearVisualSignConverter::with_trust_policy(
-            MetadataTrustPolicy::RequireAllowlistedSigner(SignerAllowlist::new()),
+            MetadataTrustPolicy::RequireAllowlistedSigner(
+                visualsign::signing::SignerAllowlist::new(),
+            ),
         )
         .to_visual_sign_payload(NearTransaction::Intent(envelope), options)
         .expect("convert");
