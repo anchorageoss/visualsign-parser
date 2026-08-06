@@ -41,13 +41,10 @@ use crate::tx::NearTransaction;
 fn token_registry_for(
     options: &VisualSignOptions,
     trust_policy: &MetadataTrustPolicy,
-) -> Result<
-    (
-        LayeredRegistry<NearTokenRegistry>,
-        Vec<SignablePayloadField>,
-    ),
-    VisualSignError,
-> {
+) -> (
+    LayeredRegistry<NearTokenRegistry>,
+    Vec<SignablePayloadField>,
+) {
     let extraction = try_extract_token_metadata_from_chain_metadata(
         options.metadata.as_ref(),
         authorized_token_metadata_signers(),
@@ -59,10 +56,10 @@ fn token_registry_for(
         }
         None => LayeredRegistry::new(Arc::new(NearTokenRegistry::default())),
     };
-    Ok((
+    (
         registry,
-        crate::presets::intents::rejected_metadata_diagnostics(&extraction.rejected)?,
-    ))
+        crate::presets::intents::rejected_metadata_diagnostics(&extraction.rejected),
+    )
 }
 
 /// Payload version emitted for NEAR payloads.
@@ -175,7 +172,7 @@ impl NearVisualSignConverter {
         // so a rejection is a property of the request, not of each action that
         // consults the registry. Building it per action would repeat every
         // rejection diagnostic for a multi-action transaction.
-        let (registry, rejection_diagnostics) = token_registry_for(options, &self.trust_policy)?;
+        let (registry, rejection_diagnostics) = token_registry_for(options, &self.trust_policy);
         fields.extend(rejection_diagnostics);
 
         let total_actions = tx.actions().len();
@@ -244,7 +241,7 @@ fn render_intent_envelope(
     options: &VisualSignOptions,
     trust_policy: &MetadataTrustPolicy,
 ) -> Result<ConversionResult, VisualSignError> {
-    let (registry, rejection_diagnostics) = token_registry_for(options, trust_policy)?;
+    let (registry, rejection_diagnostics) = token_registry_for(options, trust_policy);
     let mut fields = rejection_diagnostics;
     fields.extend(
         crate::presets::intents::try_render_single_intent(json.as_bytes(), &registry, options)
