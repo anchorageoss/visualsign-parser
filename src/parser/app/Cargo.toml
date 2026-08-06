@@ -44,7 +44,11 @@ solana = ["dep:visualsign-solana"]
 sui = ["dep:visualsign-sui"]
 tron = ["dep:visualsign-tron"]
 unspecified = ["dep:visualsign-unspecified"]
-diagnostics = ["visualsign/diagnostics", "visualsign-solana?/diagnostics"]
+diagnostics = [
+    "visualsign/diagnostics",
+    "visualsign-solana?/diagnostics",
+    "visualsign-near?/diagnostics",
+]
 vsock = ["qos_core/vm"]
 
 [lints]

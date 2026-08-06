@@ -10,7 +10,11 @@ solana = ["dep:visualsign-solana"]
 ethereum = ["dep:visualsign-ethereum", "visualsign-ethereum/dev-signing"]
 near = ["dep:visualsign-near"]
 tron = ["dep:visualsign-tron"]
-diagnostics = ["visualsign/diagnostics", "visualsign-solana?/diagnostics"]
+diagnostics = [
+    "visualsign/diagnostics",
+    "visualsign-solana?/diagnostics",
+    "visualsign-near?/diagnostics",
+]
 serve = ["dep:axum", "dep:tokio", "dep:serde", "dep:serde_json"]
 
 [dependencies]
