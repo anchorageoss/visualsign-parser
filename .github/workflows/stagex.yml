@@ -196,6 +196,11 @@ jobs:
             echo "#   \"expectedPivotDigest\": \"${digest}\""
             echo "#   \"qosVersion\": \"${qos_version}\""
             echo '#   "appId": "<env-specific>"'
+            # parser_app refuses to start without an ABI trust posture, and the
+            # posture must be visible in the manifest so a signer can verify which
+            # mode the deployment runs (PRS-556). Pick exactly one.
+            echo '#   "pivotArgs": ["--host-ip", "0.0.0.0", "--host-port", "3000", "--accept-unsigned-abis"]'
+            echo '#     ^ or "--accept-signatures-from-pubkey", "<hex-secp256k1-pubkey>" to reject unsigned ABI mappings'
             echo 'tvc deploy create tvc-deploy.json'
             echo '```'
           } > "$deploy_md"
