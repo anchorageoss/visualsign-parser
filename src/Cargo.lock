@@ -4353,6 +4353,8 @@ dependencies = [
  "borsh 1.6.0",
  "prost 0.12.6",
  "qos_core",
+ "qos_crypto",
+ "serde",
  "tonic 0.10.2",
 ]
 
@@ -6870,6 +6872,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "subtle",
+ "thiserror 2.0.17",
  "tokio",
  "visualsign",
  "visualsign-ethereum",

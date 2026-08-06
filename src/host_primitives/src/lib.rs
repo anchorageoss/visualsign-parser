@@ -9,6 +9,8 @@ use prost::Message;
 use qos_core::protocol::{ProtocolError, msg::ProtocolMsg};
 use tonic::Status;
 
+pub mod payment_marker;
+
 /// Buffer size for socket message queue.
 pub static ENCLAVE_QUEUE_CAPACITY: usize = 12;
 /// Maximum gRPC message size. Set to 25MB (25*1024*1024)

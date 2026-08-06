@@ -96,6 +96,7 @@ async fn parser_e2e() {
             unsigned_payload: "unsignedpayload".to_string(),
             chain: Chain::Unspecified as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         };
 
         let parse_response = test_args
@@ -137,6 +138,7 @@ async fn propagates_grpc_errors() {
             unsigned_payload: "no-no-that-is-not-valid-base64".to_string(),
             chain: Chain::Ethereum as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         };
 
         let parse_error = test_args
@@ -213,6 +215,7 @@ async fn parser_solana_native_transfer_e2e() {
             unsigned_payload: solana_tx,
             chain: Chain::Solana as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         };
 
         let parse_response = test_args
@@ -406,6 +409,7 @@ async fn parser_ethereum_native_transfer_e2e() {
             unsigned_payload: ethereum_tx_hex.to_string(),
             chain: Chain::Ethereum as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         };
 
         let parse_response = test_args
@@ -516,6 +520,7 @@ async fn parser_charset_validation_all_chains() {
                 unsigned_payload: transaction.to_string(),
                 chain: chain as i32,
                 chain_metadata: None,
+                payment_marker: vec![],
             };
 
             let parse_response = test_args
@@ -574,6 +579,7 @@ async fn parser_sui_native_transfer_e2e() {
             unsigned_payload: sui_tx_b64.to_string(),
             chain: Chain::Sui as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         };
 
         let parse_response = test_args
