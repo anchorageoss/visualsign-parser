@@ -50,6 +50,36 @@ EPHEMERAL_FILE=/path/to/key.secret cargo run --bin parser_grpc_server
 
 For development, the binary defaults to `integration/fixtures/ephemeral.secret`.
 
+#### ABI trust posture
+
+Whether caller-supplied Ethereum `abi_mappings` are honoured when they carry no
+signature is chosen at startup, not per request. Pass exactly one of:
+
+```bash
+# Honour unsigned ABI mappings. A signature that IS present must still verify,
+# but its signer is not checked against an allowlist.
+parser_grpc_server --accept-unsigned-abis
+
+# Only honour mappings signed by one of these secp256k1 keys. Repeatable.
+# Unsigned and foreign-signed mappings are dropped.
+parser_grpc_server --accept-signatures-from-pubkey <hex> [--accept-signatures-from-pubkey <hex>]
+```
+
+<Warning>
+With no flag, this binary **defaults to `--accept-unsigned-abis`** and prints a
+notice at startup. That default exists because the standalone server has no
+attestation and no signed deployment manifest to audit the posture against, so
+there is nothing to be gained by refusing to start. It does mean a deployment that
+passes no flag honours unsigned ABI mappings from any caller. The enclave binary
+(`parser_app`) has no such default and refuses to start without an explicit
+posture. If you self-host, state the flag explicitly so the choice is recorded in
+your deployment config rather than inherited from a default.
+</Warning>
+
+A dropped mapping is not an error: the transaction still parses and the affected
+call renders as raw calldata, and nothing in the response distinguishes it from a
+request that supplied no mappings.
+
 ## Building a Docker image
 
 The server binary can be containerized as a single static binary:
@@ -75,7 +105,10 @@ ENV EPHEMERAL_FILE=/etc/visualsign/ephemeral.secret
 
 EXPOSE 44020
 
-CMD ["parser_grpc_server"]
+# State the ABI trust posture explicitly rather than relying on the binary's
+# accept-unsigned default. Swap in --accept-signatures-from-pubkey <hex> to only
+# honour ABI mappings signed by keys you allowlist.
+CMD ["parser_grpc_server", "--accept-unsigned-abis"]
 ```
 
 Build and run:
@@ -109,6 +142,9 @@ spec:
       containers:
       - name: parser
         image: your-registry/visualsign-grpc-server:latest
+        # ABI trust posture, stated explicitly rather than inherited from the
+        # binary's accept-unsigned default.
+        args: ["--accept-unsigned-abis"]
         ports:
         - containerPort: 44020
         env:

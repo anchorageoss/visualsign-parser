@@ -120,9 +120,16 @@ The metadata bag must contain at least `algorithm` (set to `"secp256k1"`) and `p
 
 #### Trust model
 
-Signing proves the ABI was not modified after you signed it. It does **not** prove who signed it; the parser accepts any well-formed signature from any key. To establish identity, wallets verify your public key against an allowlist they maintain (a static config, a registry of audited dApps, or whatever fits their threat model). Publish your signing key alongside your contracts so wallets can pin it.
+What signing buys you depends on the posture the deployment you're talking to runs. That posture is fixed when the parser is deployed, not per request, so you cannot detect or influence it from your side. There are two:
 
-If signature validation fails, the parser logs a warning and **skips that ABI entry**, falling back to raw-hex rendering for calls to that contract. That means a wrong signature is worse than no signature: users see less information, not more. Ship unsigned ABIs until you're confident the signing pipeline is stable, then add signatures once your wallet integrators are ready to verify them.
+- **Accept-unsigned.** Unsigned ABIs are honoured. A signature that *is* present must still verify against the public key you supply alongside it, so signing proves the ABI was not modified after you signed it, but it does **not** prove who signed it: the signer's identity is not checked against any allowlist. Identity, if anyone establishes it, is established by the wallet.
+- **Require-signed.** Every ABI must carry a signature that verifies *and* whose key is on the deployment's allowlist. Unsigned ABIs and ABIs signed by a key that is not allowlisted are both **dropped**.
+
+Publish your signing key alongside your contracts so wallets and parser operators can pin it.
+
+If an ABI entry is rejected (bad signature under either posture, or unsigned/foreign-signed under require-signed), the parser **skips that entry** and falls back to raw-hex rendering for calls to that contract. The transaction still parses; users just see less information. Nothing in the response distinguishes a dropped entry from one you never sent, so you cannot detect this from the parse result alone.
+
+Practically: a wrong signature is worse than no signature under accept-unsigned, and equally bad under require-signed. Sign your ABIs and get your key allowlisted by the operators you integrate with. Shipping unsigned works only against an accept-unsigned deployment, so treat it as a local development shortcut rather than a rollout strategy.
 
 ## Design calldata that visualizes well
 

@@ -139,6 +139,17 @@ impl Builder {
         Self::default()
     }
 
+    /// Start `parser_app` in the strict posture instead: only ABI mappings signed by
+    /// `signer_pubkey_hex` (hex secp256k1) are accepted.
+    #[must_use]
+    pub fn require_signed_abis(mut self, signer_pubkey_hex: &str) -> Self {
+        self.abi_trust_args = vec![
+            "--accept-signatures-from-pubkey".to_string(),
+            signer_pubkey_hex.to_string(),
+        ];
+        self
+    }
+
     /// Execute `test`.
     ///
     /// Note this test env builder relies on binaries from other crates already
@@ -186,7 +197,7 @@ impl Builder {
             .arg("--ephemeral-file")
             .arg("./fixtures/ephemeral.secret")
             // parser_app refuses to start without an explicit ABI trust posture; see
-            // `Builder::default`.
+            // `Builder::default` / `Builder::require_signed_abis`.
             .args(&self.abi_trust_args)
             .spawn()
             .unwrap()
