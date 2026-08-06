@@ -95,6 +95,9 @@ struct GenOperatorKeyArgs {
 }
 
 #[derive(clap::Args)]
+#[command(group(
+    clap::ArgGroup::new("abi_trust").required(true).multiple(false)
+))]
 struct DeployArgs {
     #[arg(long)]
     app_id: String,
@@ -115,6 +118,14 @@ struct DeployArgs {
     host_ip: String,
     #[arg(long, default_value_t = 3000)]
     host_port: u16,
+    /// Deploy a parser that accepts caller-supplied ABI mappings with no signature
+    /// (integrity and provenance unverified)
+    #[arg(long, group = "abi_trust")]
+    accept_unsigned_abis: bool,
+    /// Deploy a parser that only accepts caller-supplied ABI mappings signed by this
+    /// hex secp256k1 public key. Repeatable
+    #[arg(long, group = "abi_trust", value_name = "HEX_PUBKEY")]
+    accept_signatures_from_pubkey: Vec<String>,
     /// Skip the check for an existing pending deploy activity for this app-id
     #[arg(long)]
     force: bool,
@@ -201,6 +212,9 @@ fn write_secret_file(path: &Path, contents: &str) -> Result<()> {
 
 fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
     validate_digest(&args.expected_digest)?;
+    for key in &args.accept_signatures_from_pubkey {
+        validate_signer_pubkey(key)?;
+    }
 
     if !args.force {
         // Turnkey has no dedup for create_tvc_deployment: submitting the same
@@ -235,13 +249,12 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
         }
     };
     let cfg_path = temp_path("tvc-deploy", "json");
-    let (app_id, image, digest, operator_id, qos, host_ip, host_port) = (
+    let (app_id, image, digest, operator_id, qos, host_port) = (
         &args.app_id,
         &args.image_url,
         &args.expected_digest,
         &args.operator_id,
         &args.qos_version,
-        &args.host_ip,
         args.host_port,
     );
 
@@ -255,7 +268,7 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
             "qosVersion": qos,
             "pivotContainerImageUrl": image,
             "pivotPath": "/parser_app",
-            "pivotArgs": ["--host-ip", host_ip, "--host-port", host_port.to_string()],
+            "pivotArgs": pivot_args(args),
             "expectedPivotDigest": digest,
             "debugMode": false,
             "healthCheckType": "TVC_HEALTH_CHECK_TYPE_GRPC",
@@ -292,6 +305,23 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
     let deploy_id = outcome?;
     println!("deployment {deploy_id} is healthy and live");
     Ok(())
+}
+
+fn pivot_args(args: &DeployArgs) -> Vec<String> {
+    let mut pivot = vec![
+        "--host-ip".to_string(),
+        args.host_ip.to_string(),
+        "--host-port".to_string(),
+        args.host_port.to_string(),
+    ];
+    if args.accept_unsigned_abis {
+        pivot.push("--accept-unsigned-abis".to_string());
+    }
+    for key in &args.accept_signatures_from_pubkey {
+        pivot.push("--accept-signatures-from-pubkey".to_string());
+        pivot.push(key.clone());
+    }
+    pivot
 }
 
 /// Standalone digest gate, for callers that must record the expected digest
@@ -431,6 +461,74 @@ fn validate_digest(d: &str) -> Result<()> {
     }
 }
 
+fn validate_signer_pubkey(hex_str: &str) -> Result<()> {
+    let stripped = hex_str
+        .strip_prefix("0x")
+        .or_else(|| hex_str.strip_prefix("0X"))
+        .unwrap_or(hex_str);
+    let valid_len = matches!(stripped.len(), 66 | 130);
+    let valid_prefix = match stripped.len() {
+        // 05 is SEC1's "compact" tag (derived y-coordinate); `canonical_pubkey_from_hex`,
+        // what parser_app actually runs on this key, accepts it same as 02/03/04.
+        66 => {
+            stripped.starts_with("02") || stripped.starts_with("03") || stripped.starts_with("05")
+        }
+        130 => stripped.starts_with("04"),
+        _ => false,
+    };
+    if !(valid_len && valid_prefix && stripped.bytes().all(|b| b.is_ascii_hexdigit())) {
+        bail!(
+            "--accept-signatures-from-pubkey must be a 33-byte (02/03/05-prefixed) or \
+             65-byte (04-prefixed) hex secp256k1 public key, got {}",
+            truncate_for_error(hex_str)
+        );
+    }
+
+    let bytes = decode_hex_bytes(stripped)?;
+    let key_len = bytes.len();
+    if k256::PublicKey::from_sec1_bytes(&bytes).is_err() {
+        let tag = if key_len == 33 {
+            match bytes.first() {
+                Some(0x02) => "02 (compressed)",
+                Some(0x03) => "03 (compressed)",
+                Some(0x05) => "05 (compact)",
+                _ => "unknown",
+            }
+        } else {
+            "04 (uncompressed)"
+        };
+        bail!(
+            "--accept-signatures-from-pubkey is well-formed hex (SEC1 {tag}, {key_len} bytes) \
+             but does not decode to a point on the secp256k1 curve, got {}",
+            truncate_for_error(hex_str)
+        );
+    }
+    Ok(())
+}
+
+fn decode_hex_bytes(stripped: &str) -> Result<Vec<u8>> {
+    (0..stripped.len())
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(&stripped[i..i + 2], 16)
+                .map_err(|e| anyhow::anyhow!("invalid hex byte at offset {i}: {e}"))
+        })
+        .collect()
+}
+
+fn truncate_for_error(value: &str) -> String {
+    const MAX: usize = 64;
+    if value.chars().count() <= MAX {
+        format!("{value:?}")
+    } else {
+        let head: String = value.chars().take(MAX).collect();
+        format!(
+            "{head:?} (truncated, {} chars total)",
+            value.chars().count()
+        )
+    }
+}
+
 /// Resolve the operator seed to a file path, returning `(path, cleanup)` or
 /// `None`. Prefers `--operator-seed <path>`; else reads the hex seed from env
 /// `TVC_CI_OPERATOR_SEED` into a temp 0600 file (cleanup=true so the caller
@@ -483,6 +581,114 @@ mod tests {
     #[test]
     fn cli_parses_all_subcommands() {
         Cli::command().debug_assert();
+    }
+
+    fn deploy_args(extra: &[&str]) -> DeployArgs {
+        let digest = "a".repeat(64);
+        let base = [
+            "tvc-deploy",
+            "deploy",
+            "--app-id",
+            "app",
+            "--image-url",
+            "img",
+            "--expected-digest",
+            &digest,
+            "--operator-id",
+            "op",
+        ];
+        let argv: Vec<String> = base
+            .iter()
+            .map(|s| (*s).to_string())
+            .chain(extra.iter().map(|s| (*s).to_string()))
+            .collect();
+        match Cli::parse_from(argv).command {
+            Command::Deploy(args) => args,
+            _ => panic!("expected the deploy subcommand"),
+        }
+    }
+
+    fn deploy_error_kind(extra: &[&str]) -> clap::error::ErrorKind {
+        let digest = "a".repeat(64);
+        let base = [
+            "tvc-deploy",
+            "deploy",
+            "--app-id",
+            "app",
+            "--image-url",
+            "img",
+            "--expected-digest",
+            &digest,
+            "--operator-id",
+            "op",
+        ];
+        let argv: Vec<String> = base
+            .iter()
+            .map(|s| (*s).to_string())
+            .chain(extra.iter().map(|s| (*s).to_string()))
+            .collect();
+        Cli::try_parse_from(argv)
+            .map(|_| ())
+            .expect_err("these args must not parse")
+            .kind()
+    }
+
+    #[test]
+    fn pivot_args_carry_accept_unsigned() {
+        let args = deploy_args(&["--accept-unsigned-abis"]);
+        assert_eq!(
+            pivot_args(&args),
+            vec![
+                "--host-ip",
+                "0.0.0.0",
+                "--host-port",
+                "3000",
+                "--accept-unsigned-abis"
+            ]
+        );
+    }
+
+    #[test]
+    fn pivot_args_carry_every_signer_pubkey() {
+        let args = deploy_args(&[
+            "--accept-signatures-from-pubkey",
+            "04aa",
+            "--accept-signatures-from-pubkey",
+            "04bb",
+        ]);
+        assert_eq!(
+            pivot_args(&args),
+            vec![
+                "--host-ip",
+                "0.0.0.0",
+                "--host-port",
+                "3000",
+                "--accept-signatures-from-pubkey",
+                "04aa",
+                "--accept-signatures-from-pubkey",
+                "04bb"
+            ]
+        );
+    }
+
+    #[test]
+    fn deploy_requires_a_posture() {
+        assert_eq!(
+            deploy_error_kind(&[]),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+    }
+
+    #[test]
+    fn deploy_rejects_both_postures() {
+        assert_eq!(
+            deploy_error_kind(&[
+                "--accept-unsigned-abis",
+                "--accept-signatures-from-pubkey",
+                "04aa",
+            ]),
+            clap::error::ErrorKind::ArgumentConflict
+        );
     }
 
     #[test]
@@ -540,6 +746,84 @@ Deployment: deploy-123
         assert!(validate_digest(&"a".repeat(65)).is_err());
         assert!(validate_digest(&("g".repeat(64))).is_err());
         assert!(validate_digest("").is_err());
+    }
+
+    fn hex_of(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn real_pubkey_hex(compressed: bool) -> String {
+        use k256::elliptic_curve::sec1::ToEncodedPoint;
+        let sk = k256::SecretKey::from_slice(&[0x42u8; 32]).expect("valid scalar");
+        hex_of(sk.public_key().to_encoded_point(compressed).as_bytes())
+    }
+
+    fn real_compact_pubkey_hex() -> String {
+        let uncompressed = real_pubkey_hex(false);
+        format!("05{}", &uncompressed[2..66])
+    }
+
+    #[test]
+    fn validate_signer_pubkey_accepts_compressed_and_uncompressed() {
+        let compressed = real_pubkey_hex(true);
+        assert!(validate_signer_pubkey(&compressed).is_ok());
+        assert!(validate_signer_pubkey(&real_pubkey_hex(false)).is_ok());
+        assert!(
+            validate_signer_pubkey(&format!("0x{}", real_pubkey_hex(false).to_uppercase())).is_ok()
+        );
+        assert!(validate_signer_pubkey(&real_compact_pubkey_hex()).is_ok());
+    }
+
+    #[test]
+    fn validate_signer_pubkey_compact_through_k256() {
+        let compact = real_compact_pubkey_hex();
+        let bytes = (0..compact.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&compact[i..i + 2], 16).expect("valid hex"))
+            .collect::<Vec<u8>>();
+        assert_eq!(bytes[0], 0x05, "compact tag");
+        assert_eq!(bytes.len(), 33, "compact is 33 bytes");
+        k256::PublicKey::from_sec1_bytes(&bytes).expect("k256 must accept SEC1 compact (05) form");
+    }
+
+    #[test]
+    fn validate_signer_pubkey_rejects_truncated_or_malformed() {
+        assert!(validate_signer_pubkey("04aa").is_err());
+        assert!(validate_signer_pubkey("").is_err());
+        assert!(validate_signer_pubkey(&format!("06{}", "a".repeat(64))).is_err());
+        assert!(validate_signer_pubkey(&format!("02{}", "g".repeat(64))).is_err());
+        assert!(validate_signer_pubkey(&format!("02{}", "a".repeat(128))).is_err());
+    }
+
+    #[test]
+    fn validate_signer_pubkey_rejects_well_formed_hex_that_is_off_curve() {
+        let err = validate_signer_pubkey(&format!("02{}", "f".repeat(64)))
+            .expect_err("an off-curve key must be rejected locally");
+        assert!(
+            err.to_string().contains("does not decode to a point"),
+            "unexpected error: {err}"
+        );
+        assert!(validate_signer_pubkey(&format!("04{}", "f".repeat(128))).is_err());
+    }
+
+    #[test]
+    fn validate_signer_pubkey_error_truncates_a_huge_paste() {
+        let huge = format!("02{}", "a".repeat(4096));
+        let err = validate_signer_pubkey(&huge).expect_err("wrong length must be rejected");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("truncated"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            !rendered.contains(&huge),
+            "error must not echo the whole paste verbatim"
+        );
+        assert!(
+            rendered.len() < 300,
+            "error should stay bounded, got {} chars",
+            rendered.len()
+        );
     }
 
     #[test]
