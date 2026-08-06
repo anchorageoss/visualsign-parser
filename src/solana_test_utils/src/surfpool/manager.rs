@@ -1,4 +1,4 @@
-use super::config::SurfpoolConfig;
+use super::config::{SurfpoolConfig, redact_url_credentials};
 use anyhow::{Context, Result};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature};
@@ -52,7 +52,18 @@ impl SurfpoolManager {
             args.push("--ci".to_string());
         }
 
-        debug!("Spawning surfpool with args: {:?}", args);
+        // The datasource URL is one of the args and carries credentials.
+        let loggable_args: Vec<String> = args
+            .iter()
+            .map(|arg| {
+                if arg.contains("://") {
+                    redact_url_credentials(arg)
+                } else {
+                    arg.clone()
+                }
+            })
+            .collect();
+        debug!("Spawning surfpool with args: {:?}", loggable_args);
 
         let child = Command::new("surfpool")
             .args(&args)
