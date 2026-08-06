@@ -1,4 +1,36 @@
-//! yoctoNEAR, Tgas formatting helpers.
+//! yoctoNEAR, Tgas, and field-text formatting helpers.
+
+/// Strips everything except printable ASCII and spaces, so a chain-supplied
+/// string (`memo`, `msg`, `method_name`, an NFT/MT token id) cannot smuggle a
+/// newline into a text field's fallback text. The core crate's charset
+/// validator permits `\n` as the wallet's documented multi-line separator
+/// (`SignablePayload::validate_charset`), so an unfiltered attacker-controlled
+/// string can render as extra apparent confirmed fields on the signing screen.
+///
+/// Every untrusted string reaching a field on either NEAR path -- the borsh
+/// transaction path and the intents path -- goes through here. Values typed as
+/// `AccountId` do not need it: an id carrying these bytes fails its own
+/// validation during decode.
+///
+/// Filtering rather than rejecting is deliberate. A legitimate memo carrying
+/// an accented character or an emoji loses those characters instead of failing
+/// the whole parse, which keeps a non-ASCII memo from denying the signer their
+/// transaction.
+///
+/// A literal backslash is stripped too, on availability grounds rather than
+/// spoofing: it serializes as `\\`, so a backslash before `u`/`t`/`r`/`b`/`f`
+/// or `/` puts a `FORBIDDEN_JSON_ESCAPES` substring in the serialized payload
+/// and `SignablePayload::validate_charset` rejects the whole transaction.
+///
+/// Double quotes are kept. They serialize as `\"`, which the core validator
+/// deliberately permits so field text can carry real embedded JSON -- and
+/// `ft_transfer_call`'s `msg` is exactly such a field, so deleting its quotes
+/// would strip structure a signer needs to read literally.
+pub(crate) fn charset_safe(text: &str) -> String {
+    text.chars()
+        .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '\\'))
+        .collect()
+}
 
 /// Render `units / 10^decimals` as a decimal string with trailing-zero trim.
 ///

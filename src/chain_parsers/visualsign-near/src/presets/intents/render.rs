@@ -12,6 +12,8 @@ use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_amount_field, create_text_field};
 use visualsign::registry::LayeredRegistry;
 
+use crate::fmt::charset_safe;
+
 use super::tokens;
 use super::verify::SignatureCheck;
 use super::{NEAR_DECIMALS, NEAR_SYMBOL, NearTokenRegistry};
@@ -64,7 +66,7 @@ pub(crate) fn rejected_metadata_diagnostics(
     rejected
         .iter()
         .filter_map(|r| {
-            let message = crate::actions::charset_safe(&format!(
+            let message = charset_safe(&format!(
                 "token metadata supplied for {} was rejected and not used: {}",
                 r.asset_id, r.reason
             ));
@@ -250,8 +252,10 @@ fn render_token_diff(td: &TokenDiff, registry: &Reg) -> Result<Fields, VisualSig
         )?);
     }
     if let Some(memo) = &td.memo {
-        fields.push(create_text_field("Memo", memo)?.signable_payload_field);
+        fields.push(create_text_field("Memo", &charset_safe(memo))?.signable_payload_field);
     }
+    // `referral` is an `AccountId`: its own charset rules already exclude
+    // everything `charset_safe` would strip, so filtering it would be dead code.
     if let Some(referral) = &td.referral {
         fields.push(create_text_field("Referral", referral.as_str())?.signable_payload_field);
     }
@@ -269,7 +273,7 @@ fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignErr
         )?);
     }
     if let Some(memo) = &t.memo {
-        fields.push(create_text_field("Memo", memo)?.signable_payload_field);
+        fields.push(create_text_field("Memo", &charset_safe(memo))?.signable_payload_field);
     }
     // A `Transfer`'s optional notification changes what the transfer does
     // beyond moving the named tokens: `msg` calls `mt_on_transfer` on
@@ -277,7 +281,9 @@ fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignErr
     // `_transfer_call` form), and `state_init` initializes the receiver's
     // contract in the same receipt.
     if let Some(notification) = &t.notification {
-        fields.push(create_text_field("Message", &notification.msg)?.signable_payload_field);
+        fields.push(
+            create_text_field("Message", &charset_safe(&notification.msg))?.signable_payload_field,
+        );
         if notification.state_init.is_some() {
             fields.push(state_init_field()?);
         }
@@ -285,18 +291,23 @@ fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignErr
     Ok(fields)
 }
 
-/// A withdraw's optional `msg` (switches the call into its `_transfer_call`
-/// form, passing this to the receiver) and `storage_deposit` (a separate,
-/// unconditional wNEAR debit for the receiver's storage on `token`, never
-/// refunded on failure) -- both must render, since either changes what the
-/// withdraw actually does beyond moving the named token/amount.
+/// A withdraw's trailing fields, shared by all three token standards so none
+/// can silently drop one: the optional `memo`, the optional `msg` (switches
+/// the call into its `_transfer_call` form, passing this to the receiver), and
+/// `storage_deposit` (a separate, unconditional wNEAR debit for the receiver's
+/// storage on `token`, never refunded on failure). Each changes what the
+/// withdraw does beyond moving the named token/amount, so each must render.
 fn push_withdraw_call_details(
     fields: &mut Fields,
+    memo: &Option<String>,
     msg: &Option<String>,
     storage_deposit: Option<near_sdk::NearToken>,
 ) -> Result<(), VisualSignError> {
+    if let Some(memo) = memo.as_deref().filter(|m| !m.is_empty()) {
+        fields.push(create_text_field("Memo", &charset_safe(memo))?.signable_payload_field);
+    }
     if let Some(msg) = msg.as_deref().filter(|m| !m.is_empty()) {
-        fields.push(create_text_field("Message", msg)?.signable_payload_field);
+        fields.push(create_text_field("Message", &charset_safe(msg))?.signable_payload_field);
     }
     if let Some(deposit) = storage_deposit {
         fields.push(near_amount_field(
@@ -318,10 +329,7 @@ fn render_ft_withdraw(w: &FtWithdraw, registry: &Reg) -> Result<Fields, VisualSi
         w.amount.0,
         registry,
     )?);
-    if let Some(memo) = &w.memo {
-        fields.push(create_text_field("Memo", memo)?.signable_payload_field);
-    }
-    push_withdraw_call_details(&mut fields, &w.msg, w.storage_deposit)?;
+    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit)?;
     Ok(fields)
 }
 
@@ -329,12 +337,12 @@ fn render_nft_withdraw(w: &NftWithdraw) -> Result<Fields, VisualSignError> {
     let mut fields = vec![
         create_text_field("Token", w.token.as_str())?.signable_payload_field,
         create_text_field("To", w.receiver_id.as_str())?.signable_payload_field,
-        create_text_field("NFT Token Id", w.token_id.as_str())?.signable_payload_field,
+        // `token_id` is a plain `String` (`non_fungible_token::TokenId`), not
+        // an `AccountId`, so it carries whatever bytes the sender chose.
+        create_text_field("NFT Token Id", &charset_safe(w.token_id.as_str()))?
+            .signable_payload_field,
     ];
-    if let Some(memo) = &w.memo {
-        fields.push(create_text_field("Memo", memo)?.signable_payload_field);
-    }
-    push_withdraw_call_details(&mut fields, &w.msg, w.storage_deposit)?;
+    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit)?;
     Ok(fields)
 }
 
@@ -351,11 +359,15 @@ fn render_mt_withdraw(w: &MtWithdraw) -> Result<Fields, VisualSignError> {
         create_text_field("To", w.receiver_id.as_str())?.signable_payload_field,
     ];
     for (id, amount) in w.token_ids.iter().zip(w.amounts.iter()) {
+        // As with `nft_withdraw`'s `token_id`, an MT token id is a plain
+        // `String` (`defuse_nep245::TokenId`); filter it before it joins the
+        // composite, so the amount half cannot be pushed onto its own line.
         fields.push(
-            create_text_field("MT Token", &format!("{} x{}", id, amount.0))?.signable_payload_field,
+            create_text_field("MT Token", &format!("{} x{}", charset_safe(id), amount.0))?
+                .signable_payload_field,
         );
     }
-    push_withdraw_call_details(&mut fields, &w.msg, w.storage_deposit)?;
+    push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit)?;
     Ok(fields)
 }
 
@@ -1062,5 +1074,106 @@ mod tests {
         let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
         assert!(!labels.contains(&"Message"), "labels: {labels:?}");
         assert!(!labels.contains(&"Storage Deposit"), "labels: {labels:?}");
+    }
+
+    /// The text of the first `TextV2` field carrying `label`.
+    fn text_at(fields: &Fields, label: &str) -> String {
+        fields
+            .iter()
+            .find_map(|f| match f {
+                SignablePayloadField::TextV2 { common, text_v2 } if common.label == label => {
+                    Some(text_v2.text.clone())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no TextV2 field labelled {label}: {fields:?}"))
+    }
+
+    /// An intent-carried string an attacker controls, shaped to read as two
+    /// more confirmed fields on a wallet that renders the documented `\n`
+    /// separator.
+    const SPOOF: &str = r"innocent\nTo: alice.near\nAmount: 0.001 SOL";
+
+    #[test]
+    fn transfer_memo_with_embedded_newline_is_sanitized() {
+        let intent = intent_from(&format!(
+            r#"{{"intent":"transfer","receiver_id":"bob.near","tokens":{{"nep141:wrap.near":"1"}},"memo":"{SPOOF}"}}"#
+        ));
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert_eq!(
+            text_at(&fields, "Memo"),
+            "innocentTo: alice.nearAmount: 0.001 SOL"
+        );
+    }
+
+    #[test]
+    fn transfer_notification_message_with_embedded_newline_is_sanitized() {
+        let intent = intent_from(&format!(
+            r#"{{"intent":"transfer","receiver_id":"bob.near","tokens":{{"nep141:wrap.near":"1"}},"msg":"{SPOOF}"}}"#
+        ));
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert!(!text_at(&fields, "Message").contains('\n'));
+    }
+
+    #[test]
+    fn token_diff_memo_with_embedded_newline_is_sanitized() {
+        let intent = intent_from(&format!(
+            r#"{{"intent":"token_diff","diff":{{"nep141:wrap.near":"-1"}},"memo":"{SPOOF}"}}"#
+        ));
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert!(!text_at(&fields, "Memo").contains('\n'));
+    }
+
+    #[test]
+    fn ft_withdraw_memo_with_embedded_newline_is_sanitized() {
+        let intent = intent_from(&format!(
+            r#"{{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"alice.near","amount":"1","memo":"{SPOOF}"}}"#
+        ));
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert!(!text_at(&fields, "Memo").contains('\n'));
+    }
+
+    /// Covers every withdraw variant at once: `msg` renders through the shared
+    /// [`push_withdraw_call_details`].
+    #[test]
+    fn withdraw_message_with_embedded_newline_is_sanitized() {
+        let intent = intent_from(&format!(
+            r#"{{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"alice.near","amount":"1","msg":"{SPOOF}"}}"#
+        ));
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert!(!text_at(&fields, "Message").contains('\n'));
+    }
+
+    // `NftWithdraw::token_id` and `MtWithdraw::token_ids` are plain `String`s
+    // (`non_fungible_token::TokenId`, `defuse_nep245::TokenId`), unconstrained
+    // by any account-id charset -- so unlike `token`/`receiver_id`, they carry
+    // an attacker's bytes straight to the field text.
+    #[test]
+    fn nft_withdraw_token_id_with_embedded_newline_is_sanitized() {
+        let intent = intent_from(&format!(
+            r#"{{"intent":"nft_withdraw","token":"nft.near","receiver_id":"alice.near","token_id":"{SPOOF}"}}"#
+        ));
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert!(!text_at(&fields, "NFT Token Id").contains('\n'));
+    }
+
+    #[test]
+    fn mt_withdraw_token_id_with_embedded_newline_is_sanitized() {
+        let intent = intent_from(&format!(
+            r#"{{"intent":"mt_withdraw","token":"mt.near","receiver_id":"alice.near","token_ids":["{SPOOF}"],"amounts":["5"]}}"#
+        ));
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert!(!text_at(&fields, "MT Token").contains('\n'));
+    }
+
+    /// `ft_withdraw` and `nft_withdraw` both render their memo; `mt_withdraw`
+    /// carries the same field and must not drop it.
+    #[test]
+    fn mt_withdraw_renders_its_memo() {
+        let intent = intent_from(
+            r#"{"intent":"mt_withdraw","token":"mt.near","receiver_id":"alice.near","token_ids":["1"],"amounts":["5"],"memo":"for invoice 7"}"#,
+        );
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert_eq!(text_at(&fields, "Memo"), "for invoice 7");
     }
 }

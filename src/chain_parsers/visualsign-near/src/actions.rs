@@ -16,7 +16,7 @@ use visualsign::field_builders::{
     create_text_field,
 };
 
-use crate::fmt::{format_near, format_tgas};
+use crate::fmt::{charset_safe, format_near, format_tgas};
 
 /// NEAR's native token symbol, used for `AmountV2` abbreviations.
 const NEAR_SYMBOL: &str = "NEAR";
@@ -321,28 +321,6 @@ fn push_amount_and_notes(
         fields.push(create_text_field("Message", &charset_safe(msg))?.signable_payload_field);
     }
     Ok(())
-}
-
-/// Strips everything except printable ASCII and spaces, so a transaction's
-/// JSON args (`memo`, `msg`, `method_name`) cannot smuggle a newline into a
-/// text field's fallback text. The core crate's charset validator permits
-/// `\n` as the wallet's documented multi-line separator, so an unfiltered
-/// attacker-controlled string can render as extra apparent confirmed fields
-/// on the signing screen.
-///
-/// A literal backslash is stripped too, on availability grounds rather than
-/// spoofing: it serializes as `\\`, so a backslash before `u`/`t`/`r`/`b`/`f`
-/// or `/` puts a `FORBIDDEN_JSON_ESCAPES` substring in the serialized payload
-/// and `SignablePayload::validate_charset` rejects the whole transaction.
-///
-/// Double quotes are kept. They serialize as `\"`, which the core validator
-/// deliberately permits so field text can carry real embedded JSON -- and
-/// `ft_transfer_call`'s `msg` is exactly such a field, so deleting its quotes
-/// would strip structure a signer needs to read literally.
-pub(crate) fn charset_safe(text: &str) -> String {
-    text.chars()
-        .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '\\'))
-        .collect()
 }
 
 /// Human-readable label for an action variant.
