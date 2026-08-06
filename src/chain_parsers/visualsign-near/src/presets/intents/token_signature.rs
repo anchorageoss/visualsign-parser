@@ -1129,7 +1129,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 &near_allowlist(),
                 &accept_unsigned_policy()
@@ -1163,12 +1163,9 @@ mod tests {
                 )]),
             })),
         };
-        let registry = try_extract_from_chain_metadata(
-            Some(&metadata),
-            &near_allowlist(),
-            &require_signed_policy(),
-        )
-        .expect("an unrecognized origin_chain falls back to the NEAR curve");
+        let registry =
+            extract_registry(Some(&metadata), &near_allowlist(), &require_signed_policy())
+                .expect("an unrecognized origin_chain falls back to the NEAR curve");
         assert_eq!(
             registry.by_asset_id.get(ASSET_ID).expect("present").symbol,
             "USDC.e"
