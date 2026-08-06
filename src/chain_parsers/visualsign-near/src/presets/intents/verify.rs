@@ -152,10 +152,20 @@ mod tests {
     // ---------------------------------------------------------------
     // ERC-191 (secp256k1 / EVM wallets)
     //
-    // The vector is GENERATED deterministically (fixed key, RFC6979
-    // signing, fixed nonce/deadline) and pinned as a fixture file;
-    // regenerate with:
+    // This vector is self-produced: generated deterministically (fixed key,
+    // RFC6979 signing, fixed nonce/deadline) and committed as a fixture file,
+    // regeneratable with:
     //   UPDATE_TESTDATA=1 cargo test -p visualsign-near erc191
+    //
+    // Two layers cover it, and one gap remains. `erc191_vector_matches_generator`
+    // fails when the committed bytes and the generator disagree, so neither
+    // drifts silently. The verification tests decode the committed bytes through
+    // the production verify path, so a bug in the generator alone surfaces as a
+    // signature that no longer verifies -- regenerating cannot bless it into
+    // passing. What neither layer catches is a bug in logic the generator and
+    // the verifier share, since regeneration moves both together; the
+    // real-wallet MetaMask and TRON vectors below are the external anchor for
+    // that, and no command in this repo can rewrite them.
     // ---------------------------------------------------------------
 
     /// Throwaway test-only signing key (any fixed valid scalar).
@@ -271,6 +281,14 @@ mod tests {
         // signer, not the recovery itself.
         let good = String::from_utf8(ERC191_VECTOR.to_vec()).expect("utf8");
         let tampered = good.replace("\\\"998\\\"", "\\\"999\\\"");
+        // Without this the test passes vacuously: a fixture reformatted or
+        // re-valued so the pattern no longer matches would leave `tampered`
+        // identical to `good`, and the assertion below would then be checking
+        // that an untampered payload recovers the signer's own key.
+        assert_ne!(
+            tampered, good,
+            "the tamper pattern no longer matches the fixture"
+        );
         let payloads = decode_args(tampered.as_bytes()).expect("decode");
         let (check, _) = verify_and_extract(&payloads[0]);
         let signer = format!(
@@ -477,6 +495,30 @@ mod tests {
                 assert_eq!(recovered_key, reference_recovered_key());
             }
             other => panic!("expected a valid signature, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tip191_tampered_message_recovers_a_different_key() {
+        // Recovery, not verification: a well-formed signature over a changed
+        // message still recovers SOME key, just not the signer's -- so the
+        // assertion is inequality, the same shape as the ERC-191 tamper test.
+        // Recovery is also allowed to fail outright on the mutated prehash.
+        let payload = secp256k1_reference_payload(
+            "tip191",
+            "Hello, TRON?",
+            normalize_v(sig65(TRON_SIGNATURE_HEX)),
+        );
+        match verify_and_extract(&payload).0 {
+            SignatureCheck::Valid { recovered_key, .. } => {
+                assert_ne!(
+                    recovered_key,
+                    reference_recovered_key(),
+                    "a tampered TIP-191 message must not recover the signer's key"
+                );
+            }
+            SignatureCheck::Invalid => {}
+            other => panic!("expected a recovery outcome, got {other:?}"),
         }
     }
 
