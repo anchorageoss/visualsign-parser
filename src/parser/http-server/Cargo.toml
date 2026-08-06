@@ -36,6 +36,7 @@ visualsign = { path = "../../visualsign" }
 # Crypto / hashing / manifest re-encoding for the boot-proof seam.
 qos_core = { workspace = true }
 qos_hex = { workspace = true }
+qos_nsm = { workspace = true }
 qos_p256 = { workspace = true }
 borsh = { version = "1", features = ["std", "derive"], default-features = false }
 
@@ -58,6 +59,11 @@ clap = { version = "4.0", features = ["derive", "env"] }
 
 [dev-dependencies]
 turnkey_api_key_stamper = "0.10"
+# `ManifestEnvelope` (and its nested types) only derive `Default` under
+# qos_core's own "mock" feature; the boot-proof tests need that to build a
+# throwaway manifest fixture without hand-writing every nested field. Cargo's
+# feature unification only applies this to test targets, not the release bin.
+qos_core = { workspace = true, features = ["mock"] }
 
 [lints]
 workspace = true
