@@ -33,11 +33,12 @@
 //! a non-canonical path, bind-mount it instead.
 
 mod boot_proof;
+mod stamp;
 
 use axum::{
     Json, Router,
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -54,6 +55,7 @@ use parser_app::payment_verify::PaymentPolicy;
 use parser_app::routes::parse::parse;
 use qos_core::handles::EphemeralKeyHandle;
 use qos_p256::P256Pair;
+use stamp::Allowlist;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -90,6 +92,13 @@ struct Args {
     /// default); a build without it refuses to start when this flag is given.
     #[arg(long = "accept-signatures-from-pubkey")]
     accept_signatures_from_pubkey: Vec<String>,
+
+    /// Comma-separated compressed SEC1 hex pubkeys allowed to call the parse
+    /// routes. Absent means the routes stay open (today's behavior);
+    /// present means every request must carry a valid X-Stamp from a listed
+    /// key. Delivered via `pivotArgs` at deploy time.
+    #[arg(long, env = "ALLOWED_STAMP_PUBKEYS_HEX")]
+    allowed_stamp_pubkeys_hex: Option<String>,
 }
 
 #[derive(Clone)]
@@ -97,6 +106,7 @@ struct AppState {
     ephemeral_key: Arc<P256Pair>,
     boot_proof: Arc<dyn BootProofSource + Send + Sync>,
     config: ParserConfig,
+    allowlist: Option<Arc<Allowlist>>,
 }
 
 // Deliberate exception to the "every response carries bootProof" contract:
@@ -107,8 +117,8 @@ async fn health() -> StatusCode {
     StatusCode::OK
 }
 
-// Handlers take raw bytes, never `Json<T>`. A later PR verifies an X-Stamp
-// signature over the exact request bytes; a `Json<T>` extractor only
+// Handlers take raw bytes, never `Json<T>`. The X-Stamp signature is
+// verified against the exact request bytes; a `Json<T>` extractor only
 // deserializes the request and discards the original bytes, so verifying
 // the signature would then have to re-serialize the parsed value to get
 // bytes back, changing key order / whitespace / unicode escaping and
@@ -120,7 +130,7 @@ async fn health() -> StatusCode {
 // (415 on a non-JSON media type).
 async fn parse_v1(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    headers: HeaderMap,
     body: Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
     let body = match body {
@@ -140,14 +150,14 @@ async fn parse_v1(
     // else on that worker (including GET /health) on a 1-2 vCPU TVC replica.
     // Matches the block_in_place precedent parser_app::service::Processor::process
     // already uses around this same parse() call on the vsock/gRPC path.
-    tokio::task::block_in_place(|| handle_parse(&state, &body))
+    tokio::task::block_in_place(|| handle_parse(&state, &headers, &body))
 }
 
 /// v2 is byte-identical to v1 in this PR. Registering it now keeps the
-/// deployed URL stable across the stack as later PRs add enforcement here.
+/// deployed URL stable across the stack as later PRs add payment enforcement here.
 async fn parse_v2(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    headers: HeaderMap,
     body: Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
     let body = match body {
@@ -161,7 +171,7 @@ async fn parse_v2(
             "expected content-type: application/json".to_string(),
         );
     }
-    tokio::task::block_in_place(|| handle_parse(&state, &body))
+    tokio::task::block_in_place(|| handle_parse(&state, &headers, &body))
 }
 
 /// `Bytes`'s own `FromRequest` rejection covers every way axum can fail to
@@ -226,8 +236,27 @@ fn error_status(
     )
 }
 
-fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
-    // A later PR inserts the X-Stamp check here, before anything else touches `body`.
+fn handle_parse(
+    state: &AppState,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
+    if let Some(allowlist) = state.allowlist.as_deref() {
+        if let Err(e) = stamp::verify(headers, body, allowlist) {
+            eprintln!("rejected request: {e:?}");
+            // Deliberately coarse: the client learns "not authenticated", not
+            // which check failed, so the error text cannot be used to probe
+            // the allowlist.
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(error_response(
+                    "invalid or missing X-Stamp".to_string(),
+                    state.boot_proof.boot_proof(),
+                )),
+            );
+        }
+    }
+
     let wrapper = match parse_envelope(body) {
         Ok(w) => w,
         Err(e) => {
@@ -397,10 +426,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .map_err(|e| format!("failed to build boot proof: {e:?}"))?;
 
+    // Absent means the routes stay open (today's behavior); present means
+    // every request must carry a valid X-Stamp from a listed key.
+    let allowlist = args
+        .allowed_stamp_pubkeys_hex
+        .map(|csv| Allowlist::from_hex_list(&csv))
+        .transpose()
+        .map_err(|e| format!("invalid --allowed-stamp-pubkeys-hex: {e:?}"))?
+        .map(Arc::new);
+
     let state = AppState {
         ephemeral_key: Arc::new(ephemeral_key),
         boot_proof: Arc::new(boot_proof),
         config,
+        allowlist,
     };
 
     // 64 KiB caps every parse-request body the TVC pivot will accept.
@@ -497,6 +536,7 @@ mod tests {
             ephemeral_key: Arc::new(pair),
             boot_proof: Arc::new(boot_proof),
             config: ParserConfig::accept_unsigned(),
+            allowlist: None,
         }
     }
 

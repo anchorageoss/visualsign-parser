@@ -6,6 +6,7 @@ use std::time::Duration;
 use integration::{ChildWrapper, find_free_port, wait_until_port_is_bound};
 use qos_p256::P256Pair;
 use qos_test_primitives::PathWrapper;
+use turnkey_api_key_stamper::{Stamp, TurnkeyP256ApiKey};
 
 // Same Ethereum signed legacy transaction used by
 // `integration::tests::parser_ethereum_native_transfer_e2e`.
@@ -33,6 +34,12 @@ struct RunningServer {
 
 impl RunningServer {
     async fn start() -> Self {
+        Self::start_with_args(&[]).await
+    }
+
+    /// Same as `start`, but with extra CLI args appended (e.g.
+    /// `--allowed-stamp-pubkeys-hex <csv>`).
+    async fn start_with_args(extra_args: &[&str]) -> Self {
         let test_id = format!("{:?}", rand::random::<u64>());
         // Kept as a plain `String` (not `PathWrapper`) until `RunningServer`
         // is fully constructed below: `PathWrapper`'s `Drop` deletes this
@@ -76,7 +83,8 @@ impl RunningServer {
             .arg("--port")
             .arg(port.to_string())
             .arg("--accept-unsigned-abis")
-            .current_dir(&*work_dir)
+            .args(extra_args)
+            .current_dir(&work_dir)
             .spawn()
             .expect("failed to spawn parser_http_server");
 
@@ -324,4 +332,67 @@ async fn http_server_serves_health_parse_and_errors() {
     )
     .await;
     assert_eq!(too_large_value.get("error").unwrap(), "payload too large");
+}
+
+#[tokio::test]
+async fn http_server_enforces_x_stamp_when_allowlist_is_configured() {
+    let allowed = TurnkeyP256ApiKey::generate();
+    let other = TurnkeyP256ApiKey::generate();
+    let allowlist_hex = hex::encode(allowed.compressed_public_key());
+
+    let server =
+        RunningServer::start_with_args(&["--allowed-stamp-pubkeys-hex", &allowlist_hex]).await;
+    let client = reqwest::Client::new();
+
+    let body = serde_json::json!({
+        "request": {
+            "chain": "CHAIN_ETHEREUM",
+            "unsigned_payload": ETH_TX_HEX,
+        }
+    });
+    // Sign the exact bytes sent over the wire, not a re-serialized copy:
+    // this is what the pivot verifies against.
+    let raw_body = serde_json::to_vec(&body).expect("failed to serialize body");
+
+    // 1. No X-Stamp header: 401 with bootProof present.
+    let unstamped = client
+        .post(format!("{}/visualsign/api/v1/parse", server.base_url))
+        .header("content-type", "application/json")
+        .body(raw_body.clone())
+        .send()
+        .await
+        .expect("unstamped request failed");
+    assert_eq!(unstamped.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let unstamped_value: serde_json::Value = unstamped
+        .json()
+        .await
+        .expect("unstamped response was not valid JSON");
+    assert!(
+        unstamped_value.get("bootProof").is_some(),
+        "401 response must still carry bootProof"
+    );
+
+    // 2. Stamped by a listed key: 200.
+    let stamp = allowed.stamp(&raw_body).expect("failed to stamp body");
+    let listed = client
+        .post(format!("{}/visualsign/api/v1/parse", server.base_url))
+        .header("content-type", "application/json")
+        .header(stamp.name, stamp.value)
+        .body(raw_body.clone())
+        .send()
+        .await
+        .expect("listed-key request failed");
+    assert_eq!(listed.status(), reqwest::StatusCode::OK);
+
+    // 3. Stamped by an unlisted key: 401.
+    let other_stamp = other.stamp(&raw_body).expect("failed to stamp body");
+    let unlisted = client
+        .post(format!("{}/visualsign/api/v1/parse", server.base_url))
+        .header("content-type", "application/json")
+        .header(other_stamp.name, other_stamp.value)
+        .body(raw_body)
+        .send()
+        .await
+        .expect("unlisted-key request failed");
+    assert_eq!(unlisted.status(), reqwest::StatusCode::UNAUTHORIZED);
 }
