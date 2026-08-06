@@ -26,13 +26,19 @@ type Fields = Vec<SignablePayloadField>;
 /// structured [`SignablePayloadField::Diagnostic`]; the default build carries
 /// the same information as a `Warning`-labelled text field, keeping the
 /// production payload shape unchanged.
+///
+/// `message` is charset-filtered here rather than at each call site. Every
+/// rule on this path quotes untrusted input -- an asset id, a decode error
+/// that echoes the offending value -- so filtering at this choke point is what
+/// makes a newly added rule safe by construction. `rule` is a literal at every
+/// call site and needs no filtering.
 #[cfg(feature = "diagnostics")]
 fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualSignError> {
     Ok(visualsign::field_builders::create_diagnostic_field(
         rule,
         "near-intents",
         visualsign::lint::Severity::Warn,
-        message,
+        &charset_safe(message),
         None,
     )
     .signable_payload_field)
@@ -41,7 +47,10 @@ fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualS
 /// See the `diagnostics`-enabled twin above.
 #[cfg(not(feature = "diagnostics"))]
 fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualSignError> {
-    Ok(create_text_field("Warning", &format!("{rule}: {message}"))?.signable_payload_field)
+    Ok(
+        create_text_field("Warning", &format!("{rule}: {}", charset_safe(message)))?
+            .signable_payload_field,
+    )
 }
 
 /// Report each caller-supplied token-metadata entry the parser refused.
@@ -52,10 +61,10 @@ fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualS
 /// supplied and thrown away. A rejection is a soft finding: the intents still
 /// render, since the refusal protects them rather than invalidating them.
 ///
-/// Both halves of the message are charset-filtered. `asset_id` is a
-/// caller-controlled map key and `reason` can quote it back (a JSON parse
-/// error, a length), so an embedded newline would otherwise render as extra
-/// apparent fields on the signing screen.
+/// `asset_id` is a caller-controlled map key and `reason` can quote it back (a
+/// JSON parse error, a length); [`diagnostic`] charset-filters the assembled
+/// message, so neither half can render as extra apparent fields on the signing
+/// screen.
 pub(crate) fn rejected_metadata_diagnostics(
     rejected: &[super::token_signature::RejectedTokenMetadata],
 ) -> Fields {
@@ -66,10 +75,10 @@ pub(crate) fn rejected_metadata_diagnostics(
     rejected
         .iter()
         .filter_map(|r| {
-            let message = charset_safe(&format!(
+            let message = format!(
                 "token metadata supplied for {} was rejected and not used: {}",
                 r.asset_id, r.reason
-            ));
+            );
             match diagnostic("rejected-token-metadata", &message) {
                 Ok(field) => Some(field),
                 Err(e) => {
@@ -89,13 +98,26 @@ pub(crate) fn rejected_metadata_diagnostics(
 /// Metadata resolved from an unsigned request entry (a gap-fill for an asset
 /// `SEEDS` doesn't cover) carries an extra diagnostic alongside the amount, so
 /// the signer sees the caveat rather than just an operator log.
+///
+/// A `TokenId` is only half account-typed: its `FromStr` parses the contract
+/// half as an `AccountId` and takes the remainder verbatim into a plain
+/// `String` (`Nep245TokenId::mt_token_id`, `Nep171TokenId::nft_token_id`), and
+/// `Display` round-trips it. So an asset id echoed into field text carries
+/// whatever bytes the sender chose and must be filtered.
+///
+/// The filtered form is for display only. Resolution runs against the raw id,
+/// because stripping first would let a crafted id collapse onto a seeded one
+/// (`nep141:wrap\u{7f}.near` -> `nep141:wrap.near`) and borrow that token's
+/// symbol and decimals.
 fn token_amount_field(
     label: &str,
     asset_id: &str,
     raw: u128,
     registry: &Reg,
 ) -> Result<Fields, VisualSignError> {
-    match tokens::resolve(asset_id, registry) {
+    let resolved = tokens::resolve(asset_id, registry);
+    let asset_id = charset_safe(asset_id);
+    match resolved {
         Some(meta) => {
             let mut fields = vec![
                 create_amount_field(
@@ -120,6 +142,15 @@ fn token_amount_field(
                 .signable_payload_field,
         ]),
     }
+}
+
+/// Charset-filter an optional field string, dropping it when nothing
+/// printable survives. Filtering before the emptiness test is what keeps an
+/// all-non-ASCII memo from rendering as a blank `Memo` line: it carries no
+/// information, and a labelled empty field reads as though the sender left it
+/// deliberately blank.
+fn nonempty_filtered(text: Option<&str>) -> Option<String> {
+    text.map(charset_safe).filter(|t| !t.is_empty())
 }
 
 /// Format a yoctoNEAR balance as a `<amount> NEAR` text field.
@@ -203,7 +234,7 @@ pub(crate) fn render_intent(intent: &Intent, registry: &Reg) -> Result<Fields, V
         Intent::AuthCall(c) => {
             let mut fields = vec![
                 create_text_field("Contract", c.contract_id.as_str())?.signable_payload_field,
-                create_text_field("Message", &c.msg)?.signable_payload_field,
+                create_text_field("Message", &charset_safe(&c.msg))?.signable_payload_field,
                 near_amount_field("Attached Deposit", c.attached_deposit.as_yoctonear())?,
             ];
             if c.state_init.is_some() {
@@ -251,8 +282,8 @@ fn render_token_diff(td: &TokenDiff, registry: &Reg) -> Result<Fields, VisualSig
             registry,
         )?);
     }
-    if let Some(memo) = &td.memo {
-        fields.push(create_text_field("Memo", &charset_safe(memo))?.signable_payload_field);
+    if let Some(memo) = nonempty_filtered(td.memo.as_deref()) {
+        fields.push(create_text_field("Memo", &memo)?.signable_payload_field);
     }
     // `referral` is an `AccountId`: its own charset rules already exclude
     // everything `charset_safe` would strip, so filtering it would be dead code.
@@ -272,8 +303,8 @@ fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignErr
             registry,
         )?);
     }
-    if let Some(memo) = &t.memo {
-        fields.push(create_text_field("Memo", &charset_safe(memo))?.signable_payload_field);
+    if let Some(memo) = nonempty_filtered(t.memo.as_deref()) {
+        fields.push(create_text_field("Memo", &memo)?.signable_payload_field);
     }
     // A `Transfer`'s optional notification changes what the transfer does
     // beyond moving the named tokens: `msg` calls `mt_on_transfer` on
@@ -281,9 +312,9 @@ fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignErr
     // `_transfer_call` form), and `state_init` initializes the receiver's
     // contract in the same receipt.
     if let Some(notification) = &t.notification {
-        fields.push(
-            create_text_field("Message", &charset_safe(&notification.msg))?.signable_payload_field,
-        );
+        if let Some(msg) = nonempty_filtered(Some(notification.msg.as_str())) {
+            fields.push(create_text_field("Message", &msg)?.signable_payload_field);
+        }
         if notification.state_init.is_some() {
             fields.push(state_init_field()?);
         }
@@ -303,11 +334,11 @@ fn push_withdraw_call_details(
     msg: &Option<String>,
     storage_deposit: Option<near_sdk::NearToken>,
 ) -> Result<(), VisualSignError> {
-    if let Some(memo) = memo.as_deref().filter(|m| !m.is_empty()) {
-        fields.push(create_text_field("Memo", &charset_safe(memo))?.signable_payload_field);
+    if let Some(memo) = nonempty_filtered(memo.as_deref()) {
+        fields.push(create_text_field("Memo", &memo)?.signable_payload_field);
     }
-    if let Some(msg) = msg.as_deref().filter(|m| !m.is_empty()) {
-        fields.push(create_text_field("Message", &charset_safe(msg))?.signable_payload_field);
+    if let Some(msg) = nonempty_filtered(msg.as_deref()) {
+        fields.push(create_text_field("Message", &msg)?.signable_payload_field);
     }
     if let Some(deposit) = storage_deposit {
         fields.push(near_amount_field(
@@ -1112,7 +1143,10 @@ mod tests {
             r#"{{"intent":"transfer","receiver_id":"bob.near","tokens":{{"nep141:wrap.near":"1"}},"msg":"{SPOOF}"}}"#
         ));
         let fields = render_intent(&intent, &empty_reg()).expect("render");
-        assert!(!text_at(&fields, "Message").contains('\n'));
+        assert_eq!(
+            text_at(&fields, "Message"),
+            "innocentTo: alice.nearAmount: 0.001 SOL"
+        );
     }
 
     #[test]
@@ -1121,7 +1155,10 @@ mod tests {
             r#"{{"intent":"token_diff","diff":{{"nep141:wrap.near":"-1"}},"memo":"{SPOOF}"}}"#
         ));
         let fields = render_intent(&intent, &empty_reg()).expect("render");
-        assert!(!text_at(&fields, "Memo").contains('\n'));
+        assert_eq!(
+            text_at(&fields, "Memo"),
+            "innocentTo: alice.nearAmount: 0.001 SOL"
+        );
     }
 
     #[test]
@@ -1130,7 +1167,10 @@ mod tests {
             r#"{{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"alice.near","amount":"1","memo":"{SPOOF}"}}"#
         ));
         let fields = render_intent(&intent, &empty_reg()).expect("render");
-        assert!(!text_at(&fields, "Memo").contains('\n'));
+        assert_eq!(
+            text_at(&fields, "Memo"),
+            "innocentTo: alice.nearAmount: 0.001 SOL"
+        );
     }
 
     /// Covers every withdraw variant at once: `msg` renders through the shared
@@ -1141,7 +1181,10 @@ mod tests {
             r#"{{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"alice.near","amount":"1","msg":"{SPOOF}"}}"#
         ));
         let fields = render_intent(&intent, &empty_reg()).expect("render");
-        assert!(!text_at(&fields, "Message").contains('\n'));
+        assert_eq!(
+            text_at(&fields, "Message"),
+            "innocentTo: alice.nearAmount: 0.001 SOL"
+        );
     }
 
     // `NftWithdraw::token_id` and `MtWithdraw::token_ids` are plain `String`s
@@ -1154,7 +1197,10 @@ mod tests {
             r#"{{"intent":"nft_withdraw","token":"nft.near","receiver_id":"alice.near","token_id":"{SPOOF}"}}"#
         ));
         let fields = render_intent(&intent, &empty_reg()).expect("render");
-        assert!(!text_at(&fields, "NFT Token Id").contains('\n'));
+        assert_eq!(
+            text_at(&fields, "NFT Token Id"),
+            "innocentTo: alice.nearAmount: 0.001 SOL"
+        );
     }
 
     #[test]
@@ -1163,7 +1209,102 @@ mod tests {
             r#"{{"intent":"mt_withdraw","token":"mt.near","receiver_id":"alice.near","token_ids":["{SPOOF}"],"amounts":["5"]}}"#
         ));
         let fields = render_intent(&intent, &empty_reg()).expect("render");
-        assert!(!text_at(&fields, "MT Token").contains('\n'));
+        assert_eq!(
+            text_at(&fields, "MT Token"),
+            "innocentTo: alice.nearAmount: 0.001 SOL x5"
+        );
+    }
+
+    #[test]
+    fn auth_call_message_with_embedded_newline_is_sanitized() {
+        let intent = intent_from(&format!(
+            r#"{{"intent":"auth_call","contract_id":"c.near","msg":"{SPOOF}"}}"#
+        ));
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert_eq!(
+            text_at(&fields, "Message"),
+            "innocentTo: alice.nearAmount: 0.001 SOL"
+        );
+    }
+
+    // A `TokenId` is only half account-typed: `FromStr` splits on the first
+    // `:` and parses just the contract half as an `AccountId`, taking the
+    // remainder verbatim into a plain `String` (`Nep245TokenId::mt_token_id`,
+    // `Nep171TokenId::nft_token_id`). So an asset id echoed back into field
+    // text carries whatever bytes the sender chose.
+    #[test]
+    fn unresolved_asset_id_with_embedded_newline_is_sanitized() {
+        let intent = intent_from(
+            r#"{"intent":"transfer","receiver_id":"bob.near","tokens":{"nep245:mt.near:x\nTo: attacker.near\nAmount: 1000 USDC":"1"}}"#,
+        );
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert_eq!(
+            text_at(&fields, "Amount"),
+            "1 (unresolved nep245:mt.near:xTo: attacker.nearAmount: 1000 USDC)"
+        );
+    }
+
+    /// Sanitizing the asset id must not feed the registry lookup: a crafted id
+    /// that *becomes* a seeded one once its non-printable bytes are stripped
+    /// would otherwise borrow that token's symbol and decimals.
+    #[test]
+    fn asset_id_resolves_on_its_raw_form_not_its_sanitized_form() {
+        let fields = token_amount_field(
+            "Amount",
+            "nep141:wrap\u{7f}.near",
+            1_000_000_000_000_000_000_000_000,
+            &empty_reg(),
+        )
+        .expect("render");
+        let text = text_at(&fields, "Amount");
+        assert!(
+            text.contains("unresolved"),
+            "must not resolve as wNEAR: {text}"
+        );
+    }
+
+    /// The message text of a soft finding, in whichever shape the build emits.
+    fn message_of(field: &SignablePayloadField) -> String {
+        #[cfg(feature = "diagnostics")]
+        match field {
+            SignablePayloadField::Diagnostic { diagnostic, .. } => diagnostic.message.clone(),
+            other => panic!("expected Diagnostic, got {other:?}"),
+        }
+        #[cfg(not(feature = "diagnostics"))]
+        match field {
+            SignablePayloadField::TextV2 { text_v2, .. } => text_v2.text.clone(),
+            other => panic!("expected TextV2, got {other:?}"),
+        }
+    }
+
+    /// Diagnostic messages quote untrusted input (an asset id, a decode
+    /// error), so the filter belongs inside the helper rather than at each
+    /// call site.
+    #[test]
+    fn diagnostic_messages_are_sanitized() {
+        let field = diagnostic("test-rule", "innocent\nTo: attacker.near").expect("diagnostic");
+        // The non-`diagnostics` build prefixes the rule onto the same string,
+        // so assert on the message's own content rather than the whole field.
+        let message = message_of(&field);
+        assert!(message.contains("innocentTo: attacker.near"), "{message}");
+    }
+
+    /// The `extraction` rule quotes a `serde_json::Error`, which interpolates
+    /// the offending value -- an attacker-chosen `intent` tag -- with `{}`, so
+    /// its newlines reach the message intact.
+    #[test]
+    fn extraction_diagnostic_sanitizes_the_decode_error() {
+        let mp: MultiPayload = serde_json::from_str(
+            r#"{"standard":"raw_ed25519","payload":"{\"signer_id\":\"alice.near\",\"verifying_contract\":\"intents.near\",\"deadline\":\"2999-01-01T00:00:00Z\",\"nonce\":\"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=\",\"intents\":[{\"intent\":\"innocent\\nTo: attacker.near\"}]}","public_key":"ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN","signature":"ed25519:3vtbNQJHZfuV1s5DykzyjkbNLc583hnkrhTz57eDhd966iqzkor6Twgr4Loh2C195SCSEsiGfrd6KcxpjNq9ZbVj"}"#,
+        )
+        .expect("multi payload json");
+        let fields = section(1, 1, &mp, &empty_reg()).expect("render");
+        let extraction = fields
+            .iter()
+            .find(|f| super::super::test_support::is_warning_diagnostic(f, "extraction"))
+            .expect("extraction warning");
+        let message = message_of(extraction);
+        assert!(!message.contains('\n'), "{message}");
     }
 
     /// `ft_withdraw` and `nft_withdraw` both render their memo; `mt_withdraw`
