@@ -9,8 +9,13 @@
 ///
 /// Every untrusted string reaching a field on either NEAR path -- the borsh
 /// transaction path and the intents path -- goes through here. Values typed as
-/// `AccountId` do not need it: an id carrying these bytes fails its own
-/// validation during decode.
+/// `AccountId` are the one exemption: an id carrying these bytes fails its own
+/// validation during decode, so filtering it would be dead code.
+///
+/// `TokenId` is not such a value, despite its account-id-shaped prefix. Its
+/// `FromStr` parses only the contract half as an `AccountId` and takes the
+/// remainder verbatim into a plain `String`, so an asset id needs filtering
+/// like any other caller-supplied text.
 ///
 /// Filtering rather than rejecting is deliberate. A legitimate memo carrying
 /// an accented character or an emoji loses those characters instead of failing
@@ -93,5 +98,58 @@ mod tests {
     #[test]
     fn format_tgas_hundred() {
         assert_eq!(format_tgas(100_000_000_000_000), "100");
+    }
+
+    #[test]
+    fn charset_safe_strips_the_wallet_line_separator() {
+        assert_eq!(
+            charset_safe("innocent\nTo: alice.near"),
+            "innocentTo: alice.near"
+        );
+    }
+
+    /// `\t`, `\r`, `\b`, `\f` serialize to `FORBIDDEN_JSON_ESCAPES` substrings,
+    /// which make `SignablePayload::validate_charset` refuse the whole
+    /// transaction. Stripping them here keeps one attacker-supplied byte from
+    /// withholding the payload entirely.
+    #[test]
+    fn charset_safe_strips_the_other_control_escapes() {
+        assert_eq!(charset_safe("a\tb\rc\u{8}d\u{c}e"), "abcde");
+    }
+
+    #[test]
+    fn charset_safe_strips_a_literal_backslash() {
+        assert_eq!(charset_safe(r"a\u0041b"), "au0041b");
+    }
+
+    #[test]
+    fn charset_safe_strips_non_ascii() {
+        // A bidi override can reorder a rendered line without changing its
+        // bytes; an emoji and an accent are simply outside the ASCII range the
+        // core validator accepts.
+        assert_eq!(
+            charset_safe("caf\u{e9} \u{202e}dlrow \u{1f600}"),
+            "caf dlrow "
+        );
+    }
+
+    #[test]
+    fn charset_safe_keeps_printable_ascii_and_spaces() {
+        assert_eq!(
+            charset_safe("Send 1.5 wNEAR to alice.near (id #7)"),
+            "Send 1.5 wNEAR to alice.near (id #7)"
+        );
+    }
+
+    /// Double quotes survive: they serialize as `\"`, which the core validator
+    /// permits so a field can carry real embedded JSON.
+    #[test]
+    fn charset_safe_keeps_double_quotes() {
+        assert_eq!(charset_safe(r#"{"amount":"1"}"#), r#"{"amount":"1"}"#);
+    }
+
+    #[test]
+    fn charset_safe_empties_an_all_non_ascii_string() {
+        assert_eq!(charset_safe("\u{e9}\u{e9}\u{e9}"), "");
     }
 }
