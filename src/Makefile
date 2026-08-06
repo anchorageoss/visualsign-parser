@@ -142,7 +142,8 @@ parser:
 parser_app:
 	cargo run --bin parser_app -- \
 	--usock $(PARSER_INNER_SOCKET_PATH) \
-	--ephemeral-file $(ROOT)/src/integration/fixtures/ephemeral.secret
+	--ephemeral-file $(ROOT)/src/integration/fixtures/ephemeral.secret \
+	--accept-unsigned-abis
 
 .PHONY: parser_enclave
 parser_enclave:

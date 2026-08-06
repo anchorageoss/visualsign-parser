@@ -116,14 +116,38 @@ pub struct TestArgs {
 }
 
 /// Test harness builder.
-#[derive(Default)]
-pub struct Builder {}
+pub struct Builder {
+    /// The ABI trust posture `parser_app` is started with. `parser_app` refuses to
+    /// start without one, so this is never empty.
+    abi_trust_args: Vec<String>,
+}
+
+impl Default for Builder {
+    /// Starts `parser_app` in the permissive posture, which is what the suite's
+    /// fixtures (unsigned or absent `abi_mappings`) expect.
+    fn default() -> Self {
+        Self {
+            abi_trust_args: vec!["--accept-unsigned-abis".to_string()],
+        }
+    }
+}
 
 impl Builder {
     /// Create a new instance of [`Self`].
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Start `parser_app` in the strict posture instead: only ABI mappings signed by
+    /// `signer_pubkey_hex` (hex secp256k1) are accepted.
+    #[must_use]
+    pub fn require_signed_abis(mut self, signer_pubkey_hex: &str) -> Self {
+        self.abi_trust_args = vec![
+            "--accept-signatures-from-pubkey".to_string(),
+            signer_pubkey_hex.to_string(),
+        ];
+        self
     }
 
     /// Execute `test`.
@@ -172,6 +196,9 @@ impl Builder {
             .arg(host_port.to_string())
             .arg("--ephemeral-file")
             .arg("./fixtures/ephemeral.secret")
+            // parser_app refuses to start without an explicit ABI trust posture; see
+            // `Builder::default` / `Builder::require_signed_abis`.
+            .args(&self.abi_trust_args)
             .spawn()
             .unwrap()
             .into();
