@@ -27,6 +27,9 @@
 //! - `--port <u16>` / `HTTP_PORT` (default 3000) - Turnkey TVC public ingress.
 //! - `--enclave-app <name>` / `ENCLAVE_APP` (default `visualsign-parser`).
 //! - `--deployment-label <label>` / `DEPLOYMENT_LABEL`.
+//! - `--boot-proof-source <static|nsm>` / `BOOT_PROOF_SOURCE` (default
+//!   `static`) - `nsm` calls the real `/dev/nsm` device once at startup for
+//!   the response `bootProof`'s attestation document.
 //!
 //! The ephemeral key is read from `qos_core::EPHEMERAL_KEY_FILE` (provisioned
 //! by QOS inside the enclave). No override flag - if a deployment ever needs
@@ -42,7 +45,7 @@ use axum::{
     routing::{get, post},
 };
 use base64::Engine as _;
-use boot_proof::{BootProofSource, StaticBootProof};
+use boot_proof::{BootProofSource, NsmBootProof, StaticBootProof};
 use clap::Parser;
 use generated::parser::{Chain, ChainMetadata, SignatureScheme};
 use host_primitives::turnkey::{
@@ -77,6 +80,21 @@ struct Args {
     /// key. Delivered via `pivotArgs` at deploy time.
     #[arg(long, env = "ALLOWED_STAMP_PUBKEYS_HEX")]
     allowed_stamp_pubkeys_hex: Option<String>,
+
+    /// Where each response's `bootProof` attestation document comes from.
+    /// `static` (default) leaves it empty, which is what local dev and CI
+    /// run with since they have no `/dev/nsm`. `nsm` calls the real NSM
+    /// device once at startup and reuses the resulting document for every
+    /// response.
+    #[arg(long, env = "BOOT_PROOF_SOURCE", default_value = "static")]
+    boot_proof_source: BootProofSourceKind,
+}
+
+/// See `Args::boot_proof_source`.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum BootProofSourceKind {
+    Static,
+    Nsm,
 }
 
 #[derive(Clone)]
@@ -266,11 +284,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         qos_core::EPHEMERAL_KEY_FILE,
     );
 
-    let boot_proof = StaticBootProof::from_enclave_files(
-        &ephemeral_key,
-        args.enclave_app,
-        args.deployment_label,
-    );
+    let boot_proof: Arc<dyn BootProofSource + Send + Sync> = match args.boot_proof_source {
+        BootProofSourceKind::Static => Arc::new(StaticBootProof::from_enclave_files(
+            &ephemeral_key,
+            args.enclave_app,
+            args.deployment_label,
+        )),
+        BootProofSourceKind::Nsm => Arc::new(
+            NsmBootProof::new(&ephemeral_key, args.enclave_app, args.deployment_label)
+                .expect("failed to generate NSM boot proof"),
+        ),
+    };
 
     // Absent means the routes stay open (today's behavior); present means
     // every request must carry a valid X-Stamp from a listed key.
@@ -281,7 +305,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState {
         ephemeral_key: Arc::new(ephemeral_key),
-        boot_proof: Arc::new(boot_proof),
+        boot_proof,
         allowlist,
     };
 
