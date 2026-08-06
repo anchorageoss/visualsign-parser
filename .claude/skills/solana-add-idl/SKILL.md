@@ -89,7 +89,7 @@ Create directory: `src/chain_parsers/visualsign-solana/src/presets/{snake_name}/
 ```rust
 use super::{SCREAMING_SNAKE}_PROGRAM_ID;
 use crate::core::{SolanaIntegrationConfig, SolanaIntegrationConfigData};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub struct {PascalName}Config;
 
@@ -101,8 +101,8 @@ impl SolanaIntegrationConfig for {PascalName}Config {
     fn data(&self) -> &SolanaIntegrationConfigData {
         static DATA: std::sync::OnceLock<SolanaIntegrationConfigData> = std::sync::OnceLock::new();
         DATA.get_or_init(|| {
-            let mut programs = HashMap::new();
-            let mut instructions = HashMap::new();
+            let mut programs = BTreeMap::new();
+            let mut instructions = BTreeMap::new();
             instructions.insert("*", vec!["*"]);
             programs.insert({SCREAMING_SNAKE}_PROGRAM_ID, instructions);
             SolanaIntegrationConfigData { programs }
@@ -117,38 +117,42 @@ Use the dflow_aggregator preset as a template: `src/chain_parsers/visualsign-sol
 
 Read that file for the exact structure, then generate a generic version with these substitutions:
 - Replace `DflowAggregator` / `dflow_aggregator` / `DFLOW_AGGREGATOR` with the appropriate casing of the new program name
-- Replace the program ID string with the new program address
+- Declare the program ID const near the top, which is what `config.rs` resolves via `use super::{SCREAMING_SNAKE}_PROGRAM_ID;`:
+  ```rust
+  pub(crate) const {SCREAMING_SNAKE}_PROGRAM_ID: &str = "{base58_program_id}";
+  ```
 - Replace `"DFlow Aggregator"` display strings with `{display_name}`
 - Replace IDL file reference: `include_str!("{snake_name}.json")`
 - Keep the `kind()` method returning the user's chosen `VisualizerKind` variant with `display_name` as the `&'static str` argument
 
 **Generic IDL pattern only:**
 - The generic scaffold uses the three helpers `dflow_aggregator` defines: `build_named_accounts`, `build_parsed_fields`, and `build_fallback_fields`. All three work with any IDL.
-- Two additional helpers — `append_raw_data` (for byte-blob args) and `format_arg_value` (for custom scalar rendering) — are not present in `dflow_aggregator`. Add them when the target IDL needs them, copying the pattern from another preset such as `kamino_vault` or `jupiter_earn`.
+- `format_arg_value` (for custom scalar rendering) is also defined in `dflow_aggregator`; copy it along with the rest. `append_raw_data` (for byte-blob args) is not — add it when the target IDL needs it, copying the pattern from another preset such as `kamino_vault` or `jupiter_earn`.
 - The parse function should: check `data.len() < 8`, load IDL, call `parse_instruction_with_idl`, call `build_named_accounts`, return a struct with parsed data + named accounts
 
-**Visualizer body must use the wire-data context API.** At the top of `visualize_tx_commands`:
+**Visualizer body reads wire data through `InstructionView`.** At the top of `visualize_tx_commands`:
 ```rust
-let program_id = context.resolve_program_id()?.to_string();
-let accounts = context.resolve_accounts()?;
+let view = InstructionView::from_context(context);
 let data = context.data();
 ```
 
-These three accessors replace the old `context.current_instruction()`. They surface
-unresolved indices as `Err(VisualSignError::DecodeError(...))` with the bad index
-named, instead of returning a generic "no instruction found" failure. Use
-`context.instruction_index()` for any "Instruction N" labels.
+`InstructionView` is built infallibly: each program and account index resolves to
+either its base58 pubkey or an `"unresolved(N)"` placeholder. Use it on the render
+path rather than `context.resolve_program_id()?` / `context.resolve_accounts()?`,
+which return `Err` for indices that live in an address lookup table — that aborts
+the whole transaction render for any v0+ALT instruction instead of degrading to a
+placeholder. Use `context.instruction_index()` for any "Instruction N" labels.
 
 **Required imports** (at top of module, NOT inside functions):
 ```rust
 use crate::core::{
-    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::{PascalName}Config;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
-use solana_sdk::instruction::AccountMeta;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use visualsign::errors::VisualSignError;
