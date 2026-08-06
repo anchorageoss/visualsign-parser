@@ -72,6 +72,7 @@ impl parser_cli_core::ChainPlugin for NearPlugin {
 }
 
 /// Parsed components of a `Name@Path@AssetId` mapping string.
+#[derive(Debug)]
 struct NearMappingComponents {
     name: String,
     path: String,
@@ -85,9 +86,21 @@ struct NearMappingComponents {
 /// `mapping_parser::parse_mapping`, which splits on `:` and would truncate a
 /// NEAR asset id at its first embedded colon).
 fn parse_near_mapping(mapping_str: &str) -> Result<NearMappingComponents, String> {
-    let mut parts = mapping_str.splitn(3, '@');
-    let (Some(name), Some(path), Some(asset_id)) = (parts.next(), parts.next(), parts.next())
-    else {
+    // Split on every '@' rather than the first two: a path containing '@' is
+    // legal on Linux/macOS, and `splitn(3, '@')` would quietly absorb the
+    // remainder into the asset id, turning "/tmp/a@b/t.json" into path
+    // "/tmp/a" and asset id "b/t.json@nep141:...". An asset id never contains
+    // '@', so a fourth component means the path did.
+    let parts: Vec<&str> = mapping_str.split('@').collect();
+    let [name, path, asset_id] = parts[..] else {
+        if parts.len() > 3 {
+            return Err(format!(
+                "Invalid mapping format: found {} '@'-separated components, expected 3 \
+                 (Name@FilePath@AssetId). A file path containing '@' cannot be used here: \
+                 {mapping_str}",
+                parts.len()
+            ));
+        }
         return Err(format!(
             "Invalid mapping format (expected Name@FilePath@AssetId): {mapping_str}"
         ));
@@ -430,6 +443,33 @@ mod tests {
         assert!(parse_near_mapping("NoAtSigns").is_err());
         assert!(parse_near_mapping("OnlyOne@AtSign").is_err());
         assert!(parse_near_mapping("@@EmptyComponents").is_err());
+    }
+
+    #[test]
+    fn parse_near_mapping_rejects_an_at_sign_in_the_path() {
+        // Previously absorbed into the asset id, yielding path "/tmp/my" and
+        // asset id "dir/token.json@nep141:wrap.near" with no complaint.
+        let err = parse_near_mapping("MyToken@/tmp/my@dir/token.json@nep141:wrap.near")
+            .expect_err("a path containing '@' must be rejected");
+        assert!(err.contains("expected 3"), "{err}");
+        assert!(err.contains("cannot be used here"), "{err}");
+    }
+
+    #[test]
+    fn build_token_mappings_skips_a_file_whose_json_is_invalid() {
+        // Distinct from the file-not-found path: the file opens and reads, and
+        // the failure comes from serde_json rejecting its contents.
+        let dir = std::env::temp_dir().join("vsp_near_cli_plugin_invalid_json");
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("broken.json");
+        std::fs::write(&path, "{").expect("write");
+
+        let mapping = format!("Broken@{}@nep141:wrap.near", path.display());
+        let (map, valid) = build_token_mappings_from_files(&[mapping], NearNetwork::default());
+        assert!(map.is_empty(), "an unparseable file must register nothing");
+        assert_eq!(valid, 0);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// An `execute_intents` transaction withdrawing the token behind `asset_id`,
