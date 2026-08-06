@@ -974,6 +974,12 @@ async fn parser_near_intent_envelope_e2e() {
                     "Type": "text_v2"
                 },
                 {
+                    "FallbackText": "FT Withdraw",
+                    "Label": "Intent",
+                    "TextV2": { "Text": "FT Withdraw" },
+                    "Type": "text_v2"
+                },
+                {
                     "FallbackText": "wrap.near",
                     "Label": "Token",
                     "TextV2": { "Text": "wrap.near" },
@@ -993,7 +999,7 @@ async fn parser_near_intent_envelope_e2e() {
                 }
             ],
             "PayloadType": "NearTx",
-            "Title": "NEAR Intent",
+            "Title": "NEAR Intent: FT Withdraw",
             "Version": "0"
         });
 
