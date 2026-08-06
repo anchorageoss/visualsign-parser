@@ -4749,6 +4749,7 @@ dependencies = [
  "tonic 0.10.2",
  "tracing",
  "tracing-test",
+ "turnkey_api_key_stamper",
  "visualsign-solana",
 ]
 
@@ -6600,14 +6601,20 @@ dependencies = [
  "borsh 1.6.0",
  "clap",
  "generated",
+ "hex",
  "host_primitives",
+ "k256 0.13.4",
+ "p256",
  "parser_app",
  "qos_core",
  "qos_hex",
  "qos_p256",
  "serde",
  "serde_json",
+ "subtle",
  "tokio",
+ "turnkey_api_key_stamper",
+ "visualsign",
 ]
 
 [[package]]
@@ -13827,6 +13834,22 @@ dependencies = [
  "sha1",
  "thiserror 2.0.17",
  "utf-8",
+]
+
+[[package]]
+name = "turnkey_api_key_stamper"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c0ca5df1b0c48a971fc24dfd83323b8f75a2671776bb4842e07c9a87e31b874"
+dependencies = [
+ "base64 0.22.1",
+ "hex",
+ "k256 0.13.4",
+ "p256",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
