@@ -5,14 +5,46 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-base64 = { workspace = true }
+# internal paths
 generated = { path = "../../generated", features = ["tonic_types", "serde_derive"] }
 health_check = { path = "../../health_check" }
 host_primitives = { path = "../../host_primitives" }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time"] }
-serde_json = { workspace = true }
-axum = { version = "0.6.20", features = ["http1", "tokio", "json"], default-features = false }
+
+# core runtime + serialization
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time", "net"] }
 serde = { workspace = true }
+serde_json = { workspace = true }
+
+# axum
+axum = { version = "0.8", features = ["http1", "tokio", "json"], default-features = false }
+
+# x402
+x402-axum = "1.4"
+x402-types = "1.4"
+x402-chain-eip155 = { version = "1", features = ["server"] }
+x402-chain-solana = { version = "1", features = ["server"] }
+
+rust_decimal = "1"
+url = "2"
+
+# attestation: verifies the TVC ephemeral-key signature on the parse response
+qos_p256 = { workspace = true }
+qos_hex = { workspace = true }
+qos_crypto = { workspace = true } # sha_256 for the attestation-test digest
+subtle = { version = "2", default-features = false }
+
+# Borsh: the attestation-test digest is computed over the same
+# borsh-encoded ParsedTransactionPayload that parser_app signs.
+borsh = { version = "1", features = ["std", "derive"], default-features = false }
+
+# Base64 for the intermediate_output proto bytes field.
+base64 = { workspace = true }
+
+# error handling
+thiserror = "2.0.12"
+
+# http client (startup facilitator probe)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [lints]
 workspace = true
