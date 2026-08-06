@@ -1,6 +1,9 @@
 //! Parsing endpoint for `VisualSign`
 
-use crate::{chain_conversion, errors::GrpcError, registry::create_registry};
+use crate::{
+    chain_conversion, errors::GrpcError, payment_verify, payment_verify::PaymentPolicy,
+    registry::create_registry,
+};
 use generated::parser::Chain as ProtoChain;
 use generated::{
     google::rpc::Code,
@@ -25,7 +28,9 @@ use visualsign::vsptrait::VisualSignOptions;
 pub fn parse(
     parse_request: &ParseRequest,
     ephemeral_key: &P256Pair,
+    policy: &PaymentPolicy,
 ) -> Result<ParseResponse, GrpcError> {
+    payment_verify::verify(parse_request, policy)?;
     let registry = create_registry();
     parse_with_registry(parse_request, ephemeral_key, &registry)
 }
@@ -362,6 +367,7 @@ mod tests {
             unsigned_payload: "stub".to_string(),
             chain: ProtoChain::Tron as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         }
     }
 

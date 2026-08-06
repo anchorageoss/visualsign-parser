@@ -96,6 +96,7 @@ async fn parser_e2e() {
             unsigned_payload: "unsignedpayload".to_string(),
             chain: Chain::Unspecified as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         };
 
         let parse_response = test_args
@@ -137,6 +138,7 @@ async fn propagates_grpc_errors() {
             unsigned_payload: "no-no-that-is-not-valid-base64".to_string(),
             chain: Chain::Ethereum as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         };
 
         let parse_error = test_args
@@ -213,6 +215,7 @@ async fn parser_solana_native_transfer_e2e() {
             unsigned_payload: solana_tx,
             chain: Chain::Solana as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         };
 
         let parse_response = test_args
@@ -406,6 +409,7 @@ async fn parser_ethereum_native_transfer_e2e() {
             unsigned_payload: ethereum_tx_hex.to_string(),
             chain: Chain::Ethereum as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         };
 
         let parse_response = test_args
@@ -516,6 +520,7 @@ async fn parser_charset_validation_all_chains() {
                 unsigned_payload: transaction.to_string(),
                 chain: chain as i32,
                 chain_metadata: None,
+                payment_marker: vec![],
             };
 
             let parse_response = test_args
@@ -574,6 +579,7 @@ async fn parser_sui_native_transfer_e2e() {
             unsigned_payload: sui_tx_b64.to_string(),
             chain: Chain::Sui as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         };
 
         let parse_response = test_args
@@ -764,6 +770,7 @@ async fn parser_near_native_transfer_e2e() {
             unsigned_payload: near_transfer_hex.to_string(),
             chain: Chain::Near as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         };
 
         let parse_response = test_args
@@ -838,6 +845,7 @@ async fn parser_near_metadata_selects_the_network_e2e() {
             unsigned_payload: near_testnet_transfer_hex.to_string(),
             chain: Chain::Near as i32,
             chain_metadata: near_chain_metadata("NEAR_TESTNET"),
+            payment_marker: vec![],
         };
 
         let parse_response = test_args
@@ -880,6 +888,7 @@ async fn parser_near_metadata_network_reaches_the_account_suffix_check_e2e() {
             unsigned_payload: near_mainnet_transfer_hex.to_string(),
             chain: Chain::Near as i32,
             chain_metadata: near_chain_metadata("NEAR_TESTNET"),
+            payment_marker: vec![],
         };
 
         let parse_error = test_args
@@ -914,6 +923,7 @@ async fn parser_near_intent_envelope_e2e() {
             unsigned_payload: intent_json.to_string(),
             chain: Chain::Near as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         };
 
         let parse_response = test_args
@@ -996,6 +1006,7 @@ async fn parser_near_rejects_input_that_is_neither_transaction_nor_intent() {
             unsigned_payload: "not-hex-not-base64-not-json".to_string(),
             chain: Chain::Near as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         };
 
         let parse_error = test_args
