@@ -8,8 +8,15 @@
 /// feature is disabled are omitted; requests for those chains hit the
 /// registry-miss path in `convert_transaction` and surface as
 /// `InvalidArgument` at the gRPC layer.
+///
+/// `config` carries the deploy-time settings the converters need, chiefly the ABI
+/// trust posture. It is threaded in rather than read from a global so the posture
+/// is set once at startup and cannot vary between requests.
 #[must_use]
-pub fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
+#[cfg_attr(not(feature = "ethereum"), allow(unused_variables))]
+pub fn create_registry(
+    config: &crate::config::ParserConfig,
+) -> visualsign::registry::TransactionConverterRegistry {
     #[allow(unused_mut)] // mut is unused when no chain features are enabled
     let mut registry = visualsign::registry::TransactionConverterRegistry::new();
     // TODO: Create a ChainRegistry trait that all chains can implement for token metadata,
@@ -17,7 +24,7 @@ pub fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
     #[cfg(feature = "ethereum")]
     registry.register::<visualsign_ethereum::EthereumTransactionWrapper, _>(
         visualsign::registry::Chain::Ethereum,
-        visualsign_ethereum::EthereumVisualSignConverter::new(),
+        visualsign_ethereum::EthereumVisualSignConverter::with_policy(config.abi_trust.clone()),
     );
     #[cfg(feature = "solana")]
     registry.register::<visualsign_solana::SolanaTransactionWrapper, _>(
@@ -93,20 +100,26 @@ mod tests {
     /// Pins the ABI trust posture the deployed binary actually runs.
     ///
     /// `create_registry` is the only production construction site for the Ethereum
-    /// converter, and which posture it installs is decided purely by which
-    /// constructor this file calls. Moving between `new()` (accept-unsigned) and
-    /// `with_policy(RequireAllowlistedSigner(..))` compiles clean and, without this
-    /// test, leaves the whole suite green, so nothing would tell a reviewer that the
+    /// converter, and which posture it installs is decided purely by the
+    /// [`ParserConfig`](crate::config::ParserConfig) this file forwards into
+    /// `with_policy`. Moving between `AcceptUnsigned` and
+    /// `RequireAllowlistedSigner(..)` compiles clean and, without this test,
+    /// leaves the whole suite green, so nothing would tell a reviewer that the
     /// production posture had changed.
     ///
-    /// Today it is accept-unsigned, deliberately: this is the posture the enclave
-    /// binary has always effectively run, since the compiled-in allowlist is empty
-    /// there and an unsigned entry was already accepted. The deploy-time flag that
-    /// lets an operator choose require-signed is a follow-up; when it lands, this
-    /// assertion is the one that has to be updated on purpose, which is the point.
+    /// The posture is a deploy-time choice (see the `parser_app` CLI flags), so
+    /// this test builds the config explicitly with `AcceptUnsigned` and asserts
+    /// the unsigned caller ABI decodes. That is the posture the enclave binary
+    /// has always effectively run (the compiled-in allowlist is empty there, so an
+    /// unsigned entry was already accepted); an operator who deploys
+    /// require-signed constructs a different config on purpose, which is the point
+    /// at which this assertion's premise is revisited.
     #[test]
     fn create_registry_runs_the_accept_unsigned_abi_posture() {
-        let rendered = super::create_registry()
+        let config = crate::config::ParserConfig::new(
+            visualsign::signing::MetadataTrustPolicy::AcceptUnsigned,
+        );
+        let rendered = super::create_registry(&config)
             .convert_transaction(
                 &Chain::Ethereum,
                 CUSTOM_FOO_TX_HEX,
@@ -127,6 +140,42 @@ mod tests {
         assert!(
             !rendered.contains(CUSTOM_FOO_SELECTOR),
             "a decoded call must not fall back to the raw selector, got: {rendered}"
+        );
+    }
+
+    /// The mirror of the test above, for the posture that actually enforces something.
+    ///
+    /// Asserting only the accept-unsigned direction would leave the security-relevant
+    /// wiring unpinned: a `create_registry` that dropped `config.abi_trust` and always
+    /// built a permissive converter would still pass the accept-unsigned test. Here the
+    /// same unsigned fixture must be refused and fall back to the raw selector, so the
+    /// posture has to reach the converter for the test to hold.
+    #[test]
+    fn create_registry_runs_the_require_signed_abi_posture() {
+        let config = crate::config::ParserConfig::new(
+            visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
+                visualsign::signing::SignerAllowlist::new(),
+            ),
+        );
+        let rendered = super::create_registry(&config)
+            .convert_transaction(
+                &Chain::Ethereum,
+                CUSTOM_FOO_TX_HEX,
+                options_with_unsigned_abi(),
+            )
+            .expect("fixture transaction must convert")
+            .payload
+            .to_json()
+            .expect("payload must serialize");
+
+        assert!(
+            !rendered.contains("customFoo"),
+            "require-signed must drop the unsigned caller ABI; decoding it means the \
+             posture never reached the converter. Got: {rendered}"
+        );
+        assert!(
+            rendered.contains(CUSTOM_FOO_SELECTOR),
+            "dropping the ABI must leave the raw selector {CUSTOM_FOO_SELECTOR}, got: {rendered}"
         );
     }
 }
