@@ -65,12 +65,15 @@ impl NearTransaction {
             defuse_core::payload::DefusePayload<defuse_core::intents::DefuseIntents>,
         >(trimmed)
         .map_err(|e| {
+            // Both causes are appended rather than interpolated into the
+            // summary, so the sentence naming the two accepted formats stays
+            // contiguous for callers that match on it.
             let borsh_cause = borsh_failure
                 .as_deref()
                 .unwrap_or("input is not hex or base64");
             TransactionParseError::DecodeError(format!(
-                "input is neither a NEAR borsh transaction (near borsh decode: {borsh_cause}) \
-                 nor a DefusePayload JSON envelope: {e}"
+                "input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: \
+                 {e}; near borsh decode: {borsh_cause}"
             ))
         })?;
         Ok(Self::Intent(trimmed.to_string()))
