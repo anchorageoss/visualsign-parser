@@ -7,6 +7,7 @@ use defuse_core::intents::{DefuseIntents, Intent};
 use defuse_core::payload::DefusePayload;
 use defuse_core::payload::multi::MultiPayload;
 use visualsign::SignablePayloadField;
+use visualsign::encodings::split_hex_prefix;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_amount_field, create_text_field};
 use visualsign::registry::LayeredRegistry;
@@ -164,9 +165,26 @@ fn state_init_field() -> Result<SignablePayloadField, VisualSignError> {
     Ok(create_text_field("State Init", "(not fully decoded)")?.signable_payload_field)
 }
 
+/// Renders a token diff as one signed `Send`/`Receive` line per entry.
+///
+/// An empty diff, or an entry whose delta is zero, is refused rather than
+/// rendered: the contract refuses both itself (`DefuseError::InvalidIntent`,
+/// `defuse_core::intents::token_diff`), so such an intent cannot execute, and
+/// a zero delta would otherwise render as `Receive 0 <token>` -- a line
+/// claiming a movement that does not happen.
 fn render_token_diff(td: &TokenDiff, registry: &Reg) -> Result<Fields, VisualSignError> {
+    if td.diff.is_empty() {
+        return Err(VisualSignError::ValidationError(
+            "token_diff carries no entries".to_string(),
+        ));
+    }
     let mut fields = Fields::new();
     for (token_id, delta) in td.diff.iter() {
+        if *delta == 0 {
+            return Err(VisualSignError::ValidationError(format!(
+                "token_diff entry for {token_id} has a zero delta"
+            )));
+        }
         let label = if *delta < 0 { "Send" } else { "Receive" };
         fields.push(token_amount_field(
             label,
@@ -293,8 +311,9 @@ fn render_native_withdraw(w: &NativeWithdraw) -> Result<Fields, VisualSignError>
 }
 
 /// Whether `signer_id` has the shape of a key-derived implicit account --
-/// NEAR's 64-hex-char convention, or defuse's own `"0x"` + 40-hex convention
-/// for EVM-style signers -- rather than a human-chosen named account (e.g.
+/// NEAR's 64-hex-char convention, or defuse's own `0x`/`0X` + 40-hex
+/// convention for EVM-style signers -- rather than a human-chosen named
+/// account (e.g.
 /// `alice.near`). Only for these shapes is key-to-account binding checkable
 /// offline: a named account's access keys are registered on-chain, decoupled
 /// from any implicit derivation, so comparing against one would produce
@@ -302,9 +321,7 @@ fn render_native_withdraw(w: &NativeWithdraw) -> Result<Fields, VisualSignError>
 fn looks_like_implicit_account(signer_id: &str) -> bool {
     let is_hex = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_hexdigit());
     (signer_id.len() == 64 && is_hex(signer_id))
-        || signer_id
-            .strip_prefix("0x")
-            .is_some_and(|rest| rest.len() == 40 && is_hex(rest))
+        || split_hex_prefix(signer_id).is_some_and(|rest| rest.len() == 40 && is_hex(rest))
 }
 
 /// Render the standard + signature-status fields for one signed payload.
@@ -331,7 +348,11 @@ pub(crate) fn render_signature(
             recovered_key,
             implied_account_id,
         } => match signer_id.filter(|id| looks_like_implicit_account(id)) {
-            Some(id) if id == implied_account_id => {
+            // Hex digit case is not part of the identity: both shapes this arm
+            // accepts are hex, and `to_implicit_account_id` emits lowercase, so
+            // a differently-cased spelling of the same account is a match, not
+            // a failed derivation.
+            Some(id) if id.eq_ignore_ascii_case(implied_account_id) => {
                 fields.push(
                     create_text_field(
                         "Signature",
@@ -443,6 +464,43 @@ mod tests {
         assert!(looks_like_implicit_account(
             "0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025"
         ));
+    }
+
+    #[test]
+    fn looks_like_implicit_account_accepts_an_uppercase_hex_prefix() {
+        assert!(looks_like_implicit_account(
+            "0X17c5185167401ed00cf5f5b2fc97d9bbfdb7d025"
+        ));
+    }
+
+    #[test]
+    fn a_differently_cased_signer_id_still_counts_as_derived() {
+        // `to_implicit_account_id` emits lowercase; an equal account id spelled
+        // with any other hex case must not read as a failed derivation.
+        let fields = render_signature(
+            "erc191",
+            &valid_check("0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025"),
+            Some("0X17C5185167401ED00CF5F5B2FC97D9BBFDB7D025"),
+        )
+        .expect("render");
+        let text = fields
+            .iter()
+            .filter_map(|f| match f {
+                SignablePayloadField::TextV2 { text_v2, common } if common.label == "Signature" => {
+                    Some(text_v2.text.as_str())
+                }
+                _ => None,
+            })
+            .next()
+            .expect("signature field");
+        assert!(text.contains("derives signer_id"), "{text}");
+        // Holds whether or not the `diagnostics` feature is on: the finding
+        // carries this wording as a structured message or as `Warning` text.
+        let rendered = format!("{fields:?}");
+        assert!(
+            !rendered.contains("does not derive"),
+            "a case difference must not raise an account-binding finding: {rendered}"
+        );
     }
 
     #[test]
@@ -678,6 +736,24 @@ mod tests {
         let wnear = wnear.expect("a resolved AmountV2");
         assert_eq!(wnear.amount, "1");
         assert_eq!(wnear.abbreviation.as_deref(), Some("wNEAR"));
+    }
+
+    #[test]
+    fn token_diff_refuses_a_zero_delta_entry() {
+        let intent = intent_from(
+            r#"{"intent":"token_diff","diff":{"nep141:wrap.near":"-1000000000000000000000000","nep141:usdc.near":"0"}}"#,
+        );
+        let err = render_intent(&intent, &empty_reg()).expect_err("zero delta must be refused");
+        let message = err.to_string();
+        assert!(message.contains("zero delta"), "{message}");
+        assert!(message.contains("nep141:usdc.near"), "{message}");
+    }
+
+    #[test]
+    fn token_diff_refuses_an_empty_diff() {
+        let intent = intent_from(r#"{"intent":"token_diff","diff":{}}"#);
+        let err = render_intent(&intent, &empty_reg()).expect_err("empty diff must be refused");
+        assert!(err.to_string().contains("no entries"), "{err}");
     }
 
     #[test]
