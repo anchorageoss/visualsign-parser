@@ -130,12 +130,10 @@ jobs:
             echo "::error::abi_signer_pubkey is required for workflow_dispatch: pass a hex secp256k1 signer pubkey, or the literal 'unsigned' to explicitly deploy --accept-unsigned-abis."
             exit 1
           fi
-          if [ "$ABI_SIGNER_PUBKEY" = "unsigned" ]; then
+          if [ "$ABI_SIGNER_PUBKEY" = "unsigned" ] || [ -z "$ABI_SIGNER_PUBKEY" ]; then
             abi_trust_args=(--accept-unsigned-abis)
-          elif [ -n "$ABI_SIGNER_PUBKEY" ]; then
-            abi_trust_args=(--accept-signatures-from-pubkey "$ABI_SIGNER_PUBKEY")
           else
-            abi_trust_args=(--accept-unsigned-abis)
+            abi_trust_args=(--accept-signatures-from-pubkey "$ABI_SIGNER_PUBKEY")
           fi
           ./tools/tvc-deploy/target/release/tvc-deploy deploy \
             --app-id "$APP_ID" \
