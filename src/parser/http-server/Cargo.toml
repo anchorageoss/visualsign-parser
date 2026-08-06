@@ -37,6 +37,7 @@ visualsign = { path = "../../visualsign" }
 # Crypto / hashing / manifest re-encoding for the boot-proof seam.
 qos_core = { workspace = true }
 qos_hex = { workspace = true }
+qos_nsm = { workspace = true }
 qos_p256 = { workspace = true }
 borsh = { version = "1", features = ["std", "derive"], default-features = false }
 
