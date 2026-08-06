@@ -60,6 +60,7 @@ message ChainMetadata {
   oneof metadata {
     EthereumMetadata ethereum = 1;
     SolanaMetadata solana = 2;
+    NearMetadata near = 3;
   }
 }
 
@@ -137,6 +138,11 @@ message SolanaMetadata {
   // Map of program_id (base58 string) to IDL definitions
   // Allows wallet to provide multiple IDLs, one per program
   map<string, Idl> idl_mappings = 3;
+}
+
+message NearMetadata {
+  // Network identifier string (e.g., "NEAR_MAINNET", "NEAR_TESTNET")
+  optional string network_id = 1;
 }
 
 message Abi {

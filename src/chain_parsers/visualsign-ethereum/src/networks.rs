@@ -235,13 +235,14 @@ pub fn extract_chain_id_from_metadata(
     let metadata = chain_metadata?;
     let inner_metadata = metadata.metadata.as_ref()?;
 
-    match inner_metadata {
-        chain_metadata::Metadata::Ethereum(eth_metadata) => {
-            let network_id = eth_metadata.network_id.as_ref()?;
-            network_id_to_chain_id(network_id)
-        }
-        chain_metadata::Metadata::Solana(_) => None,
-    }
+    // Deliberately not an exhaustive match: this crate reads Ethereum metadata
+    // and has no business naming the other chains' variants. Any non-Ethereum
+    // metadata carries no Ethereum chain id by definition.
+    let chain_metadata::Metadata::Ethereum(eth_metadata) = inner_metadata else {
+        return None;
+    };
+    let network_id = eth_metadata.network_id.as_ref()?;
+    network_id_to_chain_id(network_id)
 }
 
 #[cfg(test)]
