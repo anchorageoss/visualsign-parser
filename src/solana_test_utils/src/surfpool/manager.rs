@@ -8,6 +8,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
+/// Confirmation polls before [`SurfpoolManager::airdrop`] gives up.
+const AIRDROP_MAX_ATTEMPTS: u32 = 60;
+
+/// Delay between airdrop confirmation polls.
+const AIRDROP_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 /// Manages the lifecycle of a Surfpool validator instance.
 ///
 /// Spawns a `surfpool` subprocess on [`start`](Self::start), polls until the
@@ -142,55 +148,22 @@ impl SurfpoolManager {
         &self.ws_url
     }
 
-    /// Request an airdrop and wait for confirmation (bounded).
+    /// Request an airdrop and wait for confirmation, bounded to
+    /// [`AIRDROP_MAX_ATTEMPTS`] polls [`AIRDROP_POLL_INTERVAL`] apart.
     ///
     /// `get_signature_status` reports a confirmed transaction as
     /// `Some(Result<(), TransactionError>)`, so a confirmed *failure* is still
     /// a status. Only `Some(Ok(()))` counts as a landed airdrop; a confirmed
     /// `TransactionError` returns `Err` naming the error.
     pub async fn airdrop(&self, pubkey: &Pubkey, lamports: u64) -> Result<Signature> {
-        // `RpcClient` is synchronous and blocks for up to its HTTP timeout, so
-        // each call is dispatched via `spawn_blocking` to keep Tokio workers free.
-        let client = Arc::new(self.rpc_client());
-        let target = *pubkey;
-
-        let request_client = Arc::clone(&client);
-        let signature =
-            tokio::task::spawn_blocking(move || request_client.request_airdrop(&target, lamports))
-                .await
-                .context("Airdrop request task panicked")?
-                .context("Failed to request airdrop")?;
-
-        let max_attempts = 60;
-        let mut last_rpc_error = None;
-        for _ in 0..max_attempts {
-            let status_client = Arc::clone(&client);
-            let status =
-                tokio::task::spawn_blocking(move || status_client.get_signature_status(&signature))
-                    .await
-                    .context("Airdrop confirmation task panicked")?;
-
-            match status {
-                Ok(Some(Ok(()))) => return Ok(signature),
-                Ok(Some(Err(tx_error))) => {
-                    return Err(anyhow::anyhow!(
-                        "Airdrop {signature} confirmed with transaction error: {tx_error}"
-                    ));
-                }
-                Ok(None) => {}
-                Err(e) => last_rpc_error = Some(e),
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-
-        match last_rpc_error {
-            Some(e) => Err(anyhow::anyhow!(
-                "Airdrop {signature} unconfirmed after {max_attempts} attempts; last RPC error: {e}"
-            )),
-            None => Err(anyhow::anyhow!(
-                "Airdrop {signature} unconfirmed after {max_attempts} attempts"
-            )),
-        }
+        airdrop_with(
+            Arc::new(self.rpc_client()),
+            pubkey,
+            lamports,
+            AIRDROP_MAX_ATTEMPTS,
+            AIRDROP_POLL_INTERVAL,
+        )
+        .await
     }
 
     /// Find a free TCP port by binding to port 0.
@@ -211,5 +184,143 @@ impl Drop for SurfpoolManager {
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+}
+
+/// Request an airdrop through `client` and poll until it confirms.
+///
+/// Takes the client and the retry budget as arguments so the confirmation
+/// outcomes can be driven by `RpcClient::new_mock` without a validator.
+///
+/// # Errors
+///
+/// - the airdrop request itself fails
+/// - the transaction confirms carrying a `TransactionError`
+/// - it stays unconfirmed for the whole budget, in which case the last
+///   RPC-level error (if any) is attached
+async fn airdrop_with(
+    client: Arc<RpcClient>,
+    pubkey: &Pubkey,
+    lamports: u64,
+    max_attempts: u32,
+    poll_interval: Duration,
+) -> Result<Signature> {
+    // The blocking `RpcClient` calls `block_in_place` internally, which panics
+    // on a `current_thread` runtime, so every call goes through
+    // `spawn_blocking`. This also keeps Tokio workers free, as `wait_ready`
+    // documents for its own probe.
+    let target = *pubkey;
+    let request_client = Arc::clone(&client);
+    let signature =
+        tokio::task::spawn_blocking(move || request_client.request_airdrop(&target, lamports))
+            .await
+            .context("Airdrop request task panicked")?
+            .context("Failed to request airdrop")?;
+
+    let mut last_rpc_error = None;
+    for attempt in 1..=max_attempts {
+        let status_client = Arc::clone(&client);
+        let status =
+            tokio::task::spawn_blocking(move || status_client.get_signature_status(&signature))
+                .await
+                .context("Airdrop confirmation task panicked")?;
+
+        match status {
+            Ok(Some(Ok(()))) => return Ok(signature),
+            Ok(Some(Err(tx_error))) => {
+                return Err(anyhow::anyhow!(
+                    "Airdrop {signature} confirmed with transaction error: {tx_error}"
+                ));
+            }
+            Ok(None) => {}
+            Err(e) => {
+                warn!("Airdrop status probe failed (attempt {attempt}): {e}");
+                last_rpc_error = Some(e);
+            }
+        }
+
+        if attempt < max_attempts {
+            tokio::time::sleep(poll_interval).await;
+        }
+    }
+
+    let budget = poll_interval * max_attempts;
+    let summary =
+        format!("Airdrop {signature} unconfirmed after {max_attempts} attempts over {budget:?}");
+    match last_rpc_error {
+        Some(e) => Err(anyhow::Error::new(e).context(summary)),
+        None => Err(anyhow::anyhow!(summary)),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    /// `MockSender` keys its canned `getSignatureStatuses` response off the URL:
+    /// `account_in_use` and `instruction_error` confirm with a
+    /// `TransactionError`, `sig_not_found` never confirms, and any other value
+    /// confirms successfully.
+    fn mock_client(behavior: &str) -> Arc<RpcClient> {
+        Arc::new(RpcClient::new_mock(behavior.to_string()))
+    }
+
+    async fn airdrop_against(behavior: &str) -> Result<Signature> {
+        airdrop_with(
+            mock_client(behavior),
+            &Pubkey::new_unique(),
+            1_000_000_000,
+            2,
+            Duration::from_millis(1),
+        )
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn confirmed_success_returns_the_signature() {
+        airdrop_against("succeeds")
+            .await
+            .expect("a confirmed airdrop returns the signature");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn confirmed_transaction_error_is_an_error() {
+        let error = airdrop_against("account_in_use")
+            .await
+            .expect_err("a confirmed TransactionError is not a successful airdrop");
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains("confirmed with transaction error"),
+            "error should name the confirmed failure: {rendered}"
+        );
+        // `TransactionError` renders through `Display`, so the message carries
+        // the human-readable reason rather than the variant name.
+        assert!(
+            rendered.contains("Account in use"),
+            "error should name the TransactionError: {rendered}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn confirmed_instruction_error_is_an_error() {
+        let error = airdrop_against("instruction_error")
+            .await
+            .expect_err("a confirmed InstructionError is not a successful airdrop");
+        assert!(
+            format!("{error:#}").contains("confirmed with transaction error"),
+            "error should name the confirmed failure"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn never_confirmed_times_out() {
+        let error = airdrop_against("sig_not_found")
+            .await
+            .expect_err("an airdrop that never confirms is not a success");
+        assert!(
+            format!("{error:#}").contains("unconfirmed after 2 attempts"),
+            "error should report the exhausted budget: {error:#}"
+        );
     }
 }
