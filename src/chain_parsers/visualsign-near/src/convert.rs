@@ -243,13 +243,13 @@ fn render_intent_envelope(
 ) -> Result<ConversionResult, VisualSignError> {
     let (registry, rejection_diagnostics) = token_registry_for(options, trust_policy);
     let mut fields = rejection_diagnostics;
-    fields.extend(
+    let rendered =
         crate::presets::intents::try_render_single_intent(json.as_bytes(), &registry, options)
-            .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,
-    );
+            .map_err(|e| VisualSignError::ConversionError(e.to_string()))?;
+    fields.extend(rendered.fields);
     Ok(ConversionResult::new(SignablePayload::new(
         PAYLOAD_VERSION,
-        "NEAR Intent".to_string(),
+        rendered.title,
         None,
         fields,
         PAYLOAD_TYPE.to_string(),

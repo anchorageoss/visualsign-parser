@@ -33,6 +33,14 @@
       "Type": "text_v2"
     },
     {
+      "FallbackText": "FT Withdraw",
+      "Label": "Intent",
+      "TextV2": {
+        "Text": "FT Withdraw"
+      },
+      "Type": "text_v2"
+    },
+    {
       "FallbackText": "wrap.near",
       "Label": "Token",
       "TextV2": {
@@ -59,6 +67,6 @@
     }
   ],
   "PayloadType": "NearTx",
-  "Title": "NEAR Intent",
+  "Title": "NEAR Intent: FT Withdraw",
   "Version": "0"
 }
