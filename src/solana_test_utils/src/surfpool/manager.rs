@@ -4,6 +4,7 @@ use solana_client::rpc_client::RpcClient;
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature};
 use std::net::TcpListener;
 use std::process::{Child, Command};
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
@@ -131,23 +132,54 @@ impl SurfpoolManager {
     }
 
     /// Request an airdrop and wait for confirmation (bounded).
+    ///
+    /// `get_signature_status` reports a confirmed transaction as
+    /// `Some(Result<(), TransactionError>)`, so a confirmed *failure* is still
+    /// a status. Only `Some(Ok(()))` counts as a landed airdrop; a confirmed
+    /// `TransactionError` returns `Err` naming the error.
     pub async fn airdrop(&self, pubkey: &Pubkey, lamports: u64) -> Result<Signature> {
-        let client = self.rpc_client();
-        let signature = client
-            .request_airdrop(pubkey, lamports)
-            .context("Failed to request airdrop")?;
+        // `RpcClient` is synchronous and blocks for up to its HTTP timeout, so
+        // each call is dispatched via `spawn_blocking` to keep Tokio workers free.
+        let client = Arc::new(self.rpc_client());
+        let target = *pubkey;
+
+        let request_client = Arc::clone(&client);
+        let signature =
+            tokio::task::spawn_blocking(move || request_client.request_airdrop(&target, lamports))
+                .await
+                .context("Airdrop request task panicked")?
+                .context("Failed to request airdrop")?;
 
         let max_attempts = 60;
+        let mut last_rpc_error = None;
         for _ in 0..max_attempts {
-            if let Ok(Some(_status)) = client.get_signature_status(&signature) {
-                return Ok(signature);
+            let status_client = Arc::clone(&client);
+            let status =
+                tokio::task::spawn_blocking(move || status_client.get_signature_status(&signature))
+                    .await
+                    .context("Airdrop confirmation task panicked")?;
+
+            match status {
+                Ok(Some(Ok(()))) => return Ok(signature),
+                Ok(Some(Err(tx_error))) => {
+                    return Err(anyhow::anyhow!(
+                        "Airdrop {signature} confirmed with transaction error: {tx_error}"
+                    ));
+                }
+                Ok(None) => {}
+                Err(e) => last_rpc_error = Some(e),
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
-        Err(anyhow::anyhow!(
-            "Airdrop confirmation timed out after {max_attempts} attempts"
-        ))
+        match last_rpc_error {
+            Some(e) => Err(anyhow::anyhow!(
+                "Airdrop {signature} unconfirmed after {max_attempts} attempts; last RPC error: {e}"
+            )),
+            None => Err(anyhow::anyhow!(
+                "Airdrop {signature} unconfirmed after {max_attempts} attempts"
+            )),
+        }
     }
 
     /// Find a free TCP port by binding to port 0.
