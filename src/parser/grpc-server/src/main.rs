@@ -15,6 +15,7 @@ use generated::parser::{
     parser_service_server::{ParserService, ParserServiceServer},
 };
 use generated::tonic::{self, Request, Response, Status};
+use parser_app::config::ParserConfig;
 use parser_app::routes::parse::parse;
 use qos_core::handles::EphemeralKeyHandle;
 use qos_p256::P256Pair;
@@ -23,6 +24,7 @@ use std::net::SocketAddr;
 /// Standalone gRPC service that calls the parser directly
 struct GrpcService {
     ephemeral_key: P256Pair,
+    config: ParserConfig,
 }
 
 /// Health check service - always returns SERVING
@@ -34,7 +36,14 @@ impl GrpcService {
         let ephemeral_key = handle
             .get_ephemeral_key()
             .expect("Failed to load ephemeral key");
-        Self { ephemeral_key }
+        // This dev-only server keeps the historical accept-unsigned posture. A
+        // later commit puts it behind the same cmdline flags parser_app takes.
+        let abi_trust = ParserConfig::abi_trust_from_options(true, &[])
+            .expect("accept-unsigned is always a valid posture");
+        Self {
+            ephemeral_key,
+            config: ParserConfig::new(abi_trust),
+        }
     }
 }
 
@@ -45,7 +54,7 @@ impl ParserService for GrpcService {
         request: Request<ParseRequest>,
     ) -> Result<Response<ParseResponse>, Status> {
         // Direct function call - no sockets needed
-        parse(&request.into_inner(), &self.ephemeral_key)
+        parse(&request.into_inner(), &self.ephemeral_key, &self.config)
             .map(Response::new)
             .map_err(|e| Status::new(tonic::Code::from(e.code as i32), e.message))
     }
