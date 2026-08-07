@@ -4,13 +4,19 @@
 //! - `@-` reads it from stdin.
 //! - Anything else is returned unchanged.
 //!
-//! In all `@` cases, ASCII whitespace (space, tab, line feed, form feed,
-//! carriage return) is stripped from
-//! the buffer since the transaction string itself (hex / base64) cannot
+//! In all `@` cases, leading and trailing whitespace comes off, so a file
+//! ending in a newline behaves like the same value passed inline.
+//!
+//! Internal ASCII whitespace (space, tab, line feed, form feed, carriage
+//! return) is stripped as well for hex / base64 bodies, which cannot
 //! legitimately contain it — this lets users paste line-wrapped hex from
-//! block explorers or terminal emulators without manual cleanup. The 10 MB
-//! size limit is applied to the raw read so a whitespace-padded file can't
-//! bypass it.
+//! block explorers or terminal emulators without manual cleanup. A JSON
+//! envelope is exempt: it is itself a transaction format, and its string
+//! values can legitimately contain spaces, so stripping them would decode
+//! different bytes than the same input passed via `-t`.
+//!
+//! The 10 MB size limit is applied to the raw read so a whitespace-padded
+//! file can't bypass it.
 
 use std::io::Read;
 
@@ -37,7 +43,25 @@ pub fn resolve_transaction_input(input: &str) -> Result<String, String> {
         }
     };
 
-    Ok(strip_ascii_whitespace(&raw))
+    Ok(resolve_buffer(&raw))
+}
+
+/// Apply the whitespace rule for a buffer read via `@file` / `@-`.
+///
+/// A JSON envelope is itself a transaction format, and its string values can
+/// legitimately contain spaces, so stripping is confined to the encodings that
+/// cannot carry whitespace at all. Leading/trailing whitespace comes off
+/// either way, so a file ending in a newline behaves the same for both.
+///
+/// A leading `{` is the whole test. Every JSON transaction format this CLI
+/// accepts is an object, and no hex or base64 body can begin with that byte,
+/// so the two cases cannot be confused.
+fn resolve_buffer(raw: &str) -> String {
+    if raw.trim_start().starts_with('{') {
+        raw.trim().to_string()
+    } else {
+        strip_ascii_whitespace(raw)
+    }
 }
 
 /// Remove every ASCII-whitespace byte from `input`. We intentionally use the
@@ -105,6 +129,43 @@ mod tests {
             strip_ascii_whitespace("a b\tc\nd \u{00A0}e"),
             "abcd\u{00A0}e"
         );
+    }
+
+    // A JSON envelope is a transaction format whose string values can
+    // legitimately contain spaces, so the hex-oriented stripping above must
+    // not reach it: `-t` and `@file` have to decode the same bytes.
+    #[test]
+    fn reads_json_from_file_without_touching_its_whitespace() {
+        let json = r#"{"memo":"AAA BBB  CCC"}"#;
+        let path = write_temp_json("vsp_tx_input_tests", "tx.json", json);
+        let arg = format!("@{}", path.display());
+        assert_eq!(resolve_transaction_input(&arg).unwrap(), json);
+    }
+
+    #[test]
+    fn json_detection_tolerates_surrounding_whitespace() {
+        let path = write_temp_json(
+            "vsp_tx_input_tests",
+            "tx_padded.json",
+            "\n  {\"memo\":\"A B\"}\n",
+        );
+        let arg = format!("@{}", path.display());
+        assert_eq!(
+            resolve_transaction_input(&arg).unwrap(),
+            "{\"memo\":\"A B\"}"
+        );
+    }
+
+    #[test]
+    fn json_from_stdin_keeps_its_whitespace() {
+        let json = r#"{"memo":"AAA BBB  CCC"}"#;
+        assert_eq!(resolve_buffer(json), json);
+    }
+
+    #[test]
+    fn a_hex_body_is_still_stripped() {
+        // The JSON carve-out must not weaken the line-wrapped-hex handling.
+        assert_eq!(resolve_buffer("0a8a01\n0a0207 93\n"), "0a8a010a020793");
     }
 
     #[test]
