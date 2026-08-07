@@ -219,7 +219,7 @@ Tests are triggered by adding labels to a PR:
 |-------|----------|-----------|
 | `test:proptest` | `proptest-solana.yml` | `cargo test -p visualsign-solana` |
 | `test:fuzz` | `fuzz-solana.yml` | Both libFuzzer targets for 30 seconds each |
-| `test:surfpool` | `surfpool-solana.yml` | `scripts/surfpool_fuzz_all_idls.sh` against all embedded IDLs |
+| `test:surfpool` | `surfpool-solana.yml` | `cargo test -p visualsign-solana --test surfpool_fuzz -- --ignored --test-threads=1` |
 | `ci:stagex` | `stagex.yml` | Hermetic stagex OCI image builds |
 | `ci` | `main.yml` | Full build, lint, and test suite |
 
