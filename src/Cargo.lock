@@ -4632,8 +4632,11 @@ name = "host_primitives"
 version = "0.1.0"
 dependencies = [
  "borsh 1.6.0",
+ "generated",
  "prost 0.12.6",
  "qos_core",
+ "serde",
+ "serde_json",
  "tonic 0.10.2",
 ]
 

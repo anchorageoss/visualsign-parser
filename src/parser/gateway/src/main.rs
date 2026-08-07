@@ -15,89 +15,17 @@ use generated::grpc::health::v1::{
     HealthCheckRequest, health_check_response::ServingStatus, health_client::HealthClient,
 };
 use generated::parser::{
-    Chain, ChainMetadata, EthereumMetadata, ParseRequest, SignatureScheme, SolanaMetadata,
-    chain_metadata, parser_service_client::ParserServiceClient,
+    Chain, ChainMetadata, ParseRequest, SignatureScheme, parser_service_client::ParserServiceClient,
 };
 use generated::tonic;
 use host_primitives::GRPC_MAX_RECV_MSG_SIZE;
-use serde::{Deserialize, Serialize};
+use host_primitives::turnkey::{
+    TurnkeyBootProof, TurnkeyParsedTransaction, TurnkeyPayload, TurnkeyRequestWrapper,
+    TurnkeyResponse, TurnkeyResponseWrapper, TurnkeySignature,
+    error_response as turnkey_error_response,
+};
 use std::net::SocketAddr;
 use std::time::Duration;
-
-#[derive(Deserialize)]
-struct TurnkeyRequestWrapper {
-    request: TurnkeyRequest,
-}
-
-/// Tagged representation of chain metadata for unambiguous JSON deserialization.
-///
-/// The generated `ChainMetadata` uses `serde(untagged)` on the inner oneof enum, which means
-/// serde tries Ethereum first. A Solana payload with only `networkId` would be silently
-/// decoded as `EthereumMetadata`. This wrapper uses an explicit `chain` discriminator.
-#[derive(Deserialize)]
-#[serde(tag = "chain", rename_all = "camelCase")]
-enum ChainMetadataInput {
-    #[serde(rename = "CHAIN_ETHEREUM")]
-    Ethereum(EthereumMetadata),
-    #[serde(rename = "CHAIN_SOLANA")]
-    Solana(SolanaMetadata),
-}
-
-impl From<ChainMetadataInput> for ChainMetadata {
-    fn from(input: ChainMetadataInput) -> Self {
-        let metadata = match input {
-            ChainMetadataInput::Ethereum(eth) => chain_metadata::Metadata::Ethereum(eth),
-            ChainMetadataInput::Solana(sol) => chain_metadata::Metadata::Solana(sol),
-        };
-        ChainMetadata {
-            metadata: Some(metadata),
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct TurnkeyRequest {
-    unsigned_payload: String,
-    chain: String,
-    chain_metadata: Option<ChainMetadataInput>,
-    /// Opt-in for the chain-specific `intermediate_output` blob. Defaults to
-    /// false so existing REST callers that omit it behave exactly as before.
-    #[serde(default)]
-    include_intermediate_output: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TurnkeyResponseWrapper {
-    /// Top-level boot proof, matching the production Turnkey visualsign API
-    /// response shape that wallet integrators consume. parser_gateway always
-    /// emits a stable mock here — the gateway is only used in non-TEE local
-    /// dev/CI, never wrapping a real enclave, so production deployments never
-    /// see these values. Downstream consumers that perform real attestation
-    /// verification will reject the mock, which is correct: this is for
-    /// contract-shape testing (the field must be present), not for letting
-    /// signing actually succeed. See issue #337.
-    boot_proof: TurnkeyBootProof,
-    response: TurnkeyResponse,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-}
-
-/// Boot proof object shape, matching the production Turnkey visualsign API
-/// that wallet integrators consume. The reference Go client uses the same
-/// field names — see [visualsign-turnkeyclient/api/types.go::TurnkeyBootProof][types].
-///
-/// [types]: https://github.com/anchorageoss/visualsign-turnkeyclient/blob/main/api/types.go#L128
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TurnkeyBootProof {
-    aws_attestation_doc_b64: String,
-    qos_manifest_b64: String,
-    qos_manifest_envelope_b64: String,
-    ephemeral_public_key_hex: String,
-    enclave_app: String,
-    deployment_label: String,
-}
 
 /// Stable mock used in every gateway response. The base64 sentinels decode to
 /// "TURNKEY_GATEWAY_MOCK_BOOT_PROOF" and "TURNKEY_GATEWAY_MOCK_QOS_MANIFEST*" —
@@ -121,41 +49,10 @@ fn mock_boot_proof() -> TurnkeyBootProof {
     }
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TurnkeyResponse {
-    parsed_transaction: TurnkeyParsedTransaction,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TurnkeyParsedTransaction {
-    payload: TurnkeyPayload,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<TurnkeySignature>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TurnkeyPayload {
-    signable_payload: String,
-    metadata_digest: String,
-    input_payload_digest: String,
-    /// Chain-specific, borsh-serialized structured decode, base64-encoded (proto
-    /// `bytes` JSON convention). Empty and omitted from the response when the
-    /// request did not opt in or the chain has no intermediate output, so
-    /// responses to existing consumers stay byte-identical.
-    #[serde(skip_serializing_if = "String::is_empty")]
-    intermediate_output: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TurnkeySignature {
-    message: String,
-    public_key: String,
-    scheme: String,
-    signature: String,
+/// Gateway-local error envelope: always the stable mock boot proof. The gateway
+/// only runs in non-TEE local dev and CI, so it never has a real one.
+fn error_response(msg: String) -> TurnkeyResponseWrapper {
+    turnkey_error_response(msg, mock_boot_proof())
 }
 
 type GrpcClient = ParserServiceClient<tonic::transport::Channel>;
@@ -323,27 +220,6 @@ async fn parse_handler(
     )
 }
 
-// SHA-256 of empty input: used as the canonical "no data" sentinel for digest fields.
-const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-
-fn error_response(msg: String) -> TurnkeyResponseWrapper {
-    TurnkeyResponseWrapper {
-        boot_proof: mock_boot_proof(),
-        response: TurnkeyResponse {
-            parsed_transaction: TurnkeyParsedTransaction {
-                payload: TurnkeyPayload {
-                    signable_payload: String::new(),
-                    metadata_digest: EMPTY_SHA256.to_string(),
-                    input_payload_digest: EMPTY_SHA256.to_string(),
-                    intermediate_output: String::new(),
-                },
-                signature: None,
-            },
-        },
-        error: Some(msg),
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port: u16 = match std::env::var("GATEWAY_PORT") {
@@ -413,6 +289,7 @@ async fn shutdown_signal() {
 mod tests {
     use super::*;
     use generated::parser::{Abi, AbiType, EthereumMetadata, SolanaMetadata};
+    use host_primitives::turnkey::{ChainMetadataInput, EMPTY_SHA256};
 
     #[test]
     fn error_response_has_empty_sha256_digests() {
