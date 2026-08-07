@@ -96,7 +96,7 @@ Read that file for the exact structure, then generate a generic version with the
 - Keep the `kind()` method returning the user's chosen `VisualizerKind` variant with `display_name` as the `&'static str` argument
 
 **Generic IDL pattern only:**
-- The generic scaffold uses the three helpers `dflow_aggregator` defines: `build_named_accounts`, `build_parsed_fields`, and `build_fallback_fields`. All three work with any IDL.
+- The generic scaffold uses the three helpers a preset defines: `build_named_accounts`, `build_parsed_fields`, and `build_fallback_fields`. All three work with any IDL.
 - Two additional helpers — `append_raw_data` (for byte-blob args) and `format_arg_value` (for custom scalar rendering) — are not present in `dflow_aggregator`. Add them when the target IDL needs them, copying the pattern from another preset such as `kamino_vault` or `jupiter_earn`.
 - The parse function should: check `data.len() < 8`, load IDL, call `parse_instruction_with_idl`, call `build_named_accounts`, return a struct with parsed data + named accounts
 
@@ -111,6 +111,18 @@ These three accessors replace the old `context.current_instruction()`. They surf
 unresolved indices as `Err(VisualSignError::DecodeError(...))` with the bad index
 named, instead of returning a generic "no instruction found" failure. Use
 `context.instruction_index()` for any "Instruction N" labels.
+
+**Surface the discriminator (required convention).** `build_parsed_fields` must
+include the instruction discriminator in the expanded view:
+```rust
+expanded_fields.push(create_text_field("Discriminator", &parsed.discriminator)?);
+```
+Every Anchor/IDL Solana preset does this, and it is enforced by
+`chain_parsers/visualsign-solana/tests/preset_conventions.rs`, which scans
+`presets/*/mod.rs` for a `"Discriminator"` field. A new preset that omits it
+fails CI. Only native programs without an Anchor discriminator are exempt (via
+that test's `DISCRIMINATOR_ALLOWLIST`); an IDL preset should never be added to
+that allowlist.
 
 **Required imports** (at top of module, NOT inside functions):
 ```rust
@@ -174,3 +186,7 @@ make -C src test
 All must pass before the task is complete. Both feature configurations
 (diagnostics on and off) need to compile and test cleanly because parser_app
 builds without `diagnostics` while parser_cli builds with it.
+
+`cargo test -p visualsign-solana` includes the `preset_conventions` gate — if it
+reports your preset under "must surface a Discriminator field", add the
+`create_text_field("Discriminator", ...)` line above rather than allowlisting it.
