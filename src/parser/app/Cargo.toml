@@ -46,8 +46,8 @@ tron = ["dep:visualsign-tron"]
 unspecified = ["dep:visualsign-unspecified"]
 diagnostics = [
     "visualsign/diagnostics",
-    "visualsign-solana?/diagnostics",
     "visualsign-near?/diagnostics",
+    "visualsign-solana?/diagnostics",
 ]
 vsock = ["qos_core/vm"]
 

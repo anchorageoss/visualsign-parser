@@ -42,6 +42,46 @@ fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualS
     Ok(create_text_field("Warning", &format!("{rule}: {message}"))?.signable_payload_field)
 }
 
+/// Report each caller-supplied token-metadata entry the parser refused.
+///
+/// Without this the signer sees only the consequence -- an amount rendered in
+/// raw base units against an `unresolved` asset id, or resolved from a seed
+/// instead of the supplied override -- with no indication that metadata was
+/// supplied and thrown away. A rejection is a soft finding: the intents still
+/// render, since the refusal protects them rather than invalidating them.
+///
+/// Both halves of the message are charset-filtered. `asset_id` is a
+/// caller-controlled map key and `reason` can quote it back (a JSON parse
+/// error, a length), so an embedded newline would otherwise render as extra
+/// apparent fields on the signing screen.
+pub(crate) fn rejected_metadata_diagnostics(
+    rejected: &[super::token_signature::RejectedTokenMetadata],
+) -> Fields {
+    // Infallible by construction: reporting a refusal must never be able to
+    // withhold the transaction. A field that fails to build (an empty message
+    // after charset filtering, say) is logged and dropped, leaving the signer
+    // a payload minus one caveat rather than no payload at all.
+    rejected
+        .iter()
+        .filter_map(|r| {
+            let message = crate::actions::charset_safe(&format!(
+                "token metadata supplied for {} was rejected and not used: {}",
+                r.asset_id, r.reason
+            ));
+            match diagnostic("rejected-token-metadata", &message) {
+                Ok(field) => Some(field),
+                Err(e) => {
+                    tracing::warn!(
+                        "could not render the rejection diagnostic for '{}': {e}",
+                        r.asset_id
+                    );
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
 /// Render one token amount, resolving symbol/decimals when the asset is known;
 /// otherwise show the raw base-unit amount tagged with the unresolved asset id.
 /// Metadata resolved from an unsigned request entry (a gap-fill for an asset

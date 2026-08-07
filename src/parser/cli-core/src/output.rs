@@ -138,6 +138,22 @@ impl<'a> HumanReadableFormatter<'a> {
                     prefix, common.label, address_v2.address
                 )?;
             }
+            // Rendered rather than falling through to the `Unknown` arm below:
+            // a diagnostic printed as "Field: Unknown" tells the reader nothing,
+            // which defeats the point of emitting it. `--output json` carries the
+            // full structured form; this is the human view of the same finding.
+            #[cfg(feature = "diagnostics")]
+            SignablePayloadField::Diagnostic { diagnostic, .. } => {
+                let index = diagnostic
+                    .instruction_index
+                    .map(|i| format!(" (instruction {i})"))
+                    .unwrap_or_default();
+                writeln!(
+                    writer,
+                    "{} [{}] {}{}: {}",
+                    prefix, diagnostic.level, diagnostic.rule, index, diagnostic.message
+                )?;
+            }
             _ => {
                 writeln!(writer, "{} Field: {}", prefix, common_label(field))?;
             }
@@ -235,4 +251,77 @@ pub fn parse_and_display(
         eprintln!("{}", hex::encode(bytes));
     }
     Ok(())
+}
+
+/// Named for the variant it covers rather than the file, so it can sit
+/// alongside `output.rs`'s general formatter tests without colliding.
+#[cfg(all(test, feature = "diagnostics"))]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod diagnostic_tests {
+    use super::*;
+    use visualsign::{SignablePayloadFieldCommon, SignablePayloadFieldDiagnostic};
+
+    fn diagnostic_field(
+        rule: &str,
+        level: &str,
+        message: &str,
+        instruction_index: Option<u32>,
+    ) -> SignablePayloadField {
+        SignablePayloadField::Diagnostic {
+            common: SignablePayloadFieldCommon {
+                fallback_text: format!("{level}: {message}"),
+                label: rule.to_string(),
+            },
+            diagnostic: SignablePayloadFieldDiagnostic {
+                rule: rule.to_string(),
+                domain: "test".to_string(),
+                level: level.to_string(),
+                message: message.to_string(),
+                instruction_index,
+            },
+        }
+    }
+
+    fn render(fields: Vec<SignablePayloadField>) -> String {
+        let payload =
+            SignablePayload::new(0, "Test".to_string(), None, fields, "TestTx".to_string());
+        HumanReadableFormatter::new(&payload, false).to_string()
+    }
+
+    /// A diagnostic has to say what it found. Falling through to the catch-all
+    /// arm prints "Field: Unknown", which reports that something was emitted
+    /// while withholding every part a reader needs.
+    #[test]
+    fn human_output_renders_a_diagnostic_rule_level_and_message() {
+        let rendered = render(vec![diagnostic_field(
+            "deadline",
+            "warn",
+            "deadline has passed",
+            None,
+        )]);
+        assert!(
+            rendered.contains("[warn] deadline: deadline has passed"),
+            "diagnostic should render its level, rule, and message: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Field: Unknown"),
+            "diagnostic must not fall through to the unknown-field arm: {rendered}"
+        );
+    }
+
+    /// Solana's diagnostics carry the instruction they came from; dropping it
+    /// leaves the reader unable to tell which instruction to look at.
+    #[test]
+    fn human_output_includes_a_diagnostics_instruction_index() {
+        let rendered = render(vec![diagnostic_field(
+            "transaction::oob_account_index",
+            "warn",
+            "index 7 out of bounds",
+            Some(2),
+        )]);
+        assert!(
+            rendered.contains("(instruction 2)"),
+            "an indexed diagnostic should name its instruction: {rendered}"
+        );
+    }
 }
