@@ -7,6 +7,7 @@ pub mod actions;
 pub mod convert;
 pub mod fmt;
 pub mod networks;
+pub mod presets;
 pub mod tx;
 
 pub use convert::NearVisualSignConverter;
