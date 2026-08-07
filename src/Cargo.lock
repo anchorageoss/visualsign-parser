@@ -7335,6 +7335,7 @@ dependencies = [
  "tracing-subscriber",
  "visualsign",
  "visualsign-ethereum",
+ "visualsign-near",
  "visualsign-solana",
  "visualsign-tron",
 ]
@@ -14987,6 +14988,7 @@ dependencies = [
  "borsh 1.6.0",
  "bs58 0.5.1",
  "chrono",
+ "clap",
  "defuse-core",
  "defuse-crypto",
  "defuse-deadline",
@@ -14996,6 +14998,7 @@ dependencies = [
  "near-crypto",
  "near-primitives",
  "near-sdk",
+ "parser_cli_core",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
