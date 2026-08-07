@@ -253,9 +253,11 @@ pub fn parse_and_display(
     Ok(())
 }
 
+/// Named for the variant it covers rather than the file, so it can sit
+/// alongside `output.rs`'s general formatter tests without colliding.
 #[cfg(all(test, feature = "diagnostics"))]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-mod tests {
+mod diagnostic_tests {
     use super::*;
     use visualsign::{SignablePayloadFieldCommon, SignablePayloadFieldDiagnostic};
 
