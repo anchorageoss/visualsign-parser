@@ -15,8 +15,8 @@ use generated::grpc::health::v1::{
     HealthCheckRequest, health_check_response::ServingStatus, health_client::HealthClient,
 };
 use generated::parser::{
-    Chain, ChainMetadata, EthereumMetadata, ParseRequest, SignatureScheme, SolanaMetadata,
-    chain_metadata, parser_service_client::ParserServiceClient,
+    Chain, ChainMetadata, EthereumMetadata, NearMetadata, ParseRequest, SignatureScheme,
+    SolanaMetadata, chain_metadata, parser_service_client::ParserServiceClient,
 };
 use generated::tonic;
 use host_primitives::GRPC_MAX_RECV_MSG_SIZE;
@@ -41,6 +41,8 @@ enum ChainMetadataInput {
     Ethereum(EthereumMetadata),
     #[serde(rename = "CHAIN_SOLANA")]
     Solana(SolanaMetadata),
+    #[serde(rename = "CHAIN_NEAR")]
+    Near(NearMetadata),
 }
 
 impl From<ChainMetadataInput> for ChainMetadata {
@@ -48,6 +50,7 @@ impl From<ChainMetadataInput> for ChainMetadata {
         let metadata = match input {
             ChainMetadataInput::Ethereum(eth) => chain_metadata::Metadata::Ethereum(eth),
             ChainMetadataInput::Solana(sol) => chain_metadata::Metadata::Solana(sol),
+            ChainMetadataInput::Near(near) => chain_metadata::Metadata::Near(near),
         };
         ChainMetadata {
             metadata: Some(metadata),

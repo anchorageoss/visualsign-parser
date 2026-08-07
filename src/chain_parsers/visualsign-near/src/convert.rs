@@ -7,6 +7,7 @@ use near_primitives::transaction::Transaction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_address_field, create_text_field};
 use visualsign::registry::LayeredRegistry;
+use visualsign::signing::MetadataTrustPolicy;
 use visualsign::vsptrait::{
     ConversionResult, VisualSignConverter, VisualSignConverterFromString, VisualSignOptions,
 };
@@ -14,8 +15,42 @@ use visualsign::{SignablePayload, SignablePayloadField};
 
 use crate::actions::render_action;
 use crate::networks::{NearNetwork, extract_network_from_metadata};
-use crate::presets::intents::NearTokenRegistry;
+use crate::presets::intents::{
+    NearTokenRegistry, authorized_token_metadata_signers,
+    try_extract_token_metadata_from_chain_metadata,
+};
 use crate::tx::NearTransaction;
+
+/// Build the token registry for this request: an empty global layer, plus
+/// whatever `options.metadata` supplies (verified per
+/// [`crate::presets::intents::TokenMetadataSignerAllowlists`]) as the
+/// request-scoped layer. The compiled-in seed table lives separately in
+/// `tokens::SEEDS`, consulted by `tokens::resolve` only after this registry's
+/// own lookup misses.
+///
+/// `trust_policy` gates only whether an entry with no signature at all is
+/// accepted; a present signature is always checked against the relevant
+/// origin-chain allowlist (see `authorized_token_metadata_signers`)
+/// regardless of posture -- NEAR, unlike Ethereum's single-allowlist ABI
+/// path, already dispatches identity checks per origin chain, so the
+/// allowlist `MetadataTrustPolicy::RequireAllowlistedSigner` carries is not
+/// itself consulted here.
+fn token_registry_for(
+    options: &VisualSignOptions,
+    trust_policy: &MetadataTrustPolicy,
+) -> LayeredRegistry<NearTokenRegistry> {
+    let request = try_extract_token_metadata_from_chain_metadata(
+        options.metadata.as_ref(),
+        authorized_token_metadata_signers(),
+        trust_policy,
+    );
+    match request {
+        Some(request) => {
+            LayeredRegistry::with_request(Arc::new(NearTokenRegistry::default()), request)
+        }
+        None => LayeredRegistry::new(Arc::new(NearTokenRegistry::default())),
+    }
+}
 
 /// Payload version emitted for NEAR payloads.
 const PAYLOAD_VERSION: i64 = 0;
@@ -24,22 +59,52 @@ const PAYLOAD_VERSION: i64 = 0;
 const PAYLOAD_TYPE: &str = "NearTx";
 
 /// Converts a [`NearTransaction`] into a VisualSign [`SignablePayload`].
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone)]
 pub struct NearVisualSignConverter {
     network: NearNetwork,
+    trust_policy: MetadataTrustPolicy,
 }
 
 impl NearVisualSignConverter {
-    /// Construct a converter for mainnet (the default for wallet display).
+    /// Construct a converter for mainnet with the permissive
+    /// [`MetadataTrustPolicy::AcceptUnsigned`] posture -- the library/embedding
+    /// default. Deployments that want an auditable, non-default posture should
+    /// use [`Self::with_trust_policy`] instead.
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            network: NearNetwork::default(),
+            trust_policy: MetadataTrustPolicy::AcceptUnsigned,
+        }
     }
 
-    /// Construct a converter for a specific [`NearNetwork`] (e.g. testnet).
+    /// Construct a converter for a specific [`NearNetwork`] (e.g. testnet),
+    /// with the permissive default trust posture.
     #[must_use]
     pub fn with_network(network: NearNetwork) -> Self {
-        Self { network }
+        Self {
+            network,
+            ..Self::new()
+        }
+    }
+
+    /// Construct a converter for mainnet with an explicit caller-metadata
+    /// trust posture. This is the constructor a deployment should use to pin
+    /// [`MetadataTrustPolicy::RequireAllowlistedSigner`] at construction time,
+    /// fixed for the process rather than implied by what each request happens
+    /// to contain.
+    #[must_use]
+    pub fn with_trust_policy(trust_policy: MetadataTrustPolicy) -> Self {
+        Self {
+            trust_policy,
+            ..Self::new()
+        }
+    }
+}
+
+impl Default for NearVisualSignConverter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -51,7 +116,9 @@ impl VisualSignConverter<NearTransaction> for NearVisualSignConverter {
     ) -> Result<ConversionResult, VisualSignError> {
         match transaction {
             NearTransaction::OnChain(tx) => self.render_on_chain(&tx, &options),
-            NearTransaction::Intent(json) => render_intent_envelope(&json, &options),
+            NearTransaction::Intent(json) => {
+                render_intent_envelope(&json, &options, &self.trust_policy)
+            }
         }
     }
 }
@@ -94,7 +161,12 @@ impl NearVisualSignConverter {
         let total_actions = tx.actions().len();
         for action in tx.actions() {
             fields.extend(render_action(action, total_actions)?);
-            fields.extend(decode_intents(tx.receiver_id().as_str(), action, options)?);
+            fields.extend(decode_intents(
+                tx.receiver_id().as_str(),
+                action,
+                options,
+                &self.trust_policy,
+            )?);
         }
 
         Ok(ConversionResult::new(SignablePayload::new(
@@ -130,6 +202,7 @@ fn decode_intents(
     receiver_id: &str,
     action: &Action,
     options: &VisualSignOptions,
+    trust_policy: &MetadataTrustPolicy,
 ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
     if receiver_id != "intents.near" {
         return Ok(vec![]);
@@ -140,7 +213,7 @@ fn decode_intents(
     if fc.method_name != "execute_intents" {
         return Ok(vec![]);
     }
-    let registry = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+    let registry = token_registry_for(options, trust_policy);
     crate::presets::intents::try_decode_execute_intents(&fc.args, &registry, options)
         .map_err(|e| VisualSignError::ConversionError(e.to_string()))
 }
@@ -150,8 +223,9 @@ fn decode_intents(
 fn render_intent_envelope(
     json: &str,
     options: &VisualSignOptions,
+    trust_policy: &MetadataTrustPolicy,
 ) -> Result<ConversionResult, VisualSignError> {
-    let registry = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+    let registry = token_registry_for(options, trust_policy);
     let fields =
         crate::presets::intents::try_render_single_intent(json.as_bytes(), &registry, options)
             .map_err(|e| VisualSignError::ConversionError(e.to_string()))?;
@@ -282,6 +356,7 @@ mod tests {
             metadata: Some(ChainMetadata {
                 metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                     network_id: Some("NEAR_TESTNET".to_string()),
+                    token_mappings: Default::default(),
                 })),
             }),
             ..Default::default()
@@ -300,6 +375,7 @@ mod tests {
             metadata: Some(ChainMetadata {
                 metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                     network_id: Some("testnet".to_string()),
+                    token_mappings: Default::default(),
                 })),
             }),
             ..Default::default()
@@ -415,6 +491,72 @@ mod tests {
         assert!(
             json.contains("wNEAR"),
             "resolved ft_withdraw amount missing: {json}"
+        );
+    }
+
+    /// Proves the `unverified-token-metadata` diagnostic (see
+    /// `presets::intents::render::token_amount_field`) reaches the actual
+    /// serialized payload from real `options.metadata`, not just the render
+    /// helper in isolation: `options.metadata` -> `token_registry_for` ->
+    /// `decode_intents` -> the field the signer sees.
+    #[test]
+    fn unsigned_gap_fill_metadata_surfaces_a_diagnostic_end_to_end() {
+        let inner = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"gap-fill-token.near","receiver_id":"bob.near","amount":"1000000"}]}"#;
+        let args = serde_json::json!({"signed":[{
+            "standard": "raw_ed25519",
+            "payload": inner,
+            "public_key": "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN",
+            "signature": "ed25519:3vtbNQJHZfuV1s5DykzyjkbNLc583hnkrhTz57eDhd966iqzkor6Twgr4Loh2C195SCSEsiGfrd6KcxpjNq9ZbVj"
+        }]});
+
+        let txv0 = TransactionV0 {
+            signer_id: "alice.near".parse().unwrap(),
+            public_key: "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"
+                .parse()
+                .unwrap(),
+            nonce: 1,
+            receiver_id: "intents.near".parse().unwrap(),
+            block_hash: CryptoHash::default(),
+            actions: vec![Action::FunctionCall(Box::new(FunctionCallAction {
+                method_name: "execute_intents".to_string(),
+                args: serde_json::to_vec(&args).unwrap(),
+                gas: Gas::from_gas(30_000_000_000_000),
+                deposit: Balance::from_yoctonear(0),
+            }))],
+        };
+        let near_tx = NearTransaction::OnChain(Transaction::V0(txv0));
+
+        let options = VisualSignOptions {
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                    network_id: Some("NEAR_MAINNET".to_string()),
+                    token_mappings: [(
+                        "nep141:gap-fill-token.near".to_string(),
+                        generated::parser::TokenMetadataEntry {
+                            value: r#"{"symbol":"GAPFILL","decimals":6}"#.to_string(),
+                            signature: None,
+                            origin_chain: None,
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                })),
+            }),
+            ..Default::default()
+        };
+
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(near_tx, options)
+            .expect("convert");
+        let json = payload.payload.to_json().expect("json");
+
+        assert!(
+            json.contains("GAPFILL"),
+            "unsigned gap-fill entry must still resolve the symbol: {json}"
+        );
+        assert!(
+            json.contains("unverified-token-metadata"),
+            "unsigned gap-fill entry must carry its provenance into the render: {json}"
         );
     }
 

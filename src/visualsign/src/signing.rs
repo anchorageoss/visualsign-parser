@@ -31,10 +31,18 @@
 //! - `DOMAIN` is the constant ASCII string [`METADATA_SIGNING_DOMAIN_V1`]
 //!   (`b"visualsign-metadata-v1"`). It version-stamps the construction so a future
 //!   v2 layout cannot collide with a v1 prehash.
-//! - `chain_tag` is a short ASCII tag identifying the chain family
-//!   ([`CHAIN_TAG_ETHEREUM`] or [`CHAIN_TAG_SOLANA`]).
+//! - `chain_tag` identifies both the chain family AND the artifact kind being
+//!   signed ([`CHAIN_TAG_ETHEREUM`]/[`CHAIN_TAG_SOLANA`] for ABI/IDL;
+//!   [`CHAIN_TAG_NEAR_TOKEN_METADATA`]/[`CHAIN_TAG_ETHEREUM_TOKEN_METADATA`]/
+//!   [`CHAIN_TAG_SOLANA_TOKEN_METADATA`] for NEAR Intents token metadata). A
+//!   chain that signs more than one kind of artifact (Ethereum: ABI and,
+//!   separately, NEAR Intents token metadata for its bridged assets) gets a
+//!   distinct tag per kind, so a signature minted for one artifact can never
+//!   verify as a signature over a different artifact even when scope and body
+//!   happen to coincide.
 //! - `scope` is the chain-specific on-chain identity bytes (see below).
-//! - `body` is the metadata JSON bytes verbatim (the ABI/IDL string as supplied).
+//! - `body` is the metadata JSON bytes verbatim (the ABI/IDL string as supplied,
+//!   or the canonical `{symbol, decimals}` JSON for token metadata).
 //! - `le_u64(n)` is the 8-byte little-endian length of the field that immediately
 //!   follows it. Prefixing every field with its length makes the encoding injective:
 //!   distinct `(chain_tag, scope, body)` triples can never produce the same preimage,
@@ -48,6 +56,11 @@
 //!   8-byte big-endian `chain_id` followed by the 20-byte contract address.
 //! - **Solana** ([`solana_metadata_prehash`]): the scope is the 32-byte program id
 //!   (pubkey).
+//! - **NEAR Intents token metadata** ([`near_token_metadata_prehash`],
+//!   [`ethereum_token_metadata_prehash`], [`solana_token_metadata_prehash`]): the
+//!   scope is the NEAR Intents asset id string (e.g. `"nep141:wrap.near"`), the
+//!   same identity regardless of which chain the underlying asset lives on. Only
+//!   the tag differs across these three functions.
 //!
 //! External signers reproduce a valid signature by computing the SHA-256 over this
 //! exact byte sequence and signing the resulting 32-byte digest. The signing
@@ -202,6 +215,28 @@ pub const CHAIN_TAG_ETHEREUM: &str = "ethereum";
 /// Chain tag for Solana metadata signatures.
 pub const CHAIN_TAG_SOLANA: &str = "solana";
 
+/// Chain tag for NEAR Intents token-metadata signatures (curator vouches for a
+/// NEAR-native asset's symbol/decimals).
+///
+/// Distinct from [`CHAIN_TAG_ETHEREUM`]/[`CHAIN_TAG_SOLANA`]: those two chains
+/// already sign a different artifact (ABI / IDL) under those tags, and this
+/// crate's domain separation is per (chain, artifact kind), not per chain
+/// alone, so token-metadata signatures get their own tags below rather than
+/// reusing the ABI/IDL ones.
+pub const CHAIN_TAG_NEAR_TOKEN_METADATA: &str = "near-token-metadata";
+
+/// Chain tag for NEAR Intents token-metadata signatures over an Ethereum-origin
+/// (or EVM-twin) bridged asset, verified with the same secp256k1 curator
+/// identity the Ethereum ABI path uses -- but under its own tag, so an ABI
+/// signature can never be replayed as a token-metadata signature or vice versa.
+pub const CHAIN_TAG_ETHEREUM_TOKEN_METADATA: &str = "ethereum-token-metadata";
+
+/// Chain tag for NEAR Intents token-metadata signatures over a Solana-origin
+/// (or SVM-twin) bridged asset, verified with the same ed25519 curator
+/// identity the Solana IDL path uses -- but under its own tag, so an IDL
+/// signature can never be replayed as a token-metadata signature or vice versa.
+pub const CHAIN_TAG_SOLANA_TOKEN_METADATA: &str = "solana-token-metadata";
+
 /// Core constructor for the v1 domain-separated metadata prehash.
 ///
 /// Computes the SHA-256 over the length-prefixed encoding of
@@ -239,6 +274,32 @@ pub fn ethereum_metadata_prehash(chain_id: u64, address: &[u8; 20], abi_json: &[
 #[must_use]
 pub fn solana_metadata_prehash(program_id: &[u8; 32], idl_json: &[u8]) -> [u8; 32] {
     metadata_signing_prehash_v1(CHAIN_TAG_SOLANA, program_id, idl_json)
+}
+
+/// NEAR Intents token-metadata scope = the asset id string (e.g.
+/// `"nep141:wrap.near"`), the NEAR-side identity every bridged or native asset
+/// is addressed by regardless of which chain the underlying value lives on.
+/// `body` is the canonical JSON-encoded `{symbol, decimals}` being attested to.
+#[must_use]
+pub fn near_token_metadata_prehash(asset_id: &str, body: &[u8]) -> [u8; 32] {
+    metadata_signing_prehash_v1(CHAIN_TAG_NEAR_TOKEN_METADATA, asset_id.as_bytes(), body)
+}
+
+/// Ethereum-origin (or EVM-twin) NEAR Intents token-metadata scope = the asset
+/// id string. See [`near_token_metadata_prehash`] for the shared `body` shape;
+/// this differs only in `chain_tag`, so a signature over one asset's metadata
+/// under this tag can never verify as a signature over the same asset under
+/// [`near_token_metadata_prehash`] or [`solana_token_metadata_prehash`].
+#[must_use]
+pub fn ethereum_token_metadata_prehash(asset_id: &str, body: &[u8]) -> [u8; 32] {
+    metadata_signing_prehash_v1(CHAIN_TAG_ETHEREUM_TOKEN_METADATA, asset_id.as_bytes(), body)
+}
+
+/// Solana-origin (or SVM-twin) NEAR Intents token-metadata scope = the asset id
+/// string. See [`near_token_metadata_prehash`] for the shared `body` shape.
+#[must_use]
+pub fn solana_token_metadata_prehash(asset_id: &str, body: &[u8]) -> [u8; 32] {
+    metadata_signing_prehash_v1(CHAIN_TAG_SOLANA_TOKEN_METADATA, asset_id.as_bytes(), body)
 }
 
 #[cfg(test)]
@@ -437,6 +498,78 @@ mod tests {
         assert_eq!(
             actual, expected,
             "solana wrapper must match the hand-computed core call"
+        );
+    }
+
+    #[test]
+    fn test_near_token_metadata_wrapper_matches_hand_computed_prehash() {
+        let asset_id = "nep141:wrap.near";
+        let body = br#"{"symbol":"wNEAR","decimals":24}"#;
+
+        let expected =
+            metadata_signing_prehash_v1(CHAIN_TAG_NEAR_TOKEN_METADATA, asset_id.as_bytes(), body);
+        let actual = near_token_metadata_prehash(asset_id, body);
+        assert_eq!(
+            actual, expected,
+            "near token-metadata wrapper must match the hand-computed core call"
+        );
+    }
+
+    /// Core regression for the new artifact kind: a signature minted for the
+    /// Ethereum ABI path (or the Solana IDL path) under the same asset-id-shaped
+    /// scope must never verify as a token-metadata signature, and vice versa,
+    /// because each uses a distinct chain_tag.
+    #[test]
+    fn test_token_metadata_tags_never_collide_with_each_other_or_existing_artifacts() {
+        let asset_id = "nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near";
+        let body = br#"{"symbol":"USDC.e","decimals":6}"#;
+
+        let near = near_token_metadata_prehash(asset_id, body);
+        let eth_token = ethereum_token_metadata_prehash(asset_id, body);
+        let sol_token = solana_token_metadata_prehash(asset_id, body);
+        // Same (scope, body) reinterpreted under the pre-existing ABI/IDL tags.
+        let eth_abi = metadata_signing_prehash_v1(CHAIN_TAG_ETHEREUM, asset_id.as_bytes(), body);
+        let sol_idl = metadata_signing_prehash_v1(CHAIN_TAG_SOLANA, asset_id.as_bytes(), body);
+
+        let all = [near, eth_token, sol_token, eth_abi, sol_idl];
+        for i in 0..all.len() {
+            for j in (i + 1)..all.len() {
+                assert_ne!(
+                    all[i], all[j],
+                    "distinct chain tags must never produce the same prehash for the same scope+body"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_ethereum_token_metadata_wrapper_matches_hand_computed_prehash() {
+        let asset_id = "nep141:dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near";
+        let body = br#"{"symbol":"USDT.e","decimals":6}"#;
+
+        let expected = metadata_signing_prehash_v1(
+            CHAIN_TAG_ETHEREUM_TOKEN_METADATA,
+            asset_id.as_bytes(),
+            body,
+        );
+        let actual = ethereum_token_metadata_prehash(asset_id, body);
+        assert_eq!(
+            actual, expected,
+            "ethereum token-metadata wrapper must match the hand-computed core call"
+        );
+    }
+
+    #[test]
+    fn test_solana_token_metadata_wrapper_matches_hand_computed_prehash() {
+        let asset_id = "nep141:someassetonsolana.omft.near";
+        let body = br#"{"symbol":"SOL","decimals":9}"#;
+
+        let expected =
+            metadata_signing_prehash_v1(CHAIN_TAG_SOLANA_TOKEN_METADATA, asset_id.as_bytes(), body);
+        let actual = solana_token_metadata_prehash(asset_id, body);
+        assert_eq!(
+            actual, expected,
+            "solana token-metadata wrapper must match the hand-computed core call"
         );
     }
 }

@@ -143,6 +143,43 @@ ChainMetadata: &pb.ChainMetadata{
 | `SOLANA_IDL_TYPE_ANCHOR` | Anchor framework IDL |
 | `SOLANA_IDL_TYPE_SHANK` | Shank IDL format |
 
+## NEAR: Token Metadata
+
+For NEAR Intents, provide a symbol and decimals for asset ids not already in the parser's compiled-in seed table (see [NEAR](../../chains/near#visualization-strategy)). Unlike Ethereum ABIs and Solana IDLs, entries are keyed by NEAR Intents asset id (e.g. `nep141:wrap.near`), not by a contract or program address.
+
+### gRPC example
+
+```go
+request := &pb.ParseRequest{
+    UnsignedPayload: rawTxHex,
+    Chain: pb.Chain_CHAIN_NEAR,
+    ChainMetadata: &pb.ChainMetadata{
+        Metadata: &pb.ChainMetadata_Near{
+            Near: &pb.NearMetadata{
+                NetworkId: proto.String("NEAR_MAINNET"),
+                TokenMappings: map[string]*pb.TokenMetadataEntry{
+                    "nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near": &pb.TokenMetadataEntry{
+                        Value: `{"symbol":"USDC.e","decimals":6}`,
+                    },
+                },
+            },
+        },
+    },
+}
+```
+
+### Signed entries (optional)
+
+A `TokenMetadataEntry` can carry an optional signature, so a wallet can trust an entry beyond the raw request itself. Unlike ABI/IDL signing (one curve per chain), the curve here is chosen per entry by `origin_chain`, since a NEAR Intents asset id can describe a NEAR-native asset or one bridged in from another chain:
+
+| `origin_chain` | Curve | Same curator identity family as |
+|----------------|-------|----------------------------------|
+| `TOKEN_ORIGIN_CHAIN_NEAR` (or unset) | ed25519 | A NEAR-only curator key |
+| `TOKEN_ORIGIN_CHAIN_ETHEREUM` | secp256k1 | Ethereum ABI signing |
+| `TOKEN_ORIGIN_CHAIN_SOLANA` | ed25519 | Solana IDL signing |
+
+The signature covers `value`'s bytes verbatim (the same convention as `Abi.value`/`Idl.value`), bound to the asset id so it cannot be replayed under a different one. An entry with no signature is still accepted; one with a signature that fails to verify is rejected outright, not silently downgraded to unsigned. See [`visualsign::signing`](https://github.com/anchorageoss/visualsign-parser/blob/main/src/visualsign/src/signing.rs) for the exact prehash construction.
+
 ## Library integration
 
 When using the library directly (not gRPC), pass metadata via `VisualSignOptions`. The Ethereum metadata shape mirrors the proto: a `network_id` and an `abi_mappings` map keyed by contract address.
@@ -189,6 +226,13 @@ See [Library Integration](../library/getting-started) for the full end-to-end ex
 | Anchor build | `target/idl/program_name.json` |
 | On-chain | Some programs publish IDL on-chain |
 | Program repo | Check the program's source repository |
+
+### NEAR token metadata
+
+| Source | How to get |
+|--------|------------|
+| Token contract | `ft_metadata` view call on the NEP-141 account |
+| Omni Bridge registry | `get_token_id` / `get_native_token_id` view calls on `omni.bridge.near` resolve to a NEP-141 account, whose `ft_metadata` then gives symbol/decimals |
 
 ## Without metadata
 

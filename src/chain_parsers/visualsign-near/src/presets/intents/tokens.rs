@@ -10,8 +10,24 @@ use super::{NearTokenRegistry, TokenMeta};
 /// before being added; a wrong `decimals` silently misrenders amounts, so
 /// anything not confidently verified is omitted and falls back to the raw
 /// asset id. `wrap.near` is the canonical wrapped-NEAR contract (24 decimals,
-/// matching native NEAR).
-const SEEDS: &[(&str, &str, u8)] = &[("nep141:wrap.near", "wNEAR", 24)];
+/// matching native NEAR). The bridged entries below resolve through
+/// `omni.bridge.near`'s own `get_token_id`/`get_native_token_id` registry via
+/// `scripts/gen_near_token_seeds.sh`, not a hand-typed guess at the
+/// `<chain>-<address>.omft.near` naming convention.
+const SEEDS: &[(&str, &str, u8)] = &[
+    ("nep141:wrap.near", "wNEAR", 24),
+    (
+        "nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near",
+        "USDC.e",
+        6,
+    ),
+    (
+        "nep141:dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near",
+        "USDT.e",
+        6,
+    ),
+    ("nep141:eth.bridge.near", "ETH", 18),
+];
 
 /// Largest `decimals` [`format_units`] can scale by: `10^39` exceeds `u128`.
 const MAX_DECIMALS: u8 = 38;
@@ -22,6 +38,11 @@ const MAX_DECIMALS: u8 = 38;
 /// wrapped-around divisor.
 fn usable(meta: TokenMeta) -> Option<TokenMeta> {
     (meta.decimals <= MAX_DECIMALS).then_some(meta)
+}
+
+/// Whether `asset_id` has a compiled-in, verified entry in [`SEEDS`].
+pub(crate) fn is_seeded(asset_id: &str) -> bool {
+    SEEDS.iter().any(|(id, _, _)| *id == asset_id)
 }
 
 /// Resolve an asset id to its metadata: request-scoped override layer first
@@ -39,6 +60,7 @@ pub(crate) fn resolve(
         .map(|(_, symbol, decimals)| TokenMeta {
             symbol: (*symbol).to_string(),
             decimals: *decimals,
+            verified: true,
         })
         .and_then(usable)
 }
@@ -78,6 +100,17 @@ mod tests {
     }
 
     #[test]
+    fn seeded_bridged_token_resolves() {
+        let meta = resolve(
+            "nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near",
+            &empty(),
+        )
+        .expect("seeded");
+        assert_eq!(meta.symbol, "USDC.e");
+        assert_eq!(meta.decimals, 6);
+    }
+
+    #[test]
     fn unknown_token_is_none() {
         assert!(resolve("nep141:not-a-real-token.near", &empty()).is_none());
     }
@@ -96,6 +129,7 @@ mod tests {
             TokenMeta {
                 symbol: "BROKEN".to_string(),
                 decimals: 39,
+                verified: false,
             },
         );
         let registry =
@@ -112,6 +146,7 @@ mod tests {
             TokenMeta {
                 symbol: "WIDE".to_string(),
                 decimals: MAX_DECIMALS,
+                verified: false,
             },
         );
         let registry =
@@ -120,6 +155,12 @@ mod tests {
         assert_eq!(meta.decimals, MAX_DECIMALS);
         // The bound is exactly what `format_units` can scale by.
         assert_eq!(format_units(0, MAX_DECIMALS), "0");
+    }
+
+    #[test]
+    fn is_seeded_matches_seeds_table() {
+        assert!(is_seeded("nep141:wrap.near"));
+        assert!(!is_seeded("nep141:not-a-real-token.near"));
     }
 
     #[test]
