@@ -10,12 +10,56 @@ use super::{NearTokenRegistry, TokenMeta};
 /// before being added; a wrong `decimals` silently misrenders amounts, so
 /// anything not confidently verified is omitted and falls back to the raw
 /// asset id. `wrap.near` is the canonical wrapped-NEAR contract (24 decimals,
-/// matching native NEAR). The bridged entries below resolve through
-/// `omni.bridge.near`'s own `get_token_id`/`get_native_token_id` registry via
-/// `scripts/gen_near_token_seeds.sh`, not a hand-typed guess at the
-/// `<chain>-<address>.omft.near` naming convention.
+/// matching native NEAR).
+///
+/// # Symbols are origin-qualified, and unique
+///
+/// The on-chain `ft_metadata` symbol is not usable verbatim. Four distinct
+/// assets report `{"symbol":"ETH","decimals":18}` -- Ethereum's ether via the
+/// omni bridge and via the legacy rainbow bridge, plus ether bridged from Base
+/// and from Arbitrum -- and four report `{"symbol":"USDC","decimals":6}`.
+/// `SignablePayloadFieldAmountV2` carries only an amount and an abbreviation,
+/// so seeding the raw symbol would render Base ether identically to mainnet
+/// ether, and a swap of one for the other identically to its mirror.
+///
+/// So the bare symbol belongs to the asset native to its own chain, and
+/// anything bridged from elsewhere carries an origin suffix (`ETH.base`,
+/// `USDC.sol`). `.e` marks the legacy rainbow-bridge entries, the convention
+/// the first stablecoin seeds already used. `every_seeded_symbol_is_unique`
+/// enforces this: a new entry that collides fails the test rather than
+/// silently making two assets look alike.
+///
+/// # Sourcing
+///
+/// `scripts/gen_near_token_seeds.sh` resolves ids through `omni.bridge.near`'s
+/// own registry, rather than hand-typing the `<chain>-<address>.omft.near`
+/// convention. Its output is a starting point, not the authority. Both of its
+/// lookups answer with ids that real intents do not carry:
+/// `get_native_token_id` gives `Eth` the legacy `eth.bridge.near` and
+/// `Base`/`Arb`/`Pol` their `.omdep.near` deposit contracts, and
+/// `get_token_id` gives Ethereum USDC/USDT their legacy `factory.bridge.near`
+/// ids while returning nothing at all for Base or Arbitrum.
+///
+/// So every entry's `symbol`/`decimals` is confirmed against the token
+/// contract's own `ft_metadata`, and its id rests on one of these:
+///
+/// - **observed traffic** -- `eth.omft.near` and `sol.omft.near` appear in
+///   captured production envelopes, which is also what establishes
+///   `<chain>.omft.near` as the intents-facing form for the entries beside
+///   them;
+/// - **the bridge registry** -- `get_token_id` maps the canonical Solana USDC
+///   and USDT mints onto the two `sol-*` ids, and `get_native_token_id` names
+///   `nbtc.bridge.near` for `Btc`;
+/// - **a self-describing id** -- the two `eth-0x…` ids embed the source-chain
+///   contract address, so it can be checked against Ethereum directly.
+///
+/// Assets whose id has none of these -- notably the per-token Base and
+/// Arbitrum stablecoins, which the bridge does not index at all -- are left
+/// out. They render as raw base units against their asset id, which is honest
+/// about what the parser knows.
 const SEEDS: &[(&str, &str, u8)] = &[
     ("nep141:wrap.near", "wNEAR", 24),
+    // Legacy rainbow bridge.
     (
         "nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near",
         "USDC.e",
@@ -26,7 +70,37 @@ const SEEDS: &[(&str, &str, u8)] = &[
         "USDT.e",
         6,
     ),
-    ("nep141:eth.bridge.near", "ETH", 18),
+    ("nep141:eth.bridge.near", "ETH.e", 18),
+    // Omni bridge, chain-native assets. `eth`/`sol` are the two ids carried by
+    // observed intent traffic.
+    ("nep141:eth.omft.near", "ETH", 18),
+    ("nep141:sol.omft.near", "SOL", 9),
+    ("nep141:btc.omft.near", "BTC", 8),
+    ("nep141:nbtc.bridge.near", "NBTC", 8),
+    ("nep141:pol.omft.near", "POL", 18),
+    ("nep141:base.omft.near", "ETH.base", 18),
+    ("nep141:arb.omft.near", "ETH.arb", 18),
+    // Omni bridge, per-token assets.
+    (
+        "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
+        "USDC",
+        6,
+    ),
+    (
+        "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+        "USDC.sol",
+        6,
+    ),
+    (
+        "nep141:sol-c800a4bd850783ccb82c2b2c7e84175443606352.omft.near",
+        "USDT.sol",
+        6,
+    ),
+    (
+        "nep141:eth-0xdac17f958d2ee523a2206206994597c13d831ec7.omft.near",
+        "USDT",
+        6,
+    ),
 ];
 
 /// Largest `decimals` [`format_units`] can scale by: `10^39` exceeds `u128`.
@@ -155,6 +229,59 @@ mod tests {
         assert_eq!(meta.decimals, MAX_DECIMALS);
         // The bound is exactly what `format_units` can scale by.
         assert_eq!(format_units(0, MAX_DECIMALS), "0");
+    }
+
+    /// The two assets carried by real intent traffic. Both were rendering as
+    /// raw base units against an unresolved asset id, so nothing on screen
+    /// distinguished 1 ETH from 1 gwei.
+    #[test]
+    fn the_omni_bridge_native_assets_resolve() {
+        let eth = resolve("nep141:eth.omft.near", &empty()).expect("seeded");
+        assert_eq!((eth.symbol.as_str(), eth.decimals), ("ETH", 18));
+        let sol = resolve("nep141:sol.omft.near", &empty()).expect("seeded");
+        assert_eq!((sol.symbol.as_str(), sol.decimals), ("SOL", 9));
+    }
+
+    /// `omni.bridge.near::get_native_token_id("Eth")` returns the legacy
+    /// rainbow-bridge id, which is how the wrong entry reached the table. Both
+    /// ids are real and both are ETH, so they have to stay distinguishable.
+    #[test]
+    fn the_legacy_and_omni_ether_ids_do_not_render_alike() {
+        let legacy = resolve("nep141:eth.bridge.near", &empty()).expect("seeded");
+        let omni = resolve("nep141:eth.omft.near", &empty()).expect("seeded");
+        assert_ne!(legacy.symbol, omni.symbol);
+    }
+
+    /// Four distinct assets report `{"symbol":"ETH","decimals":18}` on-chain
+    /// and four report `{"symbol":"USDC","decimals":6}`. `AmountV2` carries
+    /// only an amount and an abbreviation, so an unqualified symbol would let
+    /// Base ETH render identically to mainnet ETH -- and a swap of one for the
+    /// other render identically to its mirror.
+    #[test]
+    fn every_seeded_symbol_is_unique() {
+        let mut seen = std::collections::BTreeMap::new();
+        for (asset_id, symbol, _) in SEEDS {
+            if let Some(previous) = seen.insert(*symbol, *asset_id) {
+                panic!("symbol {symbol} is shared by {previous} and {asset_id}");
+            }
+        }
+    }
+
+    /// The same token bridged from a different chain carries an origin
+    /// qualifier; the asset native to its own chain carries the bare symbol.
+    #[test]
+    fn same_token_from_different_chains_is_origin_qualified() {
+        for (asset_id, expected) in [
+            ("nep141:base.omft.near", "ETH.base"),
+            ("nep141:arb.omft.near", "ETH.arb"),
+            (
+                "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
+                "USDC",
+            ),
+        ] {
+            let meta = resolve(asset_id, &empty()).expect(asset_id);
+            assert_eq!(meta.symbol, expected, "for {asset_id}");
+        }
     }
 
     #[test]
