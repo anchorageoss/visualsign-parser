@@ -43,14 +43,39 @@ RPC_DELAY_SECONDS="${RPC_DELAY_SECONDS:-1}"
 # contract's `FromStr`/`Deserialize` impls accept), plus a separate list of
 # chains whose *native* asset (ETH, etc.) should be resolved via
 # `get_native_token_id` instead of `get_token_id`.
+#
+# This output is a starting point, not the authority. Two things must be
+# checked by hand before anything reaches the `SEEDS` table:
+#
+#   1. `get_native_token_id` does not always answer with the id real intents
+#      carry. It answers `Eth` with the legacy rainbow-bridge
+#      `eth.bridge.near`, and `Base`/`Arb`/`Pol` with `.omdep.near` deposit
+#      contracts, while observed traffic uses `<chain>.omft.near`. Cross-check
+#      every id against `ft_metadata` and against a real envelope.
+#
+#   2. The reported `symbol` is not unique across chains. Four assets report
+#      `ETH` and four report `USDC`. `SEEDS` requires origin-qualified symbols
+#      (`ETH.base`, `USDC.sol`) so two assets never render alike; see the
+#      table's own docs.
 
 FOREIGN_TOKENS=(
-    "eth:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"  # USDC on Ethereum
-    "eth:0xdac17f958d2ee523a2206206994597c13d831ec7"  # USDT on Ethereum
+    "eth:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"   # USDC on Ethereum
+    "eth:0xdac17f958d2ee523a2206206994597c13d831ec7"   # USDT on Ethereum
+    "sol:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" # USDC on Solana
+    "sol:Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" # USDT on Solana
 )
+
+# Base and Arbitrum stablecoins are deliberately absent: `get_token_id`
+# returns nothing for them, so this script cannot source their ids, and the
+# `SEEDS` table leaves them out rather than seeding an unsourced id.
 
 NATIVE_CHAINS=(
     "Eth"
+    "Sol"
+    "Base"
+    "Arb"
+    "Pol"
+    "Btc"
 )
 
 # ── RPC helpers ─────────────────────────────────────────────────────────────
