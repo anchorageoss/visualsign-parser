@@ -234,6 +234,7 @@ async fn parse_handler(
         chain,
         chain_metadata: wrapper.request.chain_metadata.map(ChainMetadata::from),
         include_intermediate_output: wrapper.request.include_intermediate_output,
+        payment_marker: vec![],
     });
 
     let response = match tokio::time::timeout(PARSE_TIMEOUT, grpc_client.parse(request)).await {

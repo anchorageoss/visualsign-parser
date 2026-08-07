@@ -58,6 +58,13 @@ pub struct ParseRequest {
     /// emits an empty `intermediate_output` and the signed digest is unchanged.
     #[prost(bool, tag = "4")]
     pub include_intermediate_output: bool,
+    /// Borsh-encoded VerifiedPaymentMarker signed by the gateway. parser_app
+    /// verifies this before processing. Empty for the open v1 routes and for
+    /// local-dev / gRPC-direct callers. Field 5, not 4: field 4 shipped as
+    /// include_intermediate_output (#414) while payment_marker was still on an
+    /// unmerged branch, so payment_marker moved rather than breaking the wire.
+    #[prost(bytes = "vec", tag = "5")]
+    pub payment_marker: ::prost::alloc::vec::Vec<u8>,
 }
 #[cfg_attr(
     feature = "serde_derive",
