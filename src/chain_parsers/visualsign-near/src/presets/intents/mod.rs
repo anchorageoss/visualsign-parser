@@ -80,6 +80,15 @@ pub fn try_decode_execute_intents(
     Ok(fields)
 }
 
+/// A rendered pre-signature envelope: the fields, plus the title naming what
+/// the envelope does.
+pub struct RenderedEnvelope {
+    /// Payload title. A lone intent names its type; a batch stays generic.
+    pub title: String,
+    /// Envelope + per-intent fields.
+    pub fields: Vec<visualsign::SignablePayloadField>,
+}
+
 /// Render the single intent a user is about to sign, from the JSON of its
 /// `DefusePayload` message (the inner message that gets signed, independent of
 /// which signature standard later wraps it).
@@ -90,12 +99,16 @@ pub fn try_render_single_intent(
     payload_json: &[u8],
     token_registry: &visualsign::registry::LayeredRegistry<NearTokenRegistry>,
     _options: &visualsign::vsptrait::VisualSignOptions,
-) -> Result<Vec<visualsign::SignablePayloadField>, NearIntentsError> {
+) -> Result<RenderedEnvelope, NearIntentsError> {
     let payload: defuse_core::payload::DefusePayload<defuse_core::intents::DefuseIntents> =
         serde_json::from_slice(payload_json)
             .map_err(|e| NearIntentsError::InputNotJson(e.to_string()))?;
-    render::render_single(&payload, token_registry)
-        .map_err(|e| NearIntentsError::Render(e.to_string()))
+    let fields = render::render_single(&payload, token_registry)
+        .map_err(|e| NearIntentsError::Render(e.to_string()))?;
+    Ok(RenderedEnvelope {
+        title: render::title_for_intents(&payload.intents),
+        fields,
+    })
 }
 
 /// Test-only matcher shared across this module's test submodules.
@@ -196,10 +209,15 @@ mod tests {
         let inner = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
         let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
 
-        let fields =
+        let rendered =
             try_render_single_intent(inner.as_bytes(), &reg, &VisualSignOptions::default())
                 .unwrap();
+        let fields = rendered.fields;
         let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
+
+        // A lone intent names its type in both the title and the Intent field.
+        assert_eq!(rendered.title, "NEAR Intent: FT Withdraw");
+        assert!(labels.contains(&"Intent"), "missing the intent type field");
 
         for expected in [
             "Signer",
@@ -236,7 +254,8 @@ mod tests {
     fn single_intent_rejects_malformed_json() {
         let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
         let err = try_render_single_intent(b"not json", &reg, &VisualSignOptions::default())
-            .expect_err("malformed JSON should error");
+            .err()
+            .expect("malformed JSON should error");
         assert!(matches!(err, NearIntentsError::InputNotJson(_)));
     }
 
