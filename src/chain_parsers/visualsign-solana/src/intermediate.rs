@@ -66,11 +66,10 @@ pub struct SolanaIntermediateInstruction {
     pub parsed_instruction_data: Option<SolanaParsedInstructionDataIo>,
     /// True when `program_key` is not in `idl::builtin_programs::is_trusted_program`'s
     /// set (native/SPL programs, `solana_parser::ProgramType` built-ins, and every
-    /// in-crate preset visualizer's program IDs). Downstream policy engines
-    /// (e.g. the HSM) use this to decide whether to reject a transaction
-    /// containing it. Deliberately independent of `parsed_instruction_data`:
-    /// a program can be trusted (e.g. System, Token) without going through
-    /// `solana_parser`'s IDL path at all.
+    /// in-crate preset visualizer's program IDs). Downstream policy engines use
+    /// this to decide whether to reject a transaction containing it. Deliberately
+    /// independent of `parsed_instruction_data`: a program can be trusted (e.g.
+    /// System, Token) without going through `solana_parser`'s IDL path at all.
     pub is_unregistered: bool,
     /// Inner/CPI instructions this instruction invoked at execution time, in
     /// call order. Always empty for statically-decoded instructions (CPI
@@ -586,7 +585,8 @@ mod tests {
         let router_program_id = "8KQG1MYXru73rqobftpFjD3hBD8Ab3jaag8wbjZG63sx";
         let router_instruction_data_hex = "f8c69e91e17587c82a000000c1209b3341d69c810402000000386400012f000064010280841e00000000000d78940000000000320000";
         let jupiter_program_id = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
-        let jupiter_cpi_data_hex = "c1209b3341d69c810402000000386400012f000064010280841e00000000000d78940000000000320000";
+        let jupiter_cpi_data_hex =
+            "c1209b3341d69c810402000000386400012f000064010280841e00000000000d78940000000000320000";
 
         let simulated = generated::parser::SimulatedInstruction {
             program_key: router_program_id.to_string(),
