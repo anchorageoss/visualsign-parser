@@ -582,6 +582,31 @@ mod tests {
     }
 
     #[test]
+    fn is_unregistered_true_for_real_unregistered_router_with_trusted_jupiter_cpi() {
+        let router_program_id = "8KQG1MYXru73rqobftpFjD3hBD8Ab3jaag8wbjZG63sx";
+        let router_instruction_data_hex = "f8c69e91e17587c82a000000c1209b3341d69c810402000000386400012f000064010280841e00000000000d78940000000000320000";
+        let jupiter_program_id = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+        let jupiter_cpi_data_hex = "c1209b3341d69c810402000000386400012f000064010280841e00000000000d78940000000000320000";
+
+        let simulated = generated::parser::SimulatedInstruction {
+            program_key: router_program_id.to_string(),
+            instruction_data_hex: router_instruction_data_hex.to_string(),
+            account_keys: vec![],
+            inner_instructions: vec![generated::parser::SimulatedInstruction {
+                program_key: jupiter_program_id.to_string(),
+                instruction_data_hex: jupiter_cpi_data_hex.to_string(),
+                account_keys: vec![],
+                inner_instructions: vec![],
+            }],
+        };
+
+        let io = SolanaIntermediateInstruction::from(&simulated);
+        assert!(io.is_unregistered);
+        assert_eq!(io.inner_instructions.len(), 1);
+        assert!(!io.inner_instructions[0].is_unregistered);
+    }
+
+    #[test]
     fn is_unregistered_true_survives_borsh_round_trip() {
         let upstream = parser::SolanaInstruction {
             program_key: "Unknown1111111111111111111111111111111111".to_string(),
