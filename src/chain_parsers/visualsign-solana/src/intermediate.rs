@@ -35,10 +35,15 @@ use visualsign::vsptrait::TransactionParseError;
 
 use crate::idl::IdlRegistry;
 
-/// Version of the `SolanaIntermediateOutput` Borsh schema. Bump on ANY change
-/// to the shape below. Mirrored decoders assert this value, so a bump makes a
-/// schema drift fail loudly instead of silently misparsing.
-pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 2;
+/// Version of the `SolanaIntermediateOutput` Borsh schema. Bump on any change
+/// to the shape below that ships to a consumer that already understands a
+/// prior version -- mirrored decoders assert this value, so a bump makes a
+/// schema drift fail loudly instead of silently misparsing. Emission is gated
+/// behind an opt-in flag with no live consumers yet, so `is_unregistered` and
+/// `inner_instructions` were added under this same version: every decoder is
+/// updated to the new shape before the flag is ever enabled, so there is no
+/// window where a `1`-labeled blob could mean two different things.
+pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 1;
 
 /// Top-level Solana intermediate output. Mirrors `solana_parser::SolanaMetadata`
 /// minus `signatures`.

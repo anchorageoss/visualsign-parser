@@ -244,15 +244,8 @@ pub struct SolanaMetadata {
         ::prost::alloc::string::String,
         Idl,
     >,
-    /// Top-level simulated instructions from a caller's pre-signing transaction
-    /// simulation, each carrying its own inner/CPI calls (see
-    /// SimulatedInstruction.inner_instructions). Mirrors Solana's
-    /// simulateTransaction RPC shape directly (top-level Instructions, each
-    /// with its own indexed InnerInstructions) rather than flattening the tree,
-    /// so the parser and downstream policy engines can distinguish "this
-    /// unregistered call was made directly by the user" from "this
-    /// unregistered call was made via CPI by an already-registered program" --
-    /// the two can warrant different policy treatment.
+    /// Top-level simulated instructions, each carrying its inner/CPI calls (see
+    /// SimulatedInstruction.inner_instructions).
     #[prost(message, repeated, tag = "4")]
     #[cfg_attr(feature = "serde_derive", serde(default))]
     pub simulated_instructions: ::prost::alloc::vec::Vec<SimulatedInstruction>,
@@ -276,9 +269,8 @@ pub struct SimulatedInstruction {
     /// Base58-encoded account pubkeys, in instruction order.
     #[prost(string, repeated, tag = "3")]
     pub account_keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// Inner/CPI instructions this instruction invoked at execution time, in
-    /// call order. Empty for a leaf call. Recursive to match simulation's own
-    /// nesting depth (Solana allows nested CPI, not just one level).
+    /// Inner/CPI instructions this instruction invoked, in call order. Empty
+    /// for a leaf call. Recursive, but callers today only populate one level.
     #[prost(message, repeated, tag = "4")]
     pub inner_instructions: ::prost::alloc::vec::Vec<SimulatedInstruction>,
 }
