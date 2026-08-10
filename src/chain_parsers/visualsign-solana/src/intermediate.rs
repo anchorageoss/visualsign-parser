@@ -483,6 +483,81 @@ mod tests {
     }
 
     #[test]
+    fn is_unregistered_false_for_native_program_without_idl_match() {
+        // System Program: natively decoded elsewhere in solana_parser (SOL
+        // transfers), never goes through the IDL path, so parsed_instruction
+        // is None here. Must still be trusted -- is_unregistered must come
+        // from is_trusted_program, not from parsed_instruction.is_none().
+        let upstream = parser::SolanaInstruction {
+            program_key: "11111111111111111111111111111111".to_string(),
+            accounts: vec![],
+            instruction_data_hex: "0200000001000000000000000000".to_string(),
+            address_table_lookups: vec![],
+            parsed_instruction: None,
+            idl_parse_error: None,
+        };
+
+        let io = SolanaIntermediateInstruction::from(&upstream);
+        assert!(!io.is_unregistered);
+        assert!(io.parsed_instruction_data.is_none());
+    }
+
+    #[test]
+    fn is_unregistered_true_for_unknown_program() {
+        let upstream = parser::SolanaInstruction {
+            program_key: "Unknown1111111111111111111111111111111111".to_string(),
+            accounts: vec![],
+            instruction_data_hex: "ff".to_string(),
+            address_table_lookups: vec![],
+            parsed_instruction: None,
+            idl_parse_error: None,
+        };
+
+        let io = SolanaIntermediateInstruction::from(&upstream);
+        assert!(io.is_unregistered);
+        assert!(io.parsed_instruction_data.is_none());
+    }
+
+    #[test]
+    fn is_unregistered_false_for_preset_covered_program() {
+        // Squads v4 multisig: no ProgramType/IDL entry in solana_parser at
+        // all (parsed_instruction is always None for it there), but it has
+        // an in-crate preset visualizer, so is_trusted_program must cover it
+        // via preset_program_ids() -- this is the whole point of using
+        // is_trusted_program instead of parsed_instruction.is_none().
+        let upstream = parser::SolanaInstruction {
+            program_key: "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf".to_string(),
+            accounts: vec![],
+            instruction_data_hex: "deadbeef".to_string(),
+            address_table_lookups: vec![],
+            parsed_instruction: None,
+            idl_parse_error: None,
+        };
+
+        let io = SolanaIntermediateInstruction::from(&upstream);
+        assert!(!io.is_unregistered);
+    }
+
+    #[test]
+    fn is_unregistered_true_survives_borsh_round_trip() {
+        let upstream = parser::SolanaInstruction {
+            program_key: "Unknown1111111111111111111111111111111111".to_string(),
+            accounts: vec![],
+            instruction_data_hex: "ff".to_string(),
+            address_table_lookups: vec![],
+            parsed_instruction: None,
+            idl_parse_error: None,
+        };
+        let io = SolanaIntermediateInstruction::from(&upstream);
+
+        let bytes = borsh::to_vec(&io).expect("borsh serializes");
+        let recovered: SolanaIntermediateInstruction =
+            borsh::from_slice(&bytes).expect("borsh deserializes");
+        assert_eq!(io, recovered);
+        assert!(recovered.is_unregistered);
+    }
+
+    #[test]
     fn intermediate_output_round_trip_is_deterministic() {
         let metadata = SolanaMetadata {
             signatures: vec![],
