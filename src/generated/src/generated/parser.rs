@@ -244,6 +244,43 @@ pub struct SolanaMetadata {
         ::prost::alloc::string::String,
         Idl,
     >,
+    /// Top-level simulated instructions from a caller's pre-signing transaction
+    /// simulation, each carrying its own inner/CPI calls (see
+    /// SimulatedInstruction.inner_instructions). Mirrors Solana's
+    /// simulateTransaction RPC shape directly (top-level Instructions, each
+    /// with its own indexed InnerInstructions) rather than flattening the tree,
+    /// so the parser and downstream policy engines can distinguish "this
+    /// unregistered call was made directly by the user" from "this
+    /// unregistered call was made via CPI by an already-registered program" --
+    /// the two can warrant different policy treatment.
+    #[prost(message, repeated, tag = "4")]
+    #[cfg_attr(feature = "serde_derive", serde(default))]
+    pub simulated_instructions: ::prost::alloc::vec::Vec<SimulatedInstruction>,
+}
+/// One instruction from a transaction simulation result, top-level or inner.
+#[cfg_attr(
+    feature = "serde_derive",
+    derive(::serde::Serialize, ::serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
+#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SimulatedInstruction {
+    /// Base58-encoded program ID this instruction invokes.
+    #[prost(string, tag = "1")]
+    pub program_key: ::prost::alloc::string::String,
+    /// Hex-encoded raw instruction data.
+    #[prost(string, tag = "2")]
+    pub instruction_data_hex: ::prost::alloc::string::String,
+    /// Base58-encoded account pubkeys, in instruction order.
+    #[prost(string, repeated, tag = "3")]
+    pub account_keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Inner/CPI instructions this instruction invoked at execution time, in
+    /// call order. Empty for a leaf call. Recursive to match simulation's own
+    /// nesting depth (Solana allows nested CPI, not just one level).
+    #[prost(message, repeated, tag = "4")]
+    pub inner_instructions: ::prost::alloc::vec::Vec<SimulatedInstruction>,
 }
 #[cfg_attr(
     feature = "serde_derive",

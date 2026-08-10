@@ -436,8 +436,9 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
         };
 
         let idl_registry = create_idl_registry_from_options(&options)?;
+        let simulated_instructions = extract_simulated_instructions(&options);
         Ok(
-            match build_intermediate_bytes(&message_hex, &idl_registry) {
+            match build_intermediate_bytes(&message_hex, &idl_registry, simulated_instructions) {
                 Some(bytes) => ConversionResult::with_intermediate(payload, bytes),
                 None => ConversionResult::new(payload),
             },
@@ -482,19 +483,66 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
 fn build_intermediate_bytes(
     message_hex: &str,
     idl_registry: &crate::idl::IdlRegistry,
+    simulated_instructions: Option<&[generated::parser::SimulatedInstruction]>,
 ) -> Option<Vec<u8>> {
     match extract_solana_intermediate_output(message_hex, false, idl_registry) {
-        Ok(output) => match borsh::to_vec(&output) {
-            Ok(bytes) => Some(bytes),
-            Err(err) => {
-                tracing::warn!("Failed to borsh-encode Solana intermediate output: {err}");
-                None
+        Ok(mut output) => {
+            // When the caller supplied a simulation result, attach each
+            // top-level instruction's inner/CPI calls onto the matching
+            // statically-decoded entry by position -- both lists enumerate
+            // the same top-level instructions in the same order (simulation
+            // always reports the full top-level Instructions list alongside
+            // InnerInstructions, it does not omit them), so index alignment
+            // is safe. This preserves the static decode's richer
+            // `parsed_instruction_data` for top-level entries (simulation
+            // never decodes named arguments) while adding the inner/CPI
+            // visibility only simulation can provide. A length mismatch
+            // (e.g. the two decoders disagree on instruction count) degrades
+            // to "no inner_instructions attached" per-entry via `zip` rather
+            // than panicking or erroring the whole conversion.
+            if let Some(simulated) = simulated_instructions {
+                for (instruction, simulated_instruction) in
+                    output.instructions.iter_mut().zip(simulated)
+                {
+                    instruction.inner_instructions = simulated_instruction
+                        .inner_instructions
+                        .iter()
+                        .map(crate::intermediate::SolanaIntermediateInstruction::from)
+                        .collect();
+                }
             }
-        },
+            match borsh::to_vec(&output) {
+                Ok(bytes) => Some(bytes),
+                Err(err) => {
+                    tracing::warn!("Failed to borsh-encode Solana intermediate output: {err}");
+                    None
+                }
+            }
+        }
         Err(err) => {
             tracing::warn!("Failed to extract Solana intermediate output: {err}");
             None
         }
+    }
+}
+
+/// Pulls the top-level simulated-instruction list (each carrying its own
+/// nested `inner_instructions`) out of `options.metadata`'s Solana branch, if
+/// present. `None` when no `ChainMetadata`, no Solana variant, or an empty
+/// list was supplied -- callers treat all three the same (no inner/CPI data
+/// attached; `instructions` stays exactly what static decode produced).
+fn extract_simulated_instructions(
+    options: &VisualSignOptions,
+) -> Option<&[generated::parser::SimulatedInstruction]> {
+    let generated::parser::chain_metadata::Metadata::Solana(solana) =
+        options.metadata.as_ref()?.metadata.as_ref()?
+    else {
+        return None;
+    };
+    if solana.simulated_instructions.is_empty() {
+        None
+    } else {
+        Some(&solana.simulated_instructions)
     }
 }
 
@@ -843,6 +891,110 @@ mod tests {
         );
     }
 
+    /// End-to-end exercise of the nested inner_instructions attachment: the
+    /// same known System transfer, but with a simulation result attached
+    /// that reports two inner/CPI calls under that one top-level
+    /// instruction -- one to the System Program (native, trusted, but never
+    /// IDL-decoded even when simulated) and one to a made-up unknown
+    /// program. Confirms: the top-level entry keeps its statically-decoded
+    /// `parsed_instruction_data` (not overwritten by simulation), and each
+    /// inner entry gets its own independently-computed `is_unregistered`
+    /// with no `parsed_instruction_data` (simulation never decodes named
+    /// arguments, for top-level or inner calls).
+    #[test]
+    fn intermediate_output_attaches_nested_inner_instructions_from_simulation() {
+        let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
+        let solana_transfer_transaction =
+            create_transaction_with_empty_signatures(solana_transfer_message);
+        let wrapper = SolanaTransactionWrapper::from_string(&solana_transfer_transaction)
+            .expect("known transfer parses");
+
+        let options = VisualSignOptions {
+            include_intermediate_output: true,
+            decode_transfers: true,
+            transaction_name: Some("Solana Transaction".to_string()),
+            metadata: Some(generated::parser::ChainMetadata {
+                metadata: Some(generated::parser::chain_metadata::Metadata::Solana(
+                    generated::parser::SolanaMetadata {
+                        network_id: None,
+                        idl: None,
+                        idl_mappings: Default::default(),
+                        simulated_instructions: vec![generated::parser::SimulatedInstruction {
+                            // Mirrors the same top-level System transfer the
+                            // static decode already sees.
+                            program_key: "11111111111111111111111111111111".to_string(),
+                            instruction_data_hex: "0200000080f0fa0200000000".to_string(),
+                            account_keys: vec![],
+                            inner_instructions: vec![
+                                generated::parser::SimulatedInstruction {
+                                    program_key: "11111111111111111111111111111111".to_string(),
+                                    instruction_data_hex: "0200000001000000000000000000"
+                                        .to_string(),
+                                    account_keys: vec![],
+                                    inner_instructions: vec![],
+                                },
+                                generated::parser::SimulatedInstruction {
+                                    program_key: "Unknown9xyz11111111111111111111111111"
+                                        .to_string(),
+                                    instruction_data_hex: "deadbeef".to_string(),
+                                    account_keys: vec![],
+                                    inner_instructions: vec![],
+                                },
+                            ],
+                        }],
+                    },
+                )),
+            }),
+            ..VisualSignOptions::default()
+        };
+        let result = SolanaVisualSignConverter
+            .to_visual_sign_payload(wrapper, options)
+            .expect("conversion succeeds with simulated instructions attached");
+
+        let bytes = result
+            .intermediate_output
+            .as_ref()
+            .expect("intermediate_output should be emitted");
+        let decoded: SolanaIntermediateOutput =
+            borsh::from_slice(bytes).expect("emitted bytes decode into the published schema");
+
+        assert_eq!(
+            decoded.instructions.len(),
+            1,
+            "still one top-level instruction"
+        );
+        let top_level = &decoded.instructions[0];
+        assert!(
+            !top_level.is_unregistered,
+            "System Program top-level instruction is trusted"
+        );
+        assert!(
+            top_level.parsed_instruction_data.is_none(),
+            "top-level System transfer has no IDL match (native decode path, not IDL); \
+             confirms static decode's own value, unmodified by attaching inner_instructions"
+        );
+
+        assert_eq!(
+            top_level.inner_instructions.len(),
+            2,
+            "both simulated inner calls must be attached"
+        );
+        assert!(
+            !top_level.inner_instructions[0].is_unregistered,
+            "System Program inner call is trusted even though simulation never IDL-decodes it"
+        );
+        assert!(
+            top_level.inner_instructions[1].is_unregistered,
+            "unknown program inner call must be flagged unregistered"
+        );
+        assert!(
+            top_level.inner_instructions[0]
+                .inner_instructions
+                .is_empty(),
+            "leaf inner call has no further nesting"
+        );
+    }
+
     /// The intermediate-output path is best-effort: when `solana_parser` cannot
     /// decode the message, `build_intermediate_bytes` must degrade to `None`
     /// rather than panic or surface an error, so the converter still returns
@@ -853,7 +1005,7 @@ mod tests {
         // must fail and the helper must return `None`.
         let registry = IdlRegistry::new();
         assert!(
-            build_intermediate_bytes("deadbeef", &registry).is_none(),
+            build_intermediate_bytes("deadbeef", &registry, None).is_none(),
             "undecodable input must degrade to None, not panic or error"
         );
     }
@@ -2050,6 +2202,7 @@ mod tests {
                         network_id: Some("SOLANA_MAINNET".to_string()),
                         idl: None,
                         idl_mappings: idl_mappings.into_iter().collect(),
+                        simulated_instructions: Vec::new(),
                     },
                 )),
             }),

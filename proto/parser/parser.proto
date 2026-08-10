@@ -139,6 +139,30 @@ message SolanaMetadata {
   // Map of program_id (base58 string) to IDL definitions
   // Allows wallet to provide multiple IDLs, one per program
   map<string, Idl> idl_mappings = 3;
+  // Top-level simulated instructions from a caller's pre-signing transaction
+  // simulation, each carrying its own inner/CPI calls (see
+  // SimulatedInstruction.inner_instructions). Mirrors Solana's
+  // simulateTransaction RPC shape directly (top-level Instructions, each
+  // with its own indexed InnerInstructions) rather than flattening the tree,
+  // so the parser and downstream policy engines can distinguish "this
+  // unregistered call was made directly by the user" from "this
+  // unregistered call was made via CPI by an already-registered program" --
+  // the two can warrant different policy treatment.
+  repeated SimulatedInstruction simulated_instructions = 4;
+}
+
+// One instruction from a transaction simulation result, top-level or inner.
+message SimulatedInstruction {
+  // Base58-encoded program ID this instruction invokes.
+  string program_key = 1;
+  // Hex-encoded raw instruction data.
+  string instruction_data_hex = 2;
+  // Base58-encoded account pubkeys, in instruction order.
+  repeated string account_keys = 3;
+  // Inner/CPI instructions this instruction invoked at execution time, in
+  // call order. Empty for a leaf call. Recursive to match simulation's own
+  // nesting depth (Solana allows nested CPI, not just one level).
+  repeated SimulatedInstruction inner_instructions = 4;
 }
 
 message NearMetadata {

@@ -72,6 +72,19 @@ pub struct SolanaIntermediateInstruction {
     /// a program can be trusted (e.g. System, Token) without going through
     /// `solana_parser`'s IDL path at all.
     pub is_unregistered: bool,
+    /// Inner/CPI instructions this instruction invoked at execution time, in
+    /// call order. Always empty for statically-decoded instructions (CPI
+    /// data does not exist in the raw unsigned transaction message at all --
+    /// it is an execution-time artifact); populated only when a caller
+    /// supplied a simulation result. Nested (not flattened) so a downstream
+    /// policy engine can distinguish "this unregistered call was requested
+    /// directly by the user" (top-level, is_unregistered on this struct)
+    /// from "this unregistered call happened via CPI from an
+    /// already-registered program" (nested here) -- the two can warrant
+    /// different policy treatment, e.g. allowing an already-trusted
+    /// program's unknown inner call while still failing fast on an unknown
+    /// top-level one.
+    pub inner_instructions: Vec<SolanaIntermediateInstruction>,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -272,6 +285,36 @@ impl From<&parser::SolanaInstruction> for SolanaIntermediateInstruction {
                 .as_ref()
                 .map(SolanaParsedInstructionDataIo::from),
             is_unregistered: !crate::idl::builtin_programs::is_trusted_program(&value.program_key),
+            // Static decode has no visibility into inner/CPI calls at all --
+            // that data only exists at execution time. Always empty here.
+            inner_instructions: Vec::new(),
+        }
+    }
+}
+
+/// Built from a caller-supplied simulation result (top-level or inner/CPI
+/// call), not from `solana_parser`'s static decode -- there is no discriminator
+/// matching against an IDL here, so `parsed_instruction_data` is always `None`
+/// and `accounts`/`address_table_lookups` are always empty (the simulation
+/// wire shape carries account pubkeys as a flat `account_keys` list, with no
+/// signer/writable/address-table-lookup distinction to project into
+/// `SolanaAccount`). `is_unregistered` is still meaningful and computed the
+/// same way as the static-decode path. Recurses into `inner_instructions` so
+/// nested CPI depth is preserved rather than flattened.
+impl From<&generated::parser::SimulatedInstruction> for SolanaIntermediateInstruction {
+    fn from(value: &generated::parser::SimulatedInstruction) -> Self {
+        Self {
+            program_key: value.program_key.clone(),
+            accounts: Vec::new(),
+            instruction_data_hex: value.instruction_data_hex.clone(),
+            address_table_lookups: Vec::new(),
+            parsed_instruction_data: None,
+            is_unregistered: !crate::idl::builtin_programs::is_trusted_program(&value.program_key),
+            inner_instructions: value
+                .inner_instructions
+                .iter()
+                .map(SolanaIntermediateInstruction::from)
+                .collect(),
         }
     }
 }
