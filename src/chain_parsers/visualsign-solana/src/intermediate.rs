@@ -38,7 +38,7 @@ use crate::idl::IdlRegistry;
 /// Version of the `SolanaIntermediateOutput` Borsh schema. Bump on ANY change
 /// to the shape below. Mirrored decoders assert this value, so a bump makes a
 /// schema drift fail loudly instead of silently misparsing.
-pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 1;
+pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 2;
 
 /// Top-level Solana intermediate output. Mirrors `solana_parser::SolanaMetadata`
 /// minus `signatures`.
@@ -64,6 +64,14 @@ pub struct SolanaIntermediateInstruction {
     pub address_table_lookups: Vec<SolanaSingleAddressTableLookup>,
     /// `None` when the parser could not match an IDL for this instruction.
     pub parsed_instruction_data: Option<SolanaParsedInstructionDataIo>,
+    /// True when `program_key` is not in `idl::builtin_programs::is_trusted_program`'s
+    /// set (native/SPL programs, `solana_parser::ProgramType` built-ins, and every
+    /// in-crate preset visualizer's program IDs). Downstream policy engines
+    /// (e.g. the HSM) use this to decide whether to reject a transaction
+    /// containing it. Deliberately independent of `parsed_instruction_data`:
+    /// a program can be trusted (e.g. System, Token) without going through
+    /// `solana_parser`'s IDL path at all.
+    pub is_unregistered: bool,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -263,6 +271,7 @@ impl From<&parser::SolanaInstruction> for SolanaIntermediateInstruction {
                 .parsed_instruction
                 .as_ref()
                 .map(SolanaParsedInstructionDataIo::from),
+            is_unregistered: !crate::idl::builtin_programs::is_trusted_program(&value.program_key),
         }
     }
 }
