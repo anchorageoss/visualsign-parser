@@ -101,7 +101,7 @@ pub(crate) fn create_chain_metadata(idl_json_mappings: &[String]) -> Option<Chai
             network_id: None,
             idl: None,
             idl_mappings: idl_mappings.into_iter().collect(),
-            simulated_instructions: Vec::new(),
+            simulate_transaction_result: None,
         })),
     })
 }

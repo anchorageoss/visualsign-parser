@@ -487,29 +487,12 @@ fn build_intermediate_bytes(
 ) -> Option<Vec<u8>> {
     match extract_solana_intermediate_output(message_hex, false, idl_registry) {
         Ok(mut output) => {
-            // When the caller supplied a simulation result, attach each
-            // top-level instruction's inner/CPI calls onto the matching
-            // statically-decoded entry by position -- both lists enumerate
-            // the same top-level instructions in the same order (simulation
-            // always reports the full top-level Instructions list alongside
-            // InnerInstructions, it does not omit them), so index alignment
-            // is safe. This preserves the static decode's richer
-            // `parsed_instruction_data` for top-level entries (simulation
-            // never decodes named arguments) while adding the inner/CPI
-            // visibility only simulation can provide. A length mismatch
-            // (e.g. the two decoders disagree on instruction count) degrades
-            // to "no inner_instructions attached" per-entry via `zip` rather
-            // than panicking or erroring the whole conversion.
+            // Simulation results are independent of static decode
             if let Some(simulated) = simulated_instructions {
-                for (instruction, simulated_instruction) in
-                    output.instructions.iter_mut().zip(simulated)
-                {
-                    instruction.inner_instructions = simulated_instruction
-                        .inner_instructions
-                        .iter()
-                        .map(crate::intermediate::SolanaIntermediateInstruction::from)
-                        .collect();
-                }
+                output.simulated_instructions = simulated
+                    .iter()
+                    .map(crate::intermediate::SolanaSimulatedInstruction::from)
+                    .collect();
             }
             match borsh::to_vec(&output) {
                 Ok(bytes) => Some(bytes),
@@ -526,11 +509,10 @@ fn build_intermediate_bytes(
     }
 }
 
-/// Pulls the top-level simulated-instruction list (each carrying its own
-/// nested `inner_instructions`) out of `options.metadata`'s Solana branch, if
-/// present. `None` when no `ChainMetadata`, no Solana variant, or an empty
-/// list was supplied -- callers treat all three the same (no inner/CPI data
-/// attached; `instructions` stays exactly what static decode produced).
+/// Pulls the flattened simulated-instruction list out of `options.metadata`'s
+/// Solana branch, if present. `None` when no `ChainMetadata`, no Solana
+/// variant, no simulation result, or an empty list was supplied -- callers
+/// treat all four the same (`simulated_instructions` stays empty).
 fn extract_simulated_instructions(
     options: &VisualSignOptions,
 ) -> Option<&[generated::parser::SimulatedInstruction]> {
@@ -539,10 +521,11 @@ fn extract_simulated_instructions(
     else {
         return None;
     };
-    if solana.simulated_instructions.is_empty() {
+    let result = solana.simulate_transaction_result.as_ref()?;
+    if result.instructions.is_empty() {
         None
     } else {
-        Some(&solana.simulated_instructions)
+        Some(&result.instructions)
     }
 }
 
@@ -891,18 +874,16 @@ mod tests {
         );
     }
 
-    /// End-to-end exercise of the nested inner_instructions attachment: the
-    /// same known System transfer, but with a simulation result attached
-    /// that reports two inner/CPI calls under that one top-level
-    /// instruction -- one to the System Program (native, trusted, but never
-    /// IDL-decoded even when simulated) and one to a made-up unknown
-    /// program. Confirms: the top-level entry keeps its statically-decoded
-    /// `parsed_instruction_data` (not overwritten by simulation), and each
-    /// inner entry gets its own independently-computed `is_unregistered`
-    /// with no `parsed_instruction_data` (simulation never decodes named
-    /// arguments, for top-level or inner calls).
+    /// End-to-end exercise of `simulated_instructions`: the same known System
+    /// transfer, with a simulation result reporting two calls -- one to the
+    /// System Program (native, trusted, but never IDL-decoded even when
+    /// simulated) and one to a made-up unknown program. Confirms:
+    /// static decode's `instructions` (and its `parsed_instruction_data`) is
+    /// completely unaffected by the simulation result, and
+    /// `simulated_instructions` is a flat list independent of it, with each
+    /// entry's own `is_unregistered`.
     #[test]
-    fn intermediate_output_attaches_nested_inner_instructions_from_simulation() {
+    fn intermediate_output_populates_simulated_instructions() {
         let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
         let solana_transfer_transaction =
             create_transaction_with_empty_signatures(solana_transfer_message);
@@ -919,29 +900,22 @@ mod tests {
                         network_id: None,
                         idl: None,
                         idl_mappings: Default::default(),
-                        simulated_instructions: vec![generated::parser::SimulatedInstruction {
-                            // Mirrors the same top-level System transfer the
-                            // static decode already sees.
-                            program_key: "11111111111111111111111111111111".to_string(),
-                            instruction_data_hex: "0200000080f0fa0200000000".to_string(),
-                            account_keys: vec![],
-                            inner_instructions: vec![
-                                generated::parser::SimulatedInstruction {
-                                    program_key: "11111111111111111111111111111111".to_string(),
-                                    instruction_data_hex: "0200000001000000000000000000"
-                                        .to_string(),
-                                    account_keys: vec![],
-                                    inner_instructions: vec![],
-                                },
-                                generated::parser::SimulatedInstruction {
-                                    program_key: "Unknown9xyz11111111111111111111111111"
-                                        .to_string(),
-                                    instruction_data_hex: "deadbeef".to_string(),
-                                    account_keys: vec![],
-                                    inner_instructions: vec![],
-                                },
-                            ],
-                        }],
+                        simulate_transaction_result: Some(
+                            generated::parser::SimulateTransactionResult {
+                                instructions: vec![
+                                    generated::parser::SimulatedInstruction {
+                                        program_key: "11111111111111111111111111111111".to_string(),
+                                        instruction_data_hex: "0200000001000000000000000000"
+                                            .to_string(),
+                                    },
+                                    generated::parser::SimulatedInstruction {
+                                        program_key: "Unknown9xyz11111111111111111111111111"
+                                            .to_string(),
+                                        instruction_data_hex: "deadbeef".to_string(),
+                                    },
+                                ],
+                            },
+                        ),
                     },
                 )),
             }),
@@ -961,37 +935,25 @@ mod tests {
         assert_eq!(
             decoded.instructions.len(),
             1,
-            "still one top-level instruction"
-        );
-        let top_level = &decoded.instructions[0];
-        assert!(
-            !top_level.is_unregistered,
-            "System Program top-level instruction is trusted"
+            "static decode is unaffected by the simulation result"
         );
         assert!(
-            top_level.parsed_instruction_data.is_none(),
-            "top-level System transfer has no IDL match (native decode path, not IDL); \
-             confirms static decode's own value, unmodified by attaching inner_instructions"
+            decoded.instructions[0].parsed_instruction_data.is_none(),
+            "top-level System transfer has no IDL match (native decode path, not IDL)"
         );
 
         assert_eq!(
-            top_level.inner_instructions.len(),
+            decoded.simulated_instructions.len(),
             2,
-            "both simulated inner calls must be attached"
+            "both simulated calls must be present"
         );
         assert!(
-            !top_level.inner_instructions[0].is_unregistered,
-            "System Program inner call is trusted even though simulation never IDL-decodes it"
+            !decoded.simulated_instructions[0].is_unregistered,
+            "System Program call is trusted even though simulation never IDL-decodes it"
         );
         assert!(
-            top_level.inner_instructions[1].is_unregistered,
-            "unknown program inner call must be flagged unregistered"
-        );
-        assert!(
-            top_level.inner_instructions[0]
-                .inner_instructions
-                .is_empty(),
-            "leaf inner call has no further nesting"
+            decoded.simulated_instructions[1].is_unregistered,
+            "unknown program call must be flagged unregistered"
         );
     }
 
@@ -2202,7 +2164,7 @@ mod tests {
                         network_id: Some("SOLANA_MAINNET".to_string()),
                         idl: None,
                         idl_mappings: idl_mappings.into_iter().collect(),
-                        simulated_instructions: Vec::new(),
+                        simulate_transaction_result: None,
                     },
                 )),
             }),

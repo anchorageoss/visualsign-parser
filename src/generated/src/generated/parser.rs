@@ -244,13 +244,26 @@ pub struct SolanaMetadata {
         ::prost::alloc::string::String,
         Idl,
     >,
-    /// Top-level simulated instructions, each carrying its inner/CPI calls (see
-    /// SimulatedInstruction.inner_instructions).
-    #[prost(message, repeated, tag = "4")]
+    /// Result of a caller-supplied transaction simulation.
+    #[prost(message, optional, tag = "4")]
     #[cfg_attr(feature = "serde_derive", serde(default))]
-    pub simulated_instructions: ::prost::alloc::vec::Vec<SimulatedInstruction>,
+    pub simulate_transaction_result: ::core::option::Option<SimulateTransactionResult>,
 }
-/// One instruction from a transaction simulation result, top-level or inner.
+/// Every call a transaction simulation observed, top-level and inner/CPI
+/// alike, flattened into one list.
+#[cfg_attr(
+    feature = "serde_derive",
+    derive(::serde::Serialize, ::serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
+#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SimulateTransactionResult {
+    #[prost(message, repeated, tag = "1")]
+    pub instructions: ::prost::alloc::vec::Vec<SimulatedInstruction>,
+}
+/// One call observed during a transaction simulation.
 #[cfg_attr(
     feature = "serde_derive",
     derive(::serde::Serialize, ::serde::Deserialize),
@@ -266,13 +279,6 @@ pub struct SimulatedInstruction {
     /// Hex-encoded raw instruction data.
     #[prost(string, tag = "2")]
     pub instruction_data_hex: ::prost::alloc::string::String,
-    /// Base58-encoded account pubkeys, in instruction order.
-    #[prost(string, repeated, tag = "3")]
-    pub account_keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// Inner/CPI instructions this instruction invoked, in call order. Empty
-    /// for a leaf call. Recursive, but callers today only populate one level.
-    #[prost(message, repeated, tag = "4")]
-    pub inner_instructions: ::prost::alloc::vec::Vec<SimulatedInstruction>,
 }
 #[cfg_attr(
     feature = "serde_derive",

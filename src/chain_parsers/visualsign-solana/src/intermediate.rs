@@ -39,10 +39,9 @@ use crate::idl::IdlRegistry;
 /// to the shape below that ships to a consumer that already understands a
 /// prior version -- mirrored decoders assert this value, so a bump makes a
 /// schema drift fail loudly instead of silently misparsing. Emission is gated
-/// behind an opt-in flag with no live consumers yet, so `is_unregistered` and
-/// `inner_instructions` were added under this same version: every decoder is
-/// updated to the new shape before the flag is ever enabled, so there is no
-/// window where a `1`-labeled blob could mean two different things.
+/// behind an opt-in flag with no live consumers yet, so `simulated_instructions`
+/// was added under this same version: every decoder is updated to the new
+/// shape before the flag is ever enabled.
 pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 1;
 
 /// Top-level Solana intermediate output. Mirrors `solana_parser::SolanaMetadata`
@@ -59,6 +58,11 @@ pub struct SolanaIntermediateOutput {
     pub spl_transfers: Vec<SplTransfer>,
     pub recent_blockhash: String,
     pub address_table_lookups: Vec<SolanaAddressTableLookup>,
+    /// Every call (top-level and inner/CPI, flattened) a caller-supplied
+    /// transaction simulation observed. Always empty when no simulation was
+    /// supplied. Separate from `instructions` (static decode): this is the
+    /// only place `is_unregistered` is computed.
+    pub simulated_instructions: Vec<SolanaSimulatedInstruction>,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -69,26 +73,17 @@ pub struct SolanaIntermediateInstruction {
     pub address_table_lookups: Vec<SolanaSingleAddressTableLookup>,
     /// `None` when the parser could not match an IDL for this instruction.
     pub parsed_instruction_data: Option<SolanaParsedInstructionDataIo>,
+}
+
+/// One call a transaction simulation observed, top-level or inner/CPI.
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SolanaSimulatedInstruction {
+    pub program_key: String,
+    pub instruction_data_hex: String,
     /// True when `program_key` is not in `idl::builtin_programs::is_trusted_program`'s
     /// set (native/SPL programs, `solana_parser::ProgramType` built-ins, and every
-    /// in-crate preset visualizer's program IDs). Downstream policy engines use
-    /// this to decide whether to reject a transaction containing it. Deliberately
-    /// independent of `parsed_instruction_data`: a program can be trusted (e.g.
-    /// System, Token) without going through `solana_parser`'s IDL path at all.
+    /// in-crate preset visualizer's program IDs).
     pub is_unregistered: bool,
-    /// Inner/CPI instructions this instruction invoked at execution time, in
-    /// call order. Always empty for statically-decoded instructions (CPI
-    /// data does not exist in the raw unsigned transaction message at all --
-    /// it is an execution-time artifact); populated only when a caller
-    /// supplied a simulation result. Nested (not flattened) so a downstream
-    /// policy engine can distinguish "this unregistered call was requested
-    /// directly by the user" (top-level, is_unregistered on this struct)
-    /// from "this unregistered call happened via CPI from an
-    /// already-registered program" (nested here) -- the two can warrant
-    /// different policy treatment, e.g. allowing an already-trusted
-    /// program's unknown inner call while still failing fast on an unknown
-    /// top-level one.
-    pub inner_instructions: Vec<SolanaIntermediateInstruction>,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -288,37 +283,19 @@ impl From<&parser::SolanaInstruction> for SolanaIntermediateInstruction {
                 .parsed_instruction
                 .as_ref()
                 .map(SolanaParsedInstructionDataIo::from),
-            is_unregistered: !crate::idl::builtin_programs::is_trusted_program(&value.program_key),
-            // Static decode has no visibility into inner/CPI calls at all --
-            // that data only exists at execution time. Always empty here.
-            inner_instructions: Vec::new(),
         }
     }
 }
 
-/// Built from a caller-supplied simulation result (top-level or inner/CPI
-/// call), not from `solana_parser`'s static decode -- there is no discriminator
-/// matching against an IDL here, so `parsed_instruction_data` is always `None`
-/// and `accounts`/`address_table_lookups` are always empty (the simulation
-/// wire shape carries account pubkeys as a flat `account_keys` list, with no
-/// signer/writable/address-table-lookup distinction to project into
-/// `SolanaAccount`). `is_unregistered` is still meaningful and computed the
-/// same way as the static-decode path. Recurses into `inner_instructions` so
-/// nested CPI depth is preserved rather than flattened.
-impl From<&generated::parser::SimulatedInstruction> for SolanaIntermediateInstruction {
+/// Built from a caller-supplied simulation result -- one call (top-level or
+/// inner/CPI) that a `simulateTransaction` call observed. `is_unregistered`
+/// is computed the same way as the static-decode path.
+impl From<&generated::parser::SimulatedInstruction> for SolanaSimulatedInstruction {
     fn from(value: &generated::parser::SimulatedInstruction) -> Self {
         Self {
             program_key: value.program_key.clone(),
-            accounts: Vec::new(),
             instruction_data_hex: value.instruction_data_hex.clone(),
-            address_table_lookups: Vec::new(),
-            parsed_instruction_data: None,
             is_unregistered: !crate::idl::builtin_programs::is_trusted_program(&value.program_key),
-            inner_instructions: value
-                .inner_instructions
-                .iter()
-                .map(SolanaIntermediateInstruction::from)
-                .collect(),
         }
     }
 }
@@ -342,6 +319,7 @@ impl From<&SolanaMetadata> for SolanaIntermediateOutput {
                 .iter()
                 .map(SolanaAddressTableLookup::from)
                 .collect(),
+            simulated_instructions: Vec::new(),
         }
     }
 }
@@ -530,59 +508,35 @@ mod tests {
     }
 
     #[test]
-    fn is_unregistered_false_for_native_program_without_idl_match() {
-        // System Program: natively decoded elsewhere in solana_parser (SOL
-        // transfers), never goes through the IDL path, so parsed_instruction
-        // is None here. Must still be trusted -- is_unregistered must come
-        // from is_trusted_program, not from parsed_instruction.is_none().
-        let upstream = parser::SolanaInstruction {
+    fn is_unregistered_false_for_native_program_via_simulation() {
+        // System Program is trusted regardless of IDL match -- is_unregistered
+        // must come from is_trusted_program, not from an IDL decode result.
+        let simulated = generated::parser::SimulatedInstruction {
             program_key: "11111111111111111111111111111111".to_string(),
-            accounts: vec![],
             instruction_data_hex: "0200000001000000000000000000".to_string(),
-            address_table_lookups: vec![],
-            parsed_instruction: None,
-            idl_parse_error: None,
         };
-
-        let io = SolanaIntermediateInstruction::from(&upstream);
-        assert!(!io.is_unregistered);
-        assert!(io.parsed_instruction_data.is_none());
+        assert!(!SolanaSimulatedInstruction::from(&simulated).is_unregistered);
     }
 
     #[test]
-    fn is_unregistered_true_for_unknown_program() {
-        let upstream = parser::SolanaInstruction {
+    fn is_unregistered_true_for_unknown_program_via_simulation() {
+        let simulated = generated::parser::SimulatedInstruction {
             program_key: "Unknown1111111111111111111111111111111111".to_string(),
-            accounts: vec![],
             instruction_data_hex: "ff".to_string(),
-            address_table_lookups: vec![],
-            parsed_instruction: None,
-            idl_parse_error: None,
         };
-
-        let io = SolanaIntermediateInstruction::from(&upstream);
-        assert!(io.is_unregistered);
-        assert!(io.parsed_instruction_data.is_none());
+        assert!(SolanaSimulatedInstruction::from(&simulated).is_unregistered);
     }
 
     #[test]
-    fn is_unregistered_false_for_preset_covered_program() {
+    fn is_unregistered_false_for_preset_covered_program_via_simulation() {
         // Squads v4 multisig: no ProgramType/IDL entry in solana_parser at
-        // all (parsed_instruction is always None for it there), but it has
-        // an in-crate preset visualizer, so is_trusted_program must cover it
-        // via preset_program_ids() -- this is the whole point of using
-        // is_trusted_program instead of parsed_instruction.is_none().
-        let upstream = parser::SolanaInstruction {
+        // all, but it has an in-crate preset visualizer, so is_trusted_program
+        // must cover it via preset_program_ids().
+        let simulated = generated::parser::SimulatedInstruction {
             program_key: "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf".to_string(),
-            accounts: vec![],
             instruction_data_hex: "deadbeef".to_string(),
-            address_table_lookups: vec![],
-            parsed_instruction: None,
-            idl_parse_error: None,
         };
-
-        let io = SolanaIntermediateInstruction::from(&upstream);
-        assert!(!io.is_unregistered);
+        assert!(!SolanaSimulatedInstruction::from(&simulated).is_unregistered);
     }
 
     #[test]
@@ -593,38 +547,29 @@ mod tests {
         let jupiter_cpi_data_hex =
             "c1209b3341d69c810402000000386400012f000064010280841e00000000000d78940000000000320000";
 
-        let simulated = generated::parser::SimulatedInstruction {
+        let router = generated::parser::SimulatedInstruction {
             program_key: router_program_id.to_string(),
             instruction_data_hex: router_instruction_data_hex.to_string(),
-            account_keys: vec![],
-            inner_instructions: vec![generated::parser::SimulatedInstruction {
-                program_key: jupiter_program_id.to_string(),
-                instruction_data_hex: jupiter_cpi_data_hex.to_string(),
-                account_keys: vec![],
-                inner_instructions: vec![],
-            }],
+        };
+        let jupiter_cpi = generated::parser::SimulatedInstruction {
+            program_key: jupiter_program_id.to_string(),
+            instruction_data_hex: jupiter_cpi_data_hex.to_string(),
         };
 
-        let io = SolanaIntermediateInstruction::from(&simulated);
-        assert!(io.is_unregistered);
-        assert_eq!(io.inner_instructions.len(), 1);
-        assert!(!io.inner_instructions[0].is_unregistered);
+        assert!(SolanaSimulatedInstruction::from(&router).is_unregistered);
+        assert!(!SolanaSimulatedInstruction::from(&jupiter_cpi).is_unregistered);
     }
 
     #[test]
     fn is_unregistered_true_survives_borsh_round_trip() {
-        let upstream = parser::SolanaInstruction {
+        let simulated = generated::parser::SimulatedInstruction {
             program_key: "Unknown1111111111111111111111111111111111".to_string(),
-            accounts: vec![],
             instruction_data_hex: "ff".to_string(),
-            address_table_lookups: vec![],
-            parsed_instruction: None,
-            idl_parse_error: None,
         };
-        let io = SolanaIntermediateInstruction::from(&upstream);
+        let io = SolanaSimulatedInstruction::from(&simulated);
 
         let bytes = borsh::to_vec(&io).expect("borsh serializes");
-        let recovered: SolanaIntermediateInstruction =
+        let recovered: SolanaSimulatedInstruction =
             borsh::from_slice(&bytes).expect("borsh deserializes");
         assert_eq!(io, recovered);
         assert!(recovered.is_unregistered);
