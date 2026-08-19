@@ -483,16 +483,34 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
 fn build_intermediate_bytes(
     message_hex: &str,
     idl_registry: &crate::idl::IdlRegistry,
-    simulated_instructions: Option<&[generated::parser::SimulatedInstruction]>,
+    inner_instruction_groups: Option<&[generated::parser::InnerInstructionGroup]>,
 ) -> Option<Vec<u8>> {
     match extract_solana_intermediate_output(message_hex, false, idl_registry) {
         Ok(mut output) => {
             // Simulation results are independent of static decode
-            if let Some(simulated) = simulated_instructions {
-                output.simulated_instructions = simulated
+            if let Some(groups) = inner_instruction_groups {
+                output.simulated_instructions = groups
                     .iter()
-                    .map(crate::intermediate::SolanaSimulatedInstruction::from)
+                    .flat_map(|group| {
+                        group.instructions.iter().map(move |instruction| {
+                            crate::intermediate::build_simulated_instruction(
+                                instruction,
+                                group.instruction_index,
+                                idl_registry,
+                            )
+                        })
+                    })
                     .collect();
+                let unresolved = output
+                    .simulated_instructions
+                    .iter()
+                    .filter(|s| s.parsed_instruction_data.is_none() && s.rpc_parsed_data.is_none())
+                    .count();
+                tracing::info!(
+                    simulated_instructions = output.simulated_instructions.len(),
+                    unresolved,
+                    "Solana simulated instructions attached to intermediate output"
+                );
             }
             match borsh::to_vec(&output) {
                 Ok(bytes) => Some(bytes),
@@ -509,23 +527,23 @@ fn build_intermediate_bytes(
     }
 }
 
-/// Pulls the flattened simulated-instruction list out of `options.metadata`'s
-/// Solana branch, if present. `None` when no `ChainMetadata`, no Solana
-/// variant, no simulation result, or an empty list was supplied -- callers
-/// treat all four the same (`simulated_instructions` stays empty).
+/// Pulls the inner-instruction groups out of `options.metadata`'s Solana
+/// branch, if present. `None` when no `ChainMetadata`, no Solana variant, no
+/// simulation result, or an empty list was supplied -- callers treat all four
+/// the same (`simulated_instructions` stays empty).
 fn extract_simulated_instructions(
     options: &VisualSignOptions,
-) -> Option<&[generated::parser::SimulatedInstruction]> {
+) -> Option<&[generated::parser::InnerInstructionGroup]> {
     let generated::parser::chain_metadata::Metadata::Solana(solana) =
         options.metadata.as_ref()?.metadata.as_ref()?
     else {
         return None;
     };
     let result = solana.simulate_transaction_result.as_ref()?;
-    if result.instructions.is_empty() {
+    if result.inner_instructions.is_empty() {
         None
     } else {
-        Some(&result.instructions)
+        Some(&result.inner_instructions)
     }
 }
 
@@ -875,13 +893,14 @@ mod tests {
     }
 
     /// End-to-end exercise of `simulated_instructions`: the same known System
-    /// transfer, with a simulation result reporting two calls -- one to the
-    /// System Program (native, trusted, but never IDL-decoded even when
-    /// simulated) and one to a made-up unknown program. Confirms:
+    /// transfer, with a simulation result reporting one inner-instruction
+    /// group (triggered by top-level instruction 0) containing two calls --
+    /// one to the System Program (native, trusted; no IDL entry so it's never
+    /// IDL-decoded) and one to a made-up unknown program. Confirms:
     /// static decode's `instructions` (and its `parsed_instruction_data`) is
     /// completely unaffected by the simulation result, and
-    /// `simulated_instructions` is a flat list independent of it, with each
-    /// entry's own `is_unregistered`.
+    /// `simulated_instructions` is independent of it, with each entry's own
+    /// `is_unregistered` and `instruction_index` carried from its group.
     #[test]
     fn intermediate_output_populates_simulated_instructions() {
         let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
@@ -902,16 +921,29 @@ mod tests {
                         idl_mappings: Default::default(),
                         simulate_transaction_result: Some(
                             generated::parser::SimulateTransactionResult {
-                                instructions: vec![
-                                    generated::parser::SimulatedInstruction {
-                                        program_key: "11111111111111111111111111111111".to_string(),
-                                        instruction_data_hex: "0200000001000000000000000000"
-                                            .to_string(),
-                                    },
-                                    generated::parser::SimulatedInstruction {
-                                        program_key: "Unknown9xyz11111111111111111111111111"
-                                            .to_string(),
-                                        instruction_data_hex: "deadbeef".to_string(),
+                                inner_instructions: vec![
+                                    generated::parser::InnerInstructionGroup {
+                                        instruction_index: 0,
+                                        instructions: vec![
+                                            generated::parser::SimulatedInstruction {
+                                                program_key: "11111111111111111111111111111111"
+                                                    .to_string(),
+                                                instruction_data_hex:
+                                                    "0200000001000000000000000000".to_string(),
+                                                accounts: vec![],
+                                                stack_height: 2,
+                                                rpc_parsed_data: None,
+                                            },
+                                            generated::parser::SimulatedInstruction {
+                                                program_key:
+                                                    "Unknown9xyz11111111111111111111111111"
+                                                        .to_string(),
+                                                instruction_data_hex: "deadbeef".to_string(),
+                                                accounts: vec![],
+                                                stack_height: 2,
+                                                rpc_parsed_data: None,
+                                            },
+                                        ],
                                     },
                                 ],
                             },
@@ -947,10 +979,12 @@ mod tests {
             2,
             "both simulated calls must be present"
         );
+        assert_eq!(decoded.simulated_instructions[0].instruction_index, 0);
         assert!(
             !decoded.simulated_instructions[0].is_unregistered,
-            "System Program call is trusted even though simulation never IDL-decodes it"
+            "System Program call is trusted even though it has no IDL entry to match"
         );
+        assert_eq!(decoded.simulated_instructions[1].instruction_index, 0);
         assert!(
             decoded.simulated_instructions[1].is_unregistered,
             "unknown program call must be flagged unregistered"

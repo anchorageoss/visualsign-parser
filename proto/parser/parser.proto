@@ -143,18 +143,62 @@ message SolanaMetadata {
   optional SimulateTransactionResult simulate_transaction_result = 4;
 }
 
-// Every call a transaction simulation observed, top-level and inner/CPI
-// alike, flattened into one list.
+// Inner/CPI calls a transaction simulation observed, grouped by the
+// top-level instruction that triggered them. Top-level instructions are
+// already visible via static decode, so they aren't repeated here.
 message SimulateTransactionResult {
-  repeated SimulatedInstruction instructions = 1;
+  repeated InnerInstructionGroup inner_instructions = 1;
 }
 
-// One call observed during a transaction simulation.
+// Inner/CPI calls triggered by one top-level instruction.
+message InnerInstructionGroup {
+  // Position of the triggering top-level instruction (0-based), matching
+  // static decode's instruction indexing.
+  uint32 instruction_index = 1;
+  repeated SimulatedInstruction instructions = 2;
+}
+
+// One inner/CPI call observed during a transaction simulation.
 message SimulatedInstruction {
   // Base58-encoded program ID this instruction invokes.
   string program_key = 1;
-  // Hex-encoded raw instruction data.
+  // Hex-encoded raw instruction data. Empty when the RPC returned this
+  // instruction jsonParsed instead of raw -- see rpc_parsed_data.
   string instruction_data_hex = 2;
+  // Accounts passed to this instruction, in order, resolved against the
+  // transaction's account keys (including any resolved address-lookup-table
+  // entries). Lets the parser IDL-decode simulated/inner instructions the
+  // same way it decodes statically-visible ones. Empty when the RPC returned
+  // this instruction jsonParsed instead of raw -- see rpc_parsed_data.
+  repeated SimulatedInstructionAccount accounts = 3;
+  // Call depth: 2+ for inner/CPI calls. Matches Solana simulation's own
+  // stackHeight semantics.
+  uint32 stack_height = 4;
+  // Set when the RPC returned this instruction jsonParsed (recognized
+  // programs, e.g. System/Token) instead of raw/compiled. Mutually exclusive
+  // with instruction_data_hex/accounts being populated: a jsonParsed
+  // instruction carries no raw data to IDL-decode, so this is the only
+  // source of instruction detail in that case.
+  optional RpcParsedInstructionData rpc_parsed_data = 5;
+}
+
+// The RPC's own jsonParsed decode of an instruction (program-specific state
+// parser output), as returned for recognized programs. Distinct from
+// SolanaParsedInstructionDataIo, which is this parser's own IDL-decoded
+// output -- this is decoded by the RPC node, not by visualsign-parser.
+message RpcParsedInstructionData {
+  // The RPC's instruction type name, e.g. "initializeAccount3", "transfer".
+  string instruction_type = 1;
+  // The RPC's `parsed.info` object, re-serialized as a JSON string.
+  string info_json = 2;
+}
+
+// One account passed to a SimulatedInstruction.
+message SimulatedInstructionAccount {
+  // Base58-encoded account public key.
+  string account_key = 1;
+  bool is_signer = 2;
+  bool is_writable = 3;
 }
 
 message NearMetadata {

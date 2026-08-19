@@ -26,8 +26,12 @@ use std::collections::BTreeMap;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde_json::Value;
+use solana_parser::solana::idl_parser::{
+    compute_idl_hash, construct_idl_records_map, create_accounts_map,
+    find_instruction_by_discriminator, parse_data_into_args, resolve_idl_for_record,
+};
 use solana_parser::solana::structs::{
-    self as parser, IdlSource, SolanaMetadata, SolanaParsedInstructionData,
+    self as parser, AccountAddress, IdlSource, SolanaMetadata, SolanaParsedInstructionData,
 };
 use solana_parser::{CustomIdlConfig, parse_transaction_with_idls};
 use visualsign::errors::VisualSignError;
@@ -42,7 +46,7 @@ use crate::idl::IdlRegistry;
 /// behind an opt-in flag with no live consumers yet, so `simulated_instructions`
 /// was added under this same version: every decoder is updated to the new
 /// shape before the flag is ever enabled.
-pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 1;
+pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 2;
 
 /// Top-level Solana intermediate output. Mirrors `solana_parser::SolanaMetadata`
 /// minus `signatures`.
@@ -75,15 +79,30 @@ pub struct SolanaIntermediateInstruction {
     pub parsed_instruction_data: Option<SolanaParsedInstructionDataIo>,
 }
 
-/// One call a transaction simulation observed, top-level or inner/CPI.
+/// One inner/CPI call a transaction simulation observed.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SolanaSimulatedInstruction {
+    /// Position of the top-level instruction that triggered this call
+    /// (0-based), matching static decode's instruction indexing.
+    pub instruction_index: u32,
+    /// Call depth: 2+ for inner/CPI calls, matching Solana simulation's own
+    /// stackHeight semantics.
+    pub stack_height: u32,
     pub program_key: String,
+    pub accounts: Vec<SolanaAccount>,
     pub instruction_data_hex: String,
     /// True when `program_key` is not in `idl::builtin_programs::is_trusted_program`'s
     /// set (native/SPL programs, `solana_parser::ProgramType` built-ins, and every
     /// in-crate preset visualizer's program IDs).
     pub is_unregistered: bool,
+    /// `None` when the parser could not match an IDL for this instruction.
+    /// Always `None` when `rpc_parsed_data` is `Some`: a jsonParsed instruction
+    /// carries no raw instruction_data_hex/accounts for the parser to IDL-decode.
+    pub parsed_instruction_data: Option<SolanaParsedInstructionDataIo>,
+    /// The RPC's own jsonParsed decode, when the caller's simulateTransaction
+    /// result returned this instruction jsonParsed instead of raw (recognized
+    /// programs, e.g. System/Token). `None` for raw/compiled instructions.
+    pub rpc_parsed_data: Option<SolanaRpcParsedInstructionDataIo>,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -140,6 +159,15 @@ pub struct SolanaParsedInstructionDataIo {
     /// `"Custom"`. Empty when no IDL was used.
     pub idl_source: String,
     pub idl_hash: String,
+}
+
+/// The RPC's own jsonParsed decode of a simulated instruction, as returned for
+/// recognized programs. Distinct from [`SolanaParsedInstructionDataIo`], which
+/// is this parser's own IDL-decoded output.
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SolanaRpcParsedInstructionDataIo {
+    pub instruction_type: String,
+    pub info_json: String,
 }
 
 // -- From impls --------------------------------------------------------------
@@ -287,17 +315,115 @@ impl From<&parser::SolanaInstruction> for SolanaIntermediateInstruction {
     }
 }
 
-/// Built from a caller-supplied simulation result -- one call (top-level or
-/// inner/CPI) that a `simulateTransaction` call observed. `is_unregistered`
-/// is computed the same way as the static-decode path.
-impl From<&generated::parser::SimulatedInstruction> for SolanaSimulatedInstruction {
-    fn from(value: &generated::parser::SimulatedInstruction) -> Self {
-        Self {
-            program_key: value.program_key.clone(),
-            instruction_data_hex: value.instruction_data_hex.clone(),
-            is_unregistered: !crate::idl::builtin_programs::is_trusted_program(&value.program_key),
-        }
+/// Builds a [`SolanaSimulatedInstruction`] from one caller-supplied inner/CPI
+/// call, IDL-decoding it the same way static decode does. `instruction_index`
+/// comes from the enclosing `InnerInstructionGroup`, not the instruction
+/// itself. `is_unregistered` is computed the same way as the static-decode
+/// path. IDL resolution/decoding is best-effort: any failure (no IDL, bad
+/// discriminator, account/arg mismatch) degrades to `parsed_instruction_data:
+/// None` rather than failing the whole conversion, matching static decode's
+/// `SolanaIntermediateInstruction.parsed_instruction_data` posture.
+pub(crate) fn build_simulated_instruction(
+    value: &generated::parser::SimulatedInstruction,
+    instruction_index: u32,
+    idl_registry: &IdlRegistry,
+) -> SolanaSimulatedInstruction {
+    let accounts: Vec<SolanaAccount> = value
+        .accounts
+        .iter()
+        .map(|a| SolanaAccount {
+            account_key: a.account_key.clone(),
+            signer: a.is_signer,
+            writable: a.is_writable,
+        })
+        .collect();
+
+    // A jsonParsed instruction carries no raw instruction_data_hex/accounts,
+    // so there's nothing for parse_simulated_instruction_idl to decode; use
+    // the RPC's own parsed data instead.
+    let (parsed_instruction_data, rpc_parsed_data) = match &value.rpc_parsed_data {
+        Some(rpc_parsed) => (
+            None,
+            Some(SolanaRpcParsedInstructionDataIo {
+                instruction_type: rpc_parsed.instruction_type.clone(),
+                info_json: rpc_parsed.info_json.clone(),
+            }),
+        ),
+        None => (
+            parse_simulated_instruction_idl(
+                &value.program_key,
+                &accounts,
+                &value.instruction_data_hex,
+                idl_registry,
+            ),
+            None,
+        ),
+    };
+
+    SolanaSimulatedInstruction {
+        instruction_index,
+        stack_height: value.stack_height,
+        program_key: value.program_key.clone(),
+        accounts: accounts.clone(),
+        instruction_data_hex: value.instruction_data_hex.clone(),
+        is_unregistered: !crate::idl::builtin_programs::is_trusted_program(&value.program_key),
+        parsed_instruction_data,
+        rpc_parsed_data,
     }
+}
+
+/// IDL-decodes one simulated instruction using the same public
+/// `solana_parser` building blocks the static-decode path's private
+/// `parse_idl` uses internally, since simulated/inner instructions never
+/// appear in the raw transaction message and so can't go through
+/// `parse_transaction_with_idls`. Returns `None` on any resolution/decode
+/// failure (no IDL for this program, unmatched discriminator, malformed
+/// data/accounts) -- best-effort, never surfaced as an error.
+fn parse_simulated_instruction_idl(
+    program_key: &str,
+    accounts: &[SolanaAccount],
+    instruction_data_hex: &str,
+    idl_registry: &IdlRegistry,
+) -> Option<SolanaParsedInstructionDataIo> {
+    let data = hex::decode(instruction_data_hex).ok()?;
+    let account_addresses: Vec<AccountAddress> = accounts
+        .iter()
+        .map(|a| {
+            AccountAddress::Static(parser::SolanaAccount {
+                account_key: a.account_key.clone(),
+                signer: a.signer,
+                writable: a.writable,
+            })
+        })
+        .collect();
+
+    let configs = idl_registry.get_all_configs();
+    let custom_idls = if configs.is_empty() {
+        None
+    } else {
+        Some(
+            configs
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        )
+    };
+    let idl_records = construct_idl_records_map(custom_idls).ok()?;
+    let idl_record = idl_records.get(program_key)?;
+    let (idl, idl_json, idl_source) = resolve_idl_for_record(idl_record, program_key).ok()?;
+    let instruction = find_instruction_by_discriminator(&data, idl.instructions.clone()).ok()?;
+    let program_call_args = parse_data_into_args(&data, &instruction, &idl).ok()?;
+    let named_accounts = create_accounts_map(&account_addresses, &instruction).ok()?;
+    let discriminator = instruction.discriminator.clone()?;
+
+    Some(SolanaParsedInstructionDataIo {
+        instruction_name: instruction.name,
+        discriminator: hex::encode(discriminator),
+        named_accounts: named_accounts.into_iter().collect(),
+        program_call_args_json: canonical_args_json(&program_call_args),
+        idl_source: idl_source_string(&idl_source),
+        idl_hash: compute_idl_hash(&idl_json),
+    })
 }
 
 impl From<&SolanaMetadata> for SolanaIntermediateOutput {
@@ -514,8 +640,11 @@ mod tests {
         let simulated = generated::parser::SimulatedInstruction {
             program_key: "11111111111111111111111111111111".to_string(),
             instruction_data_hex: "0200000001000000000000000000".to_string(),
+            accounts: vec![],
+            stack_height: 2,
+            rpc_parsed_data: None,
         };
-        assert!(!SolanaSimulatedInstruction::from(&simulated).is_unregistered);
+        assert!(!build_simulated_instruction(&simulated, 0, &IdlRegistry::new()).is_unregistered);
     }
 
     #[test]
@@ -523,8 +652,11 @@ mod tests {
         let simulated = generated::parser::SimulatedInstruction {
             program_key: "Unknown1111111111111111111111111111111111".to_string(),
             instruction_data_hex: "ff".to_string(),
+            accounts: vec![],
+            stack_height: 2,
+            rpc_parsed_data: None,
         };
-        assert!(SolanaSimulatedInstruction::from(&simulated).is_unregistered);
+        assert!(build_simulated_instruction(&simulated, 0, &IdlRegistry::new()).is_unregistered);
     }
 
     #[test]
@@ -535,8 +667,11 @@ mod tests {
         let simulated = generated::parser::SimulatedInstruction {
             program_key: "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf".to_string(),
             instruction_data_hex: "deadbeef".to_string(),
+            accounts: vec![],
+            stack_height: 2,
+            rpc_parsed_data: None,
         };
-        assert!(!SolanaSimulatedInstruction::from(&simulated).is_unregistered);
+        assert!(!build_simulated_instruction(&simulated, 0, &IdlRegistry::new()).is_unregistered);
     }
 
     #[test]
@@ -550,14 +685,21 @@ mod tests {
         let router = generated::parser::SimulatedInstruction {
             program_key: router_program_id.to_string(),
             instruction_data_hex: router_instruction_data_hex.to_string(),
+            accounts: vec![],
+            stack_height: 1,
+            rpc_parsed_data: None,
         };
         let jupiter_cpi = generated::parser::SimulatedInstruction {
             program_key: jupiter_program_id.to_string(),
             instruction_data_hex: jupiter_cpi_data_hex.to_string(),
+            accounts: vec![],
+            stack_height: 2,
+            rpc_parsed_data: None,
         };
 
-        assert!(SolanaSimulatedInstruction::from(&router).is_unregistered);
-        assert!(!SolanaSimulatedInstruction::from(&jupiter_cpi).is_unregistered);
+        let registry = IdlRegistry::new();
+        assert!(build_simulated_instruction(&router, 0, &registry).is_unregistered);
+        assert!(!build_simulated_instruction(&jupiter_cpi, 0, &registry).is_unregistered);
     }
 
     #[test]
@@ -565,8 +707,11 @@ mod tests {
         let simulated = generated::parser::SimulatedInstruction {
             program_key: "Unknown1111111111111111111111111111111111".to_string(),
             instruction_data_hex: "ff".to_string(),
+            accounts: vec![],
+            stack_height: 2,
+            rpc_parsed_data: None,
         };
-        let io = SolanaSimulatedInstruction::from(&simulated);
+        let io = build_simulated_instruction(&simulated, 0, &IdlRegistry::new());
 
         let bytes = borsh::to_vec(&io).expect("borsh serializes");
         let recovered: SolanaSimulatedInstruction =

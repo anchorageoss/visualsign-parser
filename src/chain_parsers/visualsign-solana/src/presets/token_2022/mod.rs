@@ -100,6 +100,14 @@ enum Token2022Instruction {
         mint: String,
         authority: String,
     },
+    TransferChecked {
+        amount: u64,
+        decimals: u8,
+        source: String,
+        mint: String,
+        destination: String,
+        authority: String,
+    },
     Pause {
         mint: String,
         pause_authority: String,
@@ -243,6 +251,25 @@ fn parse_token_2022_instruction(
                     account: accounts[0].clone(),
                     mint: accounts[1].clone(),
                     authority: accounts[2].clone(),
+                });
+            }
+            TokenInstruction::TransferChecked { amount, decimals } => {
+                if accounts.len() < 4 {
+                    return Err("Invalid transferChecked: insufficient accounts".to_string());
+                }
+                if decimals > MAX_TOKEN_DECIMALS {
+                    return Err(format!(
+                        "Invalid transferChecked: decimals {decimals} exceeds maximum supported value {MAX_TOKEN_DECIMALS}"
+                    ));
+                }
+
+                return Ok(Token2022Instruction::TransferChecked {
+                    amount,
+                    decimals,
+                    source: accounts[0].clone(),
+                    mint: accounts[1].clone(),
+                    destination: accounts[2].clone(),
+                    authority: accounts[3].clone(),
                 });
             }
             TokenInstruction::FreezeAccount => {
@@ -403,6 +430,37 @@ fn create_token_2022_preview_layout(
                 create_number_field("Decimals", &decimals.to_string(), "")?,
                 create_text_field("Token Account", account)?,
                 create_text_field("Mint", mint)?,
+                create_text_field("Authority", authority)?,
+                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_raw_data_field(context.data(), None)?,
+            ];
+
+            (title, condensed, expanded)
+        }
+        Token2022Instruction::TransferChecked {
+            amount,
+            decimals,
+            source,
+            mint,
+            destination,
+            authority,
+        } => {
+            let formatted_amount = format_token_amount(*amount, *decimals);
+            let title = format!("Transfer Checked: {formatted_amount} tokens");
+
+            let condensed = vec![
+                create_text_field("Action", "Transfer Checked")?,
+                create_text_field("Amount", &formatted_amount)?,
+            ];
+
+            let expanded = vec![
+                create_text_field("Instruction", "Transfer Checked")?,
+                create_text_field("Amount", &formatted_amount)?,
+                create_number_field("Raw Amount", &amount.to_string(), "")?,
+                create_number_field("Decimals", &decimals.to_string(), "")?,
+                create_text_field("Source Account", source)?,
+                create_text_field("Mint", mint)?,
+                create_text_field("Destination Account", destination)?,
                 create_text_field("Authority", authority)?,
                 create_text_field("Program ID", &resolve_program_id(context))?,
                 create_raw_data_field(context.data(), None)?,
