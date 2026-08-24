@@ -431,6 +431,61 @@ mod tests {
         }
     }
 
+    /// PSC-3684 names vote *and* vote-override operations as the operations
+    /// that must be human-readable. Override is the harder of the two: it
+    /// carries a `Vec<[u8; 32]>` Merkle proof and a `StakeMerkleLeaf` struct
+    /// alongside the weights. Decode a full override payload and assert all
+    /// three survive as legible fields.
+    #[test]
+    fn test_cast_vote_override_renders_weights_proof_and_leaf() {
+        let voting_wallet = Pubkey::new_unique();
+        let stake_account = Pubkey::new_unique();
+        let proof_nodes: Vec<[u8; 32]> = vec![[0xaa; 32], [0xbb; 32]];
+
+        let mut data = discriminator_for("cast_vote_override");
+        data.extend_from_slice(&10_000u64.to_le_bytes());
+        data.extend_from_slice(&0u64.to_le_bytes());
+        data.extend_from_slice(&0u64.to_le_bytes());
+        data.extend_from_slice(&(proof_nodes.len() as u32).to_le_bytes());
+        for node in &proof_nodes {
+            data.extend_from_slice(node);
+        }
+        data.extend_from_slice(voting_wallet.as_ref());
+        data.extend_from_slice(stake_account.as_ref());
+        data.extend_from_slice(&42_000_000_000u64.to_le_bytes());
+
+        let parsed = parse_svm_governance_instruction(&data, &[])
+            .expect("cast_vote_override should decode against the bundled IDL");
+        assert_eq!(parsed.parsed.instruction_name, "cast_vote_override");
+
+        let (title, _condensed, expanded) =
+            build_parsed_fields(&parsed, SVM_GOVERNANCE_PROGRAM_ID).unwrap();
+        assert_eq!(title, "SVM Governance: cast_vote_override");
+        let entries: Vec<(String, String)> = expanded.iter().map(field_label_value).collect();
+        let value_of = |label: &str| {
+            entries
+                .iter()
+                .find(|(l, _)| l == label)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_else(|| panic!("missing field {label} in {entries:?}"))
+        };
+
+        assert_eq!(value_of("for_votes_bp"), "10000");
+        assert_eq!(
+            value_of("stake_merkle_proof"),
+            format!("[0x{},0x{}]", "aa".repeat(32), "bb".repeat(32))
+        );
+        // The leaf renders as one quote-free field carrying all three members,
+        // so a signer can see whose stake the override is claiming.
+        let leaf = value_of("stake_merkle_leaf");
+        assert!(
+            leaf.contains(&format!("voting_wallet:{voting_wallet}"))
+                && leaf.contains(&format!("stake_account:{stake_account}"))
+                && leaf.contains("active_stake:42000000000"),
+            "leaf must name the wallet, the stake account, and the stake: {leaf}"
+        );
+    }
+
     #[test]
     fn test_create_proposal_strings_are_charset_safe() {
         // title and description come straight from the proposer, so they are the
