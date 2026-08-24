@@ -267,11 +267,11 @@ fn format_arg_value(value: &serde_json::Value) -> String {
     }
 }
 
-/// Keep printable ASCII and spaces; drop everything else. `"` and `\` go
-/// because a leaf string carrying them would reintroduce the JSON quoting that
-/// `format_arg_value` renders without. Tabs, carriage returns, other control
-/// bytes, and non-ASCII go because `SignablePayload::validate_charset` rejects
-/// them.
+/// Keep printable ASCII and spaces, excluding `"` and `\`. `"` and `\` are
+/// stripped because a leaf string carrying them would reintroduce the JSON
+/// quoting that `format_arg_value` renders without. Tabs, carriage returns,
+/// other control bytes, and non-ASCII are stripped because
+/// `SignablePayload::validate_charset` rejects them.
 ///
 /// Load-bearing for this program, not defensive: `create_proposal` carries a
 /// free-form `title` and `description` supplied by the proposer.
