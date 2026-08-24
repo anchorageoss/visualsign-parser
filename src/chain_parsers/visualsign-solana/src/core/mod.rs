@@ -32,6 +32,8 @@ pub enum VisualizerKind {
     StakingPools(&'static str),
     /// Payment and simple transfer-related operations
     Payments(&'static str),
+    /// On-chain governance: proposals, voting, and protocol administration
+    Governance(&'static str),
 }
 
 /// Resolution of a compiled instruction's program_id_index.

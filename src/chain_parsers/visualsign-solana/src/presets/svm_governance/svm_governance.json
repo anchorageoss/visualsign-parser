@@ -1,0 +1,2806 @@
+{
+  "address": "govYkyQ3ePtGULAtY6V75qjWE8UH4vCUVQ1W4HdCAZU",
+  "metadata": {
+    "name": "svmgov_program",
+    "version": "0.5.0-40200",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "accept_admin",
+      "docs": [
+        "Step 2 of the two-step admin transfer: the nominated admin accepts and becomes",
+        "the active admin."
+      ],
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "new_admin",
+          "signer": true
+        },
+        {
+          "name": "global_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cast_vote",
+      "discriminator": [
+        20,
+        212,
+        15,
+        189,
+        69,
+        180,
+        69,
+        151
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        },
+        {
+          "name": "vote",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  111,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "spl_vote_account"
+              }
+            ]
+          }
+        },
+        {
+          "name": "spl_vote_account",
+          "docs": [
+            "enforced here. The signer-to-vote-account binding is proved in the handler",
+            "via the meta merkle proof: voting_wallet == signer AND vote_account ==",
+            "spl_vote_account, both anchored to proposal.consensus_result."
+          ]
+        },
+        {
+          "name": "vote_override_cache",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  111,
+                  116,
+                  101,
+                  95,
+                  111,
+                  118,
+                  101,
+                  114,
+                  114,
+                  105,
+                  100,
+                  101,
+                  95,
+                  99,
+                  97,
+                  99,
+                  104,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "vote"
+              }
+            ]
+          }
+        },
+        {
+          "name": "snapshot_program"
+        },
+        {
+          "name": "consensus_result"
+        },
+        {
+          "name": "meta_merkle_proof"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "for_votes_bp",
+          "type": "u64"
+        },
+        {
+          "name": "against_votes_bp",
+          "type": "u64"
+        },
+        {
+          "name": "abstain_votes_bp",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "cast_vote_override",
+      "discriminator": [
+        225,
+        8,
+        137,
+        98,
+        214,
+        156,
+        183,
+        62
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        },
+        {
+          "name": "validator_vote",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  111,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "spl_vote_account"
+              }
+            ]
+          }
+        },
+        {
+          "name": "spl_vote_account",
+          "docs": [
+            "enforced here. The signer here is the delegator (not the validator); the",
+            "handler proves stake_merkle_leaf.voting_wallet == signer and binds the",
+            "stake leaf to this vote account via the two-tier merkle proof",
+            "(stake_merkle_root nested inside meta_merkle_leaf)."
+          ]
+        },
+        {
+          "name": "vote_override",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  111,
+                  116,
+                  101,
+                  95,
+                  111,
+                  118,
+                  101,
+                  114,
+                  114,
+                  105,
+                  100,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "spl_stake_account"
+              },
+              {
+                "kind": "account",
+                "path": "validator_vote"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vote_override_cache",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  111,
+                  116,
+                  101,
+                  95,
+                  111,
+                  118,
+                  101,
+                  114,
+                  114,
+                  105,
+                  100,
+                  101,
+                  95,
+                  99,
+                  97,
+                  99,
+                  104,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "validator_vote"
+              }
+            ]
+          }
+        },
+        {
+          "name": "spl_stake_account"
+        },
+        {
+          "name": "snapshot_program"
+        },
+        {
+          "name": "consensus_result"
+        },
+        {
+          "name": "meta_merkle_proof"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "for_votes_bp",
+          "type": "u64"
+        },
+        {
+          "name": "against_votes_bp",
+          "type": "u64"
+        },
+        {
+          "name": "abstain_votes_bp",
+          "type": "u64"
+        },
+        {
+          "name": "stake_merkle_proof",
+          "type": {
+            "vec": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        },
+        {
+          "name": "stake_merkle_leaf",
+          "type": {
+            "defined": {
+              "name": "StakeMerkleLeaf"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "create_proposal",
+      "discriminator": [
+        132,
+        116,
+        68,
+        174,
+        216,
+        160,
+        198,
+        22
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "proposal",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  112,
+                  111,
+                  115,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "seed"
+              },
+              {
+                "kind": "account",
+                "path": "spl_vote_account"
+              }
+            ]
+          }
+        },
+        {
+          "name": "proposal_index",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  100,
+                  101,
+                  120
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "spl_vote_account",
+          "docs": [
+            "enforced here; the handler then deserializes VoteStateVersions and requires",
+            "node_pubkey == signer, proving the signer operates this vote account."
+          ]
+        },
+        {
+          "name": "global_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "seed",
+          "type": "u64"
+        },
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "description",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "finalize_proposal",
+      "discriminator": [
+        23,
+        68,
+        51,
+        167,
+        109,
+        173,
+        187,
+        164
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "flush_merkle_root",
+      "discriminator": [
+        10,
+        71,
+        17,
+        246,
+        162,
+        57,
+        144,
+        87
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        },
+        {
+          "name": "spl_vote_account",
+          "docs": [
+            "to the proposal by the init_ballot_box CPI's PDA seed check, which re-derives",
+            "[b\"proposal\", proposal_seed, spl_vote_account] against the signing proposal",
+            "PDA. A mismatched vote account is therefore rejected regardless of who signs",
+            "this instruction (the signer is the admin, not necessarily the author)."
+          ]
+        },
+        {
+          "name": "ballot_box"
+        },
+        {
+          "name": "ballot_program"
+        },
+        {
+          "name": "program_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  80,
+                  114,
+                  111,
+                  103,
+                  114,
+                  97,
+                  109,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "ballot_program"
+            }
+          }
+        },
+        {
+          "name": "global_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_config",
+      "discriminator": [
+        208,
+        127,
+        21,
+        1,
+        194,
+        190,
+        196,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "program",
+          "address": "govYkyQ3ePtGULAtY6V75qjWE8UH4vCUVQ1W4HdCAZU"
+        },
+        {
+          "name": "program_data"
+        }
+      ],
+      "args": [
+        {
+          "name": "max_title_length",
+          "type": "u16"
+        },
+        {
+          "name": "max_description_length",
+          "type": "u16"
+        },
+        {
+          "name": "max_support_epochs",
+          "type": "u64"
+        },
+        {
+          "name": "min_proposal_stake_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "cluster_support_pct_min_bps",
+          "type": "u64"
+        },
+        {
+          "name": "discussion_epochs",
+          "type": "u64"
+        },
+        {
+          "name": "voting_epochs",
+          "type": "u64"
+        },
+        {
+          "name": "snapshot_epoch_extension",
+          "type": "u64"
+        },
+        {
+          "name": "snapshot_slot_offset",
+          "type": "i64"
+        },
+        {
+          "name": "max_supporters",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "initialize_index",
+      "discriminator": [
+        204,
+        67,
+        3,
+        74,
+        139,
+        139,
+        233,
+        10
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "proposal_index",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  110,
+                  100,
+                  101,
+                  120
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "modify_vote",
+      "discriminator": [
+        116,
+        52,
+        102,
+        0,
+        121,
+        145,
+        27,
+        139
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        },
+        {
+          "name": "vote",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  111,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "spl_vote_account"
+              }
+            ]
+          }
+        },
+        {
+          "name": "spl_vote_account",
+          "docs": [
+            "enforced here. The signer-to-vote-account binding is proved in the handler",
+            "via the meta merkle proof: voting_wallet == signer AND vote_account ==",
+            "spl_vote_account, both anchored to proposal.consensus_result."
+          ]
+        },
+        {
+          "name": "snapshot_program"
+        },
+        {
+          "name": "consensus_result"
+        },
+        {
+          "name": "meta_merkle_proof"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "for_votes_bp",
+          "type": "u64"
+        },
+        {
+          "name": "against_votes_bp",
+          "type": "u64"
+        },
+        {
+          "name": "abstain_votes_bp",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "modify_vote_override",
+      "discriminator": [
+        42,
+        54,
+        123,
+        87,
+        239,
+        152,
+        22,
+        186
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        },
+        {
+          "name": "validator_vote",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  111,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "spl_vote_account"
+              }
+            ]
+          }
+        },
+        {
+          "name": "spl_vote_account",
+          "docs": [
+            "enforced here. The signer here is the delegator (not the validator); the",
+            "handler proves stake_merkle_leaf.voting_wallet == signer and binds the",
+            "stake leaf to this vote account via the two-tier merkle proof",
+            "(stake_merkle_root nested inside meta_merkle_leaf)."
+          ]
+        },
+        {
+          "name": "vote_override",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  111,
+                  116,
+                  101,
+                  95,
+                  111,
+                  118,
+                  101,
+                  114,
+                  114,
+                  105,
+                  100,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "spl_stake_account"
+              },
+              {
+                "kind": "account",
+                "path": "validator_vote"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vote_override_cache",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  111,
+                  116,
+                  101,
+                  95,
+                  111,
+                  118,
+                  101,
+                  114,
+                  114,
+                  105,
+                  100,
+                  101,
+                  95,
+                  99,
+                  97,
+                  99,
+                  104,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "validator_vote"
+              }
+            ]
+          }
+        },
+        {
+          "name": "spl_stake_account"
+        },
+        {
+          "name": "snapshot_program"
+        },
+        {
+          "name": "consensus_result"
+        },
+        {
+          "name": "meta_merkle_proof"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "for_votes_bp",
+          "type": "u64"
+        },
+        {
+          "name": "against_votes_bp",
+          "type": "u64"
+        },
+        {
+          "name": "abstain_votes_bp",
+          "type": "u64"
+        },
+        {
+          "name": "stake_merkle_proof",
+          "type": {
+            "vec": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        },
+        {
+          "name": "stake_merkle_leaf",
+          "type": {
+            "defined": {
+              "name": "StakeMerkleLeaf"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "nominate_admin",
+      "docs": [
+        "Step 1 of the two-step admin transfer: the current admin nominates a new admin.",
+        "The transfer only completes once the nominee calls `accept_admin`."
+      ],
+      "discriminator": [
+        134,
+        11,
+        31,
+        244,
+        20,
+        77,
+        138,
+        121
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "global_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "proposed_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "retally_support",
+      "docs": [
+        "Permissionless re-tally of a proposal's support at the current epoch.",
+        "Activates voting if the re-measured support now meets the threshold."
+      ],
+      "discriminator": [
+        132,
+        55,
+        145,
+        255,
+        12,
+        163,
+        151,
+        141
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "Any caller. Pays only the tx fee — plus the ballot-box rent iff this",
+            "retally activates voting and the ballot box does not exist yet."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        },
+        {
+          "name": "ballot_box",
+          "writable": true
+        },
+        {
+          "name": "ballot_program"
+        },
+        {
+          "name": "program_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  80,
+                  114,
+                  111,
+                  103,
+                  114,
+                  97,
+                  109,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "ballot_program"
+            }
+          }
+        },
+        {
+          "name": "global_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "support_proposal",
+      "discriminator": [
+        95,
+        239,
+        233,
+        199,
+        201,
+        62,
+        90,
+        27
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "proposal",
+          "writable": true
+        },
+        {
+          "name": "support",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  117,
+                  112,
+                  112,
+                  111,
+                  114,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "proposal"
+              },
+              {
+                "kind": "account",
+                "path": "spl_vote_account"
+              }
+            ]
+          }
+        },
+        {
+          "name": "spl_vote_account",
+          "docs": [
+            "enforced here; the handler then deserializes VoteStateVersions and requires",
+            "node_pubkey == signer, so a supporter can only pledge stake from a vote",
+            "account they operate."
+          ]
+        },
+        {
+          "name": "ballot_box",
+          "writable": true
+        },
+        {
+          "name": "ballot_program"
+        },
+        {
+          "name": "program_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  80,
+                  114,
+                  111,
+                  103,
+                  114,
+                  97,
+                  109,
+                  67,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "ballot_program"
+            }
+          }
+        },
+        {
+          "name": "global_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_config",
+      "discriminator": [
+        29,
+        158,
+        252,
+        191,
+        10,
+        83,
+        219,
+        99
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "global_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  108,
+                  111,
+                  98,
+                  97,
+                  108,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "max_title_length",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "max_description_length",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "max_support_epochs",
+          "type": {
+            "option": "u64"
+          }
+        },
+        {
+          "name": "min_proposal_stake_lamports",
+          "type": {
+            "option": "u64"
+          }
+        },
+        {
+          "name": "cluster_support_pct_min_bps",
+          "type": {
+            "option": "u64"
+          }
+        },
+        {
+          "name": "discussion_epochs",
+          "type": {
+            "option": "u64"
+          }
+        },
+        {
+          "name": "voting_epochs",
+          "type": {
+            "option": "u64"
+          }
+        },
+        {
+          "name": "snapshot_epoch_extension",
+          "type": {
+            "option": "u64"
+          }
+        },
+        {
+          "name": "snapshot_slot_offset",
+          "type": {
+            "option": "i64"
+          }
+        },
+        {
+          "name": "max_supporters",
+          "type": {
+            "option": "u32"
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "GlobalConfig",
+      "discriminator": [
+        149,
+        8,
+        156,
+        202,
+        160,
+        252,
+        176,
+        217
+      ]
+    },
+    {
+      "name": "Proposal",
+      "discriminator": [
+        26,
+        94,
+        189,
+        187,
+        116,
+        136,
+        53,
+        33
+      ]
+    },
+    {
+      "name": "ProposalIndex",
+      "discriminator": [
+        83,
+        97,
+        143,
+        58,
+        176,
+        46,
+        177,
+        195
+      ]
+    },
+    {
+      "name": "Support",
+      "discriminator": [
+        247,
+        108,
+        3,
+        111,
+        84,
+        51,
+        217,
+        107
+      ]
+    },
+    {
+      "name": "Vote",
+      "discriminator": [
+        96,
+        91,
+        104,
+        57,
+        145,
+        35,
+        172,
+        155
+      ]
+    },
+    {
+      "name": "VoteOverride",
+      "discriminator": [
+        130,
+        93,
+        172,
+        50,
+        168,
+        151,
+        176,
+        188
+      ]
+    },
+    {
+      "name": "VoteOverrideCache",
+      "discriminator": [
+        195,
+        82,
+        50,
+        219,
+        140,
+        34,
+        108,
+        57
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AdminNominated",
+      "discriminator": [
+        22,
+        247,
+        53,
+        33,
+        59,
+        59,
+        68,
+        112
+      ]
+    },
+    {
+      "name": "AdminTransferred",
+      "discriminator": [
+        255,
+        147,
+        182,
+        5,
+        199,
+        217,
+        38,
+        179
+      ]
+    },
+    {
+      "name": "MerkleRootFlushed",
+      "discriminator": [
+        120,
+        37,
+        53,
+        216,
+        119,
+        172,
+        17,
+        144
+      ]
+    },
+    {
+      "name": "ProposalCreated",
+      "discriminator": [
+        186,
+        8,
+        160,
+        108,
+        81,
+        13,
+        51,
+        206
+      ]
+    },
+    {
+      "name": "ProposalFinalized",
+      "discriminator": [
+        159,
+        104,
+        210,
+        220,
+        86,
+        209,
+        61,
+        51
+      ]
+    },
+    {
+      "name": "ProposalRetallied",
+      "discriminator": [
+        50,
+        227,
+        187,
+        86,
+        132,
+        93,
+        57,
+        3
+      ]
+    },
+    {
+      "name": "ProposalSupported",
+      "discriminator": [
+        248,
+        220,
+        71,
+        30,
+        127,
+        209,
+        67,
+        231
+      ]
+    },
+    {
+      "name": "VoteCast",
+      "discriminator": [
+        39,
+        53,
+        195,
+        104,
+        188,
+        17,
+        225,
+        213
+      ]
+    },
+    {
+      "name": "VoteModified",
+      "discriminator": [
+        192,
+        64,
+        130,
+        9,
+        210,
+        47,
+        57,
+        175
+      ]
+    },
+    {
+      "name": "VoteOverrideCast",
+      "discriminator": [
+        111,
+        204,
+        225,
+        252,
+        254,
+        218,
+        120,
+        236
+      ]
+    },
+    {
+      "name": "VoteOverrideModified",
+      "discriminator": [
+        235,
+        74,
+        153,
+        225,
+        242,
+        72,
+        228,
+        9
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "NotEnoughStake",
+      "msg": "Insufficient stake to perform this action"
+    },
+    {
+      "code": 6001,
+      "name": "TitleEmpty",
+      "msg": "The title of the proposal cannot be empty"
+    },
+    {
+      "code": 6002,
+      "name": "TitleTooLong",
+      "msg": "The title of the proposal is too long, max 200 bytes"
+    },
+    {
+      "code": 6003,
+      "name": "DescriptionEmpty",
+      "msg": "The description of the proposal cannot be empty"
+    },
+    {
+      "code": 6004,
+      "name": "DescriptionTooLong",
+      "msg": "The description of the proposal is too long, max 500 bytes"
+    },
+    {
+      "code": 6005,
+      "name": "DescriptionInvalid",
+      "msg": "The description of the proposal must point to a github link"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidProposalId",
+      "msg": "Invalid proposal ID"
+    },
+    {
+      "code": 6007,
+      "name": "VotingNotStarted",
+      "msg": "Voting on proposal not yet started"
+    },
+    {
+      "code": 6008,
+      "name": "ProposalClosed",
+      "msg": "Proposal voting period has ended"
+    },
+    {
+      "code": 6009,
+      "name": "ProposalFinalized",
+      "msg": "Proposal has already been finalized"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidVoteDistribution",
+      "msg": "Vote distribution must add up to 100% in Basis Points"
+    },
+    {
+      "code": 6011,
+      "name": "VotingPeriodNotEnded",
+      "msg": "Voting period not yet ended"
+    },
+    {
+      "code": 6012,
+      "name": "InvalidVoteAccount",
+      "msg": "Invalid vote account"
+    },
+    {
+      "code": 6013,
+      "name": "FailedDeserializeNodePubkey",
+      "msg": "Failed to deserialize node_pubkey from Vote account"
+    },
+    {
+      "code": 6014,
+      "name": "VoteNodePubkeyMismatch",
+      "msg": "Deserialized node_pubkey from Vote accounts does not match"
+    },
+    {
+      "code": 6015,
+      "name": "NotEnoughAccounts",
+      "msg": "Not enough accounts for tally"
+    },
+    {
+      "code": 6016,
+      "name": "InvalidClusterStake",
+      "msg": "Cluster stake cannot be zero"
+    },
+    {
+      "code": 6017,
+      "name": "InvalidStartEpoch",
+      "msg": "Start epoch must be current or future epoch"
+    },
+    {
+      "code": 6018,
+      "name": "InvalidVotingLength",
+      "msg": "Voting length must be bigger than 0"
+    },
+    {
+      "code": 6019,
+      "name": "InvalidVoteAccountVersion",
+      "msg": "Invalid Vote account version"
+    },
+    {
+      "code": 6020,
+      "name": "InvalidVoteAccountSize",
+      "msg": "Invalid Vote account size"
+    },
+    {
+      "code": 6021,
+      "name": "InvalidStakeAccount",
+      "msg": "Invalid stake account"
+    },
+    {
+      "code": 6022,
+      "name": "InvalidStakeState",
+      "msg": "Invalid stake account state"
+    },
+    {
+      "code": 6023,
+      "name": "InvalidStakeAccountSize",
+      "msg": "Invalid Stake account size"
+    },
+    {
+      "code": 6024,
+      "name": "InvalidSnapshotProgram",
+      "msg": "Invalid Snapshot program: provided program ID does not match the expected Merkle Verifier Service program"
+    },
+    {
+      "code": 6025,
+      "name": "UnauthorizedMerkleRootUpdate",
+      "msg": "Only the original proposal author can add the merkle root hash"
+    },
+    {
+      "code": 6026,
+      "name": "MerkleRootAlreadySet",
+      "msg": "Merkle root hash is already set for this proposal"
+    },
+    {
+      "code": 6027,
+      "name": "InvalidMerkleRoot",
+      "msg": "Merkle root hash cannot be all zeros"
+    },
+    {
+      "code": 6028,
+      "name": "InvalidSnapshotSlot",
+      "msg": "Invalid snapshot slot: snapshot slot must be past or current slot"
+    },
+    {
+      "code": 6029,
+      "name": "MustBeOwnedBySnapshotProgram",
+      "msg": "Account must be owned by Snapshot program"
+    },
+    {
+      "code": 6030,
+      "name": "InvalidConsensusResultPDA",
+      "msg": "Invalid consensus result PDA"
+    },
+    {
+      "code": 6031,
+      "name": "CannotDeserializeMetaMerkleProofPDA",
+      "msg": "Cannot deserialize MetaMerkleProof PDA"
+    },
+    {
+      "code": 6032,
+      "name": "CannotDeserializeConsensusResult",
+      "msg": "Cannot deserialize ConsensusResult"
+    },
+    {
+      "code": 6033,
+      "name": "CannotModifyAfterStart",
+      "msg": "Cannot modify proposal after voting has started"
+    },
+    {
+      "code": 6034,
+      "name": "VotingLengthTooLong",
+      "msg": "Voting length exceeds maximum allowed epochs"
+    },
+    {
+      "code": 6035,
+      "name": "ArithmeticOverflow",
+      "msg": "Arithmetic overflow occurred"
+    },
+    {
+      "code": 6036,
+      "name": "SnapshotProgramUpgraded",
+      "msg": "Snapshot program has been upgraded, update protection triggered"
+    },
+    {
+      "code": 6037,
+      "name": "MerkleRootNotSet",
+      "msg": "Merkle root hash has not been set for this proposal"
+    },
+    {
+      "code": 6038,
+      "name": "SupportPeriodExpired",
+      "msg": "Support period has expired for this proposal"
+    },
+    {
+      "code": 6039,
+      "name": "NotInSupportPeriod",
+      "msg": "Not within the support period"
+    },
+    {
+      "code": 6040,
+      "name": "ConsensusResultNotSet",
+      "msg": "Consensus result has not been set for this proposal"
+    },
+    {
+      "code": 6041,
+      "name": "Unauthorized",
+      "msg": "Unauthorized: caller is not authorized to perform this action"
+    },
+    {
+      "code": 6042,
+      "name": "ProposalNotInVotingPhase",
+      "msg": "Proposal is not in voting phase"
+    },
+    {
+      "code": 6043,
+      "name": "InvalidVoteOverrideCache",
+      "msg": "Invalid vote override cache"
+    },
+    {
+      "code": 6044,
+      "name": "StakeAccountOwnerMismatch",
+      "msg": "Stake account owner mismatch"
+    },
+    {
+      "code": 6045,
+      "name": "UnauthorizedAdmin",
+      "msg": "Unauthorized: only the admin can perform this action"
+    },
+    {
+      "code": 6046,
+      "name": "InvalidProgram",
+      "msg": "Invalid program"
+    },
+    {
+      "code": 6047,
+      "name": "InvalidClusterSupportPctMin",
+      "msg": "Invalid cluster support percentage minimum in basis points (must be between 0 and 10,000)"
+    },
+    {
+      "code": 6048,
+      "name": "InvalidMaxTitleLength",
+      "msg": "Invalid max title length (must be greater than 0 and less than or equal to 200)"
+    },
+    {
+      "code": 6049,
+      "name": "InvalidMaxDescriptionLength",
+      "msg": "Invalid max description length (must be greater than 0 and less than or equal to 500)"
+    },
+    {
+      "code": 6050,
+      "name": "InvalidAdmin",
+      "msg": "Admin cannot be the default (all-zero) pubkey"
+    },
+    {
+      "code": 6051,
+      "name": "NoPendingAdmin",
+      "msg": "No pending admin nomination exists to accept"
+    },
+    {
+      "code": 6052,
+      "name": "NotPendingAdmin",
+      "msg": "Signer is not the pending admin nominee"
+    },
+    {
+      "code": 6053,
+      "name": "InvalidBallotBox",
+      "msg": "Invalid ballot box: provided account does not match the expected BallotBox PDA for the snapshot slot"
+    },
+    {
+      "code": 6054,
+      "name": "SnapshotSlotNotInFuture",
+      "msg": "Snapshot slot must be in the future (greater than the current slot)"
+    },
+    {
+      "code": 6055,
+      "name": "NoSupporters",
+      "msg": "Proposal has no supporters to retally"
+    },
+    {
+      "code": 6056,
+      "name": "SupporterLimitReached",
+      "msg": "Proposal has reached the maximum number of supporters"
+    },
+    {
+      "code": 6057,
+      "name": "InvalidMaxSupporters",
+      "msg": "Invalid max supporters (must be greater than 0 and less than or equal to the supporter limit)"
+    },
+    {
+      "code": 6058,
+      "name": "SupportAlreadyActivated",
+      "msg": "Support is closed: this proposal already reached its support threshold and voting has been scheduled"
+    }
+  ],
+  "types": [
+    {
+      "name": "AdminNominated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "current_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AdminTransferred",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GlobalConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "docs": [
+              "The admin pubkey who can update this config"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "docs": [
+              "A pending admin nominated by the current admin. The transfer only completes",
+              "once this key signs `accept_admin`. `None` when no transfer is in progress."
+            ],
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "max_title_length",
+            "docs": [
+              "Maximum length for proposal titles"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_description_length",
+            "docs": [
+              "Maximum length for proposal descriptions"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "max_support_epochs",
+            "docs": [
+              "Maximum epochs allowed for support phase (0 means same epoch as creation)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_proposal_stake_lamports",
+            "docs": [
+              "Minimum stake in lamports required to create a proposal"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "cluster_support_pct_min_bps",
+            "docs": [
+              "Minimum cluster support percentage in BASIS POINTS (1 bp = 0.01%)",
+              "e.g., 1000 = 10%, 50 = 0.5%"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "discussion_epochs",
+            "docs": [
+              "Number of full epochs reserved for discussion"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "voting_epochs",
+            "docs": [
+              "Number of epochs for voting period"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "snapshot_epoch_extension",
+            "docs": [
+              "Epochs of extension for snapshot"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "snapshot_slot_offset",
+            "docs": [
+              "Slot offset from epoch start for snapshot computation (can be negative)"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump seed"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "max_supporters",
+            "docs": [
+              "Maximum number of validators that may support a single proposal. Bounds",
+              "the per-transaction cost of re-tallying the `supporters` list so a",
+              "proposal can always be processed within Solana's heap/compute limits.",
+              "Must be in `1..=MAX_SUPPORTERS_LIMIT`."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MerkleRootFlushed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "author",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_snapshot_slot",
+            "type": "u64"
+          },
+          {
+            "name": "flush_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Proposal",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "author",
+            "docs": [
+              "The public key of the validator who created this proposal"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "type": "string"
+          },
+          {
+            "name": "creation_epoch",
+            "type": "u64"
+          },
+          {
+            "name": "start_epoch",
+            "type": "u64"
+          },
+          {
+            "name": "end_epoch",
+            "type": "u64"
+          },
+          {
+            "name": "proposer_stake_weight_bp",
+            "type": "u64"
+          },
+          {
+            "name": "cluster_support_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "for_votes_lamports",
+            "docs": [
+              "Total lamports voted in favor of this proposal"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "against_votes_lamports",
+            "docs": [
+              "Total lamports voted against this proposal"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "abstain_votes_lamports",
+            "docs": [
+              "Total lamports that abstained from voting on this proposal"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "voting",
+            "type": "bool"
+          },
+          {
+            "name": "finalized",
+            "type": "bool"
+          },
+          {
+            "name": "proposal_bump",
+            "type": "u8"
+          },
+          {
+            "name": "creation_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "vote_count",
+            "type": "u32"
+          },
+          {
+            "name": "index",
+            "type": "u32"
+          },
+          {
+            "name": "consensus_result",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "snapshot_slot",
+            "docs": [
+              "Slot number when the validator stake snapshot was taken"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "proposal_seed",
+            "type": "u64"
+          },
+          {
+            "name": "vote_account_pubkey",
+            "type": "pubkey"
+          },
+          {
+            "name": "num_supporters",
+            "docs": [
+              "Number of supporter entries stored in the account data at the fixed",
+              "offset [`Proposal::SUPPORTERS_OFFSET`].",
+              "",
+              "The supporter vote-account pubkeys are intentionally NOT a field of",
+              "this struct: they live past the struct's Borsh capacity boundary",
+              "(`discriminator + INIT_SPACE`), so Anchor only (de)serializes this",
+              "4-byte count. The entries are read zero-copy via",
+              "[`Proposal::supporters`] and written by [`Proposal::append_supporter`]."
+            ],
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "author",
+            "type": "pubkey"
+          },
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "description",
+            "type": "string"
+          },
+          {
+            "name": "creation_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalFinalized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "finalizer",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_for_votes",
+            "type": "u64"
+          },
+          {
+            "name": "total_against_votes",
+            "type": "u64"
+          },
+          {
+            "name": "total_abstain_votes",
+            "type": "u64"
+          },
+          {
+            "name": "total_votes_count",
+            "type": "u32"
+          },
+          {
+            "name": "finalization_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalIndex",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "current_index",
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalRetallied",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "caller",
+            "type": "pubkey"
+          },
+          {
+            "name": "cluster_support_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "voting_activated",
+            "type": "bool"
+          },
+          {
+            "name": "snapshot_slot",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalSupported",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "supporter",
+            "type": "pubkey"
+          },
+          {
+            "name": "cluster_support_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "voting_activated",
+            "type": "bool"
+          },
+          {
+            "name": "snapshot_slot",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StakeMerkleLeaf",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "voting_wallet",
+            "docs": [
+              "Wallet designated for governance voting for the stake account."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "stake_account",
+            "docs": [
+              "The stake account address."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "active_stake",
+            "docs": [
+              "Active delegated stake amount."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Support",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "validator",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Vote",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "validator",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "for_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "against_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "abstain_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "for_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "against_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "abstain_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "stake",
+            "type": "u64"
+          },
+          {
+            "name": "override_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "vote_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VoteCast",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "voter",
+            "type": "pubkey"
+          },
+          {
+            "name": "vote_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "for_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "against_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "abstain_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "for_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "against_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "abstain_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "vote_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VoteModified",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "voter",
+            "type": "pubkey"
+          },
+          {
+            "name": "vote_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "old_for_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "old_against_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "old_abstain_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "new_for_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "new_against_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "new_abstain_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "for_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "against_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "abstain_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "modification_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VoteOverride",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "delegator",
+            "type": "pubkey"
+          },
+          {
+            "name": "stake_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "validator",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "vote_account_validator",
+            "type": "pubkey"
+          },
+          {
+            "name": "for_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "against_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "abstain_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "for_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "against_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "abstain_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "stake_amount",
+            "type": "u64"
+          },
+          {
+            "name": "vote_override_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VoteOverrideCache",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "validator",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposal",
+            "type": "pubkey"
+          },
+          {
+            "name": "vote_account_validator",
+            "type": "pubkey"
+          },
+          {
+            "name": "for_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "against_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "abstain_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "total_stake",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VoteOverrideCast",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "delegator",
+            "type": "pubkey"
+          },
+          {
+            "name": "stake_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "validator",
+            "type": "pubkey"
+          },
+          {
+            "name": "for_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "against_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "abstain_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "for_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "against_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "abstain_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "stake_amount",
+            "type": "u64"
+          },
+          {
+            "name": "vote_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VoteOverrideModified",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "proposal_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "delegator",
+            "type": "pubkey"
+          },
+          {
+            "name": "stake_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "validator",
+            "type": "pubkey"
+          },
+          {
+            "name": "old_for_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "old_against_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "old_abstain_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "new_for_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "new_against_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "new_abstain_votes_bp",
+            "type": "u64"
+          },
+          {
+            "name": "for_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "against_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "abstain_votes_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "stake_amount",
+            "type": "u64"
+          },
+          {
+            "name": "modification_timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}
