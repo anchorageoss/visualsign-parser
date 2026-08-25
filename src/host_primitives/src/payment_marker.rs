@@ -11,9 +11,12 @@
 //! pubkey pinned at TVC deploy time (`GATEWAY_SIGNING_PUBKEY_HEX`), and
 //! binds the marker to the full authenticated request body via
 //! `request_hash` (all of `chain`, `unsigned_payload`, `chain_metadata`, and
-//! `include_intermediate_output`), so a compromised gateway cannot replay a
-//! marker against a request with different metadata or intermediate-output
-//! settings. The settlement-side fields (`txid`, `payer`, `pay_to`,
+//! `include_intermediate_output`). This stops a party holding one valid
+//! marker (but not the gateway's signing key) from replaying it against a
+//! different request with different metadata or intermediate-output
+//! settings; it does not protect against a compromised signing key itself,
+//! which could mint a fresh marker for any request. The settlement-side
+//! fields (`txid`, `payer`, `pay_to`,
 //! `amount`, `mint`, `network`, `x_payment_hash`) are carried in the signed
 //! marker for the record but are not independently cross-checked by
 //! parser_app today; that deeper verification (including recomputing
@@ -100,11 +103,12 @@ impl VerifiedPaymentMarker {
 }
 
 /// Compute `request_hash` over the full authenticated request: `chain`,
-/// `unsigned_payload`, `chain_metadata` (pass the caller's
-/// `borsh::to_vec` of `Option<ChainMetadata>`, or an empty slice if absent,
-/// matching the convention used for `ParsedTransactionPayload::metadata_digest`),
-/// and `include_intermediate_output`. Both gateway and parser_app call this
-/// so the binding is unambiguous; every variable-length field is
+/// `unsigned_payload`, `chain_metadata` (pass `borsh::to_vec` of the inner
+/// `ChainMetadata` value when present, NOT wrapped in `Option` (no
+/// discriminant byte), or an empty slice if absent; matching the convention
+/// used for `ParsedTransactionPayload::metadata_digest`), and
+/// `include_intermediate_output`. Both gateway and parser_app call this so
+/// the binding is unambiguous; every variable-length field is
 /// length-prefixed so no two distinct inputs can hash to the same preimage.
 #[must_use]
 pub fn request_hash(
