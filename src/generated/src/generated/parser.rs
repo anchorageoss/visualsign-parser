@@ -244,118 +244,15 @@ pub struct SolanaMetadata {
         ::prost::alloc::string::String,
         Idl,
     >,
-    /// Result of a caller-supplied transaction simulation.
-    #[prost(message, optional, tag = "4")]
-    #[cfg_attr(feature = "serde_derive", serde(default))]
-    pub simulate_transaction_result: ::core::option::Option<SimulateTransactionResult>,
-}
-/// Inner/CPI calls a transaction simulation observed, grouped by the
-/// top-level instruction that triggered them. Top-level instructions are
-/// already visible via static decode, so they aren't repeated here.
-#[cfg_attr(
-    feature = "serde_derive",
-    derive(::serde::Serialize, ::serde::Deserialize),
-    serde(rename_all = "camelCase")
-)]
-#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SimulateTransactionResult {
-    #[prost(message, repeated, tag = "1")]
-    pub inner_instructions: ::prost::alloc::vec::Vec<InnerInstructionGroup>,
-}
-/// Inner/CPI calls triggered by one top-level instruction.
-#[cfg_attr(
-    feature = "serde_derive",
-    derive(::serde::Serialize, ::serde::Deserialize),
-    serde(rename_all = "camelCase")
-)]
-#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct InnerInstructionGroup {
-    /// Position of the triggering top-level instruction (0-based), matching
-    /// static decode's instruction indexing.
-    #[prost(uint32, tag = "1")]
-    pub instruction_index: u32,
-    #[prost(message, repeated, tag = "2")]
-    pub instructions: ::prost::alloc::vec::Vec<SimulatedInstruction>,
-}
-/// One inner/CPI call observed during a transaction simulation.
-#[cfg_attr(
-    feature = "serde_derive",
-    derive(::serde::Serialize, ::serde::Deserialize),
-    serde(rename_all = "camelCase")
-)]
-#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SimulatedInstruction {
-    /// Base58-encoded program ID this instruction invokes.
-    #[prost(string, tag = "1")]
-    pub program_key: ::prost::alloc::string::String,
-    /// Hex-encoded raw instruction data. Empty when the RPC returned this
-    /// instruction jsonParsed instead of raw -- see rpc_parsed_data.
-    #[prost(string, tag = "2")]
-    pub instruction_data_hex: ::prost::alloc::string::String,
-    /// Accounts passed to this instruction, in order, resolved against the
-    /// transaction's account keys (including any resolved address-lookup-table
-    /// entries). Lets the parser IDL-decode simulated/inner instructions the
-    /// same way it decodes statically-visible ones. Empty when the RPC returned
-    /// this instruction jsonParsed instead of raw -- see rpc_parsed_data.
-    #[prost(message, repeated, tag = "3")]
-    #[cfg_attr(feature = "serde_derive", serde(default))]
-    pub accounts: ::prost::alloc::vec::Vec<SimulatedInstructionAccount>,
-    /// Call depth: 2+ for inner/CPI calls. Matches Solana simulation's own
-    /// stackHeight semantics.
-    #[prost(uint32, tag = "4")]
-    pub stack_height: u32,
-    /// Set when the RPC returned this instruction jsonParsed (recognized
-    /// programs, e.g. System/Token) instead of raw/compiled. Mutually exclusive
-    /// with instruction_data_hex/accounts being populated: a jsonParsed
-    /// instruction carries no raw data to IDL-decode, so this is the only
-    /// source of instruction detail in that case.
-    #[prost(message, optional, tag = "5")]
-    #[cfg_attr(feature = "serde_derive", serde(default))]
-    pub rpc_parsed_data: ::core::option::Option<RpcParsedInstructionData>,
-}
-/// The RPC's own jsonParsed decode of an instruction (program-specific state
-/// parser output), as returned for recognized programs. Distinct from
-/// SolanaParsedInstructionDataIo, which is this parser's own IDL-decoded
-/// output -- this is decoded by the RPC node, not by visualsign-parser.
-#[cfg_attr(
-    feature = "serde_derive",
-    derive(::serde::Serialize, ::serde::Deserialize),
-    serde(rename_all = "camelCase")
-)]
-#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct RpcParsedInstructionData {
-    /// The RPC's instruction type name, e.g. "initializeAccount3", "transfer".
-    #[prost(string, tag = "1")]
-    pub instruction_type: ::prost::alloc::string::String,
-    /// The RPC's `parsed.info` object, re-serialized as a JSON string.
-    #[prost(string, tag = "2")]
-    pub info_json: ::prost::alloc::string::String,
-}
-/// One account passed to a SimulatedInstruction.
-#[cfg_attr(
-    feature = "serde_derive",
-    derive(::serde::Serialize, ::serde::Deserialize),
-    serde(rename_all = "camelCase")
-)]
-#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SimulatedInstructionAccount {
-    /// Base58-encoded account public key.
-    #[prost(string, tag = "1")]
-    pub account_key: ::prost::alloc::string::String,
-    #[prost(bool, tag = "2")]
-    pub is_signer: bool,
-    #[prost(bool, tag = "3")]
-    pub is_writable: bool,
+    /// Raw simulateTransaction RPC response bytes (innerInstructions section),
+    /// base64-encoded (matching unsigned_payload's convention), sent with no
+    /// caller-side decode/reshape. The parser runs this through the same
+    /// static-decode path (parse_transaction_with_idls) used for
+    /// unsigned_payload.
+    #[prost(string, optional, tag = "5")]
+    pub simulated_transaction_result: ::core::option::Option<
+        ::prost::alloc::string::String,
+    >,
 }
 #[cfg_attr(
     feature = "serde_derive",

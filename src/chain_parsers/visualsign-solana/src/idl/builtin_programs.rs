@@ -21,6 +21,13 @@
 //! `canonical_name`). Source 3 carries no canonical name (the preset itself
 //! drives rendering); these IDs are still "trusted" for the purpose of
 //! refusing caller IDL overrides (`is_trusted_program`).
+//!
+//! `registered_source` answers a narrower, separate question for simulated
+//! (inner/CPI) instructions: which of these sources, if any, do we ourselves
+//! vouch for this program ID through. It reports source 2 (`ProgramType`) as
+//! `ThirdParty` and a caller-supplied `idl_mappings` entry as
+//! `CallerSupplied`, rather than folding either into the trusted set -- see
+//! [`crate::intermediate::RegisteredSource`].
 
 use crate::core::available_visualizers;
 use solana_parser::ProgramType;
@@ -210,6 +217,41 @@ pub fn is_trusted_program(program_id_str: &str) -> bool {
     canonical_name(program_id_str).is_some() || preset_program_ids().contains(program_id_str)
 }
 
+/// Where `program_id_str` is registered, if at all -- see
+/// [`crate::intermediate::RegisteredSource`]. `caller_idl_program_ids` is the
+/// set of program IDs the caller supplied a custom IDL for (the keys of
+/// `IdlRegistry::get_all_configs()`), used only to detect `CallerSupplied`;
+/// pass an empty map if unavailable.
+///
+/// Unlike `is_trusted_program`, `Native`/`Preset` deliberately exclude
+/// `ProgramType` (the `solana_parser` crate's built-in-IDL list) -- our own
+/// trusted set should reflect sources we author or vendor ourselves, not an
+/// external, unaudited crate's program classification. A `ProgramType` match
+/// is reported separately as `ThirdParty`, and a caller-supplied IDL as
+/// `CallerSupplied`, both distinct from `Unregistered`: something was found,
+/// it's just not one we vouch for.
+pub fn registered_source(
+    program_id_str: &str,
+    caller_idl_program_ids: &std::collections::BTreeMap<String, solana_parser::CustomIdlConfig>,
+) -> crate::intermediate::RegisteredSource {
+    use crate::intermediate::RegisteredSource;
+
+    if NATIVE_PROGRAM_NAMES
+        .iter()
+        .any(|(id, _)| *id == program_id_str)
+    {
+        RegisteredSource::Native
+    } else if preset_program_ids().contains(program_id_str) {
+        RegisteredSource::Preset
+    } else if ProgramType::from_program_id(program_id_str).is_some() {
+        RegisteredSource::ThirdParty
+    } else if caller_idl_program_ids.contains_key(program_id_str) {
+        RegisteredSource::CallerSupplied
+    } else {
+        RegisteredSource::Unregistered
+    }
+}
+
 /// Is the given string a canonical program name reserved for a specific
 /// program ID? Used to block display-name impersonation: a caller may not
 /// submit an IDL labeled `"System Program"` against an arbitrary pubkey.
@@ -239,6 +281,138 @@ pub fn is_reserved_canonical_name(name: &str) -> bool {
     ]
     .iter()
     .any(|p| builtin_idl_program_name(p) == name)
+}
+
+/// The 19 IDL-backed in-crate presets' Anchor IDL JSON, keyed by program ID --
+/// the same files each preset's own visualizer `include_str!`s for rendering,
+/// re-included here so the *structured* decode path (`parse_idl` /
+/// `decode_raw_inner_instructions`, both top-level and simulated) can use
+/// them too. Presets are otherwise invisible to that path: it only ever sees
+/// `solana_parser::ProgramType` and caller `idl_mappings`, never
+/// `available_visualizers()` (that function drives only the human-facing
+/// `SignablePayload` rendering).
+///
+/// Deliberately excludes the 6 hand-written presets (System, SPL Token,
+/// Compute Budget, Associated Token Account, Stake Pool, Swig Wallet) -- they
+/// predate Anchor and have no IDL JSON to feed in.
+///
+/// `override_builtin: true` on every entry: for the 4 programs that also
+/// have a `solana_parser::ProgramType` built-in (Orca, Drift, Meteora DLMM,
+/// Jupiter Aggregator V6), the in-crate preset's IDL is the one Anchorage
+/// actually curates and ships decode features against, so it should win.
+fn preset_idl_configs()
+-> &'static std::collections::BTreeMap<String, solana_parser::CustomIdlConfig> {
+    use solana_parser::{CustomIdl, CustomIdlConfig};
+
+    static PRESET_IDL_CONFIGS: OnceLock<std::collections::BTreeMap<String, CustomIdlConfig>> =
+        OnceLock::new();
+    PRESET_IDL_CONFIGS.get_or_init(|| {
+        const ENTRIES: &[(&str, &str)] = &[
+            (
+                "DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH",
+                include_str!("../presets/dflow_aggregator/dflow_aggregator.json"),
+            ),
+            (
+                "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH",
+                include_str!("../presets/drift/drift.json"),
+            ),
+            (
+                "ExponentnaRg3CQbW6dqQNZKXp7gtZ9DGMp1cwC4HAS7",
+                include_str!("../presets/exponent_finance/exponent_finance.json"),
+            ),
+            (
+                "jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi",
+                include_str!("../presets/jupiter_borrow/jupiter_borrow.json"),
+            ),
+            (
+                "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9",
+                include_str!("../presets/jupiter_earn/jupiter_earn.json"),
+            ),
+            (
+                "PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu",
+                include_str!("../presets/jupiter_perps/jupiter_perps.json"),
+            ),
+            (
+                "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+                include_str!("../presets/jupiter_swap/jupiter_agg_v6.json"),
+            ),
+            (
+                "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",
+                include_str!("../presets/kamino_borrow/kamino_borrow.json"),
+            ),
+            (
+                "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr",
+                include_str!("../presets/kamino_farms/kamino_farms.json"),
+            ),
+            (
+                "LiMoM9rMhrdYrfzUCxQppvxCSG1FcrUK9G8uLq4A1GF",
+                include_str!("../presets/kamino_limit/kamino_limit.json"),
+            ),
+            (
+                "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd",
+                include_str!("../presets/kamino_vault/kamino_vault.json"),
+            ),
+            (
+                "VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg",
+                include_str!("../presets/metadao_conditional_vault/metadao_conditional_vault.json"),
+            ),
+            (
+                "FUTARELBfJfQ8RDGhg1wdhddq1odMAJUePHFuBYfUxKq",
+                include_str!("../presets/metadao_futarchy/metadao_futarchy.json"),
+            ),
+            (
+                "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG",
+                include_str!("../presets/meteora_damm_v2/meteora_damm_v2.json"),
+            ),
+            (
+                "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+                include_str!("../presets/meteora_dlmm/meteora_dlmm.json"),
+            ),
+            (
+                "BUNDDh4P5XviMm1f3gCvnq2qKx6TGosAGnoUK12e7cXU",
+                include_str!("../presets/neutral_trade/neutral_trade.json"),
+            ),
+            (
+                "onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe",
+                include_str!("../presets/onre_app/onre_app.json"),
+            ),
+            (
+                "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+                include_str!("../presets/orca_whirlpool/orca_whirlpool.json"),
+            ),
+            (
+                "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf",
+                include_str!("../presets/squads_multisig/squads_multisig_program.json"),
+            ),
+        ];
+
+        ENTRIES
+            .iter()
+            .map(|(program_id, json)| {
+                (
+                    (*program_id).to_string(),
+                    CustomIdlConfig {
+                        idl: CustomIdl::Json((*json).to_string()),
+                        override_builtin: true,
+                    },
+                )
+            })
+            .collect()
+    })
+}
+
+/// Merges the 19 preset IDL configs (see [`preset_idl_configs`]) into
+/// `caller_configs`, without overwriting an entry the caller explicitly
+/// supplied for the same program ID -- a genuine caller override still wins
+/// over our own preset default.
+pub fn merge_preset_idl_configs(
+    caller_configs: &std::collections::BTreeMap<String, solana_parser::CustomIdlConfig>,
+) -> std::collections::BTreeMap<String, solana_parser::CustomIdlConfig> {
+    let mut merged = preset_idl_configs().clone();
+    for (program_id, config) in caller_configs {
+        merged.insert(program_id.clone(), config.clone());
+    }
+    merged
 }
 
 #[cfg(test)]

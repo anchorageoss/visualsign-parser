@@ -436,9 +436,11 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
         };
 
         let idl_registry = create_idl_registry_from_options(&options)?;
-        let simulated_instructions = extract_simulated_instructions(&options);
+        let raw_simulated_instructions =
+            extract_raw_simulated_instructions(&options, &idl_registry);
         Ok(
-            match build_intermediate_bytes(&message_hex, &idl_registry, simulated_instructions) {
+            match build_intermediate_bytes(&message_hex, &idl_registry, raw_simulated_instructions)
+            {
                 Some(bytes) => ConversionResult::with_intermediate(payload, bytes),
                 None => ConversionResult::new(payload),
             },
@@ -483,24 +485,15 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
 fn build_intermediate_bytes(
     message_hex: &str,
     idl_registry: &crate::idl::IdlRegistry,
-    inner_instruction_groups: Option<&[generated::parser::InnerInstructionGroup]>,
+    raw_simulated_instructions: Option<Vec<crate::intermediate::SolanaSimulatedInstruction>>,
 ) -> Option<Vec<u8>> {
     match extract_solana_intermediate_output(message_hex, false, idl_registry) {
         Ok(mut output) => {
-            // Simulation results are independent of static decode
-            if let Some(groups) = inner_instruction_groups {
-                output.simulated_instructions = groups
-                    .iter()
-                    .flat_map(|group| {
-                        group.instructions.iter().map(move |instruction| {
-                            crate::intermediate::build_simulated_instruction(
-                                instruction,
-                                group.instruction_index,
-                                idl_registry,
-                            )
-                        })
-                    })
-                    .collect();
+            // Simulation results are independent of static decode.
+            if let Some(instructions) = raw_simulated_instructions {
+                output.simulated_instructions = instructions;
+            }
+            if !output.simulated_instructions.is_empty() {
                 let unresolved = output
                     .simulated_instructions
                     .iter()
@@ -527,24 +520,30 @@ fn build_intermediate_bytes(
     }
 }
 
-/// Pulls the inner-instruction groups out of `options.metadata`'s Solana
-/// branch, if present. `None` when no `ChainMetadata`, no Solana variant, no
-/// simulation result, or an empty list was supplied -- callers treat all four
-/// the same (`simulated_instructions` stays empty).
-fn extract_simulated_instructions(
+/// Pulls `simulated_transaction_result` out of `options.metadata`'s Solana
+/// branch, if present, and IDL-decodes it into `SolanaSimulatedInstruction`s via
+/// [`crate::intermediate::decode_raw_inner_instructions`]. `None` when no
+/// `ChainMetadata`, no Solana variant, no raw JSON, or the JSON doesn't parse as
+/// `Vec<UiInnerInstructions>` -- callers treat all of these the same as "no raw
+/// simulation result supplied".
+fn extract_raw_simulated_instructions(
     options: &VisualSignOptions,
-) -> Option<&[generated::parser::InnerInstructionGroup]> {
+    idl_registry: &crate::idl::IdlRegistry,
+) -> Option<Vec<crate::intermediate::SolanaSimulatedInstruction>> {
     let generated::parser::chain_metadata::Metadata::Solana(solana) =
         options.metadata.as_ref()?.metadata.as_ref()?
     else {
         return None;
     };
-    let result = solana.simulate_transaction_result.as_ref()?;
-    if result.inner_instructions.is_empty() {
-        None
-    } else {
-        Some(&result.inner_instructions)
-    }
+    let raw_json_b64 = solana.simulated_transaction_result.as_ref()?;
+    let raw_json = base64::engine::general_purpose::STANDARD
+        .decode(raw_json_b64)
+        .ok()?;
+    let groups = crate::intermediate::parse_raw_inner_instructions(&raw_json)?;
+    Some(crate::intermediate::decode_raw_inner_instructions(
+        &groups,
+        idl_registry,
+    ))
 }
 
 impl VisualSignConverterFromString<SolanaTransactionWrapper> for SolanaVisualSignConverter {}
@@ -816,7 +815,9 @@ fn convert_v0_to_visual_sign_payload(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::intermediate::{SOLANA_INTERMEDIATE_SCHEMA_VERSION, SolanaIntermediateOutput};
+    use crate::intermediate::{
+        RegisteredSource, SOLANA_INTERMEDIATE_SCHEMA_VERSION, SolanaIntermediateOutput,
+    };
     use crate::test_utils::payload_from_b64;
     use crate::utils::create_transaction_with_empty_signatures;
 
@@ -900,7 +901,7 @@ mod tests {
     /// static decode's `instructions` (and its `parsed_instruction_data`) is
     /// completely unaffected by the simulation result, and
     /// `simulated_instructions` is independent of it, with each entry's own
-    /// `is_unregistered` and `instruction_index` carried from its group.
+    /// `registered_source` and `index` carried from its group.
     #[test]
     fn intermediate_output_populates_simulated_instructions() {
         let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
@@ -919,34 +920,35 @@ mod tests {
                         network_id: None,
                         idl: None,
                         idl_mappings: Default::default(),
-                        simulate_transaction_result: Some(
-                            generated::parser::SimulateTransactionResult {
-                                inner_instructions: vec![
-                                    generated::parser::InnerInstructionGroup {
-                                        instruction_index: 0,
-                                        instructions: vec![
-                                            generated::parser::SimulatedInstruction {
-                                                program_key: "11111111111111111111111111111111"
-                                                    .to_string(),
-                                                instruction_data_hex:
-                                                    "0200000001000000000000000000".to_string(),
-                                                accounts: vec![],
-                                                stack_height: 2,
-                                                rpc_parsed_data: None,
-                                            },
-                                            generated::parser::SimulatedInstruction {
-                                                program_key:
-                                                    "Unknown9xyz11111111111111111111111111"
-                                                        .to_string(),
-                                                instruction_data_hex: "deadbeef".to_string(),
-                                                accounts: vec![],
-                                                stack_height: 2,
-                                                rpc_parsed_data: None,
-                                            },
-                                        ],
-                                    },
-                                ],
-                            },
+                        simulated_transaction_result: Some(
+                            base64::engine::general_purpose::STANDARD.encode(
+                                serde_json::json!({
+                                    "context": {"slot": 0},
+                                    "value": {
+                                        "err": null,
+                                        "innerInstructions": [
+                                            {
+                                                "index": 0,
+                                                "instructions": [
+                                                    {
+                                                        "programId": "11111111111111111111111111111111",
+                                                        "accounts": [],
+                                                        "data": bs58::encode([0x02u8, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).into_string(),
+                                                        "stackHeight": 2
+                                                    },
+                                                    {
+                                                        "programId": "Unknown9xyz11111111111111111111111111",
+                                                        "accounts": [],
+                                                        "data": bs58::encode([0xde, 0xad, 0xbe, 0xef]).into_string(),
+                                                        "stackHeight": 2
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                })
+                                .to_string(),
+                            ),
                         ),
                     },
                 )),
@@ -973,20 +975,27 @@ mod tests {
             decoded.instructions[0].parsed_instruction_data.is_none(),
             "top-level System transfer has no IDL match (native decode path, not IDL)"
         );
+        assert_eq!(
+            decoded.instructions[0].registered_source,
+            RegisteredSource::Native,
+            "top-level System transfer is trusted even though it has no IDL entry to match"
+        );
 
         assert_eq!(
             decoded.simulated_instructions.len(),
             2,
             "both simulated calls must be present"
         );
-        assert_eq!(decoded.simulated_instructions[0].instruction_index, 0);
-        assert!(
-            !decoded.simulated_instructions[0].is_unregistered,
+        assert_eq!(decoded.simulated_instructions[0].index, 0);
+        assert_eq!(
+            decoded.simulated_instructions[0].registered_source,
+            RegisteredSource::Native,
             "System Program call is trusted even though it has no IDL entry to match"
         );
-        assert_eq!(decoded.simulated_instructions[1].instruction_index, 0);
-        assert!(
-            decoded.simulated_instructions[1].is_unregistered,
+        assert_eq!(decoded.simulated_instructions[1].index, 0);
+        assert_eq!(
+            decoded.simulated_instructions[1].registered_source,
+            RegisteredSource::Unregistered,
             "unknown program call must be flagged unregistered"
         );
     }
@@ -2198,7 +2207,7 @@ mod tests {
                         network_id: Some("SOLANA_MAINNET".to_string()),
                         idl: None,
                         idl_mappings: idl_mappings.into_iter().collect(),
-                        simulate_transaction_result: None,
+                        simulated_transaction_result: None,
                     },
                 )),
             }),

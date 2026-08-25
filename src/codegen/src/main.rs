@@ -49,11 +49,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(".parser.ChainMetadata", SERDE_DERIVE)
         .type_attribute(".parser.EthereumMetadata", SERDE_DERIVE)
         .type_attribute(".parser.SolanaMetadata", SERDE_DERIVE)
-        .type_attribute(".parser.SimulatedInstruction", SERDE_DERIVE)
-        .type_attribute(".parser.SimulatedInstructionAccount", SERDE_DERIVE)
-        .type_attribute(".parser.RpcParsedInstructionData", SERDE_DERIVE)
-        .type_attribute(".parser.InnerInstructionGroup", SERDE_DERIVE)
-        .type_attribute(".parser.SimulateTransactionResult", SERDE_DERIVE)
         .type_attribute(".parser.NearMetadata", SERDE_DERIVE)
         .type_attribute(".parser.Abi", SERDE_DERIVE)
         .type_attribute(".parser.Idl", SERDE_DERIVE)
@@ -65,18 +60,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // serde(default) on map fields so callers can omit them when empty
         .field_attribute(".parser.EthereumMetadata.abi_mappings", SERDE_DEFAULT)
         .field_attribute(".parser.SolanaMetadata.idl_mappings", SERDE_DEFAULT)
-        .field_attribute(
-            ".parser.SolanaMetadata.simulate_transaction_result",
-            SERDE_DEFAULT,
-        )
-        // Callers may omit accounts/rpc_parsed_data when the RPC returned an
-        // instruction jsonParsed instead of raw (no accounts to report), or
-        // vice versa.
-        .field_attribute(".parser.SimulatedInstruction.accounts", SERDE_DEFAULT)
-        .field_attribute(
-            ".parser.SimulatedInstruction.rpc_parsed_data",
-            SERDE_DEFAULT,
-        )
         // Represent the abi_type enum as its string name over JSON
         .field_attribute(".parser.Abi.abi_type", SERDE_ABI_TYPE)
         // BORSH - Used for QOS sha256 checks
@@ -90,11 +73,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .enum_attribute(".parser.Metadata", BORSH_ENUM_DISC_ATTR)
         .type_attribute(".parser.SolanaMetadata", BORSH_DERIVE)
         .enum_attribute(".parser.SolanaMetadata", BORSH_ENUM_DISC_ATTR)
-        .type_attribute(".parser.SimulatedInstruction", BORSH_DERIVE)
-        .type_attribute(".parser.SimulatedInstructionAccount", BORSH_DERIVE)
-        .type_attribute(".parser.RpcParsedInstructionData", BORSH_DERIVE)
-        .type_attribute(".parser.InnerInstructionGroup", BORSH_DERIVE)
-        .type_attribute(".parser.SimulateTransactionResult", BORSH_DERIVE)
         .type_attribute(".parser.EthereumMetadata", BORSH_DERIVE)
         .enum_attribute(".parser.EthereumMetadata", BORSH_ENUM_DISC_ATTR)
         .type_attribute(".parser.NearMetadata", BORSH_DERIVE)
