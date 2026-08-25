@@ -36,7 +36,10 @@ impl InstructionVisualizer for ExponentFinanceVisualizer {
         let data = context.data();
 
         let instruction_data_hex = hex::encode(data);
-        let fallback_text = format!("Program ID: {}\nData: {instruction_data_hex}", view.program_id);
+        let fallback_text = format!(
+            "Program ID: {}\nData: {instruction_data_hex}",
+            view.program_id
+        );
 
         let parsed = parse_exponent_finance_instruction(data, &view.accounts);
 
@@ -110,11 +113,7 @@ fn parse_exponent_finance_instruction(
     })
 }
 
-fn build_named_accounts(
-    data: &[u8],
-    idl: &Idl,
-    accounts: &[String],
-) -> BTreeMap<String, String> {
+fn build_named_accounts(data: &[u8], idl: &Idl, accounts: &[String]) -> BTreeMap<String, String> {
     let mut named_accounts = BTreeMap::new();
 
     let idl_instruction = idl.instructions.iter().find(|inst| {
