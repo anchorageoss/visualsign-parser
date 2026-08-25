@@ -108,7 +108,7 @@ pub struct TurnkeyPayload {
     /// `bytes` JSON convention). Empty and omitted from the response when the
     /// request did not opt in or the chain has no intermediate output, so
     /// responses to existing consumers stay byte-identical.
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub intermediate_output: String,
 }
 
@@ -243,5 +243,24 @@ mod tests {
         let json = r#"{"chain":"CHAIN_SOLANA","networkId":"solana-mainnet"}"#;
         let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
         assert!(matches!(parsed, ChainMetadataInput::Solana(_)));
+    }
+
+    #[test]
+    fn response_wrapper_round_trips_when_intermediate_output_is_omitted() {
+        // A response with no intermediate_output must still deserialize back into
+        // TurnkeyResponseWrapper, not just serialize cleanly: the omitted key needs
+        // a default on the way back in, since this is the shape every existing
+        // caller produces.
+        let resp = error_response("oops".to_string(), probe_boot_proof());
+        let json = serde_json::to_string(&resp).unwrap();
+        let round_tripped: TurnkeyResponseWrapper = serde_json::from_str(&json).unwrap();
+        assert!(
+            round_tripped
+                .response
+                .parsed_transaction
+                .payload
+                .intermediate_output
+                .is_empty()
+        );
     }
 }
