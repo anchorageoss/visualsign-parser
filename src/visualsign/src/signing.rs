@@ -127,12 +127,10 @@ impl FromIterator<Vec<u8>> for SignerAllowlist {
 /// life of the process. Nothing in a request can move the parser between the two
 /// variants: a caller cannot opt itself into leniency by omitting a signature,
 /// and cannot opt itself into strictness either. That is the point of the type.
-/// The intent is for the choice to live on the parser's cmdline (for the
-/// enclave binary, in the `pivotArgs` of the signed TVC manifest), so a signer
-/// can verify out of band which posture the deployment they are signing against
-/// actually runs, instead of trusting a per-request signal or a log line that no
-/// one sees. Wiring the enclave binary and gRPC server to a cmdline flag is a
-/// planned follow-up; today only `parser_cli` constructs an explicit posture.
+/// Because the choice lives on the parser's cmdline (for the enclave binary, in
+/// the `pivotArgs` of the signed TVC manifest), a signer can verify out of band
+/// which posture the deployment they are signing against actually runs, instead
+/// of trusting a per-request signal or a log line that no one sees.
 ///
 /// The two variants are mutually exclusive by construction:
 ///
@@ -151,7 +149,12 @@ impl FromIterator<Vec<u8>> for SignerAllowlist {
 ///
 /// There is deliberately no `Default`: a deployment has to say which posture it
 /// runs.
+///
+/// Marked `#[non_exhaustive]` so a third posture can be added without breaking
+/// downstream crates that match on this enum. Every match today lives in this
+/// module; consumers only construct variants.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum MetadataTrustPolicy {
     /// Accept unsigned metadata; verify integrity only when a signature is present.
     AcceptUnsigned,
