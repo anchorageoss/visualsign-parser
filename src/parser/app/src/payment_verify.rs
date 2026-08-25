@@ -16,6 +16,7 @@ use generated::google::rpc::Code;
 use generated::parser::{ChainMetadata, ParseRequest};
 use host_primitives::payment_marker::{SignedVerifiedPaymentMarker, VPM_VERSION, request_hash};
 use qos_p256::sign::P256SignPublic;
+use visualsign::encodings::decode_hex;
 
 use crate::errors::GrpcError;
 
@@ -72,7 +73,7 @@ impl PaymentPolicy {
     /// env-coupled constructor here.
     pub fn from_hex(hex_value: &str) -> Result<Self, GrpcError> {
         let trimmed = hex_value.trim();
-        let bytes = qos_hex::decode(trimmed).map_err(|e| {
+        let bytes = decode_hex(trimmed).map_err(|e| {
             GrpcError::internal(&format!("GATEWAY_SIGNING_PUBKEY_HEX hex decode: {e:?}"))
         })?;
         let pinned = P256SignPublic::from_bytes(&bytes).map_err(|e| {
