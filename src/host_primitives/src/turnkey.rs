@@ -24,8 +24,9 @@ pub struct TurnkeyRequest {
     pub include_intermediate_output: bool,
 }
 
-// ChainMetadataInput needs Serialize too so parser_gateway can build the
-// outbound HTTP body symmetrically with what parser_http_server parses.
+// Serialize is derived on the request types (not just Deserialize) for a future
+// caller that builds this envelope symmetrically to what parses it; no in-tree
+// consumer serializes a request today.
 
 /// Tagged representation of chain metadata for unambiguous JSON deserialization.
 ///
@@ -138,6 +139,22 @@ pub fn error_response(msg: String, boot_proof: TurnkeyBootProof) -> TurnkeyRespo
             },
         },
         error: Some(msg),
+    }
+}
+
+/// Success envelope. `boot_proof` is injected by the caller for the same reason as
+/// in [`error_response`].
+pub fn success_response(
+    boot_proof: TurnkeyBootProof,
+    payload: TurnkeyPayload,
+    signature: Option<TurnkeySignature>,
+) -> TurnkeyResponseWrapper {
+    TurnkeyResponseWrapper {
+        boot_proof,
+        response: TurnkeyResponse {
+            parsed_transaction: TurnkeyParsedTransaction { payload, signature },
+        },
+        error: None,
     }
 }
 

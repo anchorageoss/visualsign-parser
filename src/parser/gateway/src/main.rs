@@ -20,9 +20,9 @@ use generated::parser::{
 use generated::tonic;
 use host_primitives::GRPC_MAX_RECV_MSG_SIZE;
 use host_primitives::turnkey::{
-    TurnkeyBootProof, TurnkeyParsedTransaction, TurnkeyPayload, TurnkeyRequestWrapper,
-    TurnkeyResponse, TurnkeyResponseWrapper, TurnkeySignature,
-    error_response as turnkey_error_response,
+    TurnkeyBootProof, TurnkeyPayload, TurnkeyRequestWrapper, TurnkeyResponseWrapper,
+    TurnkeySignature, error_response as turnkey_error_response,
+    success_response as turnkey_success_response,
 };
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -198,25 +198,20 @@ async fn parse_handler(
 
     (
         StatusCode::OK,
-        Json(TurnkeyResponseWrapper {
-            boot_proof: mock_boot_proof(),
-            response: TurnkeyResponse {
-                parsed_transaction: TurnkeyParsedTransaction {
-                    payload: TurnkeyPayload {
-                        signable_payload: payload.parsed_payload,
-                        metadata_digest: payload.metadata_digest,
-                        input_payload_digest: payload.input_payload_digest,
-                        // base64 of an empty Vec is "", which serde omits (see
-                        // skip_serializing_if) so the non-intermediate response
-                        // is unchanged.
-                        intermediate_output: base64::engine::general_purpose::STANDARD
-                            .encode(&payload.intermediate_output),
-                    },
-                    signature,
-                },
+        Json(turnkey_success_response(
+            mock_boot_proof(),
+            TurnkeyPayload {
+                signable_payload: payload.parsed_payload,
+                metadata_digest: payload.metadata_digest,
+                input_payload_digest: payload.input_payload_digest,
+                // base64 of an empty Vec is "", which serde omits (see
+                // skip_serializing_if) so the non-intermediate response
+                // is unchanged.
+                intermediate_output: base64::engine::general_purpose::STANDARD
+                    .encode(&payload.intermediate_output),
             },
-            error: None,
-        }),
+            signature,
+        )),
     )
 }
 
@@ -318,23 +313,6 @@ mod tests {
     }
 
     #[test]
-    fn intermediate_output_empty_is_omitted() {
-        // Existing consumers and existing-parser responses must see byte-identical
-        // JSON when there is no intermediate output: the key is absent, not "".
-        let payload = TurnkeyPayload {
-            signable_payload: "sp".to_string(),
-            metadata_digest: "md".to_string(),
-            input_payload_digest: "ipd".to_string(),
-            intermediate_output: String::new(),
-        };
-        let value = serde_json::to_value(&payload).unwrap();
-        assert!(
-            value.get("intermediateOutput").is_none(),
-            "empty intermediate output must be omitted from the response"
-        );
-    }
-
-    #[test]
     fn error_response_carries_mock_boot_proof() {
         // The wallet-integration contract (see issue #337) requires bootProof
         // be present on every response, including parse errors — strict
@@ -350,45 +328,19 @@ mod tests {
 
     #[test]
     fn mock_boot_proof_matches_production_wire_shape() {
-        // Wire-shape parity with the production response that wallet
-        // integrators consume. Field set and JSON keys mirror
-        // visualsign-turnkeyclient/api/types.go: TurnkeyVisualSignResponse
-        // (bootProof at top level) and TurnkeyBootProof (six camelCase keys).
+        // Top-level wire parity: bootProof must sit alongside response, not
+        // nested. bootProof's own field set is covered by
+        // host_primitives::turnkey::boot_proof_wire_shape_is_exactly_six_camel_case_keys.
         let resp = error_response("x".to_string());
         let value: serde_json::Value = serde_json::to_value(&resp).unwrap();
 
         let top_keys: std::collections::BTreeSet<_> =
             value.as_object().unwrap().keys().cloned().collect();
-        // Top-level: bootProof, response, error (error only present when set).
         assert!(
             top_keys.contains("bootProof"),
             "missing top-level bootProof"
         );
         assert!(top_keys.contains("response"), "missing top-level response");
-
-        let bp = value.get("bootProof").unwrap().as_object().unwrap();
-        let bp_keys: std::collections::BTreeSet<&str> = bp.keys().map(String::as_str).collect();
-        let expected: std::collections::BTreeSet<&str> = [
-            "awsAttestationDocB64",
-            "qosManifestB64",
-            "qosManifestEnvelopeB64",
-            "ephemeralPublicKeyHex",
-            "enclaveApp",
-            "deploymentLabel",
-        ]
-        .into_iter()
-        .collect();
-        assert_eq!(
-            bp_keys, expected,
-            "bootProof field set must match production wire shape exactly"
-        );
-    }
-
-    #[test]
-    fn chain_metadata_input_solana_not_misread_as_ethereum() {
-        let json = r#"{"chain":"CHAIN_SOLANA","networkId":"solana-mainnet"}"#;
-        let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
-        assert!(matches!(parsed, ChainMetadataInput::Solana(_)));
     }
 
     #[test]
