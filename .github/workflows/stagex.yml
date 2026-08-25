@@ -151,33 +151,34 @@ jobs:
           tvc_tag="${SEMVER_TAG:-$SHA_TAG}"
           container_url="ghcr.io/anchorageoss/${TARGET_NAME}:${tvc_tag}"
           container_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${container_url}" | cut -d '@' -f 2)
-          docker create --name tmp-extract-${TARGET_NAME} "${container_url}" /bin/true
-          docker cp "tmp-extract-${TARGET_NAME}:/${TARGET_NAME}" "/tmp/${TARGET_NAME}"
-          docker rm "tmp-extract-${TARGET_NAME}"
-          digest=$(sha256sum "/tmp/${TARGET_NAME}" | awk '{print $1}')
+          docker create --name tmp-extract "${container_url}" /bin/true
+          docker cp "tmp-extract:/${TARGET_NAME}" /tmp/binary
+          docker rm tmp-extract
+          digest=$(sha256sum /tmp/binary | awk '{print $1}')
           pinned_url="${container_url}@${container_digest}"
           # Hardcoded: TVC currently only supports this QOS version.
           qos_version="0.12.0"
 
-          # parser_app is the enclave-side binary (signs responses).
-          # parser_gateway is the host-side binary (verifies the signature
-          # against a pinned pubkey + handles x402 settlement). Operators
-          # need both digests pinned to actually establish the trust pair.
+          # Per-target context for operators establishing the TVC trust
+          # boundary: parser_app / parser_http_server are enclave-side pivot
+          # binaries; parser_gateway is the host-side counterpart that signs
+          # payment verification for the enclave to check.
           case "${TARGET_NAME}" in
             parser_app)
-              role_note=$'\nThe enclave-side binary that speaks gRPC over vsock to QOS. Use this as the TVC pivot when your callers reach the app via Turnkey-internal routing.'
+              role_note='The enclave-side binary that speaks gRPC over vsock to QOS. Use this as the TVC pivot when your callers reach the app via Turnkey-internal routing.'
               ;;
             parser_http_server)
-              role_note=$'\nThe HTTP+JSON enclave-side binary intended for TVC public ingress. Cloudflare in front of `app-<uuid>.turnkey.cloud` only accepts HTTP, so this is the variant to pivot when external clients call the app directly. Routes: `GET /health` (Turnkey HTTP health check), `POST /visualsign/api/v1/parse` (open), `POST /visualsign/api/v2/parse` (TVC-enforced when `GATEWAY_SIGNING_PUBKEY_HEX` is set). Deploy with `healthCheckType: TVC_HEALTH_CHECK_TYPE_HTTP`, `publicIngressPort: 3000`.'
+              role_note='The HTTP+JSON enclave-side binary intended for TVC public ingress. Cloudflare in front of `app-<uuid>.turnkey.cloud` only accepts HTTP, so this is the variant to pivot when external clients call the app directly. Routes: `GET /health` (Turnkey HTTP health check), `POST /visualsign/api/v1/parse` (open), `POST /visualsign/api/v2/parse` (TVC-enforced when `GATEWAY_SIGNING_PUBKEY_HEX` is set). Deploy with `healthCheckType: TVC_HEALTH_CHECK_TYPE_HTTP`, `publicIngressPort: 3000`.'
               ;;
             parser_gateway)
-              role_note=$'\nThe host-side gateway that performs x402 verify+settle and signs a `VerifiedPaymentMarker` for the enclave to verify. Pairs with `parser_http_server`\'s `/v2` route; the gateway\'s P256 sign pubkey is pinned in the enclave\'s `GATEWAY_SIGNING_PUBKEY_HEX` env.'
+              role_note='The host-side gateway that performs x402 verify+settle and signs a `VerifiedPaymentMarker` for the enclave to verify. Pairs with `parser_http_server`'\''s `/v2` route; the gateway'\''s P256 sign pubkey is pinned in the enclave'\''s `GATEWAY_SIGNING_PUBKEY_HEX` env.'
               ;;
           esac
 
           deploy_md="${RUNNER_TEMP}/tvc_deploy_${TARGET_NAME}.md"
           {
             echo "## TVC Deployment Details: ${TARGET_NAME}"
+            echo ""
             echo "${role_note}"
             echo ""
             echo "- **Container Image URL**: \`${pinned_url}\`"
@@ -219,28 +220,56 @@ jobs:
           cat "$deploy_md" >> "$GITHUB_STEP_SUMMARY"
 
           # Mirror onto the GitHub release for this semver, when it exists.
-          # Each target uses its own sentinel pair so parser_app and
-          # parser_gateway can publish independently without clobbering each
-          # other when stagex runs them in parallel.
+          # Each target uses its own sentinel pair so the matrix targets can
+          # publish independently without clobbering each other when stagex
+          # runs them in parallel.
           begin_sentinel="<!-- BEGIN_TVC_DEPLOY_${TARGET_NAME} -->"
           end_sentinel="<!-- END_TVC_DEPLOY_${TARGET_NAME} -->"
           if [ -n "$SEMVER_TAG" ] && gh release view "$SEMVER_TAG" >/dev/null 2>&1; then
-            existing_body=$(gh release view "$SEMVER_TAG" --json body --jq .body)
-            preserved=$(printf '%s\n' "$existing_body" | awk -v b="$begin_sentinel" -v e="$end_sentinel" '
-              $0 == b { skipping = 1; next }
-              $0 == e { skipping = 0; next }
-              !skipping
-            ')
+            # Other matrix legs (parser_app / parser_gateway / parser_http_server)
+            # run this same read-modify-write concurrently against one release
+            # body. Sentinels keep each leg's own block idempotent across
+            # re-runs, but they don't stop a lost update: two legs can both
+            # read the body before either writes, and whichever `gh release
+            # edit` lands last clobbers the other's block. Retry with a fresh
+            # read each time and verify our write actually stuck before
+            # declaring success, so a leg that gets raced past re-applies its
+            # block on top of whatever is live instead of silently losing it.
             new_body="${RUNNER_TEMP}/release_notes_${TARGET_NAME}.md"
-            {
-              printf '%s\n\n' "$preserved"
-              echo "$begin_sentinel"
-              cat "$deploy_md"
-              echo "$end_sentinel"
-            } > "$new_body"
-            gh release edit "$SEMVER_TAG" --notes-file "$new_body" \
-              --repo "${GITHUB_REPOSITORY}"
-            echo "Updated release $SEMVER_TAG with TVC deployment details for ${TARGET_NAME}."
+            max_attempts=5
+            attempt=1
+            while :; do
+              existing_body=$(gh release view "$SEMVER_TAG" --json body --jq .body)
+              preserved=$(printf '%s\n' "$existing_body" | awk -v b="$begin_sentinel" -v e="$end_sentinel" '
+                $0 == b { skipping = 1; next }
+                $0 == e { skipping = 0; next }
+                !skipping
+              ')
+              {
+                printf '%s\n\n' "$preserved"
+                echo "$begin_sentinel"
+                cat "$deploy_md"
+                echo "$end_sentinel"
+              } > "$new_body"
+
+              if gh release edit "$SEMVER_TAG" --notes-file "$new_body" --repo "${GITHUB_REPOSITORY}"; then
+                post_body=$(gh release view "$SEMVER_TAG" --json body --jq .body)
+                if [ "$post_body" = "$(cat "$new_body")" ]; then
+                  echo "Updated release $SEMVER_TAG with TVC deployment details for ${TARGET_NAME}."
+                  break
+                fi
+                echo "Release $SEMVER_TAG body changed under us (concurrent matrix leg); retrying (attempt ${attempt}/${max_attempts})."
+              else
+                echo "gh release edit failed for $SEMVER_TAG; retrying (attempt ${attempt}/${max_attempts})."
+              fi
+
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "ERROR: could not update release $SEMVER_TAG with TVC deployment details for ${TARGET_NAME} after ${max_attempts} attempts (lost the race with concurrent matrix legs)." >&2
+                exit 1
+              fi
+              attempt=$((attempt + 1))
+              sleep $(( (RANDOM % 5) + 1 ))
+            done
           else
             echo "No release to update (SEMVER_TAG='${SEMVER_TAG:-<unset>}'); skipping release-notes update."
           fi
