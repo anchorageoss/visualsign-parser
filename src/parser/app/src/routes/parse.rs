@@ -451,6 +451,60 @@ mod tests {
         assert_eq!(err.code, Code::InvalidArgument);
     }
 
+    /// Regression: every other test in this module exercises `parse_with_registry`
+    /// directly, which never calls `payment_verify::verify`. This test drives the
+    /// public `parse()` entry point (the one production callers actually use) with
+    /// `PaymentPolicy::Required`, so a regression that deletes, reorders, or
+    /// silently ignores the verification call inside `parse()` would fail this
+    /// test even though every `parse_with_registry` test still passes. The marker
+    /// also claims the pinned gateway key but is signed by a different keypair,
+    /// so this doubles as a true-forgery test at the `parse()` boundary (as
+    /// opposed to `payment_verify`'s own unit tests, which cover the same case
+    /// one layer down).
+    #[test]
+    fn parse_rejects_forged_payment_marker_via_public_entry_point() {
+        use host_primitives::payment_marker::{
+            SignedVerifiedPaymentMarker, VPM_VERSION, VerifiedPaymentMarker, request_hash,
+        };
+        use qos_p256::sign::P256SignPair;
+
+        let pinned_pair = P256SignPair::generate();
+        let attacker_pair = P256SignPair::generate();
+        let pinned_pub_hex = qos_hex::encode(&pinned_pair.public_key().to_bytes());
+        let policy = PaymentPolicy::from_hex(&pinned_pub_hex).unwrap();
+
+        let mut req = stub_request();
+        let vpm = VerifiedPaymentMarker {
+            version: VPM_VERSION,
+            request_hash: request_hash(
+                req.chain,
+                &req.unsigned_payload,
+                &[],
+                req.include_intermediate_output,
+            ),
+            txid: "txsig".into(),
+            payer: "Pay".into(),
+            pay_to: "Recv".into(),
+            amount: "1000".into(),
+            mint: "Mint".into(),
+            x_payment_hash: [0u8; 32],
+            network: "solana:test".into(),
+            settled_at_ms: 0,
+            gateway_pubkey_hex: pinned_pub_hex, // claims the pinned key
+        };
+        let signature = attacker_pair.sign(&vpm.signing_digest().unwrap()).unwrap(); // signed by someone else
+        let signed = SignedVerifiedPaymentMarker { vpm, signature };
+        req.payment_marker = borsh::to_vec(&signed).unwrap();
+
+        let ephemeral_key = P256Pair::generate().expect("generate ephemeral key");
+        let err = parse(&req, &ephemeral_key, &policy).expect_err(
+            "parse() must reject a payment marker forged by a different signer, even though \
+             the marker's claimed gateway_pubkey_hex matches the pinned key, before ever \
+             reaching the transaction converter registry",
+        );
+        assert_eq!(err.code, Code::FailedPrecondition);
+    }
+
     fn sample_payload(intermediate_output: Vec<u8>) -> ParsedTransactionPayload {
         ParsedTransactionPayload {
             parsed_payload: "parsed".to_string(),

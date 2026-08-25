@@ -13,12 +13,20 @@
 
 use borsh::BorshDeserialize;
 use generated::google::rpc::Code;
-use generated::parser::ParseRequest;
+use generated::parser::{ChainMetadata, ParseRequest};
 use host_primitives::payment_marker::{SignedVerifiedPaymentMarker, VPM_VERSION, request_hash};
 use qos_p256::sign::P256SignPublic;
-use subtle::ConstantTimeEq;
 
 use crate::errors::GrpcError;
+
+/// Borsh-encodes `chain_metadata`, or returns an empty `Vec` if absent.
+/// Matches the convention used for `ParsedTransactionPayload::metadata_digest`.
+fn chain_metadata_bytes(metadata: Option<&ChainMetadata>) -> Result<Vec<u8>, borsh::io::Error> {
+    metadata
+        .map(borsh::to_vec)
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
 
 /// Whether `parser_app` requires (and verifies) a `VerifiedPaymentMarker`
 /// on every parse call. Loaded once at startup from
@@ -32,9 +40,13 @@ pub enum PaymentPolicy {
         /// The gateway's P256 signing public key, pinned at TVC deploy
         /// time via `GATEWAY_SIGNING_PUBKEY_HEX`.
         pinned: P256SignPublic,
-        /// Lower-cased hex of `pinned.to_bytes()`, memoized for log
-        /// messages and for the cross-check against
-        /// `vpm.gateway_pubkey_hex`.
+        /// `qos_hex::encode(&pinned.to_bytes())`, memoized for log messages
+        /// and for the cross-check against `vpm.gateway_pubkey_hex`.
+        /// Derived from `pinned` (not from the raw config string) so it's
+        /// always the canonical unprefixed lower-case encoding, matching
+        /// what the gateway emits via the same `qos_hex::encode` call,
+        /// regardless of whether the operator supplied a `0x`-prefixed
+        /// value in `GATEWAY_SIGNING_PUBKEY_HEX`.
         pinned_hex_lower: String,
     },
 }
@@ -61,20 +73,17 @@ impl PaymentPolicy {
     pub fn from_hex(hex_value: &str) -> Result<Self, GrpcError> {
         let trimmed = hex_value.trim();
         let bytes = qos_hex::decode(trimmed).map_err(|e| {
-            GrpcError::new(
-                Code::Internal,
-                &format!("GATEWAY_SIGNING_PUBKEY_HEX hex decode: {e:?}"),
-            )
+            GrpcError::internal(&format!("GATEWAY_SIGNING_PUBKEY_HEX hex decode: {e:?}"))
         })?;
         let pinned = P256SignPublic::from_bytes(&bytes).map_err(|e| {
-            GrpcError::new(
-                Code::Internal,
-                &format!("GATEWAY_SIGNING_PUBKEY_HEX is not a valid P256 sign pubkey: {e:?}"),
-            )
+            GrpcError::internal(&format!(
+                "GATEWAY_SIGNING_PUBKEY_HEX is not a valid P256 sign pubkey: {e:?}"
+            ))
         })?;
+        let pinned_hex_lower = qos_hex::encode(&pinned.to_bytes());
         Ok(Self::Required {
             pinned,
-            pinned_hex_lower: trimmed.to_ascii_lowercase(),
+            pinned_hex_lower,
         })
     }
 }
@@ -91,8 +100,9 @@ pub enum PaymentVerifyError {
     /// The marker was signed against an unknown VPM schema version.
     #[error("payment marker version {0} is not supported")]
     UnsupportedVersion(u32),
-    /// The marker's `request_hash` doesn't match this request's
-    /// (`chain`, `unsigned_payload`) tuple.
+    /// The marker's `request_hash` doesn't match this request (see
+    /// `host_primitives::payment_marker::request_hash` for the exact
+    /// fields covered).
     #[error("payment marker does not match this request (request_hash mismatch)")]
     RequestHashMismatch,
     /// The marker claimed a different gateway pubkey than the pinned one.
@@ -105,24 +115,24 @@ pub enum PaymentVerifyError {
 
 impl From<PaymentVerifyError> for GrpcError {
     fn from(e: PaymentVerifyError) -> Self {
-        // `FailedPrecondition` is what the gateway translates to HTTP 402.
-        // We keep parser_app HTTP-unaware; the gateway maps gRPC status
-        // codes to HTTP and synthesizes the canonical x402 PaymentRequired
-        // body from its own config.
+        // `FailedPrecondition` is meant to be translated to HTTP 402 by the
+        // gateway. We keep parser_app HTTP-unaware; the gateway is
+        // responsible for mapping gRPC status codes to HTTP and
+        // synthesizing the canonical x402 PaymentRequired body from its
+        // own config (not yet wired as of this policy being `Disabled`
+        // everywhere).
         GrpcError::new(Code::FailedPrecondition, &format!("{e}"))
     }
 }
 
 /// Returns `Ok(())` if the policy allows the request to proceed.
 pub fn verify(parse_request: &ParseRequest, policy: &PaymentPolicy) -> Result<(), GrpcError> {
-    let Some((pinned, pinned_hex_lower)) = (match policy {
-        PaymentPolicy::Disabled => None,
+    let (pinned, pinned_hex_lower) = match policy {
+        PaymentPolicy::Disabled => return Ok(()),
         PaymentPolicy::Required {
             pinned,
             pinned_hex_lower,
-        } => Some((pinned, pinned_hex_lower.as_str())),
-    }) else {
-        return Ok(());
+        } => (pinned, pinned_hex_lower.as_str()),
     };
 
     if parse_request.payment_marker.is_empty() {
@@ -138,26 +148,37 @@ pub fn verify(parse_request: &ParseRequest, policy: &PaymentPolicy) -> Result<()
         return Err(PaymentVerifyError::UnsupportedVersion(vpm.version).into());
     }
 
-    // Bind the VPM to this exact request.
-    let expected = request_hash(parse_request.chain, &parse_request.unsigned_payload);
+    // Bind the VPM to this exact request: chain, unsigned_payload,
+    // chain_metadata, and include_intermediate_output all feed the
+    // enclave's own attested output, so all four must be covered.
+    let chain_metadata_bytes = chain_metadata_bytes(parse_request.chain_metadata.as_ref())
+        .map_err(|e| GrpcError::internal(&format!("chain_metadata borsh encode: {e:?}")))?;
+    let expected = request_hash(
+        parse_request.chain,
+        &parse_request.unsigned_payload,
+        &chain_metadata_bytes,
+        parse_request.include_intermediate_output,
+    );
     if expected != vpm.request_hash {
         return Err(PaymentVerifyError::RequestHashMismatch.into());
     }
 
     // Cross-check the gateway pubkey claimed in the VPM against the pinned
-    // key — constant-time compare on bytes (after length check; ct_eq on
-    // unequal-length slices returns 0).
-    let claimed = vpm.gateway_pubkey_hex.to_ascii_lowercase();
-    let a = claimed.as_bytes();
-    let b = pinned_hex_lower.as_bytes();
-    if a.len() != b.len() || a.ct_eq(b).unwrap_u8() != 1 {
+    // key. Both values are public keys, not secrets, so a plain compare is
+    // fine; the actual trust decision is the signature check below.
+    if !vpm
+        .gateway_pubkey_hex
+        .eq_ignore_ascii_case(pinned_hex_lower)
+    {
         return Err(PaymentVerifyError::PinnedKeyMismatch.into());
     }
 
-    let digest = vpm.signing_digest();
+    let digest = vpm
+        .signing_digest()
+        .map_err(|e| GrpcError::internal(&format!("payment marker signing_digest: {e:?}")))?;
     pinned
         .verify(&digest, &signed.signature)
-        .map_err(|_| GrpcError::from(PaymentVerifyError::BadSignature))?;
+        .map_err(|_| PaymentVerifyError::BadSignature)?;
 
     Ok(())
 }
@@ -166,21 +187,28 @@ pub fn verify(parse_request: &ParseRequest, policy: &PaymentPolicy) -> Result<()
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata};
     use host_primitives::payment_marker::VerifiedPaymentMarker;
     use qos_p256::sign::P256SignPair;
 
     fn sign_with(pair: &P256SignPair, vpm: VerifiedPaymentMarker) -> Vec<u8> {
         let signed = SignedVerifiedPaymentMarker {
-            signature: pair.sign(&vpm.signing_digest()).unwrap(),
+            signature: pair.sign(&vpm.signing_digest().unwrap()).unwrap(),
             vpm,
         };
         borsh::to_vec(&signed).unwrap()
     }
 
     fn make_vpm(req: &ParseRequest, gateway_hex: &str) -> VerifiedPaymentMarker {
+        let chain_metadata_bytes = chain_metadata_bytes(req.chain_metadata.as_ref()).unwrap();
         VerifiedPaymentMarker {
             version: VPM_VERSION,
-            request_hash: request_hash(req.chain, &req.unsigned_payload),
+            request_hash: request_hash(
+                req.chain,
+                &req.unsigned_payload,
+                &chain_metadata_bytes,
+                req.include_intermediate_output,
+            ),
             txid: "txsig".into(),
             payer: "Pay".into(),
             pay_to: "Recv".into(),
@@ -203,6 +231,14 @@ mod tests {
         }
     }
 
+    /// Generates a fresh gateway keypair and a `Required` policy pinned to it.
+    fn generate_policy() -> (P256SignPair, String, PaymentPolicy) {
+        let pair = P256SignPair::generate();
+        let pub_hex = qos_hex::encode(&pair.public_key().to_bytes());
+        let policy = PaymentPolicy::from_hex(&pub_hex).unwrap();
+        (pair, pub_hex, policy)
+    }
+
     #[test]
     fn disabled_policy_accepts_anything() {
         let req = req_with_marker(vec![]);
@@ -211,9 +247,7 @@ mod tests {
 
     #[test]
     fn required_policy_accepts_valid_marker() {
-        let pair = P256SignPair::generate();
-        let pub_hex = qos_hex::encode(&pair.public_key().to_bytes());
-        let policy = PaymentPolicy::from_hex(&pub_hex).unwrap();
+        let (pair, pub_hex, policy) = generate_policy();
 
         let mut req = req_with_marker(vec![]);
         let vpm = make_vpm(&req, &pub_hex);
@@ -224,9 +258,7 @@ mod tests {
 
     #[test]
     fn required_policy_rejects_missing_marker() {
-        let pair = P256SignPair::generate();
-        let pub_hex = qos_hex::encode(&pair.public_key().to_bytes());
-        let policy = PaymentPolicy::from_hex(&pub_hex).unwrap();
+        let (_pair, _pub_hex, policy) = generate_policy();
         let req = req_with_marker(vec![]);
         let err = verify(&req, &policy).unwrap_err();
         assert_eq!(err.code, Code::FailedPrecondition);
@@ -234,9 +266,7 @@ mod tests {
 
     #[test]
     fn required_policy_rejects_request_hash_mismatch() {
-        let pair = P256SignPair::generate();
-        let pub_hex = qos_hex::encode(&pair.public_key().to_bytes());
-        let policy = PaymentPolicy::from_hex(&pub_hex).unwrap();
+        let (pair, pub_hex, policy) = generate_policy();
 
         let req = req_with_marker(vec![]);
         let mut vpm = make_vpm(&req, &pub_hex);
@@ -250,11 +280,9 @@ mod tests {
 
     #[test]
     fn required_policy_rejects_wrong_gateway_key() {
-        let pair_a = P256SignPair::generate();
+        let (_pair_a, _pub_a, policy) = generate_policy();
         let pair_b = P256SignPair::generate();
-        let pub_a = qos_hex::encode(&pair_a.public_key().to_bytes());
         let pub_b = qos_hex::encode(&pair_b.public_key().to_bytes());
-        let policy = PaymentPolicy::from_hex(&pub_a).unwrap();
 
         let mut req = req_with_marker(vec![]);
         let vpm = make_vpm(&req, &pub_b); // claims a different key
@@ -265,10 +293,68 @@ mod tests {
     }
 
     #[test]
+    fn required_policy_rejects_replay_with_different_chain_metadata() {
+        // A marker paid+signed for a request with no chain_metadata must not
+        // verify against a request that is otherwise identical but carries
+        // different chain_metadata (which changes the enclave's own signed
+        // output). Regression test for request_hash covering all of
+        // ParseRequest, not just (chain, unsigned_payload).
+        let (pair, pub_hex, policy) = generate_policy();
+
+        let req_no_metadata = req_with_marker(vec![]);
+        let vpm = make_vpm(&req_no_metadata, &pub_hex);
+        let marker = sign_with(&pair, vpm);
+
+        let mut req_with_metadata = req_with_marker(marker);
+        req_with_metadata.chain_metadata = Some(ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: std::collections::BTreeMap::default(),
+            })),
+        });
+
+        let err = verify(&req_with_metadata, &policy).unwrap_err();
+        assert!(err.message.contains("request_hash"));
+    }
+
+    #[test]
+    fn required_policy_rejects_replay_with_different_intermediate_output_flag() {
+        // Same replay concern as above, but toggling
+        // include_intermediate_output instead of chain_metadata.
+        let (pair, pub_hex, policy) = generate_policy();
+
+        let req_without_flag = req_with_marker(vec![]);
+        let vpm = make_vpm(&req_without_flag, &pub_hex);
+        let marker = sign_with(&pair, vpm);
+
+        let mut req_with_flag = req_with_marker(marker);
+        req_with_flag.include_intermediate_output = true;
+
+        let err = verify(&req_with_flag, &policy).unwrap_err();
+        assert!(err.message.contains("request_hash"));
+    }
+
+    #[test]
+    fn required_policy_rejects_forged_marker_claiming_pinned_key() {
+        // Attacker claims the pinned gateway key in gateway_pubkey_hex (so
+        // the string precheck passes) but actually signs with a different
+        // keypair. This must fail at the signature check, not pass because
+        // the claimed-key string happened to match.
+        let (_pinned_pair, pinned_pub_hex, policy) = generate_policy();
+        let attacker_pair = P256SignPair::generate();
+
+        let mut req = req_with_marker(vec![]);
+        let vpm = make_vpm(&req, &pinned_pub_hex); // claims the pinned key
+        req.payment_marker = sign_with(&attacker_pair, vpm); // signed by someone else
+
+        let err = verify(&req, &policy).unwrap_err();
+        assert_eq!(err.code, Code::FailedPrecondition);
+        assert!(err.message.contains("signature"));
+    }
+
+    #[test]
     fn required_policy_rejects_tampered_signature() {
-        let pair = P256SignPair::generate();
-        let pub_hex = qos_hex::encode(&pair.public_key().to_bytes());
-        let policy = PaymentPolicy::from_hex(&pub_hex).unwrap();
+        let (pair, pub_hex, policy) = generate_policy();
 
         let mut req = req_with_marker(vec![]);
         let vpm = make_vpm(&req, &pub_hex);

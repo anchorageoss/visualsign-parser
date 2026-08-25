@@ -131,6 +131,9 @@ async fn parse_handler(
         chain,
         chain_metadata: wrapper.request.chain_metadata.map(ChainMetadata::from),
         include_intermediate_output: wrapper.request.include_intermediate_output,
+        // This local-dev/CI gateway never wraps a real enclave and doesn't
+        // forward an x402 payment marker; the production x402 gateway is
+        // out of this repo.
         payment_marker: vec![],
     });
 
