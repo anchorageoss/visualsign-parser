@@ -162,6 +162,10 @@ fn signing_digest_bytes(payload: &ParsedTransactionPayload) -> Vec<u8> {
 mod tests {
     use super::*;
     use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata};
+    use host_primitives::payment_marker::{
+        PaymentDetails, SignedVerifiedPaymentMarker, VPM_VERSION, VerifiedPaymentMarker,
+        request_hash,
+    };
     use std::collections::BTreeMap;
     use visualsign::vsptrait::{
         ConversionResult, Transaction, TransactionParseError, VisualSignConverter,
@@ -463,9 +467,6 @@ mod tests {
     /// one layer down).
     #[test]
     fn parse_rejects_forged_payment_marker_via_public_entry_point() {
-        use host_primitives::payment_marker::{
-            SignedVerifiedPaymentMarker, VPM_VERSION, VerifiedPaymentMarker, request_hash,
-        };
         use qos_p256::sign::P256SignPair;
 
         let pinned_pair = P256SignPair::generate();
@@ -482,13 +483,15 @@ mod tests {
                 &[],
                 req.include_intermediate_output,
             ),
-            txid: "txsig".into(),
-            payer: "Pay".into(),
-            pay_to: "Recv".into(),
-            amount: "1000".into(),
-            mint: "Mint".into(),
-            x_payment_hash: [0u8; 32],
-            network: "solana:test".into(),
+            details: PaymentDetails::X402Direct {
+                txid: "txsig".into(),
+                payer: "Pay".into(),
+                pay_to: "Recv".into(),
+                amount: "1000".into(),
+                mint: "Mint".into(),
+                x_payment_hash: [0u8; 32],
+                network: "solana:test".into(),
+            },
             settled_at_ms: 0,
             gateway_pubkey_hex: pinned_pub_hex, // claims the pinned key
         };

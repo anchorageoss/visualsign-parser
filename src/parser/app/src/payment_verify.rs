@@ -152,13 +152,33 @@ pub fn verify(parse_request: &ParseRequest, policy: &PaymentPolicy) -> Result<()
     // Bind the VPM to this exact request: chain, unsigned_payload,
     // chain_metadata, and include_intermediate_output all feed the
     // enclave's own attested output, so all four must be covered.
-    let chain_metadata_bytes = chain_metadata_bytes(parse_request.chain_metadata.as_ref())
+    //
+    // Destructured exhaustively on purpose. `ParseRequest` is a plain
+    // generated struct with no `#[non_exhaustive]`, so a new proto field
+    // breaks this line and forces a decision: hash it below, or bind it to
+    // `_` here with a note saying why it is out of scope. Field 4
+    // (`include_intermediate_output`) was already missed once while this
+    // work sat on an unmerged branch. Note this only guards the verifier:
+    // whoever fixes the compile error also has to extend the gateway-side
+    // signer and its pinned-preimage test, or the two sides silently
+    // disagree.
+    let ParseRequest {
+        unsigned_payload,
+        chain,
+        chain_metadata,
+        include_intermediate_output,
+        // Deliberately not hashed: it carries the marker itself, and a hash
+        // the marker commits to cannot also cover the marker.
+        payment_marker: _,
+    } = parse_request;
+
+    let chain_metadata_bytes = chain_metadata_bytes(chain_metadata.as_ref())
         .map_err(|e| GrpcError::internal(&format!("chain_metadata borsh encode: {e:?}")))?;
     let expected = request_hash(
-        parse_request.chain,
-        &parse_request.unsigned_payload,
+        *chain,
+        unsigned_payload,
         &chain_metadata_bytes,
-        parse_request.include_intermediate_output,
+        *include_intermediate_output,
     );
     if expected != vpm.request_hash {
         return Err(PaymentVerifyError::RequestHashMismatch.into());
@@ -189,7 +209,7 @@ pub fn verify(parse_request: &ParseRequest, policy: &PaymentPolicy) -> Result<()
 mod tests {
     use super::*;
     use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata};
-    use host_primitives::payment_marker::VerifiedPaymentMarker;
+    use host_primitives::payment_marker::{PaymentDetails, VerifiedPaymentMarker};
     use qos_p256::sign::P256SignPair;
 
     fn sign_with(pair: &P256SignPair, vpm: VerifiedPaymentMarker) -> Vec<u8> {
@@ -210,13 +230,15 @@ mod tests {
                 &chain_metadata_bytes,
                 req.include_intermediate_output,
             ),
-            txid: "txsig".into(),
-            payer: "Pay".into(),
-            pay_to: "Recv".into(),
-            amount: "1000".into(),
-            mint: "Mint".into(),
-            x_payment_hash: [0u8; 32],
-            network: "solana:test".into(),
+            details: PaymentDetails::X402Direct {
+                txid: "txsig".into(),
+                payer: "Pay".into(),
+                pay_to: "Recv".into(),
+                amount: "1000".into(),
+                mint: "Mint".into(),
+                x_payment_hash: [0u8; 32],
+                network: "solana:test".into(),
+            },
             settled_at_ms: 0,
             gateway_pubkey_hex: gateway_hex.to_string(),
         }

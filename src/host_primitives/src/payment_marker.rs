@@ -16,14 +16,59 @@
 //! different request with different metadata or intermediate-output
 //! settings; it does not protect against a compromised signing key itself,
 //! which could mint a fresh marker for any request. The settlement-side
-//! fields (`txid`, `payer`, `pay_to`,
-//! `amount`, `mint`, `network`, `x_payment_hash`) are carried in the signed
-//! marker for the record but are not independently cross-checked by
-//! parser_app today; that deeper verification (including recomputing
+//! fields live in [`PaymentDetails`] and are carried in the signed marker
+//! for the record, but are not independently cross-checked by parser_app
+//! today; that deeper verification (including recomputing
 //! `x_payment_hash` from the forwarded `X-PAYMENT` bytes, which has no
 //! transport in this proto yet) is deferred to v3.1.
 
 use borsh::{BorshDeserialize, BorshSerialize};
+
+/// The settlement facts for one payment, keyed by the scheme that produced
+/// them.
+///
+/// Borsh encodes an enum as a 1-byte little-endian variant index followed by
+/// that variant's fields, so the variant order here is part of the wire
+/// contract rather than an implementation detail: the gateway-side signer
+/// writes the discriminant by hand. Add schemes by appending variants, never
+/// by inserting or reordering.
+#[derive(
+    BorshSerialize,
+    BorshDeserialize,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub enum PaymentDetails {
+    /// A single x402 payment settled straight from one payer to one
+    /// recipient. The only scheme the gateway mints today.
+    X402Direct {
+        /// On-chain settlement signature, base58 (Solana).
+        txid: String,
+        /// Payer pubkey, base58 (Solana).
+        payer: String,
+        /// Recipient pubkey, base58 (Solana).
+        pay_to: String,
+        /// Atomic units paid (USDC has 6 decimals; "1000" = $0.001).
+        amount: String,
+        /// Asset mint, base58 (Solana). E.g. devnet USDC
+        /// `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`.
+        mint: String,
+        /// SHA-256 of the inner base64-decoded `X-PAYMENT` body. Intended to
+        /// let parser_app confirm the gateway didn't pair the buyer's signed
+        /// Solana tx with a different VPM, but this proto has no field
+        /// carrying the forwarded `X-PAYMENT` bytes yet and parser_app does
+        /// not check this value today; recomputing and checking it is
+        /// deferred to v3.1.
+        x_payment_hash: [u8; 32],
+        /// CAIP-2 network identifier (e.g. `solana:EtWTRABZaYq6...` for
+        /// devnet).
+        network: String,
+    },
+}
 
 /// The signed payload parser_app verifies.
 #[derive(
@@ -37,31 +82,17 @@ use borsh::{BorshDeserialize, BorshSerialize};
     serde::Deserialize,
 )]
 pub struct VerifiedPaymentMarker {
-    /// Bumped if the schema changes incompatibly.
+    /// Bumped if this envelope changes incompatibly. A new payment scheme is
+    /// a new [`PaymentDetails`] variant instead of a bump: a verifier that
+    /// predates the variant fails the Borsh decode, which fails closed.
     pub version: u32,
     /// SHA-256 binding this marker to one specific parse request: see
     /// [`request_hash`] for the exact preimage (chain, unsigned_payload,
     /// chain_metadata, include_intermediate_output).
     pub request_hash: [u8; 32],
-    /// On-chain settlement signature, base58 (Solana).
-    pub txid: String,
-    /// Payer pubkey, base58 (Solana).
-    pub payer: String,
-    /// Recipient pubkey, base58 (Solana).
-    pub pay_to: String,
-    /// Atomic units paid (USDC has 6 decimals; "1000" = $0.001).
-    pub amount: String,
-    /// Asset mint, base58 (Solana). E.g. devnet USDC
-    /// `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`.
-    pub mint: String,
-    /// SHA-256 of the inner base64-decoded `X-PAYMENT` body. Intended to let
-    /// parser_app confirm the gateway didn't pair the buyer's signed Solana
-    /// tx with a different VPM, but this proto has no field carrying the
-    /// forwarded `X-PAYMENT` bytes yet and parser_app does not check this
-    /// value today; recomputing and checking it is deferred to v3.1.
-    pub x_payment_hash: [u8; 32],
-    /// CAIP-2 network identifier (e.g. `solana:EtWTRABZaYq6...` for devnet).
-    pub network: String,
+    /// What was paid, and under which scheme. Carried in the signed marker
+    /// for the record; parser_app does not cross-check these values today.
+    pub details: PaymentDetails,
     /// Unix millis at which the gateway received the facilitator's settle
     /// response.
     pub settled_at_ms: u64,
@@ -138,13 +169,15 @@ mod tests {
         let vpm = VerifiedPaymentMarker {
             version: VPM_VERSION,
             request_hash: [1u8; 32],
-            txid: "abc".into(),
-            payer: "Pay".into(),
-            pay_to: "Recv".into(),
-            amount: "1000".into(),
-            mint: "Mint".into(),
-            x_payment_hash: [2u8; 32],
-            network: "solana:test".into(),
+            details: PaymentDetails::X402Direct {
+                txid: "abc".into(),
+                payer: "Pay".into(),
+                pay_to: "Recv".into(),
+                amount: "1000".into(),
+                mint: "Mint".into(),
+                x_payment_hash: [2u8; 32],
+                network: "solana:test".into(),
+            },
             settled_at_ms: 1_700_000_000_000,
             gateway_pubkey_hex: "04abcd".into(),
         };
@@ -158,17 +191,36 @@ mod tests {
         let vpm = VerifiedPaymentMarker {
             version: VPM_VERSION,
             request_hash: [0u8; 32],
-            txid: "tx".into(),
-            payer: String::new(),
-            pay_to: String::new(),
-            amount: "0".into(),
-            mint: String::new(),
-            x_payment_hash: [0u8; 32],
-            network: String::new(),
+            details: PaymentDetails::X402Direct {
+                txid: "tx".into(),
+                payer: String::new(),
+                pay_to: String::new(),
+                amount: "0".into(),
+                mint: String::new(),
+                x_payment_hash: [0u8; 32],
+                network: String::new(),
+            },
             settled_at_ms: 0,
             gateway_pubkey_hex: String::new(),
         };
         assert_eq!(vpm.signing_digest().unwrap(), vpm.signing_digest().unwrap());
+    }
+
+    #[test]
+    fn x402_direct_is_borsh_variant_zero() {
+        // The gateway-side signer writes this discriminant by hand, so the
+        // variant index is wire contract. Borsh prefixes an enum with a
+        // 1-byte LE variant index; appending variants must leave this at 0.
+        let details = PaymentDetails::X402Direct {
+            txid: String::new(),
+            payer: String::new(),
+            pay_to: String::new(),
+            amount: String::new(),
+            mint: String::new(),
+            x_payment_hash: [0u8; 32],
+            network: String::new(),
+        };
+        assert_eq!(borsh::to_vec(&details).unwrap().first(), Some(&0u8));
     }
 
     #[test]
