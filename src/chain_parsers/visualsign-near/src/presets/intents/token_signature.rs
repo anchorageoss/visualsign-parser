@@ -124,14 +124,8 @@ fn decode_hex_fixed<const N: usize>(
     value: &str,
     what: &str,
 ) -> Result<[u8; N], TokenMetadataSignatureError> {
-    let bytes = visualsign::encodings::decode_hex(value)
-        .map_err(|e| TokenMetadataSignatureError::Validation(format!("Invalid {what} hex: {e}")))?;
-    bytes.try_into().map_err(|v: Vec<u8>| {
-        TokenMetadataSignatureError::Validation(format!(
-            "Invalid {what} length: expected {N} bytes, got {}",
-            v.len()
-        ))
-    })
+    visualsign::encodings::decode_hex_array::<N>(value)
+        .map_err(|e| TokenMetadataSignatureError::Validation(format!("Invalid {what} {e}")))
 }
 
 /// Per-origin-chain allowlists for token-metadata curator keys, built once and

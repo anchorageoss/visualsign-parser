@@ -89,6 +89,51 @@ pub fn decode_hex(value: &str) -> Result<Vec<u8>, hex::FromHexError> {
     hex::decode(strip_hex_prefix(value))
 }
 
+/// Why a fixed-size hex decode failed. [`fmt::Display`] renders a fragment
+/// meant to be appended to the name of the field being decoded, so a caller
+/// wrapping it as `format!("Invalid {what} {e}")` reads as
+/// `"Invalid public key hex: ..."` or
+/// `"Invalid public key length: expected 32 bytes, got 31"`.
+#[derive(Debug, PartialEq)]
+pub enum DecodeHexArrayError {
+    /// The body (after any prefix) is not valid hex.
+    Hex(hex::FromHexError),
+    /// The hex decoded cleanly but to the wrong number of bytes.
+    Length { expected: usize, got: usize },
+}
+
+impl fmt::Display for DecodeHexArrayError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Hex(e) => write!(f, "hex: {e}"),
+            Self::Length { expected, got } => {
+                write!(f, "length: expected {expected} bytes, got {got}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DecodeHexArrayError {}
+
+/// Decode a hex string into a fixed-size byte array, tolerating an optional
+/// `0x`/`0X` prefix. This is the single definition of "decode a hex string of
+/// exactly N bytes" for the parser: every chain crate that reads a fixed-width
+/// public key or signature out of untrusted metadata goes through it, so a fix
+/// to how malformed input is handled lands once rather than per chain.
+///
+/// # Errors
+/// Returns [`DecodeHexArrayError`] when the body is not valid hex, or decodes
+/// to a length other than `N`.
+pub fn decode_hex_array<const N: usize>(value: &str) -> Result<[u8; N], DecodeHexArrayError> {
+    let bytes = decode_hex(value).map_err(DecodeHexArrayError::Hex)?;
+    bytes
+        .try_into()
+        .map_err(|v: Vec<u8>| DecodeHexArrayError::Length {
+            expected: N,
+            got: v.len(),
+        })
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -119,6 +164,41 @@ mod tests {
         assert_eq!(decode_hex("abCD").unwrap(), expected);
         assert!(decode_hex("0xzz").is_err());
         assert!(decode_hex("abc").is_err()); // odd length
+    }
+
+    #[test]
+    fn decode_hex_array_enforces_the_exact_length() {
+        assert_eq!(decode_hex_array::<2>("0xabcd").unwrap(), [0xab, 0xcd]);
+        assert_eq!(decode_hex_array::<2>("ABCD").unwrap(), [0xab, 0xcd]);
+        assert_eq!(
+            decode_hex_array::<2>("abcdef"),
+            Err(DecodeHexArrayError::Length {
+                expected: 2,
+                got: 3
+            })
+        );
+        assert_eq!(
+            decode_hex_array::<2>("ab"),
+            Err(DecodeHexArrayError::Length {
+                expected: 2,
+                got: 1
+            })
+        );
+        assert!(matches!(
+            decode_hex_array::<2>("0xzzzz"),
+            Err(DecodeHexArrayError::Hex(_))
+        ));
+    }
+
+    #[test]
+    fn decode_hex_array_error_reads_as_a_field_suffix() {
+        let err = decode_hex_array::<32>("ab").expect_err("wrong length");
+        assert_eq!(
+            format!("Invalid public key {err}"),
+            "Invalid public key length: expected 32 bytes, got 1"
+        );
+        let err = decode_hex_array::<32>("zz").expect_err("bad hex");
+        assert!(format!("Invalid public key {err}").starts_with("Invalid public key hex: "));
     }
 
     #[test]
