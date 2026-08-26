@@ -1375,9 +1375,10 @@ mod tests {
                 .collect(),
             })),
         };
-        // Run under accept-unsigned deliberately: the fixture carries no signature, so
-        // under require-signed the posture would drop it before the address is ever
-        // parsed and this would pass even if address validation were removed.
+        // Run under accept-unsigned deliberately: address parsing happens before the
+        // signature/posture check, so the invalid address is rejected regardless of
+        // policy. Using accept-unsigned here keeps the test scoped to address
+        // validation rather than also exercising the unsigned-rejection path.
         assert!(
             try_extract_from_chain_metadata(
                 Some(&metadata),
