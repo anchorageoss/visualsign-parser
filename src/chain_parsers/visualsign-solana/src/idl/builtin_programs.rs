@@ -222,14 +222,6 @@ pub fn is_trusted_program(program_id_str: &str) -> bool {
 /// set of program IDs the caller supplied a custom IDL for (the keys of
 /// `IdlRegistry::get_all_configs()`), used only to detect `CallerSupplied`;
 /// pass an empty map if unavailable.
-///
-/// Unlike `is_trusted_program`, `Native`/`Preset` deliberately exclude
-/// `ProgramType` (the `solana_parser` crate's built-in-IDL list) -- our own
-/// trusted set should reflect sources we author or vendor ourselves, not an
-/// external, unaudited crate's program classification. A `ProgramType` match
-/// is reported separately as `ThirdParty`, and a caller-supplied IDL as
-/// `CallerSupplied`, both distinct from `Unregistered`: something was found,
-/// it's just not one we vouch for.
 pub fn registered_source(
     program_id_str: &str,
     caller_idl_program_ids: &std::collections::BTreeMap<String, solana_parser::CustomIdlConfig>,
@@ -283,23 +275,8 @@ pub fn is_reserved_canonical_name(name: &str) -> bool {
     .any(|p| builtin_idl_program_name(p) == name)
 }
 
-/// The 19 IDL-backed in-crate presets' Anchor IDL JSON, keyed by program ID --
-/// the same files each preset's own visualizer `include_str!`s for rendering,
-/// re-included here so the *structured* decode path (`parse_idl` /
-/// `decode_raw_inner_instructions`, both top-level and simulated) can use
-/// them too. Presets are otherwise invisible to that path: it only ever sees
-/// `solana_parser::ProgramType` and caller `idl_mappings`, never
-/// `available_visualizers()` (that function drives only the human-facing
-/// `SignablePayload` rendering).
-///
-/// Deliberately excludes the 6 hand-written presets (System, SPL Token,
-/// Compute Budget, Associated Token Account, Stake Pool, Swig Wallet) -- they
-/// predate Anchor and have no IDL JSON to feed in.
-///
-/// `override_builtin: true` on every entry: for the 4 programs that also
-/// have a `solana_parser::ProgramType` built-in (Orca, Drift, Meteora DLMM,
-/// Jupiter Aggregator V6), the in-crate preset's IDL is the one Anchorage
-/// actually curates and ships decode features against, so it should win.
+/// The IDL-backed in-crate presets' Anchor IDL JSON, keyed by program ID
+/// included here so that decode path can use these idls.
 fn preset_idl_configs()
 -> &'static std::collections::BTreeMap<String, solana_parser::CustomIdlConfig> {
     use solana_parser::{CustomIdl, CustomIdlConfig};

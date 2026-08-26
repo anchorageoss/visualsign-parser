@@ -15025,6 +15025,7 @@ dependencies = [
  "serde_json",
  "solana-parser-fuzz-core",
  "solana-program",
+ "solana-rpc-client-types",
  "solana-sdk",
  "solana-system-interface 1.0.0",
  "solana-transaction-status",

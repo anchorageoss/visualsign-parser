@@ -497,7 +497,9 @@ fn build_intermediate_bytes(
                 let unresolved = output
                     .simulated_instructions
                     .iter()
-                    .filter(|s| s.parsed_instruction_data.is_none() && s.rpc_parsed_data.is_none())
+                    .filter(|s| {
+                        s.parsed_instruction_data.is_none() && s.solana_rpc_parsed_data.is_none()
+                    })
                     .count();
                 tracing::info!(
                     simulated_instructions = output.simulated_instructions.len(),
@@ -521,11 +523,7 @@ fn build_intermediate_bytes(
 }
 
 /// Pulls `simulated_transaction_result` out of `options.metadata`'s Solana
-/// branch, if present, and IDL-decodes it into `SolanaSimulatedInstruction`s via
-/// [`crate::intermediate::decode_raw_inner_instructions`]. `None` when no
-/// `ChainMetadata`, no Solana variant, no raw JSON, or the JSON doesn't parse as
-/// `Vec<UiInnerInstructions>` -- callers treat all of these the same as "no raw
-/// simulation result supplied".
+/// branch, if present, and IDL-decodes it
 fn extract_raw_simulated_instructions(
     options: &VisualSignOptions,
     idl_registry: &crate::idl::IdlRegistry,
@@ -539,11 +537,7 @@ fn extract_raw_simulated_instructions(
     let raw_json = base64::engine::general_purpose::STANDARD
         .decode(raw_json_b64)
         .ok()?;
-    let groups = crate::intermediate::parse_raw_inner_instructions(&raw_json)?;
-    Some(crate::intermediate::decode_raw_inner_instructions(
-        &groups,
-        idl_registry,
-    ))
+    crate::intermediate::parse_and_decode_simulated_instructions(&raw_json, idl_registry)
 }
 
 impl VisualSignConverterFromString<SolanaTransactionWrapper> for SolanaVisualSignConverter {}
