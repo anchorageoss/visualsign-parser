@@ -158,8 +158,11 @@ request := &pb.ParseRequest{
             Near: &pb.NearMetadata{
                 NetworkId: proto.String("NEAR_MAINNET"),
                 TokenMappings: map[string]*pb.TokenMetadataEntry{
-                    "nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near": &pb.TokenMetadataEntry{
-                        Value: `{"symbol":"USDC.e","decimals":6}`,
+                    // An asset the parser's compiled-in table doesn't cover.
+                    // Unsigned entries fill gaps only, so an override of a
+                    // known asset has to carry a signature (see below).
+                    "nep141:514910771af9ca656af840dff83e8264ecf986ca.factory.bridge.near": &pb.TokenMetadataEntry{
+                        Value: `{"symbol":"LINK","decimals":18}`,
                     },
                 },
             },
@@ -178,7 +181,21 @@ A `TokenMetadataEntry` can carry an optional signature, so a wallet can trust an
 | `TOKEN_ORIGIN_CHAIN_ETHEREUM` | secp256k1 | Ethereum ABI signing |
 | `TOKEN_ORIGIN_CHAIN_SOLANA` | ed25519 | Solana IDL signing |
 
-The signature covers `value`'s bytes verbatim (the same convention as `Abi.value`/`Idl.value`), bound to the asset id so it cannot be replayed under a different one. An entry with no signature is still accepted; one with a signature that fails to verify is rejected outright, not silently downgraded to unsigned. See [`visualsign::signing`](https://github.com/anchorageoss/visualsign-parser/blob/main/src/visualsign/src/signing.rs) for the exact prehash construction.
+The signature covers `value`'s bytes verbatim (the same convention as `Abi.value`/`Idl.value`), bound to both the asset id and the NEAR network so it cannot be replayed under a different asset or on the other network. Sign the exact bytes you put in `value` — the parser hashes them as supplied and never re-encodes them, so canonicalizing the JSON before signing produces a different prehash and the signature will not verify.
+
+The network is part of the signed scope because a NEAR implicit account id (a 64-hex address) is the same string on mainnet and testnet. Sign against the canonical id — `NEAR_MAINNET` or `NEAR_TESTNET` — matching the network the request resolves to:
+
+- The request's `network_id`, when it supplies one. An unrecognized value (`testnet` rather than `NEAR_TESTNET`, say) fails the whole request rather than falling back.
+- Otherwise the network the parser was configured for, which is mainnet unless the deployment says otherwise.
+
+This is the same resolution the rendered `Network` field uses, so the network a signature is checked against is always the network the payload displays.
+
+An entry whose signature fails to verify is rejected outright, never silently downgraded to unsigned. An entry with **no** signature is accepted only when both of these hold:
+
+- The deployment runs a permissive trust posture. `parser_cli` runs the strict posture and rejects every unsigned entry.
+- The asset is not already in the parser's compiled-in token table. Unsigned metadata fills gaps for assets the parser doesn't know; it cannot override a curated entry, since `decimals` scales the amount a signer sees.
+
+A correction to an already-known asset therefore has to be signed. See [`visualsign::signing`](https://github.com/anchorageoss/visualsign-parser/blob/main/src/visualsign/src/signing.rs) for the exact prehash construction.
 
 ## Library integration
 

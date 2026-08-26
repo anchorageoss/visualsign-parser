@@ -42,7 +42,10 @@
 //!   happen to coincide.
 //! - `scope` is the chain-specific on-chain identity bytes (see below).
 //! - `body` is the metadata JSON bytes verbatim (the ABI/IDL string as supplied,
-//!   or the canonical `{symbol, decimals}` JSON for token metadata).
+//!   or the `{symbol, decimals}` JSON for token metadata, also as supplied).
+//!   Nothing on either the signing or the verifying side re-serializes it, so a
+//!   signer hashes the exact bytes it puts on the wire and must not canonicalize
+//!   them first -- whitespace and field order are part of what is signed.
 //! - `le_u64(n)` is the 8-byte little-endian length of the field that immediately
 //!   follows it. Prefixing every field with its length makes the encoding injective:
 //!   distinct `(chain_tag, scope, body)` triples can never produce the same preimage,
@@ -58,9 +61,15 @@
 //!   (pubkey).
 //! - **NEAR Intents token metadata** ([`near_token_metadata_prehash`],
 //!   [`ethereum_token_metadata_prehash`], [`solana_token_metadata_prehash`]): the
-//!   scope is the NEAR Intents asset id string (e.g. `"nep141:wrap.near"`), the
-//!   same identity regardless of which chain the underlying asset lives on. Only
-//!   the tag differs across these three functions.
+//!   scope is the NEAR network id (e.g. `"NEAR_MAINNET"`) followed by the NEAR
+//!   Intents asset id string (e.g. `"nep141:wrap.near"`) -- the same asset
+//!   identity regardless of which chain the underlying value lives on. Both are
+//!   variable-length text, so within the scope each is itself prefixed with its
+//!   own `le_u64` length, keeping the pair injective the same way the outer
+//!   fields are. The network is included because an implicit NEAR account id is
+//!   identical on mainnet and testnet, so the asset id alone would leave a
+//!   signature replayable across networks. Only the tag differs across these
+//!   three functions.
 //!
 //! External signers reproduce a valid signature by computing the SHA-256 over this
 //! exact byte sequence and signing the resulting 32-byte digest. The signing
@@ -279,30 +288,68 @@ pub fn solana_metadata_prehash(program_id: &[u8; 32], idl_json: &[u8]) -> [u8; 3
     metadata_signing_prehash_v1(CHAIN_TAG_SOLANA, program_id, idl_json)
 }
 
-/// NEAR Intents token-metadata scope = the asset id string (e.g.
-/// `"nep141:wrap.near"`), the NEAR-side identity every bridged or native asset
-/// is addressed by regardless of which chain the underlying value lives on.
-/// `body` is the canonical JSON-encoded `{symbol, decimals}` being attested to.
-#[must_use]
-pub fn near_token_metadata_prehash(asset_id: &str, body: &[u8]) -> [u8; 32] {
-    metadata_signing_prehash_v1(CHAIN_TAG_NEAR_TOKEN_METADATA, asset_id.as_bytes(), body)
+/// Build the NEAR Intents token-metadata scope from the NEAR network the
+/// metadata applies to and the asset id it describes.
+///
+/// Both fields are variable-length text, so each is length-prefixed inside the
+/// scope exactly as [`metadata_signing_prehash_v1`] prefixes its own fields.
+/// Plain concatenation would not be injective -- network `"near"` with asset
+/// `"x"` and network `"nea"` with asset `"rx"` would produce the same bytes --
+/// and a signature is only as narrow as its scope is unambiguous.
+fn near_token_metadata_scope(network_id: &str, asset_id: &str) -> Vec<u8> {
+    let mut scope = Vec::with_capacity(16 + network_id.len() + asset_id.len());
+    for field in [network_id.as_bytes(), asset_id.as_bytes()] {
+        scope.extend_from_slice(&(field.len() as u64).to_le_bytes());
+        scope.extend_from_slice(field);
+    }
+    scope
 }
 
-/// Ethereum-origin (or EVM-twin) NEAR Intents token-metadata scope = the asset
-/// id string. See [`near_token_metadata_prehash`] for the shared `body` shape;
-/// this differs only in `chain_tag`, so a signature over one asset's metadata
-/// under this tag can never verify as a signature over the same asset under
+/// NEAR Intents token-metadata scope = the NEAR network id (e.g.
+/// `"NEAR_MAINNET"`) and the asset id string (e.g. `"nep141:wrap.near"`), the
+/// NEAR-side identity every bridged or native asset is addressed by regardless
+/// of which chain the underlying value lives on.
+///
+/// The network is part of the scope because a NEAR account id does not identify
+/// one by itself: an implicit account (a 64-hex address) is the same string on
+/// mainnet and testnet, so a scope of the asset id alone would let a signature
+/// issued for one network verify on the other.
+///
+/// `body` is the `{symbol, decimals}` JSON being attested to, exactly as it
+/// appears in `TokenMetadataEntry.value`; it is hashed byte-for-byte and is
+/// never re-encoded here or on the verifying side.
+#[must_use]
+pub fn near_token_metadata_prehash(network_id: &str, asset_id: &str, body: &[u8]) -> [u8; 32] {
+    metadata_signing_prehash_v1(
+        CHAIN_TAG_NEAR_TOKEN_METADATA,
+        &near_token_metadata_scope(network_id, asset_id),
+        body,
+    )
+}
+
+/// Ethereum-origin (or EVM-twin) NEAR Intents token-metadata prehash. Scope and
+/// `body` are as in [`near_token_metadata_prehash`]; this differs only in
+/// `chain_tag`, so a signature over one asset's metadata under this tag can
+/// never verify as a signature over the same asset under
 /// [`near_token_metadata_prehash`] or [`solana_token_metadata_prehash`].
 #[must_use]
-pub fn ethereum_token_metadata_prehash(asset_id: &str, body: &[u8]) -> [u8; 32] {
-    metadata_signing_prehash_v1(CHAIN_TAG_ETHEREUM_TOKEN_METADATA, asset_id.as_bytes(), body)
+pub fn ethereum_token_metadata_prehash(network_id: &str, asset_id: &str, body: &[u8]) -> [u8; 32] {
+    metadata_signing_prehash_v1(
+        CHAIN_TAG_ETHEREUM_TOKEN_METADATA,
+        &near_token_metadata_scope(network_id, asset_id),
+        body,
+    )
 }
 
-/// Solana-origin (or SVM-twin) NEAR Intents token-metadata scope = the asset id
-/// string. See [`near_token_metadata_prehash`] for the shared `body` shape.
+/// Solana-origin (or SVM-twin) NEAR Intents token-metadata prehash. Scope and
+/// `body` are as in [`near_token_metadata_prehash`].
 #[must_use]
-pub fn solana_token_metadata_prehash(asset_id: &str, body: &[u8]) -> [u8; 32] {
-    metadata_signing_prehash_v1(CHAIN_TAG_SOLANA_TOKEN_METADATA, asset_id.as_bytes(), body)
+pub fn solana_token_metadata_prehash(network_id: &str, asset_id: &str, body: &[u8]) -> [u8; 32] {
+    metadata_signing_prehash_v1(
+        CHAIN_TAG_SOLANA_TOKEN_METADATA,
+        &near_token_metadata_scope(network_id, asset_id),
+        body,
+    )
 }
 
 #[cfg(test)]
@@ -506,12 +553,16 @@ mod tests {
 
     #[test]
     fn test_near_token_metadata_wrapper_matches_hand_computed_prehash() {
+        let network_id = "NEAR_MAINNET";
         let asset_id = "nep141:wrap.near";
         let body = br#"{"symbol":"wNEAR","decimals":24}"#;
 
-        let expected =
-            metadata_signing_prehash_v1(CHAIN_TAG_NEAR_TOKEN_METADATA, asset_id.as_bytes(), body);
-        let actual = near_token_metadata_prehash(asset_id, body);
+        let expected = metadata_signing_prehash_v1(
+            CHAIN_TAG_NEAR_TOKEN_METADATA,
+            &near_token_metadata_scope(network_id, asset_id),
+            body,
+        );
+        let actual = near_token_metadata_prehash(network_id, asset_id, body);
         assert_eq!(
             actual, expected,
             "near token-metadata wrapper must match the hand-computed core call"
@@ -527,12 +578,14 @@ mod tests {
         let asset_id = "nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near";
         let body = br#"{"symbol":"USDC.e","decimals":6}"#;
 
-        let near = near_token_metadata_prehash(asset_id, body);
-        let eth_token = ethereum_token_metadata_prehash(asset_id, body);
-        let sol_token = solana_token_metadata_prehash(asset_id, body);
+        let network_id = "NEAR_MAINNET";
+        let scope = near_token_metadata_scope(network_id, asset_id);
+        let near = near_token_metadata_prehash(network_id, asset_id, body);
+        let eth_token = ethereum_token_metadata_prehash(network_id, asset_id, body);
+        let sol_token = solana_token_metadata_prehash(network_id, asset_id, body);
         // Same (scope, body) reinterpreted under the pre-existing ABI/IDL tags.
-        let eth_abi = metadata_signing_prehash_v1(CHAIN_TAG_ETHEREUM, asset_id.as_bytes(), body);
-        let sol_idl = metadata_signing_prehash_v1(CHAIN_TAG_SOLANA, asset_id.as_bytes(), body);
+        let eth_abi = metadata_signing_prehash_v1(CHAIN_TAG_ETHEREUM, &scope, body);
+        let sol_idl = metadata_signing_prehash_v1(CHAIN_TAG_SOLANA, &scope, body);
 
         let all = [near, eth_token, sol_token, eth_abi, sol_idl];
         for i in 0..all.len() {
@@ -545,6 +598,46 @@ mod tests {
         }
     }
 
+    /// The reason the network is in the scope at all: an implicit NEAR account
+    /// id is the same string on both networks, so without it a mainnet
+    /// signature would verify against the identical testnet asset.
+    #[test]
+    fn test_token_metadata_prehash_is_bound_to_the_network() {
+        // A 64-hex implicit account, identical on mainnet and testnet.
+        let asset_id = "nep141:9c8f1f3a2b7e4d6c5a0918273645fabcdef0123456789abcdef0123456789abcd";
+        let body = br#"{"symbol":"USDC","decimals":6}"#;
+
+        for prehash in [
+            near_token_metadata_prehash,
+            ethereum_token_metadata_prehash,
+            solana_token_metadata_prehash,
+        ] {
+            assert_ne!(
+                prehash("NEAR_MAINNET", asset_id, body),
+                prehash("NEAR_TESTNET", asset_id, body),
+                "the same asset on a different network must not share a prehash"
+            );
+        }
+    }
+
+    /// Both scope fields are variable-length text, so the boundary between them
+    /// has to be unambiguous: shifting a byte from the network into the asset id
+    /// must change the prehash.
+    #[test]
+    fn test_token_metadata_scope_is_injective_across_its_two_fields() {
+        let body = b"{}";
+        assert_ne!(
+            near_token_metadata_prehash("NEAR_MAINNE", "Tnep141:wrap.near", body),
+            near_token_metadata_prehash("NEAR_MAINNET", "nep141:wrap.near", body),
+            "a field boundary shift must change the prehash"
+        );
+        assert_ne!(
+            near_token_metadata_scope("a", "bc"),
+            near_token_metadata_scope("ab", "c"),
+            "the scope encoding itself must be injective"
+        );
+    }
+
     #[test]
     fn test_ethereum_token_metadata_wrapper_matches_hand_computed_prehash() {
         let asset_id = "nep141:dac17f958d2ee523a2206206994597c13d831ec7.factory.bridge.near";
@@ -552,10 +645,10 @@ mod tests {
 
         let expected = metadata_signing_prehash_v1(
             CHAIN_TAG_ETHEREUM_TOKEN_METADATA,
-            asset_id.as_bytes(),
+            &near_token_metadata_scope("NEAR_MAINNET", asset_id),
             body,
         );
-        let actual = ethereum_token_metadata_prehash(asset_id, body);
+        let actual = ethereum_token_metadata_prehash("NEAR_MAINNET", asset_id, body);
         assert_eq!(
             actual, expected,
             "ethereum token-metadata wrapper must match the hand-computed core call"
@@ -567,9 +660,12 @@ mod tests {
         let asset_id = "nep141:someassetonsolana.omft.near";
         let body = br#"{"symbol":"SOL","decimals":9}"#;
 
-        let expected =
-            metadata_signing_prehash_v1(CHAIN_TAG_SOLANA_TOKEN_METADATA, asset_id.as_bytes(), body);
-        let actual = solana_token_metadata_prehash(asset_id, body);
+        let expected = metadata_signing_prehash_v1(
+            CHAIN_TAG_SOLANA_TOKEN_METADATA,
+            &near_token_metadata_scope("NEAR_MAINNET", asset_id),
+            body,
+        );
+        let actual = solana_token_metadata_prehash("NEAR_MAINNET", asset_id, body);
         assert_eq!(
             actual, expected,
             "solana token-metadata wrapper must match the hand-computed core call"

@@ -58,6 +58,7 @@ use serde::Deserialize;
 use visualsign::signing::SignerAllowlist;
 
 use super::{NearTokenRegistry, TokenMeta, tokens};
+use crate::networks::NearNetwork;
 
 /// The only supported ed25519 algorithm tag (Near and Solana origins).
 const ED25519_ALGORITHM: &str = "ed25519";
@@ -247,7 +248,12 @@ fn canonical_secp256k1_pubkey_from_hex(hex_str: &str) -> Option<Vec<u8>> {
 /// Validate a token-metadata entry's signature over `value`'s raw bytes,
 /// dispatching curve and allowlist by `origin_chain`.
 /// `TokenOriginChain::Unspecified` is treated as `Near`.
+///
+/// `network_id` is the NEAR network the metadata applies to. It is part of the
+/// signed scope, so a signature minted for one network does not verify on
+/// another.
 fn validate_token_metadata_signature(
+    network_id: &str,
     asset_id: &str,
     value: &str,
     origin_chain: TokenOriginChain,
@@ -256,6 +262,7 @@ fn validate_token_metadata_signature(
 ) -> Result<(), TokenMetadataSignatureError> {
     match origin_chain {
         TokenOriginChain::Unspecified | TokenOriginChain::Near => validate_ed25519(
+            network_id,
             asset_id,
             value,
             signature,
@@ -263,9 +270,10 @@ fn validate_token_metadata_signature(
             visualsign::signing::near_token_metadata_prehash,
         ),
         TokenOriginChain::Ethereum => {
-            validate_secp256k1(asset_id, value, signature, &allowlists.ethereum)
+            validate_secp256k1(network_id, asset_id, value, signature, &allowlists.ethereum)
         }
         TokenOriginChain::Solana => validate_ed25519(
+            network_id,
             asset_id,
             value,
             signature,
@@ -276,11 +284,12 @@ fn validate_token_metadata_signature(
 }
 
 fn validate_ed25519(
+    network_id: &str,
     asset_id: &str,
     value: &str,
     signature: &SignatureMetadata,
     allowlist: &SignerAllowlist,
-    prehash: fn(&str, &[u8]) -> [u8; 32],
+    prehash: fn(&str, &str, &[u8]) -> [u8; 32],
 ) -> Result<(), TokenMetadataSignatureError> {
     let algorithm = signature
         .algorithm
@@ -296,7 +305,7 @@ fn validate_ed25519(
         .as_deref()
         .ok_or_else(|| TokenMetadataSignatureError::Validation("Missing public_key".to_string()))?;
 
-    let hash = prehash(asset_id, value.as_bytes());
+    let hash = prehash(network_id, asset_id, value.as_bytes());
     let sig_bytes = decode_hex_fixed::<ED25519_SIGNATURE_LEN>(&signature.value, "signature")?;
     let sig = Ed25519Signature::from_bytes(&sig_bytes);
     let pubkey_bytes = decode_hex_fixed::<ED25519_PUBLIC_KEY_LEN>(public_key_hex, "public key")?;
@@ -316,6 +325,7 @@ fn validate_ed25519(
 }
 
 fn validate_secp256k1(
+    network_id: &str,
     asset_id: &str,
     value: &str,
     signature: &SignatureMetadata,
@@ -335,7 +345,11 @@ fn validate_secp256k1(
         .as_deref()
         .ok_or_else(|| TokenMetadataSignatureError::Validation("Missing public_key".to_string()))?;
 
-    let hash = visualsign::signing::ethereum_token_metadata_prehash(asset_id, value.as_bytes());
+    let hash = visualsign::signing::ethereum_token_metadata_prehash(
+        network_id,
+        asset_id,
+        value.as_bytes(),
+    );
     let sig_bytes = visualsign::encodings::decode_hex(&signature.value).map_err(|e| {
         TokenMetadataSignatureError::Validation(format!("Invalid signature hex: {e}"))
     })?;
@@ -374,16 +388,21 @@ fn validate_secp256k1(
 /// can plug the result straight into a
 /// [`visualsign::registry::LayeredRegistry`] request layer.
 ///
+/// `network` is the NEAR network this request resolved to, taken as a parameter
+/// rather than re-derived from `chain_metadata`: the caller already resolves it
+/// (a request that omits `network_id` falls back to the network the converter
+/// was built for), and it is part of every signed scope, so deriving it a
+/// second time here could scope a signature check to a different network than
+/// the one being rendered.
+///
 /// `trust_policy` gates only whether an entry with no signature at all is
-/// accepted ([`MetadataTrustPolicy::accepts_unsigned`]); a present signature
+/// accepted ([`NearTokenTrustPolicy::accepts_unsigned`]); a present signature
 /// is always checked against the relevant origin-chain allowlist in
-/// `allowlists`, regardless of posture. Unlike the Ethereum ABI path (a
-/// single allowlist), NEAR already dispatches identity checks per origin
-/// chain, so the allowlist a `MetadataTrustPolicy::RequireAllowlistedSigner`
-/// carries is not itself consulted here -- only the posture it selects is.
+/// `allowlists`, regardless of posture.
 #[must_use]
 pub fn try_extract_from_chain_metadata(
     chain_metadata: Option<&ChainMetadata>,
+    network: NearNetwork,
     allowlists: &TokenMetadataSignerAllowlists,
     trust_policy: NearTokenTrustPolicy,
 ) -> Option<NearTokenRegistry> {
@@ -394,6 +413,10 @@ pub fn try_extract_from_chain_metadata(
     if near.token_mappings.is_empty() {
         return None;
     }
+    // The canonical id, not whatever spelling the request used, so a signature
+    // does not depend on the casing a caller happened to send.
+    let network_id = network.network_id();
+
     if near.token_mappings.len() > MAX_TOKEN_METADATA_ENTRIES {
         tracing::warn!(
             "Ignoring all NEAR token metadata: {} entries exceeds the limit of \
@@ -524,6 +547,7 @@ pub fn try_extract_from_chain_metadata(
         if let Some(proto_sig) = entry.signature.as_ref() {
             let signature = convert_proto_signature(proto_sig);
             if let Err(e) = validate_token_metadata_signature(
+                network_id,
                 asset_id,
                 &entry.value,
                 origin_chain,
@@ -571,17 +595,19 @@ pub const DEV_SOLANA_SIGNING_KEY_SEED: [u8; 32] = [0x53u8; 32];
 
 /// Sign `value` (the exact `TokenMetadataEntry.value` bytes) with an ed25519
 /// seed (Near or Solana origin) and return a proto `SignatureMetadata` ready
-/// to drop into `TokenMetadataEntry.signature`.
+/// to drop into `TokenMetadataEntry.signature`. `network_id` must be the NEAR
+/// network the entry is destined for; it is part of the signed scope.
 #[cfg(any(test, feature = "dev-signing"))]
 pub fn sign_token_metadata_ed25519(
+    network_id: &str,
     asset_id: &str,
     value: &str,
     seed: &[u8; 32],
-    prehash: fn(&str, &[u8]) -> [u8; 32],
+    prehash: fn(&str, &str, &[u8]) -> [u8; 32],
 ) -> generated::parser::SignatureMetadata {
     let signing_key = Ed25519SigningKey::from_bytes(seed);
     let verifying_key = signing_key.verifying_key();
-    let hash = prehash(asset_id, value.as_bytes());
+    let hash = prehash(network_id, asset_id, value.as_bytes());
     let signature = signing_key.sign(&hash);
     generated::parser::SignatureMetadata {
         value: hex::encode(signature.to_bytes()),
@@ -600,9 +626,11 @@ pub fn sign_token_metadata_ed25519(
 
 /// Sign `value` (the exact `TokenMetadataEntry.value` bytes) with a secp256k1
 /// seed (Ethereum origin) and return a proto `SignatureMetadata` ready to drop
-/// into `TokenMetadataEntry.signature`.
+/// into `TokenMetadataEntry.signature`. `network_id` must be the NEAR network
+/// the entry is destined for; it is part of the signed scope.
 #[cfg(any(test, feature = "dev-signing"))]
 pub fn sign_token_metadata_secp256k1(
+    network_id: &str,
     asset_id: &str,
     value: &str,
     seed: &[u8; 32],
@@ -610,7 +638,11 @@ pub fn sign_token_metadata_secp256k1(
     let signing_key = Secp256k1SigningKey::from_bytes(seed.into())
         .map_err(|e| format!("invalid secp256k1 signing key seed: {e}"))?;
     let verifying_key = Secp256k1VerifyingKey::from(&signing_key);
-    let hash = visualsign::signing::ethereum_token_metadata_prehash(asset_id, value.as_bytes());
+    let hash = visualsign::signing::ethereum_token_metadata_prehash(
+        network_id,
+        asset_id,
+        value.as_bytes(),
+    );
     let signature: Secp256k1Signature = signing_key
         .sign_prehash(&hash)
         .map_err(|e| format!("failed to sign token metadata hash: {e}"))?;
@@ -642,6 +674,16 @@ mod tests {
     /// of `ASSET_ID` so the gap-fill-only guard doesn't intercept first and
     /// mask what they're actually testing.
     const UNSEEDED_ASSET_ID: &str = "nep141:new-unlisted-token.near";
+    /// The network every fixture below signs and verifies against. It is part
+    /// of the signed scope, so signing and verifying must agree on it. The
+    /// string and the enum are the same network; `network_ids_agree` gates that.
+    const NETWORK_ID: &str = "NEAR_MAINNET";
+    const NETWORK: NearNetwork = NearNetwork::Mainnet;
+
+    #[test]
+    fn network_ids_agree() {
+        assert_eq!(NETWORK.network_id(), NETWORK_ID);
+    }
 
     fn accept_unsigned_policy() -> NearTokenTrustPolicy {
         NearTokenTrustPolicy::AcceptUnsigned
@@ -705,6 +747,7 @@ mod tests {
     #[test]
     fn near_origin_valid_signature_verifies() {
         let sig_meta = sign_token_metadata_ed25519(
+            NETWORK_ID,
             ASSET_ID,
             VALUE,
             &DEV_NEAR_SIGNING_KEY_SEED,
@@ -713,6 +756,7 @@ mod tests {
         let sig = convert_proto_signature(&sig_meta);
         assert!(
             validate_token_metadata_signature(
+                NETWORK_ID,
                 ASSET_ID,
                 VALUE,
                 TokenOriginChain::Near,
@@ -726,6 +770,7 @@ mod tests {
     #[test]
     fn unspecified_origin_defaults_to_near_curve() {
         let sig_meta = sign_token_metadata_ed25519(
+            NETWORK_ID,
             ASSET_ID,
             VALUE,
             &DEV_NEAR_SIGNING_KEY_SEED,
@@ -734,6 +779,7 @@ mod tests {
         let sig = convert_proto_signature(&sig_meta);
         assert!(
             validate_token_metadata_signature(
+                NETWORK_ID,
                 ASSET_ID,
                 VALUE,
                 TokenOriginChain::Unspecified,
@@ -746,11 +792,17 @@ mod tests {
 
     #[test]
     fn ethereum_origin_valid_signature_verifies() {
-        let sig_meta =
-            sign_token_metadata_secp256k1(ASSET_ID, VALUE, &DEV_ETHEREUM_SIGNING_KEY_SEED).unwrap();
+        let sig_meta = sign_token_metadata_secp256k1(
+            NETWORK_ID,
+            ASSET_ID,
+            VALUE,
+            &DEV_ETHEREUM_SIGNING_KEY_SEED,
+        )
+        .unwrap();
         let sig = convert_proto_signature(&sig_meta);
         assert!(
             validate_token_metadata_signature(
+                NETWORK_ID,
                 ASSET_ID,
                 VALUE,
                 TokenOriginChain::Ethereum,
@@ -764,6 +816,7 @@ mod tests {
     #[test]
     fn solana_origin_valid_signature_verifies() {
         let sig_meta = sign_token_metadata_ed25519(
+            NETWORK_ID,
             ASSET_ID,
             VALUE,
             &DEV_SOLANA_SIGNING_KEY_SEED,
@@ -772,6 +825,7 @@ mod tests {
         let sig = convert_proto_signature(&sig_meta);
         assert!(
             validate_token_metadata_signature(
+                NETWORK_ID,
                 ASSET_ID,
                 VALUE,
                 TokenOriginChain::Solana,
@@ -787,6 +841,7 @@ mod tests {
     #[test]
     fn signature_does_not_cross_origin_chains() {
         let sig_meta = sign_token_metadata_ed25519(
+            NETWORK_ID,
             ASSET_ID,
             VALUE,
             &DEV_NEAR_SIGNING_KEY_SEED,
@@ -795,6 +850,7 @@ mod tests {
         let sig = convert_proto_signature(&sig_meta);
         assert!(
             validate_token_metadata_signature(
+                NETWORK_ID,
                 ASSET_ID,
                 VALUE,
                 TokenOriginChain::Solana,
@@ -809,6 +865,7 @@ mod tests {
     #[test]
     fn tampered_value_rejected() {
         let sig_meta = sign_token_metadata_ed25519(
+            NETWORK_ID,
             ASSET_ID,
             VALUE,
             &DEV_NEAR_SIGNING_KEY_SEED,
@@ -818,6 +875,7 @@ mod tests {
         let tampered = r#"{"symbol":"PHISH","decimals":6}"#;
         assert!(
             validate_token_metadata_signature(
+                NETWORK_ID,
                 ASSET_ID,
                 tampered,
                 TokenOriginChain::Near,
@@ -832,6 +890,7 @@ mod tests {
     #[test]
     fn signature_bound_to_asset_id_rejects_replay() {
         let sig_meta = sign_token_metadata_ed25519(
+            NETWORK_ID,
             ASSET_ID,
             VALUE,
             &DEV_NEAR_SIGNING_KEY_SEED,
@@ -840,6 +899,7 @@ mod tests {
         let sig = convert_proto_signature(&sig_meta);
         assert!(
             validate_token_metadata_signature(
+                NETWORK_ID,
                 "nep141:a-different-token.near",
                 VALUE,
                 TokenOriginChain::Near,
@@ -853,6 +913,7 @@ mod tests {
     #[test]
     fn unlisted_signer_rejected() {
         let sig_meta = sign_token_metadata_ed25519(
+            NETWORK_ID,
             ASSET_ID,
             VALUE,
             &DEV_NEAR_SIGNING_KEY_SEED,
@@ -860,6 +921,7 @@ mod tests {
         );
         let sig = convert_proto_signature(&sig_meta);
         let result = validate_token_metadata_signature(
+            NETWORK_ID,
             ASSET_ID,
             VALUE,
             TokenOriginChain::Near,
@@ -882,8 +944,13 @@ mod tests {
     #[test]
     fn extract_no_metadata_is_none() {
         assert!(
-            try_extract_from_chain_metadata(None, &near_allowlist(), accept_unsigned_policy())
-                .is_none()
+            try_extract_from_chain_metadata(
+                None,
+                NETWORK,
+                &near_allowlist(),
+                accept_unsigned_policy()
+            )
+            .is_none()
         );
     }
 
@@ -900,6 +967,7 @@ mod tests {
         assert!(
             try_extract_from_chain_metadata(
                 Some(&metadata),
+                NETWORK,
                 &near_allowlist(),
                 accept_unsigned_policy()
             )
@@ -927,6 +995,7 @@ mod tests {
         };
         let registry = try_extract_from_chain_metadata(
             Some(&metadata),
+            NETWORK,
             &near_allowlist(),
             accept_unsigned_policy(),
         )
@@ -966,6 +1035,7 @@ mod tests {
         assert!(
             try_extract_from_chain_metadata(
                 Some(&metadata),
+                NETWORK,
                 &near_allowlist(),
                 accept_unsigned_policy()
             )
@@ -973,7 +1043,7 @@ mod tests {
         );
     }
 
-    // Regression coverage for adopting MetadataTrustPolicy: an unsigned entry
+    // Regression coverage for the trust posture: an unsigned entry
     // for an asset SEEDS doesn't cover -- normally accepted (see
     // extract_unsigned_entry_accepted) -- must be rejected outright once the
     // deployment's posture is RequireAllowlistedSigner, regardless of asset id.
@@ -995,6 +1065,7 @@ mod tests {
         assert!(
             try_extract_from_chain_metadata(
                 Some(&metadata),
+                NETWORK,
                 &near_allowlist(),
                 require_signed_policy()
             )
@@ -1002,13 +1073,114 @@ mod tests {
         );
     }
 
+    // A signature is scoped to one NEAR network, so the same signed entry
+    // presented against the other network is rejected rather than accepted as
+    // verified. This is the end-to-end half of
+    // `test_token_metadata_prehash_is_bound_to_the_network`.
+    #[test]
+    fn extract_rejects_a_mainnet_signature_replayed_on_testnet() {
+        let sig_meta = sign_token_metadata_ed25519(
+            "NEAR_MAINNET",
+            UNSEEDED_ASSET_ID,
+            VALUE,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("NEAR_MAINNET".to_string()),
+                token_mappings: make_mappings(vec![(
+                    UNSEEDED_ASSET_ID,
+                    TokenMetadataEntry {
+                        value: VALUE.to_string(),
+                        signature: Some(sig_meta),
+                        origin_chain: Some(TokenOriginChain::Near as i32),
+                    },
+                )]),
+            })),
+        };
+
+        // The control: checked against the network it was signed for, it
+        // registers verified.
+        let mainnet = try_extract_from_chain_metadata(
+            Some(&metadata),
+            NearNetwork::Mainnet,
+            &near_allowlist(),
+            require_signed_policy(),
+        )
+        .expect("the mainnet signature verifies on mainnet");
+        assert!(
+            mainnet
+                .by_asset_id
+                .get(UNSEEDED_ASSET_ID)
+                .expect("present")
+                .verified,
+            "signed entry registers as verified on its own network"
+        );
+
+        let testnet = try_extract_from_chain_metadata(
+            Some(&metadata),
+            NearNetwork::Testnet,
+            &near_allowlist(),
+            require_signed_policy(),
+        );
+        assert!(
+            testnet.is_none_or(|r| r.by_asset_id.is_empty()),
+            "a mainnet-scoped signature must not verify on testnet"
+        );
+    }
+
+    // The scope follows the `network` the caller resolved, not the
+    // `network_id` field sitting in the request: the converter's fallback
+    // network applies when a request omits the field, and the two must not
+    // diverge. A testnet-scoped signature therefore verifies for a testnet
+    // converter even though the request names no network at all.
+    #[test]
+    fn extract_scopes_to_the_resolved_network_not_the_metadata_field() {
+        let sig_meta = sign_token_metadata_ed25519(
+            "NEAR_TESTNET",
+            UNSEEDED_ASSET_ID,
+            VALUE,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: None,
+                token_mappings: make_mappings(vec![(
+                    UNSEEDED_ASSET_ID,
+                    TokenMetadataEntry {
+                        value: VALUE.to_string(),
+                        signature: Some(sig_meta),
+                        origin_chain: Some(TokenOriginChain::Near as i32),
+                    },
+                )]),
+            })),
+        };
+        let registry = try_extract_from_chain_metadata(
+            Some(&metadata),
+            NearNetwork::Testnet,
+            &near_allowlist(),
+            require_signed_policy(),
+        )
+        .expect("a testnet-scoped signature verifies for a testnet converter");
+        assert!(
+            registry
+                .by_asset_id
+                .get(UNSEEDED_ASSET_ID)
+                .expect("present")
+                .verified
+        );
+    }
+
     // A validly signed, allowlisted entry still registers under the strict
-    // posture: MetadataTrustPolicy gates only whether a MISSING signature is
+    // posture: NearTokenTrustPolicy gates only whether a MISSING signature is
     // acceptable, not the per-origin-chain allowlist check a present one
     // already goes through unconditionally.
     #[test]
     fn extract_signed_entry_still_registers_under_require_signed_policy() {
         let sig_meta = sign_token_metadata_ed25519(
+            NETWORK_ID,
             ASSET_ID,
             VALUE,
             &DEV_NEAR_SIGNING_KEY_SEED,
@@ -1029,6 +1201,7 @@ mod tests {
         };
         let registry = try_extract_from_chain_metadata(
             Some(&metadata),
+            NETWORK,
             &near_allowlist(),
             require_signed_policy(),
         )
@@ -1062,6 +1235,7 @@ mod tests {
         assert!(
             try_extract_from_chain_metadata(
                 Some(&metadata),
+                NETWORK,
                 &near_allowlist(),
                 accept_unsigned_policy()
             )
@@ -1095,6 +1269,7 @@ mod tests {
         assert!(
             try_extract_from_chain_metadata(
                 Some(&metadata),
+                NETWORK,
                 &near_allowlist(),
                 accept_unsigned_policy(),
             )
@@ -1125,51 +1300,12 @@ mod tests {
         };
         let registry = try_extract_from_chain_metadata(
             Some(&metadata),
+            NETWORK,
             &near_allowlist(),
             accept_unsigned_policy(),
         )
         .expect("a mapping exactly at the cap is accepted");
         assert_eq!(registry.by_asset_id.len(), MAX_TOKEN_METADATA_ENTRIES);
-    }
-
-    // An entry whose `value` isn't valid JSON is rejected whether or not it
-    // carries a signature. The signed case is the one the check order matters
-    // for: the JSON parse runs before signature verification, so a structurally
-    // broken entry is dropped without spending an elliptic-curve operation.
-    // Both cases must still be rejected, which is what this pins.
-    #[test]
-    fn extract_malformed_value_json_skipped_signed_or_not() {
-        let broken = r#"{"symbol":"BROKEN","decimals":}"#;
-        let signed = sign_token_metadata_ed25519(
-            UNSEEDED_ASSET_ID,
-            broken,
-            &DEV_NEAR_SIGNING_KEY_SEED,
-            visualsign::signing::near_token_metadata_prehash,
-        );
-        for signature in [None, Some(signed)] {
-            let metadata = ChainMetadata {
-                metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
-                    network_id: None,
-                    token_mappings: make_mappings(vec![(
-                        UNSEEDED_ASSET_ID,
-                        TokenMetadataEntry {
-                            value: broken.to_string(),
-                            signature,
-                            origin_chain: None,
-                        },
-                    )]),
-                })),
-            };
-            assert!(
-                try_extract_from_chain_metadata(
-                    Some(&metadata),
-                    &near_allowlist(),
-                    accept_unsigned_policy(),
-                )
-                .is_none_or(|r| r.by_asset_id.is_empty()),
-                "an entry whose value is not valid JSON must never register"
-            );
-        }
     }
 
     #[test]
@@ -1179,6 +1315,7 @@ mod tests {
         // this build cannot verify, so it must not be accepted under the NEAR
         // curator's identity.
         let sig_meta = sign_token_metadata_ed25519(
+            NETWORK_ID,
             ASSET_ID,
             VALUE,
             &DEV_NEAR_SIGNING_KEY_SEED,
@@ -1199,6 +1336,7 @@ mod tests {
         };
         let registry = try_extract_from_chain_metadata(
             Some(&metadata),
+            NETWORK,
             &near_allowlist(),
             require_signed_policy(),
         );
@@ -1211,6 +1349,7 @@ mod tests {
     #[test]
     fn extract_signed_entry_verifies_and_registers() {
         let sig_meta = sign_token_metadata_ed25519(
+            NETWORK_ID,
             ASSET_ID,
             VALUE,
             &DEV_NEAR_SIGNING_KEY_SEED,
@@ -1231,6 +1370,7 @@ mod tests {
         };
         let registry = try_extract_from_chain_metadata(
             Some(&metadata),
+            NETWORK,
             &near_allowlist(),
             accept_unsigned_policy(),
         )
@@ -1243,6 +1383,7 @@ mod tests {
     #[test]
     fn extract_rejects_entry_with_unauthorized_signature() {
         let sig_meta = sign_token_metadata_ed25519(
+            NETWORK_ID,
             ASSET_ID,
             VALUE,
             &DEV_NEAR_SIGNING_KEY_SEED,
@@ -1265,6 +1406,7 @@ mod tests {
         assert!(
             try_extract_from_chain_metadata(
                 Some(&metadata),
+                NETWORK,
                 &empty_allowlists(),
                 accept_unsigned_policy()
             )
@@ -1290,11 +1432,54 @@ mod tests {
         assert!(
             try_extract_from_chain_metadata(
                 Some(&metadata),
+                NETWORK,
                 &near_allowlist(),
                 accept_unsigned_policy()
             )
             .is_none()
         );
+    }
+
+    // An entry whose `value` isn't valid JSON is rejected whether or not it
+    // carries a signature. The signed case is the one the check order matters
+    // for: the JSON parse runs before signature verification, so a structurally
+    // broken entry is dropped without spending an elliptic-curve operation.
+    // Both cases must still be rejected, which is what this pins.
+    #[test]
+    fn extract_malformed_value_json_skipped_signed_or_not() {
+        let broken = r#"{"symbol":"BROKEN","decimals":}"#;
+        let signed = sign_token_metadata_ed25519(
+            NETWORK_ID,
+            UNSEEDED_ASSET_ID,
+            broken,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        for signature in [None, Some(signed)] {
+            let metadata = ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                    network_id: None,
+                    token_mappings: make_mappings(vec![(
+                        UNSEEDED_ASSET_ID,
+                        TokenMetadataEntry {
+                            value: broken.to_string(),
+                            signature,
+                            origin_chain: None,
+                        },
+                    )]),
+                })),
+            };
+            assert!(
+                try_extract_from_chain_metadata(
+                    Some(&metadata),
+                    NETWORK,
+                    &near_allowlist(),
+                    accept_unsigned_policy(),
+                )
+                .is_none_or(|r| r.by_asset_id.is_empty()),
+                "an entry whose value is not valid JSON must never register"
+            );
+        }
     }
 
     #[test]
@@ -1315,6 +1500,7 @@ mod tests {
         assert!(
             try_extract_from_chain_metadata(
                 Some(&metadata),
+                NETWORK,
                 &near_allowlist(),
                 accept_unsigned_policy()
             )
@@ -1344,6 +1530,7 @@ mod tests {
         assert!(
             try_extract_from_chain_metadata(
                 Some(&metadata),
+                NETWORK,
                 &near_allowlist(),
                 accept_unsigned_policy()
             )
@@ -1369,6 +1556,7 @@ mod tests {
         assert!(
             try_extract_from_chain_metadata(
                 Some(&metadata),
+                NETWORK,
                 &near_allowlist(),
                 accept_unsigned_policy()
             )
@@ -1397,6 +1585,7 @@ mod tests {
         assert!(
             try_extract_from_chain_metadata(
                 Some(&metadata),
+                NETWORK,
                 &near_allowlist(),
                 accept_unsigned_policy()
             )
@@ -1426,6 +1615,7 @@ mod tests {
         assert!(
             try_extract_from_chain_metadata(
                 Some(&metadata),
+                NETWORK,
                 &near_allowlist(),
                 accept_unsigned_policy()
             )

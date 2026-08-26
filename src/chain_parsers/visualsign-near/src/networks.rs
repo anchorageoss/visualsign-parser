@@ -23,6 +23,18 @@ impl NearNetwork {
         }
     }
 
+    /// The canonical network identifier string, the inverse of
+    /// [`Self::from_network_id`]. Signed scopes use this rather than a
+    /// caller-supplied spelling, so a signature does not depend on the casing
+    /// the request happened to send.
+    #[must_use]
+    pub fn network_id(self) -> &'static str {
+        match self {
+            NearNetwork::Mainnet => "NEAR_MAINNET",
+            NearNetwork::Testnet => "NEAR_TESTNET",
+        }
+    }
+
     /// Parses a canonical network identifier string (e.g. `"NEAR_MAINNET"`,
     /// `"NEAR_TESTNET"`). Case-insensitive.
     #[must_use]
@@ -76,6 +88,16 @@ mod tests {
     #[test]
     fn default_is_mainnet() {
         assert_eq!(NearNetwork::default(), NearNetwork::Mainnet);
+    }
+
+    #[test]
+    fn network_id_round_trips_through_from_network_id() {
+        for network in [NearNetwork::Mainnet, NearNetwork::Testnet] {
+            assert_eq!(
+                NearNetwork::from_network_id(network.network_id()),
+                Some(network)
+            );
+        }
     }
 
     #[test]

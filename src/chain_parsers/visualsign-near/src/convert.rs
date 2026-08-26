@@ -27,16 +27,23 @@ use crate::tx::NearTransaction;
 /// `tokens::SEEDS`, consulted by `tokens::resolve` only after this registry's
 /// own lookup misses.
 ///
+/// `network` is part of every token-metadata signed scope, so it is resolved
+/// once per request by [`resolve_network`] and passed down rather than derived
+/// again here: a signature must be checked against the same network the payload
+/// renders under.
+///
 /// `trust_policy` gates only whether an entry with no signature at all is
 /// accepted; a present signature is always checked against the relevant
 /// origin-chain allowlist (see `authorized_token_metadata_signers`)
 /// regardless of posture.
 fn token_registry_for(
     options: &VisualSignOptions,
+    network: NearNetwork,
     trust_policy: NearTokenTrustPolicy,
 ) -> LayeredRegistry<NearTokenRegistry> {
     let request = try_extract_token_metadata_from_chain_metadata(
         options.metadata.as_ref(),
+        network,
         authorized_token_metadata_signers(),
         trust_policy,
     );
@@ -46,6 +53,19 @@ fn token_registry_for(
         }
         None => LayeredRegistry::new(Arc::new(NearTokenRegistry::default())),
     }
+}
+
+/// Resolve the network for one request: the `network_id` the request supplied,
+/// or `fallback` (the network the converter was constructed for) when it omits
+/// one. Errors when a `network_id` is present but unrecognized.
+///
+/// Both render paths go through this so the rendered `Network` field and the
+/// network bound into a token-metadata signature scope can never disagree.
+fn resolve_network(
+    options: &VisualSignOptions,
+    fallback: NearNetwork,
+) -> Result<NearNetwork, VisualSignError> {
+    Ok(extract_network_from_metadata(options.metadata.as_ref())?.unwrap_or(fallback))
 }
 
 /// Payload version emitted for NEAR payloads.
@@ -112,9 +132,12 @@ impl VisualSignConverter<NearTransaction> for NearVisualSignConverter {
     ) -> Result<ConversionResult, VisualSignError> {
         match transaction {
             NearTransaction::OnChain(tx) => self.render_on_chain(&tx, &options),
-            NearTransaction::Intent(json) => {
-                render_intent_envelope(&json, &options, self.trust_policy)
-            }
+            NearTransaction::Intent(json) => render_intent_envelope(
+                &json,
+                &options,
+                resolve_network(&options, self.network)?,
+                self.trust_policy,
+            ),
         }
     }
 }
@@ -131,10 +154,7 @@ impl NearVisualSignConverter {
             ));
         }
 
-        let network = match extract_network_from_metadata(options.metadata.as_ref())? {
-            Some(network) => network,
-            None => self.network,
-        };
+        let network = resolve_network(options, self.network)?;
         for (role, account_id) in [
             ("signer", tx.signer_id().as_str()),
             ("receiver", tx.receiver_id().as_str()),
@@ -161,6 +181,7 @@ impl NearVisualSignConverter {
                 tx.receiver_id().as_str(),
                 action,
                 options,
+                network,
                 self.trust_policy,
             )?);
         }
@@ -198,6 +219,7 @@ fn decode_intents(
     receiver_id: &str,
     action: &Action,
     options: &VisualSignOptions,
+    network: NearNetwork,
     trust_policy: NearTokenTrustPolicy,
 ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
     if receiver_id != "intents.near" {
@@ -209,7 +231,7 @@ fn decode_intents(
     if fc.method_name != "execute_intents" {
         return Ok(vec![]);
     }
-    let registry = token_registry_for(options, trust_policy);
+    let registry = token_registry_for(options, network, trust_policy);
     crate::presets::intents::try_decode_execute_intents(&fc.args, &registry, options)
         .map_err(|e| VisualSignError::ConversionError(e.to_string()))
 }
@@ -219,9 +241,10 @@ fn decode_intents(
 fn render_intent_envelope(
     json: &str,
     options: &VisualSignOptions,
+    network: NearNetwork,
     trust_policy: NearTokenTrustPolicy,
 ) -> Result<ConversionResult, VisualSignError> {
-    let registry = token_registry_for(options, trust_policy);
+    let registry = token_registry_for(options, network, trust_policy);
     let fields =
         crate::presets::intents::try_render_single_intent(json.as_bytes(), &registry, options)
             .map_err(|e| VisualSignError::ConversionError(e.to_string()))?;
@@ -553,6 +576,60 @@ mod tests {
         assert!(
             json.contains("unverified-token-metadata"),
             "unsigned gap-fill entry must carry its provenance into the render: {json}"
+        );
+    }
+
+    /// `resolve_network` is the single resolution both the rendered `Network`
+    /// field and the token-metadata signed scope read, so a testnet converter
+    /// handling a request that omits `network_id` must land on testnet -- not on
+    /// mainnet, which would check signatures against a scope the payload never
+    /// renders under.
+    #[test]
+    fn resolve_network_falls_back_to_the_converters_network() {
+        let no_network_id = VisualSignOptions {
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                    network_id: None,
+                    token_mappings: Default::default(),
+                })),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_network(&no_network_id, NearNetwork::Testnet),
+            Ok(NearNetwork::Testnet),
+            "an absent network_id resolves to the converter's network"
+        );
+        assert_eq!(
+            resolve_network(&VisualSignOptions::default(), NearNetwork::Testnet),
+            Ok(NearNetwork::Testnet),
+            "absent metadata entirely resolves the same way"
+        );
+    }
+
+    /// A `network_id` the request does supply wins over the converter's, and one
+    /// that doesn't parse is an error rather than a silent fallback -- now on
+    /// the intents path too, which previously ignored the field.
+    #[test]
+    fn resolve_network_prefers_the_request_and_rejects_an_unparseable_one() {
+        let with_network_id = |id: &str| VisualSignOptions {
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                    network_id: Some(id.to_string()),
+                    token_mappings: Default::default(),
+                })),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_network(&with_network_id("NEAR_TESTNET"), NearNetwork::Mainnet),
+            Ok(NearNetwork::Testnet),
+            "a supplied network_id overrides the converter's network"
+        );
+        // near-api-js's spelling, not one of the two ids the parser accepts.
+        assert!(
+            resolve_network(&with_network_id("testnet"), NearNetwork::Mainnet).is_err(),
+            "an unparseable network_id must not fall back silently"
         );
     }
 

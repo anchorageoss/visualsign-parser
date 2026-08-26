@@ -76,17 +76,29 @@ near_view_raw() {
     sleep "$RPC_DELAY_SECONDS"
 }
 
-# Call a NEAR view method that returns a JSON string, and print that string
-# decoded (quotes stripped). Prints nothing and returns nonzero on a
-# contract-side panic (e.g. ERR_TOKEN_NOT_REGISTERED).
+# Call a NEAR view method and print its result decoded from the returned byte
+# array to text (a JSON string's surrounding quotes stripped; an object left as
+# is). Prints nothing and returns nonzero on an RPC error or a contract-side
+# panic (e.g. ERR_TOKEN_NOT_REGISTERED).
 near_view_string() {
     local account="$1" method="$2" args_json="$3"
     local response result_bytes
     response=$(near_view_raw "$account" "$method" "$args_json")
-    if echo "$response" | jq -e '.result.error' >/dev/null 2>&1; then
+    # A failed query surfaces in either place: JSON-RPC-level failures (and
+    # contract execution errors such as ERR_TOKEN_NOT_REGISTERED) land in the
+    # top-level .error, while some node versions nest a handler error under
+    # .result.error. Both must be checked, or the decode below runs on a
+    # response that carries no result.
+    if echo "$response" | jq -e '.error // .result.error' >/dev/null 2>&1; then
         return 1
     fi
-    result_bytes=$(echo "$response" | jq -r '.result.result | implode')
+    # Assigning in a command substitution discards jq's exit status, so an
+    # absent .result.result would otherwise return success with empty output
+    # and the caller would build a seed line out of nothing.
+    result_bytes=$(echo "$response" | jq -e -r '.result.result | implode' 2>/dev/null) || return 1
+    if [ -z "$result_bytes" ]; then
+        return 1
+    fi
     # implode of a JSON string's UTF-8 bytes yields the quoted JSON literal;
     # jq -r strips one layer of quoting for us already only for scalar output,
     # so unwrap the surrounding quotes explicitly.
@@ -101,7 +113,7 @@ near_view_string() {
 emit_seed_line() {
     local token_account="$1" label="$2"
     local metadata symbol decimals
-    metadata=$(near_view_raw "$token_account" "ft_metadata" '{}' | jq -r '.result.result | implode' 2>/dev/null || true)
+    metadata=$(near_view_string "$token_account" "ft_metadata" '{}' || true)
     if [ -z "$metadata" ] || [ "$metadata" = "null" ]; then
         echo "SKIP $label ($token_account): ft_metadata call failed" >&2
         return
