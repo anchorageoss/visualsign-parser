@@ -45,8 +45,8 @@ use boot_proof::{BootProofSource, StaticBootProof};
 use clap::Parser;
 use generated::parser::{Chain, ChainMetadata, SignatureScheme};
 use host_primitives::turnkey::{
-    TurnkeyParsedTransaction, TurnkeyPayload, TurnkeyRequestWrapper, TurnkeyResponse,
-    TurnkeyResponseWrapper, TurnkeySignature, error_response,
+    TurnkeyPayload, TurnkeyRequestWrapper, TurnkeyResponseWrapper, TurnkeySignature,
+    error_response, success_response,
 };
 use parser_app::routes::parse::parse;
 use qos_core::handles::EphemeralKeyHandle;
@@ -197,25 +197,20 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
 
     (
         StatusCode::OK,
-        Json(TurnkeyResponseWrapper {
-            boot_proof: state.boot_proof.boot_proof(),
-            response: TurnkeyResponse {
-                parsed_transaction: TurnkeyParsedTransaction {
-                    payload: TurnkeyPayload {
-                        signable_payload: payload.parsed_payload,
-                        metadata_digest: payload.metadata_digest,
-                        input_payload_digest: payload.input_payload_digest,
-                        // base64 of an empty Vec is "", which serde omits (see
-                        // skip_serializing_if) so the non-intermediate response
-                        // is unchanged.
-                        intermediate_output: base64::engine::general_purpose::STANDARD
-                            .encode(&payload.intermediate_output),
-                    },
-                    signature,
-                },
+        Json(success_response(
+            state.boot_proof.boot_proof(),
+            TurnkeyPayload {
+                signable_payload: payload.parsed_payload,
+                metadata_digest: payload.metadata_digest,
+                input_payload_digest: payload.input_payload_digest,
+                // base64 of an empty Vec is "", which serde omits (see
+                // skip_serializing_if) so the non-intermediate response
+                // is unchanged.
+                intermediate_output: base64::engine::general_purpose::STANDARD
+                    .encode(&payload.intermediate_output),
             },
-            error: None,
-        }),
+            signature,
+        )),
     )
 }
 
