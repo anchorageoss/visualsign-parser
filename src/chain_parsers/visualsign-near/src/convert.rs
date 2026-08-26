@@ -7,7 +7,6 @@ use near_primitives::transaction::Transaction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_address_field, create_text_field};
 use visualsign::registry::LayeredRegistry;
-use visualsign::signing::MetadataTrustPolicy;
 use visualsign::vsptrait::{
     ConversionResult, VisualSignConverter, VisualSignConverterFromString, VisualSignOptions,
 };
@@ -16,7 +15,7 @@ use visualsign::{SignablePayload, SignablePayloadField};
 use crate::actions::render_action;
 use crate::networks::{NearNetwork, extract_network_from_metadata};
 use crate::presets::intents::{
-    NearTokenRegistry, authorized_token_metadata_signers,
+    NearTokenRegistry, NearTokenTrustPolicy, authorized_token_metadata_signers,
     try_extract_token_metadata_from_chain_metadata,
 };
 use crate::tx::NearTransaction;
@@ -31,13 +30,10 @@ use crate::tx::NearTransaction;
 /// `trust_policy` gates only whether an entry with no signature at all is
 /// accepted; a present signature is always checked against the relevant
 /// origin-chain allowlist (see `authorized_token_metadata_signers`)
-/// regardless of posture -- NEAR, unlike Ethereum's single-allowlist ABI
-/// path, already dispatches identity checks per origin chain, so the
-/// allowlist `MetadataTrustPolicy::RequireAllowlistedSigner` carries is not
-/// itself consulted here.
+/// regardless of posture.
 fn token_registry_for(
     options: &VisualSignOptions,
-    trust_policy: &MetadataTrustPolicy,
+    trust_policy: NearTokenTrustPolicy,
 ) -> LayeredRegistry<NearTokenRegistry> {
     let request = try_extract_token_metadata_from_chain_metadata(
         options.metadata.as_ref(),
@@ -62,19 +58,19 @@ const PAYLOAD_TYPE: &str = "NearTx";
 #[derive(Debug, Clone)]
 pub struct NearVisualSignConverter {
     network: NearNetwork,
-    trust_policy: MetadataTrustPolicy,
+    trust_policy: NearTokenTrustPolicy,
 }
 
 impl NearVisualSignConverter {
     /// Construct a converter for mainnet with the permissive
-    /// [`MetadataTrustPolicy::AcceptUnsigned`] posture -- the library/embedding
+    /// [`NearTokenTrustPolicy::AcceptUnsigned`] posture -- the library/embedding
     /// default. Deployments that want an auditable, non-default posture should
     /// use [`Self::with_trust_policy`] instead.
     #[must_use]
     pub fn new() -> Self {
         Self {
             network: NearNetwork::default(),
-            trust_policy: MetadataTrustPolicy::AcceptUnsigned,
+            trust_policy: NearTokenTrustPolicy::AcceptUnsigned,
         }
     }
 
@@ -90,11 +86,11 @@ impl NearVisualSignConverter {
 
     /// Construct a converter for mainnet with an explicit caller-metadata
     /// trust posture. This is the constructor a deployment should use to pin
-    /// [`MetadataTrustPolicy::RequireAllowlistedSigner`] at construction time,
+    /// [`NearTokenTrustPolicy::RequireSignedEntries`] at construction time,
     /// fixed for the process rather than implied by what each request happens
     /// to contain.
     #[must_use]
-    pub fn with_trust_policy(trust_policy: MetadataTrustPolicy) -> Self {
+    pub fn with_trust_policy(trust_policy: NearTokenTrustPolicy) -> Self {
         Self {
             trust_policy,
             ..Self::new()
@@ -117,7 +113,7 @@ impl VisualSignConverter<NearTransaction> for NearVisualSignConverter {
         match transaction {
             NearTransaction::OnChain(tx) => self.render_on_chain(&tx, &options),
             NearTransaction::Intent(json) => {
-                render_intent_envelope(&json, &options, &self.trust_policy)
+                render_intent_envelope(&json, &options, self.trust_policy)
             }
         }
     }
@@ -165,7 +161,7 @@ impl NearVisualSignConverter {
                 tx.receiver_id().as_str(),
                 action,
                 options,
-                &self.trust_policy,
+                self.trust_policy,
             )?);
         }
 
@@ -202,7 +198,7 @@ fn decode_intents(
     receiver_id: &str,
     action: &Action,
     options: &VisualSignOptions,
-    trust_policy: &MetadataTrustPolicy,
+    trust_policy: NearTokenTrustPolicy,
 ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
     if receiver_id != "intents.near" {
         return Ok(vec![]);
@@ -223,7 +219,7 @@ fn decode_intents(
 fn render_intent_envelope(
     json: &str,
     options: &VisualSignOptions,
-    trust_policy: &MetadataTrustPolicy,
+    trust_policy: NearTokenTrustPolicy,
 ) -> Result<ConversionResult, VisualSignError> {
     let registry = token_registry_for(options, trust_policy);
     let fields =

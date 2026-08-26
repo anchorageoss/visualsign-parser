@@ -37,21 +37,25 @@
 //! validate is rejected outright: a present-but-invalid signature is a
 //! stronger signal of tampering than simply omitting one. An unsigned entry
 //! may still be accepted (not every caller signs yet), but only when the
-//! deployment's [`MetadataTrustPolicy`] allows it and the asset isn't already
+//! deployment's [`NearTokenTrustPolicy`] allows it and the asset isn't already
 //! covered by the compiled-in `tokens::SEEDS` table -- an unsigned entry
 //! fills a gap, it never overrides a curated value.
 
 use std::sync::OnceLock;
 
 use ed25519_dalek::{Signature as Ed25519Signature, VerifyingKey as Ed25519VerifyingKey};
+#[cfg(any(test, feature = "dev-signing"))]
+use ed25519_dalek::{Signer as Ed25519Signer, SigningKey as Ed25519SigningKey};
 use generated::parser::{ChainMetadata, TokenOriginChain, chain_metadata};
 use k256::EncodedPoint;
 #[cfg(any(test, feature = "dev-signing"))]
 use k256::ecdsa::SigningKey as Secp256k1SigningKey;
+#[cfg(any(test, feature = "dev-signing"))]
+use k256::ecdsa::signature::hazmat::PrehashSigner;
 use k256::ecdsa::signature::hazmat::PrehashVerifier;
 use k256::ecdsa::{Signature as Secp256k1Signature, VerifyingKey as Secp256k1VerifyingKey};
 use serde::Deserialize;
-use visualsign::signing::{MetadataTrustPolicy, SignerAllowlist};
+use visualsign::signing::SignerAllowlist;
 
 use super::{NearTokenRegistry, TokenMeta, tokens};
 
@@ -136,6 +140,37 @@ fn decode_hex_fixed<const N: usize>(
         .map_err(|e| TokenMetadataSignatureError::Validation(format!("Invalid {what} {e}")))
 }
 
+/// Whether this deployment accepts a token-metadata entry that carries no
+/// signature at all. Fixed at construction time and immutable for the life of
+/// the process: nothing in a request can move the parser between the two
+/// variants, which is the whole point of the type.
+///
+/// This is NEAR's own posture type rather than
+/// [`visualsign::signing::MetadataTrustPolicy`] because the shared enum's
+/// `RequireAllowlistedSigner` variant carries the allowlist it gates against,
+/// and NEAR has no single allowlist to put there -- signer identity is checked
+/// per origin chain against [`TokenMetadataSignerAllowlists`]. Carrying an
+/// allowlist that is never consulted would promise a caller that the keys it
+/// passed are the authorized set, which would not be true.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NearTokenTrustPolicy {
+    /// Accept an unsigned entry (subject to the gap-fill-only rule in
+    /// [`try_extract_from_chain_metadata`]). A signature that IS present must
+    /// still verify against its origin chain's allowlist.
+    AcceptUnsigned,
+    /// Reject every entry that carries no signature. A present signature is
+    /// checked exactly as under [`Self::AcceptUnsigned`].
+    RequireSignedEntries,
+}
+
+impl NearTokenTrustPolicy {
+    /// Whether an entry with no signature at all may be accepted.
+    #[must_use]
+    pub fn accepts_unsigned(self) -> bool {
+        matches!(self, Self::AcceptUnsigned)
+    }
+}
+
 /// Per-origin-chain allowlists for token-metadata curator keys, built once and
 /// cached. Kept separate from the Ethereum ABI / Solana IDL allowlists (see
 /// module docs).
@@ -157,7 +192,7 @@ pub struct TokenMetadataSignerAllowlists {
 /// which rejects every signed entry for that origin chain (fail-closed). These
 /// allowlists gate only entries that carry a signature; whether an unsigned
 /// entry is accepted at all is controlled separately by the deployment's
-/// [`MetadataTrustPolicy`] and by the gap-fill-only rule in
+/// [`NearTokenTrustPolicy`] and by the gap-fill-only rule in
 /// [`try_extract_from_chain_metadata`] (an unsigned entry is only accepted for
 /// an asset `tokens::SEEDS` doesn't already cover).
 #[must_use]
@@ -350,7 +385,7 @@ fn validate_secp256k1(
 pub fn try_extract_from_chain_metadata(
     chain_metadata: Option<&ChainMetadata>,
     allowlists: &TokenMetadataSignerAllowlists,
-    trust_policy: &MetadataTrustPolicy,
+    trust_policy: NearTokenTrustPolicy,
 ) -> Option<NearTokenRegistry> {
     let chain_metadata = chain_metadata?;
     let chain_metadata::Metadata::Near(near) = chain_metadata.metadata.as_ref()? else {
@@ -413,8 +448,8 @@ pub fn try_extract_from_chain_metadata(
 
         // Whether an unsigned entry is acceptable at all is fixed by the
         // deployment's posture, not by the request: under
-        // RequireAllowlistedSigner, a missing signature is always a
-        // rejection, regardless of the asset id.
+        // RequireSignedEntries, a missing signature is always a rejection,
+        // regardless of the asset id.
         if is_unsigned && !trust_policy.accepts_unsigned() {
             tracing::warn!(
                 "Skipping token metadata for '{asset_id}': this deployment requires signed entries"
@@ -544,8 +579,7 @@ pub fn sign_token_metadata_ed25519(
     seed: &[u8; 32],
     prehash: fn(&str, &[u8]) -> [u8; 32],
 ) -> generated::parser::SignatureMetadata {
-    use ed25519_dalek::{Signer, SigningKey};
-    let signing_key = SigningKey::from_bytes(seed);
+    let signing_key = Ed25519SigningKey::from_bytes(seed);
     let verifying_key = signing_key.verifying_key();
     let hash = prehash(asset_id, value.as_bytes());
     let signature = signing_key.sign(&hash);
@@ -573,7 +607,6 @@ pub fn sign_token_metadata_secp256k1(
     value: &str,
     seed: &[u8; 32],
 ) -> Result<generated::parser::SignatureMetadata, String> {
-    use k256::ecdsa::signature::hazmat::PrehashSigner;
     let signing_key = Secp256k1SigningKey::from_bytes(seed.into())
         .map_err(|e| format!("invalid secp256k1 signing key seed: {e}"))?;
     let verifying_key = Secp256k1VerifyingKey::from(&signing_key);
@@ -610,12 +643,12 @@ mod tests {
     /// mask what they're actually testing.
     const UNSEEDED_ASSET_ID: &str = "nep141:new-unlisted-token.near";
 
-    fn accept_unsigned_policy() -> MetadataTrustPolicy {
-        MetadataTrustPolicy::AcceptUnsigned
+    fn accept_unsigned_policy() -> NearTokenTrustPolicy {
+        NearTokenTrustPolicy::AcceptUnsigned
     }
 
-    fn require_signed_policy() -> MetadataTrustPolicy {
-        MetadataTrustPolicy::RequireAllowlistedSigner(SignerAllowlist::new())
+    fn require_signed_policy() -> NearTokenTrustPolicy {
+        NearTokenTrustPolicy::RequireSignedEntries
     }
 
     fn near_allowlist() -> TokenMetadataSignerAllowlists {
@@ -849,7 +882,7 @@ mod tests {
     #[test]
     fn extract_no_metadata_is_none() {
         assert!(
-            try_extract_from_chain_metadata(None, &near_allowlist(), &accept_unsigned_policy())
+            try_extract_from_chain_metadata(None, &near_allowlist(), accept_unsigned_policy())
                 .is_none()
         );
     }
@@ -868,7 +901,7 @@ mod tests {
             try_extract_from_chain_metadata(
                 Some(&metadata),
                 &near_allowlist(),
-                &accept_unsigned_policy()
+                accept_unsigned_policy()
             )
             .is_none()
         );
@@ -895,7 +928,7 @@ mod tests {
         let registry = try_extract_from_chain_metadata(
             Some(&metadata),
             &near_allowlist(),
-            &accept_unsigned_policy(),
+            accept_unsigned_policy(),
         )
         .expect("unsigned entry must still be registered");
         let meta = registry
@@ -934,7 +967,7 @@ mod tests {
             try_extract_from_chain_metadata(
                 Some(&metadata),
                 &near_allowlist(),
-                &accept_unsigned_policy()
+                accept_unsigned_policy()
             )
             .is_none()
         );
@@ -963,7 +996,7 @@ mod tests {
             try_extract_from_chain_metadata(
                 Some(&metadata),
                 &near_allowlist(),
-                &require_signed_policy()
+                require_signed_policy()
             )
             .is_none()
         );
@@ -997,7 +1030,7 @@ mod tests {
         let registry = try_extract_from_chain_metadata(
             Some(&metadata),
             &near_allowlist(),
-            &require_signed_policy(),
+            require_signed_policy(),
         )
         .expect("signed entry must still be registered under the strict posture");
         let meta = registry.by_asset_id.get(ASSET_ID).expect("present");
@@ -1030,7 +1063,7 @@ mod tests {
             try_extract_from_chain_metadata(
                 Some(&metadata),
                 &near_allowlist(),
-                &accept_unsigned_policy()
+                accept_unsigned_policy()
             )
             .is_none(),
             "a symbol carrying a bidi override must not register"
@@ -1063,7 +1096,7 @@ mod tests {
             try_extract_from_chain_metadata(
                 Some(&metadata),
                 &near_allowlist(),
-                &accept_unsigned_policy(),
+                accept_unsigned_policy(),
             )
             .is_none(),
             "a mapping over the entry cap is rejected whole"
@@ -1093,7 +1126,7 @@ mod tests {
         let registry = try_extract_from_chain_metadata(
             Some(&metadata),
             &near_allowlist(),
-            &accept_unsigned_policy(),
+            accept_unsigned_policy(),
         )
         .expect("a mapping exactly at the cap is accepted");
         assert_eq!(registry.by_asset_id.len(), MAX_TOKEN_METADATA_ENTRIES);
@@ -1131,7 +1164,7 @@ mod tests {
                 try_extract_from_chain_metadata(
                     Some(&metadata),
                     &near_allowlist(),
-                    &accept_unsigned_policy(),
+                    accept_unsigned_policy(),
                 )
                 .is_none_or(|r| r.by_asset_id.is_empty()),
                 "an entry whose value is not valid JSON must never register"
@@ -1167,7 +1200,7 @@ mod tests {
         let registry = try_extract_from_chain_metadata(
             Some(&metadata),
             &near_allowlist(),
-            &require_signed_policy(),
+            require_signed_policy(),
         );
         assert!(
             registry.is_none_or(|r| r.by_asset_id.is_empty()),
@@ -1199,7 +1232,7 @@ mod tests {
         let registry = try_extract_from_chain_metadata(
             Some(&metadata),
             &near_allowlist(),
-            &accept_unsigned_policy(),
+            accept_unsigned_policy(),
         )
         .expect("signed entry must verify and register");
         assert!(registry.by_asset_id.contains_key(ASSET_ID));
@@ -1233,7 +1266,7 @@ mod tests {
             try_extract_from_chain_metadata(
                 Some(&metadata),
                 &empty_allowlists(),
-                &accept_unsigned_policy()
+                accept_unsigned_policy()
             )
             .is_none()
         );
@@ -1258,7 +1291,7 @@ mod tests {
             try_extract_from_chain_metadata(
                 Some(&metadata),
                 &near_allowlist(),
-                &accept_unsigned_policy()
+                accept_unsigned_policy()
             )
             .is_none()
         );
@@ -1283,7 +1316,7 @@ mod tests {
             try_extract_from_chain_metadata(
                 Some(&metadata),
                 &near_allowlist(),
-                &accept_unsigned_policy()
+                accept_unsigned_policy()
             )
             .is_none()
         );
@@ -1312,7 +1345,7 @@ mod tests {
             try_extract_from_chain_metadata(
                 Some(&metadata),
                 &near_allowlist(),
-                &accept_unsigned_policy()
+                accept_unsigned_policy()
             )
             .is_none()
         );
@@ -1337,7 +1370,7 @@ mod tests {
             try_extract_from_chain_metadata(
                 Some(&metadata),
                 &near_allowlist(),
-                &accept_unsigned_policy()
+                accept_unsigned_policy()
             )
             .is_none()
         );
@@ -1365,7 +1398,7 @@ mod tests {
             try_extract_from_chain_metadata(
                 Some(&metadata),
                 &near_allowlist(),
-                &accept_unsigned_policy()
+                accept_unsigned_policy()
             )
             .is_none()
         );
@@ -1394,7 +1427,7 @@ mod tests {
             try_extract_from_chain_metadata(
                 Some(&metadata),
                 &near_allowlist(),
-                &accept_unsigned_policy()
+                accept_unsigned_policy()
             )
             .is_none()
         );
