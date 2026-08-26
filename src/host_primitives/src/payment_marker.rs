@@ -207,6 +207,55 @@ mod tests {
     }
 
     #[test]
+    fn signing_digest_matches_hand_encoded_wire_bytes() {
+        // `signing_digest_is_deterministic` above only compares this
+        // implementation with itself, so a field reorder or type change in
+        // `VerifiedPaymentMarker`/`PaymentDetails` would still pass it even
+        // though it silently breaks interop with the external gateway
+        // signer. This test instead hand-assembles the expected bytes from
+        // Borsh's documented encoding rules (LE integers, 4-byte-len-prefixed
+        // strings, 1-byte enum variant index, raw fixed-size arrays) rather
+        // than deriving them from `borsh::to_vec` on this same struct, so a
+        // reorder changes `borsh::to_vec(&vpm)` but not `expected`, failing
+        // the test.
+        let vpm = VerifiedPaymentMarker {
+            version: 1,
+            request_hash: [0u8; 32],
+            details: PaymentDetails::X402Direct {
+                txid: "tx".into(),
+                payer: String::new(),
+                pay_to: String::new(),
+                amount: "0".into(),
+                mint: String::new(),
+                x_payment_hash: [0u8; 32],
+                network: String::new(),
+            },
+            settled_at_ms: 0,
+            gateway_pubkey_hex: String::new(),
+        };
+
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&1u32.to_le_bytes()); // version
+        expected.extend_from_slice(&[0u8; 32]); // request_hash
+        expected.push(0); // PaymentDetails variant index: X402Direct
+        for s in ["tx", "", "", "0", ""] {
+            // txid, payer, pay_to, amount, mint: length-prefixed strings
+            expected.extend_from_slice(&(s.len() as u32).to_le_bytes());
+            expected.extend_from_slice(s.as_bytes());
+        }
+        expected.extend_from_slice(&[0u8; 32]); // x_payment_hash
+        expected.extend_from_slice(&0u32.to_le_bytes()); // network (empty)
+        expected.extend_from_slice(&0u64.to_le_bytes()); // settled_at_ms
+        expected.extend_from_slice(&0u32.to_le_bytes()); // gateway_pubkey_hex (empty)
+
+        assert_eq!(borsh::to_vec(&vpm).unwrap(), expected);
+        assert_eq!(
+            vpm.signing_digest().unwrap(),
+            qos_crypto::sha_256(&expected)
+        );
+    }
+
+    #[test]
     fn x402_direct_is_borsh_variant_zero() {
         // The gateway-side signer writes this discriminant by hand, so the
         // variant index is wire contract. Borsh prefixes an enum with a
