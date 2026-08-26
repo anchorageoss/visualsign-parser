@@ -5,7 +5,7 @@
 
 use crate::abi_registry::{AbiKind, AbiRegistry};
 use crate::embedded_abis::register_embedded_abi;
-use generated::parser::{ChainMetadata, chain_metadata};
+use generated::parser::{Abi, ChainMetadata, chain_metadata};
 use k256::EncodedPoint;
 #[cfg(any(test, feature = "dev-signing"))]
 use k256::ecdsa::SigningKey;
@@ -25,6 +25,24 @@ const MAX_ABI_JSON_BYTES: usize = 1_024 * 1_024;
 enum AbiSignatureError {
     #[error("ABI signature validation failed: {0}")]
     Validation(String),
+}
+
+/// Whether an accepted entry's signer identity went unchecked, i.e. nobody
+/// vouched for where the ABI came from.
+///
+/// This is deliberately NOT "the entry was unsigned". Under
+/// [`MetadataTrustPolicy::AcceptUnsigned`] the signer is never checked against
+/// an allowlist, so an entry an attacker signed with a key of their own is
+/// exactly as unattributed as one they left unsigned: integrity verifies,
+/// provenance is still nobody's. Counting only the unsigned case would report
+/// zero unverified mappings for a request whose entire decode came from
+/// attacker-supplied, attacker-signed ABIs.
+///
+/// Under [`MetadataTrustPolicy::RequireAllowlistedSigner`] this is always
+/// `false` for entries that reach the counter, because unsigned entries are
+/// rejected before it and a present signature must match an allowlisted key.
+fn identity_unverified(policy: &MetadataTrustPolicy, abi: &Abi) -> bool {
+    policy.signer_allowlist().is_none() || abi.signature.is_none()
 }
 
 /// Extract and validate ABIs from `ChainMetadata`, if present.
@@ -145,12 +163,8 @@ pub fn try_extract_from_chain_metadata(
         // unsigned source.
         //
         // What gets counted below is "identity was not enforced", not "signature
-        // absent". Under accept-unsigned the signer is never checked against an
-        // allowlist, so an entry an attacker signed with a key of their own is
-        // exactly as unattributed as one they left unsigned; counting only the
-        // latter would report zero unverified mappings for a request whose entire
-        // decode came from an unverified caller ABI.
-        let identity_unverified = policy.signer_allowlist().is_none() || abi.signature.is_none();
+        // absent"; see `identity_unverified`.
+        let identity_unverified = identity_unverified(policy, abi);
         match abi.signature.as_ref() {
             Some(proto_sig) => {
                 let signature = convert_proto_signature(proto_sig);
@@ -1618,5 +1632,63 @@ mod tests {
             .expect("unsigned proxy must still resolve to its unsigned implementation");
         assert_eq!(impl_addr, parse_addr(IMPL_ADDRESS));
         assert!(impl_abi.functions().any(|f| f.name == "transfer"));
+    }
+
+    /// The regression this pins: the predicate was once simplified to
+    /// `abi.signature.is_none()`, which stopped counting the case that actually
+    /// matters. Under accept-unsigned nothing checks WHO signed, so an attacker
+    /// signs with a key of their own, integrity verifies, and the entry is as
+    /// unattributed as an unsigned one. With the narrow predicate, a request
+    /// whose entire decode came from attacker-signed ABIs reported zero
+    /// unverified mappings.
+    #[test]
+    fn identity_unverified_counts_self_signed_entries_under_accept_unsigned() {
+        let policy = MetadataTrustPolicy::AcceptUnsigned;
+        let self_signed = signed_abi_with_seed(VALID_ABI, TEST_ADDRESS, &FOREIGN_SIGNER_SEED);
+        assert!(
+            self_signed.signature.is_some(),
+            "fixture must carry a signature, otherwise this test cannot distinguish \
+             the narrow predicate from the correct one"
+        );
+        assert!(
+            identity_unverified(&policy, &self_signed),
+            "an entry signed by a key nobody vouched for has unverified provenance"
+        );
+    }
+
+    #[test]
+    fn identity_unverified_counts_unsigned_entries_under_accept_unsigned() {
+        let policy = MetadataTrustPolicy::AcceptUnsigned;
+        let unsigned = Abi {
+            value: VALID_ABI.to_string(),
+            signature: None,
+            ..Default::default()
+        };
+        assert!(identity_unverified(&policy, &unsigned));
+    }
+
+    #[test]
+    fn identity_unverified_is_false_for_allowlisted_signers() {
+        let policy = MetadataTrustPolicy::RequireAllowlistedSigner(authorized_abi_signers());
+        let abi = signed_abi(VALID_ABI, TEST_ADDRESS);
+        assert!(
+            !identity_unverified(&policy, &abi),
+            "an allowlisted signer is exactly the case where provenance IS verified"
+        );
+    }
+
+    /// Completes the truth table. This combination never reaches the counter in
+    /// `try_extract_from_chain_metadata` (unsigned entries are rejected earlier
+    /// under this posture), so the assertion pins the predicate itself rather
+    /// than an observable count.
+    #[test]
+    fn identity_unverified_is_true_for_unsigned_under_require_allowlisted_signer() {
+        let policy = MetadataTrustPolicy::RequireAllowlistedSigner(authorized_abi_signers());
+        let unsigned = Abi {
+            value: VALID_ABI.to_string(),
+            signature: None,
+            ..Default::default()
+        };
+        assert!(identity_unverified(&policy, &unsigned));
     }
 }
