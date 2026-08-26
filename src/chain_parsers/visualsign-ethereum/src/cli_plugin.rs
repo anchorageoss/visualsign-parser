@@ -49,8 +49,8 @@ impl parser_cli_core::ChainPlugin for EthereumPlugin {
         // The CLI signs every ABI it loads with the local dev key (see
         // `build_abi_mappings_from_files`), so it runs the strict posture against
         // that key: locally-loaded ABIs are accepted, anything unsigned is not.
-        // Deployments take their posture from their own cmdline instead; see
-        // `abi_metadata::authorized_abi_signers`.
+        // Deployments are meant to take their posture from their own cmdline
+        // instead; that wiring is a planned follow-up, not part of this change.
         registry.register::<crate::EthereumTransactionWrapper, _>(
             Chain::Ethereum,
             crate::EthereumVisualSignConverter::with_policy(

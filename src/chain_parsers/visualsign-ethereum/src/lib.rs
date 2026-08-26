@@ -195,9 +195,11 @@ impl EthereumVisualSignConverter {
     /// explicit caller-metadata trust posture. Mirrors [`Self::new`] but pins the
     /// posture instead of taking the permissive default.
     ///
-    /// This is the constructor a deployment should use: `parser_app` and the gRPC
-    /// server build the posture from their cmdline so it is fixed at deploy time and
-    /// auditable, rather than implied by what each request happens to contain.
+    /// This is the constructor a deployment should use to pin an explicit posture
+    /// at construction time, fixed for the process rather than implied by what
+    /// each request happens to contain. `parser_cli` already does this against its
+    /// dev key; wiring `parser_app` and the gRPC server to build their posture from
+    /// their own cmdline is planned as a follow-up and is not part of this change.
     pub fn with_policy(abi_trust: MetadataTrustPolicy) -> Self {
         let (contract_registry, visualizer_builder) =
             registry::ContractRegistry::with_default_protocols();
@@ -211,10 +213,15 @@ impl EthereumVisualSignConverter {
     /// Creates a new converter with a default registry including all known protocols
     /// and the permissive [`MetadataTrustPolicy::AcceptUnsigned`] posture.
     ///
-    /// This is the library/embedding default and preserves the behaviour every
-    /// in-process caller had before the posture became explicit. Deployments must
-    /// NOT rely on it: they choose a posture on the cmdline and construct via
-    /// [`Self::with_policy`], so a signer can check which mode the deployment runs.
+    /// This is the library/embedding default. Unsigned caller metadata is accepted
+    /// exactly as it was before the posture became explicit; a present signature is
+    /// still verified for integrity, but its signer is deliberately no longer
+    /// checked against an allowlist, so an entry signed by an unlisted key is now
+    /// accepted where it used to be rejected. See [`MetadataTrustPolicy`] for why
+    /// that pairing was incoherent. Deployments that want an auditable, non-default
+    /// posture must NOT rely on this constructor: they should construct via
+    /// [`Self::with_policy`] with an explicit
+    /// [`MetadataTrustPolicy::RequireAllowlistedSigner`] instead.
     pub fn new() -> Self {
         Self::with_policy(MetadataTrustPolicy::AcceptUnsigned)
     }
