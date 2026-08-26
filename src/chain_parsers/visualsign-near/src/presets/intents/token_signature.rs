@@ -69,6 +69,14 @@ const ED25519_SIGNATURE_LEN: usize = 64;
 /// `MAX_ABI_JSON_BYTES` in `visualsign-ethereum::abi_metadata`.
 const MAX_TOKEN_METADATA_VALUE_BYTES: usize = 1024;
 
+/// Maximum number of entries accepted in one request's `token_mappings`. Each
+/// entry that survives the cheap structural checks costs an elliptic-curve
+/// verification, so the map's length is bounded before any of that work
+/// starts. A request carrying more entries than this is rejected whole rather
+/// than truncated: dropping the tail would silently ignore caller data that
+/// the caller has no way to see was discarded.
+const MAX_TOKEN_METADATA_ENTRIES: usize = 256;
+
 /// Maximum accepted `decimals` value. `tokens::format_units` computes
 /// `10u128.pow(u32::from(decimals))`, which overflows above 38 -- a remote
 /// panic (debug) or a silently wrapped, wrong-looking amount (release, where
@@ -351,6 +359,14 @@ pub fn try_extract_from_chain_metadata(
     if near.token_mappings.is_empty() {
         return None;
     }
+    if near.token_mappings.len() > MAX_TOKEN_METADATA_ENTRIES {
+        tracing::warn!(
+            "Ignoring all NEAR token metadata: {} entries exceeds the limit of \
+             {MAX_TOKEN_METADATA_ENTRIES}",
+            near.token_mappings.len()
+        );
+        return None;
+    }
 
     let mut registry = NearTokenRegistry::default();
     let mut unsigned_count: usize = 0;
@@ -363,20 +379,21 @@ pub fn try_extract_from_chain_metadata(
             continue;
         }
 
-        // An unrecognized discriminant and an omitted field both land on
-        // Unspecified (NEAR's ed25519 curve), so each is logged before it gets
-        // there. Otherwise a wrong-curve entry fails later as "Unsupported
-        // algorithm", which points at the algorithm rather than at the
-        // origin_chain that was silently substituted.
+        // Only an omitted field and an explicit Unspecified default to NEAR's
+        // ed25519 curve and curator allowlist. An unrecognized discriminant
+        // names an origin this build cannot verify, so it is rejected rather
+        // than substituted: checking it under the NEAR curator would mark
+        // metadata claiming an unsupported origin as verified.
         let origin_chain = match entry.origin_chain {
-            Some(v) => TokenOriginChain::try_from(v).unwrap_or_else(|_| {
-                tracing::warn!(
-                    "Token metadata for '{asset_id}': unrecognized origin_chain {v}, treating as \
-                     Unspecified (NEAR ed25519); a signature for another chain's curve will not \
-                     verify"
-                );
-                TokenOriginChain::Unspecified
-            }),
+            Some(v) => match TokenOriginChain::try_from(v) {
+                Ok(chain) => chain,
+                Err(_) => {
+                    tracing::warn!(
+                        "Skipping token metadata for '{asset_id}': unrecognized origin_chain {v}"
+                    );
+                    continue;
+                }
+            },
             None => {
                 if entry.signature.is_some() {
                     tracing::debug!(
@@ -390,9 +407,8 @@ pub fn try_extract_from_chain_metadata(
         };
 
         // Signatures aren't required to register an entry (not every caller
-        // signs yet), but one that IS present must validate: a present-but-
-        // invalid signature signals tampering rather than simply an unsigned
-        // source, so it is rejected outright rather than downgraded.
+        // signs yet); what an absent one costs the entry is decided by the two
+        // checks below, and what a present one must satisfy is checked last.
         let is_unsigned = entry.signature.is_none();
 
         // Whether an unsigned entry is acceptable at all is fixed by the
@@ -419,20 +435,6 @@ pub fn try_extract_from_chain_metadata(
                 "Skipping unsigned token metadata for '{asset_id}': would override a curated seed"
             );
             continue;
-        }
-
-        if let Some(proto_sig) = entry.signature.as_ref() {
-            let signature = convert_proto_signature(proto_sig);
-            if let Err(e) = validate_token_metadata_signature(
-                asset_id,
-                &entry.value,
-                origin_chain,
-                &signature,
-                allowlists,
-            ) {
-                tracing::warn!("Skipping token metadata for '{asset_id}': {e}");
-                continue;
-            }
         }
 
         let parsed: TokenMetadataValue = match serde_json::from_str(&entry.value) {
@@ -473,6 +475,29 @@ pub fn try_extract_from_chain_metadata(
                  printable ASCII"
             );
             continue;
+        }
+
+        // A present signature must validate: a present-but-invalid signature
+        // signals tampering rather than simply an unsigned source, so it is
+        // rejected outright rather than downgraded to unsigned.
+        //
+        // This runs last, once the entry is known to be structurally sound. An
+        // elliptic-curve verification is the most expensive step here by orders
+        // of magnitude, and every check above it is a length comparison or a
+        // parse of an already size-capped string, so an entry that a cheap
+        // check would reject anyway never costs one.
+        if let Some(proto_sig) = entry.signature.as_ref() {
+            let signature = convert_proto_signature(proto_sig);
+            if let Err(e) = validate_token_metadata_signature(
+                asset_id,
+                &entry.value,
+                origin_chain,
+                &signature,
+                allowlists,
+            ) {
+                tracing::warn!("Skipping token metadata for '{asset_id}': {e}");
+                continue;
+            }
         }
 
         registry.by_asset_id.insert(
@@ -1013,10 +1038,113 @@ mod tests {
     }
 
     #[test]
-    fn extract_treats_an_unrecognized_origin_chain_as_unspecified() {
-        // An out-of-range discriminant falls back to Unspecified (NEAR's
-        // ed25519 curve), so an ed25519 signature over the value still
-        // validates and the entry registers.
+    fn extract_rejects_a_mapping_over_the_entry_cap() {
+        // One entry past the cap rejects the whole map, including the entries
+        // that would individually have been fine.
+        let entries: Vec<(String, TokenMetadataEntry)> = (0..=MAX_TOKEN_METADATA_ENTRIES)
+            .map(|i| {
+                (
+                    format!("nep141:token-{i}.near"),
+                    TokenMetadataEntry {
+                        value: VALUE.to_string(),
+                        signature: None,
+                        origin_chain: None,
+                    },
+                )
+            })
+            .collect();
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("NEAR_MAINNET".to_string()),
+                token_mappings: entries.into_iter().collect(),
+            })),
+        };
+        assert!(
+            try_extract_from_chain_metadata(
+                Some(&metadata),
+                &near_allowlist(),
+                &accept_unsigned_policy(),
+            )
+            .is_none(),
+            "a mapping over the entry cap is rejected whole"
+        );
+    }
+
+    #[test]
+    fn extract_accepts_a_mapping_at_the_entry_cap() {
+        let entries: Vec<(String, TokenMetadataEntry)> = (0..MAX_TOKEN_METADATA_ENTRIES)
+            .map(|i| {
+                (
+                    format!("nep141:token-{i}.near"),
+                    TokenMetadataEntry {
+                        value: VALUE.to_string(),
+                        signature: None,
+                        origin_chain: None,
+                    },
+                )
+            })
+            .collect();
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("NEAR_MAINNET".to_string()),
+                token_mappings: entries.into_iter().collect(),
+            })),
+        };
+        let registry = try_extract_from_chain_metadata(
+            Some(&metadata),
+            &near_allowlist(),
+            &accept_unsigned_policy(),
+        )
+        .expect("a mapping exactly at the cap is accepted");
+        assert_eq!(registry.by_asset_id.len(), MAX_TOKEN_METADATA_ENTRIES);
+    }
+
+    // An entry whose `value` isn't valid JSON is rejected whether or not it
+    // carries a signature. The signed case is the one the check order matters
+    // for: the JSON parse runs before signature verification, so a structurally
+    // broken entry is dropped without spending an elliptic-curve operation.
+    // Both cases must still be rejected, which is what this pins.
+    #[test]
+    fn extract_malformed_value_json_skipped_signed_or_not() {
+        let broken = r#"{"symbol":"BROKEN","decimals":}"#;
+        let signed = sign_token_metadata_ed25519(
+            UNSEEDED_ASSET_ID,
+            broken,
+            &DEV_NEAR_SIGNING_KEY_SEED,
+            visualsign::signing::near_token_metadata_prehash,
+        );
+        for signature in [None, Some(signed)] {
+            let metadata = ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                    network_id: None,
+                    token_mappings: make_mappings(vec![(
+                        UNSEEDED_ASSET_ID,
+                        TokenMetadataEntry {
+                            value: broken.to_string(),
+                            signature,
+                            origin_chain: None,
+                        },
+                    )]),
+                })),
+            };
+            assert!(
+                try_extract_from_chain_metadata(
+                    Some(&metadata),
+                    &near_allowlist(),
+                    &accept_unsigned_policy(),
+                )
+                .is_none_or(|r| r.by_asset_id.is_empty()),
+                "an entry whose value is not valid JSON must never register"
+            );
+        }
+    }
+
+    #[test]
+    fn extract_rejects_an_unrecognized_origin_chain() {
+        // An out-of-range discriminant is rejected even when the entry carries
+        // an otherwise-valid NEAR curator signature: the entry names an origin
+        // this build cannot verify, so it must not be accepted under the NEAR
+        // curator's identity.
         let sig_meta = sign_token_metadata_ed25519(
             ASSET_ID,
             VALUE,
@@ -1040,11 +1168,10 @@ mod tests {
             Some(&metadata),
             &near_allowlist(),
             &require_signed_policy(),
-        )
-        .expect("an unrecognized origin_chain falls back to the NEAR curve");
-        assert_eq!(
-            registry.by_asset_id.get(ASSET_ID).expect("present").symbol,
-            "USDC.e"
+        );
+        assert!(
+            registry.is_none_or(|r| r.by_asset_id.is_empty()),
+            "an unrecognized origin_chain must not register under the NEAR curator"
         );
     }
 
