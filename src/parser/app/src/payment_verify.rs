@@ -152,6 +152,18 @@ impl From<PaymentVerifyError> for GrpcError {
     }
 }
 
+/// Upper bound on `payment_marker` bytes accepted before Borsh decoding.
+///
+/// A real marker (fixed 32-byte arrays, a handful of short base58/hex
+/// strings, a 64-byte signature) serializes to well under 1 KiB. The gRPC
+/// server otherwise only caps `payment_marker` at the whole-request size
+/// (`GRPC_MAX_RECV_MSG_SIZE`, 25 MiB), so without this an attacker who
+/// cannot forge a signature could still make every rejected request pay
+/// for decoding, and later re-serializing, up to 25 MiB of unauthenticated
+/// bytes before the signature check ever runs. 8 KiB leaves headroom for
+/// added fields while cutting that cost by three orders of magnitude.
+const MAX_PAYMENT_MARKER_BYTES: usize = 8 * 1024;
+
 /// Returns `Ok(())` if the policy allows the request to proceed.
 pub fn verify(
     parse_request: &ParseRequest,
@@ -164,6 +176,13 @@ pub fn verify(
 
     if parse_request.payment_marker.is_empty() {
         return Err(PaymentVerifyError::Missing);
+    }
+
+    if parse_request.payment_marker.len() > MAX_PAYMENT_MARKER_BYTES {
+        return Err(PaymentVerifyError::Decode(format!(
+            "payment marker is {} bytes, exceeds {MAX_PAYMENT_MARKER_BYTES} byte limit",
+            parse_request.payment_marker.len()
+        )));
     }
 
     let signed = SignedVerifiedPaymentMarker::try_from_slice(&parse_request.payment_marker)
@@ -337,7 +356,10 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::{generate_policy, make_vpm, req_with_marker, sign_with};
     use super::*;
-    use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata};
+    use generated::parser::{
+        ChainMetadata, EthereumMetadata, Idl, NearMetadata, SolanaIdlType, SolanaMetadata,
+        chain_metadata,
+    };
     use qos_p256::sign::P256SignPair;
 
     #[test]
@@ -363,6 +385,20 @@ mod tests {
         let req = req_with_marker(vec![]);
         let err: GrpcError = verify(&req, &policy).unwrap_err().into();
         assert_eq!(err.code, Code::FailedPrecondition);
+    }
+
+    #[test]
+    fn required_policy_rejects_oversized_marker_before_decoding() {
+        // A marker larger than MAX_PAYMENT_MARKER_BYTES must be rejected on
+        // size alone, before any Borsh decode of the attacker-controlled
+        // bytes is attempted.
+        let (_pair, _pub_hex, policy) = generate_policy();
+        let oversized = vec![0u8; MAX_PAYMENT_MARKER_BYTES + 1];
+        let req = req_with_marker(oversized);
+
+        let err: GrpcError = verify(&req, &policy).unwrap_err().into();
+        assert_eq!(err.code, Code::InvalidArgument);
+        assert!(err.message.contains("exceeds"));
     }
 
     #[test]
@@ -566,6 +602,105 @@ mod tests {
         expected.extend_from_slice(&u32::try_from(network_id.len()).unwrap().to_le_bytes());
         expected.extend_from_slice(network_id.as_bytes());
         expected.extend_from_slice(&0u32.to_le_bytes()); // abi_mappings: empty BTreeMap
+
+        assert_eq!(chain_metadata_bytes(Some(&metadata)).unwrap(), expected);
+    }
+
+    #[test]
+    fn chain_metadata_bytes_matches_hand_encoded_layout_for_solana_variant() {
+        // Companion to the Ethereum test above: pins the Solana variant's
+        // discriminant (1) plus `SolanaMetadata`'s own declaration order
+        // (`network_id` tag 2, then `idl` tag 1, then `idl_mappings` tag 3),
+        // so swapping Solana and Near in the `.proto` oneof, or reordering
+        // `SolanaMetadata`'s fields, fails this test instead of silently
+        // changing the `request_hash` preimage.
+        fn encode_idl(idl: &Idl, buf: &mut Vec<u8>) {
+            buf.extend_from_slice(&u32::try_from(idl.value.len()).unwrap().to_le_bytes());
+            buf.extend_from_slice(idl.value.as_bytes());
+            match idl.idl_type {
+                Some(t) => {
+                    buf.push(1);
+                    buf.extend_from_slice(&t.to_le_bytes());
+                }
+                None => buf.push(0),
+            }
+            match &idl.idl_version {
+                Some(v) => {
+                    buf.push(1);
+                    buf.extend_from_slice(&u32::try_from(v.len()).unwrap().to_le_bytes());
+                    buf.extend_from_slice(v.as_bytes());
+                }
+                None => buf.push(0),
+            }
+            buf.push(u8::from(idl.signature.is_some())); // None here
+            match &idl.program_name {
+                Some(n) => {
+                    buf.push(1);
+                    buf.extend_from_slice(&u32::try_from(n.len()).unwrap().to_le_bytes());
+                    buf.extend_from_slice(n.as_bytes());
+                }
+                None => buf.push(0),
+            }
+        }
+
+        let network_id = "SOLANA_MAINNET";
+        let idl = Idl {
+            value: "{}".to_string(),
+            idl_type: Some(SolanaIdlType::Anchor as i32),
+            idl_version: Some("0.30.0".to_string()),
+            signature: None,
+            program_name: Some("JupiterLend".to_string()),
+        };
+        let mut idl_mappings = std::collections::BTreeMap::new();
+        idl_mappings.insert(
+            "Prog11111111111111111111111111111111111111".to_string(),
+            idl.clone(),
+        );
+
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Solana(SolanaMetadata {
+                network_id: Some(network_id.to_string()),
+                idl: Some(idl.clone()),
+                idl_mappings,
+            })),
+        };
+
+        let mut expected = Vec::new();
+        expected.push(1); // ChainMetadata.metadata: Option<Metadata>: Some
+        expected.push(1); // Metadata variant index 1: Solana
+        expected.push(1); // SolanaMetadata.network_id: Option<String>: Some
+        expected.extend_from_slice(&u32::try_from(network_id.len()).unwrap().to_le_bytes());
+        expected.extend_from_slice(network_id.as_bytes());
+        expected.push(1); // SolanaMetadata.idl: Option<Idl>: Some
+        encode_idl(&idl, &mut expected);
+        expected.extend_from_slice(&1u32.to_le_bytes()); // idl_mappings: 1 entry
+        let key = "Prog11111111111111111111111111111111111111";
+        expected.extend_from_slice(&u32::try_from(key.len()).unwrap().to_le_bytes());
+        expected.extend_from_slice(key.as_bytes());
+        encode_idl(&idl, &mut expected);
+
+        assert_eq!(chain_metadata_bytes(Some(&metadata)).unwrap(), expected);
+    }
+
+    #[test]
+    fn chain_metadata_bytes_matches_hand_encoded_layout_for_near_variant() {
+        // Companion to the Ethereum/Solana tests above: pins the Near
+        // variant's discriminant (2) and `NearMetadata`'s single field, so
+        // a variant reorder that leaves Ethereum at index 0 but swaps
+        // Solana/Near still fails somewhere in this trio.
+        let network_id = "NEAR_MAINNET";
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some(network_id.to_string()),
+            })),
+        };
+
+        let mut expected = Vec::new();
+        expected.push(1); // ChainMetadata.metadata: Option<Metadata>: Some
+        expected.push(2); // Metadata variant index 2: Near
+        expected.push(1); // NearMetadata.network_id: Option<String>: Some
+        expected.extend_from_slice(&u32::try_from(network_id.len()).unwrap().to_le_bytes());
+        expected.extend_from_slice(network_id.as_bytes());
 
         assert_eq!(chain_metadata_bytes(Some(&metadata)).unwrap(), expected);
     }
