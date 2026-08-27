@@ -168,10 +168,10 @@ jobs:
               role_note='The enclave-side binary that speaks gRPC over vsock to QOS. Use this as the TVC pivot when your callers reach the app via Turnkey-internal routing.'
               ;;
             parser_http_server)
-              role_note='The HTTP+JSON enclave-side binary intended for TVC public ingress. Cloudflare in front of `app-<uuid>.turnkey.cloud` only accepts HTTP, so this is the variant to pivot when external clients call the app directly. Routes: `GET /health` (Turnkey HTTP health check), `POST /visualsign/api/v1/parse` (open), `POST /visualsign/api/v2/parse` (TVC-enforced when `GATEWAY_SIGNING_PUBKEY_HEX` is set). Deploy with `healthCheckType: TVC_HEALTH_CHECK_TYPE_HTTP`, `publicIngressPort: 3000`.'
+              role_note='The HTTP+JSON enclave-side binary intended for TVC public ingress. Cloudflare in front of `app-<uuid>.turnkey.cloud` only accepts HTTP, so this is the variant to pivot when external clients call the app directly. Routes: `GET /health` (Turnkey HTTP health check), `POST /visualsign/api/v1/parse` (open), `POST /visualsign/api/v2/parse` (currently open too, identical to v1; a follow-up PR adds `GATEWAY_SIGNING_PUBKEY_HEX`-gated enforcement here). Deploy with `healthCheckType: TVC_HEALTH_CHECK_TYPE_HTTP`, `publicIngressPort: 3000`.'
               ;;
             parser_gateway)
-              role_note='The host-side gateway that performs x402 verify+settle and signs a `VerifiedPaymentMarker` for the enclave to verify. Pairs with `parser_http_server`'\''s `/v2` route; the gateway'\''s P256 sign pubkey is pinned in the enclave'\''s `GATEWAY_SIGNING_PUBKEY_HEX` env.'
+              role_note='The host-side gateway intended to perform x402 verify+settle and sign a `VerifiedPaymentMarker` for the enclave to verify; that payment enforcement is not implemented yet, this is scaffolding. Pairs with `parser_http_server`'\''s `/v2` route; once implemented, the gateway'\''s P256 sign pubkey will be pinned in the enclave'\''s `GATEWAY_SIGNING_PUBKEY_HEX` env.'
               ;;
           esac
 
@@ -233,8 +233,12 @@ jobs:
             # read the body before either writes, and whichever `gh release
             # edit` lands last clobbers the other's block. Retry with a fresh
             # read each time and verify our write actually stuck before
-            # declaring success, so a leg that gets raced past re-applies its
-            # block on top of whatever is live instead of silently losing it.
+            # declaring success: this is best-effort, not a lock. It catches
+            # the case where our own write gets clobbered before we read it
+            # back, but a later leg's write, computed from a stale read, can
+            # still land after our read-back succeeds and silently drop our
+            # block. Blast radius is a cosmetic release-notes body, not the
+            # build or deploy path; a manual stagex re-run restores it.
             new_body="${RUNNER_TEMP}/release_notes_${TARGET_NAME}.md"
             max_attempts=5
             attempt=1
