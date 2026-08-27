@@ -61,13 +61,10 @@ fn identity_unverified(policy: &MetadataTrustPolicy, abi: &Abi) -> bool {
 /// - **Whether unsigned ABIs are accepted is a deploy-time decision, not a
 ///   request-time one.** `policy` is fixed when the parser process starts. A
 ///   caller cannot move the parser between postures by omitting a signature.
-///   The intent is for `parser_app` to take its posture from `--accept-unsigned-abis`
-///   / `--accept-signatures-from-pubkey` cmdline flags landing in the signed TVC
+///   `parser_app` takes its posture from the `--accept-unsigned-abis` /
+///   `--accept-signatures-from-pubkey` cmdline flags, which land in the signed TVC
 ///   manifest's `pivotArgs`, so a signer can verify out of band which posture the
-///   deployment runs; wiring that binary and the gRPC server to such flags is a
-///   planned follow-up (see [`signer_allowlist_from_hex`]) and not part of this
-///   change. Today only `parser_cli` constructs an explicit posture. See
-///   [`MetadataTrustPolicy`].
+///   deployment runs. See [`MetadataTrustPolicy`].
 /// - **Under [`MetadataTrustPolicy::RequireAllowlistedSigner`]**, every entry must
 ///   carry a signature that verifies AND whose key is allowlisted. Missing,
 ///   malformed and unauthorized signatures are all rejected. An empty allowlist
@@ -445,15 +442,13 @@ fn validate_abi_signature(
 /// An empty result (no dev key, no env entries) rejects all signed ABIs
 /// (fail-closed).
 ///
-/// **This is not how a deployment picks its trust posture.** The intent is for
-/// `parser_app` and the gRPC server to take their posture from their own cmdline
-/// (`--accept-unsigned-abis` / `--accept-signatures-from-pubkey`, parsed into a
-/// [`MetadataTrustPolicy`] via [`signer_allowlist_from_hex`]) so the choice is
-/// auditable in the signed deployment manifest and cannot be influenced per
-/// request; wiring those binaries to such flags is a planned follow-up and not
-/// part of this change. This function backs `parser_cli`, which signs the ABI
-/// files it loads with the dev key and therefore runs require-signed against
-/// that key.
+/// **This is not how a deployment picks its trust posture.** `parser_app` takes
+/// its posture from its own cmdline (`--accept-unsigned-abis` /
+/// `--accept-signatures-from-pubkey`, parsed into a [`MetadataTrustPolicy`] via
+/// [`signer_allowlist_from_hex`]) so the choice is auditable in the signed
+/// deployment manifest and cannot be influenced per request. This function backs
+/// `parser_cli`, which signs the ABI files it loads with the dev key and
+/// therefore runs require-signed against that key.
 #[must_use]
 pub fn authorized_abi_signers() -> SignerAllowlist {
     let mut allow = SignerAllowlist::new();
