@@ -60,7 +60,7 @@ pub struct ParseRequest {
     pub include_intermediate_output: bool,
     /// Borsh-encoded SignedVerifiedPaymentMarker: a VerifiedPaymentMarker plus
     /// the gateway's P256 signature over it. Note the wrapper, not the bare
-    /// VerifiedPaymentMarker -- an external signer that emits the inner struct
+    /// VerifiedPaymentMarker: an external signer that emits the inner struct
     /// produces bytes the enclave cannot deserialize. parser_app verifies this
     /// before processing when payment enforcement is on (PaymentPolicy::Required);
     /// today every call site passes PaymentPolicy::Disabled, so verification is a
@@ -68,10 +68,13 @@ pub struct ParseRequest {
     /// for local-dev / gRPC-direct callers. Field 5, not 4: field 4 shipped as
     /// include_intermediate_output (#414) while payment_marker was still on an
     /// unmerged branch, so payment_marker moved rather than breaking the wire.
-    /// No size bound stated here: this field relies on the server's own gRPC
-    /// message-size cap (25MB, host_primitives::GRPC_MAX_RECV_MSG_SIZE) to
-    /// reject an oversized request before Borsh-decoding, same as every other
-    /// field on this message.
+    /// Size bound: parser_app rejects a payment_marker over 8 KiB on length
+    /// alone, before Borsh-decoding it
+    /// (parser_app::payment_verify::MAX_PAYMENT_MARKER_BYTES). A real marker is
+    /// well under 1 KiB, so the limit is headroom, not a constraint a signer
+    /// has to plan around. The server's whole-request gRPC cap (25MB,
+    /// host_primitives::GRPC_MAX_RECV_MSG_SIZE) still applies on top, as it
+    /// does to every other field on this message.
     #[prost(bytes = "vec", tag = "5")]
     pub payment_marker: ::prost::alloc::vec::Vec<u8>,
 }
