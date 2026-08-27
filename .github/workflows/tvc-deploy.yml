@@ -45,6 +45,10 @@ on:
         description: "parser_app listen port"
         required: false
         default: "3000"
+      abi_signer_pubkey:
+        description: "ABI trust posture: hex secp256k1 signer pubkey to require-signed ABI mappings, or the literal 'unsigned' to explicitly deploy --accept-unsigned-abis. No default: workflow_dispatch must state a posture (app_id is free text here, so a blank default could silently deploy the permissive posture to a non-test app)."
+        required: false
+        default: ""
       turnkey_client_version:
         description: "turnkey-client image tag for the smoke check (approved version, not latest)"
         required: false
@@ -114,7 +118,23 @@ jobs:
           QOS_VERSION: ${{ inputs.qos_version || '0.12.0' }}
           HOST_IP: ${{ inputs.host_ip || '0.0.0.0' }}
           HOST_PORT: ${{ inputs.host_port || '3000' }}
+          # ABI trust posture, baked into the manifest's pivotArgs. The PR-label
+          # path has no `inputs` context (always blank here) and only ever
+          # targets the dev TEST app, so it keeps the permissive default. A
+          # workflow_dispatch run takes a free-text app_id, so it must state the
+          # posture explicitly: pass a hex signer pubkey, or the literal
+          # "unsigned" to opt into --accept-unsigned-abis on purpose.
+          ABI_SIGNER_PUBKEY: ${{ inputs.abi_signer_pubkey || '' }}
         run: |
+          if [ -z "$ABI_SIGNER_PUBKEY" ] && [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "::error::abi_signer_pubkey is required for workflow_dispatch: pass a hex secp256k1 signer pubkey, or the literal 'unsigned' to explicitly deploy --accept-unsigned-abis."
+            exit 1
+          fi
+          if [ "$ABI_SIGNER_PUBKEY" = "unsigned" ] || [ -z "$ABI_SIGNER_PUBKEY" ]; then
+            abi_trust_args=(--accept-unsigned-abis)
+          else
+            abi_trust_args=(--accept-signatures-from-pubkey "$ABI_SIGNER_PUBKEY")
+          fi
           ./tools/tvc-deploy/target/release/tvc-deploy deploy \
             --app-id "$APP_ID" \
             --image-url "$IMAGE_URL" \
@@ -123,7 +143,8 @@ jobs:
             --operator-seed "$RUNNER_TEMP/operator.seed" \
             --qos-version "$QOS_VERSION" \
             --host-ip "$HOST_IP" \
-            --host-port "$HOST_PORT"
+            --host-port "$HOST_PORT" \
+            "${abi_trust_args[@]}"
 
       # Post-deploy smoke: against the live dev endpoint (/visualsign-dev), run
       # `turnkey-client verify` on a V0+ALT tx and assert it both RENDERS and

@@ -145,6 +145,28 @@ tvc-deploy create-policies --file templates/readonly-policy.json \
 
 ## Deploying
 
+### Choosing the ABI trust posture
+
+Every `deploy` must pick exactly one of:
+
+```
+--accept-unsigned-abis                      # accept caller ABI mappings with no signature
+--accept-signatures-from-pubkey <HEX_PUBKEY>  # only accept mappings signed by this key (repeatable)
+```
+
+The chosen flag is appended to the deployment's `pivotArgs`, so it is part of the
+manifest the operators approve. That is the whole point: a signer verifying a
+deployment reads the posture straight off the manifest, instead of trusting a
+per-request signal or parser logs (Turnkey does not surface those today).
+
+`--accept-signatures-from-pubkey` rejects unsigned mappings outright, plus anything
+signed by a key that was not passed. `--accept-unsigned-abis` accepts unsigned
+mappings; a signature that IS present still has to verify, but its signer is not
+checked, since an attacker facing an identity check would just drop the signature.
+
+Switching posture means a new deployment: the flags live in the manifest, so there
+is no way to flip a running deployment (and no way to flip it per request).
+
 `tvc-deploy deploy` refuses to run if the target `--app-id` already has a
 `create_tvc_deployment` activity awaiting consensus, since Turnkey has no
 dedup for this -- submitting the same deploy twice (e.g. a retry before the

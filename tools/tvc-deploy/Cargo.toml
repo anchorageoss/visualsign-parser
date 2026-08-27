@@ -12,6 +12,10 @@ path = "src/main.rs"
 anyhow = "1.0.102"
 clap = { version = "4", features = ["derive"] }
 comfy-table = "7"
+# Used only to reject an off-curve signer pubkey locally, before the key reaches
+# the manifest a quorum signs. Without this the key is only decoded by parser_app
+# at enclave startup, which costs a consensus round and a redeploy to find out.
+k256 = { version = "0.13", default-features = false, features = ["arithmetic"] }
 qos_p256 = { version = "0.6.1", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
