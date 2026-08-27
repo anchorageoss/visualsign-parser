@@ -367,6 +367,40 @@ mod tests {
         );
     }
 
+    // Handler-level regression pin, complementing the test above: that one only
+    // calls `parse_envelope` directly and never touches `parse_v1`/`parse_v2`'s
+    // own parameter type, so it would keep passing even if a future change swapped
+    // `body: axum::body::Bytes` for `body: Json<TurnkeyRequestWrapper>` there - axum's
+    // `Json` extractor deserializes and re-serializes before the handler body runs,
+    // which is exactly the byte-changing round trip the seam exists to prevent (see
+    // the module doc on `parse_v1`). Passing a `Bytes` value as the `body` argument
+    // here means that swap would fail to *compile*, catching the regression at build
+    // time rather than needing a runtime assertion this test has no other way to make.
+    // `block_in_place` (used inside `parse_v1`) requires the multi-threaded
+    // runtime; the current-thread flavor other tests in this module use
+    // panics with "can call blocking only when running on the multi-threaded
+    // runtime".
+    #[tokio::test(flavor = "multi_thread")]
+    async fn parse_v1_handler_extracts_raw_bytes_not_a_json_type() {
+        let pair = qos_p256::P256Pair::generate().unwrap();
+        let boot_proof = StaticBootProof::from_enclave_files(
+            &pair,
+            "visualsign-parser".to_string(),
+            "test".to_string(),
+        );
+        let state = AppState {
+            ephemeral_key: Arc::new(pair),
+            boot_proof: Arc::new(boot_proof),
+        };
+        let raw = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02","include_intermediate_output":false}}"#;
+        let body = axum::body::Bytes::from_static(raw);
+        let (_, Json(resp)) = parse_v1(State(state), body).await;
+        // Reaching a structured envelope (rather than a panic or a bare axum
+        // rejection) proves the handler ran end to end through the real `Bytes`
+        // extractor, not a bypassed helper.
+        assert!(resp.error.is_some());
+    }
+
     #[test]
     fn static_boot_proof_has_the_six_keys_and_a_real_ephemeral_pubkey() {
         let pair = qos_p256::P256Pair::generate().unwrap();
