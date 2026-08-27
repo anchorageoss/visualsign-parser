@@ -69,7 +69,8 @@
           {
             "group": "For dApp Builders",
             "pages": [
-              "wallet-integration/dapps/ethereum"
+              "wallet-integration/dapps/ethereum",
+              "wallet-integration/dapps/near-intents"
             ]
           },
           {
@@ -103,7 +104,8 @@
                 ]
               },
               "chains/sui",
-              "chains/tron"
+              "chains/tron",
+              "chains/near"
             ]
           },
           {
@@ -157,7 +159,8 @@
               "changelog/solana",
               "changelog/ethereum",
               "changelog/sui",
-              "changelog/tron"
+              "changelog/tron",
+              "changelog/near"
             ]
           },
           {
