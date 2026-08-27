@@ -6,23 +6,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let git_dir = workspace_root.join(".git");
 
     println!("cargo:rerun-if-env-changed=VERSION");
-    println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
-    println!(
-        "cargo:rerun-if-changed={}",
-        git_dir.join("logs/HEAD").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        git_dir.join("packed-refs").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        git_dir.join("refs/remotes/origin/main").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        git_dir.join("refs/remotes/origin/master").display()
-    );
+    for rel in [
+        "HEAD",
+        "logs/HEAD",
+        "packed-refs",
+        "refs/remotes/origin/main",
+        "refs/remotes/origin/master",
+    ] {
+        println!("cargo:rerun-if-changed={}", git_dir.join(rel).display());
+    }
     println!(
         "cargo:rerun-if-changed={}",
         workspace_root.join("scripts/auto-version.sh").display()
