@@ -10,6 +10,15 @@ use qos_p256::P256Pair;
 // `integration::tests::parser_ethereum_native_transfer_e2e`.
 const ETH_TX_HEX: &str = "0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83";
 
+// Same Solana transfer message used by
+// `visualsign_solana::core::visualsign::tests::intermediate_output_emitted_for_known_transfer`
+// and `integration::tests::parser_solana_native_transfer_e2e` - the System
+// Program decode path is the one that actually emits a non-empty
+// `intermediate_output` blob (Ethereum's decode path never does), so this is
+// the fixture that exercises the `include_intermediate_output` parity seam
+// over HTTP.
+const SOLANA_TRANSFER_MESSAGE_B64: &str = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
+
 /// Spins up a `parser_http_server` instance under a private working
 /// directory (so its default, non-`vsock` ephemeral-key path
 /// `./local-enclave/qos.ephemeral.key` doesn't collide with other tests),
@@ -186,6 +195,45 @@ async fn http_server_serves_health_parse_and_errors() {
     assert_eq!(v2.status(), reqwest::StatusCode::OK);
     let v2_value: serde_json::Value = v2.json().await.expect("v2 response was not valid JSON");
     assert_eq!(v1_value, v2_value);
+
+    // 3.5. `include_intermediate_output: true` on a Solana request that
+    //    actually decodes a transfer emits a non-empty, camelCase
+    //    `intermediateOutput` field. The default-false case is already
+    //    covered by step 2/3 above (Ethereum, flag omitted); this covers the
+    //    opt-in branch so the parity seam can't regress silently.
+    let solana_tx = visualsign_solana::utils::create_transaction_with_empty_signatures(
+        SOLANA_TRANSFER_MESSAGE_B64,
+    );
+    let solana_body = serde_json::json!({
+        "request": {
+            "chain": "CHAIN_SOLANA",
+            "unsigned_payload": solana_tx,
+            "include_intermediate_output": true,
+        }
+    });
+    let solana_resp = client
+        .post(format!("{}/visualsign/api/v1/parse", server.base_url))
+        .json(&solana_body)
+        .send()
+        .await
+        .expect("solana request failed");
+    assert_eq!(solana_resp.status(), reqwest::StatusCode::OK);
+    let solana_value: serde_json::Value = solana_resp
+        .json()
+        .await
+        .expect("solana response was not valid JSON");
+    let intermediate_output_b64 = solana_value
+        .get("response")
+        .and_then(|r| r.get("parsedTransaction"))
+        .and_then(|t| t.get("payload"))
+        .and_then(|p| p.get("intermediateOutput"))
+        .and_then(|v| v.as_str())
+        .expect("solana response missing payload.intermediateOutput");
+    assert!(
+        !intermediate_output_b64.is_empty(),
+        "intermediateOutput must be non-empty when include_intermediate_output is true \
+         and the chain decode succeeds"
+    );
 
     // 4. A malformed body returns 400 with a bootProof present.
     let malformed = client
