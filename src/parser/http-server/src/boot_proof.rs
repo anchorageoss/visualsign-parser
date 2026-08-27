@@ -4,6 +4,7 @@
 //! empty attestation doc); a later PR adds an NSM-backed implementation that
 //! fills the attestation doc in.
 
+use base64::Engine as _;
 use host_primitives::turnkey::TurnkeyBootProof;
 use qos_core::protocol::services::boot::ManifestEnvelope;
 use qos_p256::P256Pair;
@@ -84,7 +85,6 @@ pub fn read_manifest_envelope() -> Result<ManifestEnvelope, BootProofError> {
 /// Returns empty strings when the manifest is unreadable (local dev outside an
 /// enclave), which keeps the six keys present and obviously unverifiable.
 fn read_manifest_borsh_b64() -> (String, String) {
-    use base64::Engine as _;
     let Ok(envelope) = read_manifest_envelope() else {
         eprintln!(
             "boot proof: {} unreadable, manifest fields empty",
@@ -92,12 +92,91 @@ fn read_manifest_borsh_b64() -> (String, String) {
         );
         return (String::new(), String::new());
     };
+    (
+        encode_borsh_b64(&envelope.manifest),
+        encode_borsh_b64(&envelope),
+    )
+}
+
+fn encode_borsh_b64(v: &impl borsh::BorshSerialize) -> String {
     let engine = base64::engine::general_purpose::STANDARD;
-    let manifest_b64 = borsh::to_vec(&envelope.manifest)
+    borsh::to_vec(v)
         .map(|b| engine.encode(b))
-        .unwrap_or_default();
-    let envelope_b64 = borsh::to_vec(&envelope)
-        .map(|b| engine.encode(b))
-        .unwrap_or_default();
-    (manifest_b64, envelope_b64)
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use qos_core::protocol::services::boot::{
+        Manifest, ManifestSet, Namespace, NitroConfig, PatchSet, PivotConfig, RestartPolicy,
+        ShareSet,
+    };
+
+    // The Go verifier borsh-deserializes both `qosManifestB64` and
+    // `qosManifestEnvelopeB64` and hashes the borsh bytes into the
+    // attestation doc's `user_data` (see the module doc on
+    // `read_manifest_envelope`). Prove the encode side actually round-trips
+    // through borsh, so a future refactor that swaps the encoding (e.g. to
+    // JSON, or introduces a HashMap-backed field) fails a test instead of
+    // silently breaking verification.
+    //
+    // Built field-by-field rather than via `ManifestEnvelope::default()`:
+    // that impl only exists behind qos_core's `mock` feature, which cannot
+    // be unified in the same build graph as this crate's `vsock` feature
+    // (qos_core's own `compile_error!` forbids `vm` + `mock` together). Every
+    // field here is a plain public value, so no derive is needed at all.
+    #[test]
+    fn manifest_and_envelope_borsh_b64_round_trip() {
+        let envelope = ManifestEnvelope {
+            manifest: Manifest {
+                namespace: Namespace {
+                    name: String::new(),
+                    nonce: 0,
+                    quorum_key: Vec::new(),
+                },
+                pivot: PivotConfig {
+                    hash: [0u8; 32],
+                    restart: RestartPolicy::Never,
+                    bridge_config: Vec::new(),
+                    debug_mode: false,
+                    args: Vec::new(),
+                },
+                manifest_set: ManifestSet {
+                    threshold: 0,
+                    members: Vec::new(),
+                },
+                share_set: ShareSet {
+                    threshold: 0,
+                    members: Vec::new(),
+                },
+                enclave: NitroConfig {
+                    pcr0: Vec::new(),
+                    pcr1: Vec::new(),
+                    pcr2: Vec::new(),
+                    pcr3: Vec::new(),
+                    aws_root_certificate: Vec::new(),
+                    qos_commit: String::new(),
+                },
+                patch_set: PatchSet {
+                    threshold: 0,
+                    members: Vec::new(),
+                },
+            },
+            manifest_set_approvals: Vec::new(),
+            share_set_approvals: Vec::new(),
+        };
+        let engine = base64::engine::general_purpose::STANDARD;
+
+        let manifest_b64 = encode_borsh_b64(&envelope.manifest);
+        let decoded_manifest: qos_core::protocol::services::boot::Manifest =
+            borsh::from_slice(&engine.decode(manifest_b64).unwrap()).unwrap();
+        assert_eq!(decoded_manifest, envelope.manifest);
+
+        let envelope_b64 = encode_borsh_b64(&envelope);
+        let decoded_envelope: ManifestEnvelope =
+            borsh::from_slice(&engine.decode(envelope_b64).unwrap()).unwrap();
+        assert_eq!(decoded_envelope, envelope);
+    }
 }
