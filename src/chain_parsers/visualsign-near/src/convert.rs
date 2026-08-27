@@ -7,6 +7,7 @@ use near_primitives::transaction::Transaction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_address_field, create_text_field};
 use visualsign::registry::LayeredRegistry;
+use visualsign::signing::MetadataTrustPolicy;
 use visualsign::vsptrait::{
     ConversionResult, VisualSignConverter, VisualSignConverterFromString, VisualSignOptions,
 };
@@ -15,14 +16,14 @@ use visualsign::{SignablePayload, SignablePayloadField};
 use crate::actions::render_action;
 use crate::networks::{NearNetwork, extract_network_from_metadata};
 use crate::presets::intents::{
-    NearTokenRegistry, NearTokenTrustPolicy, authorized_token_metadata_signers,
+    NearTokenRegistry, authorized_token_metadata_signers,
     try_extract_token_metadata_from_chain_metadata,
 };
 use crate::tx::NearTransaction;
 
 /// Build the token registry for this request: an empty global layer, plus
 /// whatever `options.metadata` supplies (verified per
-/// [`crate::presets::intents::TokenMetadataSignerAllowlists`]) as the
+/// [`crate::presets::intents::authorized_token_metadata_signers`]) as the
 /// request-scoped layer. The compiled-in seed table lives separately in
 /// `tokens::SEEDS`, consulted by `tokens::resolve` only after this registry's
 /// own lookup misses.
@@ -39,12 +40,20 @@ use crate::tx::NearTransaction;
 fn token_registry_for(
     options: &VisualSignOptions,
     network: NearNetwork,
-    trust_policy: NearTokenTrustPolicy,
+    trust_policy: &MetadataTrustPolicy,
 ) -> LayeredRegistry<NearTokenRegistry> {
+    // The posture may carry its own allowlist -- `parser_cli` passes the
+    // env-configured one so the variant's contract is truthful. `AcceptUnsigned`
+    // carries none by construction, and NEAR still needs an allowlist under it:
+    // identity decides whether an entry renders as verified and whether it may
+    // override a curated seed, neither of which the posture answers.
+    let allowlist = trust_policy
+        .signer_allowlist()
+        .unwrap_or_else(|| authorized_token_metadata_signers());
     let request = try_extract_token_metadata_from_chain_metadata(
         options.metadata.as_ref(),
         network,
-        authorized_token_metadata_signers(),
+        allowlist,
         trust_policy,
     );
     match request {
@@ -78,19 +87,19 @@ const PAYLOAD_TYPE: &str = "NearTx";
 #[derive(Debug, Clone)]
 pub struct NearVisualSignConverter {
     network: NearNetwork,
-    trust_policy: NearTokenTrustPolicy,
+    trust_policy: MetadataTrustPolicy,
 }
 
 impl NearVisualSignConverter {
     /// Construct a converter for mainnet with the permissive
-    /// [`NearTokenTrustPolicy::AcceptUnsigned`] posture -- the library/embedding
+    /// [`MetadataTrustPolicy::AcceptUnsigned`] posture -- the library/embedding
     /// default. Deployments that want an auditable, non-default posture should
     /// use [`Self::with_trust_policy`] instead.
     #[must_use]
     pub fn new() -> Self {
         Self {
             network: NearNetwork::default(),
-            trust_policy: NearTokenTrustPolicy::AcceptUnsigned,
+            trust_policy: MetadataTrustPolicy::AcceptUnsigned,
         }
     }
 
@@ -106,11 +115,11 @@ impl NearVisualSignConverter {
 
     /// Construct a converter for mainnet with an explicit caller-metadata
     /// trust posture. This is the constructor a deployment should use to pin
-    /// [`NearTokenTrustPolicy::RequireSignedEntries`] at construction time,
+    /// [`MetadataTrustPolicy::RequireAllowlistedSigner`] at construction time,
     /// fixed for the process rather than implied by what each request happens
     /// to contain.
     #[must_use]
-    pub fn with_trust_policy(trust_policy: NearTokenTrustPolicy) -> Self {
+    pub fn with_trust_policy(trust_policy: MetadataTrustPolicy) -> Self {
         Self {
             trust_policy,
             ..Self::new()
@@ -136,7 +145,7 @@ impl VisualSignConverter<NearTransaction> for NearVisualSignConverter {
                 &json,
                 &options,
                 resolve_network(&options, self.network)?,
-                self.trust_policy,
+                &self.trust_policy,
             ),
         }
     }
@@ -182,7 +191,7 @@ impl NearVisualSignConverter {
                 action,
                 options,
                 network,
-                self.trust_policy,
+                &self.trust_policy,
             )?);
         }
 
@@ -220,7 +229,7 @@ fn decode_intents(
     action: &Action,
     options: &VisualSignOptions,
     network: NearNetwork,
-    trust_policy: NearTokenTrustPolicy,
+    trust_policy: &MetadataTrustPolicy,
 ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
     if receiver_id != "intents.near" {
         return Ok(vec![]);
@@ -242,7 +251,7 @@ fn render_intent_envelope(
     json: &str,
     options: &VisualSignOptions,
     network: NearNetwork,
-    trust_policy: NearTokenTrustPolicy,
+    trust_policy: &MetadataTrustPolicy,
 ) -> Result<ConversionResult, VisualSignError> {
     let registry = token_registry_for(options, network, trust_policy);
     let fields =

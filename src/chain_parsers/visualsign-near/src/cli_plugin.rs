@@ -30,8 +30,13 @@ impl NearPlugin {
 /// `cli_trust_policy`). Signer identity for a present signature is checked per
 /// origin chain against `authorized_token_metadata_signers`, which is why this
 /// posture carries no allowlist of its own.
-fn cli_trust_policy() -> crate::presets::intents::NearTokenTrustPolicy {
-    crate::presets::intents::NearTokenTrustPolicy::RequireSignedEntries
+fn cli_trust_policy() -> visualsign::signing::MetadataTrustPolicy {
+    // Carries the same allowlist the decode path checks against, so the
+    // variant's contract -- these are the authorized keys -- is literally true
+    // rather than a promise made and then read from somewhere else.
+    visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
+        crate::presets::intents::authorized_token_metadata_signers().clone(),
+    )
 }
 
 impl parser_cli_core::ChainPlugin for NearPlugin {
