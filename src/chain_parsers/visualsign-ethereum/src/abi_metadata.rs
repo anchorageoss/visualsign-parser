@@ -117,12 +117,32 @@ pub fn try_extract_from_chain_metadata(
     chain_id: u64,
     policy: &MetadataTrustPolicy,
 ) -> Option<AbiRegistry> {
-    let chain_metadata = chain_metadata?;
-    let chain_metadata::Metadata::Ethereum(ethereum) = chain_metadata.metadata.as_ref()? else {
-        return None;
+    extract_with_provenance(chain_metadata, chain_id, policy).0
+}
+
+/// [`try_extract_from_chain_metadata`] plus the provenance counter it feeds to
+/// the aggregated warning.
+///
+/// The count is not public: nothing consumes it today (PRS-555 tracks surfacing
+/// provenance per entry), and `log::warn!` is the only channel it reaches in
+/// production. It is returned here so a test can assert the count the loop
+/// actually produced, rather than only the [`identity_unverified`] predicate that
+/// feeds it. Guarding the predicate alone left the call site free to narrow back
+/// to `signature.is_none()` with every test still green.
+fn extract_with_provenance(
+    chain_metadata: Option<&ChainMetadata>,
+    chain_id: u64,
+    policy: &MetadataTrustPolicy,
+) -> (Option<AbiRegistry>, usize) {
+    let Some(chain_metadata) = chain_metadata else {
+        return (None, 0);
+    };
+    let Some(chain_metadata::Metadata::Ethereum(ethereum)) = chain_metadata.metadata.as_ref()
+    else {
+        return (None, 0);
     };
     if ethereum.abi_mappings.is_empty() {
-        return None;
+        return (None, 0);
     }
 
     let mut registry = AbiRegistry::new();
@@ -222,9 +242,9 @@ pub fn try_extract_from_chain_metadata(
         );
     }
     if registry.list_abis().is_empty() {
-        return None;
+        return (None, unverified_count);
     }
-    Some(registry)
+    (Some(registry), unverified_count)
 }
 
 /// Resolve the `AbiKind` and (for proxies) the implementation address from a proto
@@ -1271,6 +1291,70 @@ mod tests {
         )
         .expect("accept-unsigned checks integrity only, so this must register");
         assert!(registry.list_abis().contains(&TEST_ADDRESS));
+    }
+
+    /// Under accept-unsigned, an entry an attacker signed with a key of their own is
+    /// counted as unverified even though a signature is present.
+    ///
+    /// The signer is never checked against an allowlist in this posture, so a
+    /// self-signed entry establishes no more provenance than an unsigned one. A
+    /// predicate keyed on `signature.is_none()` reports zero unverified mappings
+    /// here, for a request whose entire decode came from an unattributed caller ABI,
+    /// which is exactly the wrong answer to hand whatever ends up rendering it.
+    ///
+    /// This watches the count through the extraction loop, so narrowing the call
+    /// site (or dropping the increment) fails here even while
+    /// [`identity_unverified`]'s own unit tests stay green.
+    #[test]
+    fn test_accept_unsigned_counts_self_signed_entry_as_unverified() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![(
+                    TEST_ADDRESS,
+                    signed_abi_with_seed(VALID_ABI, TEST_ADDRESS, &FOREIGN_SIGNER_SEED),
+                )])
+                .into_iter()
+                .collect(),
+            })),
+        };
+        let (registry, unverified) =
+            extract_with_provenance(Some(&metadata), 1, &MetadataTrustPolicy::AcceptUnsigned);
+        assert!(
+            registry.is_some(),
+            "accept-unsigned checks integrity only, so this must register"
+        );
+        assert_eq!(
+            unverified, 1,
+            "a present signature whose signer is never checked establishes no \
+             provenance, so the entry must still count as unverified"
+        );
+    }
+
+    /// Require-signed accepts only entries whose signer was actually checked, so
+    /// nothing it registers is unverified. Counterpart to
+    /// `test_accept_unsigned_counts_self_signed_entry_as_unverified`: without this,
+    /// a predicate that counted every accepted entry unconditionally would pass.
+    #[test]
+    fn test_require_signed_registers_nothing_unverified() {
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: make_abi_mappings(vec![(
+                    TEST_ADDRESS,
+                    signed_abi(VALID_ABI, TEST_ADDRESS),
+                )])
+                .into_iter()
+                .collect(),
+            })),
+        };
+        let (registry, unverified) =
+            extract_with_provenance(Some(&metadata), 1, &test_require_signed());
+        assert!(registry.is_some(), "the fixture is allowlisted");
+        assert_eq!(
+            unverified, 0,
+            "an allowlisted signer was verified, so nothing is unverified"
+        );
     }
 
     /// An entry that DOES carry a signature but fails validation (signer not on
