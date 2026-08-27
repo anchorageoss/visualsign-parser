@@ -1,6 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use generated::health::{AppHealthRequest, AppHealthResponse};
-use generated::parser::{Chain, ParseRequest};
+use generated::parser::{
+    Abi, Chain, ChainMetadata, EthereumMetadata, ParseRequest, chain_metadata::Metadata,
+};
 use integration::TestArgs;
 use qos_crypto::sha_256;
 use tonic::Code;
@@ -751,4 +753,256 @@ async fn parser_sui_native_transfer_e2e() {
     }
 
     integration::Builder::new().execute(test).await
+}
+
+// ---------------------------------------------------------------------------
+// Deploy-time ABI trust posture (PRS-556)
+// ---------------------------------------------------------------------------
+//
+// The two tests below send the SAME request to two parser_app instances that
+// differ only in the cmdline they were started with. That is the property the
+// deploy-time flag buys: whether an unverified ABI is honoured is decided by the
+// deployment, not by what the caller put in (or left out of) the request.
+
+/// Unsigned EIP-1559 call to an otherwise-unknown contract, carrying
+/// `frobnicate(uint256,address)` calldata (selector `5c04b43b`). The function is
+/// deliberately one no compiled-in visualizer knows, so whether it renders as a
+/// named call depends ONLY on whether the caller-supplied ABI was honoured.
+const ABI_TX_HEX: &str = "0x02f86c0180830f4240843b9aca00830186a094111111111111111111111111111111111111111180b8445c04b43b00000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000deadc0";
+
+/// The contract `ABI_TX_HEX` calls.
+const ABI_TX_CONTRACT: &str = "0x1111111111111111111111111111111111111111";
+
+/// A valid uncompressed secp256k1 public key (scalar `[0x42; 32]`). Passed to
+/// `--accept-signatures-from-pubkey` to put the parser into the strict posture.
+const ABI_SIGNER_PUBKEY: &str = "0424653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c119fc5009a032aa9fe47f5e149bb8442f71f884ccb516590686d8ff6ab91c613";
+
+/// DER signature over `ABI_JSON` for `ABI_TX_CONTRACT` on chain 1, produced with the
+/// scalar `[0x42; 32]` behind `ABI_SIGNER_PUBKEY`, so the deployed allowlist
+/// authorizes it.
+///
+/// Checked in rather than signed at test time on purpose: signing here would mean
+/// depending on `visualsign-ethereum/dev-signing` from this crate, and because
+/// `integration` is a workspace member, Cargo would then unify that feature ON for
+/// `parser_app` in any workspace-wide invocation. See the keep-out-of-prod note on
+/// the `dev-signing` feature in `visualsign-ethereum/Cargo.toml`. ECDSA signing here
+/// is RFC6979-deterministic, so these are stable. To regenerate, call
+/// `visualsign_ethereum::abi_metadata::sign_abi(ABI_JSON, &address, 1, &seed)` from
+/// a crate that already enables `dev-signing` (e.g. a unit test in that crate).
+const ALLOWLISTED_SIGNER_SIG: &str = "3045022100f64e7822e0762177d0786b7ee513074705b11c13dbef491bc27b7f099b8953dc02201265f573895a648a36158c9a9cf4058bb0e6174cf86681e2441d1a8bbe7aa9f6";
+
+/// The same ABI signed with scalar `[0x43; 32]`, a key the deployment does not
+/// allowlist. The signature itself is valid; only the signer's identity differs.
+const FOREIGN_SIGNER_SIG: &str = "3045022100d6908186f6a67e1ab526f0662ae4190486eba3a8e7a7f33dd367a1511fe2432c02205f95117f3d1a30315206a33bd90b647209a24fbff4df780254dea97b0e3c4472";
+
+/// Uncompressed secp256k1 public key for scalar `[0x43; 32]`.
+const FOREIGN_SIGNER_PUBKEY: &str = "047f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007282870f68031e8772062f4f63cd3ecbf834846787f512738ba15664990af4e20";
+
+/// The ABI both the signed and unsigned fixtures carry.
+const ABI_JSON: &str = r#"[{
+        "type": "function",
+        "name": "frobnicate",
+        "inputs": [
+            {"name": "amount", "type": "uint256"},
+            {"name": "beneficiary", "type": "address"}
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+    }]"#;
+
+/// The `SignatureMetadata` for a checked-in `(signature, public key)` pair.
+fn abi_signature_metadata(
+    signature: &str,
+    public_key: &str,
+) -> generated::parser::SignatureMetadata {
+    generated::parser::SignatureMetadata {
+        value: signature.to_string(),
+        metadata: vec![
+            generated::parser::Metadata {
+                key: "algorithm".to_string(),
+                value: "secp256k1".to_string(),
+            },
+            generated::parser::Metadata {
+                key: "public_key".to_string(),
+                value: public_key.to_string(),
+            },
+        ],
+    }
+}
+
+/// A request supplying an ABI mapping signed by the given signer.
+fn signed_abi_parse_request(signature: &str, public_key: &str) -> ParseRequest {
+    let mut abi_mappings = std::collections::BTreeMap::new();
+    abi_mappings.insert(
+        ABI_TX_CONTRACT.to_string(),
+        Abi {
+            value: ABI_JSON.to_string(),
+            signature: Some(abi_signature_metadata(signature, public_key)),
+            ..Default::default()
+        },
+    );
+
+    ParseRequest {
+        include_intermediate_output: false,
+        unsigned_payload: ABI_TX_HEX.to_string(),
+        chain: Chain::Ethereum as i32,
+        chain_metadata: Some(ChainMetadata {
+            metadata: Some(Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: abi_mappings.into_iter().collect(),
+            })),
+        }),
+    }
+}
+
+/// Send `signed_abi_parse_request` and return the rendered payload JSON.
+async fn parsed_payload_for_signed_abi(
+    test_args: TestArgs,
+    signature: &str,
+    public_key: &str,
+) -> String {
+    let parse_response = test_args
+        .parser_client
+        .unwrap()
+        .parse(tonic::Request::new(signed_abi_parse_request(
+            signature, public_key,
+        )))
+        .await
+        .unwrap()
+        .into_inner();
+
+    parse_response
+        .parsed_transaction
+        .unwrap()
+        .payload
+        .unwrap()
+        .parsed_payload
+}
+
+/// A request supplying an UNSIGNED ABI mapping for `ABI_TX_CONTRACT`.
+fn unsigned_abi_parse_request() -> ParseRequest {
+    let mut abi_mappings = std::collections::BTreeMap::new();
+    abi_mappings.insert(
+        ABI_TX_CONTRACT.to_string(),
+        Abi {
+            value: ABI_JSON.to_string(),
+            signature: None,
+            ..Default::default()
+        },
+    );
+
+    ParseRequest {
+        include_intermediate_output: false,
+        unsigned_payload: ABI_TX_HEX.to_string(),
+        chain: Chain::Ethereum as i32,
+        chain_metadata: Some(ChainMetadata {
+            metadata: Some(Metadata::Ethereum(EthereumMetadata {
+                network_id: Some("ETHEREUM_MAINNET".to_string()),
+                abi_mappings: abi_mappings.into_iter().collect(),
+            })),
+        }),
+    }
+}
+
+/// Send `unsigned_abi_parse_request` and return the rendered payload JSON.
+async fn parsed_payload_for_unsigned_abi(test_args: TestArgs) -> String {
+    let parse_response = test_args
+        .parser_client
+        .unwrap()
+        .parse(tonic::Request::new(unsigned_abi_parse_request()))
+        .await
+        .unwrap()
+        .into_inner();
+
+    parse_response
+        .parsed_transaction
+        .unwrap()
+        .payload
+        .unwrap()
+        .parsed_payload
+}
+
+/// A parser deployed with `--accept-unsigned-abis` honours the unsigned ABI: the
+/// calldata is decoded and the function name shows up in the payload.
+#[tokio::test]
+async fn accept_unsigned_abis_deployment_decodes_unsigned_abi() {
+    async fn test(test_args: TestArgs) {
+        let payload = parsed_payload_for_unsigned_abi(test_args).await;
+        assert!(
+            payload.contains("frobnicate"),
+            "accept-unsigned deployment should decode the unsigned ABI, got: {payload}"
+        );
+    }
+
+    integration::Builder::new().execute(test).await
+}
+
+/// The same request against a parser deployed with
+/// `--accept-signatures-from-pubkey` is NOT honoured: the unsigned ABI is dropped,
+/// so the calldata falls back to raw hex and the function name never appears. Only
+/// the cmdline differs from the test above.
+#[tokio::test]
+async fn require_signed_abis_deployment_drops_unsigned_abi() {
+    async fn test(test_args: TestArgs) {
+        let payload = parsed_payload_for_unsigned_abi(test_args).await;
+        assert!(
+            !payload.contains("frobnicate"),
+            "require-signed deployment must not decode an unsigned ABI, got: {payload}"
+        );
+        assert!(
+            payload.contains("5c04b43b"),
+            "the undecoded calldata should fall back to raw hex, got: {payload}"
+        );
+    }
+
+    integration::Builder::new()
+        .require_signed_abis(ABI_SIGNER_PUBKEY)
+        .execute(test)
+        .await
+}
+
+/// The accepting direction of the strict posture: an ABI signed by the very key the
+/// deployment allowlists IS honoured. Without this, a parser that rejected every
+/// caller ABI regardless of signature would still pass the test above.
+#[tokio::test]
+async fn require_signed_abis_deployment_decodes_allowlisted_signed_abi() {
+    async fn test(test_args: TestArgs) {
+        let payload =
+            parsed_payload_for_signed_abi(test_args, ALLOWLISTED_SIGNER_SIG, ABI_SIGNER_PUBKEY)
+                .await;
+        assert!(
+            payload.contains("frobnicate"),
+            "an ABI signed by the allowlisted key must decode, got: {payload}"
+        );
+    }
+
+    integration::Builder::new()
+        .require_signed_abis(ABI_SIGNER_PUBKEY)
+        .execute(test)
+        .await
+}
+
+/// The strict posture gates on signer identity, not merely on a signature being
+/// present: a well-formed signature from a key the deployment does not allowlist is
+/// dropped just like an unsigned entry.
+#[tokio::test]
+async fn require_signed_abis_deployment_drops_foreign_signed_abi() {
+    async fn test(test_args: TestArgs) {
+        let payload =
+            parsed_payload_for_signed_abi(test_args, FOREIGN_SIGNER_SIG, FOREIGN_SIGNER_PUBKEY)
+                .await;
+        assert!(
+            !payload.contains("frobnicate"),
+            "an ABI signed by a non-allowlisted key must not decode, got: {payload}"
+        );
+        assert!(
+            payload.contains("5c04b43b"),
+            "the undecoded calldata should fall back to raw hex, got: {payload}"
+        );
+    }
+
+    integration::Builder::new()
+        .require_signed_abis(ABI_SIGNER_PUBKEY)
+        .execute(test)
+        .await
 }
