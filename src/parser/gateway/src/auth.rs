@@ -1,14 +1,14 @@
 //! Optional shared-bearer-token HTTP gate in front of every route except
 //! `/health`.
 //!
-//! Disabled by default — when neither `GATEWAY_AUTH_BEARER_TOKEN` nor
+//! Disabled by default -- when neither `GATEWAY_AUTH_BEARER_TOKEN` nor
 //! `GATEWAY_AUTH_BEARER_FILE` is set the gateway behaves exactly as before.
 //! When one of them is set, callers must send `Authorization: Bearer <token>`
 //! or receive `401 Unauthorized` with `WWW-Authenticate: Bearer
 //! realm="x402-gateway"`. The two env vars are mutually exclusive (both set
 //! is a boot-time error).
 //!
-//! The token is a shared secret. This is a weak gate — its job is to keep
+//! The token is a shared secret. This is a weak gate -- its job is to keep
 //! random crawlers off the endpoint while AI-agent callers (which can set
 //! arbitrary headers but can't easily mint per-caller identity tokens) can
 //! reach the x402 settlement layer below. Per-caller identity belongs in a
@@ -31,6 +31,24 @@ use axum::{
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 
+/// Reads an env var, distinguishing "unset" from "set but not valid UTF-8".
+/// `std::env::var(..).ok()` collapses both cases into `None`, which would
+/// silently disable the auth gate for a token containing non-UTF-8 bytes
+/// instead of failing loudly like every other auth-config error here.
+fn read_env_var(key: &'static str) -> Result<Option<String>, AuthError> {
+    match std::env::var(key) {
+        Ok(v) => Ok(Some(v)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(AuthError::NotUnicode { var: key }),
+    }
+}
+
+/// Minimum accepted bearer-token length, in bytes (post-trim). The token is
+/// the sole mitigation for the otherwise-free gated routes, so reject
+/// trivially guessable short values at config-load time rather than silently
+/// accepting them.
+const MIN_TOKEN_BYTES: usize = 16;
+
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
     #[error("both GATEWAY_AUTH_BEARER_TOKEN and GATEWAY_AUTH_BEARER_FILE are set; choose one")]
@@ -39,6 +57,12 @@ pub enum AuthError {
     ReadFile { path: String, message: String },
     #[error("bearer token from {origin} is empty after trim")]
     Empty { origin: &'static str },
+    #[error("{var} contains invalid (non-UTF-8) bytes")]
+    NotUnicode { var: &'static str },
+    #[error("bearer token from {origin} contains bytes illegal in an HTTP header value")]
+    InvalidHeaderBytes { origin: &'static str },
+    #[error("bearer token is {len} bytes; must be at least {min} bytes")]
+    TooShort { len: usize, min: usize },
 }
 
 /// In-memory bearer token. The bytes are stored after trimming surrounding
@@ -53,25 +77,37 @@ impl BearerToken {
     /// or `GATEWAY_AUTH_BEARER_FILE` (path to a file containing the token).
     /// Returns `Ok(None)` when neither is set.
     pub fn from_env() -> Result<Option<Self>, AuthError> {
-        let inline = std::env::var("GATEWAY_AUTH_BEARER_TOKEN").ok();
-        let file_path = std::env::var("GATEWAY_AUTH_BEARER_FILE").ok();
-        match (inline, file_path) {
-            (None, None) => Ok(None),
-            (Some(_), Some(_)) => Err(AuthError::BothSet),
-            (Some(raw), None) => Self::from_sources(Some(&raw), None),
-            (None, Some(path)) => {
-                let raw = std::fs::read_to_string(&path).map_err(|e| AuthError::ReadFile {
+        let inline = read_env_var("GATEWAY_AUTH_BEARER_TOKEN")?;
+        let file_path = read_env_var("GATEWAY_AUTH_BEARER_FILE")?;
+        if inline.is_some() && file_path.is_some() {
+            return Err(AuthError::BothSet);
+        }
+        let file_contents = file_path
+            .map(|path| {
+                std::fs::read_to_string(&path).map_err(|e| AuthError::ReadFile {
                     path: path.clone(),
                     message: e.to_string(),
-                })?;
-                Self::from_sources(None, Some(&raw))
+                })
+            })
+            .transpose()?;
+        let token = Self::from_sources(inline.as_deref(), file_contents.as_deref())?;
+        if let Some(t) = &token {
+            let len = t.byte_len();
+            if len < MIN_TOKEN_BYTES {
+                return Err(AuthError::TooShort {
+                    len,
+                    min: MIN_TOKEN_BYTES,
+                });
             }
         }
+        Ok(token)
     }
 
     /// Testable core. Takes the resolved contents (not paths). At most one
-    /// of `inline` / `file_contents` may be `Some`.
-    pub fn from_sources(
+    /// of `inline` / `file_contents` may be `Some`. Crate-private: the
+    /// `MIN_TOKEN_BYTES` floor is only enforced by `from_env`, so this must
+    /// not be reachable from outside the crate without re-checking it.
+    pub(crate) fn from_sources(
         inline: Option<&str>,
         file_contents: Option<&str>,
     ) -> Result<Option<Self>, AuthError> {
@@ -88,14 +124,27 @@ impl BearerToken {
         if trimmed.is_empty() {
             return Err(AuthError::Empty { origin });
         }
+        // A token with bytes illegal in an HTTP header value would pass
+        // config load but could never be sent by a conformant client,
+        // permanently denying all traffic while looking healthy. Reuse
+        // `HeaderValue`'s own legality check rather than reimplementing it.
+        // `HeaderValue::from_str` alone isn't enough: it accepts opaque
+        // bytes >= 0x80, but the request path reads the incoming
+        // `Authorization` header via `to_str()`, which rejects any
+        // non-ASCII byte. A non-ASCII token would pass this check, boot
+        // cleanly, and then deny every request (including ones with the
+        // correct token) since the comparison side never even parses.
+        if HeaderValue::from_str(trimmed).is_err() || !trimmed.is_ascii() {
+            return Err(AuthError::InvalidHeaderBytes { origin });
+        }
         Ok(Some(Self {
             bytes: Arc::new(trimmed.as_bytes().to_vec()),
         }))
     }
 
-    /// Constant-time match when lengths align. Length mismatch bails early —
+    /// Constant-time match when lengths align. Length mismatch bails early --
     /// the token length is fixed at deploy time, so leaking it costs nothing.
-    pub fn matches(&self, candidate: &[u8]) -> bool {
+    pub(crate) fn matches(&self, candidate: &[u8]) -> bool {
         if candidate.len() != self.bytes.len() {
             return false;
         }
@@ -112,14 +161,23 @@ impl BearerToken {
 /// Decision returned by [`evaluate_request`]. Pulled out of the middleware
 /// fn so the routing logic is testable without spinning up an axum Router.
 #[derive(Debug, PartialEq, Eq)]
-pub enum AuthOutcome {
+#[non_exhaustive]
+pub(crate) enum AuthOutcome {
     Allow,
     Deny,
 }
 
+/// Splits an `Authorization` header value into (scheme, credentials),
+/// tolerating any run of whitespace between them (RFC 7235 leaves the
+/// separator as OWS, not a single space).
+fn split_auth_scheme(header: &str) -> Option<(&str, &str)> {
+    let (scheme, rest) = header.split_once(char::is_whitespace)?;
+    Some((scheme, rest.trim_start()))
+}
+
 /// Pure auth-routing decision: should this request reach the handler?
 /// The middleware fn below is a thin shell around this.
-pub fn evaluate_request(
+pub(crate) fn evaluate_request(
     path: &str,
     authorization_header: Option<&str>,
     expected: &BearerToken,
@@ -127,9 +185,9 @@ pub fn evaluate_request(
     if path == "/health" {
         return AuthOutcome::Allow;
     }
-    let provided = match authorization_header.and_then(|v| v.strip_prefix("Bearer ")) {
-        Some(t) => t,
-        None => return AuthOutcome::Deny,
+    let provided = match authorization_header.and_then(split_auth_scheme) {
+        Some((scheme, rest)) if scheme.eq_ignore_ascii_case("bearer") => rest,
+        _ => return AuthOutcome::Deny,
     };
     if expected.matches(provided.as_bytes()) {
         AuthOutcome::Allow
@@ -287,6 +345,49 @@ mod tests {
             ),
             AuthOutcome::Allow,
         );
+    }
+
+    #[test]
+    fn evaluate_request_lowercase_scheme_allows() {
+        let t = token("panic-at-the-gateway");
+        assert_eq!(
+            evaluate_request(
+                "/visualsign/api/v2/parse",
+                Some("bearer panic-at-the-gateway"),
+                &t,
+            ),
+            AuthOutcome::Allow,
+            "scheme match must be case-insensitive per RFC 7235"
+        );
+    }
+
+    #[test]
+    fn evaluate_request_extra_whitespace_allows() {
+        let t = token("panic-at-the-gateway");
+        assert_eq!(
+            evaluate_request(
+                "/visualsign/api/v2/parse",
+                Some("Bearer  panic-at-the-gateway"),
+                &t,
+            ),
+            AuthOutcome::Allow,
+            "a run of whitespace between scheme and credentials must be accepted"
+        );
+    }
+
+    #[test]
+    fn from_sources_rejects_illegal_header_bytes() {
+        let res = BearerToken::from_sources(Some("bad\ntoken"), None);
+        assert!(matches!(res, Err(AuthError::InvalidHeaderBytes { .. })));
+    }
+
+    #[test]
+    fn from_sources_rejects_non_ascii_token() {
+        // Legal as a raw HeaderValue (bytes >= 0x80 are opaque-but-allowed),
+        // but the request path's `to_str()` rejects non-ASCII, so a token
+        // like this would boot cleanly and then deny every request.
+        let res = BearerToken::from_sources(Some("token-with-\u{e9}-byte"), None);
+        assert!(matches!(res, Err(AuthError::InvalidHeaderBytes { .. })));
     }
 
     #[test]
