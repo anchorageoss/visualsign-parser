@@ -144,7 +144,16 @@ impl X402Config {
 
         let facilitator_url = Self::load_facilitator_url(&get, profile)?;
         let facilitator_timeout = Self::load_timeout(&get)?;
+        // Only x402 protocol v2 is wired up (build_middleware hardcodes
+        // x402_types::proto::v2); reject anything else at load time instead
+        // of silently serving v2 under a different declared version.
         let protocol_version = get("X402_PROTOCOL_VERSION").unwrap_or_else(|| "v2".to_string());
+        if protocol_version != "v2" {
+            return Err(ConfigError::Invalid {
+                var: "X402_PROTOCOL_VERSION",
+                message: format!("unsupported value '{protocol_version}'; only 'v2' is supported"),
+            });
+        }
 
         let price_tags = if let Some(json) = get("X402_PRICE_TAGS_JSON") {
             Self::parse_tags_json(&json)?
@@ -745,6 +754,24 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn from_env_rejects_unsupported_protocol_version() {
+        let err = X402Config::from_lookup(lookup(&[("X402_PROTOCOL_VERSION", "v1")])).unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                var: "X402_PROTOCOL_VERSION",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn from_env_accepts_explicit_v2_protocol_version() {
+        let cfg = X402Config::from_lookup(lookup(&[("X402_PROTOCOL_VERSION", "v2")])).unwrap();
+        assert_eq!(cfg.protocol_version, "v2");
     }
 
     #[test]

@@ -143,11 +143,16 @@ impl AttestationVerifier {
         hex_value: &str,
         source: &'static str,
     ) -> Result<Self, AttestationError> {
-        let pinned_bytes =
-            qos_hex::decode(hex_value.trim()).map_err(|e| AttestationError::Hex {
+        // Operator-supplied hex (env var or file), not the wire-carried
+        // signature fields verify() decodes below -- route it through the
+        // repository's unified decoder so an uppercase `0X` prefix isn't
+        // silently rejected (qos_hex::decode only strips lowercase `0x`).
+        let pinned_bytes = visualsign::encodings::decode_hex(hex_value.trim()).map_err(|e| {
+            AttestationError::Hex {
                 field: source,
                 message: format!("{e:?}"),
-            })?;
+            }
+        })?;
         let pinned_public = P256Public::from_bytes(&pinned_bytes)
             .map_err(|e| AttestationError::InvalidPinnedKey(format!("{e:?}")))?;
         Ok(Self { pinned_public })
@@ -308,6 +313,16 @@ mod tests {
         // Valid hex, but too short to be a qos_p256 compound key.
         let res = AttestationVerifier::from_hex("00112233");
         assert!(matches!(res, Err(AttestationError::InvalidPinnedKey(_))));
+    }
+
+    #[test]
+    fn from_hex_accepts_uppercase_0x_prefix() {
+        let pair = P256Pair::generate().unwrap();
+        let hex = qos_hex::encode(&pair.public_key().to_bytes());
+        let uppercase_prefixed = format!("0X{hex}");
+        let verifier = AttestationVerifier::from_hex(&uppercase_prefixed)
+            .expect("uppercase 0X prefix must be tolerated, same as the lowercase 0x form");
+        assert_eq!(verifier.pinned_hex(), hex);
     }
 
     #[test]

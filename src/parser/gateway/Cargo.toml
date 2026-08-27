@@ -9,6 +9,7 @@ publish = false
 generated = { path = "../../generated", features = ["tonic_types", "serde_derive"] }
 health_check = { path = "../../health_check" }
 host_primitives = { path = "../../host_primitives" }
+visualsign = { workspace = true } # decode_hex: unified 0x/0X-tolerant hex decoding
 
 # core runtime + serialization
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time", "net"] }

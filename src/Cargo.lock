@@ -7416,6 +7416,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "url",
+ "visualsign",
  "x402-axum",
  "x402-chain-eip155",
  "x402-chain-solana",
