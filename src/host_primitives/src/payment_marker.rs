@@ -1,11 +1,11 @@
-//! VerifiedPaymentMarker — the signed proof the gateway hands to parser_app
+//! VerifiedPaymentMarker, the signed proof the gateway hands to parser_app
 //! to certify that an x402 payment was verified + settled before the parse
 //! request was forwarded.
 //!
 //! Wire shape: `borsh(SignedVerifiedPaymentMarker)` rides as
 //! `ParseRequest.payment_marker` (bytes field). Same type defined here so
 //! both gateway (signer) and parser_app (verifier) deserialize identical
-//! bytes — no schema drift.
+//! bytes, no schema drift.
 //!
 //! Trust model: parser_app verifies the gateway's P256 signature against a
 //! pubkey pinned at TVC deploy time (`GATEWAY_SIGNING_PUBKEY_HEX`), and

@@ -519,7 +519,7 @@ mod tests {
         let mut req = req_with_marker(vec![]);
         let vpm = make_vpm(&req, &pub_hex);
         let mut marker = sign_with(&pair, vpm);
-        // Flip the last byte (inside the signature region — the signature
+        // Flip the last byte (inside the signature region, the signature
         // is the tail of the borsh-encoded struct).
         let last = marker.len() - 1;
         marker[last] ^= 0xff;
