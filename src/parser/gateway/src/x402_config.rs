@@ -200,10 +200,23 @@ impl X402Config {
                 return Err(ConfigError::MissingVar("X402_FACILITATOR_URL"));
             }
         };
-        Url::parse(&s).map_err(|e| ConfigError::Invalid {
+        let url = Url::parse(&s).map_err(|e| ConfigError::Invalid {
             var: "X402_FACILITATOR_URL",
             message: e.to_string(),
-        })
+        })?;
+        // Non-local profiles handle real payment negotiation/settlement
+        // traffic; only accept https there. `local` keeps allowing plain
+        // http against a loopback facilitator for zero-config dev/CI.
+        if profile != X402Profile::Local && url.scheme() != "https" {
+            return Err(ConfigError::Invalid {
+                var: "X402_FACILITATOR_URL",
+                message: format!(
+                    "scheme '{}' not allowed for non-local profiles; use https",
+                    url.scheme()
+                ),
+            });
+        }
+        Ok(url)
     }
 
     fn load_timeout<F>(get: &F) -> Result<Duration, ConfigError>
@@ -212,12 +225,20 @@ impl X402Config {
     {
         match get("X402_FACILITATOR_TIMEOUT_SECS") {
             Some(s) => {
-                s.parse::<u64>()
-                    .map(Duration::from_secs)
-                    .map_err(|e| ConfigError::Invalid {
+                let secs = s.parse::<u64>().map_err(|e| ConfigError::Invalid {
+                    var: "X402_FACILITATOR_TIMEOUT_SECS",
+                    message: e.to_string(),
+                })?;
+                // 0 parses to Duration::ZERO, which times out every
+                // facilitator call instantly rather than disabling the
+                // timeout; reject it instead of silently taking x402 down.
+                if secs == 0 {
+                    return Err(ConfigError::Invalid {
                         var: "X402_FACILITATOR_TIMEOUT_SECS",
-                        message: e.to_string(),
-                    })
+                        message: "must be greater than 0".to_string(),
+                    });
+                }
+                Ok(Duration::from_secs(secs))
             }
             None => Ok(Duration::from_secs(5)),
         }
@@ -298,6 +319,18 @@ impl X402Config {
             serde_json::from_str(json).map_err(|e| ConfigError::JsonParse(e.to_string()))?;
         wire.into_iter()
             .map(|w| {
+                // build_price_tag only ever constructs a USDC price tag; an
+                // operator configuring (or typo'ing) any other asset would
+                // otherwise silently get a USDC tag with no error or log.
+                if w.asset != "USDC" {
+                    return Err(ConfigError::Invalid {
+                        var: "X402_PRICE_TAGS_JSON",
+                        message: format!(
+                            "unsupported asset '{}'; only 'USDC' is supported",
+                            w.asset
+                        ),
+                    });
+                }
                 Ok(PriceTagConfig {
                     network: w.network,
                     asset: w.asset,
@@ -371,12 +404,33 @@ impl X402Config {
     }
 }
 
+/// Parse a payTo address string into its typed chain-address representation,
+/// wrapping a parse failure into the `ConfigError` shape shared by every
+/// (payTo, network) match arm in `build_price_tag`.
+fn parse_payto_addr<T>(addr_s: &str, kind: &str, field: &'static str) -> Result<T, ConfigError>
+where
+    T: FromStr,
+    T::Err: std::fmt::Display,
+{
+    addr_s.parse().map_err(|e: T::Err| ConfigError::Invalid {
+        var: field,
+        message: format!("invalid {kind} address '{addr_s}': {e}"),
+    })
+}
+
 /// Convert a single [`PriceTagConfig`] into a [`v2::PriceTag`].
 fn build_price_tag(tag: &PriceTagConfig) -> Result<v2::PriceTag, ConfigError> {
     if tag.scheme != PriceScheme::Exact {
         return Err(ConfigError::Invalid {
             var: "X402_PRICE_TAGS_JSON",
             message: "unsupported scheme; only 'exact' is supported".into(),
+        });
+    }
+
+    if tag.price_usd.is_sign_negative() {
+        return Err(ConfigError::Invalid {
+            var: "priceUsd",
+            message: format!("price {} must not be negative", tag.price_usd),
         });
     }
 
@@ -391,55 +445,37 @@ fn build_price_tag(tag: &PriceTagConfig) -> Result<v2::PriceTag, ConfigError> {
             message: format!("price {} overflows USDC atomic units (u64)", tag.price_usd),
         })?;
 
+    if atomic == 0 {
+        return Err(ConfigError::Invalid {
+            var: "priceUsd",
+            message: format!(
+                "price {} rounds to 0 USDC atomic units; the route would be free",
+                tag.price_usd
+            ),
+        });
+    }
+
     match (&tag.pay_to, tag.network.as_str()) {
         (PayToAddress::Evm(addr_s), "base-sepolia") => {
-            let addr: ChecksummedAddress =
-                addr_s
-                    .parse()
-                    .map_err(
-                        |e: <ChecksummedAddress as FromStr>::Err| ConfigError::Invalid {
-                            var: "payTo.evm",
-                            message: format!("invalid EVM address '{addr_s}': {e}"),
-                        },
-                    )?;
+            let addr: ChecksummedAddress = parse_payto_addr(addr_s, "EVM", "payTo.evm")?;
             Ok(V2Eip155Exact::price_tag(
                 addr,
                 USDC::base_sepolia().amount(atomic),
             ))
         }
         (PayToAddress::Evm(addr_s), "base") => {
-            let addr: ChecksummedAddress =
-                addr_s
-                    .parse()
-                    .map_err(
-                        |e: <ChecksummedAddress as FromStr>::Err| ConfigError::Invalid {
-                            var: "payTo.evm",
-                            message: format!("invalid EVM address '{addr_s}': {e}"),
-                        },
-                    )?;
+            let addr: ChecksummedAddress = parse_payto_addr(addr_s, "EVM", "payTo.evm")?;
             Ok(V2Eip155Exact::price_tag(addr, USDC::base().amount(atomic)))
         }
         (PayToAddress::Solana(addr_s), "solana") => {
-            let addr: SolanaAddress =
-                addr_s
-                    .parse()
-                    .map_err(|e: <SolanaAddress as FromStr>::Err| ConfigError::Invalid {
-                        var: "payTo.solana",
-                        message: format!("invalid Solana address '{addr_s}': {e}"),
-                    })?;
+            let addr: SolanaAddress = parse_payto_addr(addr_s, "Solana", "payTo.solana")?;
             Ok(V2SolanaExact::price_tag(
                 addr,
                 USDC::solana().amount(atomic),
             ))
         }
         (PayToAddress::Solana(addr_s), "solana-devnet") => {
-            let addr: SolanaAddress =
-                addr_s
-                    .parse()
-                    .map_err(|e: <SolanaAddress as FromStr>::Err| ConfigError::Invalid {
-                        var: "payTo.solana",
-                        message: format!("invalid Solana address '{addr_s}': {e}"),
-                    })?;
+            let addr: SolanaAddress = parse_payto_addr(addr_s, "Solana", "payTo.solana")?;
             Ok(V2SolanaExact::price_tag(
                 addr,
                 USDC::solana_devnet().amount(atomic),
@@ -670,5 +706,88 @@ mod tests {
         ]"#;
         let err = X402Config::from_lookup(lookup(&[("X402_PRICE_TAGS_JSON", json)])).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid { .. }));
+    }
+
+    #[test]
+    fn from_env_rejects_non_usdc_asset() {
+        let json = r#"[
+            {"network":"base","asset":"ETH","priceUsd":"0.05","payTo":{"evm":"0x1111111111111111111111111111111111111111"},"scheme":"exact"}
+        ]"#;
+        let err = X402Config::from_lookup(lookup(&[("X402_PRICE_TAGS_JSON", json)])).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid { .. }));
+    }
+
+    #[test]
+    fn from_env_rejects_non_https_facilitator_for_non_local_profile() {
+        let err = X402Config::from_lookup(lookup(&[
+            ("X402_PROFILE", "payai"),
+            ("X402_FACILITATOR_URL", "http://facilitator.payai.network"),
+            ("X402_PAYTO", "0xabcdef0000000000000000000000000000000001"),
+        ]))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                var: "X402_FACILITATOR_URL",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn from_env_rejects_zero_facilitator_timeout() {
+        let err =
+            X402Config::from_lookup(lookup(&[("X402_FACILITATOR_TIMEOUT_SECS", "0")])).unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                var: "X402_FACILITATOR_TIMEOUT_SECS",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn build_price_tag_rejects_zero_atomic_price() {
+        let tag = PriceTagConfig {
+            network: "solana-devnet".to_string(),
+            asset: "USDC".to_string(),
+            price_usd: Decimal::from_str("0.0000004").unwrap(),
+            pay_to: PayToAddress::Solana(
+                "EGBQqKn968sVv5cQh5Cr72pSTHfxsuzq7o7asqYB5uEV".to_string(),
+            ),
+            scheme: PriceScheme::Exact,
+        };
+        let err = build_price_tag(&tag).unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                var: "priceUsd",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn solana_devnet_default_prices_pinned_per_seed_path() {
+        // Local-profile auto-added companion tag: 0.0001, same as the
+        // local-profile base-sepolia default it's paired with.
+        let derived = X402Config::from_lookup(lookup(&[])).unwrap();
+        let companion = &derived.price_tags[1];
+        assert_eq!(companion.network, "solana-devnet");
+        assert_eq!(companion.price_usd, Decimal::from_str("0.0001").unwrap());
+
+        // Explicit X402_NETWORK=solana-devnet override path: 0.001, same as
+        // the other mainnet-adjacent explicit overrides (base, solana).
+        let explicit = X402Config::from_lookup(lookup(&[
+            ("X402_PROFILE", "payai"),
+            ("X402_NETWORK", "solana-devnet"),
+            ("X402_PAYTO", "EGBQqKn968sVv5cQh5Cr72pSTHfxsuzq7o7asqYB5uEV"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            explicit.price_tags[0].price_usd,
+            Decimal::from_str("0.001").unwrap()
+        );
     }
 }
