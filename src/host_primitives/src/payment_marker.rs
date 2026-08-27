@@ -32,16 +32,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 /// contract rather than an implementation detail: the gateway-side signer
 /// writes the discriminant by hand. Add schemes by appending variants, never
 /// by inserting or reordering.
-#[derive(
-    BorshSerialize,
-    BorshDeserialize,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-)]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
 pub enum PaymentDetails {
     /// A single x402 payment settled straight from one payer to one
     /// recipient. The only scheme the gateway mints today.
@@ -71,16 +62,7 @@ pub enum PaymentDetails {
 }
 
 /// The signed payload parser_app verifies.
-#[derive(
-    BorshSerialize,
-    BorshDeserialize,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-)]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
 pub struct VerifiedPaymentMarker {
     /// Bumped if this envelope changes incompatibly. A new payment scheme is
     /// a new [`PaymentDetails`] variant instead of a bump: a verifier that
@@ -152,7 +134,11 @@ impl VerifiedPaymentMarker {
 /// used for `ParsedTransactionPayload::metadata_digest`), and
 /// `include_intermediate_output`. Both gateway and parser_app call this so
 /// the binding is unambiguous; every variable-length field is
-/// length-prefixed so no two distinct inputs can hash to the same preimage.
+/// length-prefixed so no two distinct inputs can hash to the same preimage,
+/// as long as `unsigned_payload` and `chain_metadata_bytes` each stay under
+/// 2^32 bytes (their length prefixes are `as u32`). The gRPC server's own
+/// message-size cap is far below that bound today, so this is a
+/// documentation caveat, not a live gap.
 #[must_use]
 pub fn request_hash(
     chain: i32,
@@ -343,5 +329,59 @@ mod tests {
             shifted_right, shifted_left,
             "unsigned_payload/chain_metadata boundary must be unambiguous"
         );
+    }
+
+    #[test]
+    fn signed_marker_pins_field_order_and_signature_length_prefix() {
+        // `SignedVerifiedPaymentMarker` (vpm, then signature) is the struct
+        // that actually rides in `ParseRequest.payment_marker`, not `vpm`
+        // alone. This pins its wire layout independently of
+        // `VerifiedPaymentMarker`'s own pinned-bytes test above: a field
+        // swap (signature before vpm), or a signer that writes
+        // `vpm_bytes || sig[64]` with no length prefix on `signature`,
+        // passes every existing `sign_with`/`verify` round-trip test but
+        // produces bytes the enclave cannot deserialize as intended.
+        let vpm = VerifiedPaymentMarker {
+            version: 1,
+            request_hash: [0u8; 32],
+            details: PaymentDetails::X402Direct {
+                txid: "tx".into(),
+                payer: String::new(),
+                pay_to: String::new(),
+                amount: "0".into(),
+                mint: String::new(),
+                x_payment_hash: [0u8; 32],
+                network: String::new(),
+            },
+            settled_at_ms: 0,
+            gateway_pubkey_hex: String::new(),
+        };
+
+        // Hand-assembled from the documented Borsh layout (LE integers, a
+        // 1-byte enum variant index, 4-byte-length-prefixed
+        // strings/Vec<u8>, raw fixed-size arrays), independent of
+        // `borsh::to_vec` on either `vpm` or `signed`.
+        let mut expected_vpm_bytes = Vec::new();
+        expected_vpm_bytes.extend_from_slice(&1u32.to_le_bytes()); // version
+        expected_vpm_bytes.extend_from_slice(&[0u8; 32]); // request_hash
+        expected_vpm_bytes.push(0); // PaymentDetails variant index: X402Direct
+        for s in ["tx", "", "", "0", ""] {
+            // txid, payer, pay_to, amount, mint: length-prefixed strings
+            expected_vpm_bytes.extend_from_slice(&(s.len() as u32).to_le_bytes());
+            expected_vpm_bytes.extend_from_slice(s.as_bytes());
+        }
+        expected_vpm_bytes.extend_from_slice(&[0u8; 32]); // x_payment_hash
+        expected_vpm_bytes.extend_from_slice(&0u32.to_le_bytes()); // network (empty)
+        expected_vpm_bytes.extend_from_slice(&0u64.to_le_bytes()); // settled_at_ms
+        expected_vpm_bytes.extend_from_slice(&0u32.to_le_bytes()); // gateway_pubkey_hex (empty)
+
+        let signature = vec![0xABu8; 64];
+        let mut expected = expected_vpm_bytes;
+        expected.extend_from_slice(&(signature.len() as u32).to_le_bytes());
+        expected.extend_from_slice(&signature);
+
+        let signed = SignedVerifiedPaymentMarker { vpm, signature };
+
+        assert_eq!(borsh::to_vec(&signed).unwrap(), expected);
     }
 }

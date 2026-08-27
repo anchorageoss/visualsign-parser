@@ -94,11 +94,15 @@ pub(crate) fn parse_with_registry(
 
     // Metadata can be empty; if so, we use an empty vec for hashing to avoid having to deal with
     // optional types in ParsedTransactionPayload.
-    let metadata_bytes = if let Some(metadata) = parse_request.chain_metadata.as_ref() {
-        borsh::to_vec(&metadata).expect("chain_metadata implements borsh::Serialize")
-    } else {
-        vec![]
-    };
+    let metadata_bytes = payment_verify::chain_metadata_bytes(
+        parse_request.chain_metadata.as_ref(),
+    )
+    .map_err(|e| {
+        GrpcError::new(
+            Code::Internal,
+            &format!("chain_metadata borsh encode: {e:?}"),
+        )
+    })?;
 
     let payload = ParsedTransactionPayload {
         parsed_payload: parsed_payload_str.clone(),
@@ -161,11 +165,9 @@ fn signing_digest_bytes(payload: &ParsedTransactionPayload) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::payment_verify::test_support::{make_vpm, sign_with};
     use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata};
-    use host_primitives::payment_marker::{
-        PaymentDetails, SignedVerifiedPaymentMarker, VPM_VERSION, VerifiedPaymentMarker,
-        request_hash,
-    };
+    use qos_p256::sign::P256SignPair;
     use std::collections::BTreeMap;
     use visualsign::vsptrait::{
         ConversionResult, Transaction, TransactionParseError, VisualSignConverter,
@@ -467,37 +469,14 @@ mod tests {
     /// one layer down).
     #[test]
     fn parse_rejects_forged_payment_marker_via_public_entry_point() {
-        use qos_p256::sign::P256SignPair;
-
         let pinned_pair = P256SignPair::generate();
         let attacker_pair = P256SignPair::generate();
         let pinned_pub_hex = qos_hex::encode(&pinned_pair.public_key().to_bytes());
         let policy = PaymentPolicy::from_hex(&pinned_pub_hex).unwrap();
 
         let mut req = stub_request();
-        let vpm = VerifiedPaymentMarker {
-            version: VPM_VERSION,
-            request_hash: request_hash(
-                req.chain,
-                &req.unsigned_payload,
-                &[],
-                req.include_intermediate_output,
-            ),
-            details: PaymentDetails::X402Direct {
-                txid: "txsig".into(),
-                payer: "Pay".into(),
-                pay_to: "Recv".into(),
-                amount: "1000".into(),
-                mint: "Mint".into(),
-                x_payment_hash: [0u8; 32],
-                network: "solana:test".into(),
-            },
-            settled_at_ms: 0,
-            gateway_pubkey_hex: pinned_pub_hex, // claims the pinned key
-        };
-        let signature = attacker_pair.sign(&vpm.signing_digest().unwrap()).unwrap(); // signed by someone else
-        let signed = SignedVerifiedPaymentMarker { vpm, signature };
-        req.payment_marker = borsh::to_vec(&signed).unwrap();
+        let vpm = make_vpm(&req, &pinned_pub_hex); // claims the pinned key
+        req.payment_marker = sign_with(&attacker_pair, vpm); // signed by someone else
 
         let ephemeral_key = P256Pair::generate().expect("generate ephemeral key");
         let err = parse(&req, &ephemeral_key, &policy).expect_err(
@@ -506,6 +485,13 @@ mod tests {
              reaching the transaction converter registry",
         );
         assert_eq!(err.code, Code::FailedPrecondition);
+        // The status code alone doesn't distinguish this forgery failure
+        // from `Missing`/`RequestHashMismatch`/`PinnedKeyMismatch`, all of
+        // which also map to `FailedPrecondition`. Assert on the message too
+        // so this test can't silently start passing for the wrong reason
+        // (e.g. if `test_support::make_vpm`'s preimage ever drifted from
+        // `verify()`'s).
+        assert!(err.message.contains("signature"));
     }
 
     fn sample_payload(intermediate_output: Vec<u8>) -> ParsedTransactionPayload {

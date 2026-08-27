@@ -4,12 +4,14 @@
 //! request. The deeper buyer-Ed25519-on-the-Solana-tx check is deferred to
 //! v3.1 (see plan).
 //!
-//! Policy is built once at startup from a hex-encoded pinned gateway pubkey
-//! via `PaymentPolicy::from_hex`, and the binary decides where that hex
-//! value comes from (CLI arg / env). Local dev / gRPC-direct callers pass
-//! `PaymentPolicy::Disabled` and VPM is not required. When `Required`, the
-//! policy refuses any request whose `payment_marker` doesn't carry a valid
-//! gateway-signed VPM bound to the exact request body.
+//! Policy is meant to be built once at startup from a hex-encoded pinned
+//! gateway pubkey via `PaymentPolicy::from_hex`, with the binary deciding
+//! where that hex value comes from (CLI arg / env). No binary does that
+//! yet: every call site currently passes `Disabled`, so this module is the
+//! enforcement point sitting in place, switched off. Local dev / gRPC-direct
+//! callers pass `PaymentPolicy::Disabled` and VPM is not required. When
+//! `Required`, the policy refuses any request whose `payment_marker` doesn't
+//! carry a valid gateway-signed VPM bound to the exact request body.
 
 use borsh::BorshDeserialize;
 use generated::google::rpc::Code;
@@ -21,8 +23,11 @@ use visualsign::encodings::decode_hex;
 use crate::errors::GrpcError;
 
 /// Borsh-encodes `chain_metadata`, or returns an empty `Vec` if absent.
-/// Matches the convention used for `ParsedTransactionPayload::metadata_digest`.
-fn chain_metadata_bytes(metadata: Option<&ChainMetadata>) -> Result<Vec<u8>, borsh::io::Error> {
+/// Matches (and is reused by) the convention used for
+/// `ParsedTransactionPayload::metadata_digest` in `routes::parse`.
+pub(crate) fn chain_metadata_bytes(
+    metadata: Option<&ChainMetadata>,
+) -> Result<Vec<u8>, borsh::io::Error> {
     metadata
         .map(borsh::to_vec)
         .transpose()
@@ -30,25 +35,18 @@ fn chain_metadata_bytes(metadata: Option<&ChainMetadata>) -> Result<Vec<u8>, bor
 }
 
 /// Whether `parser_app` requires (and verifies) a `VerifiedPaymentMarker`
-/// on every parse call. Loaded once at startup from
-/// `GATEWAY_SIGNING_PUBKEY_HEX`.
+/// on every parse call. Built by the binary from its own config via
+/// `PaymentPolicy::from_hex`; there is no env-coupled constructor here (see
+/// the module doc above).
 pub enum PaymentPolicy {
-    /// No payment enforcement. Used by the open `/v1/parse` route and by
-    /// local-dev / direct-gRPC callers.
+    /// No payment enforcement. Used by local-dev / direct-gRPC callers, and
+    /// by every call site today (no binary constructs `Required` yet).
     Disabled,
     /// Require a valid gateway-signed VPM in `ParseRequest.payment_marker`.
     Required {
         /// The gateway's P256 signing public key, pinned at TVC deploy
         /// time via `GATEWAY_SIGNING_PUBKEY_HEX`.
         pinned: P256SignPublic,
-        /// `qos_hex::encode(&pinned.to_bytes())`, memoized for log and
-        /// `Debug` output only. Derived from `pinned` (not from the raw
-        /// config string) so it's always the canonical unprefixed
-        /// lower-case encoding regardless of whether the operator supplied
-        /// a `0x`-prefixed value in `GATEWAY_SIGNING_PUBKEY_HEX`. The
-        /// cross-check against `vpm.gateway_pubkey_hex` compares decoded
-        /// bytes, not this string.
-        pinned_hex_lower: String,
     },
 }
 
@@ -56,12 +54,19 @@ impl std::fmt::Debug for PaymentPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Disabled => write!(f, "PaymentPolicy::Disabled"),
-            Self::Required {
-                pinned_hex_lower, ..
-            } => f
-                .debug_struct("PaymentPolicy::Required")
-                .field("pinned_hex", pinned_hex_lower)
-                .finish(),
+            Self::Required { pinned } => {
+                // Encoded on demand rather than memoized: this is log/Debug
+                // output only, not the hot verify() path, and deriving it
+                // from `pinned` (not the raw config string) keeps it the
+                // canonical unprefixed lower-case encoding regardless of
+                // whether the operator supplied a `0x`-prefixed value in
+                // `GATEWAY_SIGNING_PUBKEY_HEX`. The cross-check against
+                // `vpm.gateway_pubkey_hex` compares decoded bytes, not this
+                // string.
+                f.debug_struct("PaymentPolicy::Required")
+                    .field("pinned_hex", &qos_hex::encode(&pinned.to_bytes()))
+                    .finish()
+            }
         }
     }
 }
@@ -81,11 +86,7 @@ impl PaymentPolicy {
                 "GATEWAY_SIGNING_PUBKEY_HEX is not a valid P256 sign pubkey: {e:?}"
             ))
         })?;
-        let pinned_hex_lower = qos_hex::encode(&pinned.to_bytes());
-        Ok(Self::Required {
-            pinned,
-            pinned_hex_lower,
-        })
+        Ok(Self::Required { pinned })
     }
 }
 
@@ -95,7 +96,8 @@ pub enum PaymentVerifyError {
     /// `payment_marker` was empty in `Required` mode.
     #[error("payment marker is required for this endpoint")]
     Missing,
-    /// The marker bytes weren't valid Borsh / didn't match the schema.
+    /// The marker bytes weren't valid Borsh, or a decoded field didn't match
+    /// the schema (e.g. `gateway_pubkey_hex` that isn't valid hex).
     #[error("payment marker decode error: {0}")]
     Decode(String),
     /// The marker was signed against an unknown VPM schema version.
@@ -112,6 +114,13 @@ pub enum PaymentVerifyError {
     /// The gateway signature on the marker didn't verify.
     #[error("payment marker signature verification failed")]
     BadSignature,
+    /// A failure unrelated to payment status (e.g. Borsh-encoding this
+    /// request's own `chain_metadata` to compute `request_hash`). Kept
+    /// distinct from the payment-conditional variants above so a caller
+    /// that matches on `PaymentVerifyError` for logging/metrics doesn't see
+    /// a deployment bug reported as a payment failure.
+    #[error("internal error verifying payment marker: {0}")]
+    Internal(String),
 }
 
 impl From<PaymentVerifyError> for GrpcError {
@@ -137,20 +146,24 @@ impl From<PaymentVerifyError> for GrpcError {
             | PaymentVerifyError::RequestHashMismatch
             | PaymentVerifyError::PinnedKeyMismatch
             | PaymentVerifyError::BadSignature => Code::FailedPrecondition,
+            PaymentVerifyError::Internal(_) => Code::Internal,
         };
         GrpcError::new(code, &format!("{e}"))
     }
 }
 
 /// Returns `Ok(())` if the policy allows the request to proceed.
-pub fn verify(parse_request: &ParseRequest, policy: &PaymentPolicy) -> Result<(), GrpcError> {
+pub fn verify(
+    parse_request: &ParseRequest,
+    policy: &PaymentPolicy,
+) -> Result<(), PaymentVerifyError> {
     let pinned = match policy {
         PaymentPolicy::Disabled => return Ok(()),
-        PaymentPolicy::Required { pinned, .. } => pinned,
+        PaymentPolicy::Required { pinned } => pinned,
     };
 
     if parse_request.payment_marker.is_empty() {
-        return Err(PaymentVerifyError::Missing.into());
+        return Err(PaymentVerifyError::Missing);
     }
 
     let signed = SignedVerifiedPaymentMarker::try_from_slice(&parse_request.payment_marker)
@@ -159,7 +172,19 @@ pub fn verify(parse_request: &ParseRequest, policy: &PaymentPolicy) -> Result<()
     let vpm = &signed.vpm;
 
     if vpm.version != VPM_VERSION {
-        return Err(PaymentVerifyError::UnsupportedVersion(vpm.version).into());
+        return Err(PaymentVerifyError::UnsupportedVersion(vpm.version));
+    }
+
+    // Exhaustive on purpose, mirroring the `ParseRequest` destructure below:
+    // `PaymentDetails` has one variant today, but a new scheme is a new
+    // variant (see host_primitives::payment_marker doc), and this has no
+    // wildcard arm so adding one is a compile error here, forcing an
+    // explicit accept/reject decision for the new scheme rather than
+    // silently accepting it. This is separate from cross-checking a
+    // variant's settlement fields against forwarded X-PAYMENT bytes, which
+    // is deferred to v3.1.
+    match &vpm.details {
+        host_primitives::payment_marker::PaymentDetails::X402Direct { .. } => {}
     }
 
     // Bind the VPM to this exact request: chain, unsigned_payload,
@@ -186,7 +211,7 @@ pub fn verify(parse_request: &ParseRequest, policy: &PaymentPolicy) -> Result<()
     } = parse_request;
 
     let chain_metadata_bytes = chain_metadata_bytes(chain_metadata.as_ref())
-        .map_err(|e| GrpcError::internal(&format!("chain_metadata borsh encode: {e:?}")))?;
+        .map_err(|e| PaymentVerifyError::Internal(format!("chain_metadata borsh encode: {e:?}")))?;
     let expected = request_hash(
         *chain,
         unsigned_payload,
@@ -194,7 +219,7 @@ pub fn verify(parse_request: &ParseRequest, policy: &PaymentPolicy) -> Result<()
         *include_intermediate_output,
     );
     if expected != vpm.request_hash {
-        return Err(PaymentVerifyError::RequestHashMismatch.into());
+        return Err(PaymentVerifyError::RequestHashMismatch);
     }
 
     // Cross-check the gateway pubkey claimed in the VPM against the pinned
@@ -206,15 +231,34 @@ pub fn verify(parse_request: &ParseRequest, policy: &PaymentPolicy) -> Result<()
     // underneath. Both values are public keys, not secrets, so a plain
     // compare is fine; the actual trust decision is the signature check
     // below.
+    // A `gateway_pubkey_hex` that isn't even valid hex is a malformed marker,
+    // not an unpaid request, so it takes the `Decode` path (InvalidArgument)
+    // rather than `PinnedKeyMismatch` (FailedPrecondition -> 402). Telling a
+    // caller to pay again cannot fix a marker whose key field is corrupt.
+    //
+    // The decode error is deliberately not included: `hex::FromHexError`'s
+    // `Display` embeds the offending character verbatim, and this field is
+    // unauthenticated and attacker-controlled at this point (the signature
+    // has not been checked yet), so echoing it into a client-visible gRPC
+    // message would put attacker bytes in our error strings and logs.
     let claimed = decode_hex(vpm.gateway_pubkey_hex.trim())
-        .map_err(|_| PaymentVerifyError::PinnedKeyMismatch)?;
+        .map_err(|_| PaymentVerifyError::Decode("gateway_pubkey_hex is not valid hex".into()))?;
+    // Valid hex of the wrong length (e.g. a truncated or padded key) falls
+    // through to `PinnedKeyMismatch` (FailedPrecondition -> 402) rather than
+    // `Decode` (InvalidArgument -> 400) above, even though both are
+    // malformed-marker cases. Left as-is: this compares decoded bytes
+    // against the pinned key regardless of length, so a length mismatch is
+    // just a specific case of "does not match the pinned key". Revisit if
+    // deploy-time key skew (a rotated gateway key with a stale pin) turns
+    // out to be common enough that InvalidArgument's clearer "this can
+    // never succeed" signal is worth splitting out here too.
     if claimed[..] != pinned.to_bytes()[..] {
-        return Err(PaymentVerifyError::PinnedKeyMismatch.into());
+        return Err(PaymentVerifyError::PinnedKeyMismatch);
     }
 
-    let digest = vpm
-        .signing_digest()
-        .map_err(|e| GrpcError::internal(&format!("payment marker signing_digest: {e:?}")))?;
+    let digest = vpm.signing_digest().map_err(|e| {
+        PaymentVerifyError::Internal(format!("payment marker signing_digest: {e:?}"))
+    })?;
     pinned
         .verify(&digest, &signed.signature)
         .map_err(|_| PaymentVerifyError::BadSignature)?;
@@ -222,15 +266,22 @@ pub fn verify(parse_request: &ParseRequest, policy: &PaymentPolicy) -> Result<()
     Ok(())
 }
 
+/// Shared VPM test-construction helpers. `pub(crate)` (rather than nested
+/// inside `mod tests` below) so `routes::parse`'s tests can build the same
+/// well-formed markers instead of re-deriving `VerifiedPaymentMarker`
+/// construction from scratch.
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-mod tests {
-    use super::*;
-    use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata};
-    use host_primitives::payment_marker::{PaymentDetails, VerifiedPaymentMarker};
+pub(crate) mod test_support {
+    use super::{PaymentPolicy, chain_metadata_bytes};
+    use generated::parser::ParseRequest;
+    use host_primitives::payment_marker::{
+        PaymentDetails, SignedVerifiedPaymentMarker, VPM_VERSION, VerifiedPaymentMarker,
+        request_hash,
+    };
     use qos_p256::sign::P256SignPair;
 
-    fn sign_with(pair: &P256SignPair, vpm: VerifiedPaymentMarker) -> Vec<u8> {
+    pub(crate) fn sign_with(pair: &P256SignPair, vpm: VerifiedPaymentMarker) -> Vec<u8> {
         let signed = SignedVerifiedPaymentMarker {
             signature: pair.sign(&vpm.signing_digest().unwrap()).unwrap(),
             vpm,
@@ -238,7 +289,7 @@ mod tests {
         borsh::to_vec(&signed).unwrap()
     }
 
-    fn make_vpm(req: &ParseRequest, gateway_hex: &str) -> VerifiedPaymentMarker {
+    pub(crate) fn make_vpm(req: &ParseRequest, gateway_hex: &str) -> VerifiedPaymentMarker {
         let chain_metadata_bytes = chain_metadata_bytes(req.chain_metadata.as_ref()).unwrap();
         VerifiedPaymentMarker {
             version: VPM_VERSION,
@@ -262,7 +313,7 @@ mod tests {
         }
     }
 
-    fn req_with_marker(marker: Vec<u8>) -> ParseRequest {
+    pub(crate) fn req_with_marker(marker: Vec<u8>) -> ParseRequest {
         ParseRequest {
             unsigned_payload: "0xdeadbeef".into(),
             chain: 1,
@@ -273,12 +324,21 @@ mod tests {
     }
 
     /// Generates a fresh gateway keypair and a `Required` policy pinned to it.
-    fn generate_policy() -> (P256SignPair, String, PaymentPolicy) {
+    pub(crate) fn generate_policy() -> (P256SignPair, String, PaymentPolicy) {
         let pair = P256SignPair::generate();
         let pub_hex = qos_hex::encode(&pair.public_key().to_bytes());
         let policy = PaymentPolicy::from_hex(&pub_hex).unwrap();
         (pair, pub_hex, policy)
     }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::test_support::{generate_policy, make_vpm, req_with_marker, sign_with};
+    use super::*;
+    use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata};
+    use qos_p256::sign::P256SignPair;
 
     #[test]
     fn disabled_policy_accepts_anything() {
@@ -301,7 +361,7 @@ mod tests {
     fn required_policy_rejects_missing_marker() {
         let (_pair, _pub_hex, policy) = generate_policy();
         let req = req_with_marker(vec![]);
-        let err = verify(&req, &policy).unwrap_err();
+        let err: GrpcError = verify(&req, &policy).unwrap_err().into();
         assert_eq!(err.code, Code::FailedPrecondition);
     }
 
@@ -315,7 +375,7 @@ mod tests {
         let marker = sign_with(&pair, vpm);
         let req = req_with_marker(marker);
 
-        let err = verify(&req, &policy).unwrap_err();
+        let err: GrpcError = verify(&req, &policy).unwrap_err().into();
         assert!(err.message.contains("request_hash"));
     }
 
@@ -329,7 +389,7 @@ mod tests {
         let vpm = make_vpm(&req, &pub_b); // claims a different key
         req.payment_marker = sign_with(&pair_b, vpm);
 
-        let err = verify(&req, &policy).unwrap_err();
+        let err: GrpcError = verify(&req, &policy).unwrap_err().into();
         assert!(err.message.contains("pinned"));
     }
 
@@ -354,7 +414,7 @@ mod tests {
             })),
         });
 
-        let err = verify(&req_with_metadata, &policy).unwrap_err();
+        let err: GrpcError = verify(&req_with_metadata, &policy).unwrap_err().into();
         assert!(err.message.contains("request_hash"));
     }
 
@@ -371,7 +431,7 @@ mod tests {
         let mut req_with_flag = req_with_marker(marker);
         req_with_flag.include_intermediate_output = true;
 
-        let err = verify(&req_with_flag, &policy).unwrap_err();
+        let err: GrpcError = verify(&req_with_flag, &policy).unwrap_err().into();
         assert!(err.message.contains("request_hash"));
     }
 
@@ -380,7 +440,7 @@ mod tests {
         // Attacker claims the pinned gateway key in gateway_pubkey_hex (so
         // the pubkey precheck passes) but actually signs with a different
         // keypair. This must fail at the signature check, not pass because
-        // the claimed-key string happened to match.
+        // the claimed key happened to match the pinned one.
         let (_pinned_pair, pinned_pub_hex, policy) = generate_policy();
         let attacker_pair = P256SignPair::generate();
 
@@ -388,7 +448,7 @@ mod tests {
         let vpm = make_vpm(&req, &pinned_pub_hex); // claims the pinned key
         req.payment_marker = sign_with(&attacker_pair, vpm); // signed by someone else
 
-        let err = verify(&req, &policy).unwrap_err();
+        let err: GrpcError = verify(&req, &policy).unwrap_err().into();
         assert_eq!(err.code, Code::FailedPrecondition);
         assert!(err.message.contains("signature"));
     }
@@ -411,15 +471,18 @@ mod tests {
 
     #[test]
     fn required_policy_rejects_undecodable_gateway_pubkey_hex() {
+        // A corrupt key field is a malformed marker, so it must land on the
+        // InvalidArgument path with the other decode failures rather than on
+        // the 402 path that asks the caller to pay again.
         let (pair, _pub_hex, policy) = generate_policy();
 
         let mut req = req_with_marker(vec![]);
         let vpm = make_vpm(&req, "not-hex");
         req.payment_marker = sign_with(&pair, vpm);
 
-        let err = verify(&req, &policy).unwrap_err();
-        assert_eq!(err.code, Code::FailedPrecondition);
-        assert!(err.message.contains("pinned"));
+        let err: GrpcError = verify(&req, &policy).unwrap_err().into();
+        assert_eq!(err.code, Code::InvalidArgument);
+        assert!(err.message.contains("gateway_pubkey_hex"));
     }
 
     #[test]
@@ -430,7 +493,7 @@ mod tests {
         let (_pair, _pub_hex, policy) = generate_policy();
         let req = req_with_marker(vec![0xff; 4]);
 
-        let err = verify(&req, &policy).unwrap_err();
+        let err: GrpcError = verify(&req, &policy).unwrap_err().into();
         assert_eq!(err.code, Code::InvalidArgument);
     }
 
@@ -445,7 +508,7 @@ mod tests {
         vpm.version = VPM_VERSION + 1;
         req.payment_marker = sign_with(&pair, vpm);
 
-        let err = verify(&req, &policy).unwrap_err();
+        let err: GrpcError = verify(&req, &policy).unwrap_err().into();
         assert_eq!(err.code, Code::InvalidArgument);
     }
 
@@ -462,7 +525,53 @@ mod tests {
         marker[last] ^= 0xff;
         req.payment_marker = marker;
 
-        let err = verify(&req, &policy).unwrap_err();
+        let err: GrpcError = verify(&req, &policy).unwrap_err().into();
         assert!(err.message.contains("signature"));
+    }
+
+    #[test]
+    fn chain_metadata_bytes_matches_hand_encoded_layout_for_ethereum_variant() {
+        // `chain_metadata_bytes` (borsh(ChainMetadata)) is one-third of
+        // `request_hash`'s preimage, alongside `unsigned_payload` and
+        // `chain`, both of which already have hand-encoded pinned tests in
+        // `host_primitives::payment_marker`. `prost`'s oneof codegen emits
+        // struct fields in `.proto` declaration order, not tag order (see
+        // `EthereumMetadata`: `network_id` is proto tag 2 but is declared,
+        // and thus Borsh-serialized, before `abi_mappings`, proto tag 3),
+        // and the enclosing oneof's Borsh variant index (Ethereum=0,
+        // Solana=1, Near=2, by Rust declaration order) has no relationship
+        // to the prost tags (1, 2, 3) either. A cosmetic-looking field or
+        // variant reorder in `parser.proto` is wire-compatible from
+        // `prost`'s point of view and produces no `make generated` diff
+        // failure, but silently changes this preimage and breaks every
+        // marker already minted against the old layout. This test
+        // hand-assembles the expected bytes from the documented Borsh
+        // encoding rules (LE integers, 1-byte `Option`/enum discriminants,
+        // 4-byte-length-prefixed strings, a 4-byte-length-prefixed empty
+        // `BTreeMap`) plus the current declaration order, rather than
+        // deriving them from `borsh::to_vec` on the struct under test, so a
+        // reorder fails this test instead of silently passing it.
+        let network_id = "ETHEREUM_MAINNET";
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
+                network_id: Some(network_id.to_string()),
+                abi_mappings: std::collections::BTreeMap::default(),
+            })),
+        };
+
+        let mut expected = Vec::new();
+        expected.push(1); // ChainMetadata.metadata: Option<Metadata>: Some
+        expected.push(0); // Metadata variant index 0: Ethereum
+        expected.push(1); // EthereumMetadata.network_id: Option<String>: Some
+        expected.extend_from_slice(&u32::try_from(network_id.len()).unwrap().to_le_bytes());
+        expected.extend_from_slice(network_id.as_bytes());
+        expected.extend_from_slice(&0u32.to_le_bytes()); // abi_mappings: empty BTreeMap
+
+        assert_eq!(chain_metadata_bytes(Some(&metadata)).unwrap(), expected);
+    }
+
+    #[test]
+    fn chain_metadata_bytes_is_empty_for_absent_metadata() {
+        assert_eq!(chain_metadata_bytes(None).unwrap(), Vec::<u8>::new());
     }
 }
