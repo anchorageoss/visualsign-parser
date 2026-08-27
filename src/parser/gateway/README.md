@@ -21,10 +21,11 @@ gateway logs and continues serving v1 + health only.
 
 Every successful v1/v2 parse response is signed by `parser_app`'s
 ephemeral P256 keypair, provisioned into the enclave at boot. The gateway
-verifies the signature against a **pinned** public key. On failure it
-returns `502 Bad Gateway`; the x402 middleware's settle-on-success
-contract then skips `/settle`, so an unattested response is never
-charged to the payer.
+verifies the signature against a **pinned** public key, over the actual
+forwarded payload (not the wire-carried digest). On failure -- including a
+backend response with no signature at all -- it returns `502 Bad Gateway`;
+the x402 middleware's settle-on-success contract then skips `/settle`, so
+an unattested response is never charged to the payer.
 
 The pinned pubkey is provided to the gateway as a launch argument by the
 TVC stack. The value is `qos_hex::encode(P256Public::to_bytes())` -- the
@@ -47,7 +48,9 @@ attestation document.
 
 ## x402 configuration
 
-All env vars are read at startup. Bad values fail-closed (gateway exits 1).
+All env vars are read at startup. Bad values (or an unreachable facilitator)
+disable x402: the gateway logs a warning and continues serving v1 + health
+only, without mounting v2.
 
 | Env var                          | Required? | Default                             | Meaning                                                                                |
 | --------------------------------- | --------- | ------------------------------------ | ---------------------------------------------------------------------------------------- |
@@ -61,8 +64,14 @@ All env vars are read at startup. Bad values fail-closed (gateway exits 1).
 | `X402_PRICE_TAGS_JSON`           | no        | seeded from profile + `X402_NETWORK` | full multi-tag override; see the JSON shape in `x402_config.rs`                        |
 | `TVC_DEMO_PINNED_PUBKEY_HEX`     | **yes** (non-local) | --                         | pinned enclave pubkey, hex                                                             |
 | `TVC_DEMO_PINNED_PUBKEY_FILE`    | no        | --                                   | alternative to `_HEX`: file holding the hex                                            |
-| `GATEWAY_AUTH_BEARER_TOKEN`      | no        | --                                   | optional shared-bearer-token gate. When set, every route except `/health` requires `Authorization: Bearer <this-value>` or returns 401. Mutually exclusive with `_FILE`. |
+| `GATEWAY_AUTH_BEARER_TOKEN`      | no        | --                                   | optional shared-bearer-token gate. When set, every route except `/health` requires `Authorization: Bearer <this-value>` or returns 401. Mutually exclusive with `_FILE`. Must be at least 16 bytes after trimming. |
 | `GATEWAY_AUTH_BEARER_FILE`       | no        | --                                   | path to a file containing the bearer token (whitespace-trimmed). Preferred for Cloud Run / k8s secret-volume mounts. Mutually exclusive with `_TOKEN`. |
+
+`GATEWAY_AUTH_BEARER_TOKEN` / `_FILE` is off in every configuration this
+repo's own build/Compose/CI setup produces, and `/visualsign/api/v1/parse`
+runs the same handler as `/v2` without the x402 gate. Once `/v2` is priced,
+any deployment that cares about that price should also set the bearer
+token (or otherwise close `/v1`) -- x402 gates payment, not access.
 
 The bearer-token gate is a weak shared-secret intended to keep random
 crawlers off the endpoint while AI-agent callers (which can set arbitrary
@@ -95,6 +104,13 @@ The `payai` profile requires outbound HTTPS to
 `facilitator.payai.network` from wherever the gateway runs. In TVC
 deployments the gateway runs on the host VM (outside the enclave); the
 enclave-host networking already provides egress for Turnkey integrations.
+
+### Connection-level protections
+
+`axum::serve` runs with hyper's default settings: no header-read timeout,
+no request-body-read timeout, no per-IP connection cap. A production
+deployment should sit behind a fronting proxy (load balancer, ingress,
+Cloud Run) that provides those; the gateway itself does not.
 
 ## Tests
 

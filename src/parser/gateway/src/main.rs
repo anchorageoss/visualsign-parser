@@ -1,7 +1,7 @@
-// TODO(#231): Remove these exemptions and fix violations in a follow-up PR.
-#![allow(clippy::unwrap_used)]
+// TODO(#231): Remove this exemption and fix violations in a follow-up PR.
+// unwrap_used and panic have no remaining non-test call sites in this crate;
+// only the SIGTERM-handler setup below still relies on expect_used.
 #![allow(clippy::expect_used)]
-#![allow(clippy::panic)]
 
 use axum::{
     Router,
@@ -82,6 +82,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         attestation,
     };
 
+    // 64 KiB caps the public ingress body. The gRPC backend's
+    // `GRPC_MAX_RECV_MSG_SIZE` (~25 MiB) is the wrong ceiling for the public
+    // HTTP layer -- a parse request is <= a few KB in real traffic, while a
+    // 25 MiB unauthenticated body lets a non-paying caller force the gateway
+    // to JSON-parse 25 MB before any Payment-Signature check runs. 64 KiB
+    // leaves headroom for `chain_metadata.abi_mappings` while shrinking the
+    // pre-paywall amplification surface by ~400x. Applied router-wide
+    // (below, after both routes are mounted), matching bd3b0657.
+    const PUBLIC_BODY_LIMIT_BYTES: usize = 64 * 1024;
+
     let mut app = Router::new()
         .route(
             "/health",
@@ -92,6 +102,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(parser_gateway::handlers::parse::parse_handler),
         );
 
+    // x402 config/price-tag errors are a soft fail: log and keep serving
+    // v1 + health only. Same treatment as an unreachable facilitator below;
+    // an x402-only misconfiguration should not take the unrelated v1 route
+    // down with it.
     match X402Config::from_env() {
         Ok(x402_cfg) => match x402_cfg.build_middleware() {
             Ok(x402_middleware) => {
@@ -104,21 +118,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 } else {
                     println!("x402 facilitator probe OK");
+                    for tag in &x402_cfg.price_tags {
+                        println!(
+                            "x402 price tag: network={} asset={} price_usd={} payTo={:?}",
+                            tag.network, tag.asset, tag.price_usd, tag.pay_to
+                        );
+                    }
                     app = app.route(
                         "/visualsign/api/v2/parse",
                         post(parser_gateway::handlers::parse::parse_handler).layer(x402_middleware),
                     );
                 }
             }
-            Err(e) => eprintln!("WARNING: x402 disabled; invalid x402 price tags: {e}"),
+            Err(e) => eprintln!("WARNING: x402 disabled; failed to build x402 middleware: {e}"),
         },
         Err(e) => eprintln!("WARNING: x402 disabled; invalid x402 configuration: {e}"),
     }
 
-    // Optional shared-bearer-token gate. Sits above the body-limit layer so
-    // unauthenticated callers don't even consume the 64 KiB JSON-parse budget.
-    // /health is carved out inside the middleware (Cloud Run / operator probes
-    // don't need the token).
+    // Optional shared-bearer-token gate. /health is carved out inside the
+    // middleware (Cloud Run / operator probes don't need the token).
     let bearer_token = match BearerToken::from_env() {
         Ok(t) => t,
         Err(e) => {
@@ -131,26 +149,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("gateway bearer-token gate enabled ({len}-byte token)");
     }
 
-    // 64 KiB caps the public ingress body. The gRPC backend's
-    // `GRPC_MAX_RECV_MSG_SIZE` (~25 MiB) is the wrong number for the public
-    // HTTP layer -- a parse request is <= a few KB in real traffic, while a
-    // 25 MiB unauthenticated body lets a non-paying caller force the gateway
-    // to JSON-parse 25 MB before any Payment-Signature check runs. 64 KiB
-    // leaves headroom for `chain_metadata.abi_mappings` while shrinking the
-    // pre-paywall amplification surface by ~400x.
-    const PUBLIC_BODY_LIMIT_BYTES: usize = 64 * 1024;
-    let mut app = app.layer(DefaultBodyLimit::max(PUBLIC_BODY_LIMIT_BYTES));
     if let Some(token) = bearer_token {
         app = app.layer(axum::middleware::from_fn_with_state(
             token,
             parser_gateway::auth::require_bearer_token,
         ));
     }
-    let app = app.with_state(state);
+    let app = app
+        .layer(DefaultBodyLimit::max(PUBLIC_BODY_LIMIT_BYTES))
+        .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| format!("failed to bind {addr}: {e}"))?;
     println!("parser_gateway {} listening on {addr}", env!("VERSION"));
-    let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
@@ -162,9 +175,14 @@ async fn probe_facilitator(
     url: &url::Url,
     timeout: std::time::Duration,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut probe_url = url.clone();
-    let base_path = probe_url.path().trim_end_matches('/').to_string();
-    probe_url.set_path(&format!("{base_path}/supported"));
+    // Resolve "./supported" the same way x402-axum's `FacilitatorClient`
+    // resolves its own `./verify` / `./settle` / `./supported` endpoints
+    // (RFC 3986 relative `Url::join`), not by naively string-appending
+    // "/supported". For a facilitator URL with a non-root path and no
+    // trailing slash the two approaches resolve to different endpoints, so
+    // matching the real client's semantics keeps this probe meaningful
+    // evidence about the path x402-axum will actually use.
+    let probe_url = url.join("./supported")?;
     let client = reqwest::Client::builder().timeout(timeout).build()?;
     let resp = client.get(probe_url).send().await?;
     if !resp.status().is_success() {
