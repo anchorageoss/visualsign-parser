@@ -41,13 +41,13 @@ pub enum PaymentPolicy {
         /// The gateway's P256 signing public key, pinned at TVC deploy
         /// time via `GATEWAY_SIGNING_PUBKEY_HEX`.
         pinned: P256SignPublic,
-        /// `qos_hex::encode(&pinned.to_bytes())`, memoized for log messages
-        /// and for the cross-check against `vpm.gateway_pubkey_hex`.
-        /// Derived from `pinned` (not from the raw config string) so it's
-        /// always the canonical unprefixed lower-case encoding, matching
-        /// what the gateway emits via the same `qos_hex::encode` call,
-        /// regardless of whether the operator supplied a `0x`-prefixed
-        /// value in `GATEWAY_SIGNING_PUBKEY_HEX`.
+        /// `qos_hex::encode(&pinned.to_bytes())`, memoized for log and
+        /// `Debug` output only. Derived from `pinned` (not from the raw
+        /// config string) so it's always the canonical unprefixed
+        /// lower-case encoding regardless of whether the operator supplied
+        /// a `0x`-prefixed value in `GATEWAY_SIGNING_PUBKEY_HEX`. The
+        /// cross-check against `vpm.gateway_pubkey_hex` compares decoded
+        /// bytes, not this string.
         pinned_hex_lower: String,
     },
 }
@@ -122,18 +122,31 @@ impl From<PaymentVerifyError> for GrpcError {
         // synthesizing the canonical x402 PaymentRequired body from its
         // own config (not yet wired as of this policy being `Disabled`
         // everywhere).
-        GrpcError::new(Code::FailedPrecondition, &format!("{e}"))
+        //
+        // Only the payment-conditional variants get that treatment. Corrupt
+        // marker bytes (`Decode`) and schema skew (`UnsupportedVersion`) are
+        // caller or deployment bugs, not "you have not paid": under x402
+        // retry semantics a 402 tells the caller to pay again for a request
+        // that cannot succeed however many times it retries. Those map to
+        // `InvalidArgument` so the gateway surfaces a 400 instead.
+        let code = match &e {
+            PaymentVerifyError::Decode(_) | PaymentVerifyError::UnsupportedVersion(_) => {
+                Code::InvalidArgument
+            }
+            PaymentVerifyError::Missing
+            | PaymentVerifyError::RequestHashMismatch
+            | PaymentVerifyError::PinnedKeyMismatch
+            | PaymentVerifyError::BadSignature => Code::FailedPrecondition,
+        };
+        GrpcError::new(code, &format!("{e}"))
     }
 }
 
 /// Returns `Ok(())` if the policy allows the request to proceed.
 pub fn verify(parse_request: &ParseRequest, policy: &PaymentPolicy) -> Result<(), GrpcError> {
-    let (pinned, pinned_hex_lower) = match policy {
+    let pinned = match policy {
         PaymentPolicy::Disabled => return Ok(()),
-        PaymentPolicy::Required {
-            pinned,
-            pinned_hex_lower,
-        } => (pinned, pinned_hex_lower.as_str()),
+        PaymentPolicy::Required { pinned, .. } => pinned,
     };
 
     if parse_request.payment_marker.is_empty() {
@@ -185,12 +198,17 @@ pub fn verify(parse_request: &ParseRequest, policy: &PaymentPolicy) -> Result<()
     }
 
     // Cross-check the gateway pubkey claimed in the VPM against the pinned
-    // key. Both values are public keys, not secrets, so a plain compare is
-    // fine; the actual trust decision is the signature check below.
-    if !vpm
-        .gateway_pubkey_hex
-        .eq_ignore_ascii_case(pinned_hex_lower)
-    {
+    // key. Compare decoded bytes rather than the hex strings: `decode_hex`
+    // accepts an optional `0x` prefix, exactly as `PaymentPolicy::from_hex`
+    // does for the operator-supplied value, so a signer that reads the
+    // `gateway_pubkey_hex` field doc literally and writes a prefixed key
+    // still matches instead of failing every request with a valid signature
+    // underneath. Both values are public keys, not secrets, so a plain
+    // compare is fine; the actual trust decision is the signature check
+    // below.
+    let claimed = decode_hex(vpm.gateway_pubkey_hex.trim())
+        .map_err(|_| PaymentVerifyError::PinnedKeyMismatch)?;
+    if claimed[..] != pinned.to_bytes()[..] {
         return Err(PaymentVerifyError::PinnedKeyMismatch.into());
     }
 
@@ -360,7 +378,7 @@ mod tests {
     #[test]
     fn required_policy_rejects_forged_marker_claiming_pinned_key() {
         // Attacker claims the pinned gateway key in gateway_pubkey_hex (so
-        // the string precheck passes) but actually signs with a different
+        // the pubkey precheck passes) but actually signs with a different
         // keypair. This must fail at the signature check, not pass because
         // the claimed-key string happened to match.
         let (_pinned_pair, pinned_pub_hex, policy) = generate_policy();
@@ -373,6 +391,62 @@ mod tests {
         let err = verify(&req, &policy).unwrap_err();
         assert_eq!(err.code, Code::FailedPrecondition);
         assert!(err.message.contains("signature"));
+    }
+
+    #[test]
+    fn required_policy_accepts_prefixed_and_uppercase_gateway_pubkey_hex() {
+        // `gateway_pubkey_hex` is cross-checked by decoded bytes, not by
+        // string equality, so a signer that writes the key the way
+        // `GATEWAY_SIGNING_PUBKEY_HEX` accepts it (optional `0x`, either
+        // case) must still verify. Before this, such a marker failed with
+        // PinnedKeyMismatch despite a valid signature underneath.
+        let (pair, pub_hex, policy) = generate_policy();
+
+        let mut req = req_with_marker(vec![]);
+        let vpm = make_vpm(&req, &format!("0x{}", pub_hex.to_uppercase()));
+        req.payment_marker = sign_with(&pair, vpm);
+
+        verify(&req, &policy).unwrap();
+    }
+
+    #[test]
+    fn required_policy_rejects_undecodable_gateway_pubkey_hex() {
+        let (pair, _pub_hex, policy) = generate_policy();
+
+        let mut req = req_with_marker(vec![]);
+        let vpm = make_vpm(&req, "not-hex");
+        req.payment_marker = sign_with(&pair, vpm);
+
+        let err = verify(&req, &policy).unwrap_err();
+        assert_eq!(err.code, Code::FailedPrecondition);
+        assert!(err.message.contains("pinned"));
+    }
+
+    #[test]
+    fn corrupt_marker_bytes_map_to_invalid_argument() {
+        // Not payment-conditional: a truncated marker is a caller bug, and
+        // a 402 would tell the caller to pay again for a request that can
+        // never succeed.
+        let (_pair, _pub_hex, policy) = generate_policy();
+        let req = req_with_marker(vec![0xff; 4]);
+
+        let err = verify(&req, &policy).unwrap_err();
+        assert_eq!(err.code, Code::InvalidArgument);
+    }
+
+    #[test]
+    fn unsupported_version_maps_to_invalid_argument() {
+        // Schema skew between gateway and enclave is a deployment bug, not
+        // a missing payment.
+        let (pair, pub_hex, policy) = generate_policy();
+
+        let mut req = req_with_marker(vec![]);
+        let mut vpm = make_vpm(&req, &pub_hex);
+        vpm.version = VPM_VERSION + 1;
+        req.payment_marker = sign_with(&pair, vpm);
+
+        let err = verify(&req, &policy).unwrap_err();
+        assert_eq!(err.code, Code::InvalidArgument);
     }
 
     #[test]

@@ -95,9 +95,21 @@ pub struct VerifiedPaymentMarker {
     pub details: PaymentDetails,
     /// Unix millis at which the gateway received the facilitator's settle
     /// response.
+    ///
+    /// Signed for the record; nothing reads it today. There is deliberately
+    /// no max-age check in `parser_app`: `request_hash` already binds a
+    /// marker to one exact request, so a replayed marker can only re-run the
+    /// byte-identical parse, and parse is read-only. The exposure is
+    /// therefore repeat parses of an already-paid request, not a bypass,
+    /// which doesn't justify making enclave verification depend on clock
+    /// skew between the signer and the enclave. Revisit if a future scheme
+    /// makes markers fungible across requests.
     pub settled_at_ms: u64,
     /// SEC1-uncompressed hex of the gateway's P256 signing public key.
-    /// MUST equal the pinned `GATEWAY_SIGNING_PUBKEY_HEX` on parser_app.
+    /// MUST decode to the same bytes as the pinned
+    /// `GATEWAY_SIGNING_PUBKEY_HEX` on parser_app. The verifier compares
+    /// decoded bytes, so an optional `0x` prefix and either case are
+    /// accepted on both sides.
     pub gateway_pubkey_hex: String,
 }
 
@@ -285,6 +297,37 @@ mod tests {
         assert_ne!(h1, h4, "must be sensitive to unsigned_payload");
         assert_ne!(h1, h5, "must be sensitive to chain_metadata bytes");
         assert_ne!(h1, h6, "must be sensitive to include_intermediate_output");
+    }
+
+    #[test]
+    fn request_hash_matches_hand_encoded_preimage() {
+        // The two differential tests around this one compare `request_hash`
+        // with itself, so they pin the *presence* of the length prefixes and
+        // nothing beyond it: reorder the four writes, swap `to_le_bytes` for
+        // `to_be_bytes`, or drop the `chain` write entirely and both stay
+        // green while every marker minted by the external gateway signer
+        // stops verifying. This literal doesn't move when the implementation
+        // does, so it catches all three.
+        //
+        // The expectation is hand-assembled from the documented preimage
+        // layout rather than captured from `request_hash` itself, the same
+        // way `signing_digest_matches_hand_encoded_wire_bytes` avoids
+        // deriving its expectation from the code under test:
+        //
+        //   0100_0000                    chain = 1, i32 LE
+        //   0a00_0000                    unsigned_payload len = 10, u32 LE
+        //   30786465616462656566         "0xdeadbeef"
+        //   0300_0000                    chain_metadata len = 3, u32 LE
+        //   010203                       chain_metadata bytes
+        //   01                           include_intermediate_output = true
+        //
+        // sha256 of that preimage:
+        let expected: [u8; 32] = [
+            0xf8, 0xb6, 0x4e, 0x41, 0xac, 0x19, 0xee, 0x85, 0xf7, 0x4d, 0x23, 0x3f, 0x9f, 0xf0,
+            0x88, 0xdf, 0x73, 0xc1, 0x47, 0x6d, 0xcd, 0xe3, 0xce, 0xfc, 0x13, 0xd2, 0xb8, 0x5d,
+            0x43, 0x4a, 0x5a, 0xc9,
+        ];
+        assert_eq!(request_hash(1, "0xdeadbeef", &[1, 2, 3], true), expected);
     }
 
     #[test]
