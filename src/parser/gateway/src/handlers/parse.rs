@@ -136,7 +136,7 @@ pub async fn parse_handler(
     // contract to skip /settle so payment is not charged for an unattested
     // response.
     if let Some(verifier) = attestation.as_ref()
-        && let Err(e) = verifier.verify(&proto_signature)
+        && let Err(e) = verifier.verify(&proto_signature, &payload)
     {
         eprintln!("attestation verification failed: {e}");
         return (

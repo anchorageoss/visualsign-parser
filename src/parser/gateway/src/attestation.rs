@@ -38,9 +38,10 @@
 //! base58 address; the two share the word "pubkey" but live in different
 //! namespaces.
 
-use generated::parser::{Signature, SignatureScheme};
+use borsh::BorshSerialize;
+use generated::parser::{ParsedTransactionPayload, Signature, SignatureScheme};
+use qos_crypto::sha_256;
 use qos_p256::P256Public;
-use subtle::ConstantTimeEq;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AttestationError {
@@ -59,11 +60,37 @@ pub enum AttestationError {
     Verify,
     #[error("failed to read TVC pubkey file {path}: {message}")]
     PubkeyFile { path: String, message: String },
+    #[error("failed to serialize payload for digest recomputation: {0}")]
+    DigestSerialization(String),
+    #[error("both TVC_DEMO_PINNED_PUBKEY_HEX and TVC_DEMO_PINNED_PUBKEY_FILE are set; choose one")]
+    BothSet,
+}
+
+/// Recompute the bytes the TVC ephemeral key signs over for a
+/// `ParsedTransactionPayload`.
+///
+/// This mirrors `parser/app/src/routes/parse.rs::signing_digest_bytes`
+/// byte-for-byte; keep the two in sync. `verify()` uses this to recompute the
+/// signed digest from the payload actually being forwarded, rather than
+/// trusting the wire-carried `Signature.message` verbatim -- otherwise a
+/// stale-but-validly-signed `(message, signature, public_key)` tuple could be
+/// replayed against an attacker-substituted payload.
+fn signing_digest_bytes(payload: &ParsedTransactionPayload) -> Result<Vec<u8>, AttestationError> {
+    let mut bytes = Vec::new();
+    payload
+        .serialize(&mut bytes)
+        .map_err(|e| AttestationError::DigestSerialization(e.to_string()))?;
+    if !payload.intermediate_output.is_empty() {
+        payload
+            .intermediate_output
+            .serialize(&mut bytes)
+            .map_err(|e| AttestationError::DigestSerialization(e.to_string()))?;
+    }
+    Ok(bytes)
 }
 
 pub struct AttestationVerifier {
     pinned_public: P256Public,
-    pinned_bytes: Vec<u8>,
 }
 
 impl AttestationVerifier {
@@ -83,41 +110,62 @@ impl AttestationVerifier {
     where
         F: Fn(&str) -> Option<String>,
     {
-        let hex_value = match (
+        let (hex_value, source) = match (
             get("TVC_DEMO_PINNED_PUBKEY_HEX"),
             get("TVC_DEMO_PINNED_PUBKEY_FILE"),
         ) {
-            (Some(s), _) => s,
-            (None, Some(path)) => std::fs::read_to_string(&path)
-                .map_err(|e| AttestationError::PubkeyFile {
-                    path: path.clone(),
-                    message: e.to_string(),
-                })?
-                .trim()
-                .to_string(),
+            (Some(_), Some(_)) => return Err(AttestationError::BothSet),
+            (Some(s), None) => (s, "TVC_DEMO_PINNED_PUBKEY_HEX"),
+            (None, Some(path)) => (
+                std::fs::read_to_string(&path)
+                    .map_err(|e| AttestationError::PubkeyFile {
+                        path: path.clone(),
+                        message: e.to_string(),
+                    })?
+                    .trim()
+                    .to_string(),
+                "TVC_DEMO_PINNED_PUBKEY_FILE",
+            ),
             (None, None) => return Ok(None),
         };
 
-        Self::from_hex(&hex_value).map(Some)
+        Self::from_hex_with_source(&hex_value, source).map(Some)
     }
 
     pub fn from_hex(hex_value: &str) -> Result<Self, AttestationError> {
+        Self::from_hex_with_source(hex_value, "TVC_DEMO_PINNED_PUBKEY_HEX")
+    }
+
+    /// Core hex-decode path, parameterized by which env var the hex actually
+    /// came from so a decode failure names the input the operator set (not
+    /// always `_HEX`, e.g. when the value was read out of `_FILE`).
+    fn from_hex_with_source(
+        hex_value: &str,
+        source: &'static str,
+    ) -> Result<Self, AttestationError> {
         let pinned_bytes =
             qos_hex::decode(hex_value.trim()).map_err(|e| AttestationError::Hex {
-                field: "TVC_DEMO_PINNED_PUBKEY_HEX",
+                field: source,
                 message: format!("{e:?}"),
             })?;
         let pinned_public = P256Public::from_bytes(&pinned_bytes)
             .map_err(|e| AttestationError::InvalidPinnedKey(format!("{e:?}")))?;
-        Ok(Self {
-            pinned_public,
-            pinned_bytes,
-        })
+        Ok(Self { pinned_public })
     }
 
-    /// Verify that the proto `Signature` on a parse response was produced by the
-    /// pinned TVC key.
-    pub fn verify(&self, sig: &Signature) -> Result<(), AttestationError> {
+    /// Verify that the proto `Signature` on a parse response was produced by
+    /// the pinned TVC key over exactly this `payload` -- the one actually
+    /// being forwarded to the caller.
+    ///
+    /// The digest is recomputed from `payload` (see `signing_digest_bytes`)
+    /// rather than trusted from `sig.message`, so a signature captured from a
+    /// prior legitimate response can't be paired with a different,
+    /// attacker-controlled payload and still verify.
+    pub fn verify(
+        &self,
+        sig: &Signature,
+        payload: &ParsedTransactionPayload,
+    ) -> Result<(), AttestationError> {
         if sig.scheme != SignatureScheme::TurnkeyP256EphemeralKey as i32 {
             // The generated `SignatureScheme` (prost 0.11-style enum) has no
             // `from_i32` helper on main, unlike newer prost releases. Only
@@ -136,19 +184,13 @@ impl AttestationVerifier {
                 field: "signature.public_key",
                 message: format!("{e:?}"),
             })?;
-        if response_bytes.len() != self.pinned_bytes.len()
-            || response_bytes
-                .ct_eq(self.pinned_bytes.as_slice())
-                .unwrap_u8()
-                != 1
-        {
+        let response_public = P256Public::from_bytes(&response_bytes)
+            .map_err(|_| AttestationError::PubkeyMismatch)?;
+        if response_public != self.pinned_public {
             return Err(AttestationError::PubkeyMismatch);
         }
 
-        let digest = qos_hex::decode(&sig.message).map_err(|e| AttestationError::Hex {
-            field: "signature.message",
-            message: format!("{e:?}"),
-        })?;
+        let expected_digest = sha_256(&signing_digest_bytes(payload)?);
         let signature_bytes =
             qos_hex::decode(&sig.signature).map_err(|e| AttestationError::Hex {
                 field: "signature.signature",
@@ -156,13 +198,13 @@ impl AttestationVerifier {
             })?;
 
         self.pinned_public
-            .verify(&digest, &signature_bytes)
+            .verify(&expected_digest, &signature_bytes)
             .map_err(|_| AttestationError::Verify)
     }
 
     /// Hex representation of the pinned key. Useful for log/error messages.
     pub fn pinned_hex(&self) -> String {
-        qos_hex::encode(&self.pinned_bytes)
+        qos_hex::encode(&self.pinned_public.to_bytes())
     }
 }
 
@@ -170,20 +212,21 @@ impl AttestationVerifier {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use generated::parser::{ParsedTransactionPayload, Signature, SignatureScheme};
-    use qos_crypto::sha_256;
+    use generated::parser::SignatureScheme;
     use qos_p256::P256Pair;
 
-    fn make_signed_response(pair: &P256Pair) -> Signature {
-        let payload = ParsedTransactionPayload {
-            parsed_payload: "{}".to_string(),
+    fn sample_payload(parsed_payload: &str) -> ParsedTransactionPayload {
+        ParsedTransactionPayload {
+            parsed_payload: parsed_payload.to_string(),
             input_payload_digest: String::new(),
             metadata_digest: String::new(),
             signable_payload: "{}".to_string(),
             intermediate_output: Vec::new(),
-        };
-        let body = borsh::to_vec(&payload).unwrap();
-        let digest = sha_256(&body);
+        }
+    }
+
+    fn make_signed_response(pair: &P256Pair, payload: &ParsedTransactionPayload) -> Signature {
+        let digest = sha_256(&signing_digest_bytes(payload).unwrap());
         let sig_bytes = pair.sign(&digest).unwrap();
         Signature {
             public_key: qos_hex::encode(&pair.public_key().to_bytes()),
@@ -200,13 +243,82 @@ mod tests {
     }
 
     #[test]
+    fn from_lookup_both_set_errors() {
+        let res = AttestationVerifier::from_lookup(|key| match key {
+            "TVC_DEMO_PINNED_PUBKEY_HEX" => Some("aa".to_string()),
+            "TVC_DEMO_PINNED_PUBKEY_FILE" => Some("/nonexistent".to_string()),
+            _ => None,
+        });
+        assert!(matches!(res, Err(AttestationError::BothSet)));
+    }
+
+    #[test]
+    fn from_lookup_reads_file_source() {
+        let pair = P256Pair::generate().unwrap();
+        let hex = qos_hex::encode(&pair.public_key().to_bytes());
+        let path = std::env::temp_dir().join(format!(
+            "attestation-test-pubkey-{}-{}.hex",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&path, &hex).unwrap();
+        let path_str = path.to_string_lossy().to_string();
+
+        let v = AttestationVerifier::from_lookup(move |key| {
+            if key == "TVC_DEMO_PINNED_PUBKEY_FILE" {
+                Some(path_str.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap();
+        std::fs::remove_file(&path).ok();
+        assert!(v.is_some());
+    }
+
+    #[test]
+    fn from_lookup_file_source_names_file_var_on_bad_hex() {
+        let path = std::env::temp_dir().join(format!(
+            "attestation-test-badhex-{}-{}.hex",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&path, "not-hex!!").unwrap();
+        let path_str = path.to_string_lossy().to_string();
+
+        let res = AttestationVerifier::from_lookup(move |key| {
+            if key == "TVC_DEMO_PINNED_PUBKEY_FILE" {
+                Some(path_str.clone())
+            } else {
+                None
+            }
+        });
+        std::fs::remove_file(&path).ok();
+        assert!(matches!(
+            res,
+            Err(AttestationError::Hex {
+                field: "TVC_DEMO_PINNED_PUBKEY_FILE",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn from_hex_invalid_key_bytes_rejected() {
+        // Valid hex, but too short to be a qos_p256 compound key.
+        let res = AttestationVerifier::from_hex("00112233");
+        assert!(matches!(res, Err(AttestationError::InvalidPinnedKey(_))));
+    }
+
+    #[test]
     fn round_trip_verifies_real_signature() {
         let pair = P256Pair::generate().unwrap();
         let pinned_hex = qos_hex::encode(&pair.public_key().to_bytes());
         let verifier = AttestationVerifier::from_hex(&pinned_hex).unwrap();
-        let sig = make_signed_response(&pair);
+        let payload = sample_payload("{}");
+        let sig = make_signed_response(&pair, &payload);
         verifier
-            .verify(&sig)
+            .verify(&sig, &payload)
             .expect("legitimate signature must verify");
     }
 
@@ -216,9 +328,10 @@ mod tests {
         let pair_b = P256Pair::generate().unwrap();
         let pinned_hex = qos_hex::encode(&pair_a.public_key().to_bytes());
         let verifier = AttestationVerifier::from_hex(&pinned_hex).unwrap();
-        let sig = make_signed_response(&pair_b);
+        let payload = sample_payload("{}");
+        let sig = make_signed_response(&pair_b, &payload);
         assert!(matches!(
-            verifier.verify(&sig).unwrap_err(),
+            verifier.verify(&sig, &payload).unwrap_err(),
             AttestationError::PubkeyMismatch
         ));
     }
@@ -228,13 +341,14 @@ mod tests {
         let pair = P256Pair::generate().unwrap();
         let pinned_hex = qos_hex::encode(&pair.public_key().to_bytes());
         let verifier = AttestationVerifier::from_hex(&pinned_hex).unwrap();
-        let mut sig = make_signed_response(&pair);
+        let payload = sample_payload("{}");
+        let mut sig = make_signed_response(&pair, &payload);
         let mut chars: Vec<char> = sig.signature.chars().collect();
         let last_idx = chars.len() - 1;
         chars[last_idx] = if chars[last_idx] == '0' { '1' } else { '0' };
         sig.signature = chars.into_iter().collect();
         assert!(matches!(
-            verifier.verify(&sig).unwrap_err(),
+            verifier.verify(&sig, &payload).unwrap_err(),
             AttestationError::Verify
         ));
     }
@@ -244,10 +358,11 @@ mod tests {
         let pair = P256Pair::generate().unwrap();
         let pinned_hex = qos_hex::encode(&pair.public_key().to_bytes());
         let verifier = AttestationVerifier::from_hex(&pinned_hex).unwrap();
-        let mut sig = make_signed_response(&pair);
+        let payload = sample_payload("{}");
+        let mut sig = make_signed_response(&pair, &payload);
         sig.scheme = SignatureScheme::Unspecified as i32;
         assert!(matches!(
-            verifier.verify(&sig).unwrap_err(),
+            verifier.verify(&sig, &payload).unwrap_err(),
             AttestationError::UnsupportedScheme(_)
         ));
     }
@@ -257,7 +372,28 @@ mod tests {
         let pair = P256Pair::generate().unwrap();
         let pinned_hex = qos_hex::encode(&pair.public_key().to_bytes());
         let verifier = AttestationVerifier::from_hex(&pinned_hex.to_uppercase()).unwrap();
-        let sig = make_signed_response(&pair);
-        verifier.verify(&sig).expect("hex case must not matter");
+        let payload = sample_payload("{}");
+        let sig = make_signed_response(&pair, &payload);
+        verifier
+            .verify(&sig, &payload)
+            .expect("hex case must not matter");
+    }
+
+    #[test]
+    fn rejects_stale_signature_replayed_against_substituted_payload() {
+        // The core fix under test: a validly-signed (message, signature,
+        // public_key) tuple for one payload must NOT verify against a
+        // different payload, even though the tuple was produced by the
+        // pinned key. Regression test for the digest-binding gap.
+        let pair = P256Pair::generate().unwrap();
+        let pinned_hex = qos_hex::encode(&pair.public_key().to_bytes());
+        let verifier = AttestationVerifier::from_hex(&pinned_hex).unwrap();
+        let original_payload = sample_payload("{\"amount\":\"1\"}");
+        let sig = make_signed_response(&pair, &original_payload);
+        let substituted_payload = sample_payload("{\"amount\":\"1000000\"}");
+        assert!(matches!(
+            verifier.verify(&sig, &substituted_payload).unwrap_err(),
+            AttestationError::Verify
+        ));
     }
 }

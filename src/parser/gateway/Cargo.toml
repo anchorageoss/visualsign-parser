@@ -30,11 +30,12 @@ url = "2"
 # attestation: verifies the TVC ephemeral-key signature on the parse response
 qos_p256 = { workspace = true }
 qos_hex = { workspace = true }
-qos_crypto = { workspace = true } # sha_256 for the attestation-test digest
+qos_crypto = { workspace = true } # sha_256 over the recomputed signing digest
 subtle = { version = "2", default-features = false }
 
-# Borsh: the attestation-test digest is computed over the same
-# borsh-encoded ParsedTransactionPayload that parser_app signs.
+# Borsh: the signed digest is recomputed over the same borsh-encoded
+# ParsedTransactionPayload that parser_app signs, then compared against the
+# wire signature (see attestation.rs::signing_digest_bytes).
 borsh = { version = "1", features = ["std", "derive"], default-features = false }
 
 # Base64 for the intermediate_output proto bytes field.
@@ -44,7 +45,7 @@ base64 = { workspace = true }
 thiserror = "2.0.12"
 
 # http client (startup facilitator probe)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 [lints]
 workspace = true
