@@ -623,6 +623,24 @@ mod tests {
         }
     ]"#;
 
+    /// A second well-formed ABI, used as the swapped-in body in tampering tests.
+    ///
+    /// It has to parse cleanly on its own, otherwise `register_embedded_abi` drops
+    /// the entry before `validate_abi_signature` ever runs and the test passes
+    /// without exercising the signature check at all.
+    const OTHER_VALID_ABI: &str = r#"[
+        {
+            "type": "function",
+            "name": "approve",
+            "inputs": [
+                {"name": "spender", "type": "address"},
+                {"name": "amount", "type": "uint256"}
+            ],
+            "outputs": [{"name": "", "type": "bool"}],
+            "stateMutability": "nonpayable"
+        }
+    ]"#;
+
     /// A signing seed no allowlist in this crate authorizes. Distinct from
     /// [`CLI_DEV_SIGNING_KEY_SEED`], which `authorized_abi_signers()` allowlists under
     /// `cfg(test)`.
@@ -1198,9 +1216,11 @@ mod tests {
     /// present-but-invalid signature never degrades to "accept and log".
     #[test]
     fn test_accept_unsigned_still_rejects_tampered_signature() {
-        // Signature is minted over VALID_ABI, then the body is swapped out.
+        // Signature is minted over VALID_ABI, then the body is swapped out for a
+        // different ABI that is itself well-formed, so the only thing that can
+        // reject this entry is the signature check.
         let mut abi = signed_abi(VALID_ABI, TEST_ADDRESS);
-        abi.value = r#"[{"type":"function","name":"approve"}]"#.to_string();
+        abi.value = OTHER_VALID_ABI.to_string();
 
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
