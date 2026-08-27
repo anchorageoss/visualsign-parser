@@ -75,6 +75,12 @@ tracing = "0.1.41"
 # Pin visualsign dependencies
 visualsign = { path = "./visualsign" }
 
+near-sdk = { version = "5.27", features = ["non-contract-usage"] }
+
+defuse-core     = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
+defuse-crypto   = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
+defuse-deadline = { git = "https://github.com/near/intents.git", tag = "defuse/v0.4.2" }
+
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"

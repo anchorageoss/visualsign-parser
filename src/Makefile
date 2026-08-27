@@ -46,9 +46,23 @@ test: build
 	cargo test -p visualsign --features diagnostics --lib
 	cargo test -p visualsign-solana --features diagnostics --lib
 
+# Solana preset sources, which `cargo fmt` cannot reach. `presets/mod.rs`
+# declares its submodules through `include!(concat!(env!("OUT_DIR"), ...))`, a
+# path that exists only after codegen, and rustfmt does not follow an `include!`
+# of a generated path -- so `cargo fmt` formats `presets/mod.rs` and nothing
+# beneath it. These files are enumerated so `fmt` covers them directly.
+#
+# `find` rather than a literal list: presets are scaffolded one directory per
+# program and the set grows with each new one, so a hardcoded list drops files
+# out of the gate as soon as it goes stale.
+SOLANA_PRESET_SOURCES := $(shell find chain_parsers/visualsign-solana/src/presets -name '*.rs' 2>/dev/null | sort)
+
 .PHONY: fmt
 fmt:
 	cargo fmt
+	@test -n "$(SOLANA_PRESET_SOURCES)" || { echo "no preset sources found under chain_parsers/visualsign-solana/src/presets"; exit 1; }
+	@echo "rustfmt $(words $(SOLANA_PRESET_SOURCES)) Solana preset sources"
+	@rustfmt $(SOLANA_PRESET_SOURCES)
 
 .PHONY: lint
 lint:
