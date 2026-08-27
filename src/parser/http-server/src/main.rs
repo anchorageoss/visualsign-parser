@@ -159,15 +159,25 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
     let proto_resp = match parse(&proto_req, &state.ephemeral_key) {
         Ok(r) => r,
         Err(e) => {
-            let http_status = match e.code {
-                generated::google::rpc::Code::InvalidArgument => StatusCode::BAD_REQUEST,
-                generated::google::rpc::Code::NotFound => StatusCode::NOT_FOUND,
+            // Only InvalidArgument/NotFound carry a message safe to hand back
+            // to an unauthenticated caller. Everything else is logged
+            // server-side and replaced with a generic message, matching
+            // parser_gateway's handling of the same codes
+            // (src/parser/gateway/src/main.rs).
+            let (http_status, msg) = match e.code {
+                generated::google::rpc::Code::InvalidArgument => {
+                    (StatusCode::BAD_REQUEST, e.message)
+                }
+                generated::google::rpc::Code::NotFound => (StatusCode::NOT_FOUND, e.message),
                 _ => {
                     eprintln!("parse failed: {} ({:?})", e.message, e.code);
-                    StatusCode::INTERNAL_SERVER_ERROR
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "internal error".to_string(),
+                    )
                 }
             };
-            return error_status(state, http_status, e.message);
+            return error_status(state, http_status, msg);
         }
     };
 
