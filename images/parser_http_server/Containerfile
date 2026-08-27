@@ -16,7 +16,7 @@ ENV VERSION=$VERSION
 # passes --no-default-features, so chains not listed here are NOT linked into
 # the binary, shrinking both the image and the attestation surface. Default
 # mirrors parser_http_server/Cargo.toml's `default` feature set.
-ARG CHAIN_FEATURES="ethereum solana sui tron unspecified"
+ARG CHAIN_FEATURES="ethereum near solana sui tron unspecified"
 ENV CHAIN_FEATURES=$CHAIN_FEATURES
 
 # Load Rust sources

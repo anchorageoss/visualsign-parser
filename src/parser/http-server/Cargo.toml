@@ -8,8 +8,9 @@ publish = false
 # Chain visualizers compiled into the binary. Mirrors parser_app's default
 # set; trim with `--no-default-features --features solana` (or any subset)
 # to shrink the image and attestation surface for chain-specific deploys.
-default = ["ethereum", "solana", "sui", "tron", "unspecified"]
+default = ["ethereum", "near", "solana", "sui", "tron", "unspecified"]
 ethereum = ["parser_app/ethereum"]
+near = ["parser_app/near"]
 solana = ["parser_app/solana"]
 sui = ["parser_app/sui"]
 tron = ["parser_app/tron"]
