@@ -1,3 +1,8 @@
 .DS_Store
 target
 *.log
+
+# integration/tests/http_server.rs writes a freshly generated P256 private
+# key under this per-run directory to stand up parser_http_server for the
+# test; never let it linger on a shared CI runner's filesystem uncovered.
+*-http-server-workdir

@@ -101,10 +101,31 @@ fn boot_proof_keys(value: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
+/// Asserts `resp` has `status` and carries exactly `expected_keys` under
+/// `bootProof`; returns the parsed body for any further per-case checks.
+async fn assert_boot_proof_response(
+    resp: reqwest::Response,
+    status: reqwest::StatusCode,
+    expected_keys: &[String],
+) -> serde_json::Value {
+    assert_eq!(resp.status(), status);
+    let value: serde_json::Value = resp.json().await.expect("response was not valid JSON");
+    let mut keys = boot_proof_keys(&value);
+    keys.sort();
+    assert_eq!(keys, expected_keys);
+    value
+}
+
 #[tokio::test]
 async fn http_server_serves_health_parse_and_errors() {
     let server = RunningServer::start().await;
-    let client = reqwest::Client::new();
+    // reqwest::Client::new() has no default request timeout, so a server
+    // that accepts a connection but never responds would otherwise hang
+    // this test indefinitely instead of failing it.
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("failed to build reqwest client");
 
     // 1. GET /health returns 200.
     let health = client
@@ -174,16 +195,49 @@ async fn http_server_serves_health_parse_and_errors() {
         .send()
         .await
         .expect("malformed request failed");
-    assert_eq!(malformed.status(), reqwest::StatusCode::BAD_REQUEST);
-    let malformed_value: serde_json::Value = malformed
-        .json()
+    assert_boot_proof_response(malformed, reqwest::StatusCode::BAD_REQUEST, &expected_keys).await;
+
+    // 5. An unmatched route still returns bootProof (axum's default 404
+    //    rejection would otherwise bypass the Turnkey envelope entirely).
+    let not_found = client
+        .get(format!("{}/not-a-real-route", server.base_url))
+        .send()
         .await
-        .expect("malformed response was not valid JSON");
-    assert!(
-        malformed_value.get("bootProof").is_some(),
-        "error response must still carry bootProof"
-    );
-    let mut malformed_keys = boot_proof_keys(&malformed_value);
-    malformed_keys.sort();
-    assert_eq!(malformed_keys, expected_keys);
+        .expect("not-found request failed");
+    assert_boot_proof_response(not_found, reqwest::StatusCode::NOT_FOUND, &expected_keys).await;
+
+    // 6. A disallowed method on a real route still returns bootProof (axum's
+    //    default 405 rejection would otherwise bypass the envelope too).
+    let wrong_method = client
+        .get(format!("{}/visualsign/api/v1/parse", server.base_url))
+        .send()
+        .await
+        .expect("wrong-method request failed");
+    assert_boot_proof_response(
+        wrong_method,
+        reqwest::StatusCode::METHOD_NOT_ALLOWED,
+        &expected_keys,
+    )
+    .await;
+
+    // 7. A body over the 64 KiB `PIVOT_BODY_LIMIT_BYTES` cap returns 413 with
+    //    bootProof (axum's `DefaultBodyLimit` rejection would otherwise bypass
+    //    the Turnkey envelope, same gap as the 404/405 cases above, but
+    //    handled by `envelope_body_limit_rejection` instead of a fallback
+    //    since axum rejects the body before any handler or route-miss fires).
+    let oversized_body = vec![b'a'; 65 * 1024];
+    let too_large = client
+        .post(format!("{}/visualsign/api/v1/parse", server.base_url))
+        .header("content-type", "application/json")
+        .body(oversized_body)
+        .send()
+        .await
+        .expect("oversized request failed");
+    let too_large_value = assert_boot_proof_response(
+        too_large,
+        reqwest::StatusCode::PAYLOAD_TOO_LARGE,
+        &expected_keys,
+    )
+    .await;
+    assert_eq!(too_large_value.get("error").unwrap(), "payload too large");
 }

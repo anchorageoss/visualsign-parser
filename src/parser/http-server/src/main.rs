@@ -1,8 +1,3 @@
-// TODO(#231): Remove these exemptions and fix violations in a follow-up PR.
-#![allow(clippy::unwrap_used)]
-#![allow(clippy::expect_used)]
-#![allow(clippy::panic)]
-
 //! HTTP+JSON server wrapping `parser_app::routes::parse::parse` - the
 //! single-binary variant intended for Turnkey TVC deployment.
 //!
@@ -36,8 +31,10 @@ mod boot_proof;
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Request, State},
     http::StatusCode,
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use base64::Engine as _;
@@ -88,7 +85,13 @@ async fn parse_v1(
     State(state): State<AppState>,
     body: axum::body::Bytes,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
-    handle_parse(&state, &body)
+    // parse() does the full decode/charset-validation/sign path, which is
+    // CPU-bound, not I/O-bound. Running it directly on the async task would
+    // pin a Tokio worker thread per concurrent request, starving everything
+    // else on that worker (including GET /health) on a 1-2 vCPU TVC replica.
+    // Matches the block_in_place precedent parser_app::service::Processor::process
+    // already uses around this same parse() call on the vsock/gRPC path.
+    tokio::task::block_in_place(|| handle_parse(&state, &body))
 }
 
 /// v2 is byte-identical to v1 in this PR. Registering it now keeps the
@@ -97,7 +100,7 @@ async fn parse_v2(
     State(state): State<AppState>,
     body: axum::body::Bytes,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
-    handle_parse(&state, &body)
+    tokio::task::block_in_place(|| handle_parse(&state, &body))
 }
 
 /// Deserialize the envelope from the original bytes. Kept separate so the
@@ -106,32 +109,44 @@ fn parse_envelope(body: &[u8]) -> Result<TurnkeyRequestWrapper, serde_json::Erro
     serde_json::from_slice(body)
 }
 
+/// Builds the Turnkey-shaped error envelope shared by every non-2xx response
+/// in this binary: `handle_parse`'s own error arms, the 413 rewrite in
+/// `envelope_body_limit_rejection`, and the 404/405 fallbacks below.
+fn error_status(
+    state: &AppState,
+    status: StatusCode,
+    msg: String,
+) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
+    (
+        status,
+        Json(error_response(msg, state.boot_proof.boot_proof())),
+    )
+}
+
 fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
     // A later PR inserts the X-Stamp check here, before anything else touches `body`.
     let wrapper = match parse_envelope(body) {
         Ok(w) => w,
         Err(e) => {
-            return (
+            // serde_json's Display for a type-mismatch error embeds the
+            // offending value verbatim, which would otherwise reflect up to
+            // the full request body back to an unauthenticated caller. Log
+            // the detail server-side; keep the client-visible message generic.
+            eprintln!("invalid request body: {e}");
+            return error_status(
+                state,
                 StatusCode::BAD_REQUEST,
-                Json(error_response(
-                    format!("invalid request body: {e}"),
-                    state.boot_proof.boot_proof(),
-                )),
+                "invalid request body".to_string(),
             );
         }
     };
 
-    let chain = match Chain::from_str_name(&wrapper.request.chain) {
-        Some(c) => c as i32,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(error_response(
-                    format!("unknown chain: {}", wrapper.request.chain),
-                    state.boot_proof.boot_proof(),
-                )),
-            );
-        }
+    let Some(chain) = Chain::from_str_name(&wrapper.request.chain).map(|c| c as i32) else {
+        return error_status(
+            state,
+            StatusCode::BAD_REQUEST,
+            format!("unknown chain: {}", wrapper.request.chain),
+        );
     };
 
     let proto_req = generated::parser::ParseRequest {
@@ -147,46 +162,33 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
             let http_status = match e.code {
                 generated::google::rpc::Code::InvalidArgument => StatusCode::BAD_REQUEST,
                 generated::google::rpc::Code::NotFound => StatusCode::NOT_FOUND,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
+                _ => {
+                    eprintln!("parse failed: {} ({:?})", e.message, e.code);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }
             };
-            return (
-                http_status,
-                Json(error_response(e.message, state.boot_proof.boot_proof())),
-            );
+            return error_status(state, http_status, e.message);
         }
     };
 
-    let parsed_tx = match proto_resp.parsed_transaction {
-        Some(tx) => tx,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    "parser_app returned no parsed_transaction".to_string(),
-                    state.boot_proof.boot_proof(),
-                )),
-            );
-        }
+    let Some(parsed_tx) = proto_resp.parsed_transaction else {
+        eprintln!("parse returned no parsed_transaction");
+        return error_status(
+            state,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "parser_app returned no parsed_transaction".to_string(),
+        );
     };
-    let payload = match parsed_tx.payload {
-        Some(p) => p,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    "parser_app returned no payload".to_string(),
-                    state.boot_proof.boot_proof(),
-                )),
-            );
-        }
+    let Some(payload) = parsed_tx.payload else {
+        eprintln!("parse returned no payload");
+        return error_status(
+            state,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "parser_app returned no payload".to_string(),
+        );
     };
     let signature = parsed_tx.signature.map(|sig| {
-        let scheme = match sig.scheme {
-            x if x == SignatureScheme::TurnkeyP256EphemeralKey as i32 => {
-                SignatureScheme::TurnkeyP256EphemeralKey
-            }
-            _ => SignatureScheme::Unspecified,
-        };
+        let scheme = SignatureScheme::try_from(sig.scheme).unwrap_or(SignatureScheme::Unspecified);
         TurnkeySignature {
             message: sig.message,
             public_key: sig.public_key,
@@ -214,6 +216,52 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
     )
 }
 
+/// axum's built-in rejection for an oversized body (413) never reaches
+/// `handle_parse` - `DefaultBodyLimit` rejects the request while reading it,
+/// before any handler runs - so it skips the Turnkey envelope entirely.
+/// Keyed on status alone this is safe only because 413 cannot originate from
+/// a handler: `handle_parse` never returns `PAYLOAD_TOO_LARGE`. 404 and 405
+/// are deliberately NOT handled here, even though axum's default rejections
+/// for them have the same gap - `handle_parse` legitimately returns 404
+/// itself (`Code::NotFound`, with the parser's real error message), and a
+/// status-keyed middleware sitting in front of every handler response cannot
+/// tell that apart from an unmatched route. Those two go through
+/// `Router::fallback` / `Router::method_not_allowed_fallback` below instead,
+/// which axum only invokes when no handler ran at all.
+async fn envelope_body_limit_rejection(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let response = next.run(request).await;
+    if response.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        return error_status(
+            &state,
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "payload too large".to_string(),
+        )
+        .into_response();
+    }
+    response
+}
+
+/// `Router::fallback` target for unmatched routes. axum only calls this when
+/// no route matched, so it never sees `handle_parse`'s own 404s.
+async fn not_found_fallback(State(state): State<AppState>) -> Response {
+    error_status(&state, StatusCode::NOT_FOUND, "not found".to_string()).into_response()
+}
+
+/// `Router::method_not_allowed_fallback` target for a matched path called
+/// with an unsupported method.
+async fn method_not_allowed_fallback(State(state): State<AppState>) -> Response {
+    error_status(
+        &state,
+        StatusCode::METHOD_NOT_ALLOWED,
+        "method not allowed".to_string(),
+    )
+    .into_response()
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
@@ -221,7 +269,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handle = EphemeralKeyHandle::new(qos_core::EPHEMERAL_KEY_FILE.to_string());
     let ephemeral_key = handle
         .get_ephemeral_key()
-        .expect("failed to load ephemeral key");
+        .map_err(|e| format!("failed to load ephemeral key: {e}"))?;
     eprintln!(
         "parser_http_server {} loaded ephemeral key from {}",
         env!("VERSION"),
@@ -241,16 +289,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 64 KiB caps every parse-request body the TVC pivot will accept.
     // axum's default is 2 MiB; a real parse envelope is hundreds of bytes,
-    // and accepting more lets an attacker force expensive sync parsing
-    // (block_in_place) on the enclave's CPU per call. Same cap as the
-    // gateway in front of us, so a properly-formed request that passes the
-    // gateway can't be rejected here.
+    // and accepting more lets an attacker force expensive sync parsing on
+    // the enclave's CPU per call. Deliberately far below the gateway's own
+    // cap (`host_primitives::GRPC_MAX_RECV_MSG_SIZE`, 25 MiB), which sizes
+    // for gRPC message limits, not this DoS concern.
     const PIVOT_BODY_LIMIT_BYTES: usize = 64 * 1024;
     let app = Router::new()
         .route("/health", get(health))
         .route("/visualsign/api/v1/parse", post(parse_v1))
         .route("/visualsign/api/v2/parse", post(parse_v2))
+        .fallback(not_found_fallback)
+        .method_not_allowed_fallback(method_not_allowed_fallback)
         .layer(axum::extract::DefaultBodyLimit::max(PIVOT_BODY_LIMIT_BYTES))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            envelope_body_limit_rejection,
+        ))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
@@ -266,15 +320,25 @@ async fn shutdown_signal() {
     let ctrl_c = tokio::signal::ctrl_c();
     #[cfg(unix)]
     {
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to register SIGTERM handler");
-        tokio::select! {
-            _ = ctrl_c => {}
-            _ = sigterm.recv() => {}
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                tokio::select! {
+                    _ = ctrl_c => {}
+                    _ = sigterm.recv() => {}
+                }
+            }
+            Err(e) => {
+                eprintln!("failed to register SIGTERM handler: {e}; falling back to ctrl-c only");
+                if let Err(e) = ctrl_c.await {
+                    eprintln!("failed to listen for ctrl-c: {e}");
+                }
+            }
         }
     }
     #[cfg(not(unix))]
-    ctrl_c.await.expect("failed to listen for ctrl-c");
+    if let Err(e) = ctrl_c.await {
+        eprintln!("failed to listen for ctrl-c: {e}");
+    }
     eprintln!("parser_http_server shutting down");
 }
 
@@ -318,5 +382,48 @@ mod tests {
         assert!(bp.aws_attestation_doc_b64.is_empty());
         let value = serde_json::to_value(&bp).unwrap();
         assert_eq!(value.as_object().unwrap().len(), 6);
+    }
+
+    // Regression pin: an earlier version of this middleware rewrote every
+    // 404/405 response by status alone, which clobbered `handle_parse`'s own
+    // 404 (`Code::NotFound`, with the parser's real error message) with this
+    // fixed generic text. `Router::fallback` / `method_not_allowed_fallback`
+    // are only invoked by axum when no handler produced a response at all
+    // (see the axum docs on `method_not_allowed_fallback`), so they can never
+    // run after `handle_parse` - fixing the class of bug structurally rather
+    // than by inspecting response bodies. This test pins the fallbacks'
+    // fixed messages; it cannot exercise `handle_parse`'s own `Code::NotFound`
+    // arm end to end because nothing in `parser_app::routes::parse::parse`
+    // currently returns that code.
+    #[tokio::test]
+    async fn fallbacks_carry_their_own_fixed_message_and_boot_proof() {
+        let pair = qos_p256::P256Pair::generate().unwrap();
+        let boot_proof = StaticBootProof::from_enclave_files(
+            &pair,
+            "visualsign-parser".to_string(),
+            "test".to_string(),
+        );
+        let state = AppState {
+            ephemeral_key: Arc::new(pair),
+            boot_proof: Arc::new(boot_proof),
+        };
+
+        let not_found = not_found_fallback(State(state.clone())).await;
+        assert_eq!(not_found.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(not_found.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value.get("error").unwrap(), "not found");
+        assert!(value.get("bootProof").is_some());
+
+        let method_not_allowed = method_not_allowed_fallback(State(state)).await;
+        assert_eq!(method_not_allowed.status(), StatusCode::METHOD_NOT_ALLOWED);
+        let body = axum::body::to_bytes(method_not_allowed.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value.get("error").unwrap(), "method not allowed");
+        assert!(value.get("bootProof").is_some());
     }
 }
