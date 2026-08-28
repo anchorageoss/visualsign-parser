@@ -181,14 +181,26 @@ pub async fn parse_handler(
     // pinned enclave key. A 502 here causes x402-axum's settle-on-success
     // contract to skip /settle so payment is not charged for an unattested
     // response.
+    //
+    // `verify()` never inspects `sig.message` (see its doc comment), so a
+    // compromised gRPC hop could tamper with that field alone and still pass
+    // verification. Use the digest `verify()` returns -- the value actually
+    // authenticated -- as the outgoing message instead of trusting the wire
+    // value; otherwise a client that checks the signature against `message`
+    // would reject a response it already paid for.
+    let mut wire_message = proto_signature.message.clone();
     if let Some(verifier) = attestation.as_ref() {
-        if let Err(e) = verifier.verify(&proto_signature, &payload) {
-            eprintln!("attestation verification failed: {e}");
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(error_response(format!("attestation failed: {e}"))),
-            );
-        }
+        let authenticated_digest = match verifier.verify(&proto_signature, &payload) {
+            Ok(digest) => digest,
+            Err(e) => {
+                eprintln!("attestation verification failed: {e}");
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(error_response(format!("attestation failed: {e}"))),
+                );
+            }
+        };
+        wire_message = qos_hex::encode(&authenticated_digest);
 
         // Bind the verified response to *this* request; see
         // `response_matches_request` for why.
@@ -210,7 +222,7 @@ pub async fn parse_handler(
         _ => SignatureScheme::Unspecified,
     };
     let signature = Some(TurnkeySignature {
-        message: proto_signature.message,
+        message: wire_message,
         public_key: proto_signature.public_key,
         scheme: scheme.as_str_name().to_string(),
         signature: proto_signature.signature,

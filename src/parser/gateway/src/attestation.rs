@@ -166,11 +166,19 @@ impl AttestationVerifier {
     /// rather than trusted from `sig.message`, so a signature captured from a
     /// prior legitimate response can't be paired with a different,
     /// attacker-controlled payload and still verify.
+    ///
+    /// On success, returns the recomputed digest that was actually
+    /// authenticated. Callers MUST forward this value (not `sig.message`) to
+    /// clients: `sig.message` is wire-carried and unverified, so a
+    /// compromised gRPC hop could tamper with it alone -- verification here
+    /// would still pass (it never reads `sig.message`), but a client that
+    /// checks the signature against the tampered `message` field would
+    /// reject a response it already paid for.
     pub fn verify(
         &self,
         sig: &Signature,
         payload: &ParsedTransactionPayload,
-    ) -> Result<(), AttestationError> {
+    ) -> Result<[u8; 32], AttestationError> {
         if sig.scheme != SignatureScheme::TurnkeyP256EphemeralKey as i32 {
             // The generated `SignatureScheme` (prost 0.11-style enum) has no
             // `from_i32` helper on main, unlike newer prost releases. Only
@@ -204,7 +212,9 @@ impl AttestationVerifier {
 
         self.pinned_public
             .verify(&expected_digest, &signature_bytes)
-            .map_err(|_| AttestationError::Verify)
+            .map_err(|_| AttestationError::Verify)?;
+
+        Ok(expected_digest)
     }
 
     /// Hex representation of the pinned key. Useful for log/error messages.
@@ -392,6 +402,41 @@ mod tests {
         verifier
             .verify(&sig, &payload)
             .expect("hex case must not matter");
+    }
+
+    #[test]
+    fn verify_returns_authenticated_digest_ignoring_tampered_wire_message() {
+        // Regression for the gap where `parse_handler` forwarded
+        // `sig.message` verbatim: `verify()` never reads `sig.message`, so a
+        // compromised hop could tamper with only that field and verification
+        // would still pass. Callers must use the digest `verify()` returns
+        // (the value actually authenticated), not the untrusted wire field.
+        // This test proves that returned digest matches the real signed
+        // digest and diverges from a tampered `sig.message`, i.e. a caller
+        // that forwards the returned digest (as `parse_handler` now does)
+        // never forwards the tampered value unchanged.
+        let pair = P256Pair::generate().unwrap();
+        let pinned_hex = qos_hex::encode(&pair.public_key().to_bytes());
+        let verifier = AttestationVerifier::from_hex(&pinned_hex).unwrap();
+        let payload = sample_payload("{\"amount\":\"1\"}");
+        let mut sig = make_signed_response(&pair, &payload);
+
+        // Tamper with only `message`; signature and public_key are untouched.
+        let real_digest = sha_256(&signing_digest_bytes(&payload).unwrap());
+        sig.message = qos_hex::encode(b"attacker-controlled-message");
+
+        let authenticated_digest = verifier
+            .verify(&sig, &payload)
+            .expect("verification does not read sig.message, so it still passes");
+        assert_eq!(
+            authenticated_digest, real_digest,
+            "returned digest must be the value actually signed over"
+        );
+        assert_ne!(
+            qos_hex::encode(&authenticated_digest),
+            sig.message,
+            "returned digest must diverge from the tampered wire message"
+        );
     }
 
     #[test]
