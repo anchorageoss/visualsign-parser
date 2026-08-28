@@ -4,13 +4,16 @@
 use crate::state::AppState;
 use axum::{Json, extract::State, http::StatusCode};
 use base64::Engine as _;
-use generated::parser::{Chain, ChainMetadata, ParseRequest, SignatureScheme};
+use generated::parser::{
+    Chain, ChainMetadata, ParseRequest, ParsedTransactionPayload, SignatureScheme,
+};
 use generated::tonic;
 use host_primitives::turnkey::{
     TurnkeyBootProof, TurnkeyPayload, TurnkeyRequestWrapper, TurnkeyResponseWrapper,
     TurnkeySignature, error_response as turnkey_error_response,
     success_response as turnkey_success_response,
 };
+use qos_crypto::sha_256;
 use std::time::Duration;
 
 /// Stable mock used in every gateway response. The base64 sentinels decode to
@@ -43,6 +46,28 @@ fn error_response(msg: String) -> TurnkeyResponseWrapper {
 
 const PARSE_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// True if `payload`'s digests match what parser_app would compute for
+/// `unsigned_payload` and `metadata_bytes` -- i.e. the response actually
+/// answers this request, not a different one. Mirrors the digest
+/// computation in `parser/app/src/routes/parse.rs::parse_with_registry`
+/// byte-for-byte; keep the two in sync.
+///
+/// A valid signature over `payload` (checked separately by
+/// `AttestationVerifier::verify`) only proves the pinned key produced it, not
+/// that it answers this request -- without this check, a compromised gRPC
+/// hop could replay a validly-signed response captured for a different
+/// request and it would still verify.
+fn response_matches_request(
+    payload: &ParsedTransactionPayload,
+    unsigned_payload: &str,
+    metadata_bytes: &[u8],
+) -> bool {
+    let expected_input_digest = qos_hex::encode(&sha_256(unsigned_payload.as_bytes()));
+    let expected_metadata_digest = qos_hex::encode(&sha_256(metadata_bytes));
+    payload.input_payload_digest == expected_input_digest
+        && payload.metadata_digest == expected_metadata_digest
+}
+
 pub async fn parse_handler(
     State(AppState {
         mut grpc_client,
@@ -64,10 +89,31 @@ pub async fn parse_handler(
         }
     };
 
+    let chain_metadata = wrapper.request.chain_metadata.map(ChainMetadata::from);
+    // Bytes parser_app hashes into `metadata_digest` for this exact request
+    // (see parser/app/src/routes/parse.rs). Recomputed after the response
+    // comes back so the verified payload can be bound to *this* request
+    // rather than just to itself -- see the attestation check below.
+    let metadata_bytes = match chain_metadata.as_ref() {
+        Some(metadata) => match borsh::to_vec(metadata) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(error_response(format!(
+                        "failed to serialize chain metadata: {e}"
+                    ))),
+                );
+            }
+        },
+        None => Vec::new(),
+    };
+    let unsigned_payload = wrapper.request.unsigned_payload;
+
     let request = tonic::Request::new(ParseRequest {
-        unsigned_payload: wrapper.request.unsigned_payload,
+        unsigned_payload: unsigned_payload.clone(),
         chain,
-        chain_metadata: wrapper.request.chain_metadata.map(ChainMetadata::from),
+        chain_metadata,
         include_intermediate_output: wrapper.request.include_intermediate_output,
     });
 
@@ -135,14 +181,26 @@ pub async fn parse_handler(
     // pinned enclave key. A 502 here causes x402-axum's settle-on-success
     // contract to skip /settle so payment is not charged for an unattested
     // response.
-    if let Some(verifier) = attestation.as_ref()
-        && let Err(e) = verifier.verify(&proto_signature, &payload)
-    {
-        eprintln!("attestation verification failed: {e}");
-        return (
-            StatusCode::BAD_GATEWAY,
-            Json(error_response(format!("attestation failed: {e}"))),
-        );
+    if let Some(verifier) = attestation.as_ref() {
+        if let Err(e) = verifier.verify(&proto_signature, &payload) {
+            eprintln!("attestation verification failed: {e}");
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(error_response(format!("attestation failed: {e}"))),
+            );
+        }
+
+        // Bind the verified response to *this* request; see
+        // `response_matches_request` for why.
+        if !response_matches_request(&payload, &unsigned_payload, &metadata_bytes) {
+            eprintln!("response digest does not match this request");
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(error_response(
+                    "response does not match request".to_string(),
+                )),
+            );
+        }
     }
 
     let scheme = match proto_signature.scheme {
@@ -183,6 +241,66 @@ mod tests {
     use super::*;
     use generated::parser::{Abi, AbiType, EthereumMetadata, SolanaMetadata};
     use host_primitives::turnkey::{ChainMetadataInput, EMPTY_SHA256};
+
+    fn sample_response_payload(
+        input_payload_digest: String,
+        metadata_digest: String,
+    ) -> ParsedTransactionPayload {
+        ParsedTransactionPayload {
+            parsed_payload: "{}".to_string(),
+            input_payload_digest,
+            metadata_digest,
+            signable_payload: "{}".to_string(),
+            intermediate_output: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn response_matches_request_accepts_matching_digests() {
+        let unsigned_payload = "0xdeadbeef";
+        let metadata_bytes = b"some-metadata";
+        let payload = sample_response_payload(
+            qos_hex::encode(&sha_256(unsigned_payload.as_bytes())),
+            qos_hex::encode(&sha_256(metadata_bytes)),
+        );
+        assert!(response_matches_request(
+            &payload,
+            unsigned_payload,
+            metadata_bytes
+        ));
+    }
+
+    #[test]
+    fn response_matches_request_rejects_replay_of_a_different_requests_payload() {
+        // Simulates a compromised gRPC hop returning a validly-signed
+        // response that was actually produced for a different request's
+        // unsigned_payload -- the core replay this check closes.
+        let unsigned_payload = "0xdeadbeef";
+        let metadata_bytes = b"some-metadata";
+        let payload = sample_response_payload(
+            qos_hex::encode(&sha_256(b"0xsomeoneelsesrequest")),
+            qos_hex::encode(&sha_256(metadata_bytes)),
+        );
+        assert!(!response_matches_request(
+            &payload,
+            unsigned_payload,
+            metadata_bytes
+        ));
+    }
+
+    #[test]
+    fn response_matches_request_rejects_metadata_mismatch() {
+        let unsigned_payload = "0xdeadbeef";
+        let payload = sample_response_payload(
+            qos_hex::encode(&sha_256(unsigned_payload.as_bytes())),
+            qos_hex::encode(&sha_256(b"someone-elses-metadata")),
+        );
+        assert!(!response_matches_request(
+            &payload,
+            unsigned_payload,
+            b"some-metadata"
+        ));
+    }
 
     #[test]
     fn error_response_has_empty_sha256_digests() {
