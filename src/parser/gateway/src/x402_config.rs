@@ -5,6 +5,7 @@ use rust_decimal::prelude::ToPrimitive;
 use std::str::FromStr;
 use std::time::Duration;
 use url::Url;
+use visualsign::encodings::split_hex_prefix;
 
 /// Default Solana "burn"-style payTo used in the local profile when an
 /// operator hasn't supplied an explicit one. Solana System Program ID is
@@ -311,15 +312,23 @@ impl X402Config {
     }
 
     fn classify_payto(s: &str) -> Result<PayToAddress, ConfigError> {
-        if s.starts_with("0x") && s.len() == 42 {
-            Ok(PayToAddress::Evm(s.to_string()))
-        } else if !s.is_empty() && !s.starts_with("0x") {
-            Ok(PayToAddress::Solana(s.to_string()))
-        } else {
-            Err(ConfigError::Invalid {
+        // Use the repo's unified (case-insensitive) 0x/0X prefix handling
+        // rather than hand-rolling a lowercase-only check, which would
+        // misclassify a valid `0X`-prefixed EVM address as Solana. Rebuild
+        // with a canonical lowercase `0x` prefix: downstream
+        // `ChecksummedAddress::from_str` only strips lowercase `0x` (it
+        // rejects `0X` outright with `InvalidStringLength` since the
+        // unstripped `X` isn't a hex digit), so a `0X` input must be
+        // normalized here to actually parse later.
+        match split_hex_prefix(s) {
+            Some(hex_body) if hex_body.len() == 40 => {
+                Ok(PayToAddress::Evm(format!("0x{hex_body}")))
+            }
+            None if !s.is_empty() => Ok(PayToAddress::Solana(s.to_string())),
+            _ => Err(ConfigError::Invalid {
                 var: "X402_PAYTO",
                 message: "not a recognizable EVM or Solana address".into(),
-            })
+            }),
         }
     }
 
@@ -382,12 +391,13 @@ impl X402Config {
         &self,
     ) -> Result<X402LayerBuilder<StaticPriceTags<v2::PriceTag>, Arc<FacilitatorClient>>, ConfigError>
     {
-        let m = x402_axum::X402Middleware::try_new(self.facilitator_url.as_str()).map_err(|e| {
-            ConfigError::Invalid {
+        let facilitator = FacilitatorClient::try_new(self.facilitator_url.clone())
+            .map_err(|e| ConfigError::Invalid {
                 var: "X402_FACILITATOR_URL",
                 message: e.to_string(),
-            }
-        })?;
+            })?
+            .with_timeout(self.facilitator_timeout);
+        let m = x402_axum::X402Middleware::from_facilitator(Arc::new(facilitator));
 
         // Convert all price tags to v2::PriceTag.
         let tags: Vec<v2::PriceTag> = self
@@ -587,6 +597,24 @@ mod tests {
         .unwrap();
         assert_eq!(cfg.price_tags.len(), 1);
         assert_eq!(cfg.price_tags[0].network, "base-sepolia");
+    }
+
+    #[test]
+    fn from_env_payai_with_uppercase_hex_prefix_payto_classifies_as_evm() {
+        // A valid `0X`-prefixed EVM address must classify as EVM, not
+        // Solana, and the resulting PayToAddress must actually parse as a
+        // ChecksummedAddress later in build_price_tag (0X isn't stripped by
+        // the downstream hex decoder, so classify_payto must normalize it).
+        let cfg = X402Config::from_lookup(lookup(&[
+            ("X402_PROFILE", "payai"),
+            ("X402_PAYTO", "0Xabcdef0000000000000000000000000000000001"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            cfg.price_tags[0].pay_to,
+            PayToAddress::Evm("0xabcdef0000000000000000000000000000000001".to_string())
+        );
+        let _ = build_price_tag(&cfg.price_tags[0]).expect("0X-prefixed payTo must build");
     }
 
     #[test]

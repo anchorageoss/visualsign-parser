@@ -44,7 +44,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // enclave's ephemeral key. Fail-closed in non-local profiles: a production
     // gateway without a pinned verifier would happily forward (and settle for)
     // unattested responses.
-    let profile_str = std::env::var("X402_PROFILE").unwrap_or_else(|_| "local".to_string());
+    // Distinguish "unset" from "set but not valid UTF-8" the same way the
+    // bearer-token loader does (see auth.rs::read_env_var): collapsing both
+    // into the `local` default would let a malformed deployment env silently
+    // bypass the non-local attestation requirement below instead of failing
+    // startup loudly.
+    let profile_str = match std::env::var("X402_PROFILE") {
+        Ok(v) => v,
+        Err(std::env::VarError::NotPresent) => "local".to_string(),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            eprintln!("FATAL: X402_PROFILE contains invalid (non-UTF-8) bytes");
+            std::process::exit(1);
+        }
+    };
     let is_local_profile = profile_str == "local";
 
     let attestation: Option<Arc<AttestationVerifier>> = match AttestationVerifier::from_env() {
@@ -82,15 +94,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         attestation,
     };
 
-    // 64 KiB caps the public ingress body. The gRPC backend's
+    // Caps the public ingress body. The gRPC backend's
     // `GRPC_MAX_RECV_MSG_SIZE` (~25 MiB) is the wrong ceiling for the public
-    // HTTP layer -- a parse request is <= a few KB in real traffic, while a
-    // 25 MiB unauthenticated body lets a non-paying caller force the gateway
-    // to JSON-parse 25 MB before any Payment-Signature check runs. 64 KiB
-    // leaves headroom for `chain_metadata.abi_mappings` while shrinking the
-    // pre-paywall amplification surface by ~400x. Applied router-wide
-    // (below, after both routes are mounted), matching bd3b0657.
-    const PUBLIC_BODY_LIMIT_BYTES: usize = 64 * 1024;
+    // HTTP layer -- a 25 MiB unauthenticated body lets a non-paying caller
+    // force the gateway to JSON-parse 25 MB before any Payment-Signature
+    // check runs. But the backend contract (visualsign-ethereum's
+    // `MAX_ABI_JSON_BYTES` / visualsign-solana's `MAX_IDL_JSON_BYTES`) allows
+    // each proto-supplied `abi_mappings`/`idl_mappings` entry up to 1 MiB, and
+    // `chain_metadata` may carry more than one (e.g. a proxy plus its
+    // implementation). 2 MiB comfortably covers that documented contract
+    // (one full-size mapping plus JSON overhead, with room for a second)
+    // while still shrinking the pre-paywall amplification surface by ~12x
+    // vs the old 25 MiB ceiling. Applied router-wide (below, after both
+    // routes are mounted), matching bd3b0657's intent on a wider bound.
+    const PUBLIC_BODY_LIMIT_BYTES: usize = 2 * 1024 * 1024;
 
     let mut app = Router::new()
         .route(
