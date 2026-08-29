@@ -29,7 +29,7 @@ use visualsign::{
     },
 };
 
-use crate::intermediate::extract_solana_intermediate_output;
+use crate::intermediate::{SolanaIntermediateOutput, parse_solana_metadata};
 
 /// Maximum size for IDL JSON from proto messages (1 MB).
 ///
@@ -381,6 +381,23 @@ fn create_idl_registry_from_options(
     }
 }
 
+/// Decode a Solana message into the structured intermediate representation.
+///
+/// This is the first half of the conversion pipeline: the single structured
+/// decode of the transaction, up to and including `intermediate_output`
+/// creation, with no `SignablePayload` rendering. Exposed so the cost of that
+/// half can be measured on its own (see `benches/solana_stages.rs`) and so
+/// callers that only need policy metadata can skip rendering entirely.
+///
+/// `message_hex` is the hex-encoded serialized message.
+pub fn build_solana_intermediate_output(
+    message_hex: &str,
+    options: &VisualSignOptions,
+) -> Result<crate::intermediate::SolanaIntermediateOutput, VisualSignError> {
+    let idl_registry = create_idl_registry_from_options(options)?;
+    crate::intermediate::extract_solana_intermediate_output(message_hex, false, &idl_registry)
+}
+
 /// Converter that knows how to format Solana transactions for VisualSign
 pub struct SolanaVisualSignConverter;
 
@@ -393,12 +410,46 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
         #[cfg(feature = "diagnostics")]
         let lint_config = visualsign::lint::LintConfig::default();
 
+        // Single structured decode. When the caller wants `intermediate_output`
+        // we decode the message once, up front, and render the payload from the
+        // same `SolanaMetadata` that the intermediate is projected from. That
+        // removes the second decode and, more importantly, makes the bytes a
+        // policy engine consumes and the fields a human reads two projections
+        // of one parse rather than the output of two independent decoders.
+        //
+        // When the caller does not ask for intermediate output we skip the
+        // serialize + decode entirely, so the default signing path pays nothing
+        // and its bytes stay identical to the pre-feature path.
+        let shared = if options.include_intermediate_output {
+            let message_hex = match &transaction_wrapper {
+                SolanaTransactionWrapper::Legacy(transaction) => {
+                    hex::encode(transaction.message.serialize())
+                }
+                SolanaTransactionWrapper::Versioned(versioned_tx) => {
+                    hex::encode(versioned_tx.message.serialize())
+                }
+            };
+            let idl_registry = create_idl_registry_from_options(&options)?;
+            // Best-effort: a message this decoder cannot handle still renders
+            // through the existing paths, it just carries no policy metadata.
+            match parse_solana_metadata(&message_hex, false, &idl_registry) {
+                Ok(metadata) => Some(metadata),
+                Err(err) => {
+                    tracing::warn!("Failed to decode Solana transaction for intermediate: {err}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let payload = match &transaction_wrapper {
             SolanaTransactionWrapper::Legacy(transaction) => convert_to_visual_sign_payload(
                 transaction,
                 options.decode_transfers,
                 options.transaction_name.clone(),
                 &options,
+                shared.as_ref(),
                 #[cfg(feature = "diagnostics")]
                 &lint_config,
             )?,
@@ -408,6 +459,7 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
                     options.decode_transfers,
                     options.transaction_name.clone(),
                     &options,
+                    shared.as_ref(),
                     #[cfg(feature = "diagnostics")]
                     &lint_config,
                 )?
@@ -420,84 +472,37 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
             return Ok(ConversionResult::new(payload));
         }
 
-        // Defer the message serialize + hex-encode to here (rather than the
-        // match above) so the default signing path — which never reads
-        // `message_hex` — pays nothing for a blob it does not use. This avoids
-        // a third full message serialize on the hot path (`decode_transfers`
-        // already serializes the message once). `transaction_wrapper` is still
-        // owned here because the match above borrowed it.
-        let message_hex = match &transaction_wrapper {
-            SolanaTransactionWrapper::Legacy(transaction) => {
-                hex::encode(transaction.message.serialize())
+        // Project the intermediate from the metadata decoded above. No second
+        // parse: `shared` is the same value the payload was rendered from.
+        Ok(match shared {
+            Some(metadata) => {
+                let intermediate = SolanaIntermediateOutput::from(&metadata);
+                match borsh::to_vec(&intermediate) {
+                    Ok(bytes) => ConversionResult::with_intermediate(payload, bytes),
+                    Err(err) => {
+                        tracing::warn!("Failed to borsh-encode Solana intermediate output: {err}");
+                        ConversionResult::new(payload)
+                    }
+                }
             }
-            SolanaTransactionWrapper::Versioned(versioned_tx) => {
-                hex::encode(versioned_tx.message.serialize())
-            }
-        };
-
-        let idl_registry = create_idl_registry_from_options(&options)?;
-        Ok(
-            match build_intermediate_bytes(&message_hex, &idl_registry) {
-                Some(bytes) => ConversionResult::with_intermediate(payload, bytes),
-                None => ConversionResult::new(payload),
-            },
-        )
+            None => ConversionResult::new(payload),
+        })
     }
 }
 
-/// Build the borsh-encoded intermediate output for a Solana transaction.
-///
-/// Best-effort: if `solana_parser::parse_transaction_with_idls` cannot parse
-/// the message (e.g. an obscure variant we still display via fallback paths)
-/// we drop the intermediate output rather than fail the whole conversion. The
-/// SignablePayload is still returned so visual signing keeps working; only
-/// policy-engine evaluation degrades to "no metadata".
-///
-/// # Dual-decoder divergence
-///
-/// This structured decode is produced by `solana_parser::parse_transaction_with_idls`,
-/// a *separate* decoder from the `instructions::decode_instructions` path that
-/// builds the human-readable `SignablePayload`. On the same bytes the two can
-/// in principle diverge — the classic "user sees X, policy consumes Y" surface
-/// for visual signing. Mitigations in place today:
-///
-/// - Both the `SignablePayload` and these bytes are bound into the signed
-///   digest (see `parser::app::routes::parse::signing_digest_bytes`), so a
-///   consumer that verifies the signature also commits to the intermediate.
-/// - Emission is opt-in (`include_intermediate_output`), so the existing
-///   signing boundary is preserved until a caller explicitly asks for metadata.
-/// - Transfers and accounts stay faithful because `decode_transfers` also
-///   routes through `solana_parser`.
-/// - On any parse failure the intermediate is dropped to `None` here, so
-///   policy degrades to "no metadata" rather than *wrong* metadata.
-///
-/// The eventual architecture (tracked, not yet implemented — see
-/// [`extract_solana_intermediate_output`]) is to make the structured decode the
-/// single source of truth from which the `SignablePayload` is generated and
-/// pass these bytes through as-is, eliminating the re-parse. Until that lands,
-/// a drift test that cross-checks the intermediate against the `SignablePayload`
-/// for known transactions is the guard against silent divergence; see
-/// `intermediate_output_emitted_for_known_transfer` for an initial cross-check
-/// (transfer amount) and add more cases as the schema grows.
-fn build_intermediate_bytes(
-    message_hex: &str,
-    idl_registry: &crate::idl::IdlRegistry,
-) -> Option<Vec<u8>> {
-    match extract_solana_intermediate_output(message_hex, false, idl_registry) {
-        Ok(output) => match borsh::to_vec(&output) {
-            Ok(bytes) => Some(bytes),
-            Err(err) => {
-                tracing::warn!("Failed to borsh-encode Solana intermediate output: {err}");
-                None
-            }
-        },
-        Err(err) => {
-            tracing::warn!("Failed to extract Solana intermediate output: {err}");
-            None
-        }
-    }
-}
-
+// Dual-decoder divergence: status.
+//
+// `intermediate_output` and the `SignablePayload` are now projections of a
+// single `solana_parser` decode (see `to_visual_sign_payload`), so for the
+// transfer fields the "user sees X, policy consumes Y" surface is closed by
+// construction rather than by cross-checking.
+//
+// Still outstanding: `instructions::decode_instructions` and the v0 transfer
+// path (`decode_v0_transfers`) continue to run their own decodes, so the
+// instruction-level fields are not yet projections of the shared metadata.
+// Until those are migrated, the drift test
+// `intermediate_output_emitted_for_known_transfer` remains the guard for that
+// part of the payload.
 impl VisualSignConverterFromString<SolanaTransactionWrapper> for SolanaVisualSignConverter {}
 
 /// Public API function for ease of use with legacy transactions
@@ -539,6 +544,9 @@ fn convert_to_visual_sign_payload(
     decode_transfers: bool,
     title: Option<String>,
     options: &VisualSignOptions,
+    // The single structured decode, when one was performed. When present,
+    // transfer fields are rendered from it instead of decoding again.
+    shared_metadata: Option<&solana_parser::solana::structs::SolanaMetadata>,
     #[cfg(feature = "diagnostics")] lint_config: &visualsign::lint::LintConfig,
 ) -> Result<SignablePayload, VisualSignError> {
     let message = &transaction.message;
@@ -557,7 +565,13 @@ fn convert_to_visual_sign_payload(
     }];
 
     if decode_transfers {
-        let transfer_fields = instructions::decode_transfers(transaction)?;
+        // Render from the shared decode when one exists; otherwise fall back to
+        // decoding here (the default signing path, which performs no shared
+        // decode, so its output is unchanged).
+        let transfer_fields = match shared_metadata {
+            Some(metadata) => instructions::decode_transfers_from_metadata(metadata),
+            None => instructions::decode_transfers(transaction)?,
+        };
         fields.extend(
             transfer_fields
                 .iter()
@@ -612,6 +626,11 @@ fn convert_versioned_to_visual_sign_payload(
     decode_transfers: bool,
     title: Option<String>,
     options: &VisualSignOptions,
+    // The single structured decode, when one was performed. A well-formed
+    // legacy transaction is wire-identical to `VersionedTransaction::Legacy`,
+    // so `from_string` routes almost all real input here -- this is the path
+    // that has to consume the shared decode for it to matter.
+    shared_metadata: Option<&solana_parser::solana::structs::SolanaMetadata>,
     #[cfg(feature = "diagnostics")] lint_config: &visualsign::lint::LintConfig,
 ) -> Result<SignablePayload, VisualSignError> {
     match &versioned_tx.message {
@@ -625,6 +644,7 @@ fn convert_versioned_to_visual_sign_payload(
                 decode_transfers,
                 title,
                 options,
+                shared_metadata,
                 #[cfg(feature = "diagnostics")]
                 lint_config,
             )
@@ -635,6 +655,7 @@ fn convert_versioned_to_visual_sign_payload(
             decode_transfers,
             title,
             options,
+            shared_metadata,
             #[cfg(feature = "diagnostics")]
             lint_config,
         ),
@@ -648,6 +669,8 @@ fn convert_v0_to_visual_sign_payload(
     decode_transfers: bool,
     title: Option<String>,
     options: &VisualSignOptions,
+    // The single structured decode, when one was performed.
+    shared_metadata: Option<&solana_parser::solana::structs::SolanaMetadata>,
     #[cfg(feature = "diagnostics")] lint_config: &visualsign::lint::LintConfig,
 ) -> Result<SignablePayload, VisualSignError> {
     // NOTE: the parser does not perform on-chain ALT resolution, so any
@@ -724,7 +747,13 @@ fn convert_v0_to_visual_sign_payload(
 
     // Process V0 transfer decoding using solana-parser
     if decode_transfers {
-        match decode_v0_transfers(versioned_tx) {
+        // Render from the shared decode when one exists, so the v0 path is a
+        // projection of the same parse the intermediate comes from.
+        let v0_transfers = match shared_metadata {
+            Some(metadata) => Ok(instructions::decode_transfers_from_metadata(metadata)),
+            None => decode_v0_transfers(versioned_tx),
+        };
+        match v0_transfers {
             Ok(transfer_fields) => {
                 fields.extend(
                     transfer_fields
@@ -844,17 +873,18 @@ mod tests {
     }
 
     /// The intermediate-output path is best-effort: when `solana_parser` cannot
-    /// decode the message, `build_intermediate_bytes` must degrade to `None`
-    /// rather than panic or surface an error, so the converter still returns
-    /// the `SignablePayload` and policy degrades to "no metadata".
+    /// decode the message, the shared decode must surface an error that the
+    /// converter swallows into "no intermediate", rather than panicking or
+    /// failing the whole conversion. The converter still returns the
+    /// `SignablePayload` and policy degrades to "no metadata".
     #[test]
-    fn build_intermediate_bytes_returns_none_on_undecodable() {
-        // `deadbeef` is not a valid Solana message; the best-effort extract
-        // must fail and the helper must return `None`.
+    fn shared_decode_errors_on_undecodable_input() {
+        // `deadbeef` is not a valid Solana message; the shared decode that
+        // feeds both the payload and the intermediate must report failure.
         let registry = IdlRegistry::new();
         assert!(
-            build_intermediate_bytes("deadbeef", &registry).is_none(),
-            "undecodable input must degrade to None, not panic or error"
+            parse_solana_metadata("deadbeef", false, &registry).is_err(),
+            "undecodable input must return an error the converter degrades on"
         );
     }
 
@@ -1637,9 +1667,15 @@ mod tests {
             developer_config: None,
         };
 
-        let payload =
-            convert_v0_to_visual_sign_payload(&versioned_tx, &v0_message, false, None, &options)
-                .expect("convert should succeed via Instruction Decoding Note fallback");
+        let payload = convert_v0_to_visual_sign_payload(
+            &versioned_tx,
+            &v0_message,
+            false,
+            None,
+            &options,
+            None,
+        )
+        .expect("convert should succeed via Instruction Decoding Note fallback");
 
         let note = payload
             .fields
@@ -1935,6 +1971,7 @@ mod tests {
                 false,
                 None,
                 &default_options(),
+                None,
                 #[cfg(feature = "diagnostics")]
                 &lint_config,
             )

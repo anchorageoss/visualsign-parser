@@ -47,7 +47,12 @@ jupiter-swap-api-client = "0.2.0"
 base64 = "0.22.1"
 bs58 = "0.5"
 proptest = "1"
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[[bench]]
+name = "solana_stages"
+harness = false
 
 [lints]
 workspace = true
