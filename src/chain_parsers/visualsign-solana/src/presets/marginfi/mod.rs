@@ -1,0 +1,325 @@
+//! Marginfi preset implementation for Solana
+
+mod config;
+
+use crate::core::{
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind, format_arg_value,
+};
+use config::MarginfiConfig;
+use solana_parser::{
+    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
+};
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
+use visualsign::errors::VisualSignError;
+use visualsign::field_builders::{create_raw_data_field, create_text_field};
+use visualsign::{
+    AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
+    SignablePayloadFieldListLayout, SignablePayloadFieldPreviewLayout, SignablePayloadFieldTextV2,
+};
+
+pub(crate) const MARGINFI_PROGRAM_ID: &str = "MFv2hWf31Z9kbCa1snEPdcgp7X3GK4Y9EtyMkRxBUGA";
+
+const MARGINFI_DISPLAY_NAME: &str = "Marginfi";
+
+const MARGINFI_IDL_JSON: &str = include_str!("marginfi.json");
+
+static MARGINFI_CONFIG: MarginfiConfig = MarginfiConfig;
+
+pub struct MarginfiVisualizer;
+
+impl InstructionVisualizer for MarginfiVisualizer {
+    fn visualize_tx_commands(
+        &self,
+        context: &VisualizerContext,
+    ) -> Result<AnnotatedPayloadField, VisualSignError> {
+        let view = InstructionView::from_context(context);
+        let data = context.data();
+
+        let instruction_data_hex = hex::encode(data);
+        let fallback_text =
+            format!("Program ID: {}\nData: {instruction_data_hex}", view.program_id);
+
+        let parsed = parse_marginfi_instruction(data, &view.accounts);
+
+        let (title, condensed_fields, mut expanded_fields) = match parsed {
+            Ok(parsed) => build_parsed_fields(&parsed, &view.program_id)?,
+            Err(e) => {
+                tracing::warn!("Failed to parse Marginfi instruction with IDL: {e}");
+                build_fallback_fields(&view.program_id)?
+            }
+        };
+
+        let condensed = SignablePayloadFieldListLayout {
+            fields: condensed_fields,
+        };
+        expanded_fields.push(create_raw_data_field(data, Some(instruction_data_hex))?);
+        let expanded = SignablePayloadFieldListLayout {
+            fields: expanded_fields,
+        };
+
+        let preview_layout = SignablePayloadFieldPreviewLayout {
+            title: Some(SignablePayloadFieldTextV2 { text: title }),
+            subtitle: Some(SignablePayloadFieldTextV2 {
+                text: String::new(),
+            }),
+            condensed: Some(condensed),
+            expanded: Some(expanded),
+        };
+
+        let index = context.instruction_index() + 1;
+        Ok(AnnotatedPayloadField {
+            static_annotation: None,
+            dynamic_annotation: None,
+            signable_payload_field: SignablePayloadField::PreviewLayout {
+                common: SignablePayloadFieldCommon {
+                    label: format!("Instruction {index}"),
+                    fallback_text,
+                },
+                preview_layout,
+            },
+        })
+    }
+
+    fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
+        Some(&MARGINFI_CONFIG)
+    }
+
+    fn kind(&self) -> VisualizerKind {
+        VisualizerKind::Lending(MARGINFI_DISPLAY_NAME)
+    }
+}
+
+fn get_marginfi_idl() -> Option<&'static Idl> {
+    static IDL: OnceLock<Option<Idl>> = OnceLock::new();
+    IDL.get_or_init(|| decode_idl_data(MARGINFI_IDL_JSON).ok())
+        .as_ref()
+}
+
+fn parse_marginfi_instruction(
+    data: &[u8],
+    accounts: &[String],
+) -> Result<MarginfiParsedInstruction, Box<dyn std::error::Error>> {
+    if data.len() < 8 {
+        return Err("Invalid instruction data length".into());
+    }
+
+    let idl = get_marginfi_idl().ok_or("Marginfi IDL not available")?;
+    let parsed = parse_instruction_with_idl(data, MARGINFI_PROGRAM_ID, idl)?;
+
+    let (named_accounts, extra_accounts) = build_named_accounts(data, idl, accounts);
+
+    Ok(MarginfiParsedInstruction {
+        parsed,
+        named_accounts,
+        extra_accounts,
+    })
+}
+
+fn build_named_accounts(
+    data: &[u8],
+    idl: &Idl,
+    accounts: &[String],
+) -> (BTreeMap<String, String>, Vec<String>) {
+    let mut named_accounts = BTreeMap::new();
+    let mut extra_accounts = Vec::new();
+
+    let idl_instruction = idl.instructions.iter().find(|inst| {
+        inst.discriminator
+            .as_ref()
+            .is_some_and(|disc| data.get(..disc.len()) == Some(disc.as_slice()))
+    });
+
+    if let Some(idl_instruction) = idl_instruction {
+        for (index, account_str) in accounts.iter().enumerate() {
+            if let Some(idl_account) = idl_instruction.accounts.get(index) {
+                named_accounts.insert(idl_account.name.clone(), account_str.clone());
+            } else {
+                extra_accounts.push(account_str.clone());
+            }
+        }
+    }
+
+    (named_accounts, extra_accounts)
+}
+
+struct MarginfiParsedInstruction {
+    parsed: SolanaParsedInstructionData,
+    named_accounts: BTreeMap<String, String>,
+    extra_accounts: Vec<String>,
+}
+
+fn build_parsed_fields(
+    instruction: &MarginfiParsedInstruction,
+    program_id: &str,
+) -> Result<
+    (
+        String,
+        Vec<AnnotatedPayloadField>,
+        Vec<AnnotatedPayloadField>,
+    ),
+    VisualSignError,
+> {
+    let parsed = &instruction.parsed;
+    let instruction_name = &parsed.instruction_name;
+    let title = format!("{MARGINFI_DISPLAY_NAME}: {instruction_name}");
+
+    let mut condensed_fields = vec![];
+    let mut expanded_fields = vec![];
+
+    condensed_fields.push(create_text_field("Program", MARGINFI_DISPLAY_NAME)?);
+    condensed_fields.push(create_text_field("Instruction", instruction_name)?);
+    for (key, value) in &parsed.program_call_args {
+        condensed_fields.push(create_text_field(key, &format_arg_value(value))?);
+    }
+
+    expanded_fields.push(create_text_field("Program", MARGINFI_DISPLAY_NAME)?);
+    expanded_fields.push(create_text_field("Program ID", program_id)?);
+    expanded_fields.push(create_text_field("Instruction", instruction_name)?);
+    expanded_fields.push(create_text_field("Discriminator", &parsed.discriminator)?);
+
+    for (account_name, account_address) in &instruction.named_accounts {
+        expanded_fields.push(create_text_field(account_name, account_address)?);
+    }
+
+    for (index, pubkey) in instruction.extra_accounts.iter().enumerate() {
+        expanded_fields.push(create_text_field(
+            &format!("Remaining Account {}", index + 1),
+            pubkey,
+        )?);
+    }
+
+    for (key, value) in &parsed.program_call_args {
+        expanded_fields.push(create_text_field(key, &format_arg_value(value))?);
+    }
+
+    Ok((title, condensed_fields, expanded_fields))
+}
+
+fn build_fallback_fields(
+    program_id: &str,
+) -> Result<
+    (
+        String,
+        Vec<AnnotatedPayloadField>,
+        Vec<AnnotatedPayloadField>,
+    ),
+    VisualSignError,
+> {
+    let title = format!("{MARGINFI_DISPLAY_NAME}: Unknown Instruction");
+
+    let mut condensed_fields = vec![];
+    let mut expanded_fields = vec![];
+
+    condensed_fields.push(create_text_field("Program", MARGINFI_DISPLAY_NAME)?);
+    condensed_fields.push(create_text_field("Status", "Unknown instruction type")?);
+
+    expanded_fields.push(create_text_field("Program", MARGINFI_DISPLAY_NAME)?);
+    expanded_fields.push(create_text_field("Program ID", program_id)?);
+    expanded_fields.push(create_text_field("Status", "Unknown instruction type")?);
+
+    Ok((title, condensed_fields, expanded_fields))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use solana_parser::IdlSource;
+
+    fn dummy_account_strings(n: usize) -> Vec<String> {
+        use solana_sdk::pubkey::Pubkey;
+        (0..n).map(|_| Pubkey::new_unique().to_string()).collect()
+    }
+
+    fn field_label_value(field: &AnnotatedPayloadField) -> (String, String) {
+        match &field.signable_payload_field {
+            SignablePayloadField::TextV2 { common, text_v2 } => {
+                (common.label.clone(), text_v2.text.clone())
+            }
+            other => panic!("expected TextV2 field, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_marginfi_idl_loads() {
+        let idl = get_marginfi_idl();
+        assert!(idl.is_some(), "Marginfi IDL should load successfully");
+        assert!(!idl.unwrap().instructions.is_empty(), "IDL should have instructions");
+    }
+
+    #[test]
+    fn test_marginfi_idl_has_discriminators() {
+        let idl = get_marginfi_idl().unwrap();
+        for ix in &idl.instructions {
+            let len = ix.discriminator.as_ref().map(Vec::len).unwrap_or(0);
+            assert_eq!(len, 8, "instruction {} missing 8-byte discriminator", ix.name);
+        }
+    }
+
+    #[test]
+    fn test_unknown_discriminator_returns_error() {
+        let garbage_data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09];
+        let accounts = dummy_account_strings(0);
+        let result = parse_marginfi_instruction(&garbage_data, &accounts);
+        assert!(result.is_err(), "Unknown discriminator should return error");
+    }
+
+    #[test]
+    fn test_short_data_returns_error() {
+        let short_data = [0x01, 0x02, 0x03];
+        let accounts = dummy_account_strings(0);
+        let result = parse_marginfi_instruction(&short_data, &accounts);
+        assert!(result.is_err(), "Short data should return error");
+    }
+
+    #[test]
+    fn test_build_named_accounts_surfaces_extra_accounts() {
+        let idl = get_marginfi_idl().unwrap();
+        // Pick any IDL instruction with at least one named account
+        let ix = idl.instructions.first().expect("IDL has at least one instruction");
+        let disc = ix.discriminator.as_ref().expect("instruction has a discriminator").clone();
+        let n_named = ix.accounts.len();
+
+        // Provide n_named + 2 accounts to get 2 extras
+        let accounts = dummy_account_strings(n_named + 2);
+        let (named, extra) = build_named_accounts(&disc, idl, &accounts);
+
+        assert_eq!(named.len(), n_named, "first {n_named} accounts should be named");
+        assert_eq!(extra.len(), 2, "remaining 2 accounts should be extras");
+        assert_eq!(extra[0], accounts[n_named]);
+        assert_eq!(extra[1], accounts[n_named + 1]);
+    }
+
+    #[test]
+    fn test_remaining_account_label_is_human_readable() {
+        let pubkeys = dummy_account_strings(3);
+        let parsed = MarginfiParsedInstruction {
+            parsed: SolanaParsedInstructionData {
+                instruction_name: "test_ix".to_string(),
+                discriminator: "00".to_string(),
+                named_accounts: Default::default(),
+                program_call_args: serde_json::Map::new(),
+                idl_source: IdlSource::Custom,
+                idl_hash: String::new(),
+            },
+            named_accounts: BTreeMap::new(),
+            extra_accounts: pubkeys.clone(),
+        };
+        let (_title, _condensed, expanded) = build_parsed_fields(&parsed, "PROGRAM_ID").unwrap();
+        let entries: Vec<(String, String)> = expanded
+            .iter()
+            .map(field_label_value)
+            .filter(|(label, _)| label.starts_with("Remaining Account"))
+            .collect();
+        assert_eq!(
+            entries,
+            vec![
+                ("Remaining Account 1".to_string(), pubkeys[0].clone()),
+                ("Remaining Account 2".to_string(), pubkeys[1].clone()),
+                ("Remaining Account 3".to_string(), pubkeys[2].clone()),
+            ]
+        );
+    }
+}
