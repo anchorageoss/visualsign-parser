@@ -11,7 +11,7 @@ mod tokens;
 mod verify;
 
 pub use token_signature::{
-    authorized_token_metadata_signers,
+    TokenMetadataDomain, authorized_token_metadata_signers, insert_token_metadata_signer,
     try_extract_from_chain_metadata as try_extract_token_metadata_from_chain_metadata,
 };
 
@@ -36,6 +36,29 @@ pub enum NearIntentsError {
     InputNotJson(String),
     #[error("Failed to render intents: {0}")]
     Render(String),
+    /// An envelope account contradicts the resolved network. Kept distinct from
+    /// [`Self::Render`] so the caller can raise it as the same validation error
+    /// the on-chain transaction accounts raise, rather than as a conversion
+    /// failure: it is the same condition, and a wallet branching on the error
+    /// class must not see two different ones depending on which path carried the
+    /// request.
+    #[error("{0}")]
+    NetworkMismatch(String),
+}
+
+/// Translate a render-layer failure into this module's error.
+///
+/// `render_single` reports an envelope whose accounts contradict the resolved
+/// network as [`visualsign::errors::VisualSignError::ValidationError`], which no
+/// field builder produces, so that variant identifies the mismatch
+/// unambiguously.
+fn render_error(e: visualsign::errors::VisualSignError) -> NearIntentsError {
+    match e {
+        visualsign::errors::VisualSignError::ValidationError(mismatch) => {
+            NearIntentsError::NetworkMismatch(mismatch)
+        }
+        other => NearIntentsError::Render(other.to_string()),
+    }
 }
 
 /// Plain NEP-141 token metadata. The lean baseline chain parser constructs
@@ -45,16 +68,73 @@ pub struct NearTokenRegistry {
     pub by_asset_id: std::collections::BTreeMap<String, TokenMeta>,
 }
 
+/// Where a resolved [`TokenMeta`] came from.
+///
+/// Distinguishes the two ways a request entry can be unattributed: one carrying
+/// no signature, and one whose signature verifies under a key this deployment
+/// has not enrolled. Both are worth the same in trust terms -- neither may
+/// override a curated seed (see `token_signature::SignerIdentity`) -- and they
+/// differ only in what the signer is told, which is why the render needs to tell
+/// them apart rather than reading a single bool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenProvenance {
+    /// The compiled-in `tokens::SEEDS` table.
+    Seed,
+    /// A request entry signed by a key enrolled for its origin chain.
+    RecognizedSigner,
+    /// A request entry whose signature verifies under an unenrolled key.
+    UnrecognizedSigner,
+    /// A request entry carrying no signature.
+    Unsigned,
+}
+
+impl TokenProvenance {
+    /// Whether metadata from this source is trustworthy: it may override a
+    /// curated seed, and its amounts render without a provenance caveat.
+    #[must_use]
+    pub fn verified(self) -> bool {
+        matches!(self, Self::Seed | Self::RecognizedSigner)
+    }
+
+    /// Names an unattributed source for the signer-facing diagnostic. `Seed` and
+    /// `RecognizedSigner` carry no caveat, so they have no phrasing here.
+    #[must_use]
+    pub(crate) fn unverified_cause(self) -> Option<&'static str> {
+        match self {
+            Self::Seed | Self::RecognizedSigner => None,
+            Self::UnrecognizedSigner => {
+                Some("unrecognized signer (signature verified, key not enrolled)")
+            }
+            Self::Unsigned => Some("unsigned request entry"),
+        }
+    }
+
+    /// Names an unattributed source in a refusal, where the phrasing is the
+    /// subject of "... would override a curated seed".
+    ///
+    /// Matched exhaustively rather than with a wildcard: only the two
+    /// unattributed variants can reach a refusal (the caller guards on
+    /// [`Self::verified`]), but a fifth variant should have to name its own
+    /// phrasing here rather than silently inherit "unsigned entry" and describe
+    /// itself falsely.
+    #[must_use]
+    pub(crate) fn override_subject(self) -> &'static str {
+        match self {
+            Self::UnrecognizedSigner => "unrecognized signer",
+            Self::Unsigned => "unsigned entry",
+            Self::Seed => "compiled-in seed",
+            Self::RecognizedSigner => "recognized signer",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TokenMeta {
     pub symbol: String,
     pub decimals: u8,
-    /// Whether this metadata is trustworthy: resolved from the compiled-in
-    /// `tokens::SEEDS` table, or from a signed, allowlisted request entry.
-    /// `false` for an unsigned request entry (fills a gap for an asset
-    /// `SEEDS` doesn't cover -- accepted, but unauthenticated). Rendering
-    /// surfaces this so the signer sees the caveat, not just an operator log.
-    pub verified: bool,
+    /// Where this metadata came from. Rendering surfaces an unattributed source
+    /// so the signer sees the caveat, not just an operator log.
+    pub provenance: TokenProvenance,
 }
 
 /// Decode `execute_intents` args and render them as `SignablePayloadField`s.
@@ -64,14 +144,14 @@ pub fn try_decode_execute_intents(
     args: &[u8],
     token_registry: &visualsign::registry::LayeredRegistry<NearTokenRegistry>,
     _options: &visualsign::vsptrait::VisualSignOptions,
+    network: crate::networks::NearNetwork,
 ) -> Result<Vec<visualsign::SignablePayloadField>, NearIntentsError> {
     let payloads = args::decode_args(args)?;
     let total = payloads.len();
     let mut fields = Vec::new();
     for (i, mp) in payloads.iter().enumerate() {
         fields.extend(
-            render::section(i + 1, total, mp, token_registry)
-                .map_err(|e| NearIntentsError::Render(e.to_string()))?,
+            render::section(i + 1, total, mp, token_registry, network).map_err(render_error)?,
         );
     }
     Ok(fields)
@@ -87,12 +167,12 @@ pub fn try_render_single_intent(
     payload_json: &[u8],
     token_registry: &visualsign::registry::LayeredRegistry<NearTokenRegistry>,
     _options: &visualsign::vsptrait::VisualSignOptions,
+    network: crate::networks::NearNetwork,
 ) -> Result<Vec<visualsign::SignablePayloadField>, NearIntentsError> {
     let payload: defuse_core::payload::DefusePayload<defuse_core::intents::DefuseIntents> =
         serde_json::from_slice(payload_json)
             .map_err(|e| NearIntentsError::InputNotJson(e.to_string()))?;
-    render::render_single(&payload, token_registry)
-        .map_err(|e| NearIntentsError::Render(e.to_string()))
+    render::render_single(&payload, token_registry, network).map_err(render_error)
 }
 
 /// Test-only matcher shared across this module's test submodules.
@@ -150,8 +230,13 @@ mod tests {
         let bytes = serde_json::to_vec(&args).unwrap();
         let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
 
-        let fields =
-            try_decode_execute_intents(&bytes, &reg, &VisualSignOptions::default()).unwrap();
+        let fields = try_decode_execute_intents(
+            &bytes,
+            &reg,
+            &VisualSignOptions::default(),
+            crate::networks::NearNetwork::Mainnet,
+        )
+        .unwrap();
         let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
 
         for expected in [
@@ -193,9 +278,13 @@ mod tests {
         let inner = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
         let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
 
-        let fields =
-            try_render_single_intent(inner.as_bytes(), &reg, &VisualSignOptions::default())
-                .unwrap();
+        let fields = try_render_single_intent(
+            inner.as_bytes(),
+            &reg,
+            &VisualSignOptions::default(),
+            crate::networks::NearNetwork::Mainnet,
+        )
+        .unwrap();
         let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
 
         for expected in [
@@ -232,8 +321,13 @@ mod tests {
     #[test]
     fn single_intent_rejects_malformed_json() {
         let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
-        let err = try_render_single_intent(b"not json", &reg, &VisualSignOptions::default())
-            .expect_err("malformed JSON should error");
+        let err = try_render_single_intent(
+            b"not json",
+            &reg,
+            &VisualSignOptions::default(),
+            crate::networks::NearNetwork::Mainnet,
+        )
+        .expect_err("malformed JSON should error");
         assert!(matches!(err, NearIntentsError::InputNotJson(_)));
     }
 
@@ -248,8 +342,13 @@ mod tests {
         }]});
         let bytes = serde_json::to_vec(&args).unwrap();
         let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
-        let fields =
-            try_decode_execute_intents(&bytes, &reg, &VisualSignOptions::default()).unwrap();
+        let fields = try_decode_execute_intents(
+            &bytes,
+            &reg,
+            &VisualSignOptions::default(),
+            crate::networks::NearNetwork::Mainnet,
+        )
+        .unwrap();
         let has_deadline_warning = fields
             .iter()
             .any(|f| super::test_support::is_warning_diagnostic(f, "deadline"));

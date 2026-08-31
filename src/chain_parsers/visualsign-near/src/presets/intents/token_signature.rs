@@ -61,7 +61,7 @@ use k256::ecdsa::{Signature as Secp256k1Signature, VerifyingKey as Secp256k1Veri
 use serde::Deserialize;
 use visualsign::signing::{MetadataTrustPolicy, SignerAllowlist};
 
-use super::{NearTokenRegistry, TokenMeta, tokens};
+use super::{NearTokenRegistry, TokenMeta, TokenProvenance, tokens};
 use crate::networks::NearNetwork;
 
 /// The only supported ed25519 algorithm tag (Near and Solana origins).
@@ -85,6 +85,15 @@ const MAX_TOKEN_METADATA_VALUE_BYTES: usize = 1024;
 /// than truncated: dropping the tail would silently ignore caller data that
 /// the caller has no way to see was discarded.
 const MAX_TOKEN_METADATA_ENTRIES: usize = 256;
+
+/// Maximum accepted length for a `token_mappings` key (a NEAR Intents asset id).
+///
+/// The key is the one part of an entry the value and entry-count bounds do not
+/// reach: it is cloned into the registry as its lookup key and echoed into the
+/// operator log on a refusal. Bounded so a single oversized key cannot be
+/// amplified inside the enclave. Real asset ids are a standard tag plus an
+/// account id (`nep141:a0b8...factory.bridge.near`), well inside this.
+const MAX_ASSET_ID_BYTES: usize = 128;
 
 /// Maximum accepted `decimals` value. `tokens::format_units` computes
 /// `10u128.pow(u32::from(decimals))`, which overflows above 38 -- a remote
@@ -314,14 +323,49 @@ fn insert_env_signers(allow: &mut SignerAllowlist, domain: TokenMetadataDomain) 
         return;
     };
     for entry in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-        let canonical = match domain.algorithm() {
-            SECP256K1_ALGORITHM => canonical_secp256k1_pubkey_from_hex(entry),
-            _ => canonical_ed25519_pubkey_from_hex(entry),
-        };
-        match canonical {
-            Some(bytes) => allow.insert(scoped_signer_key(domain, &bytes)),
-            None => tracing::warn!("Ignoring invalid pubkey in {env_var}"),
+        if !insert_token_metadata_signer(allow, domain, entry) {
+            tracing::warn!("Ignoring invalid pubkey in {env_var}");
         }
+    }
+}
+
+/// Enrol one curator key, for one origin-chain domain, in `allowlist`.
+///
+/// A NEAR token-metadata allowlist entry is not a bare canonical public key: it
+/// is the key bound to the domain it vouches for (see [`scoped_signer_key`]), so
+/// a key enrolled through [`SignerAllowlist::insert`] directly is never
+/// recognized on this path. A caller assembling an allowlist for
+/// [`MetadataTrustPolicy::RequireAllowlistedSigner`] -- to hand to
+/// [`crate::NearVisualSignConverter::with_trust_policy`] -- has to key it the
+/// same way the parser looks it up, which is what this exposes.
+///
+/// `pubkey_hex` is hex with an optional `0x` prefix: a 32-byte ed25519 key for
+/// [`TokenMetadataDomain::Near`] and [`TokenMetadataDomain::Solana`], any SEC1
+/// encoding for [`TokenMetadataDomain::Ethereum`]. Returns `false`, enrolling
+/// nothing, when it is not a valid key for that domain's curve. The same
+/// physical key enrolled for two domains is two entries, so revoking one leaves
+/// the other standing.
+pub fn insert_token_metadata_signer(
+    allowlist: &mut SignerAllowlist,
+    domain: TokenMetadataDomain,
+    pubkey_hex: &str,
+) -> bool {
+    // Matched on the domain itself, exhaustively and without a wildcard: a
+    // fourth origin chain on a new curve has to name its canonicalization here
+    // rather than falling into a default and silently reusing ed25519, which is
+    // the accidental identity reuse `TokenMetadataDomain` exists to prevent.
+    let canonical = match domain {
+        TokenMetadataDomain::Ethereum => canonical_secp256k1_pubkey_from_hex(pubkey_hex),
+        TokenMetadataDomain::Near | TokenMetadataDomain::Solana => {
+            canonical_ed25519_pubkey_from_hex(pubkey_hex)
+        }
+    };
+    match canonical {
+        Some(bytes) => {
+            allowlist.insert(scoped_signer_key(domain, &bytes));
+            true
+        }
+        None => false,
     }
 }
 
@@ -508,6 +552,17 @@ pub fn try_extract_from_chain_metadata(
     let mut registry = NearTokenRegistry::default();
     let mut unverified_count: usize = 0;
     for (asset_id, entry) in &near.token_mappings {
+        // First, and quoting only the length: every other refusal echoes the
+        // asset id, so an oversized key is refused before it can be copied into
+        // a message.
+        if asset_id.len() > MAX_ASSET_ID_BYTES {
+            tracing::warn!(
+                "Skipping token metadata for an oversized asset id: {} bytes > {MAX_ASSET_ID_BYTES}",
+                asset_id.len()
+            );
+            continue;
+        }
+
         if entry.value.len() > MAX_TOKEN_METADATA_VALUE_BYTES {
             tracing::warn!(
                 "Skipping token metadata for '{asset_id}': exceeds size limit ({} bytes > {MAX_TOKEN_METADATA_VALUE_BYTES})",
@@ -602,10 +657,13 @@ pub fn try_extract_from_chain_metadata(
         // asset name on the signing screen. Rejected rather than filtered: a
         // symbol is short and operator-supplied, so silently rewriting it
         // would show an asset name nobody chose.
+        // Backslash is excluded too: the symbol reaches `create_amount_field`
+        // verbatim, and a renderer that unescapes could otherwise be steered by
+        // one.
         if !parsed
             .symbol
             .chars()
-            .all(|c| c.is_ascii_graphic() || c == ' ')
+            .all(|c| c == ' ' || (c.is_ascii_graphic() && c != '\\'))
         {
             tracing::warn!(
                 "Skipping token metadata for '{asset_id}': symbol contains characters outside \
@@ -630,8 +688,8 @@ pub fn try_extract_from_chain_metadata(
         // of magnitude, and every check above it is a length comparison or a
         // parse of an already size-capped string, so an entry that a cheap
         // check would reject anyway never costs one.
-        let verified = match entry.signature.as_ref() {
-            None => false,
+        let provenance = match entry.signature.as_ref() {
+            None => TokenProvenance::Unsigned,
             Some(proto_sig) => {
                 let signature = convert_proto_signature(proto_sig);
                 match validate_token_metadata_signature(
@@ -646,7 +704,7 @@ pub fn try_extract_from_chain_metadata(
                         tracing::warn!("Skipping token metadata for '{asset_id}': {e}");
                         continue;
                     }
-                    Ok(SignerIdentity::Recognized) => true,
+                    Ok(SignerIdentity::Recognized) => TokenProvenance::RecognizedSigner,
                     Ok(SignerIdentity::Unrecognized) => {
                         if !trust_policy.accepts_unsigned() {
                             tracing::warn!(
@@ -659,7 +717,7 @@ pub fn try_extract_from_chain_metadata(
                             "Token metadata for '{asset_id}': signed by a key this deployment \
                              does not recognize; accepted as unverified"
                         );
-                        false
+                        TokenProvenance::UnrecognizedSigner
                     }
                 }
             }
@@ -668,10 +726,10 @@ pub fn try_extract_from_chain_metadata(
         // The gap-fill rule again, now that identity is settled: a signature
         // from an unrecognized key must not buy an override the same caller
         // could not have had by omitting it.
-        if !verified && tokens::is_seeded(asset_id) {
+        if !provenance.verified() && tokens::is_seeded(asset_id) {
             tracing::warn!(
-                "Skipping token metadata for '{asset_id}': unverified metadata would override a \
-                 curated seed"
+                "Skipping token metadata for '{asset_id}': {} would override a curated seed",
+                provenance.override_subject()
             );
             continue;
         }
@@ -681,10 +739,10 @@ pub fn try_extract_from_chain_metadata(
             TokenMeta {
                 symbol: parsed.symbol,
                 decimals: parsed.decimals,
-                verified,
+                provenance,
             },
         );
-        if !verified {
+        if !provenance.verified() {
             unverified_count += 1;
         }
     }
@@ -823,6 +881,83 @@ mod tests {
         let mut allow = SignerAllowlist::new();
         allow.insert(scoped_signer_key(domain, &canonical_pubkey));
         allow
+    }
+
+    /// An allowlist built the way an external caller has to build one -- through
+    /// the public helper, from a hex key -- must recognize the same signature the
+    /// internally-built allowlist recognizes.
+    ///
+    /// The helper's whole purpose is that a caller pinning
+    /// `RequireAllowlistedSigner` can enrol keys the parser will actually match,
+    /// which holds only if it reproduces `SignerIdentity::of`'s domain scoping
+    /// and canonicalization byte for byte. Asserted end-to-end through
+    /// extraction rather than by comparing bytes, so a divergence in either half
+    /// shows up as the entry failing to register verified.
+    #[test]
+    fn a_key_enrolled_through_the_public_helper_is_recognized() {
+        let pubkey_hex = hex::encode(
+            ed25519_dalek::SigningKey::from_bytes(&DEV_NEAR_SIGNING_KEY_SEED)
+                .verifying_key()
+                .to_bytes(),
+        );
+        let mut allowlist = SignerAllowlist::new();
+        assert!(
+            insert_token_metadata_signer(&mut allowlist, TokenMetadataDomain::Near, &pubkey_hex,),
+            "a valid ed25519 key must enrol"
+        );
+
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some(NETWORK_ID.to_string()),
+                token_mappings: make_mappings(vec![(
+                    UNSEEDED_ASSET_ID,
+                    TokenMetadataEntry {
+                        value: VALUE.to_string(),
+                        signature: Some(sign_token_metadata_ed25519(
+                            NETWORK_ID,
+                            UNSEEDED_ASSET_ID,
+                            VALUE,
+                            &DEV_NEAR_SIGNING_KEY_SEED,
+                            visualsign::signing::near_token_metadata_prehash,
+                        )),
+                        origin_chain: None,
+                    },
+                )]),
+            })),
+        };
+        let registry = try_extract_from_chain_metadata(
+            Some(&metadata),
+            NETWORK,
+            &allowlist,
+            &require_signed_policy_with(allowlist.clone()),
+        )
+        .expect("an entry signed by the enrolled key must register");
+        assert_eq!(
+            registry
+                .by_asset_id
+                .get(UNSEEDED_ASSET_ID)
+                .expect("present")
+                .provenance,
+            TokenProvenance::RecognizedSigner,
+            "the publicly-enrolled key must be recognized, not merely accepted"
+        );
+    }
+
+    /// The helper enrols nothing for a key that isn't valid on the domain's
+    /// curve, rather than a mangled entry that silently matches nothing later.
+    #[test]
+    fn the_public_helper_refuses_a_key_that_is_not_valid_for_the_domain() {
+        let mut allowlist = SignerAllowlist::new();
+        for bad in ["not hex", "0xdeadbeef", ""] {
+            assert!(
+                !insert_token_metadata_signer(&mut allowlist, TokenMetadataDomain::Near, bad),
+                "'{bad}' must not enrol as an ed25519 key"
+            );
+        }
+        assert!(
+            allowlist.is_empty(),
+            "a refused key must leave the allowlist untouched"
+        );
     }
 
     fn near_allowlist() -> SignerAllowlist {
@@ -1057,13 +1192,15 @@ mod tests {
             &accept_unsigned_policy(),
         )
         .expect("an unrecognized signer is accepted under the permissive posture");
-        assert!(
-            !registry
+        assert_eq!(
+            registry
                 .by_asset_id
                 .get(UNSEEDED_ASSET_ID)
                 .expect("present")
-                .verified,
-            "an unrecognized signer must not register as verified"
+                .provenance,
+            TokenProvenance::UnrecognizedSigner,
+            "an unrecognized signer must register unverified, and as its own \
+             provenance rather than collapsed onto unsigned"
         );
     }
 
@@ -1274,8 +1411,9 @@ mod tests {
             .expect("present");
         assert_eq!(meta.symbol, "USDC.e");
         assert_eq!(meta.decimals, 6);
-        assert!(
-            !meta.verified,
+        assert_eq!(
+            meta.provenance,
+            TokenProvenance::Unsigned,
             "an unsigned gap-fill entry must not be marked verified"
         );
     }
@@ -1377,12 +1515,13 @@ mod tests {
             &require_signed_policy(),
         )
         .expect("the mainnet signature verifies on mainnet");
-        assert!(
+        assert_eq!(
             mainnet
                 .by_asset_id
                 .get(UNSEEDED_ASSET_ID)
                 .expect("present")
-                .verified,
+                .provenance,
+            TokenProvenance::RecognizedSigner,
             "signed entry registers as verified on its own network"
         );
 
@@ -1432,17 +1571,18 @@ mod tests {
             &require_signed_policy(),
         )
         .expect("a testnet-scoped signature verifies for a testnet converter");
-        assert!(
+        assert_eq!(
             registry
                 .by_asset_id
                 .get(UNSEEDED_ASSET_ID)
                 .expect("present")
-                .verified
+                .provenance,
+            TokenProvenance::RecognizedSigner
         );
     }
 
     // A validly signed, allowlisted entry still registers under the strict
-    // posture: NearTokenTrustPolicy gates only whether a MISSING signature is
+    // posture: `MetadataTrustPolicy` gates only whether a MISSING signature is
     // acceptable, not the per-origin-chain allowlist check a present one
     // already goes through unconditionally.
     #[test]
@@ -1476,8 +1616,9 @@ mod tests {
         .expect("signed entry must still be registered under the strict posture");
         let meta = registry.by_asset_id.get(ASSET_ID).expect("present");
         assert_eq!(meta.symbol, "USDC.e");
-        assert!(
-            meta.verified,
+        assert_eq!(
+            meta.provenance,
+            TokenProvenance::RecognizedSigner,
             "a signed, allowlisted entry must be marked verified"
         );
     }

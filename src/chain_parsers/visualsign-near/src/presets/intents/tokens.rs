@@ -60,7 +60,7 @@ pub(crate) fn resolve(
         .map(|(_, symbol, decimals)| TokenMeta {
             symbol: (*symbol).to_string(),
             decimals: *decimals,
-            verified: true,
+            provenance: super::TokenProvenance::Seed,
         })
         .and_then(usable)
 }
@@ -85,6 +85,7 @@ pub(crate) fn format_units(units: u128, decimals: u8) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use crate::presets::intents::TokenProvenance;
     use std::sync::Arc;
     use visualsign::registry::LayeredRegistry;
 
@@ -129,7 +130,7 @@ mod tests {
             TokenMeta {
                 symbol: "BROKEN".to_string(),
                 decimals: 39,
-                verified: false,
+                provenance: TokenProvenance::Unsigned,
             },
         );
         let registry =
@@ -146,7 +147,7 @@ mod tests {
             TokenMeta {
                 symbol: "WIDE".to_string(),
                 decimals: MAX_DECIMALS,
-                verified: false,
+                provenance: TokenProvenance::Unsigned,
             },
         );
         let registry =
