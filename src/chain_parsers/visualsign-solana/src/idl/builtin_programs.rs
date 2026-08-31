@@ -378,18 +378,52 @@ fn preset_idl_configs()
     })
 }
 
-/// Merges the 19 preset IDL configs (see [`preset_idl_configs`]) into
-/// `caller_configs`, without overwriting an entry the caller explicitly
-/// supplied for the same program ID -- a genuine caller override still wins
-/// over our own preset default.
-pub fn merge_preset_idl_configs(
-    caller_configs: &std::collections::BTreeMap<String, solana_parser::CustomIdlConfig>,
-) -> std::collections::BTreeMap<String, solana_parser::CustomIdlConfig> {
-    let mut merged = preset_idl_configs().clone();
-    for (program_id, config) in caller_configs {
-        merged.insert(program_id.clone(), config.clone());
-    }
-    merged
+/// The presets' `IdlRecord`s, parsed and serialized once per process.
+///
+/// [`preset_idl_configs`] holds raw JSON; turning it into records means a
+/// parse plus a re-serialize for the hash JSON on every entry. That cost is
+/// identical on every request -- the presets are compiled in and never vary --
+/// so it is paid once here instead of per request inside
+/// `construct_idl_records_map`.
+///
+/// Callers layer their own records over this (see
+/// [`crate::intermediate::lookup_idl_record`]) rather than merging into it, so
+/// the map is never cloned.
+pub fn preset_idl_records()
+-> &'static std::collections::BTreeMap<String, solana_parser::solana::structs::IdlRecord> {
+    use solana_parser::solana::structs::IdlRecord;
+
+    static PRESET_IDL_RECORDS: OnceLock<std::collections::BTreeMap<String, IdlRecord>> =
+        OnceLock::new();
+    PRESET_IDL_RECORDS.get_or_init(|| {
+        preset_idl_configs()
+            .iter()
+            .filter_map(|(program_id, config)| {
+                let solana_parser::CustomIdl::Json(json) = &config.idl else {
+                    return None;
+                };
+                // A preset that fails to parse is dropped rather than fataled:
+                // it degrades to `Unregistered` at decode time, which is the
+                // same outcome as not shipping the IDL at all.
+                let idl = solana_parser::decode_idl_data(json).ok()?;
+                Some((
+                    program_id.clone(),
+                    IdlRecord {
+                        program_id: program_id.clone(),
+                        program_name: format!(
+                            "Preset Program {}",
+                            &program_id[..8.min(program_id.len())]
+                        ),
+                        program_type: None,
+                        custom_idl: Some(idl),
+                        custom_idl_json: Some(json.clone()),
+                        override_builtin: true,
+                        is_preset: true,
+                    },
+                ))
+            })
+            .collect()
+    })
 }
 
 #[cfg(test)]

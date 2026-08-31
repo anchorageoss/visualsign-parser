@@ -34,7 +34,7 @@ use solana_parser::solana::structs::{
     self as parser, AccountAddress, IdlParseError, IdlSource, SolanaMetadata,
     SolanaParsedInstructionData,
 };
-use solana_parser::{CustomIdlConfig, parse_transaction_with_idls};
+use solana_parser::{CustomIdlConfig, parse_transaction_with_idl_records};
 use visualsign::errors::VisualSignError;
 use visualsign::vsptrait::TransactionParseError;
 
@@ -257,6 +257,7 @@ impl From<&parser::SolanaAddressTableLookup> for SolanaAddressTableLookup {
 fn idl_source_string(source: &IdlSource) -> String {
     match source {
         IdlSource::BuiltIn(_) => "BuiltIn".to_string(),
+        IdlSource::Preset => "Preset".to_string(),
         IdlSource::Custom => "Custom".to_string(),
     }
 }
@@ -404,19 +405,13 @@ fn decode_inner_instructions(
     use solana_transaction_status::{UiInstruction, UiParsedInstruction};
 
     let configs = idl_registry.get_all_configs();
-    // Layer preset IDLs alongside caller-supplied ones; `configs` (caller-only)
-    // is still what registered_source's CallerSupplied check below reads,
-    // since a preset IDL is Preset, not CallerSupplied.
-    let merged_configs = crate::idl::builtin_programs::merge_preset_idl_configs(configs);
-    let custom_idls = if merged_configs.is_empty() {
-        None
-    } else {
-        Some(merged_configs.into_iter().collect())
-    };
-    let Ok(idl_records) = construct_idl_records_map(custom_idls) else {
+    // Caller records only. Presets come from the process-wide cache and the
+    // builtins from `solana_parser`'s own; `lookup_idl_record` layers the three
+    // per program rather than merging them into one map, so neither the ~2.0 MB
+    // of preset IDLs nor the builtins are cloned per request.
+    let Some(caller_records) = caller_idl_records(configs) else {
         return Vec::new();
     };
-    let idl_records: BTreeMap<_, _> = idl_records.into_iter().collect();
 
     let mut simulated_instructions = Vec::new();
 
@@ -440,7 +435,7 @@ fn decode_inner_instructions(
                             &decoded.program_id,
                             &decoded.data,
                             &accounts,
-                            &idl_records,
+                            &caller_records,
                         );
                     let registered_source = crate::idl::builtin_programs::registered_source(
                         &decoded.program_id,
@@ -489,9 +484,97 @@ fn decode_inner_instructions(
     simulated_instructions
 }
 
+/// Resolves one program's `IdlRecord` across the three sources, in the same
+/// precedence order the old single merged map encoded: a caller-supplied record
+/// wins, then a preset, then a `solana_parser` builtin.
+///
+/// Layered rather than merged so the preset records (~2.0 MB) and the builtins
+/// are borrowed from their process-wide caches instead of being cloned into a
+/// fresh map on every request.
+fn lookup_idl_record<'a>(
+    program_id: &str,
+    caller_records: &'a BTreeMap<String, solana_parser::solana::structs::IdlRecord>,
+) -> Option<&'a solana_parser::solana::structs::IdlRecord> {
+    if let Some(record) = caller_records.get(program_id) {
+        return Some(record);
+    }
+    if let Some(record) = crate::idl::builtin_programs::preset_idl_records().get(program_id) {
+        return Some(record);
+    }
+    builtin_idl_records().get(program_id)
+}
+
+/// Builds `IdlRecord`s for the caller-supplied IDLs alone.
+///
+/// `construct_idl_records_map` always prepends `solana_parser`'s builtins, so
+/// the builtin entries it returns are dropped here -- [`builtin_idl_records`]
+/// already holds them, cached. `None` signals that a caller IDL failed to parse.
+#[allow(clippy::disallowed_types)]
+fn caller_idl_records(
+    configs: &BTreeMap<String, CustomIdlConfig>,
+) -> Option<BTreeMap<String, solana_parser::solana::structs::IdlRecord>> {
+    if configs.is_empty() {
+        return Some(BTreeMap::new());
+    }
+    let records = construct_idl_records_map(Some(
+        configs
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+    ))
+    .ok()?;
+    Some(
+        records
+            .into_iter()
+            .filter(|(program_id, _)| configs.contains_key(program_id))
+            .collect(),
+    )
+}
+
+/// The full `IdlRecord` map for one request: builtins and presets from their
+/// process-wide caches, caller-supplied IDLs layered on top.
+///
+/// `solana_parser::parse_transaction_with_idl_records` takes the map by value,
+/// so the static path has to materialize one. The saving over passing configs
+/// is the parse-and-re-serialize of every preset IDL, which
+/// `construct_idl_records_map` would otherwise redo on every request.
+///
+/// Precedence matches [`lookup_idl_record`]: caller, then preset, then builtin.
+#[allow(clippy::disallowed_types)]
+fn build_idl_record_map(
+    caller_records: &BTreeMap<String, solana_parser::solana::structs::IdlRecord>,
+) -> std::collections::HashMap<String, solana_parser::solana::structs::IdlRecord> {
+    let mut records: std::collections::HashMap<_, _> = builtin_idl_records()
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    for (program_id, record) in crate::idl::builtin_programs::preset_idl_records() {
+        records.insert(program_id.clone(), record.clone());
+    }
+    for (program_id, record) in caller_records {
+        records.insert(program_id.clone(), record.clone());
+    }
+    records
+}
+
+/// `solana_parser`'s own builtin records, built once per process.
+///
+/// `construct_custom_idl_records_map` takes no arguments and returns the same
+/// 21 records every call, so there is nothing per-request about it.
+fn builtin_idl_records() -> &'static BTreeMap<String, solana_parser::solana::structs::IdlRecord> {
+    static BUILTIN_IDL_RECORDS: std::sync::OnceLock<
+        BTreeMap<String, solana_parser::solana::structs::IdlRecord>,
+    > = std::sync::OnceLock::new();
+    BUILTIN_IDL_RECORDS.get_or_init(|| {
+        solana_parser::construct_custom_idl_records_map()
+            .map(|records| records.into_iter().collect())
+            .unwrap_or_default()
+    })
+}
+
 /// IDL-decodes one `PartiallyDecoded` instruction's raw data, using the exact same
 /// resolution chain the top-level static decoder's private `parse_idl` uses internally.
-/// `idl_records` is looked up once per call by `program_id`, mirroring `parse_idl`'s
+/// The record is resolved by [`lookup_idl_record`], mirroring `parse_idl`'s
 /// `custom_idls.get(program_key)`. Returns `(None, None)` when `program_id` has
 /// no `IdlRecord` at all -- nothing was available to attempt against, distinct
 /// from an attempt that ran and failed (`(None, Some(err))`).
@@ -499,12 +582,12 @@ fn parse_partially_decoded_instruction_idl(
     program_id: &str,
     data_base58: &str,
     accounts: &[String],
-    idl_records: &BTreeMap<String, solana_parser::solana::structs::IdlRecord>,
+    caller_records: &BTreeMap<String, solana_parser::solana::structs::IdlRecord>,
 ) -> (
     Option<SolanaParsedInstructionDataIo>,
     Option<SolanaIdlParseError>,
 ) {
-    let Some(idl_record) = idl_records.get(program_id) else {
+    let Some(idl_record) = lookup_idl_record(program_id, caller_records) else {
         return (None, None);
     };
     let (idl, idl_json, idl_source) = match resolve_idl_for_record(idl_record, program_id) {
@@ -630,7 +713,7 @@ fn build_intermediate_output(
 
 // -- Extraction --------------------------------------------------------------
 
-/// Parse the transaction once via `solana_parser::parse_transaction_with_idls`
+/// Parse the transaction once via `solana_parser::parse_transaction_with_idl_records`
 /// and project the result into a Borsh-friendly intermediate output.
 ///
 /// `raw_message_hex` is the hex-encoded serialized message (or full
@@ -646,9 +729,9 @@ fn build_intermediate_output(
 /// is generated, and these bytes should be passed through as-is rather than
 /// re-parsed here. Today this re-parses once, best-effort, alongside the
 /// existing VisualSign generation path.
-// `disallowed_types`: the `solana_parser::parse_transaction_with_idls` API
-// requires a `HashMap` for its custom-IDL argument. We build one only as a
-// transient adapter from the deterministic `BTreeMap` registry; it never feeds
+// `disallowed_types`: the `solana_parser::parse_transaction_with_idl_records`
+// API requires a `HashMap` for its record argument. We build one only as a
+// transient adapter from the deterministic `BTreeMap` caches; it never feeds
 // serialized output, so determinism is unaffected.
 #[allow(clippy::disallowed_types)]
 pub(crate) fn extract_solana_intermediate_output(
@@ -657,20 +740,22 @@ pub(crate) fn extract_solana_intermediate_output(
     idl_registry: &IdlRegistry,
 ) -> Result<SolanaIntermediateOutput, VisualSignError> {
     let configs = idl_registry.get_all_configs();
-    let merged_configs = crate::idl::builtin_programs::merge_preset_idl_configs(configs);
-    let custom_idls = if merged_configs.is_empty() {
-        None
-    } else {
-        Some(merged_configs.into_iter().collect())
-    };
+    let caller_records = caller_idl_records(configs).ok_or_else(|| {
+        VisualSignError::ParseError(TransactionParseError::DecodeError(
+            "Failed to build IDL records from caller-supplied IDLs".to_string(),
+        ))
+    })?;
 
-    let response =
-        parse_transaction_with_idls(raw_message_hex.to_string(), full_transaction, custom_idls)
-            .map_err(|e| {
-                VisualSignError::ParseError(TransactionParseError::DecodeError(format!(
-                    "Failed to parse transaction for intermediate output: {e}"
-                )))
-            })?;
+    let response = parse_transaction_with_idl_records(
+        raw_message_hex.to_string(),
+        full_transaction,
+        build_idl_record_map(&caller_records),
+    )
+    .map_err(|e| {
+        VisualSignError::ParseError(TransactionParseError::DecodeError(format!(
+            "Failed to parse transaction for intermediate output: {e}"
+        )))
+    })?;
 
     let metadata = response
         .solana_parsed_transaction
@@ -770,6 +855,7 @@ mod tests {
             idl_source_string(&IdlSource::BuiltIn(ProgramType::Jupiter)),
             "BuiltIn"
         );
+        assert_eq!(idl_source_string(&IdlSource::Preset), "Preset");
         assert_eq!(idl_source_string(&IdlSource::Custom), "Custom");
     }
 
