@@ -47,6 +47,32 @@ impl NearNetwork {
     }
 }
 
+/// Detects an account whose top-level suffix contradicts the resolved network
+/// (`.testnet` under Mainnet, or `.near` under Testnet). `role` names which
+/// account failed, so the error distinguishes one from another. Implicit 64-hex
+/// accounts carry no suffix and are not guarded here.
+///
+/// The account suffix is the network evidence intrinsic to the payload, so it is
+/// what a caller-supplied `network_id` has to agree with: the resolved network
+/// picks the token-metadata signature scope and is rendered to the signer, and
+/// neither may describe a network the accounts contradict.
+///
+/// Applied to the transaction's own accounts in `convert::render_on_chain`, and
+/// to every rendered envelope's accounts in `presets::intents::render_single` --
+/// which both the standalone view and each section of an on-chain signed batch
+/// funnel through. So the same accounts cannot be a hard error on one path and a
+/// clean payload on another.
+#[must_use]
+pub fn network_mismatch(role: &str, account_id: &str, network: NearNetwork) -> Option<String> {
+    let mismatched = match network {
+        NearNetwork::Mainnet => account_id.ends_with(".testnet"),
+        NearNetwork::Testnet => account_id.ends_with(".near"),
+    };
+    mismatched.then(|| {
+        format!("{role} account '{account_id}' does not match resolved network {network:?}")
+    })
+}
+
 /// Extracts a [`NearNetwork`] from per-request [`ChainMetadata`], if present.
 ///
 /// Returns `Ok(None)` when metadata is absent or carries another chain's

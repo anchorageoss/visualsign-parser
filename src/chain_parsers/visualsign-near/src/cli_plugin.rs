@@ -28,12 +28,12 @@ impl NearPlugin {
 /// The CLI always runs the strict posture -- every token-metadata entry must
 /// carry a signature -- matching `visualsign-ethereum`'s CLI plugin (see its
 /// `cli_trust_policy`). Signer identity for a present signature is checked per
-/// origin chain against `authorized_token_metadata_signers`, which is why this
-/// posture carries no allowlist of its own.
+/// origin chain against `authorized_token_metadata_signers`, which is the
+/// allowlist this posture carries: the list the variant advertises and the list
+/// the decode path checks are the same value, so an empty one (no
+/// `VISUALSIGN_*_TOKEN_SIGNERS` configured, no `dev-signing`) rejects every
+/// entry rather than quietly checking against something else.
 fn cli_trust_policy() -> visualsign::signing::MetadataTrustPolicy {
-    // Carries the same allowlist the decode path checks against, so the
-    // variant's contract -- these are the authorized keys -- is literally true
-    // rather than a promise made and then read from somewhere else.
     visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
         crate::presets::intents::authorized_token_metadata_signers().clone(),
     )
