@@ -289,6 +289,10 @@ pub struct TokenMetadataEntry {
     /// assets with ed25519, NEAR-native assets with ed25519 via a distinct
     /// curator identity. Unset defaults to Near.
     #[prost(enumeration = "TokenOriginChain", optional, tag = "3")]
+    #[cfg_attr(
+        feature = "serde_derive",
+        serde(with = "crate::token_origin_chain_serde", default)
+    )]
     pub origin_chain: ::core::option::Option<i32>,
 }
 #[cfg_attr(
