@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn test_create_chain_metadata_empty_returns_none() {
-        assert!(create_chain_metadata(&[]).is_none());
+        assert!(create_chain_metadata(&[], None).is_none());
     }
 
     #[test]
@@ -150,7 +150,7 @@ mod tests {
             path.display()
         )];
 
-        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };
@@ -171,7 +171,7 @@ mod tests {
     fn test_create_chain_metadata_invalid_file_skipped() {
         let mappings =
             vec!["Bad:/nonexistent/idl.json:11111111111111111111111111111111".to_string()];
-        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };
@@ -190,7 +190,7 @@ mod tests {
             ),
         ];
 
-        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };
@@ -213,7 +213,7 @@ mod tests {
             path.display()
         )];
 
-        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };
@@ -233,7 +233,7 @@ mod tests {
             "Also:/missing/file.json:BadProg".to_string(),
         ];
 
-        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };

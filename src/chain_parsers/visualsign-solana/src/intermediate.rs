@@ -60,6 +60,27 @@ pub struct SolanaIntermediateOutput {
     pub recent_blockhash: String,
     pub address_table_lookups: Vec<SolanaAddressTableLookup>,
     pub simulated_instructions: Vec<SolanaSimulatedInstruction>,
+    /// Why the caller's `simulated_transaction_result` could not be read.
+    /// `None` means it was read or none was sent, and `simulated_instructions`
+    /// is authoritative -- empty there means the simulation genuinely had no
+    /// inner instructions.
+    pub simulation_error: Option<SolanaSimulationError>,
+}
+
+/// Why a caller-supplied `simulateTransaction` result could not be read. The
+/// detail is logged at WARN; these variants are the wire contract.
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolanaSimulationError {
+    InvalidBase64,
+    /// Usually the whole JSON-RPC envelope where the bare `result` was expected.
+    InvalidJson,
+    /// `value.err` was set, so the trace is partial and was dropped.
+    SimulationFailed,
+    CallerIdlRecordsUnusable,
+    /// An inner instruction arrived compiled. `simulateTransaction` parses inner
+    /// instructions whatever the transaction encoding, so the input was not one
+    /// of its results.
+    CompiledInstruction,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -75,6 +96,11 @@ pub struct SolanaIntermediateInstruction {
     pub registered_source: RegisteredSource,
 }
 
+/// Where a program ID was recognized. Decodability is a separate question --
+/// `system`, `spl_token`, `token_2022`, `compute_budget`,
+/// `associated_token_account`, `stakepool` and `swig_wallet` are all registered
+/// and ship no IDL -- so read `parsed_instruction_data`,
+/// `solana_rpc_parsed_data` and `idl_parse_error` for that.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegisteredSource {
     /// Matched `idl::builtin_programs`'s `NATIVE_PROGRAM_NAMES` list (native
@@ -382,17 +408,41 @@ fn build_intermediate_instruction(
 /// Unmarshals the raw `simulateTransaction` RPC bytes and IDL-decodes every inner
 /// instruction across all groups in one pass, returning a flat, borsh-ready list.
 ///
-/// Returns `None` on malformed JSON, no `value`, or no `innerInstructions` --
-/// best-effort, matching this module's other simulated-instruction handling.
+/// On any problem the list comes back empty with a [`SolanaSimulationError`]
+/// saying why, so "we could not read this" stays distinguishable from "there was
+/// nothing to find". A simulation with no `innerInstructions` is the latter.
 pub(crate) fn parse_and_decode_simulated_instructions(
     raw_json: &[u8],
     idl_registry: &IdlRegistry,
-) -> Option<Vec<SolanaSimulatedInstruction>> {
+) -> (
+    Vec<SolanaSimulatedInstruction>,
+    Option<SolanaSimulationError>,
+) {
     let response: solana_rpc_client_types::response::Response<
         solana_rpc_client_types::response::RpcSimulateTransactionResult,
-    > = serde_json::from_slice(raw_json).ok()?;
-    let inner_instructions = response.value.inner_instructions?;
-    Some(decode_inner_instructions(inner_instructions, idl_registry))
+    > = match serde_json::from_slice(raw_json) {
+        Ok(response) => response,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "simulated_transaction_result is not a simulateTransaction result"
+            );
+            return (Vec::new(), Some(SolanaSimulationError::InvalidJson));
+        }
+    };
+
+    if let Some(err) = &response.value.err {
+        tracing::warn!(
+            error = ?err,
+            "simulated transaction reverted; dropping its partial inner-instruction trace"
+        );
+        return (Vec::new(), Some(SolanaSimulationError::SimulationFailed));
+    }
+
+    let Some(inner_instructions) = response.value.inner_instructions else {
+        return (Vec::new(), None);
+    };
+    decode_inner_instructions(inner_instructions, idl_registry)
 }
 
 /// Builds one [`SolanaSimulatedInstruction`] per inner instruction across every
@@ -401,7 +451,10 @@ pub(crate) fn parse_and_decode_simulated_instructions(
 fn decode_inner_instructions(
     inner_instructions: Vec<solana_transaction_status::UiInnerInstructions>,
     idl_registry: &IdlRegistry,
-) -> Vec<SolanaSimulatedInstruction> {
+) -> (
+    Vec<SolanaSimulatedInstruction>,
+    Option<SolanaSimulationError>,
+) {
     use solana_transaction_status::{UiInstruction, UiParsedInstruction};
 
     let configs = idl_registry.get_all_configs();
@@ -409,8 +462,15 @@ fn decode_inner_instructions(
     // builtins from `solana_parser`'s own; `lookup_idl_record` layers the three
     // per program rather than merging them into one map, so neither the ~2.0 MB
     // of preset IDLs nor the builtins are cloned per request.
+    //
+    // Defensive: the static path rejects the request over the same records
+    // before this runs.
     let Some(caller_records) = caller_idl_records(configs) else {
-        return Vec::new();
+        tracing::warn!("caller-supplied IDLs could not be built into records");
+        return (
+            Vec::new(),
+            Some(SolanaSimulationError::CallerIdlRecordsUnusable),
+        );
     };
 
     let mut simulated_instructions = Vec::new();
@@ -420,7 +480,11 @@ fn decode_inner_instructions(
 
         for ui_instruction in entry.instructions {
             let UiInstruction::Parsed(parsed) = ui_instruction else {
-                continue;
+                tracing::warn!(
+                    "unexpected compiled inner instruction in simulated_transaction_result; \
+                     simulateTransaction does not return this shape"
+                );
+                return (Vec::new(), Some(SolanaSimulationError::CompiledInstruction));
             };
 
             match parsed {
@@ -481,7 +545,7 @@ fn decode_inner_instructions(
         }
     }
 
-    simulated_instructions
+    (simulated_instructions, None)
 }
 
 /// Resolves one program's `IdlRecord` across the three sources, in the same
@@ -708,6 +772,7 @@ fn build_intermediate_output(
             .map(SolanaAddressTableLookup::from)
             .collect(),
         simulated_instructions: Vec::new(),
+        simulation_error: None,
     }
 }
 
@@ -891,6 +956,81 @@ mod tests {
     }
 
     #[test]
+    fn unreadable_simulation_is_distinguishable_from_an_empty_one() {
+        let empty =
+            br#"{"context":{"slot":1},"value":{"err":null,"logs":[],"innerInstructions":[]}}"#;
+        let (instructions, error) =
+            parse_and_decode_simulated_instructions(empty, &IdlRegistry::new());
+        assert!(instructions.is_empty());
+        assert!(error.is_none(), "genuinely empty carries no error");
+
+        let (instructions, error) =
+            parse_and_decode_simulated_instructions(b"not-json", &IdlRegistry::new());
+        assert!(instructions.is_empty());
+        assert_eq!(error, Some(SolanaSimulationError::InvalidJson));
+    }
+
+    #[test]
+    fn full_jsonrpc_envelope_reports_invalid_json() {
+        let envelope = br#"{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":1},"value":{"err":null,"innerInstructions":[]}}}"#;
+        let (instructions, error) =
+            parse_and_decode_simulated_instructions(envelope, &IdlRegistry::new());
+        assert!(instructions.is_empty());
+        assert_eq!(error, Some(SolanaSimulationError::InvalidJson));
+    }
+
+    #[test]
+    fn reverted_simulation_drops_its_partial_trace() {
+        let reverted = br#"{"context":{"slot":1},"value":{"err":{"InstructionError":[3,{"Custom":6001}]},"logs":[],"innerInstructions":[{"index":0,"instructions":[{"accounts":["D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf"],"data":"3Bxs","programId":"QuaNtZsgYRe5Z9Bk4LZ4cTD9tbkVoyCNf1R2BN9bBDv","stackHeight":2}]}]}}"#;
+        let (instructions, error) =
+            parse_and_decode_simulated_instructions(reverted, &IdlRegistry::new());
+        assert!(
+            instructions.is_empty(),
+            "a partial trace must not attach as a complete one"
+        );
+        assert_eq!(error, Some(SolanaSimulationError::SimulationFailed));
+    }
+
+    #[test]
+    fn compiled_inner_instruction_is_rejected() {
+        let compiled = br#"{"context":{"slot":1},"value":{"err":null,"innerInstructions":[{"index":0,"instructions":[{"programIdIndex":4,"accounts":[1,2],"data":"3Bxs","stackHeight":2}]}]}}"#;
+        let (instructions, error) =
+            parse_and_decode_simulated_instructions(compiled, &IdlRegistry::new());
+        assert!(instructions.is_empty());
+        assert_eq!(error, Some(SolanaSimulationError::CompiledInstruction));
+    }
+
+    #[test]
+    fn simulation_error_round_trips_through_borsh() {
+        for error in [
+            SolanaSimulationError::InvalidBase64,
+            SolanaSimulationError::InvalidJson,
+            SolanaSimulationError::SimulationFailed,
+            SolanaSimulationError::CallerIdlRecordsUnusable,
+            SolanaSimulationError::CompiledInstruction,
+        ] {
+            let io = SolanaIntermediateOutput {
+                schema_version: SOLANA_INTERMEDIATE_SCHEMA_VERSION,
+                account_keys: vec![],
+                program_keys: vec![],
+                instructions: vec![],
+                transfers: vec![],
+                spl_transfers: vec![],
+                recent_blockhash: "blockhash".to_string(),
+                address_table_lookups: vec![],
+                simulated_instructions: vec![],
+                simulation_error: Some(error),
+            };
+            let bytes = borsh::to_vec(&io).expect("borsh serializes");
+            let recovered: SolanaIntermediateOutput =
+                borsh::from_slice(&bytes).expect("borsh deserializes");
+            assert_eq!(io, recovered);
+            // One tag byte for the `Some`, one for the variant: no payload.
+            assert_eq!(bytes[bytes.len() - 2], 1);
+        }
+    }
+
+    #[test]
     fn registered_source_classifications_from_jupiter_route_simulation() {
         let raw_json =
             include_bytes!("../tests/fixtures/simulated_instructions/jupiter_route_sim_resp.json");
@@ -903,7 +1043,9 @@ mod tests {
             .inner_instructions
             .expect("fixture has innerInstructions");
 
-        let instructions = decode_inner_instructions(inner_instructions, &IdlRegistry::new());
+        let (instructions, simulation_error) =
+            decode_inner_instructions(inner_instructions, &IdlRegistry::new());
+        assert!(simulation_error.is_none());
         assert_eq!(instructions.len(), 4, "fixture carries four inner calls");
 
         assert_eq!(

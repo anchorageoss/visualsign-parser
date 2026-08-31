@@ -485,13 +485,17 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
 fn build_intermediate_bytes(
     message_hex: &str,
     idl_registry: &crate::idl::IdlRegistry,
-    raw_simulated_instructions: Option<Vec<crate::intermediate::SolanaSimulatedInstruction>>,
+    raw_simulated_instructions: Option<(
+        Vec<crate::intermediate::SolanaSimulatedInstruction>,
+        Option<crate::intermediate::SolanaSimulationError>,
+    )>,
 ) -> Option<Vec<u8>> {
     match extract_solana_intermediate_output(message_hex, false, idl_registry) {
         Ok(mut output) => {
             // Simulation results are independent of static decode.
-            if let Some(instructions) = raw_simulated_instructions {
+            if let Some((instructions, simulation_error)) = raw_simulated_instructions {
                 output.simulated_instructions = instructions;
+                output.simulation_error = simulation_error;
             }
             if !output.simulated_instructions.is_empty() {
                 let unresolved = output
@@ -523,21 +527,34 @@ fn build_intermediate_bytes(
 }
 
 /// Pulls `simulated_transaction_result` out of `options.metadata`'s Solana
-/// branch, if present, and IDL-decodes it
+/// branch, if present, and IDL-decodes it.
+///
+/// `None` only when no simulation was supplied. Once the field is present a
+/// failure to read it comes back as a `SolanaSimulationError`, not an absence.
 fn extract_raw_simulated_instructions(
     options: &VisualSignOptions,
     idl_registry: &crate::idl::IdlRegistry,
-) -> Option<Vec<crate::intermediate::SolanaSimulatedInstruction>> {
+) -> Option<(
+    Vec<crate::intermediate::SolanaSimulatedInstruction>,
+    Option<crate::intermediate::SolanaSimulationError>,
+)> {
     let generated::parser::chain_metadata::Metadata::Solana(solana) =
         options.metadata.as_ref()?.metadata.as_ref()?
     else {
         return None;
     };
     let raw_json_b64 = solana.simulated_transaction_result.as_ref()?;
-    let raw_json = base64::engine::general_purpose::STANDARD
-        .decode(raw_json_b64)
-        .ok()?;
-    crate::intermediate::parse_and_decode_simulated_instructions(&raw_json, idl_registry)
+    let raw_json = match base64::engine::general_purpose::STANDARD.decode(raw_json_b64) {
+        Ok(raw_json) => raw_json,
+        Err(e) => {
+            tracing::warn!(error = %e, "simulated_transaction_result is not valid base64");
+            return Some((
+                Vec::new(),
+                Some(crate::intermediate::SolanaSimulationError::InvalidBase64),
+            ));
+        }
+    };
+    Some(crate::intermediate::parse_and_decode_simulated_instructions(&raw_json, idl_registry))
 }
 
 impl VisualSignConverterFromString<SolanaTransactionWrapper> for SolanaVisualSignConverter {}
