@@ -12,8 +12,7 @@ mod verify;
 
 pub use token_signature::{
     RejectedTokenMetadata, TokenMetadataDomain, TokenMetadataExtraction,
-    authorized_token_metadata_signers, insert_token_metadata_signer,
-    sign_token_metadata_for_cli,
+    authorized_token_metadata_signers, insert_token_metadata_signer, sign_token_metadata_for_cli,
     try_extract_from_chain_metadata as try_extract_token_metadata_from_chain_metadata,
 };
 

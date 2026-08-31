@@ -690,18 +690,6 @@ pub fn try_extract_from_chain_metadata(
             reject!("this deployment requires signed entries");
         }
 
-        // Unattributable metadata may fill a gap for an asset the compiled-in
-        // table doesn't cover, but must never override an already-curated one:
-        // tokens::resolve checks this registry before SEEDS unconditionally, so
-        // allowing it would let an unauthenticated caller shadow verified data
-        // -- turning, e.g., 1 wNEAR into 1000000 wNEAR by claiming the wrong
-        // decimals. Checked cheaply here for an entry carrying no signature at
-        // all; one whose signature proves to be from a key this deployment does
-        // not recognize is caught after verification, below.
-        if is_unsigned && tokens::is_seeded(asset_id) {
-            reject!("unsigned entry would override a curated seed");
-        }
-
         let parsed: TokenMetadataValue = match serde_json::from_str(&entry.value) {
             Ok(v) => v,
             Err(e) => reject!("invalid value JSON: {e}"),
@@ -727,11 +715,7 @@ pub fn try_extract_from_chain_metadata(
             .chars()
             .all(|c| c == ' ' || (c.is_ascii_graphic() && c != '\\'))
         {
-            tracing::warn!(
-                "Skipping token metadata for '{asset_id}': symbol contains characters outside \
-                 printable ASCII"
-            );
-            continue;
+            reject!("symbol contains characters outside printable ASCII");
         }
 
         // A present signature must verify: one that does not match its own
@@ -778,15 +762,28 @@ pub fn try_extract_from_chain_metadata(
             }
         };
 
-        // The gap-fill rule again, now that identity is settled: a signature
-        // from an unrecognized key must not buy an override the same caller
-        // could not have had by omitting it.
-        if !provenance.verified() && tokens::is_seeded(asset_id) {
-            tracing::warn!(
-                "Skipping token metadata for '{asset_id}': {} would override a curated seed",
-                provenance.override_subject()
-            );
-            continue;
+        // Unattributed metadata may fill a gap for an asset the compiled-in table
+        // doesn't cover, but must never override an already-curated one:
+        // `tokens::resolve` checks this registry before SEEDS unconditionally, so
+        // allowing it would let an unauthenticated caller shadow verified data --
+        // turning, e.g., 1 wNEAR into 1000000 wNEAR by claiming the wrong
+        // decimals. A signature from an unrecognized key must not buy the
+        // override either, since the same caller could have had it by omitting
+        // the signature.
+        //
+        // One check for both cases, placed after the parse so the refusal can
+        // name the values that differ: a bogus `decimals` is the whole attack,
+        // and the signer is owed what was attempted. The parse it waits on is of
+        // an already size-capped string, and no signature verification happens
+        // for the unsigned case, so nothing expensive moves ahead of it.
+        if !provenance.verified() {
+            if let Some(curated) = tokens::seeded_decimals(asset_id) {
+                reject!(
+                    "{} would override a curated seed (proposed decimals {}, curated {curated})",
+                    provenance.override_subject(),
+                    parsed.decimals
+                );
+            }
         }
 
         registry.by_asset_id.insert(
@@ -2167,6 +2164,10 @@ mod tests {
     /// only in an operator log.
     #[test]
     fn every_refusal_path_reports_the_rejected_entry() {
+        // Same seeded asset as `VALUE`, differing only in `decimals`, so the
+        // refusal has two distinguishable numbers to name.
+        const SEED_OVERRIDE_VALUE: &str = r#"{"symbol":"USDC.e","decimals":18}"#;
+
         let signed_by_dev_key = |asset_id: &str, value: &str| {
             Some(sign_token_metadata_ed25519(
                 NETWORK_ID,
@@ -2273,6 +2274,36 @@ mod tests {
                 },
                 accept_unsigned_policy(),
                 "symbol length 0 out of range",
+            ),
+            (
+                // The permissive posture accepts an unrecognized signer, but not
+                // as a licence to override a curated seed: the same terms an
+                // unsigned entry gets, since signing with a key nobody enrolled
+                // buys nothing over omitting the signature. The reason quotes
+                // both decimals because a bogus `decimals` is the whole attack.
+                "unrecognized signer overriding a curated seed",
+                ASSET_ID,
+                TokenMetadataEntry {
+                    value: SEED_OVERRIDE_VALUE.to_string(),
+                    signature: signed_by_dev_key(ASSET_ID, SEED_OVERRIDE_VALUE),
+                    origin_chain: None,
+                },
+                accept_unsigned_policy(),
+                "unrecognized signer would override a curated seed (proposed decimals 18, \
+                 curated 6)",
+            ),
+            (
+                // U+202E RIGHT-TO-LEFT OVERRIDE would reorder the asset name
+                // where the symbol renders.
+                "symbol outside printable ASCII",
+                UNSEEDED_ASSET_ID,
+                TokenMetadataEntry {
+                    value: format!("{{\"symbol\":\"BTC{}\",\"decimals\":8}}", '\u{202E}'),
+                    signature: None,
+                    origin_chain: None,
+                },
+                accept_unsigned_policy(),
+                "symbol contains characters outside printable ASCII",
             ),
         ];
 

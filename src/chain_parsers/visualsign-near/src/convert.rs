@@ -7,7 +7,7 @@ use near_primitives::transaction::Transaction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_address_field, create_text_field};
 use visualsign::registry::LayeredRegistry;
-use visualsign::signing::{MetadataTrustPolicy, SignerAllowlist};
+use visualsign::signing::MetadataTrustPolicy;
 use visualsign::vsptrait::{
     ConversionResult, VisualSignConverter, VisualSignConverterFromString, VisualSignOptions,
 };
@@ -16,7 +16,7 @@ use visualsign::{SignablePayload, SignablePayloadField};
 use crate::actions::render_action;
 use crate::networks::{NearNetwork, extract_network_from_metadata, network_mismatch};
 use crate::presets::intents::{
-    NearIntentsError, NearTokenRegistry, authorized_token_metadata_signers,
+    NearIntentsError, NearTokenRegistry, RejectedTokenMetadata, authorized_token_metadata_signers,
     try_extract_token_metadata_from_chain_metadata,
 };
 use crate::tx::NearTransaction;
@@ -53,17 +53,23 @@ fn token_registry_for(
     // the permissive one has no payload to carry, so the deployment's
     // env-configured curators stand in.
     //
-    // A posture added upstream after this build recognizes nobody rather than
-    // guessing which of the two it resembles: an empty allowlist leaves every
-    // signature unrecognized, so entries fall back to gap-fill-only terms.
+    // A posture added upstream after this build refuses the request-scoped
+    // metadata outright rather than guessing which of the two it resembles, and
+    // says so: the same fail-closed outcome an empty allowlist would reach, but
+    // stated rather than emergent, so the signer is not left with a silently
+    // thinner payload. Amounts then resolve from `tokens::SEEDS` alone.
     // Unreachable today -- `MetadataTrustPolicy` is `#[non_exhaustive]`, so a
     // third variant cannot be constructed from this crate, which is also why
     // this arm carries no test.
-    let no_signers = SignerAllowlist::new();
     let allowlist = match trust_policy {
         MetadataTrustPolicy::RequireAllowlistedSigner(allow) => allow,
         MetadataTrustPolicy::AcceptUnsigned => authorized_token_metadata_signers(),
-        _ => &no_signers,
+        unknown => {
+            return (
+                LayeredRegistry::new(Arc::new(NearTokenRegistry::default())),
+                unknown_posture_diagnostics(unknown),
+            );
+        }
     };
     let extraction = try_extract_token_metadata_from_chain_metadata(
         options.metadata.as_ref(),
@@ -81,6 +87,23 @@ fn token_registry_for(
         registry,
         crate::presets::intents::rejected_metadata_diagnostics(&extraction.rejected),
     )
+}
+
+/// Refuse the whole request-scoped metadata blob under a trust posture this
+/// build does not recognize, reported as one refusal naming the posture.
+///
+/// One diagnostic rather than one per entry: the posture is a property of the
+/// deployment, not of any entry, and the reason is identical for every one. The
+/// posture's `Display` is what an operator sees in the startup log, so quoting
+/// it here lets the two be matched up.
+fn unknown_posture_diagnostics(policy: &MetadataTrustPolicy) -> Vec<SignablePayloadField> {
+    crate::presets::intents::rejected_metadata_diagnostics(&[RejectedTokenMetadata {
+        asset_id: "all assets".to_string(),
+        reason: format!(
+            "this build does not recognize the deployment's trust posture ({policy}), so no \
+             caller-supplied token metadata was used"
+        ),
+    }])
 }
 
 /// Resolve the network for one request: the `network_id` the request supplied,
