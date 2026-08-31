@@ -134,7 +134,7 @@ cargo run --bin parser_cli -- decode \
 Two details differ from the Ethereum and Solana mapping flags:
 
 - **`@` separates the fields, not `:`.** NEAR Intents asset ids contain their own colons (`nep141:wrap.near`), so a colon-delimited format would truncate the id at its first embedded colon.
-- **The CLI signs each entry it loads** with its local development key, because it runs the same require-signed posture as the deployed parser — an unsigned entry is dropped rather than trusted. That key is allowlisted only in builds that enable the `dev-signing` feature, which `parser_cli` does and the enclave binary does not.
+- **The CLI signs each entry it loads** with its local development key, because it runs the require-signed posture — an unsigned entry is dropped rather than trusted. That key is allowlisted only in builds that enable the `dev-signing` feature, which `parser_cli` does and the enclave binary does not. The posture is a per-deployment choice, not a property of the parser: `parser_cli` pins require-signed, while `parser_app` registers the converter with the permissive default.
 
 Repeat the flag for each asset. A mapping that fails to parse or whose file can't be read is reported and skipped; the rest still load.
 
