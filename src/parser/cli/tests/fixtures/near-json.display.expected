@@ -1,6 +1,14 @@
 {
   "Fields": [
     {
+      "FallbackText": "NEAR Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "NEAR Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
       "FallbackText": "alice.near",
       "Label": "Signer",
       "TextV2": {
