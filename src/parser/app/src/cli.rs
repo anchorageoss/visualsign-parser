@@ -119,7 +119,7 @@ impl GetParserForOptions for ParserParser {
             .token(
                 Token::new(
                     ACCEPT_SIGNATURES_FROM_PUBKEY,
-                    "Required (exactly one of --accept-unsigned-abis / --accept-signatures-from-pubkey): only accept caller-supplied ABI mappings signed by this hex secp256k1 public key; unsigned and otherwise-signed mappings are rejected. Repeatable. Mutually exclusive with --accept-unsigned-abis.",
+                    "Required (exactly one of --accept-unsigned-abis / --accept-signatures-from-pubkey): only accept caller-supplied ABI mappings signed by this hex secp256k1 public key; unsigned and otherwise-signed mappings are rejected. Repeatable. Mutually exclusive with --accept-unsigned-abis. Requires a build with the `ethereum` feature (on by default); a build without it refuses to start when this flag is given.",
                 )
                 .takes_value(true)
                 .allow_multiple(true)
