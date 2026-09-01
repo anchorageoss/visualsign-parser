@@ -144,17 +144,44 @@ fn token_amount_field(
     }
 }
 
-/// Charset-filter an optional field string, dropping it only when the value
-/// itself is empty.
+/// Stands in for a present value that renders as nothing, where the value
+/// being present is itself what the signer needs to see.
+const EMPTY_VALUE: &str = "(empty)";
+
+/// Charset-filter an optional field string, dropping it when the value is
+/// empty.
+///
+/// Only for fields whose presence carries no meaning of its own, so that a
+/// value rendering as nothing and a value never supplied are genuinely the
+/// same thing to the signer. A `memo` is such a field: it annotates the
+/// transfer and changes nothing the transfer does. Where presence does change
+/// what executes, use [`present_value`] instead -- dropping the field there
+/// hides the difference between the two on-chain behaviours.
 ///
 /// `charset_safe` marks what it cannot render rather than deleting it, so an
-/// all-non-ASCII memo renders as markers instead of vanishing. That is the
-/// intended reading: the sender attached text, and a signer who sees nothing
-/// cannot tell that from a memo that was never sent. The emptiness test still
-/// drops a genuinely empty string, which would otherwise render as a labelled
-/// blank line reading as a deliberately empty memo.
+/// all-non-ASCII memo renders as markers and reaches the signer; only a
+/// genuinely empty string is dropped, which would otherwise render as a
+/// labelled blank line reading as a deliberately empty memo.
 fn nonempty_filtered(text: Option<&str>) -> Option<String> {
     text.map(charset_safe).filter(|t| !t.is_empty())
+}
+
+/// Charset-filter a value whose presence changes what the transaction does,
+/// substituting [`EMPTY_VALUE`] when nothing renders.
+///
+/// An empty `msg` still selects a contract-calling form on-chain: a
+/// `NotifyOnTransfer` invokes `mt_on_transfer` on the receiver whatever its
+/// `msg` holds, and a withdraw's `Some("")` takes the `_transfer_call` branch
+/// rather than the plain one. Dropping the field for want of text would render
+/// those byte-identically to the transfer that calls nothing, so the signer
+/// would approve a receiver callback with nothing on screen distinguishing it.
+fn present_value(text: &str) -> String {
+    let filtered = charset_safe(text);
+    if filtered.is_empty() {
+        EMPTY_VALUE.to_string()
+    } else {
+        filtered
+    }
 }
 
 /// Format a yoctoNEAR balance as a `<amount> NEAR` text field.
@@ -335,9 +362,13 @@ fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignErr
     // `_transfer_call` form), and `state_init` initializes the receiver's
     // contract in the same receipt.
     if let Some(notification) = &t.notification {
-        if let Some(msg) = nonempty_filtered(Some(notification.msg.as_str())) {
-            fields.push(create_text_field("Message", &msg)?.signable_payload_field);
-        }
+        // Rendered on presence, not on content: `msg` is a required `String`
+        // here, and `notify_on_transfer` builds the `mt_on_transfer` promise
+        // whenever the notification exists, whatever it holds.
+        fields.push(
+            create_text_field("Message", &present_value(notification.msg.as_str()))?
+                .signable_payload_field,
+        );
         if notification.state_init.is_some() {
             fields.push(state_init_field()?);
         }
@@ -360,8 +391,11 @@ fn push_withdraw_call_details(
     if let Some(memo) = nonempty_filtered(memo.as_deref()) {
         fields.push(create_text_field("Memo", &memo)?.signable_payload_field);
     }
-    if let Some(msg) = nonempty_filtered(msg.as_deref()) {
-        fields.push(create_text_field("Message", &msg)?.signable_payload_field);
+    // `Some("")` is not the same withdraw as `None`: it selects the
+    // `_transfer_call` form, which invokes a callback on the receiver. The
+    // field renders on presence so the two cannot look alike.
+    if let Some(msg) = msg.as_deref() {
+        fields.push(create_text_field("Message", &present_value(msg))?.signable_payload_field);
     }
     if let Some(deposit) = storage_deposit {
         fields.push(near_amount_field(
@@ -1020,6 +1054,31 @@ mod tests {
         assert_eq!(labels, ["Contract", "For Account", "Amount"]);
     }
 
+    /// `Some("")` is a different withdraw from `None`: it takes the
+    /// `_transfer_call` branch, which invokes a callback on the receiver.
+    /// Rendering nothing for it would make the two indistinguishable.
+    #[test]
+    fn ft_withdraw_with_an_empty_message_still_renders_it() {
+        let with_msg = intent_from(
+            r#"{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"alice.near","amount":"1","msg":""}"#,
+        );
+        let fields = render_intent(&with_msg, &empty_reg()).expect("render");
+        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
+        assert!(labels.contains(&"Message"), "labels: {labels:?}");
+        assert_eq!(text_at(&fields, "Message"), "(empty)");
+
+        let without_msg = intent_from(
+            r#"{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"alice.near","amount":"1"}"#,
+        );
+        let plain = render_intent(&without_msg, &empty_reg()).expect("render");
+        let plain_labels: Vec<&str> = plain.iter().filter_map(label_of).collect();
+        assert!(
+            !plain_labels.contains(&"Message"),
+            "a withdraw with no msg calls nothing back and must render no Message: \
+             {plain_labels:?}"
+        );
+    }
+
     #[test]
     fn ft_withdraw_renders_token_receiver_amount() {
         let intent = intent_from(
@@ -1139,6 +1198,38 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
         assert_eq!(labels, ["To", "Amount"]);
+    }
+
+    /// `notify_on_transfer` builds the `mt_on_transfer` promise whenever the
+    /// notification is present, whatever `msg` holds. An empty one that
+    /// rendered nothing would be byte-identical to the transfer that calls no
+    /// contract at all -- the signer would approve a receiver callback with
+    /// nothing on screen naming it.
+    #[test]
+    fn transfer_with_an_empty_notification_message_still_renders_it() {
+        let intent = intent_from(
+            r#"{"intent":"transfer","receiver_id":"attacker.near","tokens":{"nep141:wrap.near":"1"},"msg":""}"#,
+        );
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
+        assert_eq!(
+            labels,
+            ["To", "Amount", "Message"],
+            "an empty notification must not render as no notification"
+        );
+        assert_eq!(text_at(&fields, "Message"), "(empty)");
+    }
+
+    /// The other input that used to reach the same collapse. It no longer
+    /// sanitizes to nothing, so the field carries markers rather than needing
+    /// the placeholder.
+    #[test]
+    fn transfer_with_an_unrenderable_notification_message_renders_markers() {
+        let intent = intent_from(
+            r#"{"intent":"transfer","receiver_id":"attacker.near","tokens":{"nep141:wrap.near":"1"},"msg":"éé"}"#,
+        );
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert_eq!(text_at(&fields, "Message"), "??");
     }
 
     #[test]
