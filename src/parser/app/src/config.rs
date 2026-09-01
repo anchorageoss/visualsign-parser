@@ -22,6 +22,15 @@ impl ParserConfig {
         Self { abi_trust }
     }
 
+    /// The permissive posture, for callers that don't parse `--accept-unsigned-abis`
+    /// / `--accept-signatures-from-pubkey` cmdline flags themselves (e.g. the
+    /// non-attested dev gRPC server) but still need a `ParserConfig`. Unlike
+    /// [`Self::abi_trust_from_options`], this can't fail.
+    #[must_use]
+    pub fn accept_unsigned() -> Self {
+        Self::new(MetadataTrustPolicy::AcceptUnsigned)
+    }
+
     /// Resolve the two mutually exclusive ABI-trust cmdline options into a posture.
     ///
     /// `accept_unsigned` is the `--accept-unsigned-abis` flag; `signer_pubkeys` holds

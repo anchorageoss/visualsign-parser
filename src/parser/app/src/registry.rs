@@ -97,6 +97,22 @@ mod tests {
         }
     }
 
+    /// Builds a registry under the given policy and renders the fixture tx, for the
+    /// two tests below that assert opposite outcomes for the same conversion.
+    fn render_custom_foo(policy: visualsign::signing::MetadataTrustPolicy) -> String {
+        let config = crate::config::ParserConfig::new(policy);
+        super::create_registry(&config)
+            .convert_transaction(
+                &Chain::Ethereum,
+                CUSTOM_FOO_TX_HEX,
+                options_with_unsigned_abi(),
+            )
+            .expect("fixture transaction must convert")
+            .payload
+            .to_json()
+            .expect("payload must serialize")
+    }
+
     /// Pins the ABI trust posture the deployed binary actually runs.
     ///
     /// `create_registry` is the only production construction site for the Ethereum
@@ -116,19 +132,7 @@ mod tests {
     /// at which this assertion's premise is revisited.
     #[test]
     fn create_registry_runs_the_accept_unsigned_abi_posture() {
-        let config = crate::config::ParserConfig::new(
-            visualsign::signing::MetadataTrustPolicy::AcceptUnsigned,
-        );
-        let rendered = super::create_registry(&config)
-            .convert_transaction(
-                &Chain::Ethereum,
-                CUSTOM_FOO_TX_HEX,
-                options_with_unsigned_abi(),
-            )
-            .expect("fixture transaction must convert")
-            .payload
-            .to_json()
-            .expect("payload must serialize");
+        let rendered = render_custom_foo(visualsign::signing::MetadataTrustPolicy::AcceptUnsigned);
 
         assert!(
             rendered.contains("customFoo"),
@@ -152,21 +156,11 @@ mod tests {
     /// posture has to reach the converter for the test to hold.
     #[test]
     fn create_registry_runs_the_require_signed_abi_posture() {
-        let config = crate::config::ParserConfig::new(
+        let rendered = render_custom_foo(
             visualsign::signing::MetadataTrustPolicy::RequireAllowlistedSigner(
                 visualsign::signing::SignerAllowlist::new(),
             ),
         );
-        let rendered = super::create_registry(&config)
-            .convert_transaction(
-                &Chain::Ethereum,
-                CUSTOM_FOO_TX_HEX,
-                options_with_unsigned_abi(),
-            )
-            .expect("fixture transaction must convert")
-            .payload
-            .to_json()
-            .expect("payload must serialize");
 
         assert!(
             !rendered.contains("customFoo"),

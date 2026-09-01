@@ -97,8 +97,8 @@ Exceptions: test modules use `#[allow(clippy::unwrap_used, clippy::expect_used, 
 
 ### Deploy-Time ABI Trust Posture
 
-Whether the parser honours caller-supplied ABI mappings that carry no signature is a
-deploy-time choice, not a per-request one. `parser_app` requires exactly one of:
+Whether the parser honours caller-supplied Ethereum ABI mappings that carry no signature
+is a deploy-time choice, not a per-request one. `parser_app` requires exactly one of:
 
 - `--accept-unsigned-abis` — unsigned `abi_mappings` are registered. A signature that
   *is* present must still verify (integrity), but its signer is not checked against an
@@ -106,12 +106,18 @@ deploy-time choice, not a per-request one. `parser_app` requires exactly one of:
 - `--accept-signatures-from-pubkey <hex>` (repeatable) — every mapping must be signed
   by one of the given secp256k1 keys; unsigned or otherwise-signed mappings are dropped.
 
-The flags become `pivotArgs` in the TVC deployment manifest (see `tools/tvc-deploy`), so
-a signer can verify which posture a deployment runs out of band. Represented in code by
-`visualsign::signing::MetadataTrustPolicy`, threaded through `parser_app::config::ParserConfig`
-into `EthereumVisualSignConverter::with_policy`. `parser_grpc_server` takes the same flags
-but defaults to accept-unsigned (non-attested dev server); `parser_cli` runs require-signed
-against the local dev key it signs its own ABI files with.
+This posture only governs Ethereum `abi_mappings`. Solana `idl_mappings` go through a
+separate, unsigned-accepting path gated by the `VISUALSIGN_SOL_IDL_SIGNERS` env var,
+unaffected by either flag.
+
+The intended end state is for the flags to land in the TVC deployment manifest's
+`pivotArgs` (see `tools/tvc-deploy`), so a signer can verify which posture a deployment
+runs out of band; wiring `tools/tvc-deploy` to emit them has not landed yet and is
+tracked as a follow-up. Represented in code by `visualsign::signing::MetadataTrustPolicy`,
+threaded through `parser_app::config::ParserConfig` into
+`EthereumVisualSignConverter::with_policy`. `parser_grpc_server` currently hardcodes
+accept-unsigned (non-attested dev server); exposing the same flags there is a follow-up.
+`parser_cli` runs require-signed against the local dev key it signs its own ABI files with.
 
 ### Design Decisions
 

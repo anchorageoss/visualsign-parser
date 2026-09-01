@@ -38,11 +38,9 @@ impl GrpcService {
             .expect("Failed to load ephemeral key");
         // This dev-only server keeps the historical accept-unsigned posture. A
         // later commit puts it behind the same cmdline flags parser_app takes.
-        let abi_trust = ParserConfig::abi_trust_from_options(true, &[])
-            .expect("accept-unsigned is always a valid posture");
         Self {
             ephemeral_key,
-            config: ParserConfig::new(abi_trust),
+            config: ParserConfig::accept_unsigned(),
         }
     }
 }

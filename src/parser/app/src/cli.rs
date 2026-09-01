@@ -27,8 +27,8 @@ pub struct ParserOpts {
 
 impl ParserOpts {
     fn new(args: &mut Vec<String>) -> Self {
-        let parsed =
-            OptionsParser::<ParserParser>::parse(args).expect("Parser: Entered invalid CLI args");
+        let parsed = OptionsParser::<ParserParser>::parse(args)
+            .unwrap_or_else(|e| panic!("Parser: invalid CLI args: {e}"));
 
         Self { parsed }
     }
@@ -112,14 +112,14 @@ impl GetParserForOptions for ParserParser {
             .token(
                 Token::new(
                     ACCEPT_UNSIGNED_ABIS,
-                    "accept caller-supplied ABI mappings that carry no signature. Their integrity and provenance are unverified. Mutually exclusive with --accept-signatures-from-pubkey.",
+                    "Required (exactly one of --accept-unsigned-abis / --accept-signatures-from-pubkey): accept caller-supplied ABI mappings that carry no signature. Their integrity and provenance are unverified. Mutually exclusive with --accept-signatures-from-pubkey.",
                 )
                 .forbids(vec![ACCEPT_SIGNATURES_FROM_PUBKEY]),
             )
             .token(
                 Token::new(
                     ACCEPT_SIGNATURES_FROM_PUBKEY,
-                    "only accept caller-supplied ABI mappings signed by this hex secp256k1 public key; unsigned and otherwise-signed mappings are rejected. Repeatable. Mutually exclusive with --accept-unsigned-abis.",
+                    "Required (exactly one of --accept-unsigned-abis / --accept-signatures-from-pubkey): only accept caller-supplied ABI mappings signed by this hex secp256k1 public key; unsigned and otherwise-signed mappings are rejected. Repeatable. Mutually exclusive with --accept-unsigned-abis.",
                 )
                 .takes_value(true)
                 .allow_multiple(true)
