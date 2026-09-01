@@ -1,8 +1,12 @@
-//! `NearVisualSignConverter`: NEAR transaction -> VisualSign payload.
+//! `NearVisualSignConverter`: NEAR input -> VisualSign payload.
+
+use std::sync::Arc;
 
 use near_primitives::action::Action;
+use near_primitives::transaction::Transaction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_address_field, create_text_field};
+use visualsign::registry::LayeredRegistry;
 use visualsign::vsptrait::{
     ConversionResult, VisualSignConverter, VisualSignConverterFromString, VisualSignOptions,
 };
@@ -10,11 +14,12 @@ use visualsign::{SignablePayload, SignablePayloadField};
 
 use crate::actions::render_action;
 use crate::networks::{NearNetwork, extract_network_from_metadata};
+use crate::presets::intents::NearTokenRegistry;
 use crate::tx::NearTransaction;
 
-/// Payload version emitted for NEAR transactions.
+/// Payload version emitted for NEAR payloads.
 const PAYLOAD_VERSION: i64 = 0;
-/// Payload type tag emitted for NEAR transactions, matching the other chain
+/// Payload type tag emitted for NEAR payloads, matching the other chain
 /// crates' convention (`"SolanaTx"`, `"TronTx"`).
 const PAYLOAD_TYPE: &str = "NearTx";
 
@@ -44,8 +49,19 @@ impl VisualSignConverter<NearTransaction> for NearVisualSignConverter {
         transaction: NearTransaction,
         options: VisualSignOptions,
     ) -> Result<ConversionResult, VisualSignError> {
-        let tx = transaction.inner();
+        match transaction {
+            NearTransaction::OnChain(tx) => self.render_on_chain(&tx, &options),
+            NearTransaction::Intent(json) => render_intent_envelope(&json, &options),
+        }
+    }
+}
 
+impl NearVisualSignConverter {
+    fn render_on_chain(
+        &self,
+        tx: &Transaction,
+        options: &VisualSignOptions,
+    ) -> Result<ConversionResult, VisualSignError> {
         if tx.actions().is_empty() {
             return Err(VisualSignError::ValidationError(
                 "NEAR transaction has no actions".to_string(),
@@ -78,6 +94,7 @@ impl VisualSignConverter<NearTransaction> for NearVisualSignConverter {
         let total_actions = tx.actions().len();
         for action in tx.actions() {
             fields.extend(render_action(action, total_actions)?);
+            fields.extend(decode_intents(tx.receiver_id().as_str(), action, options)?);
         }
 
         Ok(ConversionResult::new(SignablePayload::new(
@@ -103,6 +120,48 @@ impl VisualSignConverterFromString<NearTransaction> for NearVisualSignConverter 
         .map_err(VisualSignError::ParseError)?;
         self.to_validated_visual_sign_payload(transaction, options)
     }
+}
+
+/// Decode an `execute_intents` call to `intents.near` and render the signed
+/// intent batch. Any other action or receiver yields no extra fields. A
+/// decode failure surfaces as a conversion error rather than silently
+/// dropping the intents.
+fn decode_intents(
+    receiver_id: &str,
+    action: &Action,
+    options: &VisualSignOptions,
+) -> Result<Vec<SignablePayloadField>, VisualSignError> {
+    if receiver_id != "intents.near" {
+        return Ok(vec![]);
+    }
+    let Action::FunctionCall(fc) = action else {
+        return Ok(vec![]);
+    };
+    if fc.method_name != "execute_intents" {
+        return Ok(vec![]);
+    }
+    let registry = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+    crate::presets::intents::try_decode_execute_intents(&fc.args, &registry, options)
+        .map_err(|e| VisualSignError::ConversionError(e.to_string()))
+}
+
+/// Render the pre-signature intents envelope a user is about to sign: no
+/// signature exists yet, so this is a confirmation view only.
+fn render_intent_envelope(
+    json: &str,
+    options: &VisualSignOptions,
+) -> Result<ConversionResult, VisualSignError> {
+    let registry = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+    let fields =
+        crate::presets::intents::try_render_single_intent(json.as_bytes(), &registry, options)
+            .map_err(|e| VisualSignError::ConversionError(e.to_string()))?;
+    Ok(ConversionResult::new(SignablePayload::new(
+        PAYLOAD_VERSION,
+        "NEAR Intent".to_string(),
+        None,
+        fields,
+        PAYLOAD_TYPE.to_string(),
+    )))
 }
 
 /// Title for the payload: a single action names itself, otherwise a generic
@@ -139,10 +198,10 @@ mod tests {
     use super::*;
     use generated::parser::{ChainMetadata, NearMetadata, chain_metadata};
     use near_crypto::{KeyType, PublicKey, Signature};
-    use near_primitives::action::{CreateAccountAction, TransferAction};
+    use near_primitives::action::{CreateAccountAction, FunctionCallAction, TransferAction};
     use near_primitives::hash::CryptoHash;
     use near_primitives::transaction::{SignedTransaction, TransactionV0};
-    use near_primitives::types::Balance;
+    use near_primitives::types::{Balance, Gas};
     use visualsign::vsptrait::DeveloperConfig;
 
     fn transfer() -> Action {
@@ -156,16 +215,14 @@ mod tests {
     }
 
     fn near_tx_as(signer_id: &str, receiver_id: &str, actions: Vec<Action>) -> NearTransaction {
-        NearTransaction::new(near_primitives::transaction::Transaction::V0(
-            TransactionV0 {
-                signer_id: signer_id.parse().expect("valid account id"),
-                public_key: PublicKey::empty(KeyType::ED25519),
-                nonce: 0,
-                receiver_id: receiver_id.parse().expect("valid account id"),
-                block_hash: CryptoHash::default(),
-                actions,
-            },
-        ))
+        NearTransaction::OnChain(Transaction::V0(TransactionV0 {
+            signer_id: signer_id.parse().expect("valid account id"),
+            public_key: PublicKey::empty(KeyType::ED25519),
+            nonce: 0,
+            receiver_id: receiver_id.parse().expect("valid account id"),
+            block_hash: CryptoHash::default(),
+            actions,
+        }))
     }
 
     #[test]
@@ -290,7 +347,10 @@ mod tests {
     }
 
     fn signed_transfer_hex() -> String {
-        let unsigned = near_tx(vec![transfer()]).inner().clone();
+        let unsigned = match near_tx(vec![transfer()]) {
+            NearTransaction::OnChain(tx) => tx,
+            NearTransaction::Intent(_) => panic!("expected OnChain"),
+        };
         let signed = SignedTransaction::new(Signature::empty(KeyType::ED25519), unsigned);
         hex::encode(borsh::to_vec(&signed).expect("borsh encode"))
     }
@@ -316,5 +376,61 @@ mod tests {
         };
         let result = converter.to_visual_sign_payload_from_string(&signed_transfer_hex(), options);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn execute_intents_call_renders_intents() {
+        let inner = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
+        let args = serde_json::json!({"signed":[{
+            "standard": "raw_ed25519",
+            "payload": inner,
+            "public_key": "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN",
+            "signature": "ed25519:3vtbNQJHZfuV1s5DykzyjkbNLc583hnkrhTz57eDhd966iqzkor6Twgr4Loh2C195SCSEsiGfrd6KcxpjNq9ZbVj"
+        }]});
+
+        let txv0 = TransactionV0 {
+            signer_id: "alice.near".parse().unwrap(),
+            public_key: "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"
+                .parse()
+                .unwrap(),
+            nonce: 1,
+            receiver_id: "intents.near".parse().unwrap(),
+            block_hash: CryptoHash::default(),
+            actions: vec![Action::FunctionCall(Box::new(FunctionCallAction {
+                method_name: "execute_intents".to_string(),
+                args: serde_json::to_vec(&args).unwrap(),
+                gas: Gas::from_gas(30_000_000_000_000),
+                deposit: Balance::from_yoctonear(0),
+            }))],
+        };
+        let near_tx = NearTransaction::OnChain(Transaction::V0(txv0));
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(near_tx, VisualSignOptions::default())
+            .expect("convert");
+        let json = payload.payload.to_json().expect("json");
+
+        // Generic FunctionCall view + decoded intents both present.
+        assert!(json.contains("execute_intents"), "method missing: {json}");
+        assert!(json.contains("Signer"), "intents envelope missing: {json}");
+        assert!(
+            json.contains("wNEAR"),
+            "resolved ft_withdraw amount missing: {json}"
+        );
+    }
+
+    #[test]
+    fn intent_envelope_renders_without_signature_section() {
+        let swap = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2100-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(
+                NearTransaction::Intent(swap.to_string()),
+                VisualSignOptions::default(),
+            )
+            .expect("convert");
+        let json = payload.payload.to_json().expect("json");
+        for expected in ["Signer", "alice.near", "wNEAR"] {
+            assert!(json.contains(expected), "missing {expected}: {json}");
+        }
+        assert!(!json.contains("Standard"), "unexpected signature section");
     }
 }

@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use generated::health::{AppHealthRequest, AppHealthResponse};
-use generated::parser::{Chain, ParseRequest};
+use generated::parser::{Chain, ChainMetadata, NearMetadata, ParseRequest, chain_metadata};
 use integration::TestArgs;
 use qos_crypto::sha_256;
 use tonic::Code;
@@ -748,6 +748,271 @@ async fn parser_sui_native_transfer_e2e() {
             serde_json::from_str(&parsed_transaction.parsed_payload).unwrap();
 
         validate_required_fields_present(&signable_payload, &expected_sp);
+    }
+
+    integration::Builder::new().execute(test).await
+}
+
+#[tokio::test]
+async fn parser_near_native_transfer_e2e() {
+    async fn test(test_args: TestArgs) {
+        // Borsh-encoded unsigned NEAR Transfer: alice.near -> bob.near, 1 NEAR.
+        let near_transfer_hex = "0a000000616c6963652e6e656172000000000000000000000000000000000000000000000000000000000000000000010000000000000008000000626f622e6e65617200000000000000000000000000000000000000000000000000000000000000000100000003000000a1edccce1bc2d3000000000000";
+
+        let parse_request = ParseRequest {
+            include_intermediate_output: false,
+            unsigned_payload: near_transfer_hex.to_string(),
+            chain: Chain::Near as i32,
+            chain_metadata: None,
+        };
+
+        let parse_response = test_args
+            .parser_client
+            .unwrap()
+            .parse(tonic::Request::new(parse_request))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let parsed_transaction = parse_response.parsed_transaction.unwrap().payload.unwrap();
+
+        let expected_sp = serde_json::json!({
+            "Fields": [
+                {
+                    "FallbackText": "NEAR Mainnet",
+                    "Label": "Network",
+                    "TextV2": { "Text": "NEAR Mainnet" },
+                    "Type": "text_v2"
+                },
+                {
+                    "FallbackText": "alice.near",
+                    "Label": "From",
+                    "AddressV2": { "Address": "alice.near" },
+                    "Type": "address_v2"
+                },
+                {
+                    "FallbackText": "bob.near",
+                    "Label": "To",
+                    "AddressV2": { "Address": "bob.near" },
+                    "Type": "address_v2"
+                },
+                {
+                    "FallbackText": "1 NEAR",
+                    "Label": "Amount",
+                    "AmountV2": { "Amount": "1", "Abbreviation": "NEAR" },
+                    "Type": "amount_v2"
+                }
+            ],
+            "PayloadType": "NearTx",
+            "Title": "Transfer",
+            "Version": "0"
+        });
+
+        let signable_payload: serde_json::Value =
+            serde_json::from_str(&parsed_transaction.parsed_payload).unwrap();
+        assert_eq!(&signable_payload, &expected_sp);
+        validate_safe_charset(&parsed_transaction.parsed_payload);
+    }
+
+    integration::Builder::new().execute(test).await
+}
+
+/// Builds the `chain_metadata` a wallet supplies to select a NEAR network.
+fn near_chain_metadata(network_id: &str) -> Option<ChainMetadata> {
+    Some(ChainMetadata {
+        metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+            network_id: Some(network_id.to_string()),
+        })),
+    })
+}
+
+#[tokio::test]
+async fn parser_near_metadata_selects_the_network_e2e() {
+    async fn test(test_args: TestArgs) {
+        // Same shape as the mainnet vector above, with `.testnet` accounts:
+        // alice.testnet -> bob.testnet, 1 NEAR, nonce 1.
+        let near_testnet_transfer_hex = "0d000000616c6963652e746573746e657400000000000000000000000000000000000000000000000000000000000000000001000000000000000b000000626f622e746573746e657400000000000000000000000000000000000000000000000000000000000000000100000003000000a1edccce1bc2d3000000000000";
+
+        let parse_request = ParseRequest {
+            include_intermediate_output: false,
+            unsigned_payload: near_testnet_transfer_hex.to_string(),
+            chain: Chain::Near as i32,
+            chain_metadata: near_chain_metadata("NEAR_TESTNET"),
+        };
+
+        let parse_response = test_args
+            .parser_client
+            .unwrap()
+            .parse(tonic::Request::new(parse_request))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let parsed_transaction = parse_response.parsed_transaction.unwrap().payload.unwrap();
+        let signable_payload: serde_json::Value =
+            serde_json::from_str(&parsed_transaction.parsed_payload).unwrap();
+
+        // The whole point of the test: the network came from the protobuf
+        // metadata, not from the converter's compiled-in mainnet default.
+        // Asserted field-wise rather than through validate_json_structure,
+        // which requires the expected array to carry every field.
+        let network = &signable_payload["Fields"][0];
+        assert_eq!(network["Label"], "Network");
+        assert_eq!(network["TextV2"]["Text"], "NEAR Testnet");
+        assert_eq!(network["FallbackText"], "NEAR Testnet");
+        validate_safe_charset(&parsed_transaction.parsed_payload);
+    }
+
+    integration::Builder::new().execute(test).await
+}
+
+#[tokio::test]
+async fn parser_near_metadata_network_reaches_the_account_suffix_check_e2e() {
+    async fn test(test_args: TestArgs) {
+        // A mainnet-suffixed transaction declared as Testnet. Rejection can
+        // only happen if the metadata-supplied network reached the converter
+        // and overrode its default -- a metadata value that deserialized but
+        // was then ignored would render this as NEAR Mainnet instead.
+        let near_mainnet_transfer_hex = "0a000000616c6963652e6e656172000000000000000000000000000000000000000000000000000000000000000000010000000000000008000000626f622e6e65617200000000000000000000000000000000000000000000000000000000000000000100000003000000a1edccce1bc2d3000000000000";
+
+        let parse_request = ParseRequest {
+            include_intermediate_output: false,
+            unsigned_payload: near_mainnet_transfer_hex.to_string(),
+            chain: Chain::Near as i32,
+            chain_metadata: near_chain_metadata("NEAR_TESTNET"),
+        };
+
+        let parse_error = test_args
+            .parser_client
+            .unwrap()
+            .parse(tonic::Request::new(parse_request))
+            .await
+            .unwrap_err();
+
+        assert_eq!(parse_error.code(), Code::InvalidArgument);
+        assert!(
+            parse_error.message().contains("alice.near"),
+            "the error must name the account whose suffix contradicts the network: {}",
+            parse_error.message()
+        );
+    }
+
+    integration::Builder::new().execute(test).await
+}
+
+#[tokio::test]
+async fn parser_near_intent_envelope_e2e() {
+    async fn test(test_args: TestArgs) {
+        // Pre-signature NEAR Intents envelope (near::sign_intent): a bare
+        // DefusePayload JSON, not a NEAR transaction. Routed under the same
+        // CHAIN_NEAR identity as the borsh case above, discriminated purely
+        // by input format.
+        let intent_json = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2100-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
+
+        let parse_request = ParseRequest {
+            include_intermediate_output: false,
+            unsigned_payload: intent_json.to_string(),
+            chain: Chain::Near as i32,
+            chain_metadata: None,
+        };
+
+        let parse_response = test_args
+            .parser_client
+            .unwrap()
+            .parse(tonic::Request::new(parse_request))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let parsed_transaction = parse_response.parsed_transaction.unwrap().payload.unwrap();
+
+        let expected_sp = serde_json::json!({
+            "Fields": [
+                {
+                    "FallbackText": "alice.near",
+                    "Label": "Signer",
+                    "TextV2": { "Text": "alice.near" },
+                    "Type": "text_v2"
+                },
+                {
+                    "FallbackText": "intents.near",
+                    "Label": "Verifying Contract",
+                    "TextV2": { "Text": "intents.near" },
+                    "Type": "text_v2"
+                },
+                {
+                    "FallbackText": "2100-01-01T00:00:00+00:00",
+                    "Label": "Deadline",
+                    "TextV2": { "Text": "2100-01-01T00:00:00+00:00" },
+                    "Type": "text_v2"
+                },
+                {
+                    "FallbackText": "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f",
+                    "Label": "Nonce",
+                    "TextV2": { "Text": "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f" },
+                    "Type": "text_v2"
+                },
+                {
+                    "FallbackText": "wrap.near",
+                    "Label": "Token",
+                    "TextV2": { "Text": "wrap.near" },
+                    "Type": "text_v2"
+                },
+                {
+                    "FallbackText": "bob.near",
+                    "Label": "To",
+                    "TextV2": { "Text": "bob.near" },
+                    "Type": "text_v2"
+                },
+                {
+                    "FallbackText": "1 wNEAR",
+                    "Label": "Amount",
+                    "AmountV2": { "Amount": "1", "Abbreviation": "wNEAR" },
+                    "Type": "amount_v2"
+                }
+            ],
+            "PayloadType": "NearTx",
+            "Title": "NEAR Intent",
+            "Version": "0"
+        });
+
+        let signable_payload: serde_json::Value =
+            serde_json::from_str(&parsed_transaction.parsed_payload).unwrap();
+        assert_eq!(&signable_payload, &expected_sp);
+        validate_safe_charset(&parsed_transaction.parsed_payload);
+    }
+
+    integration::Builder::new().execute(test).await
+}
+
+#[tokio::test]
+async fn parser_near_rejects_input_that_is_neither_transaction_nor_intent() {
+    async fn test(test_args: TestArgs) {
+        // Fail-closed format discrimination: input that is neither a NEAR
+        // borsh transaction nor a valid DefusePayload JSON envelope must be
+        // rejected, never guessed at or partially reinterpreted.
+        let parse_request = ParseRequest {
+            include_intermediate_output: false,
+            unsigned_payload: "not-hex-not-base64-not-json".to_string(),
+            chain: Chain::Near as i32,
+            chain_metadata: None,
+        };
+
+        let parse_error = test_args
+            .parser_client
+            .unwrap()
+            .parse(tonic::Request::new(parse_request))
+            .await
+            .unwrap_err();
+
+        assert_eq!(parse_error.code(), Code::InvalidArgument);
+        assert!(
+            parse_error
+                .message()
+                .contains("neither a NEAR borsh transaction nor a DefusePayload JSON envelope"),
+            "unexpected error message: {}",
+            parse_error.message()
+        );
     }
 
     integration::Builder::new().execute(test).await

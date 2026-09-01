@@ -5,11 +5,16 @@ edition = "2024"
 publish = false
 
 [features]
-default = ["solana", "ethereum", "tron", "diagnostics"]
+default = ["solana", "ethereum", "near", "tron", "diagnostics"]
 solana = ["dep:visualsign-solana"]
 ethereum = ["dep:visualsign-ethereum", "visualsign-ethereum/dev-signing"]
+near = ["dep:visualsign-near"]
 tron = ["dep:visualsign-tron"]
-diagnostics = ["visualsign/diagnostics", "visualsign-solana?/diagnostics"]
+diagnostics = [
+    "visualsign/diagnostics",
+    "visualsign-solana?/diagnostics",
+    "visualsign-near?/diagnostics",
+]
 serve = ["dep:axum", "dep:tokio", "dep:serde", "dep:serde_json"]
 
 [dependencies]
@@ -17,6 +22,7 @@ clap = { version = "4.0", features = ["derive"] }
 parser_cli_core = { path = "../cli-core" }
 visualsign  = { workspace = true }
 visualsign-ethereum = { path = "../../chain_parsers/visualsign-ethereum", optional = true }
+visualsign-near     = { path = "../../chain_parsers/visualsign-near",     optional = true }
 visualsign-solana   = { path = "../../chain_parsers/visualsign-solana",   optional = true }
 visualsign-tron     = { path = "../../chain_parsers/visualsign-tron",     optional = true }
 
