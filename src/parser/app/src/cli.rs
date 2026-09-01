@@ -153,16 +153,17 @@ impl Cli {
                 Err(e) => panic!("Parser: invalid ABI trust configuration: {e}"),
             };
             let config = ParserConfig::new(abi_trust);
-            let processor = crate::service::Processor::new(
-                EphemeralKeyHandle::new(opts.ephemeral_file()),
-                config.clone(),
-            );
 
             println!(
                 "---- Starting Parser server (version: {}) -----",
                 env!("VERSION")
             );
             println!("caller-supplied ABI trust: {}", config.abi_trust);
+            let processor = crate::service::Processor::new(
+                EphemeralKeyHandle::new(opts.ephemeral_file()),
+                config,
+            );
+
             let mut tasks = Vec::new();
             tasks.push(tokio::spawn(async move {
                 crate::host::Host::listen(opts.host_addr(), processor)
