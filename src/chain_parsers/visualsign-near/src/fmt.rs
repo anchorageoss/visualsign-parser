@@ -1,9 +1,22 @@
 //! yoctoNEAR, Tgas, and field-text formatting helpers.
 
-/// Strips everything except printable ASCII and spaces, so a chain-supplied
-/// string (`memo`, `msg`, `method_name`, an NFT/MT token id) cannot smuggle a
-/// newline into a text field's fallback text. The core crate's charset
-/// validator permits `\n` as the wallet's documented multi-line separator
+/// Marker substituted for a character that cannot be rendered.
+///
+/// Substituting rather than deleting keeps distinct inputs distinct: deletion
+/// renders `a\nb` and `ab` identically, so two chain-supplied values a signer
+/// must be able to tell apart can reach the screen as one string. It also
+/// makes the loss visible, instead of presenting what is left as the whole
+/// value.
+///
+/// `visualsign-solana`'s argument renderer marks elided characters the same
+/// way, so a signer reading either chain's fields reads one convention.
+const ELIDED: char = '?';
+
+/// Renders `text` as printable ASCII and spaces, substituting [`ELIDED`] for
+/// every other character, so a chain-supplied string (`memo`, `msg`,
+/// `method_name`, an NFT/MT token id) cannot smuggle a newline into a text
+/// field's fallback text. The core crate's charset validator permits `\n` as
+/// the wallet's documented multi-line separator
 /// (`SignablePayload::validate_charset`), so an unfiltered attacker-controlled
 /// string can render as extra apparent confirmed fields on the signing screen.
 ///
@@ -17,23 +30,32 @@
 /// remainder verbatim into a plain `String`, so an asset id needs filtering
 /// like any other caller-supplied text.
 ///
-/// Filtering rather than rejecting is deliberate. A legitimate memo carrying
-/// an accented character or an emoji loses those characters instead of failing
-/// the whole parse, which keeps a non-ASCII memo from denying the signer their
-/// transaction.
+/// Substituting rather than rejecting is deliberate. A legitimate memo
+/// carrying an accented character or an emoji renders with markers instead of
+/// failing the whole parse, which keeps a non-ASCII memo from denying the
+/// signer their transaction.
 ///
-/// A literal backslash is stripped too, on availability grounds rather than
+/// A literal backslash is marked too, on availability grounds rather than
 /// spoofing: it serializes as `\\`, so a backslash before `u`/`t`/`r`/`b`/`f`
 /// or `/` puts a `FORBIDDEN_JSON_ESCAPES` substring in the serialized payload
 /// and `SignablePayload::validate_charset` rejects the whole transaction.
 ///
-/// Double quotes are kept. They serialize as `\"`, which the core validator
+/// Double quotes are kept, which is where NEAR's allowed set differs from the
+/// Solana renderer's. They serialize as `\"`, which the core validator
 /// deliberately permits so field text can carry real embedded JSON -- and
-/// `ft_transfer_call`'s `msg` is exactly such a field, so deleting its quotes
-/// would strip structure a signer needs to read literally.
+/// `ft_transfer_call`'s `msg` is exactly such a field, so marking its quotes
+/// would obscure structure a signer needs to read literally. The Solana
+/// renderer emits its own `{key:value}` bracketing, where an unescaped quote
+/// is ambiguous, so it marks them.
 pub(crate) fn charset_safe(text: &str) -> String {
     text.chars()
-        .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '\\'))
+        .map(|c| {
+            if c == ' ' || (c.is_ascii_graphic() && c != '\\') {
+                c
+            } else {
+                ELIDED
+            }
+        })
         .collect()
 }
 
@@ -101,35 +123,35 @@ mod tests {
     }
 
     #[test]
-    fn charset_safe_strips_the_wallet_line_separator() {
+    fn charset_safe_marks_the_wallet_line_separator() {
         assert_eq!(
             charset_safe("innocent\nTo: alice.near"),
-            "innocentTo: alice.near"
+            "innocent?To: alice.near"
         );
     }
 
     /// `\t`, `\r`, `\b`, `\f` serialize to `FORBIDDEN_JSON_ESCAPES` substrings,
     /// which make `SignablePayload::validate_charset` refuse the whole
-    /// transaction. Stripping them here keeps one attacker-supplied byte from
+    /// transaction. Marking them here keeps one attacker-supplied byte from
     /// withholding the payload entirely.
     #[test]
-    fn charset_safe_strips_the_other_control_escapes() {
-        assert_eq!(charset_safe("a\tb\rc\u{8}d\u{c}e"), "abcde");
+    fn charset_safe_marks_the_other_control_escapes() {
+        assert_eq!(charset_safe("a\tb\rc\u{8}d\u{c}e"), "a?b?c?d?e");
     }
 
     #[test]
-    fn charset_safe_strips_a_literal_backslash() {
-        assert_eq!(charset_safe(r"a\u0041b"), "au0041b");
+    fn charset_safe_marks_a_literal_backslash() {
+        assert_eq!(charset_safe(r"a\u0041b"), "a?u0041b");
     }
 
     #[test]
-    fn charset_safe_strips_non_ascii() {
+    fn charset_safe_marks_non_ascii() {
         // A bidi override can reorder a rendered line without changing its
         // bytes; an emoji and an accent are simply outside the ASCII range the
         // core validator accepts.
         assert_eq!(
             charset_safe("caf\u{e9} \u{202e}dlrow \u{1f600}"),
-            "caf dlrow "
+            "caf? ?dlrow ?"
         );
     }
 
@@ -148,8 +170,23 @@ mod tests {
         assert_eq!(charset_safe(r#"{"amount":"1"}"#), r#"{"amount":"1"}"#);
     }
 
+    /// An all-non-ASCII string renders as markers rather than as nothing. The
+    /// signer learns the sender attached text they cannot read, which an empty
+    /// result would hide.
     #[test]
-    fn charset_safe_empties_an_all_non_ascii_string() {
-        assert_eq!(charset_safe("\u{e9}\u{e9}\u{e9}"), "");
+    fn charset_safe_marks_an_all_non_ascii_string() {
+        assert_eq!(charset_safe("\u{e9}\u{e9}\u{e9}"), "???");
+    }
+
+    /// Deleting unrenderable characters let distinct values collapse onto one
+    /// rendering. A signer comparing two fields has to be able to tell them
+    /// apart.
+    #[test]
+    fn charset_safe_keeps_distinct_values_distinct() {
+        assert_ne!(
+            charset_safe("innocent\nTo: alice.near"),
+            charset_safe("innocentTo: alice.near"),
+            "a value carrying a line separator must not render as one without it"
+        );
     }
 }
