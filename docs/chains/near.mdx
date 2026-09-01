@@ -128,8 +128,12 @@ cargo run --bin parser_cli -- decode \
   --chain near \
   --output human \
   --near-token-metadata-mappings 'MyToken@mytoken.json@nep141:my-token.near' \
-  -t '{"signer_id":"alice.near", ...}'
+  -t '{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2100-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"my-token.near","receiver_id":"bob.near","amount":"100000000"}]}'
 ```
+
+The envelope withdraws `my-token.near`, the asset the mapping covers, so the
+`Amount` field renders as `1 MYTOKEN` rather than `100000000 (unresolved
+nep141:my-token.near)`.
 
 Two details differ from the Ethereum and Solana mapping flags:
 
