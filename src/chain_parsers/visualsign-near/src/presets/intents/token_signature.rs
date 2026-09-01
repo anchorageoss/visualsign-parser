@@ -95,6 +95,12 @@ const MAX_TOKEN_METADATA_ENTRIES: usize = 256;
 /// account id (`nep141:a0b8...factory.bridge.near`), well inside this.
 const MAX_ASSET_ID_BYTES: usize = 128;
 
+/// How much of an oversized asset id the refusal names it by, counted in
+/// characters so a multi-byte boundary cannot be split. Long enough to
+/// distinguish one mapping from another, short enough that the copy stays
+/// bounded whatever the key's length.
+const ASSET_ID_PREVIEW_CHARS: usize = 32;
+
 /// Maximum accepted `decimals` value. `tokens::format_units` computes
 /// `10u128.pow(u32::from(decimals))`, which overflows above 38 -- a remote
 /// panic (debug) or a silently wrapped, wrong-looking amount (release, where
@@ -529,7 +535,11 @@ fn validate_secp256k1(
 /// instead of leaving it in an operator log the wallet never sees.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RejectedTokenMetadata {
-    /// The asset id the refused entry was keyed under.
+    /// The asset id the refused entry was keyed under, or -- when the key
+    /// itself broke [`MAX_ASSET_ID_BYTES`] -- its first
+    /// [`ASSET_ID_PREVIEW_CHARS`] characters followed by `...`, so refusing an
+    /// oversized key does not copy it whole. A refusal covering the entire map
+    /// rather than one entry is keyed `all assets`.
     pub asset_id: String,
     /// Why it was refused, in the same words as the operator log.
     pub reason: String,
@@ -631,18 +641,21 @@ pub fn try_extract_from_chain_metadata(
         }
 
         // First, and deliberately not through `reject!`: that macro clones the
-        // asset id into the rejection, which is exactly the copy this bound
-        // exists to prevent. The refusal quotes the length and stands in a fixed
-        // label for the key, so an oversized id is still reported without being
-        // echoed.
+        // whole asset id into the rejection, which is the copy this bound exists
+        // to prevent. A fixed-width prefix names the entry the signer's wallet
+        // supplied -- enough to identify which mapping was dropped -- without
+        // reintroducing an unbounded copy, and the reason carries the length.
+        // `rejected_metadata_diagnostics` charset-filters both halves, so the
+        // prefix cannot smuggle control characters onto the signing screen.
         if asset_id.len() > MAX_ASSET_ID_BYTES {
+            let preview: String = asset_id.chars().take(ASSET_ID_PREVIEW_CHARS).collect();
             let reason = format!(
                 "asset id exceeds size limit ({} bytes > {MAX_ASSET_ID_BYTES})",
                 asset_id.len()
             );
-            tracing::warn!("Skipping token metadata for an oversized asset id: {reason}");
+            tracing::warn!("Skipping token metadata for '{preview}...': {reason}");
             rejected.push(RejectedTokenMetadata {
-                asset_id: "oversized asset id".to_string(),
+                asset_id: format!("{preview}..."),
                 reason,
             });
             continue;
@@ -2335,6 +2348,88 @@ mod tests {
                 extraction.rejected[0].reason
             );
         }
+    }
+
+    /// An oversized asset id is refused like any other entry, but named by a
+    /// bounded prefix rather than copied whole: the signer still learns which
+    /// mapping was dropped, and the payload never carries the unbounded key
+    /// that `MAX_ASSET_ID_BYTES` exists to keep out of it.
+    #[test]
+    fn an_oversized_asset_id_is_reported_by_a_bounded_prefix() {
+        let oversized = format!("nep141:{}.near", "x".repeat(MAX_ASSET_ID_BYTES));
+        let metadata = chain_metadata_with(vec![(
+            oversized.as_str(),
+            TokenMetadataEntry {
+                value: VALUE.to_string(),
+                signature: None,
+                origin_chain: None,
+            },
+        )]);
+        let extraction = try_extract_from_chain_metadata(
+            Some(&metadata),
+            NETWORK,
+            &near_allowlist(),
+            &accept_unsigned_policy(),
+        );
+
+        assert!(extraction.registry.is_none(), "the entry must be refused");
+        assert_eq!(
+            extraction.rejected.len(),
+            1,
+            "expected exactly one reported rejection, got {:?}",
+            extraction.rejected
+        );
+        let rejection = &extraction.rejected[0];
+        let expected: String = oversized.chars().take(ASSET_ID_PREVIEW_CHARS).collect();
+        assert_eq!(
+            rejection.asset_id,
+            format!("{expected}..."),
+            "the refusal must name the entry by its leading characters"
+        );
+        assert!(
+            !rejection.asset_id.contains(&oversized),
+            "the whole key must not reach the payload: {}",
+            rejection.asset_id
+        );
+        assert!(
+            rejection.reason.contains("exceeds size limit")
+                && rejection.reason.contains(&oversized.len().to_string()),
+            "the refusal must quote the length that broke the bound: {}",
+            rejection.reason
+        );
+    }
+
+    /// The prefix is taken in characters, so a multi-byte key cannot be split
+    /// mid-character -- byte slicing here would panic on the whole request.
+    #[test]
+    fn an_oversized_multibyte_asset_id_is_previewed_on_a_character_boundary() {
+        let oversized = "é".repeat(MAX_ASSET_ID_BYTES);
+        let metadata = chain_metadata_with(vec![(
+            oversized.as_str(),
+            TokenMetadataEntry {
+                value: VALUE.to_string(),
+                signature: None,
+                origin_chain: None,
+            },
+        )]);
+        let extraction = try_extract_from_chain_metadata(
+            Some(&metadata),
+            NETWORK,
+            &near_allowlist(),
+            &accept_unsigned_policy(),
+        );
+
+        assert_eq!(
+            extraction.rejected.len(),
+            1,
+            "expected exactly one reported rejection, got {:?}",
+            extraction.rejected
+        );
+        assert_eq!(
+            extraction.rejected[0].asset_id,
+            format!("{}...", "é".repeat(ASSET_ID_PREVIEW_CHARS)),
+            "the preview must end on a character boundary"
+        );
     }
 
     /// An accepted entry reports no rejection, so the diagnostic can't fire on
