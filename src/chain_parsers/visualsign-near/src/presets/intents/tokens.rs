@@ -50,7 +50,7 @@ use super::{NearTokenRegistry, TokenMeta};
 /// - **the bridge registry** -- `get_token_id` maps the canonical Solana USDC
 ///   and USDT mints onto the two `sol-*` ids, and `get_native_token_id` names
 ///   `nbtc.bridge.near` for `Btc`;
-/// - **a self-describing id** -- the two `eth-0x…` ids embed the source-chain
+/// - **a self-describing id** -- the two `eth-0x...` ids embed the source-chain
 ///   contract address, so it can be checked against Ethereum directly.
 ///
 /// Assets whose id has none of these -- notably the per-token Base and
