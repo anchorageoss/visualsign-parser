@@ -15,7 +15,8 @@
 //! - `signatures` is dropped (unsigned txs have none).
 //! - All maps use `BTreeMap` so Borsh encoding is byte-deterministic.
 //! - `program_call_args` is emitted as a canonical JSON string
-//!   (`program_call_args_json`) because `serde_json::Value` does not implement
+//!   (`program_call_args_json`), as is the RPC's own decode (`parsed_json`),
+//!   because `serde_json::Value` does not implement
 //!   `BorshSerialize`. Keys are alphabetized at *every* nesting level: the
 //!   `serde_json::Value` tree is walked and re-keyed into sorted order, so the
 //!   output is independent of `serde_json`'s `preserve_order` build feature
@@ -69,18 +70,26 @@ pub struct SolanaIntermediateOutput {
 
 /// Why a caller-supplied `simulateTransaction` result could not be read. The
 /// detail is logged at WARN; these variants are the wire contract.
+///
+/// Discriminants start at 1 so 0 is not a value this type can hold: a decoder
+/// that renders `Option::None` as the zero value (borsh-go v0.3.1 does) can
+/// then tell an absent error from `InvalidBase64`.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[borsh(use_discriminant = true)]
 pub enum SolanaSimulationError {
-    InvalidBase64,
+    InvalidBase64 = 1,
     /// Usually the whole JSON-RPC envelope where the bare `result` was expected.
-    InvalidJson,
+    InvalidJson = 2,
     /// `value.err` was set, so the trace is partial and was dropped.
-    SimulationFailed,
-    CallerIdlRecordsUnusable,
+    SimulationFailed = 3,
+    CallerIdlRecordsUnusable = 4,
     /// An inner instruction arrived compiled. `simulateTransaction` parses inner
     /// instructions whatever the transaction encoding, so the input was not one
     /// of its results.
-    CompiledInstruction,
+    CompiledInstruction = 5,
+    /// An inner instruction's data was not valid base58, which the RPC never
+    /// emits.
+    InvalidInstructionData = 6,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -118,16 +127,24 @@ pub enum RegisteredSource {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SolanaSimulatedInstruction {
+    /// Index of the outer instruction this was invoked under. A grouping key,
+    /// not a unique one: every instruction in a CPI group shares it.
     pub index: u32,
+    /// `0` when the RPC omitted it. Inner instructions are CPIs, so a real
+    /// value is always >= 2.
     pub stack_height: u32,
     pub program_key: String,
+    /// Empty when `solana_rpc_parsed_data` is set: that response shape carries
+    /// its account keys inside `parsed`, under per-program field names.
     pub accounts: Vec<String>,
+    /// Empty when `solana_rpc_parsed_data` is set: the RPC consumes the
+    /// instruction data to produce `parsed` and does not return it.
     pub instruction_data_hex: String,
     pub registered_source: RegisteredSource,
     pub parsed_instruction_data: Option<SolanaParsedInstructionDataIo>,
-    /// The Solana RPC's own jsonParsed decode, when the caller's simulateTransaction
-    /// result returned this instruction jsonParsed instead of raw (recognized
-    /// programs, e.g. System/Token). `None` for partially-decoded instructions.
+    /// The RPC's own jsonParsed decode, for the recognized programs it returns
+    /// that way (System/Token and friends). `None` for partially-decoded
+    /// instructions, which we IDL-decode into `parsed_instruction_data` instead.
     pub solana_rpc_parsed_data: Option<SolanaRpcParsedInstructionDataIo>,
     pub idl_parse_error: Option<SolanaIdlParseError>,
 }
@@ -490,10 +507,16 @@ fn decode_inner_instructions(
             match parsed {
                 UiParsedInstruction::PartiallyDecoded(decoded) => {
                     let accounts = decoded.accounts;
-                    let instruction_data_hex = bs58::decode(&decoded.data)
-                        .into_vec()
-                        .map(hex::encode)
-                        .unwrap_or_default();
+                    let Ok(data) = bs58::decode(&decoded.data).into_vec() else {
+                        tracing::warn!(
+                            program_id = %decoded.program_id,
+                            "inner instruction data is not valid base58"
+                        );
+                        return (
+                            Vec::new(),
+                            Some(SolanaSimulationError::InvalidInstructionData),
+                        );
+                    };
                     let (parsed_instruction_data, idl_parse_error) =
                         parse_partially_decoded_instruction_idl(
                             &decoded.program_id,
@@ -508,10 +531,10 @@ fn decode_inner_instructions(
 
                     simulated_instructions.push(SolanaSimulatedInstruction {
                         index: outer_index,
-                        stack_height: decoded.stack_height.unwrap_or(1),
+                        stack_height: decoded.stack_height.unwrap_or(0),
                         program_key: decoded.program_id,
                         accounts,
-                        instruction_data_hex,
+                        instruction_data_hex: hex::encode(&data),
                         registered_source,
                         parsed_instruction_data,
                         solana_rpc_parsed_data: None,
@@ -519,7 +542,7 @@ fn decode_inner_instructions(
                     });
                 }
                 UiParsedInstruction::Parsed(rpc_parsed) => {
-                    let parsed_json = rpc_parsed.parsed.to_string();
+                    let parsed_json = canonicalize_value(&rpc_parsed.parsed).to_string();
                     let program = rpc_parsed.program.clone();
                     let registered_source = crate::idl::builtin_programs::registered_source(
                         &rpc_parsed.program_id,
@@ -528,7 +551,7 @@ fn decode_inner_instructions(
 
                     simulated_instructions.push(SolanaSimulatedInstruction {
                         index: outer_index,
-                        stack_height: rpc_parsed.stack_height.unwrap_or(1),
+                        stack_height: rpc_parsed.stack_height.unwrap_or(0),
                         program_key: rpc_parsed.program_id,
                         accounts: Vec::new(),
                         instruction_data_hex: String::new(),
@@ -1002,12 +1025,13 @@ mod tests {
 
     #[test]
     fn simulation_error_round_trips_through_borsh() {
-        for error in [
-            SolanaSimulationError::InvalidBase64,
-            SolanaSimulationError::InvalidJson,
-            SolanaSimulationError::SimulationFailed,
-            SolanaSimulationError::CallerIdlRecordsUnusable,
-            SolanaSimulationError::CompiledInstruction,
+        for (error, tag) in [
+            (SolanaSimulationError::InvalidBase64, 1u8),
+            (SolanaSimulationError::InvalidJson, 2),
+            (SolanaSimulationError::SimulationFailed, 3),
+            (SolanaSimulationError::CallerIdlRecordsUnusable, 4),
+            (SolanaSimulationError::CompiledInstruction, 5),
+            (SolanaSimulationError::InvalidInstructionData, 6),
         ] {
             let io = SolanaIntermediateOutput {
                 schema_version: SOLANA_INTERMEDIATE_SCHEMA_VERSION,
@@ -1025,8 +1049,10 @@ mod tests {
             let recovered: SolanaIntermediateOutput =
                 borsh::from_slice(&bytes).expect("borsh deserializes");
             assert_eq!(io, recovered);
-            // One tag byte for the `Some`, one for the variant: no payload.
+            // Trailing `01 <tag>`: Some, then the variant. No payload.
             assert_eq!(bytes[bytes.len() - 2], 1);
+            assert_eq!(bytes[bytes.len() - 1], tag, "{error:?} tag");
+            assert_ne!(tag, 0, "0 stays free to mean None");
         }
     }
 
