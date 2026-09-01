@@ -144,11 +144,15 @@ fn token_amount_field(
     }
 }
 
-/// Charset-filter an optional field string, dropping it when nothing
-/// printable survives. Filtering before the emptiness test is what keeps an
-/// all-non-ASCII memo from rendering as a blank `Memo` line: it carries no
-/// information, and a labelled empty field reads as though the sender left it
-/// deliberately blank.
+/// Charset-filter an optional field string, dropping it only when the value
+/// itself is empty.
+///
+/// `charset_safe` marks what it cannot render rather than deleting it, so an
+/// all-non-ASCII memo renders as markers instead of vanishing. That is the
+/// intended reading: the sender attached text, and a signer who sees nothing
+/// cannot tell that from a memo that was never sent. The emptiness test still
+/// drops a genuinely empty string, which would otherwise render as a labelled
+/// blank line reading as a deliberately empty memo.
 fn nonempty_filtered(text: Option<&str>) -> Option<String> {
     text.map(charset_safe).filter(|t| !t.is_empty())
 }
@@ -1196,7 +1200,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Memo"),
-            "innocentTo: alice.nearAmount: 0.001 SOL"
+            "innocent?To: alice.near?Amount: 0.001 SOL"
         );
     }
 
@@ -1208,7 +1212,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Message"),
-            "innocentTo: alice.nearAmount: 0.001 SOL"
+            "innocent?To: alice.near?Amount: 0.001 SOL"
         );
     }
 
@@ -1220,7 +1224,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Memo"),
-            "innocentTo: alice.nearAmount: 0.001 SOL"
+            "innocent?To: alice.near?Amount: 0.001 SOL"
         );
     }
 
@@ -1232,7 +1236,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Memo"),
-            "innocentTo: alice.nearAmount: 0.001 SOL"
+            "innocent?To: alice.near?Amount: 0.001 SOL"
         );
     }
 
@@ -1246,7 +1250,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Message"),
-            "innocentTo: alice.nearAmount: 0.001 SOL"
+            "innocent?To: alice.near?Amount: 0.001 SOL"
         );
     }
 
@@ -1262,7 +1266,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "NFT Token Id"),
-            "innocentTo: alice.nearAmount: 0.001 SOL"
+            "innocent?To: alice.near?Amount: 0.001 SOL"
         );
     }
 
@@ -1274,7 +1278,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "MT Token"),
-            "innocentTo: alice.nearAmount: 0.001 SOL x5"
+            "innocent?To: alice.near?Amount: 0.001 SOL x5"
         );
     }
 
@@ -1286,7 +1290,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Message"),
-            "innocentTo: alice.nearAmount: 0.001 SOL"
+            "innocent?To: alice.near?Amount: 0.001 SOL"
         );
     }
 
@@ -1303,7 +1307,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "Amount"),
-            "1 (unresolved nep245:mt.near:xTo: attacker.nearAmount: 1000 USDC)"
+            "1 (unresolved nep245:mt.near:x?To: attacker.near?Amount: 1000 USDC)"
         );
     }
 
@@ -1349,7 +1353,7 @@ mod tests {
         // The non-`diagnostics` build prefixes the rule onto the same string,
         // so assert on the message's own content rather than the whole field.
         let message = message_of(&field);
-        assert!(message.contains("innocentTo: attacker.near"), "{message}");
+        assert!(message.contains("innocent?To: attacker.near"), "{message}");
     }
 
     /// The `extraction` rule quotes a `serde_json::Error`, which interpolates
