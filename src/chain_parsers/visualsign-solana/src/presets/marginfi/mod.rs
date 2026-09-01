@@ -38,8 +38,10 @@ impl InstructionVisualizer for MarginfiVisualizer {
         let data = context.data();
 
         let instruction_data_hex = hex::encode(data);
-        let fallback_text =
-            format!("Program ID: {}\nData: {instruction_data_hex}", view.program_id);
+        let fallback_text = format!(
+            "Program ID: {}\nData: {instruction_data_hex}",
+            view.program_id
+        );
 
         let parsed = parse_marginfi_instruction(data, &view.accounts);
 
@@ -246,7 +248,10 @@ mod tests {
     fn test_marginfi_idl_loads() {
         let idl = get_marginfi_idl();
         assert!(idl.is_some(), "Marginfi IDL should load successfully");
-        assert!(!idl.unwrap().instructions.is_empty(), "IDL should have instructions");
+        assert!(
+            !idl.unwrap().instructions.is_empty(),
+            "IDL should have instructions"
+        );
     }
 
     #[test]
@@ -254,7 +259,11 @@ mod tests {
         let idl = get_marginfi_idl().unwrap();
         for ix in &idl.instructions {
             let len = ix.discriminator.as_ref().map(Vec::len).unwrap_or(0);
-            assert_eq!(len, 8, "instruction {} missing 8-byte discriminator", ix.name);
+            assert_eq!(
+                len, 8,
+                "instruction {} missing 8-byte discriminator",
+                ix.name
+            );
         }
     }
 
@@ -278,15 +287,26 @@ mod tests {
     fn test_build_named_accounts_surfaces_extra_accounts() {
         let idl = get_marginfi_idl().unwrap();
         // Pick any IDL instruction with at least one named account
-        let ix = idl.instructions.first().expect("IDL has at least one instruction");
-        let disc = ix.discriminator.as_ref().expect("instruction has a discriminator").clone();
+        let ix = idl
+            .instructions
+            .first()
+            .expect("IDL has at least one instruction");
+        let disc = ix
+            .discriminator
+            .as_ref()
+            .expect("instruction has a discriminator")
+            .clone();
         let n_named = ix.accounts.len();
 
         // Provide n_named + 2 accounts to get 2 extras
         let accounts = dummy_account_strings(n_named + 2);
         let (named, extra) = build_named_accounts(&disc, idl, &accounts);
 
-        assert_eq!(named.len(), n_named, "first {n_named} accounts should be named");
+        assert_eq!(
+            named.len(),
+            n_named,
+            "first {n_named} accounts should be named"
+        );
         assert_eq!(extra.len(), 2, "remaining 2 accounts should be extras");
         assert_eq!(extra[0], accounts[n_named]);
         assert_eq!(extra[1], accounts[n_named + 1]);
