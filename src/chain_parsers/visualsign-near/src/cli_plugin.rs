@@ -4,7 +4,7 @@ use clap::Args as ClapArgs;
 use generated::parser::{ChainMetadata, NearMetadata, TokenMetadataEntry, chain_metadata};
 use visualsign::registry::{Chain, TransactionConverterRegistry};
 
-use parser_cli_core::mapping_parser::load_json_file;
+use parser_cli_core::mapping_parser::{MappingComponents, MappingFormat, load_mappings};
 
 use crate::networks::NearNetwork;
 use crate::presets::intents::sign_token_metadata_for_cli;
@@ -71,21 +71,13 @@ impl parser_cli_core::ChainPlugin for NearPlugin {
     }
 }
 
-/// Parsed components of a `Name@Path@AssetId` mapping string.
-#[derive(Debug)]
-struct NearMappingComponents {
-    name: String,
-    path: String,
-    asset_id: String,
-}
-
 /// Parse the NEAR-specific `Name@Path@AssetId` mapping format.
 ///
 /// Splits into exactly 3 parts on `@`; the third part is the asset id
 /// verbatim, including any colons it contains (unlike the shared
 /// `mapping_parser::parse_mapping`, which splits on `:` and would truncate a
 /// NEAR asset id at its first embedded colon).
-fn parse_near_mapping(mapping_str: &str) -> Result<NearMappingComponents, String> {
+fn parse_near_mapping(mapping_str: &str) -> Result<MappingComponents, String> {
     // Split on every '@' rather than the first two: a path containing '@' is
     // legal on Linux/macOS, and `splitn(3, '@')` would quietly absorb the
     // remainder into the asset id, turning "/tmp/a@b/t.json" into path
@@ -108,10 +100,10 @@ fn parse_near_mapping(mapping_str: &str) -> Result<NearMappingComponents, String
     if name.is_empty() || path.is_empty() || asset_id.is_empty() {
         return Err(format!("Mapping components cannot be empty: {mapping_str}"));
     }
-    Ok(NearMappingComponents {
+    Ok(MappingComponents {
         name: name.to_string(),
         path: path.to_string(),
-        asset_id: asset_id.to_string(),
+        identifier: asset_id.to_string(),
     })
 }
 
@@ -121,72 +113,53 @@ fn parse_near_mapping(mapping_str: &str) -> Result<NearMappingComponents, String
 /// dropped by the strict posture [`cli_trust_policy`] installs; if signing is
 /// unavailable (binary built without `dev-signing`), the entry is registered
 /// unsigned instead of dropped here.
+///
+/// The load/dedupe/count/report loop is `load_mappings`, shared with the ABI
+/// and IDL flags, so the three chains cannot drift on what a duplicate or an
+/// unreadable file does. Only the parse differs, because a NEAR asset id
+/// carries its own colons.
 fn build_token_mappings_from_files(
     mappings: &[String],
     signing_network: NearNetwork,
 ) -> (BTreeMap<String, TokenMetadataEntry>, usize) {
-    let mut map = BTreeMap::new();
-    let mut valid_count = 0;
-
-    for mapping in mappings {
-        let components = match parse_near_mapping(mapping) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Error parsing token metadata mapping: {e}");
-                eprintln!("Expected format: Name@/path/to/file.json@AssetId");
-                eprintln!(
-                    "Example: USDC@usdc.json@nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near"
-                );
-                continue;
-            }
-        };
-        let json = match load_json_file(&components.path) {
-            Ok(j) => j,
-            Err(e) => {
-                eprintln!(
-                    "  Warning: Failed to load token metadata '{}' from '{}': {e}",
-                    components.name, components.path
-                );
-                continue;
-            }
-        };
-        let signature = match sign_token_metadata_for_cli(
-            signing_network.network_id(),
-            &components.asset_id,
-            &json,
-        ) {
-            Ok(sig) => Some(sig),
-            Err(e) => {
-                eprintln!(
-                    "  Warning: '{}' could not be signed ({e}); registering unsigned",
-                    components.name
-                );
-                None
-            }
-        };
-        let previous = map.insert(
-            components.asset_id.clone(),
-            TokenMetadataEntry {
+    load_mappings(
+        mappings,
+        &MappingFormat {
+            kind: "token metadata",
+            example: "USDC@usdc.json@nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near",
+            identifier_label: "AssetId",
+            format_hint: "Name@/path/to/file.json@AssetId",
+        },
+        parse_near_mapping,
+        // Any non-empty string is a candidate asset id: the id space is the
+        // caller's contract naming, not a fixed encoding this side can check,
+        // and `parse_near_mapping` has already rejected an empty component.
+        |_| Ok(()),
+        |components, json| {
+            // Unlike the ABI and IDL flags, a signing failure is not a
+            // rejection: the entry is still worth rendering as an unsigned
+            // gap-fill, and a build without `dev-signing` cannot sign at all.
+            let signature = match sign_token_metadata_for_cli(
+                signing_network.network_id(),
+                &components.identifier,
+                &json,
+            ) {
+                Ok(sig) => Some(sig),
+                Err(e) => {
+                    eprintln!(
+                        "  Warning: '{}' could not be signed ({e}); registering unsigned",
+                        components.name
+                    );
+                    None
+                }
+            };
+            Ok(TokenMetadataEntry {
                 value: json,
                 signature,
                 origin_chain: None,
-            },
-        );
-        if previous.is_some() {
-            eprintln!(
-                "  Warning: Duplicate asset id '{}' for token metadata '{}'; overwriting previous entry",
-                components.asset_id, components.name
-            );
-        } else {
-            valid_count += 1;
-            eprintln!(
-                "  Loaded token metadata '{}' from {} and mapped to {}",
-                components.name, components.path, components.asset_id
-            );
-        }
-    }
-
-    (map, valid_count)
+            })
+        },
+    )
 }
 
 /// Build NEAR chain metadata from the global `--network` flag and the
@@ -435,7 +408,7 @@ mod tests {
             .expect("valid mapping should parse");
         assert_eq!(result.name, "MyToken");
         assert_eq!(result.path, "/path/to/file.json");
-        assert_eq!(result.asset_id, "nep141:wrap.near");
+        assert_eq!(result.identifier, "nep141:wrap.near");
     }
 
     #[test]

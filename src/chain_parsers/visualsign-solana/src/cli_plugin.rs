@@ -53,9 +53,13 @@ impl parser_cli_core::ChainPlugin for SolanaPlugin {
 fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (BTreeMap<String, Idl>, usize) {
     mapping_parser::load_mappings(
         idl_json_mappings,
-        "IDL",
-        "JupiterSwap:path/to/jupiter.json:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
-        "ProgramId",
+        &mapping_parser::MappingFormat {
+            kind: "IDL",
+            example: "JupiterSwap:path/to/jupiter.json:JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+            identifier_label: "ProgramId",
+            format_hint: "Name:/path/to/file.json:ProgramId",
+        },
+        mapping_parser::parse_mapping,
         |id| {
             let bytes = bs58::decode(id)
                 .into_vec()
