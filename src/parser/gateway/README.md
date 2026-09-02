@@ -39,8 +39,12 @@ TVC_DEMO_PINNED_PUBKEY_FILE=/path/to/pubkey.hex
 ```
 
 If neither is set:
-- `X402_PROFILE=local`: the gateway logs a warning and skips attestation.
-- otherwise: the gateway **exits with code 1** at startup (fail-closed).
+- `X402_PROFILE=local` **and** the resolved x402 config can't settle a real
+  payment (loopback facilitator, no mainnet network tag): the gateway logs
+  a warning and skips attestation.
+- otherwise -- including `X402_PROFILE=local` pointed at a non-loopback
+  facilitator or a mainnet (`base`/`solana`) network: the gateway **exits
+  with code 1** at startup (fail-closed).
 
 This is a demo-only verifier (see `attestation.rs` for the production
 replacement sketch): it checks a pinned pubkey, not a real Nitro/TDX
@@ -62,7 +66,7 @@ only, without mounting v2.
 | `X402_NETWORK`                   | no        | profile-default                     | `base-sepolia`, `base`, `solana`, `solana-devnet`                                      |
 | `X402_PAYTO`                     | depends   | burn address for `local`            | EVM `0x...` or Solana base58                                                            |
 | `X402_PRICE_TAGS_JSON`           | no        | seeded from profile + `X402_NETWORK` | full multi-tag override; see the JSON shape in `x402_config.rs`                        |
-| `TVC_DEMO_PINNED_PUBKEY_HEX`     | **yes** (non-local) | --                         | pinned enclave pubkey, hex                                                             |
+| `TVC_DEMO_PINNED_PUBKEY_HEX`     | **yes**, unless `local` + loopback facilitator + testnet-only | --                         | pinned enclave pubkey, hex                                                             |
 | `TVC_DEMO_PINNED_PUBKEY_FILE`    | no        | --                                   | alternative to `_HEX`: file holding the hex                                            |
 | `GATEWAY_AUTH_BEARER_TOKEN`      | no        | --                                   | optional shared-bearer-token gate. When set, every route except `/health` requires `Authorization: Bearer <this-value>` or returns 401. Mutually exclusive with `_FILE`. Must be at least 16 bytes after trimming. |
 | `GATEWAY_AUTH_BEARER_FILE`       | no        | --                                   | path to a file containing the bearer token (whitespace-trimmed). Preferred for Cloud Run / k8s secret-volume mounts. Mutually exclusive with `_TOKEN`. |

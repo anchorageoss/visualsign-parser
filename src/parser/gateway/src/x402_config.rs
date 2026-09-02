@@ -260,14 +260,22 @@ impl X402Config {
             var: "X402_FACILITATOR_URL",
             message: e.to_string(),
         })?;
-        // Non-local profiles handle real payment negotiation/settlement
-        // traffic; only accept https there. `local` keeps allowing plain
-        // http against a loopback facilitator for zero-config dev/CI.
-        if profile != X402Profile::Local && url.scheme() != "https" {
+        // x402 requests carry signed payment authorization, so plain http
+        // exposes replayable payment material to an on-path attacker. Only
+        // accept https, with one carve-out: `local` may use http against a
+        // loopback facilitator for zero-config dev/CI, since that traffic
+        // never leaves the host.
+        let loopback_http_in_local = profile == X402Profile::Local
+            && url.scheme() == "http"
+            && matches!(
+                url.host_str(),
+                Some("127.0.0.1") | Some("localhost") | Some("::1")
+            );
+        if url.scheme() != "https" && !loopback_http_in_local {
             return Err(ConfigError::Invalid {
                 var: "X402_FACILITATOR_URL",
                 message: format!(
-                    "scheme '{}' not allowed for non-local profiles; use https",
+                    "scheme '{}' not allowed; use https (or http against a loopback host under X402_PROFILE=local)",
                     url.scheme()
                 ),
             });

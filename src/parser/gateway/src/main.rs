@@ -63,9 +63,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // forwarding responses with zero attestation. Config errors here are
     // handled again, identically, by the soft-fail block below -- this
     // first load only feeds the attestation-requirement check.
+    //
+    // Also require the config to actually build (e.g. a valid
+    // (payTo, network) combination): `build_middleware` is the real
+    // arbiter of whether x402 will be mounted at all, and the soft-fail
+    // block below disables x402 (keeping v1/health up) on the same
+    // failure. A config that can't build can't settle anything, so it
+    // must not trip the fail-closed attestation requirement.
     let x402_result = X402Config::from_env();
     let x402_can_settle_for_real = match &x402_result {
-        Ok(cfg) => x402_targets_real_settlement(cfg),
+        Ok(cfg) => cfg.build_middleware().is_ok() && x402_targets_real_settlement(cfg),
         Err(_) => false,
     };
 
@@ -313,5 +320,20 @@ mod tests {
     fn localhost_hostname_is_treated_as_loopback() {
         let cfg = base_config("http://localhost:8090", "solana-devnet");
         assert!(!x402_targets_real_settlement(&cfg));
+    }
+
+    #[test]
+    fn mismatched_payto_network_combination_does_not_build_even_though_flagged_as_real_settlement()
+    {
+        // A mainnet network tag paired with the wrong chain's payTo address
+        // (e.g. `solana` network with an EVM payTo) is exactly what
+        // `build_middleware` rejects (see x402_config::build_price_tag) --
+        // it can never settle anything. `x402_targets_real_settlement`
+        // alone would still flag it (it only looks at the network name),
+        // which is why `main` ANDs it with `build_middleware().is_ok()`
+        // before treating it as requiring a pinned attestation verifier.
+        let cfg = base_config("http://127.0.0.1:8090", "solana");
+        assert!(x402_targets_real_settlement(&cfg));
+        assert!(cfg.build_middleware().is_err());
     }
 }
