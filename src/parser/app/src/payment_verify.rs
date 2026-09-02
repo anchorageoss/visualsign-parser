@@ -692,7 +692,7 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                 network_id: Some(network_id.to_string()),
-                token_mappings: Default::default(),
+                token_mappings: std::collections::BTreeMap::default(),
             })),
         };
 
