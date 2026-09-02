@@ -5,6 +5,7 @@
 //! fills the attestation doc in.
 
 use std::io::Read as _;
+use std::path::Path;
 
 use base64::Engine as _;
 use host_primitives::turnkey::TurnkeyBootProof;
@@ -54,6 +55,29 @@ impl StaticBootProof {
             deployment_label,
         })
     }
+
+    /// Test-only variant of [`Self::from_enclave_files`] that reads the
+    /// manifest from an arbitrary path instead of the production
+    /// `qos_core::MANIFEST_FILE` (the real, absolute `/qos.manifest` under
+    /// the `vsock`/`vm` feature). Lets tests point at a throwaway fixture
+    /// instead of touching a real host path.
+    #[cfg(test)]
+    pub(crate) fn from_enclave_files_at(
+        ephemeral: &P256Pair,
+        enclave_app: String,
+        deployment_label: String,
+        manifest_path: &Path,
+    ) -> Result<Self, BootProofError> {
+        let (qos_manifest_b64, qos_manifest_envelope_b64) =
+            read_manifest_borsh_b64_at(manifest_path)?;
+        Ok(Self {
+            ephemeral_public_key_hex: qos_hex::encode(&ephemeral.public_key().to_bytes()),
+            qos_manifest_b64,
+            qos_manifest_envelope_b64,
+            enclave_app,
+            deployment_label,
+        })
+    }
 }
 
 impl BootProofSource for StaticBootProof {
@@ -82,8 +106,12 @@ impl BootProofSource for StaticBootProof {
 /// Shared by `StaticBootProof` and (in a later PR) an NSM-backed source,
 /// which also needs the envelope for `manifest.qos_hash()`.
 pub fn read_manifest_envelope() -> Result<ManifestEnvelope, BootProofError> {
-    let file = std::fs::File::open(qos_core::MANIFEST_FILE)
-        .map_err(|e| BootProofError::Manifest(format!("{}: {e}", qos_core::MANIFEST_FILE)))?;
+    read_manifest_envelope_at(Path::new(qos_core::MANIFEST_FILE))
+}
+
+fn read_manifest_envelope_at(path: &Path) -> Result<ManifestEnvelope, BootProofError> {
+    let file = std::fs::File::open(path)
+        .map_err(|e| BootProofError::Manifest(format!("{}: {e}", path.display())))?;
 
     // Bounded reader: never read more than MAX_MANIFEST_FILE_SIZE, even if the
     // file grows between the open and the read.
@@ -91,12 +119,12 @@ pub fn read_manifest_envelope() -> Result<ManifestEnvelope, BootProofError> {
     let mut contents = Vec::new();
     bounded
         .read_to_end(&mut contents)
-        .map_err(|e| BootProofError::Manifest(format!("{}: {e}", qos_core::MANIFEST_FILE)))?;
+        .map_err(|e| BootProofError::Manifest(format!("{}: {e}", path.display())))?;
 
     if contents.len() as u64 > MAX_MANIFEST_FILE_SIZE {
         return Err(BootProofError::Manifest(format!(
             "{} exceeds maximum size (> {MAX_MANIFEST_FILE_SIZE} bytes)",
-            qos_core::MANIFEST_FILE
+            path.display()
         )));
     }
 
@@ -106,6 +134,15 @@ pub fn read_manifest_envelope() -> Result<ManifestEnvelope, BootProofError> {
 
 fn read_manifest_borsh_b64() -> Result<(String, String), BootProofError> {
     let envelope = read_manifest_envelope()?;
+    Ok((
+        encode_borsh_b64(&envelope.manifest),
+        encode_borsh_b64(&envelope),
+    ))
+}
+
+#[cfg(test)]
+fn read_manifest_borsh_b64_at(path: &Path) -> Result<(String, String), BootProofError> {
+    let envelope = read_manifest_envelope_at(path)?;
     Ok((
         encode_borsh_b64(&envelope.manifest),
         encode_borsh_b64(&envelope),
@@ -178,24 +215,29 @@ pub(crate) mod tests {
         }
     }
 
-    // `from_enclave_files` now fails closed when `qos_core::MANIFEST_FILE`
-    // (the dev-mode relative path outside `--features vm`) is missing, so
-    // any test that exercises it needs a real file there. `OnceLock`
-    // guarantees the write happens exactly once per test-process run, even
-    // under parallel test execution: a racy `path.exists()` check could let
-    // one test observe the file mid-write (empty/partial) or reuse a stale
-    // fixture left over from an earlier run.
-    pub(crate) fn write_test_manifest_fixture() {
-        static INIT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    // Writes to a unique path under the OS temp dir, never to
+    // `qos_core::MANIFEST_FILE` (the real, absolute `/qos.manifest` under the
+    // `vsock`/`vm` feature): tests must not fail for an unprivileged
+    // developer, or corrupt a real host manifest, just by running. Callers
+    // read the manifest via `StaticBootProof::from_enclave_files_at` with
+    // the returned path instead of the production `from_enclave_files`.
+    // `OnceLock` guarantees the write happens exactly once per test-process
+    // run, even under parallel test execution: a racy `path.exists()` check
+    // could let one test observe the file mid-write (empty/partial) or reuse
+    // a stale fixture left over from an earlier run.
+    pub(crate) fn write_test_manifest_fixture() -> std::path::PathBuf {
+        static INIT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
         INIT.get_or_init(|| {
-            let path = std::path::Path::new(qos_core::MANIFEST_FILE);
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir).expect("failed to create manifest fixture dir");
-            }
+            let path = std::env::temp_dir().join(format!(
+                "parser-http-server-test-manifest-{}.json",
+                std::process::id()
+            ));
             let bytes =
                 serde_json::to_vec(&sample_manifest_envelope()).expect("failed to encode fixture");
-            std::fs::write(path, bytes).expect("failed to write manifest fixture");
-        });
+            std::fs::write(&path, bytes).expect("failed to write manifest fixture");
+            path
+        })
+        .clone()
     }
 
     // The Go verifier borsh-deserializes both `qosManifestB64` and

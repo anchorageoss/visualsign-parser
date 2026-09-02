@@ -403,12 +403,13 @@ mod tests {
     // runtime".
     #[tokio::test(flavor = "multi_thread")]
     async fn parse_v1_handler_extracts_raw_bytes_not_a_json_type() {
-        boot_proof::tests::write_test_manifest_fixture();
+        let manifest_path = boot_proof::tests::write_test_manifest_fixture();
         let pair = qos_p256::P256Pair::generate().unwrap();
-        let boot_proof = StaticBootProof::from_enclave_files(
+        let boot_proof = StaticBootProof::from_enclave_files_at(
             &pair,
             "visualsign-parser".to_string(),
             "test".to_string(),
+            &manifest_path,
         )
         .expect("test manifest fixture should be readable");
         let state = AppState {
@@ -426,13 +427,14 @@ mod tests {
 
     #[test]
     fn static_boot_proof_has_the_six_keys_and_a_real_ephemeral_pubkey() {
-        boot_proof::tests::write_test_manifest_fixture();
+        let manifest_path = boot_proof::tests::write_test_manifest_fixture();
         let pair = qos_p256::P256Pair::generate().unwrap();
         let expected_hex = qos_hex::encode(&pair.public_key().to_bytes());
-        let source = StaticBootProof::from_enclave_files(
+        let source = StaticBootProof::from_enclave_files_at(
             &pair,
             "visualsign-parser".to_string(),
             "test".to_string(),
+            &manifest_path,
         )
         .expect("test manifest fixture should be readable");
         let bp = source.boot_proof();
@@ -456,12 +458,13 @@ mod tests {
     // currently returns that code.
     #[tokio::test]
     async fn fallbacks_carry_their_own_fixed_message_and_boot_proof() {
-        boot_proof::tests::write_test_manifest_fixture();
+        let manifest_path = boot_proof::tests::write_test_manifest_fixture();
         let pair = qos_p256::P256Pair::generate().unwrap();
-        let boot_proof = StaticBootProof::from_enclave_files(
+        let boot_proof = StaticBootProof::from_enclave_files_at(
             &pair,
             "visualsign-parser".to_string(),
             "test".to_string(),
+            &manifest_path,
         )
         .expect("test manifest fixture should be readable");
         let state = AppState {
