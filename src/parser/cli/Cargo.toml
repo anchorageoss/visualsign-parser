@@ -8,7 +8,7 @@ publish = false
 default = ["solana", "ethereum", "near", "tron", "diagnostics"]
 solana = ["dep:visualsign-solana"]
 ethereum = ["dep:visualsign-ethereum", "visualsign-ethereum/dev-signing"]
-near = ["dep:visualsign-near"]
+near = ["dep:visualsign-near", "visualsign-near/dev-signing"]
 tron = ["dep:visualsign-tron"]
 diagnostics = [
     "visualsign/diagnostics",
