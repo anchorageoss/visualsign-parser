@@ -85,12 +85,15 @@ pub fn read_manifest_envelope() -> Result<ManifestEnvelope, BootProofError> {
 /// Returns empty strings when the manifest is unreadable (local dev outside an
 /// enclave), which keeps the six keys present and obviously unverifiable.
 fn read_manifest_borsh_b64() -> (String, String) {
-    let Ok(envelope) = read_manifest_envelope() else {
-        eprintln!(
-            "boot proof: {} unreadable, manifest fields empty",
-            qos_core::MANIFEST_FILE
-        );
-        return (String::new(), String::new());
+    let envelope = match read_manifest_envelope() {
+        Ok(envelope) => envelope,
+        Err(e) => {
+            eprintln!(
+                "boot proof: {} unreadable ({e:?}), manifest fields empty",
+                qos_core::MANIFEST_FILE
+            );
+            return (String::new(), String::new());
+        }
     };
     (
         encode_borsh_b64(&envelope.manifest),
