@@ -283,7 +283,10 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use generated::parser::{Abi, AbiType, EthereumMetadata, SolanaMetadata};
+    use generated::parser::{
+        Abi, AbiType, EthereumMetadata, NearMetadata, SolanaMetadata, TokenMetadataEntry,
+        TokenOriginChain,
+    };
     use host_primitives::turnkey::{ChainMetadataInput, EMPTY_SHA256};
 
     #[test]
@@ -351,6 +354,13 @@ mod tests {
     }
 
     #[test]
+    fn chain_metadata_input_near_deserializes() {
+        let json = r#"{"chain":"CHAIN_NEAR","networkId":"NEAR_MAINNET"}"#;
+        let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
+        assert!(matches!(parsed, ChainMetadataInput::Near(_)));
+    }
+
+    #[test]
     fn ethereum_metadata_abi_mappings_defaults_when_omitted() {
         let json = r#"{"networkId":"ETHEREUM_MAINNET"}"#;
         let parsed: EthereumMetadata = serde_json::from_str(json).unwrap();
@@ -400,6 +410,68 @@ mod tests {
         assert!(
             result.is_err(),
             "expected deserialization to fail for unknown AbiType variant"
+        );
+    }
+
+    #[test]
+    fn origin_chain_deserializes_from_string_name() {
+        let json = r#"{"value":"{\"symbol\":\"USDC\",\"decimals\":6}","originChain":"TOKEN_ORIGIN_CHAIN_ETHEREUM"}"#;
+        let entry: TokenMetadataEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            entry.origin_chain,
+            Some(TokenOriginChain::Ethereum as i32),
+            "the documented protobuf name must select the Ethereum curve"
+        );
+    }
+
+    #[test]
+    fn origin_chain_serializes_as_string_name() {
+        let entry = TokenMetadataEntry {
+            value: "{}".to_string(),
+            signature: None,
+            origin_chain: Some(TokenOriginChain::Solana as i32),
+        };
+        let value = serde_json::to_value(&entry).unwrap();
+        assert_eq!(
+            value.get("originChain").unwrap(),
+            "TOKEN_ORIGIN_CHAIN_SOLANA"
+        );
+    }
+
+    #[test]
+    fn origin_chain_defaults_to_none_when_omitted() {
+        let entry: TokenMetadataEntry = serde_json::from_str(r#"{"value":"{}"}"#).unwrap();
+        assert_eq!(entry.origin_chain, None);
+    }
+
+    #[test]
+    fn origin_chain_rejects_unknown_string() {
+        let result: Result<TokenMetadataEntry, _> =
+            serde_json::from_str(r#"{"value":"{}","originChain":"TOKEN_ORIGIN_CHAIN_BOGUS"}"#);
+        assert!(
+            result.is_err(),
+            "an origin this build cannot verify must be refused at the API edge"
+        );
+    }
+
+    /// `origin_chain` reaches the gateway nested two levels deep, inside
+    /// `NearMetadata.token_mappings`, so the adapter has to survive the map
+    /// value's own serde rather than only a bare `TokenMetadataEntry`.
+    #[test]
+    fn near_token_mapping_round_trips_origin_chain_by_name() {
+        let json = r#"{"networkId":"NEAR_MAINNET","tokenMappings":{"nep141:usdc.near":{"value":"{\"symbol\":\"USDC\",\"decimals\":6}","originChain":"TOKEN_ORIGIN_CHAIN_ETHEREUM"}}}"#;
+        let parsed: NearMetadata = serde_json::from_str(json).unwrap();
+        let entry = parsed.token_mappings.get("nep141:usdc.near").unwrap();
+        assert_eq!(entry.origin_chain, Some(TokenOriginChain::Ethereum as i32));
+
+        let value = serde_json::to_value(&parsed).unwrap();
+        assert_eq!(
+            value
+                .get("tokenMappings")
+                .and_then(|m| m.get("nep141:usdc.near"))
+                .and_then(|e| e.get("originChain"))
+                .unwrap(),
+            "TOKEN_ORIGIN_CHAIN_ETHEREUM"
         );
     }
 }

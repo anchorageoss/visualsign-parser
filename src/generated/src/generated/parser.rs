@@ -266,6 +266,43 @@ pub struct NearMetadata {
     /// Network identifier string (e.g., "NEAR_MAINNET", "NEAR_TESTNET")
     #[prost(string, optional, tag = "1")]
     pub network_id: ::core::option::Option<::prost::alloc::string::String>,
+    /// Map of NEAR Intents asset id (e.g. "nep141:wrap.near") to token metadata.
+    /// Allows a wallet to supply symbol/decimals for assets not yet present in
+    /// the parser's compiled-in seed table.
+    #[prost(btree_map = "string, message", tag = "2")]
+    #[cfg_attr(feature = "serde_derive", serde(default))]
+    pub token_mappings: ::prost::alloc::collections::BTreeMap<
+        ::prost::alloc::string::String,
+        TokenMetadataEntry,
+    >,
+}
+#[cfg_attr(
+    feature = "serde_derive",
+    derive(::serde::Serialize, ::serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
+#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TokenMetadataEntry {
+    /// JSON token metadata, e.g. {"symbol":"USDC.e","decimals":6}. Signed
+    /// verbatim as supplied, mirroring Abi.value / Idl.value: the signature (if
+    /// present) covers exactly these bytes, not a re-derived encoding.
+    #[prost(string, tag = "1")]
+    pub value: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "2")]
+    pub signature: ::core::option::Option<SignatureMetadata>,
+    /// Selects the signature curve, dispatched by the origin chain of the
+    /// underlying bridged asset rather than by NEAR itself: Ethereum-origin (and
+    /// EVM-twin) assets verify with secp256k1, Solana-origin (and SVM-twin)
+    /// assets with ed25519, NEAR-native assets with ed25519 via a distinct
+    /// curator identity. Unset defaults to Near.
+    #[prost(enumeration = "TokenOriginChain", optional, tag = "3")]
+    #[cfg_attr(
+        feature = "serde_derive",
+        serde(with = "crate::token_origin_chain_serde", default)
+    )]
+    pub origin_chain: ::core::option::Option<i32>,
 }
 #[cfg_attr(
     feature = "serde_derive",
@@ -390,6 +427,41 @@ impl SignatureScheme {
             "SIGNATURE_SCHEME_TURNKEY_P256_EPHEMERAL_KEY" => {
                 Some(Self::TurnkeyP256EphemeralKey)
             }
+            _ => None,
+        }
+    }
+}
+/// TokenOriginChain selects which curator identity/curve a TokenMetadataEntry
+/// signature is checked against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum TokenOriginChain {
+    /// Treated as Near
+    Unspecified = 0,
+    Near = 1,
+    Ethereum = 2,
+    Solana = 3,
+}
+impl TokenOriginChain {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            TokenOriginChain::Unspecified => "TOKEN_ORIGIN_CHAIN_UNSPECIFIED",
+            TokenOriginChain::Near => "TOKEN_ORIGIN_CHAIN_NEAR",
+            TokenOriginChain::Ethereum => "TOKEN_ORIGIN_CHAIN_ETHEREUM",
+            TokenOriginChain::Solana => "TOKEN_ORIGIN_CHAIN_SOLANA",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "TOKEN_ORIGIN_CHAIN_UNSPECIFIED" => Some(Self::Unspecified),
+            "TOKEN_ORIGIN_CHAIN_NEAR" => Some(Self::Near),
+            "TOKEN_ORIGIN_CHAIN_ETHEREUM" => Some(Self::Ethereum),
+            "TOKEN_ORIGIN_CHAIN_SOLANA" => Some(Self::Solana),
             _ => None,
         }
     }
