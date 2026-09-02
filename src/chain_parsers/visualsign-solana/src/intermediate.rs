@@ -110,19 +110,25 @@ pub struct SolanaIntermediateInstruction {
 /// `associated_token_account`, `stakepool` and `swig_wallet` are all registered
 /// and ship no IDL -- so read `parsed_instruction_data`,
 /// `solana_rpc_parsed_data` and `idl_parse_error` for that.
+///
+/// Discriminants are pinned, with `Unregistered` at 0 so the type fails closed:
+/// a zero-filled or truncated field decodes as "not registered" rather than as
+/// the most-trusted value. Never renumber these -- see
+/// [`SOLANA_INTERMEDIATE_SCHEMA_VERSION`].
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[borsh(use_discriminant = true)]
 pub enum RegisteredSource {
+    /// Matched none of the below; nothing was found at all.
+    Unregistered = 0,
     /// Matched `idl::builtin_programs`'s `NATIVE_PROGRAM_NAMES` list (native
     /// runtime / core SPL programs).
-    Native,
+    Native = 1,
     /// Matched an in-crate preset visualizer's program ID
-    Preset,
+    Preset = 2,
     /// Matched a program known only via `solana_parser::ProgramType`
-    ThirdParty,
+    ThirdParty = 3,
     /// Matched only via caller-provided `idl_mappings`.
-    CallerSupplied,
-    /// Matched none of the above; nothing was found at all.
-    Unregistered,
+    CallerSupplied = 4,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -1054,6 +1060,40 @@ mod tests {
             assert_eq!(bytes[bytes.len() - 1], tag, "{error:?} tag");
             assert_ne!(tag, 0, "0 stays free to mean None");
         }
+    }
+
+    #[test]
+    fn registered_source_tags_are_pinned_with_unregistered_at_zero() {
+        for (source, tag) in [
+            (RegisteredSource::Unregistered, 0u8),
+            (RegisteredSource::Native, 1),
+            (RegisteredSource::Preset, 2),
+            (RegisteredSource::ThirdParty, 3),
+            (RegisteredSource::CallerSupplied, 4),
+        ] {
+            let instruction = SolanaIntermediateInstruction {
+                program_key: "P1".to_string(),
+                accounts: vec![],
+                instruction_data_hex: String::new(),
+                address_table_lookups: vec![],
+                parsed_instruction_data: None,
+                idl_parse_error: None,
+                registered_source: source,
+            };
+            let bytes = borsh::to_vec(&instruction).expect("borsh serializes");
+            let recovered: SolanaIntermediateInstruction =
+                borsh::from_slice(&bytes).expect("borsh deserializes");
+            assert_eq!(instruction, recovered);
+            // `registered_source` is the last field and carries no payload.
+            assert_eq!(bytes[bytes.len() - 1], tag, "{source:?} tag");
+        }
+
+        // A zero-filled or truncated field must fail closed rather than
+        // decoding as the most-trusted source.
+        assert_eq!(
+            borsh::from_slice::<RegisteredSource>(&[0u8]).expect("0 is a valid tag"),
+            RegisteredSource::Unregistered,
+        );
     }
 
     #[test]
