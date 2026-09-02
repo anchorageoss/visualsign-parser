@@ -251,7 +251,7 @@ pub(crate) fn intent_label(intent: &Intent) -> &'static str {
         Intent::NativeWithdraw(_) => "Native Withdraw",
         Intent::AddPublicKey(_) => "Add Public Key",
         Intent::RemovePublicKey(_) => "Remove Public Key",
-        Intent::SetAuthByPredecessorId(_) => "Set Auth By Predecessor",
+        Intent::SetAuthByPredecessorId(_) => "Set Auth By Predecessor Id",
         Intent::StorageDeposit(_) => "Storage Deposit",
         Intent::AuthCall(_) => "Auth Call",
     }
@@ -1743,6 +1743,16 @@ mod tests {
                 .any(|f| super::super::test_support::is_warning_diagnostic(f, "account-control")),
             "expected an account-control warning, got {fields:?}"
         );
+    }
+
+    /// The on-screen label names the variant precisely: dropping "Id" would
+    /// make it read as though the intent were something else the account
+    /// authorizes by predecessor generally, rather than this one specific
+    /// mechanism.
+    #[test]
+    fn set_auth_by_predecessor_id_label_names_the_variant_precisely() {
+        let intent = intent_from(r#"{"intent":"set_auth_by_predecessor_id","enabled":true}"#);
+        assert_eq!(intent_label(&intent), "Set Auth By Predecessor Id");
     }
 
     #[test]
