@@ -107,8 +107,9 @@ impl GetParserForOptions for ParserParser {
             // The ABI trust posture. Exactly one of the next two options must be
             // given: `forbids` rejects passing both, and `abi_trust()` rejects
             // passing neither (the parser cannot express "one of"). Being on the
-            // cmdline is the point -- it is carried in the signed deployment
-            // manifest's pivotArgs, so the posture is auditable out of band.
+            // cmdline is the point: the intended end state is for it to land in the
+            // signed deployment manifest's pivotArgs so the posture is auditable out
+            // of band, but that wiring has not landed yet (see CLAUDE.md).
             .token(
                 Token::new(
                     ACCEPT_UNSIGNED_ABIS,
