@@ -165,14 +165,17 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
     let proto_resp = match parse(&proto_req, &state.ephemeral_key) {
         Ok(r) => r,
         Err(e) => {
-            // Only InvalidArgument/NotFound carry a message safe to hand back
-            // to an unauthenticated caller. Everything else is logged
-            // server-side and replaced with a generic message, matching
-            // parser_gateway's handling of the same codes
-            // (src/parser/gateway/src/main.rs).
+            // Only NotFound carries a message safe to hand back to an
+            // unauthenticated caller. `parse()` maps every converter error to
+            // InvalidArgument (parser/app/src/routes/parse.rs), and those
+            // errors can embed request-controlled data verbatim (e.g. an
+            // invalid NEAR networkId, visualsign-near/src/networks.rs), so
+            // InvalidArgument is logged server-side and replaced with a fixed
+            // message too, matching the other reflection fixes in this file.
             let (http_status, msg) = match e.code {
                 generated::google::rpc::Code::InvalidArgument => {
-                    (StatusCode::BAD_REQUEST, e.message)
+                    eprintln!("parse failed: {} ({:?})", e.message, e.code);
+                    (StatusCode::BAD_REQUEST, "invalid request".to_string())
                 }
                 generated::google::rpc::Code::NotFound => (StatusCode::NOT_FOUND, e.message),
                 _ => {
