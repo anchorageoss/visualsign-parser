@@ -122,11 +122,13 @@ pub fn try_extract_from_chain_metadata(
 /// the aggregated warning.
 ///
 /// The count is not public: nothing consumes it today (PRS-555 tracks surfacing
-/// provenance per entry), and `log::warn!` is the only channel it reaches in
-/// production. It is returned here so a test can assert the count the loop
-/// actually produced, rather than only the [`identity_unverified`] predicate that
-/// feeds it. Guarding the predicate alone left the call site free to narrow back
-/// to `signature.is_none()` with every test still green.
+/// provenance per entry), and in the shipping enclave binaries (`parser_app`,
+/// `parser_grpc-server`) `log::warn!` reaches no channel at all, since neither
+/// installs a log/tracing subscriber; only `parser_cli` does (`logger.rs`). It
+/// is returned here so a test can assert the count the loop actually produced,
+/// rather than only the [`identity_unverified`] predicate that feeds it.
+/// Guarding the predicate alone left the call site free to narrow back to
+/// `signature.is_none()` with every test still green.
 fn extract_with_provenance(
     chain_metadata: Option<&ChainMetadata>,
     chain_id: u64,
