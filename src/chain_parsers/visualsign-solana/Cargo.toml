@@ -14,7 +14,7 @@ clap            = { version = "4.0", features = ["derive"], optional = true }
 parser_cli_core = { path = "../../parser/cli-core", optional = true }
 
 tracing = { workspace = true }
-solana_parser = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "5b647f2" }
+solana_parser = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "191c704" }
 visualsign = { workspace = true }
 generated = { path = "../../generated" }
 serde_json = { workspace = true }
@@ -40,7 +40,7 @@ thiserror = "2.0.12"
 
 [dev-dependencies]
 parser_cli_core = { path = "../../parser/cli-core", features = ["test-utils"] }
-solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "5b647f2", features = ["proptest"] }
+solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "191c704", features = ["proptest"] }
 solana_test_utils = { path = "../../solana_test_utils" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

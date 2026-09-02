@@ -3678,7 +3678,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6987,7 +6987,7 @@ version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff32365de1b6743cb203b710788263c44a03de03802daf96092f2da4fe6ba4d7"
 dependencies = [
- "proc-macro-crate 1.1.3",
+ "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
  "syn 2.0.112",
@@ -8845,7 +8845,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8924,7 +8924,7 @@ dependencies = [
  "security-framework 3.5.1",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10776,7 +10776,7 @@ dependencies = [
 [[package]]
 name = "solana-parser-fuzz-core"
 version = "0.0.0"
-source = "git+https://github.com/anchorageoss/solana-parser.git?rev=5b647f2#5b647f2f47a54836dadcd523bb4bc16d15956107"
+source = "git+https://github.com/anchorageoss/solana-parser.git?rev=191c704#191c704764e8126b12a13f3787ed8d79ff9be6d4"
 dependencies = [
  "proptest",
  "serde_json",
@@ -12350,7 +12350,7 @@ dependencies = [
 [[package]]
 name = "solana_parser"
 version = "0.1.0"
-source = "git+https://github.com/anchorageoss/solana-parser.git?rev=5b647f2#5b647f2f47a54836dadcd523bb4bc16d15956107"
+source = "git+https://github.com/anchorageoss/solana-parser.git?rev=191c704#191c704764e8126b12a13f3787ed8d79ff9be6d4"
 dependencies = [
  "bincode",
  "bs58 0.5.1",
@@ -13980,7 +13980,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -15345,7 +15345,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
