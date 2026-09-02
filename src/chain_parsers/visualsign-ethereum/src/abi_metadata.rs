@@ -446,10 +446,12 @@ fn validate_abi_signature(
 /// **This is not how a deployment picks its trust posture.** `parser_app` takes
 /// its posture from its own cmdline (`--accept-unsigned-abis` /
 /// `--accept-signatures-from-pubkey`, parsed into a [`MetadataTrustPolicy`] via
-/// [`signer_allowlist_from_hex`]) so the choice is auditable in the signed
-/// deployment manifest and cannot be influenced per request. This function backs
-/// `parser_cli`, which signs the ABI files it loads with the dev key and
-/// therefore runs require-signed against that key.
+/// [`signer_allowlist_from_hex`]) and cannot be influenced per request. The
+/// intended end state is for that flag to land in the signed TVC manifest's
+/// `pivotArgs` so a signer can verify the posture out of band; wiring
+/// `tools/tvc-deploy` to emit it has not landed yet (see CLAUDE.md). This
+/// function backs `parser_cli`, which signs the ABI files it loads with the dev
+/// key and therefore runs require-signed against that key.
 #[must_use]
 pub fn authorized_abi_signers() -> SignerAllowlist {
     let mut allow = SignerAllowlist::new();

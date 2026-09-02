@@ -118,7 +118,8 @@ mod tests {
             .expect("payload must serialize")
     }
 
-    /// Pins the ABI trust posture the deployed binary actually runs.
+    /// Pins that `create_registry` forwards a supplied permissive policy to the
+    /// converter, rather than silently dropping it.
     ///
     /// `create_registry` is the only production construction site for the Ethereum
     /// converter, and which posture it installs is decided purely by the
@@ -126,15 +127,14 @@ mod tests {
     /// `with_policy`. Moving between `AcceptUnsigned` and
     /// `RequireAllowlistedSigner(..)` compiles clean and, without this test,
     /// leaves the whole suite green, so nothing would tell a reviewer that the
-    /// production posture had changed.
+    /// wiring broke.
     ///
-    /// The posture is a deploy-time choice (see the `parser_app` CLI flags), so
-    /// this test builds the config explicitly with `AcceptUnsigned` and asserts
-    /// the unsigned caller ABI decodes. That is the posture the enclave binary
-    /// has always effectively run (the compiled-in allowlist is empty there, so an
-    /// unsigned entry was already accepted); an operator who deploys
-    /// require-signed constructs a different config on purpose, which is the point
-    /// at which this assertion's premise is revisited.
+    /// The posture is a deploy-time choice the operator makes via the `parser_app`
+    /// CLI flags (the CLI may construct either policy; this test does not pin
+    /// which one the deployed binary actually runs). This test builds the config
+    /// explicitly with `AcceptUnsigned` and asserts the unsigned caller ABI
+    /// decodes, exercising the permissive branch of that wiring. The mirror test
+    /// below exercises the restrictive branch.
     #[test]
     fn create_registry_runs_the_accept_unsigned_abi_posture() {
         let rendered = render_custom_foo(visualsign::signing::MetadataTrustPolicy::AcceptUnsigned);
