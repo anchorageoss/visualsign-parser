@@ -62,9 +62,10 @@ fn identity_unverified(policy: &MetadataTrustPolicy, abi: &Abi) -> bool {
 ///   request-time one.** `policy` is fixed when the parser process starts. A
 ///   caller cannot move the parser between postures by omitting a signature.
 ///   `parser_app` takes its posture from the `--accept-unsigned-abis` /
-///   `--accept-signatures-from-pubkey` cmdline flags, which land in the signed TVC
-///   manifest's `pivotArgs`, so a signer can verify out of band which posture the
-///   deployment runs. See [`MetadataTrustPolicy`].
+///   `--accept-signatures-from-pubkey` cmdline flags. The intended end state is for
+///   these to land in the signed TVC manifest's `pivotArgs`, so a signer can verify
+///   out of band which posture a deployment runs; that wiring has not landed yet
+///   (see `tools/tvc-deploy` and CLAUDE.md). See [`MetadataTrustPolicy`].
 /// - **Under [`MetadataTrustPolicy::RequireAllowlistedSigner`]**, every entry must
 ///   carry a signature that verifies AND whose key is allowlisted. Missing,
 ///   malformed and unauthorized signatures are all rejected. An empty allowlist

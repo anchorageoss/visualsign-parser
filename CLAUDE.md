@@ -107,8 +107,9 @@ is a deploy-time choice, not a per-request one. `parser_app` requires exactly on
   by one of the given secp256k1 keys; unsigned or otherwise-signed mappings are dropped.
 
 This posture only governs Ethereum `abi_mappings`. Solana `idl_mappings` go through a
-separate, unsigned-accepting path gated by the `VISUALSIGN_SOL_IDL_SIGNERS` env var,
-unaffected by either flag.
+separate, unsigned-accepting path unaffected by either flag: unsigned IDLs are always
+accepted, and the `VISUALSIGN_SOL_IDL_SIGNERS` env var only allowlists signers for
+IDLs that *are* signed.
 
 The intended end state is for the flags to land in the TVC deployment manifest's
 `pivotArgs` (see `tools/tvc-deploy`), so a signer can verify which posture a deployment

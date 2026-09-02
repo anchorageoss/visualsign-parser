@@ -240,9 +240,11 @@ mod tests {
    visualsign-<your-chain> = { path = "../../chain_parsers/visualsign-<your-chain>"}
    ```
 
-6. Register your converter in `src/parser/app/src/routes/parse.rs`:
+6. Register your converter in `src/parser/app/src/registry.rs`:
    ```rust
-   fn create_registry() -> visualsign::registry::TransactionConverterRegistry {
+   pub fn create_registry(
+       config: &crate::config::ParserConfig,
+   ) -> visualsign::registry::TransactionConverterRegistry {
        let mut registry = visualsign::registry::TransactionConverterRegistry::new();
 
        // ...existing registrations...

@@ -1,10 +1,12 @@
 //! Deploy-time parser configuration.
 //!
 //! Everything in here is fixed when the process starts and cannot be influenced by
-//! a request. For the enclave binary the values come from the cmdline, which lands
-//! verbatim in the `pivotArgs` of the TVC deployment manifest the operators sign, so
-//! a signer can check the posture a deployment runs against out of band rather than
-//! trusting a per-request signal (or a log line the TEE never surfaces).
+//! a request. For the enclave binary the values come from the cmdline. The intended
+//! end state is for those values to land verbatim in the `pivotArgs` of the TVC
+//! deployment manifest the operators sign, so a signer can check the posture a
+//! deployment runs against out of band rather than trusting a per-request signal (or
+//! a log line the TEE never surfaces); wiring `tools/tvc-deploy` to emit them has not
+//! landed yet (see CLAUDE.md).
 
 use visualsign::signing::MetadataTrustPolicy;
 
