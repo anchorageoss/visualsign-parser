@@ -5,11 +5,11 @@ edition = "2024"
 
 [features]
 default    = ["cli-plugin"]
-cli-plugin = ["dep:clap", "dep:parser_cli_core", "dep:bs58"]
+cli-plugin = ["dep:clap", "dep:parser_cli_core"]
 diagnostics = ["visualsign/diagnostics"]
 
 [dependencies]
-bs58            = { version = "0.5", optional = true }
+bs58            = "0.5"
 clap            = { version = "4.0", features = ["derive"], optional = true }
 parser_cli_core = { path = "../../parser/cli-core", optional = true }
 
@@ -46,7 +46,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 jupiter-swap-api-client = "0.2.0"
 base64 = "0.22.1"
-bs58 = "0.5"
 proptest = "1"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
