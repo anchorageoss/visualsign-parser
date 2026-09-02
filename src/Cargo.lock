@@ -15091,6 +15091,7 @@ dependencies = [
  "defuse-core",
  "defuse-crypto",
  "defuse-deadline",
+ "ed25519-dalek 2.2.0",
  "generated",
  "hex",
  "k256 0.13.4",

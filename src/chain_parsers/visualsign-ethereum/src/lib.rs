@@ -272,11 +272,6 @@ impl EthereumVisualSignConverter {
 
         // Resolve chain_id: metadata > transaction > default (1 for legacy).
         let chain_id = resolve_chain_id(&transaction, &options)?;
-        // `rejected_by_policy` and `unverified` are deliberately not consumed here:
-        // rendering them needs a field on the payload (the follow-up to PRS-555,
-        // which shipped without one), which is out of scope for this change. They
-        // are carried this far so that follow-up has something to read instead of a
-        // `log::warn!` the enclave binary compiles away.
         let metadata_abi = extract_metadata_abi(&options, chain_id, &self.abi_trust);
 
         convert_to_visual_sign_payload(
@@ -285,7 +280,7 @@ impl EthereumVisualSignConverter {
             chain_id,
             &layered_registry,
             &self.visualizer_registry,
-            metadata_abi.registry.as_ref(),
+            metadata_abi.as_ref(),
         )
     }
 }
@@ -487,17 +482,11 @@ fn resolve_chain_id(
 }
 
 /// Extract ABI from wallet-provided metadata with graceful degradation.
-///
-/// Returns the whole [`abi_metadata::AbiExtraction`] rather than just the registry
-/// so the caller keeps the counts that separate "the request supplied no ABI
-/// mappings" from "this deployment refused every mapping it supplied". Both render
-/// identically (raw selector), so collapsing them here would throw away the only
-/// in-process signal that distinguishes them.
 fn extract_metadata_abi(
     options: &VisualSignOptions,
     chain_id: u64,
     policy: &MetadataTrustPolicy,
-) -> abi_metadata::AbiExtraction {
+) -> Option<abi_registry::AbiRegistry> {
     abi_metadata::try_extract_from_chain_metadata(options.metadata.as_ref(), chain_id, policy)
 }
 

@@ -822,6 +822,7 @@ fn near_chain_metadata(network_id: &str) -> Option<ChainMetadata> {
     Some(ChainMetadata {
         metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
             network_id: Some(network_id.to_string()),
+            token_mappings: Default::default(),
         })),
     })
 }
@@ -928,6 +929,16 @@ async fn parser_near_intent_envelope_e2e() {
 
         let expected_sp = serde_json::json!({
             "Fields": [
+                // The resolved network is part of every token-metadata signed
+                // scope, so the standalone intent path renders it for the same
+                // reason the borsh path does: a signature is checked against the
+                // network the payload displays.
+                {
+                    "FallbackText": "NEAR Mainnet",
+                    "Label": "Network",
+                    "TextV2": { "Text": "NEAR Mainnet" },
+                    "Type": "text_v2"
+                },
                 {
                     "FallbackText": "alice.near",
                     "Label": "Signer",
