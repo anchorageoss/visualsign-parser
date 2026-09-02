@@ -566,6 +566,38 @@ mod tests {
     }
 
     #[test]
+    fn required_policy_accepts_independently_generated_signature_vector() {
+        // Every other signature test in this file signs with
+        // `qos_p256::P256SignPair` and verifies with the same `qos_p256`
+        // implementation (via `sign_with`/`pinned.verify`), so a change to
+        // qos_p256 that altered the actual wire contract documented on
+        // `SignedVerifiedPaymentMarker::signature` (double SHA-256 pre-hash,
+        // raw 64-byte `r||s`, no DER) identically on both the sign and
+        // verify side could keep every one of those tests green while
+        // making markers from the real, out-of-repo gateway signer
+        // unverifiable. This vector is generated independently of qos_p256
+        // (Python's `cryptography` library doing a plain ECDSA P-256
+        // SHA-256 signature over `vpm.signing_digest()`, DER output decoded
+        // to raw `r||s`) so it pins interop with that documented contract
+        // rather than qos_p256's self-consistency.
+        let pub_hex = "044691897059040ae92f5e7b2fe3edc20334ece00cc295b45c2015913226a553\
+                        ac2ebd04ab793e3c3d56cf942098c13c33de20b1ca794c87bdb56433f2669b097a";
+        let policy = PaymentPolicy::from_hex(pub_hex).unwrap();
+
+        let mut req = req_with_marker(vec![]);
+        let vpm = make_vpm(&req, pub_hex);
+        let signature = decode_hex(
+            "cd5c4811efb06dd3341aa55dc1e1a15ab049cc7c948d123d6b1aaea5ec97be7\
+             93d372834f76e4db4e065192904f99229fb7aeaa9f0a1712120519f0e428604ae",
+        )
+        .unwrap();
+        req.payment_marker =
+            borsh::to_vec(&SignedVerifiedPaymentMarker { vpm, signature }).unwrap();
+
+        verify(&req, &policy).unwrap();
+    }
+
+    #[test]
     fn chain_metadata_bytes_matches_hand_encoded_layout_for_ethereum_variant() {
         // `chain_metadata_bytes` (borsh(ChainMetadata)) is one-third of
         // `request_hash`'s preimage, alongside `unsigned_payload` and
