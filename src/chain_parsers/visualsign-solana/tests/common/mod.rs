@@ -104,6 +104,7 @@ pub fn options_with_idl(program_id: &Pubkey, idl_json: &str, name: &str) -> Visu
                 idl_mappings: idl_mappings.into_iter().collect(),
                 network_id: None,
                 idl: None,
+                simulated_transaction_result: None,
             })),
         }),
         ..VisualSignOptions::default()
