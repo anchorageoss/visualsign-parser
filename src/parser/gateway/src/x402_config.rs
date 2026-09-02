@@ -280,6 +280,16 @@ impl X402Config {
                 ),
             });
         }
+        // Userinfo (user:pass@host) isn't part of this configuration
+        // contract, and the URL is later logged verbatim on probe failure
+        // (main.rs), which would leak credentials into gateway logs. Reject
+        // it outright rather than relying on every call site to redact.
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(ConfigError::Invalid {
+                var: "X402_FACILITATOR_URL",
+                message: "must not contain userinfo (user:pass@host)".into(),
+            });
+        }
         Ok(url)
     }
 
@@ -831,6 +841,26 @@ mod tests {
         let err = X402Config::from_lookup(lookup(&[
             ("X402_PROFILE", "payai"),
             ("X402_FACILITATOR_URL", "http://facilitator.payai.network"),
+            ("X402_PAYTO", "0xabcdef0000000000000000000000000000000001"),
+        ]))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                var: "X402_FACILITATOR_URL",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn from_env_rejects_facilitator_url_with_userinfo() {
+        let err = X402Config::from_lookup(lookup(&[
+            ("X402_PROFILE", "payai"),
+            (
+                "X402_FACILITATOR_URL",
+                "https://user:secret@facilitator.payai.network",
+            ),
             ("X402_PAYTO", "0xabcdef0000000000000000000000000000000001"),
         ]))
         .unwrap_err();
