@@ -293,31 +293,26 @@ impl From<&SolanaMetadata> for SolanaIntermediateOutput {
 // -- Extraction --------------------------------------------------------------
 
 /// Parse the transaction once via `solana_parser::parse_transaction_with_idls`
-/// and project the result into a Borsh-friendly intermediate output.
+/// and return the structured metadata.
+///
+/// This is the single structured decode of the transaction. Both the
+/// Borsh-friendly [`SolanaIntermediateOutput`] and the human-readable
+/// `SignablePayload` are projections of the value returned here, so the two
+/// cannot diverge and the transaction is decoded once rather than twice.
 ///
 /// `raw_message_hex` is the hex-encoded serialized message (or full
 /// transaction); `full_transaction` toggles which form is being passed in,
 /// matching `solana_parser`'s API.
-///
-/// `pub(crate)` (not `pub`) because it takes the crate-private `IdlRegistry`;
-/// the schema types above are `pub` so external consumers can still decode the
-/// emitted bytes.
-///
-/// Eventual architecture (tracked, not yet implemented): the structured decode
-/// should become the single source of truth from which the VisualSign payload
-/// is generated, and these bytes should be passed through as-is rather than
-/// re-parsed here. Today this re-parses once, best-effort, alongside the
-/// existing VisualSign generation path.
 // `disallowed_types`: the `solana_parser::parse_transaction_with_idls` API
 // requires a `HashMap` for its custom-IDL argument. We build one only as a
 // transient adapter from the deterministic `BTreeMap` registry; it never feeds
 // serialized output, so determinism is unaffected.
 #[allow(clippy::disallowed_types)]
-pub(crate) fn extract_solana_intermediate_output(
+pub(crate) fn parse_solana_metadata(
     raw_message_hex: &str,
     full_transaction: bool,
     idl_registry: &IdlRegistry,
-) -> Result<SolanaIntermediateOutput, VisualSignError> {
+) -> Result<SolanaMetadata, VisualSignError> {
     // The registry stores configs in a `BTreeMap` (determinism), but the
     // parser API takes a `HashMap`; project into one, or `None` when empty.
     let configs = idl_registry.get_all_configs();
@@ -341,18 +336,34 @@ pub(crate) fn extract_solana_intermediate_output(
                 )))
             })?;
 
-    let metadata = response
+    response
         .solana_parsed_transaction
         .payload
-        .as_ref()
-        .and_then(|p| p.transaction_metadata.as_ref())
+        .and_then(|p| p.transaction_metadata)
         .ok_or_else(|| {
             VisualSignError::ParseError(TransactionParseError::DecodeError(
                 "solana_parser returned no transaction_metadata".to_string(),
             ))
-        })?;
+        })
+}
 
-    Ok(SolanaIntermediateOutput::from(metadata))
+/// Parse a transaction and project it into the Borsh-friendly intermediate
+/// output.
+///
+/// Thin wrapper over [`parse_solana_metadata`]; prefer calling that directly
+/// and projecting when the caller also needs the metadata for rendering, so
+/// the transaction is decoded exactly once.
+///
+/// `pub(crate)` (not `pub`) because it takes the crate-private `IdlRegistry`;
+/// the schema types above are `pub` so external consumers can still decode the
+/// emitted bytes.
+pub(crate) fn extract_solana_intermediate_output(
+    raw_message_hex: &str,
+    full_transaction: bool,
+    idl_registry: &IdlRegistry,
+) -> Result<SolanaIntermediateOutput, VisualSignError> {
+    let metadata = parse_solana_metadata(raw_message_hex, full_transaction, idl_registry)?;
+    Ok(SolanaIntermediateOutput::from(&metadata))
 }
 
 #[cfg(test)]

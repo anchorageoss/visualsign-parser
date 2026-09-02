@@ -1,7 +1,7 @@
 use crate::core::{InstructionVisualizer, VisualizerContext, visualize_with_any};
 use crate::idl::IdlRegistry;
 use solana_parser::solana::parser::parse_transaction;
-use solana_parser::solana::structs::SolanaAccount;
+use solana_parser::solana::structs::{SolanaAccount, SolanaMetadata};
 use solana_sdk::transaction::Transaction as SolanaTransaction;
 use visualsign::AnnotatedPayloadField;
 use visualsign::errors::{TransactionParseError, VisualSignError};
@@ -265,81 +265,91 @@ pub fn decode_transfers(
         )))
     })?;
 
-    let mut fields = Vec::new();
-
-    // Extract native SOL transfers
-    if let Some(payload) = parsed_transaction
+    Ok(parsed_transaction
         .solana_parsed_transaction
         .payload
         .as_ref()
-    {
-        if let Some(transaction_metadata) = payload.transaction_metadata.as_ref() {
-            // Add native SOL transfers
-            for (i, transfer) in transaction_metadata.transfers.iter().enumerate() {
-                // Create the field using the old format for compatibility
-                let field = AnnotatedPayloadField {
-                    signable_payload_field: visualsign::SignablePayloadField::TextV2 {
-                        common: visualsign::SignablePayloadFieldCommon {
-                            fallback_text: format!(
-                                "Transfer {}: From {} To {} For {}",
-                                i + 1,
-                                transfer.from,
-                                transfer.to,
-                                transfer.amount
-                            ),
-                            label: format!("Transfer {}", i + 1),
-                        },
-                        text_v2: visualsign::SignablePayloadFieldTextV2 {
-                            text: format!(
-                                "From: {}\nTo: {}\nAmount: {}",
-                                transfer.from, transfer.to, transfer.amount
-                            ),
-                        },
-                    },
-                    static_annotation: None,
-                    dynamic_annotation: None,
-                };
+        .and_then(|p| p.transaction_metadata.as_ref())
+        .map(decode_transfers_from_metadata)
+        .unwrap_or_default())
+}
 
-                fields.push(field);
-            }
+/// Render transfer fields from an already-decoded [`SolanaMetadata`].
+///
+/// This is the projection half of [`decode_transfers`], split out so a caller
+/// that has already decoded the transaction (see
+/// `intermediate::parse_solana_metadata`) renders from those structures
+/// instead of decoding a second time. Rendering and the intermediate output
+/// are then projections of one decode and cannot diverge.
+pub fn decode_transfers_from_metadata(
+    transaction_metadata: &SolanaMetadata,
+) -> Vec<AnnotatedPayloadField> {
+    let mut fields = Vec::new();
 
-            // Add SPL token transfers
-            for (i, spl_transfer) in transaction_metadata.spl_transfers.iter().enumerate() {
-                let field = AnnotatedPayloadField {
-                    signable_payload_field: visualsign::SignablePayloadField::TextV2 {
-                        common: visualsign::SignablePayloadFieldCommon {
-                            fallback_text: format!(
-                                "SPL Transfer {}: From {} To {} For {}",
-                                i + 1,
-                                spl_transfer.from,
-                                spl_transfer.to,
-                                spl_transfer.amount
-                            ),
-                            label: format!("SPL Transfer {}", i + 1),
-                        },
-                        text_v2: visualsign::SignablePayloadFieldTextV2 {
-                            text: format!(
-                                "From: {}\nTo: {}\nOwner: {}\nAmount: {}\nMint: {:?}\nDecimals: {:?}\nFee: {:?}",
-                                spl_transfer.from,
-                                spl_transfer.to,
-                                spl_transfer.owner,
-                                spl_transfer.amount,
-                                spl_transfer.token_mint,
-                                spl_transfer.decimals,
-                                spl_transfer.fee
-                            ),
-                        },
-                    },
-                    static_annotation: None,
-                    dynamic_annotation: None,
-                };
+    // Extract native SOL transfers
+    // Add native SOL transfers
+    for (i, transfer) in transaction_metadata.transfers.iter().enumerate() {
+        // Create the field using the old format for compatibility
+        let field = AnnotatedPayloadField {
+            signable_payload_field: visualsign::SignablePayloadField::TextV2 {
+                common: visualsign::SignablePayloadFieldCommon {
+                    fallback_text: format!(
+                        "Transfer {}: From {} To {} For {}",
+                        i + 1,
+                        transfer.from,
+                        transfer.to,
+                        transfer.amount
+                    ),
+                    label: format!("Transfer {}", i + 1),
+                },
+                text_v2: visualsign::SignablePayloadFieldTextV2 {
+                    text: format!(
+                        "From: {}\nTo: {}\nAmount: {}",
+                        transfer.from, transfer.to, transfer.amount
+                    ),
+                },
+            },
+            static_annotation: None,
+            dynamic_annotation: None,
+        };
 
-                fields.push(field);
-            }
-        }
+        fields.push(field);
     }
 
-    Ok(fields)
+    // Add SPL token transfers
+    for (i, spl_transfer) in transaction_metadata.spl_transfers.iter().enumerate() {
+        let field = AnnotatedPayloadField {
+            signable_payload_field: visualsign::SignablePayloadField::TextV2 {
+                common: visualsign::SignablePayloadFieldCommon {
+                    fallback_text: format!(
+                        "SPL Transfer {}: From {} To {} For {}",
+                        i + 1,
+                        spl_transfer.from,
+                        spl_transfer.to,
+                        spl_transfer.amount
+                    ),
+                    label: format!("SPL Transfer {}", i + 1),
+                },
+                text_v2: visualsign::SignablePayloadFieldTextV2 {
+                    text: format!(
+                        "From: {}\nTo: {}\nOwner: {}\nAmount: {}\nMint: {:?}\nDecimals: {:?}\nFee: {:?}",
+                        spl_transfer.from,
+                        spl_transfer.to,
+                        spl_transfer.owner,
+                        spl_transfer.amount,
+                        spl_transfer.token_mint,
+                        spl_transfer.decimals,
+                        spl_transfer.fee
+                    ),
+                },
+            },
+            static_annotation: None,
+            dynamic_annotation: None,
+        };
+
+        fields.push(field);
+    }
+    fields
 }
 
 #[cfg(all(test, not(feature = "diagnostics")))]
