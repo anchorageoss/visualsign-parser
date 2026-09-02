@@ -136,7 +136,7 @@ jobs:
           docker image push --all-tags "ghcr.io/anchorageoss/${{ matrix.target.name }}"
 
       - name: TVC deployment details
-        if: matrix.target.name == 'parser_app' || matrix.target.name == 'parser_gateway' || matrix.target.name == 'parser_http_server'
+        if: matrix.target.name == 'parser_app' || matrix.target.name == 'parser_http_server'
         shell: bash
         env:
           TARGET_NAME: ${{ matrix.target.name }}
@@ -159,18 +159,16 @@ jobs:
           qos_version="0.12.0"
 
           # Per-target context for operators establishing the TVC trust
-          # boundary: parser_app / parser_http_server are enclave-side pivot
-          # binaries; parser_gateway is the host-side counterpart that signs
-          # payment verification for the enclave to check.
+          # boundary. Only enclave-side pivot binaries land here; parser_gateway
+          # is the host-side counterpart (it signs payment verification for the
+          # enclave to check) and isn't a TVC pivot, so it's excluded above and
+          # doesn't need a role_note case.
           case "${TARGET_NAME}" in
             parser_app)
               role_note='The enclave-side binary that speaks gRPC over vsock to QOS. Use this as the TVC pivot when your callers reach the app via Turnkey-internal routing.'
               ;;
             parser_http_server)
               role_note='The HTTP+JSON enclave-side binary intended for TVC public ingress. Cloudflare in front of `app-<uuid>.turnkey.cloud` only accepts HTTP, so this is the variant to pivot when external clients call the app directly. Routes: `GET /health` (Turnkey HTTP health check), `POST /visualsign/api/v1/parse` (open), `POST /visualsign/api/v2/parse` (currently open too, identical to v1; a follow-up PR adds `GATEWAY_SIGNING_PUBKEY_HEX`-gated enforcement here). Deploy with `healthCheckType: TVC_HEALTH_CHECK_TYPE_HTTP`, `publicIngressPort: 3000`.'
-              ;;
-            parser_gateway)
-              role_note='The host-side gateway intended to perform x402 verify+settle and sign a `VerifiedPaymentMarker` for the enclave to verify; that payment enforcement is not implemented yet, this is scaffolding. Pairs with `parser_http_server`'\''s `/v2` route; once implemented, the gateway'\''s P256 sign pubkey will be pinned in the enclave'\''s `GATEWAY_SIGNING_PUBKEY_HEX` env.'
               ;;
           esac
 
@@ -225,8 +223,8 @@ jobs:
           begin_sentinel="<!-- BEGIN_TVC_DEPLOY_${TARGET_NAME} -->"
           end_sentinel="<!-- END_TVC_DEPLOY_${TARGET_NAME} -->"
           if [ -n "$SEMVER_TAG" ] && gh release view "$SEMVER_TAG" >/dev/null 2>&1; then
-            # Other matrix legs (parser_app / parser_gateway / parser_http_server)
-            # run this same read-modify-write concurrently against one release
+            # Other matrix legs (parser_app / parser_http_server) run this
+            # same read-modify-write concurrently against one release
             # body. Sentinels keep each leg's own block idempotent across
             # re-runs, but they don't stop a lost update: two legs can both
             # read the body before either writes, and whichever `gh release
