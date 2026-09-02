@@ -139,6 +139,12 @@ message SolanaMetadata {
   // Map of program_id (base58 string) to IDL definitions
   // Allows wallet to provide multiple IDLs, one per program
   map<string, Idl> idl_mappings = 3;
+  // Raw simulateTransaction RPC response bytes (innerInstructions section),
+  // base64-encoded (matching unsigned_payload's convention), sent with no
+  // caller-side decode/reshape. The parser runs this through the same
+  // static-decode path (parse_transaction_with_idls) used for
+  // unsigned_payload.
+  optional string simulated_transaction_result = 5;
 }
 
 message NearMetadata {

@@ -436,8 +436,11 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
         };
 
         let idl_registry = create_idl_registry_from_options(&options)?;
+        let raw_simulated_instructions =
+            extract_raw_simulated_instructions(&options, &idl_registry);
         Ok(
-            match build_intermediate_bytes(&message_hex, &idl_registry) {
+            match build_intermediate_bytes(&message_hex, &idl_registry, raw_simulated_instructions)
+            {
                 Some(bytes) => ConversionResult::with_intermediate(payload, bytes),
                 None => ConversionResult::new(payload),
             },
@@ -482,20 +485,76 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
 fn build_intermediate_bytes(
     message_hex: &str,
     idl_registry: &crate::idl::IdlRegistry,
+    raw_simulated_instructions: Option<(
+        Vec<crate::intermediate::SolanaSimulatedInstruction>,
+        Option<crate::intermediate::SolanaSimulationError>,
+    )>,
 ) -> Option<Vec<u8>> {
     match extract_solana_intermediate_output(message_hex, false, idl_registry) {
-        Ok(output) => match borsh::to_vec(&output) {
-            Ok(bytes) => Some(bytes),
-            Err(err) => {
-                tracing::warn!("Failed to borsh-encode Solana intermediate output: {err}");
-                None
+        Ok(mut output) => {
+            // Simulation results are independent of static decode.
+            if let Some((instructions, simulation_error)) = raw_simulated_instructions {
+                output.simulated_instructions = instructions;
+                output.simulation_error = simulation_error;
             }
-        },
+            if !output.simulated_instructions.is_empty() {
+                let unresolved = output
+                    .simulated_instructions
+                    .iter()
+                    .filter(|s| {
+                        s.parsed_instruction_data.is_none() && s.solana_rpc_parsed_data.is_none()
+                    })
+                    .count();
+                tracing::info!(
+                    simulated_instructions = output.simulated_instructions.len(),
+                    unresolved,
+                    "Solana simulated instructions attached to intermediate output"
+                );
+            }
+            match borsh::to_vec(&output) {
+                Ok(bytes) => Some(bytes),
+                Err(err) => {
+                    tracing::warn!("Failed to borsh-encode Solana intermediate output: {err}");
+                    None
+                }
+            }
+        }
         Err(err) => {
             tracing::warn!("Failed to extract Solana intermediate output: {err}");
             None
         }
     }
+}
+
+/// Pulls `simulated_transaction_result` out of `options.metadata`'s Solana
+/// branch, if present, and IDL-decodes it.
+///
+/// `None` only when no simulation was supplied. Once the field is present a
+/// failure to read it comes back as a `SolanaSimulationError`, not an absence.
+fn extract_raw_simulated_instructions(
+    options: &VisualSignOptions,
+    idl_registry: &crate::idl::IdlRegistry,
+) -> Option<(
+    Vec<crate::intermediate::SolanaSimulatedInstruction>,
+    Option<crate::intermediate::SolanaSimulationError>,
+)> {
+    let generated::parser::chain_metadata::Metadata::Solana(solana) =
+        options.metadata.as_ref()?.metadata.as_ref()?
+    else {
+        return None;
+    };
+    let raw_json_b64 = solana.simulated_transaction_result.as_ref()?;
+    let raw_json = match base64::engine::general_purpose::STANDARD.decode(raw_json_b64) {
+        Ok(raw_json) => raw_json,
+        Err(e) => {
+            tracing::warn!(error = %e, "simulated_transaction_result is not valid base64");
+            return Some((
+                Vec::new(),
+                Some(crate::intermediate::SolanaSimulationError::InvalidBase64),
+            ));
+        }
+    };
+    Some(crate::intermediate::parse_and_decode_simulated_instructions(&raw_json, idl_registry))
 }
 
 impl VisualSignConverterFromString<SolanaTransactionWrapper> for SolanaVisualSignConverter {}
@@ -767,7 +826,9 @@ fn convert_v0_to_visual_sign_payload(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::intermediate::{SOLANA_INTERMEDIATE_SCHEMA_VERSION, SolanaIntermediateOutput};
+    use crate::intermediate::{
+        RegisteredSource, SOLANA_INTERMEDIATE_SCHEMA_VERSION, SolanaIntermediateOutput,
+    };
     use crate::test_utils::payload_from_b64;
     use crate::utils::create_transaction_with_empty_signatures;
 
@@ -843,6 +904,113 @@ mod tests {
         );
     }
 
+    /// End-to-end exercise of `simulated_instructions`: the same known System
+    /// transfer, with a simulation result reporting one inner-instruction
+    /// group (triggered by top-level instruction 0) containing two calls --
+    /// one to the System Program (native, trusted; no IDL entry so it's never
+    /// IDL-decoded) and one to a made-up unknown program. Confirms:
+    /// static decode's `instructions` (and its `parsed_instruction_data`) is
+    /// completely unaffected by the simulation result, and
+    /// `simulated_instructions` is independent of it, with each entry's own
+    /// `registered_source` and `index` carried from its group.
+    #[test]
+    fn intermediate_output_populates_simulated_instructions() {
+        let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
+        let solana_transfer_transaction =
+            create_transaction_with_empty_signatures(solana_transfer_message);
+        let wrapper = SolanaTransactionWrapper::from_string(&solana_transfer_transaction)
+            .expect("known transfer parses");
+
+        let options = VisualSignOptions {
+            include_intermediate_output: true,
+            decode_transfers: true,
+            transaction_name: Some("Solana Transaction".to_string()),
+            metadata: Some(generated::parser::ChainMetadata {
+                metadata: Some(generated::parser::chain_metadata::Metadata::Solana(
+                    generated::parser::SolanaMetadata {
+                        network_id: None,
+                        idl: None,
+                        idl_mappings: Default::default(),
+                        simulated_transaction_result: Some(
+                            base64::engine::general_purpose::STANDARD.encode(
+                                serde_json::json!({
+                                    "context": {"slot": 0},
+                                    "value": {
+                                        "err": null,
+                                        "innerInstructions": [
+                                            {
+                                                "index": 0,
+                                                "instructions": [
+                                                    {
+                                                        "programId": "11111111111111111111111111111111",
+                                                        "accounts": [],
+                                                        "data": bs58::encode([0x02u8, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).into_string(),
+                                                        "stackHeight": 2
+                                                    },
+                                                    {
+                                                        "programId": "Unknown9xyz11111111111111111111111111",
+                                                        "accounts": [],
+                                                        "data": bs58::encode([0xde, 0xad, 0xbe, 0xef]).into_string(),
+                                                        "stackHeight": 2
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                })
+                                .to_string(),
+                            ),
+                        ),
+                    },
+                )),
+            }),
+            ..VisualSignOptions::default()
+        };
+        let result = SolanaVisualSignConverter
+            .to_visual_sign_payload(wrapper, options)
+            .expect("conversion succeeds with simulated instructions attached");
+
+        let bytes = result
+            .intermediate_output
+            .as_ref()
+            .expect("intermediate_output should be emitted");
+        let decoded: SolanaIntermediateOutput =
+            borsh::from_slice(bytes).expect("emitted bytes decode into the published schema");
+
+        assert_eq!(
+            decoded.instructions.len(),
+            1,
+            "static decode is unaffected by the simulation result"
+        );
+        assert!(
+            decoded.instructions[0].parsed_instruction_data.is_none(),
+            "top-level System transfer has no IDL match (native decode path, not IDL)"
+        );
+        assert_eq!(
+            decoded.instructions[0].registered_source,
+            RegisteredSource::Native,
+            "top-level System transfer is trusted even though it has no IDL entry to match"
+        );
+
+        assert_eq!(
+            decoded.simulated_instructions.len(),
+            2,
+            "both simulated calls must be present"
+        );
+        assert_eq!(decoded.simulated_instructions[0].index, 0);
+        assert_eq!(
+            decoded.simulated_instructions[0].registered_source,
+            RegisteredSource::Native,
+            "System Program call is trusted even though it has no IDL entry to match"
+        );
+        assert_eq!(decoded.simulated_instructions[1].index, 0);
+        assert_eq!(
+            decoded.simulated_instructions[1].registered_source,
+            RegisteredSource::Unregistered,
+            "unknown program call must be flagged unregistered"
+        );
+    }
+
     /// The intermediate-output path is best-effort: when `solana_parser` cannot
     /// decode the message, `build_intermediate_bytes` must degrade to `None`
     /// rather than panic or surface an error, so the converter still returns
@@ -853,7 +1021,7 @@ mod tests {
         // must fail and the helper must return `None`.
         let registry = IdlRegistry::new();
         assert!(
-            build_intermediate_bytes("deadbeef", &registry).is_none(),
+            build_intermediate_bytes("deadbeef", &registry, None).is_none(),
             "undecodable input must degrade to None, not panic or error"
         );
     }
@@ -2050,6 +2218,7 @@ mod tests {
                         network_id: Some("SOLANA_MAINNET".to_string()),
                         idl: None,
                         idl_mappings: idl_mappings.into_iter().collect(),
+                        simulated_transaction_result: None,
                     },
                 )),
             }),

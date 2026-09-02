@@ -244,6 +244,15 @@ pub struct SolanaMetadata {
         ::prost::alloc::string::String,
         Idl,
     >,
+    /// Raw simulateTransaction RPC response bytes (innerInstructions section),
+    /// base64-encoded (matching unsigned_payload's convention), sent with no
+    /// caller-side decode/reshape. The parser runs this through the same
+    /// static-decode path (parse_transaction_with_idls) used for
+    /// unsigned_payload.
+    #[prost(string, optional, tag = "5")]
+    pub simulated_transaction_result: ::core::option::Option<
+        ::prost::alloc::string::String,
+    >,
 }
 #[cfg_attr(
     feature = "serde_derive",

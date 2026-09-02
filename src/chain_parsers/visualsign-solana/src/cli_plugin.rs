@@ -18,6 +18,17 @@ pub struct SolanaArgs {
         value_name = "IDL_NAME:FILE_PATH:PROGRAM_ID"
     )]
     pub idl_json_mappings: Vec<String>,
+
+    /// Base64 of a `simulateTransaction` RPC result, used to decode the
+    /// transaction's inner (CPI) instructions. Same value the API's
+    /// `simulated_transaction_result` field carries.
+    ///
+    /// The encoded JSON must be the bare `result` object
+    /// (`{"context":..,"value":..}`), not the full JSON-RPC envelope, and the
+    /// simulation must have been run with `jsonParsed` encoding and
+    /// `innerInstructions: true`.
+    #[arg(long = "simulated-tx-result", value_name = "BASE64")]
+    pub simulated_tx_result: Option<String>,
 }
 
 /// [`parser_cli_core::ChainPlugin`] implementation for Solana.
@@ -46,7 +57,10 @@ impl parser_cli_core::ChainPlugin for SolanaPlugin {
     }
 
     fn create_metadata(&self, _network: Option<String>) -> Result<Option<ChainMetadata>, String> {
-        Ok(create_chain_metadata(&self.args.idl_json_mappings))
+        Ok(create_chain_metadata(
+            &self.args.idl_json_mappings,
+            self.args.simulated_tx_result.as_deref(),
+        ))
     }
 }
 
@@ -84,27 +98,36 @@ fn build_idl_mappings_from_files(idl_json_mappings: &[String]) -> (BTreeMap<Stri
     )
 }
 
-/// Creates Solana chain metadata from IDL mappings.
-/// Returns `None` if no IDL mappings are provided.
+/// Creates Solana chain metadata from IDL mappings and/or a simulation result.
+/// Returns `None` if neither is provided.
 #[must_use]
-pub(crate) fn create_chain_metadata(idl_json_mappings: &[String]) -> Option<ChainMetadata> {
-    if idl_json_mappings.is_empty() {
+pub(crate) fn create_chain_metadata(
+    idl_json_mappings: &[String],
+    simulated_tx_result: Option<&str>,
+) -> Option<ChainMetadata> {
+    if idl_json_mappings.is_empty() && simulated_tx_result.is_none() {
         return None;
     }
 
-    eprintln!("Loading custom IDLs:");
-    let (idl_mappings, valid_count) = build_idl_mappings_from_files(idl_json_mappings);
-    eprintln!(
-        "Successfully loaded {}/{} IDL mappings\n",
-        valid_count,
-        idl_json_mappings.len()
-    );
+    let idl_mappings = if idl_json_mappings.is_empty() {
+        BTreeMap::new()
+    } else {
+        eprintln!("Loading custom IDLs:");
+        let (idl_mappings, valid_count) = build_idl_mappings_from_files(idl_json_mappings);
+        eprintln!(
+            "Successfully loaded {}/{} IDL mappings\n",
+            valid_count,
+            idl_json_mappings.len()
+        );
+        idl_mappings
+    };
 
     Some(ChainMetadata {
         metadata: Some(Metadata::Solana(SolanaMetadata {
             network_id: None,
             idl: None,
             idl_mappings: idl_mappings.into_iter().collect(),
+            simulated_transaction_result: simulated_tx_result.map(str::to_string),
         })),
     })
 }
@@ -120,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_create_chain_metadata_empty_returns_none() {
-        assert!(create_chain_metadata(&[]).is_none());
+        assert!(create_chain_metadata(&[], None).is_none());
     }
 
     #[test]
@@ -131,7 +154,7 @@ mod tests {
             path.display()
         )];
 
-        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };
@@ -152,7 +175,7 @@ mod tests {
     fn test_create_chain_metadata_invalid_file_skipped() {
         let mappings =
             vec!["Bad:/nonexistent/idl.json:11111111111111111111111111111111".to_string()];
-        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };
@@ -171,7 +194,7 @@ mod tests {
             ),
         ];
 
-        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };
@@ -194,7 +217,7 @@ mod tests {
             path.display()
         )];
 
-        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };
@@ -214,7 +237,7 @@ mod tests {
             "Also:/missing/file.json:BadProg".to_string(),
         ];
 
-        let meta = create_chain_metadata(&mappings).expect("should return Some");
+        let meta = create_chain_metadata(&mappings, None).expect("should return Some");
         let Metadata::Solana(sol) = meta.metadata.unwrap() else {
             panic!("expected Solana metadata");
         };
