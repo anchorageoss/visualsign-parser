@@ -692,6 +692,7 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                 network_id: Some(network_id.to_string()),
+                token_mappings: Default::default(),
             })),
         };
 
@@ -701,6 +702,7 @@ mod tests {
         expected.push(1); // NearMetadata.network_id: Option<String>: Some
         expected.extend_from_slice(&u32::try_from(network_id.len()).unwrap().to_le_bytes());
         expected.extend_from_slice(network_id.as_bytes());
+        expected.extend_from_slice(&0u32.to_le_bytes()); // token_mappings: 0 entries
 
         assert_eq!(chain_metadata_bytes(Some(&metadata)).unwrap(), expected);
     }

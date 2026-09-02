@@ -27,7 +27,7 @@ For a borsh transaction, the parser produces:
 - Per-action fields — a native `Transfer` renders an `Amount`; a `FunctionCall` renders `Method` plus, for the three token-movement methods the parser understands (`ft_transfer`, `ft_transfer_call`, `ft_withdraw`), the resolved recipient and amount. An `execute_intents` call to `intents.near` additionally decodes and renders the full signed intent batch inline. Any other action or method renders its generic label only — a partially understood call never masquerades as a fully decoded one.
 
 For an intents envelope (either pre-signature or inside a decoded `execute_intents` batch), the parser produces:
-- Envelope fields: `Signer`, `Verifying Contract`, `Deadline`, `Nonce`.
+- Envelope fields: `Signer`, `Verifying Contract`, `Deadline`, `Nonce`. A pre-signature envelope is preceded by the same `Network` field the borsh path renders, since the resolved network is part of every token-metadata signature scope.
 - For a signed batch specifically, a `Standard` and `Signature` (or a signature-invalid warning) per entry, since verification and structural decode are independent — a bad signature still renders the intents it wraps.
 - Per-intent fields, one section per intent in the batch.
 
@@ -57,7 +57,7 @@ ERC-191 and TIP-191 recover a secp256k1 key rather than pass/fail: a well-formed
 
 ## Visualization strategy
 
-- **Amounts in native units where resolvable** — a `wrap.near` (wNEAR) transfer renders as `1 wNEAR`, not `1000000000000000000000000` raw units. Unresolved assets render the raw base-unit amount tagged with the asset id, rather than guessing at decimals — a wrong decimals value would silently misrender an amount.
+- **Amounts in native units where resolvable** — a `wrap.near` (wNEAR) transfer renders as `1 wNEAR`, not `1000000000000000000000000` raw units. Unresolved assets render the raw base-unit amount tagged with the asset id, rather than guessing at decimals — a wrong decimals value would silently misrender an amount. Beyond the compiled-in seed table, a wallet can supply symbol/decimals for additional asset ids per request, optionally signed by a curator key whose curve is chosen by the asset's origin chain (NEAR, Ethereum, or Solana) rather than a single NEAR-wide curve — see [Chain Metadata](/wallet-integration/core-concepts/chain-metadata#near-token-metadata).
 - **Fail-closed method-args decoding** — `ft_transfer`, `ft_transfer_call`, and `ft_withdraw` args decode only when they parse as exactly the known shape (`deny_unknown_fields`); anything else falls back to the generic `FunctionCall` view rather than rendering a partial, possibly misleading subset of fields.
 - **Deadlines and invalid signatures render as soft findings alongside the content they qualify** — the intents still render even when a deadline has passed or a signature fails verification, with the problem surfaced as a warning field rather than blocking the render outright.
 
@@ -103,6 +103,7 @@ Output:
 │  Type: NearTx
 │
 └─ Fields:
+   ├─ Network: NEAR Mainnet
    ├─ Signer: alice.near
    ├─ Verifying Contract: intents.near
    ├─ Deadline: 2100-01-01T00:00:00+00:00
@@ -113,6 +114,22 @@ Output:
 ```
 
 The `--network` flag selects the rendered `Network` header — `NEAR_MAINNET` (the default) or `NEAR_TESTNET`. An unrecognized value errors before anything renders, rather than silently falling back to mainnet.
+
+The resolved network also has to agree with the accounts being rendered: an account whose suffix contradicts it (`.testnet` under mainnet, or `.near` under testnet) is refused rather than displayed under a network it does not belong to. This covers the transaction's own accounts and every rendered envelope's `signer_id`/`verifying_contract`. Since the default is mainnet, decoding a `.testnet` envelope needs `--network NEAR_TESTNET` explicitly. Implicit (64-hex) accounts carry no suffix and are not constrained.
+
+### Configuring curator keys
+
+Signer identity is resolved per origin chain from three environment variables, each a comma-separated list of hex public keys:
+
+| Variable | Curve | Vouches for |
+|----------|-------|-------------|
+| `VISUALSIGN_NEAR_TOKEN_SIGNERS` | ed25519 | NEAR-native assets |
+| `VISUALSIGN_ETH_TOKEN_SIGNERS` | secp256k1 | Ethereum-origin and EVM-twin assets |
+| `VISUALSIGN_SOL_TOKEN_SIGNERS` | ed25519 | Solana-origin and SVM-twin assets |
+
+Each populates only its own domain, so a key trusted for Ethereum-origin assets does not thereby vouch for NEAR-native ones. A variable left unset leaves that domain with no enrolled curators, and a signature checked against it is never recognized.
+
+An unset domain is fail-closed but not inert: under the permissive posture the entry is still accepted as a gap fill for an asset the seed table does not cover, and marked unverified. It cannot override a curated seed. Under the require-signed posture it is refused outright. So a deployment that wants signed token metadata to count as verified has to enrol the curator keys; without them, supplying a signature has the same effect as omitting one.
 
 ## Implementation details
 

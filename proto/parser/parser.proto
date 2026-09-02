@@ -163,6 +163,33 @@ message SolanaMetadata {
 message NearMetadata {
   // Network identifier string (e.g., "NEAR_MAINNET", "NEAR_TESTNET")
   optional string network_id = 1;
+  // Map of NEAR Intents asset id (e.g. "nep141:wrap.near") to token metadata.
+  // Allows a wallet to supply symbol/decimals for assets not yet present in
+  // the parser's compiled-in seed table.
+  map<string, TokenMetadataEntry> token_mappings = 2;
+}
+
+message TokenMetadataEntry {
+  // JSON token metadata, e.g. {"symbol":"USDC.e","decimals":6}. Signed
+  // verbatim as supplied, mirroring Abi.value / Idl.value: the signature (if
+  // present) covers exactly these bytes, not a re-derived encoding.
+  string value = 1;
+  optional SignatureMetadata signature = 2;
+  // Selects the signature curve, dispatched by the origin chain of the
+  // underlying bridged asset rather than by NEAR itself: Ethereum-origin (and
+  // EVM-twin) assets verify with secp256k1, Solana-origin (and SVM-twin)
+  // assets with ed25519, NEAR-native assets with ed25519 via a distinct
+  // curator identity. Unset defaults to Near.
+  optional TokenOriginChain origin_chain = 3;
+}
+
+// TokenOriginChain selects which curator identity/curve a TokenMetadataEntry
+// signature is checked against.
+enum TokenOriginChain {
+  TOKEN_ORIGIN_CHAIN_UNSPECIFIED = 0; // Treated as Near
+  TOKEN_ORIGIN_CHAIN_NEAR = 1;
+  TOKEN_ORIGIN_CHAIN_ETHEREUM = 2;
+  TOKEN_ORIGIN_CHAIN_SOLANA = 3;
 }
 
 message Abi {
