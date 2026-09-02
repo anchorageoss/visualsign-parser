@@ -47,7 +47,6 @@ jobs:
           - name: parser_cli
             label: "parser_cli (Solana)"
           - name: parser_gateway
-          - name: parser_grpc_server
           - name: parser_http_server
     steps:
       - name: Checkout sources
