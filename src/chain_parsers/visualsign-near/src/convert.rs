@@ -1083,6 +1083,10 @@ mod tests {
                 true,
             ),
             (
+                r#"{"intent":"mt_withdraw","token":"mt.near","receiver_id":"bob.near","token_ids":["1"],"amounts":["1"]}"#,
+                true,
+            ),
+            (
                 r#"{"intent":"native_withdraw","receiver_id":"bob.near","amount":"1"}"#,
                 false,
             ),

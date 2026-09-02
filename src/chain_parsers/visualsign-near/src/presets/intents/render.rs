@@ -338,7 +338,7 @@ fn render_intent_body(intent: &Intent, registry: &Reg) -> Result<Fields, VisualS
         Intent::Transfer(t) => render_transfer(t, registry),
         Intent::FtWithdraw(w) => render_ft_withdraw(w, registry),
         Intent::NftWithdraw(w) => render_nft_withdraw(w),
-        Intent::MtWithdraw(w) => render_mt_withdraw(w),
+        Intent::MtWithdraw(w) => render_mt_withdraw(w, registry),
         Intent::NativeWithdraw(w) => render_native_withdraw(w),
         Intent::AddPublicKey(a) => Ok(vec![
             create_text_field("Add Public Key", &a.public_key.to_string())?.signable_payload_field,
@@ -380,9 +380,11 @@ fn render_intent_body(intent: &Intent, registry: &Reg) -> Result<Fields, VisualS
 /// rather than silently drifting out of step.
 pub(crate) fn intent_consumes_token_registry(intent: &Intent) -> bool {
     match intent {
-        Intent::TokenDiff(_) | Intent::Transfer(_) | Intent::FtWithdraw(_) => true,
+        Intent::TokenDiff(_)
+        | Intent::Transfer(_)
+        | Intent::FtWithdraw(_)
+        | Intent::MtWithdraw(_) => true,
         Intent::NftWithdraw(_)
-        | Intent::MtWithdraw(_)
         | Intent::NativeWithdraw(_)
         | Intent::AddPublicKey(_)
         | Intent::RemovePublicKey(_)
@@ -532,7 +534,13 @@ fn render_nft_withdraw(w: &NftWithdraw) -> Result<Fields, VisualSignError> {
     Ok(fields)
 }
 
-fn render_mt_withdraw(w: &MtWithdraw) -> Result<Fields, VisualSignError> {
+/// Each `token_id` here is scoped to `w.token`, the multi-token contract --
+/// `nep245:<w.token>:<token_id>` is the same asset-id shape `TokenDiff`/
+/// `Transfer` already produce for an MT entry in their maps, so it reaches
+/// `token_amount_field` through the identical registry lookup (including its
+/// `tokens::mt_underlying_nep141` fallback to a wrapped NEP-141 balance)
+/// rather than a bespoke one for this withdraw shape alone.
+fn render_mt_withdraw(w: &MtWithdraw, registry: &Reg) -> Result<Fields, VisualSignError> {
     if w.token_ids.len() != w.amounts.len() {
         return Err(VisualSignError::ValidationError(format!(
             "mt_withdraw token_ids/amounts length mismatch: {} token_ids vs {} amounts",
@@ -546,12 +554,15 @@ fn render_mt_withdraw(w: &MtWithdraw) -> Result<Fields, VisualSignError> {
     ];
     for (id, amount) in w.token_ids.iter().zip(w.amounts.iter()) {
         // As with `nft_withdraw`'s `token_id`, an MT token id is a plain
-        // `String` (`defuse_nep245::TokenId`); filter it before it joins the
-        // composite, so the amount half cannot be pushed onto its own line.
-        fields.push(
-            create_text_field("MT Token", &format!("{} x{}", charset_safe(id), amount.0))?
-                .signable_payload_field,
-        );
+        // `String` (`defuse_nep245::TokenId`), so it carries whatever bytes
+        // the sender chose and must be filtered before it reaches field text.
+        fields.push(create_text_field("MT Token", &charset_safe(id))?.signable_payload_field);
+        fields.extend(token_amount_field(
+            "Amount",
+            &format!("nep245:{}:{id}", w.token),
+            amount.0,
+            registry,
+        )?);
     }
     push_withdraw_call_details(&mut fields, &w.memo, &w.msg, w.storage_deposit)?;
     Ok(fields)
@@ -1337,6 +1348,46 @@ mod tests {
         assert!(labels.contains(&"Storage Deposit"), "labels: {labels:?}");
     }
 
+    /// An MT withdraw whose token_id names a NEP-141 balance a defuse-style
+    /// contract represents as a multi-token (the same convention
+    /// `tokens::mt_underlying_nep141` recognizes) must resolve through the
+    /// registry, not render the raw base-unit amount an unresolved asset
+    /// would.
+    #[test]
+    fn mt_withdraw_resolves_a_wrapped_nep141_balance() {
+        let intent = intent_from(
+            r#"{"intent":"mt_withdraw","token":"defuse.near","receiver_id":"alice.near","token_ids":["nep141:wrap.near"],"amounts":["2000000000000000000000000"]}"#,
+        );
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        match fields.iter().find(|f| label_of(f) == Some("Amount")) {
+            Some(SignablePayloadField::AmountV2 { amount_v2, .. }) => {
+                assert_eq!(amount_v2.amount, "2");
+                assert_eq!(amount_v2.abbreviation.as_deref(), Some("wNEAR"));
+            }
+            other => panic!("expected resolved AmountV2, got {other:?}"),
+        }
+    }
+
+    /// An MT withdraw on an independent, unrelated multi-token contract --
+    /// one whose token_id has no relation to any known asset -- must still
+    /// render honestly as unresolved, not silently misattribute an amount.
+    #[test]
+    fn mt_withdraw_with_an_unrelated_token_id_is_unresolved() {
+        let intent = intent_from(
+            r#"{"intent":"mt_withdraw","token":"market.near","receiver_id":"alice.near","token_ids":["gold-sword-42"],"amounts":["5"]}"#,
+        );
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        match fields.iter().find(|f| label_of(f) == Some("Amount")) {
+            Some(SignablePayloadField::TextV2 { text_v2, .. }) => {
+                assert!(
+                    text_v2.text.contains("unresolved"),
+                    "expected an unresolved amount, got {text_v2:?}"
+                );
+            }
+            other => panic!("expected an unresolved text field, got {other:?}"),
+        }
+    }
+
     /// A NEP-616 `state_init` attached to an intent, in defuse's JSON shape:
     /// an externally-tagged `StateInit::V1` wrapping a global-contract id.
     const STATE_INIT: &str =
@@ -1550,7 +1601,7 @@ mod tests {
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         assert_eq!(
             text_at(&fields, "MT Token"),
-            "innocent?To: alice.near?Amount: 0.001 SOL x5"
+            "innocent?To: alice.near?Amount: 0.001 SOL"
         );
     }
 
