@@ -114,7 +114,18 @@ impl FromStr for PriceScheme {
 impl PayToWire {
     fn into_pay_to(self) -> Result<PayToAddress, ConfigError> {
         match (self.evm, self.solana) {
-            (Some(s), None) => Ok(PayToAddress::Evm(s)),
+            // Rebuild with a canonical lowercase `0x` prefix, same as
+            // `classify_payto` does for the `X402_PAYTO` env var path:
+            // downstream `ChecksummedAddress::from_str` only strips
+            // lowercase `0x`, so a valid uppercase-prefixed `0X` address
+            // here would otherwise reach it unchanged and be rejected.
+            (Some(s), None) => {
+                let normalized = match split_hex_prefix(&s) {
+                    Some(hex_body) => format!("0x{hex_body}"),
+                    None => s,
+                };
+                Ok(PayToAddress::Evm(normalized))
+            }
             (None, Some(s)) => Ok(PayToAddress::Solana(s)),
             _ => Err(ConfigError::Invalid {
                 var: "X402_PRICE_TAGS_JSON",
@@ -126,10 +137,45 @@ impl PayToWire {
 
 // -- X402Config env loader ----------------------------------------------------
 
+/// Every env var `from_lookup` (or a function it calls) reads by name.
+const X402_ENV_KEYS: &[&str] = &[
+    "X402_PROFILE",
+    "X402_FACILITATOR_URL",
+    "X402_FACILITATOR_TIMEOUT_SECS",
+    "X402_PROTOCOL_VERSION",
+    "X402_PRICE_TAGS_JSON",
+    "X402_NETWORK",
+    "X402_PAYTO",
+];
+
 impl X402Config {
     /// Production entrypoint -- reads the real process environment.
+    ///
+    /// Distinguishes "unset" from "set but not valid UTF-8" for every x402
+    /// env var, the same way the bearer-token loader does (see
+    /// `auth.rs::read_env_var`): plain `std::env::var(..).ok()` collapses
+    /// both into `None`, which would silently fall back to seeded defaults
+    /// (or the profile default) for a malformed value instead of reporting
+    /// invalid configuration.
     pub fn from_env() -> Result<Self, ConfigError> {
-        Self::from_lookup(|key| std::env::var(key).ok())
+        let mut resolved = std::collections::BTreeMap::new();
+        for key in X402_ENV_KEYS {
+            resolved.insert(*key, Self::checked_env_var(key)?);
+        }
+        Self::from_lookup(|key| resolved.get(key).cloned().flatten())
+    }
+
+    /// Reads an env var, distinguishing "unset" from "set but not valid
+    /// UTF-8". See `auth.rs::read_env_var`.
+    fn checked_env_var(key: &'static str) -> Result<Option<String>, ConfigError> {
+        match std::env::var(key) {
+            Ok(v) => Ok(Some(v)),
+            Err(std::env::VarError::NotPresent) => Ok(None),
+            Err(std::env::VarError::NotUnicode(_)) => Err(ConfigError::Invalid {
+                var: key,
+                message: "contains invalid (non-UTF-8) bytes".to_string(),
+            }),
+        }
     }
 
     /// Test-friendly core -- takes a closure that resolves env-var lookups.
@@ -670,6 +716,24 @@ mod tests {
         );
         assert_eq!(cfg.price_tags[1].network, "solana");
         assert!(matches!(cfg.price_tags[1].pay_to, PayToAddress::Solana(_)));
+    }
+
+    #[test]
+    fn from_env_tags_json_uppercase_hex_prefix_evm_payto_normalizes() {
+        // Same normalization as the X402_PAYTO env-var path
+        // (from_env_payai_with_uppercase_hex_prefix_payto_classifies_as_evm):
+        // an uppercase `0X`-prefixed payTo.evm in the JSON must be rebuilt
+        // with a canonical lowercase `0x` prefix, or ChecksummedAddress
+        // parsing in build_price_tag would reject it later.
+        let json = r#"[
+            {"network":"base","asset":"USDC","priceUsd":"0.05","payTo":{"evm":"0Xabcdef0000000000000000000000000000000001"},"scheme":"exact"}
+        ]"#;
+        let cfg = X402Config::from_lookup(lookup(&[("X402_PRICE_TAGS_JSON", json)])).unwrap();
+        assert_eq!(
+            cfg.price_tags[0].pay_to,
+            PayToAddress::Evm("0xabcdef0000000000000000000000000000000001".to_string())
+        );
+        let _ = build_price_tag(&cfg.price_tags[0]).expect("0X-prefixed JSON payTo must build");
     }
 
     #[test]

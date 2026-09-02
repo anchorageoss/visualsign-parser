@@ -42,6 +42,7 @@ use borsh::BorshSerialize;
 use generated::parser::{ParsedTransactionPayload, Signature, SignatureScheme};
 use qos_crypto::sha_256;
 use qos_p256::P256Public;
+use std::io::Read;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AttestationError {
@@ -60,11 +61,22 @@ pub enum AttestationError {
     Verify,
     #[error("failed to read TVC pubkey file {path}: {message}")]
     PubkeyFile { path: String, message: String },
+    #[error("TVC pubkey file {path} exceeds maximum size ({max} bytes)")]
+    PubkeyFileTooLarge { path: String, max: u64 },
     #[error("failed to serialize payload for digest recomputation: {0}")]
     DigestSerialization(String),
     #[error("both TVC_DEMO_PINNED_PUBKEY_HEX and TVC_DEMO_PINNED_PUBKEY_FILE are set; choose one")]
     BothSet,
+    #[error("{var} contains invalid (non-UTF-8) bytes")]
+    NotUnicode { var: &'static str },
 }
+
+/// Maximum allowed size for the pinned-pubkey file (bytes). The hex payload
+/// is a fixed 260 characters (130-byte qos_p256 compound key); this leaves
+/// generous room for an optional prefix/surrounding whitespace while still
+/// bounding the read against a mistaken path to a very large file or
+/// character device.
+const MAX_PUBKEY_FILE_SIZE: u64 = 4096;
 
 /// Recompute the bytes the TVC ephemeral key signs over for a
 /// `ParsedTransactionPayload`.
@@ -101,7 +113,30 @@ impl AttestationVerifier {
     /// is fatal based on profile (production deployments fail closed; local
     /// dev runs without a pinned verifier).
     pub fn from_env() -> Result<Option<Self>, AttestationError> {
-        Self::from_lookup(|key| std::env::var(key).ok())
+        // Distinguish "unset" from "set but not valid UTF-8" the same way
+        // `auth.rs::read_env_var` does: `std::env::var(..).ok()` collapses
+        // both into `None`, which would silently disable verification for a
+        // malformed pinned-key env var instead of reporting invalid
+        // configuration.
+        let hex_value = Self::checked_env_var("TVC_DEMO_PINNED_PUBKEY_HEX")?;
+        let file_path = Self::checked_env_var("TVC_DEMO_PINNED_PUBKEY_FILE")?;
+        Self::from_lookup(|key| match key {
+            "TVC_DEMO_PINNED_PUBKEY_HEX" => hex_value.clone(),
+            "TVC_DEMO_PINNED_PUBKEY_FILE" => file_path.clone(),
+            _ => None,
+        })
+    }
+
+    /// Reads an env var, distinguishing "unset" from "set but not valid
+    /// UTF-8". See `auth.rs::read_env_var`.
+    fn checked_env_var(key: &'static str) -> Result<Option<String>, AttestationError> {
+        match std::env::var(key) {
+            Ok(v) => Ok(Some(v)),
+            Err(std::env::VarError::NotPresent) => Ok(None),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                Err(AttestationError::NotUnicode { var: key })
+            }
+        }
     }
 
     /// Test-friendly core -- takes a closure that resolves env-var lookups so
@@ -117,19 +152,39 @@ impl AttestationVerifier {
             (Some(_), Some(_)) => return Err(AttestationError::BothSet),
             (Some(s), None) => (s, "TVC_DEMO_PINNED_PUBKEY_HEX"),
             (None, Some(path)) => (
-                std::fs::read_to_string(&path)
-                    .map_err(|e| AttestationError::PubkeyFile {
-                        path: path.clone(),
-                        message: e.to_string(),
-                    })?
-                    .trim()
-                    .to_string(),
+                Self::read_pubkey_file(&path)?.trim().to_string(),
                 "TVC_DEMO_PINNED_PUBKEY_FILE",
             ),
             (None, None) => return Ok(None),
         };
 
         Self::from_hex_with_source(&hex_value, source).map(Some)
+    }
+
+    /// Reads `TVC_DEMO_PINNED_PUBKEY_FILE` with a bounded reader, matching
+    /// the repository's file-input convention (`mapping_parser.rs`,
+    /// `tx_input.rs`): a mistaken path to a very large file or character
+    /// device must not exhaust memory or hang startup.
+    fn read_pubkey_file(path: &str) -> Result<String, AttestationError> {
+        let file = std::fs::File::open(path).map_err(|e| AttestationError::PubkeyFile {
+            path: path.to_string(),
+            message: e.to_string(),
+        })?;
+        let mut bounded = file.take(MAX_PUBKEY_FILE_SIZE + 1);
+        let mut contents = String::new();
+        bounded
+            .read_to_string(&mut contents)
+            .map_err(|e| AttestationError::PubkeyFile {
+                path: path.to_string(),
+                message: e.to_string(),
+            })?;
+        if contents.len() as u64 > MAX_PUBKEY_FILE_SIZE {
+            return Err(AttestationError::PubkeyFileTooLarge {
+                path: path.to_string(),
+                max: MAX_PUBKEY_FILE_SIZE,
+            });
+        }
+        Ok(contents)
     }
 
     pub fn from_hex(hex_value: &str) -> Result<Self, AttestationError> {
@@ -315,6 +370,33 @@ mod tests {
                 field: "TVC_DEMO_PINNED_PUBKEY_FILE",
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn from_lookup_file_too_large_rejected() {
+        // A pinned-key file larger than MAX_PUBKEY_FILE_SIZE must be
+        // rejected rather than read in full, regardless of its contents.
+        let path = std::env::temp_dir().join(format!(
+            "attestation-test-oversized-{}-{}.hex",
+            std::process::id(),
+            line!()
+        ));
+        let oversized = "a".repeat((MAX_PUBKEY_FILE_SIZE + 1) as usize);
+        std::fs::write(&path, &oversized).unwrap();
+        let path_str = path.to_string_lossy().to_string();
+
+        let res = AttestationVerifier::from_lookup(move |key| {
+            if key == "TVC_DEMO_PINNED_PUBKEY_FILE" {
+                Some(path_str.clone())
+            } else {
+                None
+            }
+        });
+        std::fs::remove_file(&path).ok();
+        assert!(matches!(
+            res,
+            Err(AttestationError::PubkeyFileTooLarge { .. })
         ));
     }
 

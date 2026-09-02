@@ -28,6 +28,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use std::io::Read;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 
@@ -49,12 +50,19 @@ fn read_env_var(key: &'static str) -> Result<Option<String>, AuthError> {
 /// accepting them.
 const MIN_TOKEN_BYTES: usize = 16;
 
+/// Maximum allowed size for `GATEWAY_AUTH_BEARER_FILE` (bytes). Generous for
+/// a shared-secret token while still bounding the read against a mistaken
+/// path to a very large file or character device.
+const MAX_BEARER_FILE_SIZE: u64 = 4096;
+
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
     #[error("both GATEWAY_AUTH_BEARER_TOKEN and GATEWAY_AUTH_BEARER_FILE are set; choose one")]
     BothSet,
     #[error("failed to read GATEWAY_AUTH_BEARER_FILE={path}: {message}")]
     ReadFile { path: String, message: String },
+    #[error("GATEWAY_AUTH_BEARER_FILE={path} exceeds maximum size ({max} bytes)")]
+    FileTooLarge { path: String, max: u64 },
     #[error("bearer token from {origin} is empty after trim")]
     Empty { origin: &'static str },
     #[error("{var} contains invalid (non-UTF-8) bytes")]
@@ -83,12 +91,7 @@ impl BearerToken {
             return Err(AuthError::BothSet);
         }
         let file_contents = file_path
-            .map(|path| {
-                std::fs::read_to_string(&path).map_err(|e| AuthError::ReadFile {
-                    path: path.clone(),
-                    message: e.to_string(),
-                })
-            })
+            .map(|path| Self::read_bearer_file(&path))
             .transpose()?;
         let token = Self::from_sources(inline.as_deref(), file_contents.as_deref())?;
         if let Some(t) = &token {
@@ -101,6 +104,32 @@ impl BearerToken {
             }
         }
         Ok(token)
+    }
+
+    /// Reads `GATEWAY_AUTH_BEARER_FILE` with a bounded reader, matching the
+    /// repository's file-input convention (`mapping_parser.rs`,
+    /// `tx_input.rs`): a mistaken path to a very large file or character
+    /// device must not exhaust memory or prevent startup.
+    fn read_bearer_file(path: &str) -> Result<String, AuthError> {
+        let file = std::fs::File::open(path).map_err(|e| AuthError::ReadFile {
+            path: path.to_string(),
+            message: e.to_string(),
+        })?;
+        let mut bounded = file.take(MAX_BEARER_FILE_SIZE + 1);
+        let mut contents = String::new();
+        bounded
+            .read_to_string(&mut contents)
+            .map_err(|e| AuthError::ReadFile {
+                path: path.to_string(),
+                message: e.to_string(),
+            })?;
+        if contents.len() as u64 > MAX_BEARER_FILE_SIZE {
+            return Err(AuthError::FileTooLarge {
+                path: path.to_string(),
+                max: MAX_BEARER_FILE_SIZE,
+            });
+        }
+        Ok(contents)
     }
 
     /// Testable core. Takes the resolved contents (not paths). At most one

@@ -39,11 +39,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_encoding_message_size(GRPC_MAX_RECV_MSG_SIZE);
     let health_client = HealthClient::new(channel);
 
-    // Build the TVC attestation verifier. The pinned pubkey is provisioned
-    // out-of-band (Turnkey TVC plants it as a launch arg) and must match the
-    // enclave's ephemeral key. Fail-closed in non-local profiles: a production
-    // gateway without a pinned verifier would happily forward (and settle for)
-    // unattested responses.
     // Distinguish "unset" from "set but not valid UTF-8" the same way the
     // bearer-token loader does (see auth.rs::read_env_var): collapsing both
     // into the `local` default would let a malformed deployment env silently
@@ -59,6 +54,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let is_local_profile = profile_str == "local";
 
+    // Load x402 config up front (before the attestation decision below) so
+    // that decision can account for whether this profile could actually
+    // settle real money, not just its declared name. `X402_PROFILE=local`
+    // can still be pointed at a mainnet network/payTo and an external,
+    // non-loopback facilitator; in that case, treating it as "no verifier
+    // needed" (the `local` default) would let real USDC settle while
+    // forwarding responses with zero attestation. Config errors here are
+    // handled again, identically, by the soft-fail block below -- this
+    // first load only feeds the attestation-requirement check.
+    let x402_result = X402Config::from_env();
+    let x402_can_settle_for_real = match &x402_result {
+        Ok(cfg) => x402_targets_real_settlement(cfg),
+        Err(_) => false,
+    };
+
+    // Build the TVC attestation verifier. The pinned pubkey is provisioned
+    // out-of-band (Turnkey TVC plants it as a launch arg) and must match the
+    // enclave's ephemeral key. Fail-closed whenever the resolved x402 config
+    // can settle real payments: a gateway without a pinned verifier would
+    // happily forward (and settle for) unattested responses.
     let attestation: Option<Arc<AttestationVerifier>> = match AttestationVerifier::from_env() {
         Ok(Some(v)) => {
             let hex = v.pinned_hex();
@@ -68,16 +83,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(Arc::new(v))
         }
         Ok(None) => {
-            if is_local_profile {
+            if is_local_profile && !x402_can_settle_for_real {
                 eprintln!(
                     "WARNING: TVC_DEMO_PINNED_PUBKEY_HEX not set; gateway will not attest \
-                     parse responses (allowed because X402_PROFILE=local)"
+                     parse responses (allowed because X402_PROFILE=local and the resolved \
+                     x402 config is loopback/testnet only)"
                 );
                 None
             } else {
                 eprintln!(
                     "FATAL: TVC_DEMO_PINNED_PUBKEY_HEX (or _FILE) is required for \
-                     X402_PROFILE={profile_str}"
+                     X402_PROFILE={profile_str}{}",
+                    if is_local_profile {
+                        " because the resolved facilitator/network can settle real payments"
+                    } else {
+                        ""
+                    }
                 );
                 std::process::exit(1);
             }
@@ -123,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // v1 + health only. Same treatment as an unreachable facilitator below;
     // an x402-only misconfiguration should not take the unrelated v1 route
     // down with it.
-    match X402Config::from_env() {
+    match x402_result {
         Ok(x402_cfg) => match x402_cfg.build_middleware() {
             Ok(x402_middleware) => {
                 if let Err(e) =
@@ -188,6 +209,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Whether the resolved x402 config could settle a real (mainnet) payment:
+/// a non-loopback facilitator, or a mainnet price-tag network. Used to
+/// require a pinned attestation verifier even under `X402_PROFILE=local`,
+/// which otherwise defaults to running unattested.
+fn x402_targets_real_settlement(cfg: &X402Config) -> bool {
+    let facilitator_is_loopback = matches!(
+        cfg.facilitator_url.host_str(),
+        Some("127.0.0.1") | Some("localhost") | Some("::1")
+    );
+    let any_mainnet_tag = cfg
+        .price_tags
+        .iter()
+        .any(|tag| matches!(tag.network.as_str(), "base" | "solana"));
+    !facilitator_is_loopback || any_mainnet_tag
+}
+
 async fn probe_facilitator(
     url: &url::Url,
     timeout: std::time::Duration,
@@ -223,4 +260,58 @@ async fn shutdown_signal() {
     ctrl_c.await.expect("failed to listen for ctrl-c");
 
     println!("Shutting down gateway");
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use parser_gateway::x402_config::{PayToAddress, PriceScheme, PriceTagConfig, X402Profile};
+    use std::str::FromStr;
+    use std::time::Duration;
+
+    fn base_config(facilitator_url: &str, network: &str) -> X402Config {
+        X402Config {
+            profile: X402Profile::Local,
+            facilitator_url: url::Url::parse(facilitator_url).unwrap(),
+            facilitator_timeout: Duration::from_secs(5),
+            protocol_version: "v2".to_string(),
+            price_tags: vec![PriceTagConfig {
+                network: network.to_string(),
+                asset: "USDC".to_string(),
+                price_usd: rust_decimal::Decimal::from_str("0.001").unwrap(),
+                pay_to: PayToAddress::Evm("0x000000000000000000000000000000000000dEaD".to_string()),
+                scheme: PriceScheme::Exact,
+            }],
+        }
+    }
+
+    #[test]
+    fn loopback_testnet_does_not_target_real_settlement() {
+        let cfg = base_config("http://127.0.0.1:8090", "base-sepolia");
+        assert!(!x402_targets_real_settlement(&cfg));
+    }
+
+    #[test]
+    fn non_loopback_facilitator_targets_real_settlement() {
+        // Testnet network, but the facilitator itself is a real external
+        // endpoint that could settle for real -- this must be flagged even
+        // though the network alone would look safe.
+        let cfg = base_config("https://facilitator.payai.network", "base-sepolia");
+        assert!(x402_targets_real_settlement(&cfg));
+    }
+
+    #[test]
+    fn loopback_facilitator_with_mainnet_network_targets_real_settlement() {
+        // Loopback facilitator, but a mainnet network tag -- still flagged,
+        // since a locally-run facilitator can still forward to real rails.
+        let cfg = base_config("http://127.0.0.1:8090", "base");
+        assert!(x402_targets_real_settlement(&cfg));
+    }
+
+    #[test]
+    fn localhost_hostname_is_treated_as_loopback() {
+        let cfg = base_config("http://localhost:8090", "solana-devnet");
+        assert!(!x402_targets_real_settlement(&cfg));
+    }
 }
