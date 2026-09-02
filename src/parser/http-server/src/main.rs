@@ -130,9 +130,15 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
         Err(e) => {
             // serde_json's Display for a type-mismatch error embeds the
             // offending value verbatim, which would otherwise reflect up to
-            // the full request body back to an unauthenticated caller. Log
-            // the detail server-side; keep the client-visible message generic.
-            eprintln!("invalid request body: {e}");
+            // the full request body back to an unauthenticated caller (and,
+            // logged as-is, into enclave logs). Log only bounded metadata
+            // (error category + position), never the Display string.
+            eprintln!(
+                "invalid request body: category={:?} line={} column={}",
+                e.classify(),
+                e.line(),
+                e.column()
+            );
             return error_status(
                 state,
                 StatusCode::BAD_REQUEST,
