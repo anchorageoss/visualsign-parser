@@ -149,10 +149,10 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
 
     let Some(chain) = Chain::from_str_name(&wrapper.request.chain).map(|c| c as i32) else {
         // `chain` is caller-controlled and unbounded up to the request body
-        // limit; echoing it back would reflect request bytes to an
-        // unauthenticated caller, matching the other reflection fixes in this
-        // file. Log server-side, return a fixed message.
-        eprintln!("unknown chain: {}", wrapper.request.chain);
+        // limit; logging it verbatim would let an unauthenticated caller
+        // forge log lines or amplify enclave logs. Drop the value entirely,
+        // matching the other bounded-logging fixes in this file.
+        eprintln!("unknown chain requested");
         return error_status(state, StatusCode::BAD_REQUEST, "unknown chain".to_string());
     };
 
