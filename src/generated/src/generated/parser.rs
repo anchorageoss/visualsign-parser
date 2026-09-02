@@ -76,6 +76,7 @@ pub struct ParseRequest {
     /// host_primitives::GRPC_MAX_RECV_MSG_SIZE) still applies on top, as it
     /// does to every other field on this message.
     #[prost(bytes = "vec", tag = "5")]
+    #[cfg_attr(feature = "serde_derive", serde(default))]
     pub payment_marker: ::prost::alloc::vec::Vec<u8>,
 }
 #[cfg_attr(

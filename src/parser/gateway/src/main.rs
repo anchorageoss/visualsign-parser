@@ -294,6 +294,19 @@ mod tests {
     use host_primitives::turnkey::{ChainMetadataInput, EMPTY_SHA256};
 
     #[test]
+    fn parse_request_json_without_payment_marker_still_deserializes() {
+        // payment_marker (proto field 5) was added after unsignedPayload/chain/
+        // chainMetadata/includeIntermediateOutput shipped. Any JSON caller built
+        // against the earlier shape omits paymentMarker entirely; without
+        // `serde(default)` that's a hard deserialization failure, breaking
+        // backward compatibility for the generated JSON API.
+        let json = r#"{"unsignedPayload":"abc","chain":1,"includeIntermediateOutput":false}"#;
+        let parsed: ParseRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.unsigned_payload, "abc");
+        assert!(parsed.payment_marker.is_empty());
+    }
+
+    #[test]
     fn error_response_has_empty_sha256_digests() {
         let resp = error_response("something broke".to_string());
         let payload = &resp.response.parsed_transaction.payload;

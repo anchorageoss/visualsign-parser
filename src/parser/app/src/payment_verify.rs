@@ -357,10 +357,26 @@ mod tests {
     use super::test_support::{generate_policy, make_vpm, req_with_marker, sign_with};
     use super::*;
     use generated::parser::{
-        ChainMetadata, EthereumMetadata, Idl, NearMetadata, SolanaIdlType, SolanaMetadata,
+        Abi, AbiType, ChainMetadata, EthereumMetadata, Idl, Metadata, NearMetadata,
+        SignatureMetadata, SolanaIdlType, SolanaMetadata, TokenMetadataEntry, TokenOriginChain,
         chain_metadata,
     };
     use qos_p256::sign::P256SignPair;
+
+    /// Hand-encodes `SignatureMetadata` per the documented Borsh rules,
+    /// shared by the `Abi` and `TokenMetadataEntry` wire-contract tests
+    /// below.
+    fn encode_signature_metadata(sig: &SignatureMetadata, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&u32::try_from(sig.value.len()).unwrap().to_le_bytes());
+        buf.extend_from_slice(sig.value.as_bytes());
+        buf.extend_from_slice(&u32::try_from(sig.metadata.len()).unwrap().to_le_bytes());
+        for m in &sig.metadata {
+            buf.extend_from_slice(&u32::try_from(m.key.len()).unwrap().to_le_bytes());
+            buf.extend_from_slice(m.key.as_bytes());
+            buf.extend_from_slice(&u32::try_from(m.value.len()).unwrap().to_le_bytes());
+            buf.extend_from_slice(m.value.as_bytes());
+        }
+    }
 
     #[test]
     fn disabled_policy_accepts_anything() {
@@ -615,15 +631,65 @@ mod tests {
         // marker already minted against the old layout. This test
         // hand-assembles the expected bytes from the documented Borsh
         // encoding rules (LE integers, 1-byte `Option`/enum discriminants,
-        // 4-byte-length-prefixed strings, a 4-byte-length-prefixed empty
+        // 4-byte-length-prefixed strings, a 4-byte-length-prefixed
         // `BTreeMap`) plus the current declaration order, rather than
         // deriving them from `borsh::to_vec` on the struct under test, so a
         // reorder fails this test instead of silently passing it.
+        //
+        // `abi_mappings` carries one non-default `Abi` entry (populated
+        // `signature`, `abi_type`, `implementation_address`) rather than an
+        // empty map: an empty map's Borsh encoding is just a 4-byte zero
+        // length prefix, so it can never catch a field reorder inside `Abi`
+        // or `SignatureMetadata` -- those bytes only appear once a real
+        // entry is encoded.
+        fn encode_abi(abi: &Abi, buf: &mut Vec<u8>) {
+            buf.extend_from_slice(&u32::try_from(abi.value.len()).unwrap().to_le_bytes());
+            buf.extend_from_slice(abi.value.as_bytes());
+            match &abi.signature {
+                Some(sig) => {
+                    buf.push(1);
+                    encode_signature_metadata(sig, buf);
+                }
+                None => buf.push(0),
+            }
+            match abi.abi_type {
+                Some(t) => {
+                    buf.push(1);
+                    buf.extend_from_slice(&t.to_le_bytes());
+                }
+                None => buf.push(0),
+            }
+            match &abi.implementation_address {
+                Some(a) => {
+                    buf.push(1);
+                    buf.extend_from_slice(&u32::try_from(a.len()).unwrap().to_le_bytes());
+                    buf.extend_from_slice(a.as_bytes());
+                }
+                None => buf.push(0),
+            }
+        }
+
         let network_id = "ETHEREUM_MAINNET";
+        let contract = "0x1111111111111111111111111111111111111111";
+        let abi = Abi {
+            value: r#"[{"type":"function","name":"transfer"}]"#.to_string(),
+            signature: Some(SignatureMetadata {
+                value: "3045022100deadbeef".to_string(),
+                metadata: vec![Metadata {
+                    key: "algo".to_string(),
+                    value: "ES256".to_string(),
+                }],
+            }),
+            abi_type: Some(AbiType::Proxy as i32),
+            implementation_address: Some("0x2222222222222222222222222222222222222222".to_string()),
+        };
+        let mut abi_mappings = std::collections::BTreeMap::new();
+        abi_mappings.insert(contract.to_string(), abi.clone());
+
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Ethereum(EthereumMetadata {
                 network_id: Some(network_id.to_string()),
-                abi_mappings: std::collections::BTreeMap::default(),
+                abi_mappings,
             })),
         };
 
@@ -633,7 +699,10 @@ mod tests {
         expected.push(1); // EthereumMetadata.network_id: Option<String>: Some
         expected.extend_from_slice(&u32::try_from(network_id.len()).unwrap().to_le_bytes());
         expected.extend_from_slice(network_id.as_bytes());
-        expected.extend_from_slice(&0u32.to_le_bytes()); // abi_mappings: empty BTreeMap
+        expected.extend_from_slice(&1u32.to_le_bytes()); // abi_mappings: 1 entry
+        expected.extend_from_slice(&u32::try_from(contract.len()).unwrap().to_le_bytes());
+        expected.extend_from_slice(contract.as_bytes());
+        encode_abi(&abi, &mut expected);
 
         assert_eq!(chain_metadata_bytes(Some(&metadata)).unwrap(), expected);
     }
@@ -720,11 +789,51 @@ mod tests {
         // variant's discriminant (2) and `NearMetadata`'s single field, so
         // a variant reorder that leaves Ethereum at index 0 but swaps
         // Solana/Near still fails somewhere in this trio.
+        //
+        // `token_mappings` carries one non-default `TokenMetadataEntry`
+        // (populated `signature` and a non-default `origin_chain`) rather
+        // than an empty map, for the same reason as the Ethereum test above:
+        // an empty map's encoding can't catch a reorder inside
+        // `TokenMetadataEntry` or the nested `SignatureMetadata`.
+        fn encode_token_metadata_entry(entry: &TokenMetadataEntry, buf: &mut Vec<u8>) {
+            buf.extend_from_slice(&u32::try_from(entry.value.len()).unwrap().to_le_bytes());
+            buf.extend_from_slice(entry.value.as_bytes());
+            match &entry.signature {
+                Some(sig) => {
+                    buf.push(1);
+                    encode_signature_metadata(sig, buf);
+                }
+                None => buf.push(0),
+            }
+            match entry.origin_chain {
+                Some(c) => {
+                    buf.push(1);
+                    buf.extend_from_slice(&c.to_le_bytes());
+                }
+                None => buf.push(0),
+            }
+        }
+
         let network_id = "NEAR_MAINNET";
+        let asset_id = "nep141:wrap.near";
+        let entry = TokenMetadataEntry {
+            value: r#"{"symbol":"USDC.e","decimals":6}"#.to_string(),
+            signature: Some(SignatureMetadata {
+                value: "3046022100deadbeef".to_string(),
+                metadata: vec![Metadata {
+                    key: "algo".to_string(),
+                    value: "secp256k1".to_string(),
+                }],
+            }),
+            origin_chain: Some(TokenOriginChain::Ethereum as i32),
+        };
+        let mut token_mappings = std::collections::BTreeMap::new();
+        token_mappings.insert(asset_id.to_string(), entry.clone());
+
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                 network_id: Some(network_id.to_string()),
-                token_mappings: std::collections::BTreeMap::default(),
+                token_mappings,
             })),
         };
 
@@ -734,7 +843,10 @@ mod tests {
         expected.push(1); // NearMetadata.network_id: Option<String>: Some
         expected.extend_from_slice(&u32::try_from(network_id.len()).unwrap().to_le_bytes());
         expected.extend_from_slice(network_id.as_bytes());
-        expected.extend_from_slice(&0u32.to_le_bytes()); // token_mappings: 0 entries
+        expected.extend_from_slice(&1u32.to_le_bytes()); // token_mappings: 1 entry
+        expected.extend_from_slice(&u32::try_from(asset_id.len()).unwrap().to_le_bytes());
+        expected.extend_from_slice(asset_id.as_bytes());
+        encode_token_metadata_entry(&entry, &mut expected);
 
         assert_eq!(chain_metadata_bytes(Some(&metadata)).unwrap(), expected);
     }
