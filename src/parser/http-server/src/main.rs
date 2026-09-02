@@ -175,7 +175,7 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
             // message too, matching the other reflection fixes in this file.
             let (http_status, msg) = match e.code {
                 generated::google::rpc::Code::InvalidArgument => {
-                    eprintln!("parse failed: {} ({:?})", e.message, e.code);
+                    eprintln!("parse failed: code={:?}", e.code);
                     (StatusCode::BAD_REQUEST, "invalid request".to_string())
                 }
                 generated::google::rpc::Code::NotFound => (StatusCode::NOT_FOUND, e.message),
@@ -300,7 +300,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &ephemeral_key,
         args.enclave_app,
         args.deployment_label,
-    );
+    )
+    .map_err(|e| format!("failed to build boot proof: {e:?}"))?;
 
     let state = AppState {
         ephemeral_key: Arc::new(ephemeral_key),
@@ -402,12 +403,14 @@ mod tests {
     // runtime".
     #[tokio::test(flavor = "multi_thread")]
     async fn parse_v1_handler_extracts_raw_bytes_not_a_json_type() {
+        boot_proof::tests::write_test_manifest_fixture();
         let pair = qos_p256::P256Pair::generate().unwrap();
         let boot_proof = StaticBootProof::from_enclave_files(
             &pair,
             "visualsign-parser".to_string(),
             "test".to_string(),
-        );
+        )
+        .expect("test manifest fixture should be readable");
         let state = AppState {
             ephemeral_key: Arc::new(pair),
             boot_proof: Arc::new(boot_proof),
@@ -423,13 +426,15 @@ mod tests {
 
     #[test]
     fn static_boot_proof_has_the_six_keys_and_a_real_ephemeral_pubkey() {
+        boot_proof::tests::write_test_manifest_fixture();
         let pair = qos_p256::P256Pair::generate().unwrap();
         let expected_hex = qos_hex::encode(&pair.public_key().to_bytes());
         let source = StaticBootProof::from_enclave_files(
             &pair,
             "visualsign-parser".to_string(),
             "test".to_string(),
-        );
+        )
+        .expect("test manifest fixture should be readable");
         let bp = source.boot_proof();
         assert_eq!(bp.ephemeral_public_key_hex, expected_hex);
         // A later PR fills the doc; until then it is explicitly empty, never a fake.
@@ -451,12 +456,14 @@ mod tests {
     // currently returns that code.
     #[tokio::test]
     async fn fallbacks_carry_their_own_fixed_message_and_boot_proof() {
+        boot_proof::tests::write_test_manifest_fixture();
         let pair = qos_p256::P256Pair::generate().unwrap();
         let boot_proof = StaticBootProof::from_enclave_files(
             &pair,
             "visualsign-parser".to_string(),
             "test".to_string(),
-        );
+        )
+        .expect("test manifest fixture should be readable");
         let state = AppState {
             ephemeral_key: Arc::new(pair),
             boot_proof: Arc::new(boot_proof),
