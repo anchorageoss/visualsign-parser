@@ -146,7 +146,12 @@ fn token_amount_field(
 
 /// Stands in for a present value that renders as nothing, where the value
 /// being present is itself what the signer needs to see.
-const EMPTY_VALUE: &str = "(empty)";
+///
+/// Ends in a literal backslash so no attacker-controlled string can ever
+/// equal it: [`charset_safe`] elides every backslash a caller's text
+/// contains, so this marker can be produced only here, never by a real `msg`
+/// that happens to spell out the same words.
+const EMPTY_VALUE: &str = "(empty)\\";
 
 /// Charset-filter an optional field string, dropping it when the value is
 /// empty.
@@ -321,7 +326,8 @@ fn render_token_diff(td: &TokenDiff, registry: &Reg) -> Result<Fields, VisualSig
     for (token_id, delta) in td.diff.iter() {
         if *delta == 0 {
             return Err(VisualSignError::ValidationError(format!(
-                "token_diff entry for {token_id} has a zero delta"
+                "token_diff entry for {} has a zero delta",
+                charset_safe(&token_id.to_string())
             )));
         }
         let label = if *delta < 0 { "Send" } else { "Receive" };
@@ -940,6 +946,24 @@ mod tests {
         assert!(message.contains("nep141:usdc.near"), "{message}");
     }
 
+    /// The zero-delta refusal echoes the offending asset id into its error
+    /// message; a crafted id with an embedded newline must reach it
+    /// sanitized, the same as every other echo of a `TokenId` in this file.
+    #[test]
+    fn token_diff_zero_delta_asset_id_with_embedded_newline_is_sanitized() {
+        let intent = intent_from(
+            r#"{"intent":"token_diff","diff":{"nep245:mt.near:x\nTo: attacker.near\nAmount: 1000 USDC":"0"}}"#,
+        );
+        let err = render_intent(&intent, &empty_reg()).expect_err("zero delta must be refused");
+        let message = err.to_string();
+        assert!(message.contains("zero delta"), "{message}");
+        assert!(
+            message.contains("nep245:mt.near:x?To: attacker.near?Amount: 1000 USDC"),
+            "{message}"
+        );
+        assert!(!message.contains('\n'), "{message}");
+    }
+
     #[test]
     fn token_diff_refuses_an_empty_diff() {
         let intent = intent_from(r#"{"intent":"token_diff","diff":{}}"#);
@@ -1065,7 +1089,7 @@ mod tests {
         let fields = render_intent(&with_msg, &empty_reg()).expect("render");
         let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
         assert!(labels.contains(&"Message"), "labels: {labels:?}");
-        assert_eq!(text_at(&fields, "Message"), "(empty)");
+        assert_eq!(text_at(&fields, "Message"), "(empty)\\");
 
         let without_msg = intent_from(
             r#"{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"alice.near","amount":"1"}"#,
@@ -1077,6 +1101,25 @@ mod tests {
             "a withdraw with no msg calls nothing back and must render no Message: \
              {plain_labels:?}"
         );
+    }
+
+    /// A `msg` that literally spells out the empty-value marker's words must
+    /// not render identically to a genuinely empty `msg` -- the two are
+    /// different on-chain payloads and the signer must be able to tell them
+    /// apart.
+    #[test]
+    fn ft_withdraw_message_spelling_the_empty_marker_is_distinct_from_empty() {
+        let literal = intent_from(
+            r#"{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"alice.near","amount":"1","msg":"(empty)"}"#,
+        );
+        let fields = render_intent(&literal, &empty_reg()).expect("render");
+        assert_eq!(text_at(&fields, "Message"), "(empty)");
+
+        let empty = intent_from(
+            r#"{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"alice.near","amount":"1","msg":""}"#,
+        );
+        let fields = render_intent(&empty, &empty_reg()).expect("render");
+        assert_eq!(text_at(&fields, "Message"), "(empty)\\");
     }
 
     #[test]
@@ -1217,7 +1260,7 @@ mod tests {
             ["To", "Amount", "Message"],
             "an empty notification must not render as no notification"
         );
-        assert_eq!(text_at(&fields, "Message"), "(empty)");
+        assert_eq!(text_at(&fields, "Message"), "(empty)\\");
     }
 
     /// The other input that used to reach the same collapse. It no longer
