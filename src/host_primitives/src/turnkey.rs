@@ -251,6 +251,22 @@ mod tests {
     }
 
     #[test]
+    fn chain_metadata_input_near_testnet_round_trips_into_generated_metadata() {
+        // Selecting NEAR Testnet must not silently resolve to Mainnet: the wire
+        // shape has to carry the network_id through to the generated
+        // ChainMetadata that visualsign-near's extract_network_from_metadata reads.
+        let json = r#"{"chain":"CHAIN_NEAR","networkId":"NEAR_TESTNET"}"#;
+        let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
+        assert!(matches!(parsed, ChainMetadataInput::Near(_)));
+
+        let metadata: ChainMetadata = parsed.into();
+        let Some(chain_metadata::Metadata::Near(near)) = metadata.metadata else {
+            panic!("expected Near metadata");
+        };
+        assert_eq!(near.network_id.as_deref(), Some("NEAR_TESTNET"));
+    }
+
+    #[test]
     fn response_wrapper_round_trips_when_intermediate_output_is_omitted() {
         // A response with no intermediate_output must still deserialize back into
         // TurnkeyResponseWrapper, not just serialize cleanly: the omitted key needs
