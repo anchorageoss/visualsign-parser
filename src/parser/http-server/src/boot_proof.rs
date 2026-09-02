@@ -100,9 +100,13 @@ fn read_manifest_borsh_b64() -> (String, String) {
 
 fn encode_borsh_b64(v: &impl borsh::BorshSerialize) -> String {
     let engine = base64::engine::general_purpose::STANDARD;
-    borsh::to_vec(v)
-        .map(|b| engine.encode(b))
-        .unwrap_or_default()
+    match borsh::to_vec(v) {
+        Ok(bytes) => engine.encode(bytes),
+        Err(e) => {
+            eprintln!("boot proof: borsh encode failed ({e}), manifest field empty");
+            String::new()
+        }
+    }
 }
 
 #[cfg(test)]

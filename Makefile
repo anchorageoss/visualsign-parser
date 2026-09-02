@@ -10,10 +10,6 @@ out/parser_gateway/index.json: \
 	$(shell git ls-files images/parser_gateway src)
 	$(call build,parser_gateway)
 
-out/parser_grpc_server/index.json: \
-	$(shell git ls-files images/parser_grpc_server src)
-	$(call build,parser_grpc_server)
-
 out/parser_http_server/index.json: \
 	$(shell git ls-files images/parser_http_server src)
 	$(call build,parser_http_server)
