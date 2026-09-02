@@ -180,20 +180,22 @@ pub(crate) mod tests {
 
     // `from_enclave_files` now fails closed when `qos_core::MANIFEST_FILE`
     // (the dev-mode relative path outside `--features vm`) is missing, so
-    // any test that exercises it needs a real file there. Idempotent: safe
-    // to call from multiple tests running concurrently in the same process,
-    // since every caller writes the same bytes.
+    // any test that exercises it needs a real file there. `OnceLock`
+    // guarantees the write happens exactly once per test-process run, even
+    // under parallel test execution: a racy `path.exists()` check could let
+    // one test observe the file mid-write (empty/partial) or reuse a stale
+    // fixture left over from an earlier run.
     pub(crate) fn write_test_manifest_fixture() {
-        let path = std::path::Path::new(qos_core::MANIFEST_FILE);
-        if path.exists() {
-            return;
-        }
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).expect("failed to create manifest fixture dir");
-        }
-        let bytes =
-            serde_json::to_vec(&sample_manifest_envelope()).expect("failed to encode fixture");
-        std::fs::write(path, bytes).expect("failed to write manifest fixture");
+        static INIT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        INIT.get_or_init(|| {
+            let path = std::path::Path::new(qos_core::MANIFEST_FILE);
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir).expect("failed to create manifest fixture dir");
+            }
+            let bytes =
+                serde_json::to_vec(&sample_manifest_envelope()).expect("failed to encode fixture");
+            std::fs::write(path, bytes).expect("failed to write manifest fixture");
+        });
     }
 
     // The Go verifier borsh-deserializes both `qosManifestB64` and
