@@ -160,6 +160,29 @@ pub fn try_decode_execute_intents(
     Ok(fields)
 }
 
+/// Whether the pre-signature single-intent envelope's decoded intents include
+/// a kind that consults the token registry. The equivalent, for this path, of
+/// the on-chain converter's action-level gate: the envelope can name any of
+/// eleven intent kinds and only three read the registry, so a caller must
+/// check this before building one -- otherwise an envelope that never
+/// consults token metadata (e.g. a plain `native_withdraw`) gets a rejection
+/// diagnostic for metadata nothing here reads.
+///
+/// Malformed JSON reads as inapplicable rather than as an error here: the
+/// subsequent [`try_render_single_intent`] call decodes the same bytes and
+/// reports the parse failure properly.
+pub fn single_intent_consumes_token_registry(payload_json: &[u8]) -> bool {
+    serde_json::from_slice::<
+        defuse_core::payload::DefusePayload<defuse_core::intents::DefuseIntents>,
+    >(payload_json)
+    .is_ok_and(|payload| {
+        payload
+            .intents
+            .iter()
+            .any(render::intent_consumes_token_registry)
+    })
+}
+
 /// Render the single intent a user is about to sign, from the JSON of its
 /// `DefusePayload` message (the inner message that gets signed, independent of
 /// which signature standard later wraps it).

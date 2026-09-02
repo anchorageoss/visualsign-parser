@@ -214,6 +214,24 @@ pub(crate) fn render_intent(intent: &Intent, registry: &Reg) -> Result<Fields, V
     }
 }
 
+/// Whether [`render_intent`] passes this intent's kind through to a token
+/// registry lookup. Matched exhaustively against the same arms so a kind that
+/// starts (or stops) reading `registry` there forces this to be revisited
+/// rather than silently drifting out of step.
+pub(crate) fn intent_consumes_token_registry(intent: &Intent) -> bool {
+    match intent {
+        Intent::TokenDiff(_) | Intent::Transfer(_) | Intent::FtWithdraw(_) => true,
+        Intent::NftWithdraw(_)
+        | Intent::MtWithdraw(_)
+        | Intent::NativeWithdraw(_)
+        | Intent::AddPublicKey(_)
+        | Intent::RemovePublicKey(_)
+        | Intent::SetAuthByPredecessorId(_)
+        | Intent::StorageDeposit(_)
+        | Intent::AuthCall(_) => false,
+    }
+}
+
 /// Flags an attached NEP-616 `state_init`: a global-contract id plus initial
 /// state, which initializes the callee's contract in the same receipt. The
 /// code/data have no cheap field-level render, so surface that the attachment

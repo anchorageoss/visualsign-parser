@@ -391,10 +391,19 @@ fn render_intent_envelope(
     network: NearNetwork,
     trust_policy: &MetadataTrustPolicy,
 ) -> Result<ConversionResult, VisualSignError> {
-    // Always built on this path: the payload is an intents envelope, so
-    // caller-supplied token metadata is applicable by construction -- the
-    // on-chain path's applicability gate has nothing to decide here.
-    let tokens = token_registry_for(options, network, trust_policy);
+    // Built only when the envelope's decoded intents include a kind that
+    // reads it -- the same reasoning as render_on_chain's gate via
+    // token_metadata_consumer, applied here to the intent kinds inside the
+    // envelope rather than to the wrapping action. A plain native_withdraw
+    // (or add_public_key, storage_deposit, ...) carrying unrelated or
+    // malformed caller-supplied token metadata must not get a rejection
+    // diagnostic for metadata nothing here reads.
+    let tokens = if crate::presets::intents::single_intent_consumes_token_registry(json.as_bytes())
+    {
+        token_registry_for(options, network, trust_policy)
+    } else {
+        RequestTokenRegistry::empty()
+    };
     // The resolved network is part of every token-metadata signed scope, so the
     // payload has to show which network that scope was checked against -- the
     // same field, for the same reason, as the on-chain path renders.
@@ -1023,6 +1032,78 @@ mod tests {
             json.contains(asset_id),
             "the diagnostic must name the asset id it refused: {json}"
         );
+    }
+
+    /// A standalone intent envelope whose only intent never reads the token
+    /// registry (`native_withdraw` moves NEAR itself, not a NEP-141) must not
+    /// get a rejection diagnostic for unrelated or malformed caller-supplied
+    /// token metadata: nothing here consults it, so a refusal would describe a
+    /// problem the rendered payload never had.
+    #[test]
+    fn native_withdraw_envelope_reports_no_refusal_for_metadata_it_never_reads() {
+        let options = options_with_token_mapping("nep141:rejected-token.near", "not valid json");
+        let envelope = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"native_withdraw","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
+
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(NearTransaction::Intent(envelope.to_string()), options)
+            .expect("convert");
+        assert_eq!(
+            rejection_diagnostic_count(&payload.payload),
+            0,
+            "native_withdraw consults no token metadata, so it has no refusal to report: {:?}",
+            payload.payload.fields
+        );
+    }
+
+    /// The gate that decides whether to build the token registry for a
+    /// standalone envelope and the per-intent dispatch that consumes it must
+    /// agree, the same invariant `every_action_that_renders_intents_is_one_the_gate_recognizes`
+    /// checks for the on-chain path. Asserted over every `Intent` kind
+    /// `render_intent` handles, so a kind wired to read the registry there
+    /// without being added to the gate fails here.
+    #[test]
+    fn every_intent_kind_the_registry_gate_recognizes_matches_render_intent() {
+        use crate::presets::intents::single_intent_consumes_token_registry;
+
+        let envelope_with = |intent_json: &str| -> String {
+            format!(
+                r#"{{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{intent_json}]}}"#
+            )
+        };
+        let cases: &[(&str, bool)] = &[
+            (
+                r#"{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1"}"#,
+                true,
+            ),
+            (
+                r#"{"intent":"token_diff","diff":{"nep141:wrap.near":"-1","nep141:usdc.near":"1"}}"#,
+                true,
+            ),
+            (
+                r#"{"intent":"transfer","receiver_id":"bob.near","tokens":{"nep141:wrap.near":"1"}}"#,
+                true,
+            ),
+            (
+                r#"{"intent":"native_withdraw","receiver_id":"bob.near","amount":"1"}"#,
+                false,
+            ),
+            (
+                r#"{"intent":"add_public_key","public_key":"ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"}"#,
+                false,
+            ),
+            (
+                r#"{"intent":"storage_deposit","contract_id":"wrap.near","deposit_for_account_id":"bob.near","amount":"1"}"#,
+                false,
+            ),
+        ];
+        for (intent_json, expected) in cases {
+            let json = envelope_with(intent_json);
+            assert_eq!(
+                single_intent_consumes_token_registry(json.as_bytes()),
+                *expected,
+                "gate disagrees with render_intent for {intent_json}"
+            );
+        }
     }
 
     /// The rejection is a property of the request's metadata, so it reports
