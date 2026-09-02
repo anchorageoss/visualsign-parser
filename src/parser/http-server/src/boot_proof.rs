@@ -44,15 +44,15 @@ impl StaticBootProof {
         ephemeral: &P256Pair,
         enclave_app: String,
         deployment_label: String,
-    ) -> Self {
-        let (qos_manifest_b64, qos_manifest_envelope_b64) = read_manifest_borsh_b64();
-        Self {
+    ) -> Result<Self, BootProofError> {
+        let (qos_manifest_b64, qos_manifest_envelope_b64) = read_manifest_borsh_b64()?;
+        Ok(Self {
             ephemeral_public_key_hex: qos_hex::encode(&ephemeral.public_key().to_bytes()),
             qos_manifest_b64,
             qos_manifest_envelope_b64,
             enclave_app,
             deployment_label,
-        }
+        })
     }
 }
 
@@ -104,23 +104,12 @@ pub fn read_manifest_envelope() -> Result<ManifestEnvelope, BootProofError> {
         .map_err(|e| BootProofError::Manifest(format!("manifest json: {e}")))
 }
 
-/// Returns empty strings when the manifest is unreadable (local dev outside an
-/// enclave), which keeps the six keys present and obviously unverifiable.
-fn read_manifest_borsh_b64() -> (String, String) {
-    let envelope = match read_manifest_envelope() {
-        Ok(envelope) => envelope,
-        Err(e) => {
-            eprintln!(
-                "boot proof: {} unreadable ({e:?}), manifest fields empty",
-                qos_core::MANIFEST_FILE
-            );
-            return (String::new(), String::new());
-        }
-    };
-    (
+fn read_manifest_borsh_b64() -> Result<(String, String), BootProofError> {
+    let envelope = read_manifest_envelope()?;
+    Ok((
         encode_borsh_b64(&envelope.manifest),
         encode_borsh_b64(&envelope),
-    )
+    ))
 }
 
 fn encode_borsh_b64(v: &impl borsh::BorshSerialize) -> String {
@@ -136,29 +125,20 @@ fn encode_borsh_b64(v: &impl borsh::BorshSerialize) -> String {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use qos_core::protocol::services::boot::{
         Manifest, ManifestSet, Namespace, NitroConfig, PatchSet, PivotConfig, RestartPolicy,
         ShareSet,
     };
 
-    // The Go verifier borsh-deserializes both `qosManifestB64` and
-    // `qosManifestEnvelopeB64` and hashes the borsh bytes into the
-    // attestation doc's `user_data` (see the module doc on
-    // `read_manifest_envelope`). Prove the encode side actually round-trips
-    // through borsh, so a future refactor that swaps the encoding (e.g. to
-    // JSON, or introduces a HashMap-backed field) fails a test instead of
-    // silently breaking verification.
-    //
     // Built field-by-field rather than via `ManifestEnvelope::default()`:
     // that impl only exists behind qos_core's `mock` feature, which cannot
     // be unified in the same build graph as this crate's `vsock` feature
     // (qos_core's own `compile_error!` forbids `vm` + `mock` together). Every
     // field here is a plain public value, so no derive is needed at all.
-    #[test]
-    fn manifest_and_envelope_borsh_b64_round_trip() {
-        let envelope = ManifestEnvelope {
+    pub(crate) fn sample_manifest_envelope() -> ManifestEnvelope {
+        ManifestEnvelope {
             manifest: Manifest {
                 namespace: Namespace {
                     name: String::new(),
@@ -195,7 +175,37 @@ mod tests {
             },
             manifest_set_approvals: Vec::new(),
             share_set_approvals: Vec::new(),
-        };
+        }
+    }
+
+    // `from_enclave_files` now fails closed when `qos_core::MANIFEST_FILE`
+    // (the dev-mode relative path outside `--features vm`) is missing, so
+    // any test that exercises it needs a real file there. Idempotent: safe
+    // to call from multiple tests running concurrently in the same process,
+    // since every caller writes the same bytes.
+    pub(crate) fn write_test_manifest_fixture() {
+        let path = std::path::Path::new(qos_core::MANIFEST_FILE);
+        if path.exists() {
+            return;
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).expect("failed to create manifest fixture dir");
+        }
+        let bytes =
+            serde_json::to_vec(&sample_manifest_envelope()).expect("failed to encode fixture");
+        std::fs::write(path, bytes).expect("failed to write manifest fixture");
+    }
+
+    // The Go verifier borsh-deserializes both `qosManifestB64` and
+    // `qosManifestEnvelopeB64` and hashes the borsh bytes into the
+    // attestation doc's `user_data` (see the module doc on
+    // `read_manifest_envelope`). Prove the encode side actually round-trips
+    // through borsh, so a future refactor that swaps the encoding (e.g. to
+    // JSON, or introduces a HashMap-backed field) fails a test instead of
+    // silently breaking verification.
+    #[test]
+    fn manifest_and_envelope_borsh_b64_round_trip() {
+        let envelope = sample_manifest_envelope();
         let engine = base64::engine::general_purpose::STANDARD;
 
         let manifest_b64 = encode_borsh_b64(&envelope.manifest);

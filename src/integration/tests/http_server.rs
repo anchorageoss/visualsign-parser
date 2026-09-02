@@ -42,6 +42,17 @@ impl RunningServer {
             .to_hex_file(format!("{enclave_dir}/qos.ephemeral.key"))
             .expect("failed to write ephemeral key");
 
+        // `StaticBootProof::from_enclave_files` now fails closed when the
+        // manifest is missing, so the spawned server needs a real (if
+        // otherwise empty) one at its dev-mode path. `ManifestEnvelope`'s
+        // `Default` impl is gated on qos_core's `mock` feature, which this
+        // crate (unlike parser_http_server itself) enables.
+        let manifest_envelope = qos_core::protocol::services::boot::ManifestEnvelope::default();
+        let manifest_json =
+            serde_json::to_vec(&manifest_envelope).expect("failed to encode manifest fixture");
+        fs::write(format!("{enclave_dir}/qos.manifest"), manifest_json)
+            .expect("failed to write manifest fixture");
+
         let port = find_free_port().expect("no free port available");
 
         // Unlike the other integration tests, this one also sets

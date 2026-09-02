@@ -6,3 +6,8 @@ target
 # key under this per-run directory to stand up parser_http_server for the
 # test; never let it linger on a shared CI runner's filesystem uncovered.
 *-http-server-workdir
+
+# parser_http_server's own unit tests write a manifest fixture here on first
+# run (boot_proof::tests::write_test_manifest_fixture) to exercise the
+# fail-closed dev-mode manifest path; generated, not checked in.
+parser/http-server/local-enclave/
