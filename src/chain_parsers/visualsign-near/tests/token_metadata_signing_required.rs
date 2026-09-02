@@ -12,11 +12,11 @@
 //! excludes `parser_cli`, the only crate that enables `dev-signing`, so feature
 //! unification cannot switch it back on here.
 //!
-//! Scope is the half that nothing else covers -- that an entry is registered
-//! *unsigned* rather than dropped when signing is unavailable. What happens to
-//! an unsigned entry afterwards (refused under `RequireAllowlistedSigner`,
-//! accepted only as a gap-fill under `AcceptUnsigned`) is covered by
-//! `token_signature.rs`'s own tests, which don't depend on this feature.
+//! Scope is the half that nothing else covers -- that an entry is dropped,
+//! not registered unsigned, when signing is unavailable, matching Ethereum's
+//! `--abi-json-mappings` flow: an unsigned entry can never pass the strict
+//! `RequireAllowlistedSigner` posture `register` installs, so counting it as
+//! loaded would be misleading.
 
 #![cfg(all(feature = "cli-plugin", not(feature = "dev-signing")))]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -28,7 +28,7 @@ const ASSET_ID: &str = "nep141:not-a-seeded-asset.near";
 const VALUE: &str = r#"{"symbol":"GAP","decimals":6}"#;
 
 #[test]
-fn without_dev_signing_the_cli_registers_the_entry_unsigned() {
+fn without_dev_signing_the_cli_drops_the_entry_instead_of_registering_it_unsigned() {
     let dir = std::env::temp_dir().join("vsp_near_no_dev_signing");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let file = dir.join("token.json");
@@ -40,23 +40,18 @@ fn without_dev_signing_the_cli_registers_the_entry_unsigned() {
     let metadata = plugin
         .create_metadata(Some("NEAR_MAINNET".to_string()))
         .expect("metadata builds")
-        .expect("a loadable mapping yields metadata");
+        .expect("the network flag alone yields metadata even with no token mappings");
 
     let Some(generated::parser::chain_metadata::Metadata::Near(near)) = metadata.metadata.as_ref()
     else {
         panic!("expected NEAR chain metadata, got {:?}", metadata.metadata);
     };
-    let entry = near
-        .token_mappings
-        .get(ASSET_ID)
-        .expect("the mapping registers even though signing was unavailable");
 
-    assert_eq!(entry.value, VALUE, "the file contents are carried verbatim");
     assert!(
-        entry.signature.is_none(),
-        "a binary built without dev-signing must register the entry unsigned \
-         rather than attaching a signature, got {:?}",
-        entry.signature
+        !near.token_mappings.contains_key(ASSET_ID),
+        "a binary built without dev-signing must drop the entry rather than \
+         registering it unsigned, got {:?}",
+        near.token_mappings.get(ASSET_ID)
     );
 
     std::fs::remove_dir_all(&dir).ok();
