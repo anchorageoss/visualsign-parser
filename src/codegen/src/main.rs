@@ -17,6 +17,11 @@ const SERDE_DEFAULT: &str = "#[cfg_attr(feature = \"serde_derive\", serde(defaul
 // callers omit the field entirely. See `abi_type_serde` in the generated crate.
 const SERDE_ABI_TYPE: &str =
     "#[cfg_attr(feature = \"serde_derive\", serde(with = \"crate::abi_type_serde\", default))]";
+// Same treatment for `origin_chain`: the documented values are the protobuf
+// names (e.g. "TOKEN_ORIGIN_CHAIN_ETHEREUM"), so the JSON API has to accept and
+// emit those rather than the raw i32. See `token_origin_chain_serde` in the
+// generated crate.
+const SERDE_TOKEN_ORIGIN_CHAIN: &str = "#[cfg_attr(feature = \"serde_derive\", serde(with = \"crate::token_origin_chain_serde\", default))]";
 const BORSH_ENUM_DISC_ATTR: &str = "#[borsh(use_discriminant=true)]";
 // Exclude a field from the derived Borsh encoding. Used for
 // `ParsedTransactionPayload.intermediate_output` so the derived
@@ -50,6 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(".parser.EthereumMetadata", SERDE_DERIVE)
         .type_attribute(".parser.SolanaMetadata", SERDE_DERIVE)
         .type_attribute(".parser.NearMetadata", SERDE_DERIVE)
+        .type_attribute(".parser.TokenMetadataEntry", SERDE_DERIVE)
         .type_attribute(".parser.Abi", SERDE_DERIVE)
         .type_attribute(".parser.Idl", SERDE_DERIVE)
         .type_attribute(".parser.SignatureMetadata", SERDE_DERIVE)
@@ -60,8 +66,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // serde(default) on map fields so callers can omit them when empty
         .field_attribute(".parser.EthereumMetadata.abi_mappings", SERDE_DEFAULT)
         .field_attribute(".parser.SolanaMetadata.idl_mappings", SERDE_DEFAULT)
+        .field_attribute(".parser.NearMetadata.token_mappings", SERDE_DEFAULT)
         // Represent the abi_type enum as its string name over JSON
         .field_attribute(".parser.Abi.abi_type", SERDE_ABI_TYPE)
+        // Likewise origin_chain, whose documented values are the protobuf names
+        .field_attribute(
+            ".parser.TokenMetadataEntry.origin_chain",
+            SERDE_TOKEN_ORIGIN_CHAIN,
+        )
         // BORSH - Used for QOS sha256 checks
         .type_attribute(".parser.ParsedTransactionPayload", BORSH_DERIVE)
         .enum_attribute(".parser.ParsedTransactionPayload", BORSH_ENUM_DISC_ATTR)
@@ -76,6 +88,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(".parser.EthereumMetadata", BORSH_DERIVE)
         .enum_attribute(".parser.EthereumMetadata", BORSH_ENUM_DISC_ATTR)
         .type_attribute(".parser.NearMetadata", BORSH_DERIVE)
+        .enum_attribute(".parser.NearMetadata", BORSH_ENUM_DISC_ATTR)
+        .type_attribute(".parser.TokenMetadataEntry", BORSH_DERIVE)
+        .enum_attribute(".parser.TokenMetadataEntry", BORSH_ENUM_DISC_ATTR)
         .type_attribute(".parser.Abi", BORSH_DERIVE)
         .enum_attribute(".parser.Abi", BORSH_ENUM_DISC_ATTR)
         .type_attribute(".parser.Idl", BORSH_DERIVE)
