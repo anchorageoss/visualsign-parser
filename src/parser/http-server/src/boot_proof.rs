@@ -16,9 +16,9 @@ use qos_p256::P256Pair;
 /// bounded-reader convention in `parser/cli-core/src/mapping_parser.rs`.
 const MAX_MANIFEST_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
-/// Errors surfaced while assembling a boot proof. `Encode` and `Nsm` are
-/// declared here (unused in this PR) so a later NSM-backed `BootProofSource`
-/// only has to touch its own file, not this shared enum.
+/// Errors surfaced while assembling a boot proof. `Nsm` is declared here
+/// (unused in this PR) so a later NSM-backed `BootProofSource` only has to
+/// touch its own file, not this shared enum.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum BootProofError {
@@ -135,8 +135,8 @@ fn read_manifest_envelope_at(path: &Path) -> Result<ManifestEnvelope, BootProofE
 fn read_manifest_borsh_b64() -> Result<(String, String), BootProofError> {
     let envelope = read_manifest_envelope()?;
     Ok((
-        encode_borsh_b64(&envelope.manifest),
-        encode_borsh_b64(&envelope),
+        encode_borsh_b64(&envelope.manifest)?,
+        encode_borsh_b64(&envelope)?,
     ))
 }
 
@@ -144,20 +144,15 @@ fn read_manifest_borsh_b64() -> Result<(String, String), BootProofError> {
 fn read_manifest_borsh_b64_at(path: &Path) -> Result<(String, String), BootProofError> {
     let envelope = read_manifest_envelope_at(path)?;
     Ok((
-        encode_borsh_b64(&envelope.manifest),
-        encode_borsh_b64(&envelope),
+        encode_borsh_b64(&envelope.manifest)?,
+        encode_borsh_b64(&envelope)?,
     ))
 }
 
-fn encode_borsh_b64(v: &impl borsh::BorshSerialize) -> String {
+fn encode_borsh_b64(v: &impl borsh::BorshSerialize) -> Result<String, BootProofError> {
     let engine = base64::engine::general_purpose::STANDARD;
-    match borsh::to_vec(v) {
-        Ok(bytes) => engine.encode(bytes),
-        Err(e) => {
-            eprintln!("boot proof: borsh encode failed ({e}), manifest field empty");
-            String::new()
-        }
-    }
+    let bytes = borsh::to_vec(v).map_err(|e| BootProofError::Encode(format!("{e}")))?;
+    Ok(engine.encode(bytes))
 }
 
 #[cfg(test)]
@@ -252,12 +247,12 @@ pub(crate) mod tests {
         let envelope = sample_manifest_envelope();
         let engine = base64::engine::general_purpose::STANDARD;
 
-        let manifest_b64 = encode_borsh_b64(&envelope.manifest);
+        let manifest_b64 = encode_borsh_b64(&envelope.manifest).unwrap();
         let decoded_manifest: qos_core::protocol::services::boot::Manifest =
             borsh::from_slice(&engine.decode(manifest_b64).unwrap()).unwrap();
         assert_eq!(decoded_manifest, envelope.manifest);
 
-        let envelope_b64 = encode_borsh_b64(&envelope);
+        let envelope_b64 = encode_borsh_b64(&envelope).unwrap();
         let decoded_envelope: ManifestEnvelope =
             borsh::from_slice(&engine.decode(envelope_b64).unwrap()).unwrap();
         assert_eq!(decoded_envelope, envelope);
