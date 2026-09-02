@@ -132,13 +132,16 @@ impl VerifiedPaymentMarker {
 /// `ChainMetadata` value when present, NOT wrapped in `Option` (no
 /// discriminant byte), or an empty slice if absent; matching the convention
 /// used for `ParsedTransactionPayload::metadata_digest`), and
-/// `include_intermediate_output`. Both gateway and parser_app call this so
-/// the binding is unambiguous; every variable-length field is
-/// length-prefixed so no two distinct inputs can hash to the same preimage,
-/// as long as `unsigned_payload` and `chain_metadata_bytes` each stay under
-/// 2^32 bytes (their length prefixes are `as u32`). The gRPC server's own
-/// message-size cap is far below that bound today, so this is a
-/// documentation caveat, not a live gap.
+/// `include_intermediate_output`. `parser_app` calls this directly (see
+/// `payment_verify::verify`); the external x402 gateway signer is not part
+/// of this repo and has no code path through here, so it must implement
+/// this exact preimage independently to produce a `request_hash` the
+/// verifier will accept. Every variable-length field is length-prefixed so
+/// no two distinct inputs can hash to the same preimage, as long as
+/// `unsigned_payload` and `chain_metadata_bytes` each stay under 2^32 bytes
+/// (their length prefixes are `as u32`). The gRPC server's own message-size
+/// cap is far below that bound today, so this is a documentation caveat,
+/// not a live gap.
 #[must_use]
 pub fn request_hash(
     chain: i32,
