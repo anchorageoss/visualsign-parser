@@ -1587,6 +1587,39 @@ mod tests {
         );
     }
 
+    // The gap-fill rule must see through the MT alias, not just the direct
+    // key: an unsigned entry keyed by an MT asset that itself wraps an
+    // already-seeded NEP-141 balance (tokens::mt_underlying_nep141) must be
+    // rejected the same as one keyed by that NEP-141 id directly -- otherwise
+    // an unauthenticated caller could smuggle the wrong decimals in through
+    // the MT-shaped key while the direct key stays protected.
+    #[test]
+    fn extract_unsigned_entry_for_mt_wrapped_seeded_asset_rejected() {
+        let mt_asset_id = format!("nep245:defuse.near:{ASSET_ID}");
+        let metadata = ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("NEAR_MAINNET".to_string()),
+                token_mappings: make_mappings(vec![(
+                    &mt_asset_id,
+                    TokenMetadataEntry {
+                        value: r#"{"symbol":"USDC.e","decimals":30}"#.to_string(),
+                        signature: None,
+                        origin_chain: None,
+                    },
+                )]),
+            })),
+        };
+        assert!(
+            extract_registry(
+                Some(&metadata),
+                NETWORK,
+                &near_allowlist(),
+                &accept_unsigned_policy()
+            )
+            .is_none()
+        );
+    }
+
     // Regression coverage for the trust posture: an unsigned entry
     // for an asset SEEDS doesn't cover -- normally accepted (see
     // extract_unsigned_entry_accepted) -- must be rejected outright once the
