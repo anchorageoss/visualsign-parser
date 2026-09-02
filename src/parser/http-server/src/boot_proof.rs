@@ -4,10 +4,16 @@
 //! empty attestation doc); a later PR adds an NSM-backed implementation that
 //! fills the attestation doc in.
 
+use std::io::Read as _;
+
 use base64::Engine as _;
 use host_primitives::turnkey::TurnkeyBootProof;
 use qos_core::protocol::services::boot::ManifestEnvelope;
 use qos_p256::P256Pair;
+
+/// Maximum allowed size for the QOS manifest file (10 MB), matching the
+/// bounded-reader convention in `parser/cli-core/src/mapping_parser.rs`.
+const MAX_MANIFEST_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
 /// Errors surfaced while assembling a boot proof. `Encode` and `Nsm` are
 /// declared here (unused in this PR) so a later NSM-backed `BootProofSource`
@@ -76,8 +82,24 @@ impl BootProofSource for StaticBootProof {
 /// Shared by `StaticBootProof` and (in a later PR) an NSM-backed source,
 /// which also needs the envelope for `manifest.qos_hash()`.
 pub fn read_manifest_envelope() -> Result<ManifestEnvelope, BootProofError> {
-    let contents = std::fs::read(qos_core::MANIFEST_FILE)
+    let file = std::fs::File::open(qos_core::MANIFEST_FILE)
         .map_err(|e| BootProofError::Manifest(format!("{}: {e}", qos_core::MANIFEST_FILE)))?;
+
+    // Bounded reader: never read more than MAX_MANIFEST_FILE_SIZE, even if the
+    // file grows between the open and the read.
+    let mut bounded = file.take(MAX_MANIFEST_FILE_SIZE + 1);
+    let mut contents = Vec::new();
+    bounded
+        .read_to_end(&mut contents)
+        .map_err(|e| BootProofError::Manifest(format!("{}: {e}", qos_core::MANIFEST_FILE)))?;
+
+    if contents.len() as u64 > MAX_MANIFEST_FILE_SIZE {
+        return Err(BootProofError::Manifest(format!(
+            "{} exceeds maximum size (> {MAX_MANIFEST_FILE_SIZE} bytes)",
+            qos_core::MANIFEST_FILE
+        )));
+    }
+
     serde_json::from_slice(&contents)
         .map_err(|e| BootProofError::Manifest(format!("manifest json: {e}")))
 }
