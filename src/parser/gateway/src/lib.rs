@@ -3,6 +3,7 @@
 
 pub mod attestation;
 pub mod auth;
+mod env_util;
 pub mod handlers;
 pub mod state;
 pub mod x402_config;

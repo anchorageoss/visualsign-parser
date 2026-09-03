@@ -35,13 +35,10 @@ use subtle::ConstantTimeEq;
 /// Reads an env var, distinguishing "unset" from "set but not valid UTF-8".
 /// `std::env::var(..).ok()` collapses both cases into `None`, which would
 /// silently disable the auth gate for a token containing non-UTF-8 bytes
-/// instead of failing loudly like every other auth-config error here.
+/// instead of failing loudly like every other auth-config error here. See
+/// `crate::env_util::checked_env_var`.
 fn read_env_var(key: &'static str) -> Result<Option<String>, AuthError> {
-    match std::env::var(key) {
-        Ok(v) => Ok(Some(v)),
-        Err(std::env::VarError::NotPresent) => Ok(None),
-        Err(std::env::VarError::NotUnicode(_)) => Err(AuthError::NotUnicode { var: key }),
-    }
+    crate::env_util::checked_env_var(key, |var| AuthError::NotUnicode { var })
 }
 
 /// Minimum accepted bearer-token length, in bytes (post-trim). The token is

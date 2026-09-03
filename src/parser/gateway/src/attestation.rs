@@ -113,11 +113,11 @@ impl AttestationVerifier {
     /// is fatal based on profile (production deployments fail closed; local
     /// dev runs without a pinned verifier).
     pub fn from_env() -> Result<Option<Self>, AttestationError> {
-        // Distinguish "unset" from "set but not valid UTF-8" the same way
-        // `auth.rs::read_env_var` does: `std::env::var(..).ok()` collapses
-        // both into `None`, which would silently disable verification for a
-        // malformed pinned-key env var instead of reporting invalid
-        // configuration.
+        // Distinguish "unset" from "set but not valid UTF-8" (see
+        // `crate::env_util::checked_env_var`): `std::env::var(..).ok()`
+        // collapses both into `None`, which would silently disable
+        // verification for a malformed pinned-key env var instead of
+        // reporting invalid configuration.
         let hex_value = Self::checked_env_var("TVC_DEMO_PINNED_PUBKEY_HEX")?;
         let file_path = Self::checked_env_var("TVC_DEMO_PINNED_PUBKEY_FILE")?;
         Self::from_lookup(|key| match key {
@@ -128,15 +128,9 @@ impl AttestationVerifier {
     }
 
     /// Reads an env var, distinguishing "unset" from "set but not valid
-    /// UTF-8". See `auth.rs::read_env_var`.
+    /// UTF-8". See `crate::env_util::checked_env_var`.
     fn checked_env_var(key: &'static str) -> Result<Option<String>, AttestationError> {
-        match std::env::var(key) {
-            Ok(v) => Ok(Some(v)),
-            Err(std::env::VarError::NotPresent) => Ok(None),
-            Err(std::env::VarError::NotUnicode(_)) => {
-                Err(AttestationError::NotUnicode { var: key })
-            }
-        }
+        crate::env_util::checked_env_var(key, |var| AttestationError::NotUnicode { var })
     }
 
     /// Test-friendly core -- takes a closure that resolves env-var lookups so

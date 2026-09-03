@@ -152,11 +152,10 @@ impl X402Config {
     /// Production entrypoint -- reads the real process environment.
     ///
     /// Distinguishes "unset" from "set but not valid UTF-8" for every x402
-    /// env var, the same way the bearer-token loader does (see
-    /// `auth.rs::read_env_var`): plain `std::env::var(..).ok()` collapses
-    /// both into `None`, which would silently fall back to seeded defaults
-    /// (or the profile default) for a malformed value instead of reporting
-    /// invalid configuration.
+    /// env var (see `crate::env_util::checked_env_var`): plain
+    /// `std::env::var(..).ok()` collapses both into `None`, which would
+    /// silently fall back to seeded defaults (or the profile default) for a
+    /// malformed value instead of reporting invalid configuration.
     pub fn from_env() -> Result<Self, ConfigError> {
         let mut resolved = std::collections::BTreeMap::new();
         for key in X402_ENV_KEYS {
@@ -166,16 +165,12 @@ impl X402Config {
     }
 
     /// Reads an env var, distinguishing "unset" from "set but not valid
-    /// UTF-8". See `auth.rs::read_env_var`.
+    /// UTF-8". See `crate::env_util::checked_env_var`.
     fn checked_env_var(key: &'static str) -> Result<Option<String>, ConfigError> {
-        match std::env::var(key) {
-            Ok(v) => Ok(Some(v)),
-            Err(std::env::VarError::NotPresent) => Ok(None),
-            Err(std::env::VarError::NotUnicode(_)) => Err(ConfigError::Invalid {
-                var: key,
-                message: "contains invalid (non-UTF-8) bytes".to_string(),
-            }),
-        }
+        crate::env_util::checked_env_var(key, |var| ConfigError::Invalid {
+            var,
+            message: "contains invalid (non-UTF-8) bytes".to_string(),
+        })
     }
 
     /// Test-friendly core -- takes a closure that resolves env-var lookups.
