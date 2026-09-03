@@ -66,6 +66,7 @@ impl RunningServer {
         let mut child = Command::new(binary)
             .arg("--port")
             .arg(port.to_string())
+            .arg("--accept-unsigned-abis")
             .current_dir(&work_dir)
             .spawn()
             .expect("failed to spawn parser_http_server");

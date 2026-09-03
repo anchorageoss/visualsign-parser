@@ -22,6 +22,11 @@
 //! - `--port <u16>` / `HTTP_PORT` (default 3000) - Turnkey TVC public ingress.
 //! - `--enclave-app <name>` / `ENCLAVE_APP` (default `visualsign-parser`).
 //! - `--deployment-label <label>` / `DEPLOYMENT_LABEL`.
+//! - `--accept-unsigned-abis` / `--accept-signatures-from-pubkey <hex>` (repeatable) -
+//!   required, exactly one: the deploy-time trust posture for caller-supplied Ethereum
+//!   ABI mappings, same posture and same requirement as `parser_app` (see
+//!   `ParserConfig::abi_trust_from_options`). No env fallback: these land in this
+//!   deployment's signed `pivotArgs`, and an env escape hatch would undermine that.
 //!
 //! The ephemeral key is read from `qos_core::EPHEMERAL_KEY_FILE` (provisioned
 //! by QOS inside the enclave). No override flag - if a deployment ever needs
@@ -45,6 +50,7 @@ use host_primitives::turnkey::{
     TurnkeyPayload, TurnkeyRequestWrapper, TurnkeyResponseWrapper, TurnkeySignature,
     error_response, success_response,
 };
+use parser_app::config::ParserConfig;
 use parser_app::routes::parse::parse;
 use qos_core::handles::EphemeralKeyHandle;
 use qos_p256::P256Pair;
@@ -65,12 +71,32 @@ struct Args {
     /// Deployment label reported in every response's `bootProof`.
     #[arg(long, env = "DEPLOYMENT_LABEL", default_value = "")]
     deployment_label: String,
+
+    /// Required (exactly one of --accept-unsigned-abis / --accept-signatures-from-pubkey):
+    /// accept caller-supplied ABI mappings that carry no signature. Their integrity and
+    /// provenance are unverified. Mutually exclusive with --accept-signatures-from-pubkey.
+    ///
+    /// This binary is the actual TVC public ingress once deployed (parser_app's gRPC
+    /// becomes internal vsock IPC), so it carries the same fail-closed posture
+    /// requirement as parser_app: the choice must be explicit and land in this
+    /// deployment's pivotArgs, not default silently to the permissive posture.
+    #[arg(long)]
+    accept_unsigned_abis: bool,
+
+    /// Required (exactly one of --accept-unsigned-abis / --accept-signatures-from-pubkey):
+    /// only accept caller-supplied ABI mappings signed by this hex secp256k1 public key;
+    /// unsigned and otherwise-signed mappings are rejected. Repeatable. Mutually exclusive
+    /// with --accept-unsigned-abis. Requires a build with the `ethereum` feature (on by
+    /// default); a build without it refuses to start when this flag is given.
+    #[arg(long = "accept-signatures-from-pubkey")]
+    accept_signatures_from_pubkey: Vec<String>,
 }
 
 #[derive(Clone)]
 struct AppState {
     ephemeral_key: Arc<P256Pair>,
     boot_proof: Arc<dyn BootProofSource + Send + Sync>,
+    config: ParserConfig,
 }
 
 async fn health() -> StatusCode {
@@ -163,7 +189,7 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
         include_intermediate_output: wrapper.request.include_intermediate_output,
     };
 
-    let proto_resp = match parse(&proto_req, &state.ephemeral_key) {
+    let proto_resp = match parse(&proto_req, &state.ephemeral_key, &state.config) {
         Ok(r) => r,
         Err(e) => {
             // Only NotFound carries a message safe to hand back to an
@@ -286,6 +312,17 @@ async fn method_not_allowed_fallback(State(state): State<AppState>) -> Response 
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
+    // Fail closed rather than default: this binary is the TVC public ingress, so an
+    // unstated posture here would be worse than on parser_app, not better. See
+    // ParserConfig::abi_trust_from_options for why exactly one flag is required.
+    let abi_trust = ParserConfig::abi_trust_from_options(
+        args.accept_unsigned_abis,
+        &args.accept_signatures_from_pubkey,
+    )
+    .map_err(|e| format!("invalid ABI trust config: {e}"))?;
+    eprintln!("caller-supplied ABI trust: {abi_trust}");
+    let config = ParserConfig::new(abi_trust);
+
     let handle = EphemeralKeyHandle::new(qos_core::EPHEMERAL_KEY_FILE.to_string());
     let ephemeral_key = handle
         .get_ephemeral_key()
@@ -306,6 +343,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState {
         ephemeral_key: Arc::new(ephemeral_key),
         boot_proof: Arc::new(boot_proof),
+        config,
     };
 
     // 64 KiB caps every parse-request body the TVC pivot will accept.
@@ -415,6 +453,7 @@ mod tests {
         let state = AppState {
             ephemeral_key: Arc::new(pair),
             boot_proof: Arc::new(boot_proof),
+            config: ParserConfig::accept_unsigned(),
         };
         let raw = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02","include_intermediate_output":false}}"#;
         let body = axum::body::Bytes::from_static(raw);
@@ -470,6 +509,7 @@ mod tests {
         let state = AppState {
             ephemeral_key: Arc::new(pair),
             boot_proof: Arc::new(boot_proof),
+            config: ParserConfig::accept_unsigned(),
         };
 
         let not_found = not_found_fallback(State(state.clone())).await;
