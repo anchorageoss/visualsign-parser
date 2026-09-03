@@ -255,6 +255,16 @@ impl X402Config {
             var: "X402_FACILITATOR_URL",
             message: e.to_string(),
         })?;
+        Self::validate_facilitator_url(&url, profile)?;
+        Ok(url)
+    }
+
+    // Split out of `load_facilitator_url` so `build_middleware` can
+    // revalidate the same invariants for a hand-built `X402Config`: every
+    // field on this struct is `pub` with no other invariant enforcement, so
+    // a config built any other way could carry a plain-http URL against a
+    // non-loopback host (or embedded userinfo) undetected.
+    fn validate_facilitator_url(url: &Url, profile: X402Profile) -> Result<(), ConfigError> {
         // x402 requests carry signed payment authorization, so plain http
         // exposes replayable payment material to an on-path attacker. Only
         // accept https, with one carve-out: `local` may use http against a
@@ -287,7 +297,7 @@ impl X402Config {
                 message: "must not contain userinfo (user:pass@host)".into(),
             });
         }
-        Ok(url)
+        Ok(())
     }
 
     fn load_timeout<F>(get: &F) -> Result<Duration, ConfigError>
@@ -300,19 +310,29 @@ impl X402Config {
                     var: "X402_FACILITATOR_TIMEOUT_SECS",
                     message: e.to_string(),
                 })?;
-                // 0 parses to Duration::ZERO, which times out every
-                // facilitator call instantly rather than disabling the
-                // timeout; reject it instead of silently taking x402 down.
-                if secs == 0 {
-                    return Err(ConfigError::Invalid {
-                        var: "X402_FACILITATOR_TIMEOUT_SECS",
-                        message: "must be greater than 0".to_string(),
-                    });
-                }
-                Ok(Duration::from_secs(secs))
+                let duration = Duration::from_secs(secs);
+                Self::validate_timeout(duration)?;
+                Ok(duration)
             }
             None => Ok(Duration::from_secs(5)),
         }
+    }
+
+    // Split out of `load_timeout` so `build_middleware` can revalidate the
+    // same invariant for a hand-built `X402Config`: `facilitator_timeout` is
+    // a `pub` field with no other invariant enforcement, so a config built
+    // any other way could carry `Duration::ZERO` undetected.
+    fn validate_timeout(d: Duration) -> Result<(), ConfigError> {
+        // Zero times out every facilitator call instantly rather than
+        // disabling the timeout; reject it instead of silently taking x402
+        // down.
+        if d.is_zero() {
+            return Err(ConfigError::Invalid {
+                var: "X402_FACILITATOR_TIMEOUT_SECS",
+                message: "must be greater than 0".to_string(),
+            });
+        }
+        Ok(())
     }
 
     fn seeded_tag<F>(get: &F, profile: X402Profile) -> Result<PriceTagConfig, ConfigError>
@@ -467,6 +487,12 @@ impl X402Config {
                 ),
             });
         }
+        // Same reasoning as the `protocol_version` check above: `pub` fields
+        // let a hand-built config carry a plain-http/external URL, embedded
+        // userinfo, or a zero timeout that `load_facilitator_url`/
+        // `load_timeout` would have rejected. Revalidate both here.
+        Self::validate_facilitator_url(&self.facilitator_url, self.profile)?;
+        Self::validate_timeout(self.facilitator_timeout)?;
 
         let facilitator = FacilitatorClient::try_new(self.facilitator_url.clone())
             .map_err(|e| ConfigError::Invalid {
@@ -980,6 +1006,56 @@ mod tests {
             err,
             ConfigError::Invalid {
                 var: "X402_PROTOCOL_VERSION",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn build_middleware_rejects_non_https_facilitator_url_even_when_hand_built() {
+        // Same reasoning as the protocol_version test above: `facilitator_url`
+        // is a `pub` field with the https-only invariant otherwise enforced
+        // only by `load_facilitator_url` at env-load time; a config built
+        // directly (bypassing that loader) must still be rejected here, not
+        // silently wired up against a plain-http external facilitator.
+        let mut cfg = X402Config::from_lookup(lookup(&[])).unwrap();
+        cfg.facilitator_url = Url::parse("http://example.com").unwrap();
+        let err = cfg.build_middleware().map(|_| ()).unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                var: "X402_FACILITATOR_URL",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn build_middleware_rejects_facilitator_url_userinfo_even_when_hand_built() {
+        let mut cfg = X402Config::from_lookup(lookup(&[])).unwrap();
+        cfg.facilitator_url = Url::parse("https://user:pass@example.com").unwrap();
+        let err = cfg.build_middleware().map(|_| ()).unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                var: "X402_FACILITATOR_URL",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn build_middleware_rejects_zero_timeout_even_when_hand_built() {
+        // Same reasoning: `facilitator_timeout` is a `pub` field with the
+        // "must be greater than 0" invariant otherwise enforced only by
+        // `load_timeout` at env-load time.
+        let mut cfg = X402Config::from_lookup(lookup(&[])).unwrap();
+        cfg.facilitator_timeout = Duration::ZERO;
+        let err = cfg.build_middleware().map(|_| ()).unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                var: "X402_FACILITATOR_TIMEOUT_SECS",
                 ..
             }
         ));
