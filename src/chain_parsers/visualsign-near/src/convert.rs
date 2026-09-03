@@ -410,18 +410,17 @@ fn render_intent_envelope(
     let mut fields =
         vec![create_text_field("Network", network.display_name())?.signable_payload_field];
     fields.extend(tokens.diagnostics);
-    fields.extend(
-        crate::presets::intents::try_render_single_intent(
-            json.as_bytes(),
-            &tokens.registry,
-            options,
-            network,
-        )
-        .map_err(intents_error)?,
-    );
+    let rendered = crate::presets::intents::try_render_single_intent(
+        json.as_bytes(),
+        &tokens.registry,
+        options,
+        network,
+    )
+    .map_err(intents_error)?;
+    fields.extend(rendered.fields);
     Ok(ConversionResult::new(SignablePayload::new(
         PAYLOAD_VERSION,
-        "NEAR Intent".to_string(),
+        rendered.title,
         None,
         fields,
         PAYLOAD_TYPE.to_string(),

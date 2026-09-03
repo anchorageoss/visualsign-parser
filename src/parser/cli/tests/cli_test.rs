@@ -711,5 +711,5 @@ fn test_cli_near_token_metadata_invalid_file_still_parses() {
     );
     let json: serde_json::Value =
         serde_json::from_str(&stdout).expect("CLI output should be valid JSON");
-    assert_eq!(json["Title"], "NEAR Intent");
+    assert_eq!(json["Title"], "NEAR Intent: FT Withdraw");
 }

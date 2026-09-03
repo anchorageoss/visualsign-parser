@@ -239,8 +239,100 @@ pub(crate) fn section(
     Ok(fields)
 }
 
+/// Human-readable name for an intent variant, mirroring `actions::action_label`
+/// on the transaction path.
+pub(crate) fn intent_label(intent: &Intent) -> &'static str {
+    match intent {
+        Intent::TokenDiff(_) => "Token Diff",
+        Intent::Transfer(_) => "Transfer",
+        Intent::FtWithdraw(_) => "FT Withdraw",
+        Intent::NftWithdraw(_) => "NFT Withdraw",
+        Intent::MtWithdraw(_) => "MT Withdraw",
+        Intent::NativeWithdraw(_) => "Native Withdraw",
+        Intent::AddPublicKey(_) => "Add Public Key",
+        Intent::RemovePublicKey(_) => "Remove Public Key",
+        Intent::SetAuthByPredecessorId(_) => "Set Auth By Predecessor Id",
+        Intent::StorageDeposit(_) => "Storage Deposit",
+        Intent::AuthCall(_) => "Auth Call",
+    }
+}
+
+/// Title for a pre-signature envelope, mirroring `convert::title_for` on the
+/// transaction path: a lone intent names its type, a batch stays generic
+/// because no single name describes it.
+pub(crate) fn title_for_intents(intents: &[Intent]) -> String {
+    match intents {
+        [single] => format!("NEAR Intent: {}", intent_label(single)),
+        _ => "NEAR Intent".to_string(),
+    }
+}
+
+/// The `"Intent"` field naming what the following fields belong to.
+///
+/// Unlike `actions::action_boundary_field`, which a single-action transaction
+/// omits because the title already names it, this renders for a lone intent
+/// too: a signed batch nests intents inside per-payload sections, so a section
+/// carrying one intent has nothing else to name its type. The index is added
+/// only when there is more than one, where it is what separates them.
+///
+/// The type is otherwise absent from the render entirely -- serde consumes the
+/// `intent` tag to select the variant, so it is known and dropped. Without it
+/// `transfer` and `ft_withdraw` differ only by the presence of one `Token`
+/// field.
+fn intent_boundary_field(
+    intent: &Intent,
+    index: usize,
+    total: usize,
+) -> Result<SignablePayloadField, VisualSignError> {
+    let label = intent_label(intent);
+    let text = if total > 1 {
+        format!("{} of {total}: {label}", index + 1)
+    } else {
+        label.to_string()
+    };
+    Ok(create_text_field("Intent", &text)?.signable_payload_field)
+}
+
+/// Warns that an intent hands over authority rather than moving a named
+/// amount. These render as one unremarkable line each, and appended to a
+/// legitimate swap they read as part of it -- but an added key holds
+/// permanent authority over the account's entire intents balance, and
+/// `auth_call` invokes a contract with the signer's own authority. The
+/// transaction path gives the equivalent `AddKey` action the same treatment,
+/// breaking its permission out field by field because "their absent forms
+/// widen the grant".
+fn account_control_warning(
+    intent: &Intent,
+) -> Result<Option<SignablePayloadField>, VisualSignError> {
+    let consequence = match intent {
+        Intent::AddPublicKey(_) => {
+            "this key gains permanent authority over the account's entire intents balance, until it is explicitly removed"
+        }
+        Intent::RemovePublicKey(_) => {
+            "removing a key revokes its authority over the account; removing the only remaining key can lock the account out"
+        }
+        Intent::SetAuthByPredecessorId(_) => {
+            "this changes which callers the account authorizes, independently of its keys"
+        }
+        Intent::AuthCall(_) => {
+            "this calls the named contract with the signer's own authority, and the attached deposit is not refunded on failure"
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(diagnostic("account-control", consequence)?))
+}
+
 /// Render the fields intrinsic to a single intent.
 pub(crate) fn render_intent(intent: &Intent, registry: &Reg) -> Result<Fields, VisualSignError> {
+    let mut fields = render_intent_body(intent, registry)?;
+    if let Some(warning) = account_control_warning(intent)? {
+        fields.push(warning);
+    }
+    Ok(fields)
+}
+
+/// The intent's own fields, without the boundary or any warning.
+fn render_intent_body(intent: &Intent, registry: &Reg) -> Result<Fields, VisualSignError> {
     match intent {
         Intent::TokenDiff(td) => render_token_diff(td, registry),
         Intent::Transfer(t) => render_transfer(t, registry),
@@ -608,10 +700,44 @@ pub(crate) fn render_single(
             "deadline has passed; the intents would be rejected",
         )?);
     }
-    for intent in &payload.intents {
+    // An empty list is valid and does nothing, but still consumes the nonce
+    // for this signer -- so it renders as an envelope with no body, and a
+    // signer has nothing on screen telling them that is all it does.
+    if payload.intents.is_empty() {
+        fields.push(diagnostic(
+            "empty-intents",
+            "this envelope carries no intents; signing it moves nothing but spends the nonce",
+        )?);
+    }
+    let total = payload.intents.len();
+    for (index, intent) in payload.intents.iter().enumerate() {
+        fields.push(intent_boundary_field(intent, index, total)?);
         fields.extend(render_intent(intent, registry)?);
+        if let Some(warning) = self_transfer_warning(payload, intent)? {
+            fields.push(warning);
+        }
     }
     Ok(fields)
+}
+
+/// Warns that a transfer to the signer's own account cannot execute:
+/// `Transfer::execute_intent` returns `InvalidIntent` on
+/// `sender_id == receiver_id`. Renders clean otherwise, the same way an
+/// expired deadline would without the check beside this one.
+fn self_transfer_warning(
+    payload: &DefusePayload<DefuseIntents>,
+    intent: &Intent,
+) -> Result<Option<SignablePayloadField>, VisualSignError> {
+    let Intent::Transfer(t) = intent else {
+        return Ok(None);
+    };
+    if t.receiver_id != payload.signer_id {
+        return Ok(None);
+    }
+    Ok(Some(diagnostic(
+        "self-transfer",
+        "the recipient is the signer's own account; the contract rejects a transfer to self",
+    )?))
 }
 
 #[cfg(test)]
@@ -628,6 +754,17 @@ mod tests {
             | SignablePayloadField::AddressV2 { common, .. } => Some(common.label.as_str()),
             _ => None,
         }
+    }
+
+    /// Field labels excluding soft findings. The non-`diagnostics` build
+    /// surfaces those as a `Warning`-labelled text field, so a test about
+    /// which value fields render must not count them.
+    fn value_labels(fields: &Fields) -> Vec<&str> {
+        fields
+            .iter()
+            .filter_map(label_of)
+            .filter(|l| *l != "Warning")
+            .collect()
     }
 
     fn empty_reg() -> Reg {
@@ -1281,9 +1418,8 @@ mod tests {
             r#"{{"intent":"auth_call","contract_id":"evil.near","msg":"{{}}","state_init":{STATE_INIT}}}"#
         ));
         let fields = render_intent(&intent, &empty_reg()).expect("render");
-        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
         assert_eq!(
-            labels,
+            value_labels(&fields),
             ["Contract", "Message", "Attached Deposit", "State Init"]
         );
     }
@@ -1293,8 +1429,10 @@ mod tests {
         let intent =
             intent_from(r#"{"intent":"auth_call","contract_id":"callee.near","msg":"{}"}"#);
         let fields = render_intent(&intent, &empty_reg()).expect("render");
-        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
-        assert_eq!(labels, ["Contract", "Message", "Attached Deposit"]);
+        assert_eq!(
+            value_labels(&fields),
+            ["Contract", "Message", "Attached Deposit"]
+        );
     }
 
     #[test]
@@ -1506,6 +1644,201 @@ mod tests {
             .expect("extraction warning");
         let message = message_of(extraction);
         assert!(!message.contains('\n'), "{message}");
+    }
+
+    /// Builds a payload carrying `intents` verbatim.
+    fn payload_with(intents: &str) -> DefusePayload<DefuseIntents> {
+        let json = format!(
+            r#"{{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":{intents}}}"#
+        );
+        serde_json::from_str(&json).expect("payload json")
+    }
+
+    const A_TRANSFER: &str =
+        r#"{"intent":"transfer","receiver_id":"bob.near","tokens":{"nep141:wrap.near":"1"}}"#;
+    const AN_ADD_KEY: &str = r#"{"intent":"add_public_key","public_key":"ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"}"#;
+
+    /// Every `Intent` field text, in order.
+    fn intent_lines(fields: &Fields) -> Vec<String> {
+        fields
+            .iter()
+            .filter_map(|f| match f {
+                SignablePayloadField::TextV2 { common, text_v2 } if common.label == "Intent" => {
+                    Some(text_v2.text.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    // Without a type line, `transfer` and `ft_withdraw` differ only by the
+    // presence of one `Token` field, so an instant irreversible internal
+    // transfer reads like a withdraw. serde consumes the `intent` tag to
+    // select the variant, so the value is known and was simply dropped.
+    #[test]
+    fn a_single_intent_names_its_type() {
+        let fields = render_single(
+            &payload_with(&format!("[{A_TRANSFER}]")),
+            &empty_reg(),
+            NearNetwork::Mainnet,
+        )
+        .expect("render");
+        assert_eq!(intent_lines(&fields), ["Transfer"]);
+    }
+
+    #[test]
+    fn each_intent_in_a_batch_is_numbered_and_named() {
+        let fields = render_single(
+            &payload_with(&format!("[{A_TRANSFER},{AN_ADD_KEY}]")),
+            &empty_reg(),
+            NearNetwork::Mainnet,
+        )
+        .expect("render");
+        assert_eq!(
+            intent_lines(&fields),
+            ["1 of 2: Transfer", "2 of 2: Add Public Key"]
+        );
+    }
+
+    /// The boundary has to precede its own intent's fields, or it labels the
+    /// wrong ones.
+    #[test]
+    fn the_type_line_precedes_the_fields_it_describes() {
+        let fields = render_single(
+            &payload_with(&format!("[{A_TRANSFER},{AN_ADD_KEY}]")),
+            &empty_reg(),
+            NearNetwork::Mainnet,
+        )
+        .expect("render");
+        let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
+        let first = labels.iter().position(|l| *l == "Intent").expect("first");
+        let to = labels.iter().position(|l| *l == "To").expect("To");
+        assert!(first < to, "{labels:?}");
+    }
+
+    // Account-control intents hand over authority rather than moving a named
+    // amount, and render as a single unremarkable line. Appended to a
+    // legitimate swap, an added key gains permanent authority over the
+    // account's whole intents balance.
+    #[test]
+    fn add_public_key_warns_that_it_grants_account_authority() {
+        let fields = render_intent(&intent_from(AN_ADD_KEY), &empty_reg()).expect("render");
+        assert!(
+            fields
+                .iter()
+                .any(|f| super::super::test_support::is_warning_diagnostic(f, "account-control")),
+            "expected an account-control warning, got {fields:?}"
+        );
+    }
+
+    #[test]
+    fn remove_public_key_warns_that_it_changes_account_authority() {
+        let intent = intent_from(
+            r#"{"intent":"remove_public_key","public_key":"ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"}"#,
+        );
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert!(
+            fields
+                .iter()
+                .any(|f| super::super::test_support::is_warning_diagnostic(f, "account-control")),
+            "expected an account-control warning, got {fields:?}"
+        );
+    }
+
+    /// The on-screen label names the variant precisely: dropping "Id" would
+    /// make it read as though the intent were something else the account
+    /// authorizes by predecessor generally, rather than this one specific
+    /// mechanism.
+    #[test]
+    fn set_auth_by_predecessor_id_label_names_the_variant_precisely() {
+        let intent = intent_from(r#"{"intent":"set_auth_by_predecessor_id","enabled":true}"#);
+        assert_eq!(intent_label(&intent), "Set Auth By Predecessor Id");
+    }
+
+    #[test]
+    fn set_auth_by_predecessor_warns_that_it_changes_account_authority() {
+        let intent = intent_from(r#"{"intent":"set_auth_by_predecessor_id","enabled":true}"#);
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert!(
+            fields
+                .iter()
+                .any(|f| super::super::test_support::is_warning_diagnostic(f, "account-control")),
+            "expected an account-control warning, got {fields:?}"
+        );
+    }
+
+    #[test]
+    fn auth_call_warns_that_it_calls_a_contract_as_the_signer() {
+        let intent =
+            intent_from(r#"{"intent":"auth_call","contract_id":"callee.near","msg":"{}"}"#);
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert!(
+            fields
+                .iter()
+                .any(|f| super::super::test_support::is_warning_diagnostic(f, "account-control")),
+            "expected an account-control warning, got {fields:?}"
+        );
+    }
+
+    #[test]
+    fn a_value_moving_intent_carries_no_account_control_warning() {
+        let fields = render_intent(&intent_from(A_TRANSFER), &empty_reg()).expect("render");
+        assert!(
+            !fields
+                .iter()
+                .any(|f| super::super::test_support::is_warning_diagnostic(f, "account-control")),
+            "unexpected account-control warning: {fields:?}"
+        );
+    }
+
+    /// `DefuseIntents` documents an empty list as valid: it does nothing, but
+    /// still invalidates the nonce for the signer. So it is a real no-op nonce
+    /// burn a user can be tricked into signing.
+    #[test]
+    fn an_empty_intent_list_warns_that_it_only_burns_the_nonce() {
+        let fields =
+            render_single(&payload_with("[]"), &empty_reg(), NearNetwork::Mainnet).expect("render");
+        assert!(
+            fields
+                .iter()
+                .any(|f| super::super::test_support::is_warning_diagnostic(f, "empty-intents")),
+            "expected an empty-intents warning, got {fields:?}"
+        );
+    }
+
+    /// `Transfer::execute_intent` returns `InvalidIntent` when
+    /// `sender_id == receiver_id`, so this can never execute -- the same class
+    /// as the expired-deadline check next to it.
+    #[test]
+    fn a_self_transfer_warns_that_the_contract_refuses_it() {
+        let intents = format!(
+            r#"[{}]"#,
+            r#"{"intent":"transfer","receiver_id":"alice.near","tokens":{"nep141:wrap.near":"1"}}"#
+        );
+        let fields = render_single(&payload_with(&intents), &empty_reg(), NearNetwork::Mainnet)
+            .expect("render");
+        assert!(
+            fields
+                .iter()
+                .any(|f| super::super::test_support::is_warning_diagnostic(f, "self-transfer")),
+            "expected a self-transfer warning, got {fields:?}"
+        );
+    }
+
+    #[test]
+    fn a_transfer_to_another_account_carries_no_self_transfer_warning() {
+        let fields = render_single(
+            &payload_with(&format!("[{A_TRANSFER}]")),
+            &empty_reg(),
+            NearNetwork::Mainnet,
+        )
+        .expect("render");
+        assert!(
+            !fields
+                .iter()
+                .any(|f| super::super::test_support::is_warning_diagnostic(f, "self-transfer")),
+            "unexpected self-transfer warning: {fields:?}"
+        );
     }
 
     /// `ft_withdraw` and `nft_withdraw` both render their memo; `mt_withdraw`
