@@ -177,6 +177,20 @@ pub async fn parse_handler(
         }
     };
 
+    // Bind this response to *this* request; see `response_matches_request`
+    // for why. Needs no cryptographic material (it's a plain digest
+    // recompute-and-compare), so unlike the signature check below it runs
+    // unconditionally rather than only when a verifier is pinned.
+    if !response_matches_request(&payload, &unsigned_payload, &metadata_bytes) {
+        eprintln!("response digest does not match this request");
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(error_response(
+                "response does not match request".to_string(),
+            )),
+        );
+    }
+
     // TVC attestation: only forward responses that verifiably came from the
     // pinned enclave key. A 502 here causes x402-axum's settle-on-success
     // contract to skip /settle so payment is not charged for an unattested
@@ -201,18 +215,6 @@ pub async fn parse_handler(
             }
         };
         wire_message = qos_hex::encode(&authenticated_digest);
-
-        // Bind the verified response to *this* request; see
-        // `response_matches_request` for why.
-        if !response_matches_request(&payload, &unsigned_payload, &metadata_bytes) {
-            eprintln!("response digest does not match this request");
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(error_response(
-                    "response does not match request".to_string(),
-                )),
-            );
-        }
     }
 
     let scheme = match proto_signature.scheme {
