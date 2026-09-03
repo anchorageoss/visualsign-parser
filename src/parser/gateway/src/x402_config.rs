@@ -452,6 +452,22 @@ impl X402Config {
         &self,
     ) -> Result<X402LayerBuilder<StaticPriceTags<v2::PriceTag>, Arc<FacilitatorClient>>, ConfigError>
     {
+        // Only checked at env-load time by `from_lookup`; `X402Config`'s
+        // fields are `pub` with no other invariant enforcement, and nothing
+        // below actually reads `protocol_version` to pick v1 vs v2 wiring
+        // (it's hardcoded to `x402_types::proto::v2` throughout this
+        // function). Revalidate here so a config built any other way can't
+        // silently get v2 middleware while declaring a different version.
+        if self.protocol_version != "v2" {
+            return Err(ConfigError::Invalid {
+                var: "X402_PROTOCOL_VERSION",
+                message: format!(
+                    "unsupported value '{}'; only 'v2' is supported",
+                    self.protocol_version
+                ),
+            });
+        }
+
         let facilitator = FacilitatorClient::try_new(self.facilitator_url.clone())
             .map_err(|e| ConfigError::Invalid {
                 var: "X402_FACILITATOR_URL",
@@ -500,6 +516,23 @@ where
 
 /// Convert a single [`PriceTagConfig`] into a [`v2::PriceTag`].
 fn build_price_tag(tag: &PriceTagConfig) -> Result<v2::PriceTag, ConfigError> {
+    // `asset` is only checked against "USDC" by the JSON-wire parsing path
+    // (`parse_tags_json`); `X402Config`/`PriceTagConfig`'s fields are `pub`
+    // with no other invariant enforcement, so a config built any other way
+    // (directly, or via a future construction path) could carry a
+    // non-USDC asset here undetected -- this function hardcodes USDC
+    // pricing below regardless of `tag.asset`'s value, so that config would
+    // silently get USDC middleware while claiming to price something else.
+    if tag.asset != "USDC" {
+        return Err(ConfigError::Invalid {
+            var: "priceUsd",
+            message: format!(
+                "unsupported asset '{}'; only 'USDC' is supported",
+                tag.asset
+            ),
+        });
+    }
+
     if tag.scheme != PriceScheme::Exact {
         return Err(ConfigError::Invalid {
             var: "X402_PRICE_TAGS_JSON",
@@ -826,6 +859,25 @@ mod tests {
     }
 
     #[test]
+    fn build_price_tag_rejects_non_usdc_asset_even_when_hand_built() {
+        // PriceTagConfig's fields are `pub` with the "asset must be USDC"
+        // invariant otherwise enforced only by the JSON-wire parsing path
+        // (parse_tags_json); a config built directly (bypassing that path)
+        // must still be rejected here, not silently priced as USDC.
+        let tag = PriceTagConfig {
+            network: "solana-devnet".to_string(),
+            asset: "ETH".to_string(),
+            price_usd: Decimal::from_str("0.001").unwrap(),
+            pay_to: PayToAddress::Solana(
+                "EGBQqKn968sVv5cQh5Cr72pSTHfxsuzq7o7asqYB5uEV".to_string(),
+            ),
+            scheme: PriceScheme::Exact,
+        };
+        let err = build_price_tag(&tag).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid { .. }));
+    }
+
+    #[test]
     fn from_env_rejects_unsupported_scheme() {
         let json = r#"[
             {"network":"base","asset":"USDC","priceUsd":"0.05","payTo":{"evm":"0x1111111111111111111111111111111111111111"},"scheme":"upto"}
@@ -909,6 +961,28 @@ mod tests {
     fn from_env_accepts_explicit_v2_protocol_version() {
         let cfg = X402Config::from_lookup(lookup(&[("X402_PROTOCOL_VERSION", "v2")])).unwrap();
         assert_eq!(cfg.protocol_version, "v2");
+    }
+
+    #[test]
+    fn build_middleware_rejects_non_v2_protocol_version_even_when_hand_built() {
+        // X402Config's fields are `pub` with "protocol_version must be v2"
+        // otherwise enforced only by from_lookup at env-load time, and
+        // build_middleware hardcodes x402_types::proto::v2 without ever
+        // reading self.protocol_version; a config built directly (bypassing
+        // from_lookup) must still be rejected here, not silently wired as v2
+        // while declaring something else.
+        let mut cfg = X402Config::from_lookup(lookup(&[])).unwrap();
+        cfg.protocol_version = "v1".to_string();
+        // `X402LayerBuilder` (the `Ok` payload) doesn't implement `Debug`, so
+        // discard it before `unwrap_err` rather than matching the bare Result.
+        let err = cfg.build_middleware().map(|_| ()).unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                var: "X402_PROTOCOL_VERSION",
+                ..
+            }
+        ));
     }
 
     #[test]
