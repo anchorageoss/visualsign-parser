@@ -126,9 +126,11 @@ parser-cli-narrow-build-check:
 	@# compiled binary panicking or misbehaving against real fixtures
 	@# (tests/cli_test.rs runs CARGO_BIN_EXE_parser_cli end to end), not
 	@# just a compile error.
+	@# `--locked`: matches the release container's flags and keeps this
+	@# check from silently updating Cargo.lock instead of failing.
 	@set -e; for c in $(PARSER_CLI_CHAINS); do \
 		echo "==> parser_cli --features $$c"; \
-		cargo test -p parser_cli --no-default-features --features $$c --all-targets; \
+		cargo test -p parser_cli --locked --no-default-features --features $$c --all-targets; \
 	done
 
 .PHONY: dev-signing-absent-check

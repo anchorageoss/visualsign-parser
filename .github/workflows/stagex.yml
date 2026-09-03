@@ -137,12 +137,15 @@ jobs:
       - name: Upload CLI binary to release
         # parser_cli is also usable standalone (no Docker required), so
         # attach the static binary we already built as a release asset
-        # alongside the OCI image. Only meaningful on a release build --
-        # SEMVER_TAG is empty for PR/branch builds, and (per the TVC step's
-        # comment above) a push-to-main run can compute a SEMVER_TAG before
-        # release.yml has actually created that release, so this is a no-op
-        # in that race; the tag-dispatched stagex run created afterward
-        # picks it up.
+        # alongside the OCI image. images/parser_cli/Containerfile builds
+        # this image with only `--features solana` (see the "parser_cli
+        # (Solana)" matrix label above), so the asset name says so rather
+        # than implying it covers every chain parser_cli can be built with.
+        # Only meaningful on a release build -- SEMVER_TAG is empty for
+        # PR/branch builds, and (per the TVC step's comment above) a
+        # push-to-main run can compute a SEMVER_TAG before release.yml has
+        # actually created that release, so this is a no-op in that race;
+        # the tag-dispatched stagex run created afterward picks it up.
         if: matrix.target.name == 'parser_cli' && steps.build.outputs.semver_tag != ''
         env:
           SEMVER_TAG: ${{ steps.build.outputs.semver_tag }}
@@ -153,7 +156,7 @@ jobs:
             exit 0
           fi
           docker create --name tmp-extract-cli "ghcr.io/anchorageoss/parser_cli:${SEMVER_TAG}" /bin/true
-          asset="parser_cli-${SEMVER_TAG}-x86_64-unknown-linux-musl"
+          asset="parser_cli-solana-${SEMVER_TAG}-x86_64-unknown-linux-musl"
           docker cp tmp-extract-cli:/usr/local/bin/parser_cli "$asset"
           docker rm tmp-extract-cli
           gh release upload "$SEMVER_TAG" "$asset" --clobber --repo "${GITHUB_REPOSITORY}"
