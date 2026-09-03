@@ -122,20 +122,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         attestation,
     };
 
-    // Caps the public ingress body. The gRPC backend's
-    // `GRPC_MAX_RECV_MSG_SIZE` (~25 MiB) is the wrong ceiling for the public
-    // HTTP layer -- a 25 MiB unauthenticated body lets a non-paying caller
-    // force the gateway to JSON-parse 25 MB before any Payment-Signature
-    // check runs. But the backend contract (visualsign-ethereum's
+    // Caps the public ingress body, matching the gRPC backend's own ceiling
+    // (`GRPC_MAX_RECV_MSG_SIZE`) so there's one source of truth for "how big
+    // a request this gateway will ever forward".
+    //
+    // This does NOT need to be smaller to protect the x402-gated route from
+    // pre-paywall parse amplification: `x402_axum::Paygate::handle_request`
+    // reads the payment header and calls the facilitator's `verify` before it
+    // ever calls the inner service, and axum's `Json` extractor (which is
+    // what actually reads request-body bytes) only runs inside that inner
+    // service. An unpaid or invalid-payment request on `/v2/parse` is
+    // rejected without a single body byte being read, regardless of this
+    // limit's value. A previous, smaller value here (2 MiB) was sized against
+    // that now-corrected belief and rejected legitimate multi-mapping
+    // requests: the backend contract (visualsign-ethereum's
     // `MAX_ABI_JSON_BYTES` / visualsign-solana's `MAX_IDL_JSON_BYTES`) allows
-    // each proto-supplied `abi_mappings`/`idl_mappings` entry up to 1 MiB, and
-    // `chain_metadata` may carry more than one (e.g. a proxy plus its
-    // implementation). 2 MiB comfortably covers that documented contract
-    // (one full-size mapping plus JSON overhead, with room for a second)
-    // while still shrinking the pre-paywall amplification surface by ~12x
-    // vs the old 25 MiB ceiling. Applied router-wide (below, after both
-    // routes are mounted), matching bd3b0657's intent on a wider bound.
-    const PUBLIC_BODY_LIMIT_BYTES: usize = 2 * 1024 * 1024;
+    // each `abi_mappings`/`idl_mappings` entry up to 1 MiB with no cap on
+    // entry count, so two full-size entries (e.g. a proxy plus its
+    // implementation) alone already exceeded 2 MiB before any JSON envelope
+    // or string-escaping overhead.
+    //
+    // `/v1/parse` has no payment gate at all, so this limit is its only
+    // ingress bound; matching the gRPC ceiling here is exactly its
+    // pre-x402 status quo, not a new exposure.
+    const PUBLIC_BODY_LIMIT_BYTES: usize = GRPC_MAX_RECV_MSG_SIZE;
 
     let mut app = Router::new()
         .route(
