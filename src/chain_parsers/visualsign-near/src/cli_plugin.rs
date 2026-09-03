@@ -110,9 +110,10 @@ fn parse_near_mapping(mapping_str: &str) -> Result<MappingComponents, String> {
 /// Load token-metadata JSON files and build mappings for
 /// `NearMetadata.token_mappings`. Each entry is signed with the CLI's local
 /// dev key (NEAR-origin ed25519) so it extracts as verified rather than
-/// dropped by the strict posture [`cli_trust_policy`] installs; if signing is
-/// unavailable (binary built without `dev-signing`), the entry is registered
-/// unsigned instead of dropped here.
+/// dropped by the strict posture [`cli_trust_policy`] installs; a signing
+/// failure rejects the entry, matching Ethereum's `--abi-json-mappings` flow,
+/// since an unsigned entry cannot pass that posture anyway and would
+/// otherwise be logged and counted as loaded despite being dead weight.
 ///
 /// The load/dedupe/count/report loop is `load_mappings`, shared with the ABI
 /// and IDL flags, so the three chains cannot drift on what a duplicate or an
@@ -136,26 +137,15 @@ fn build_token_mappings_from_files(
         // and `parse_near_mapping` has already rejected an empty component.
         |_| Ok(()),
         |components, json| {
-            // Unlike the ABI and IDL flags, a signing failure is not a
-            // rejection: the entry is still worth rendering as an unsigned
-            // gap-fill, and a build without `dev-signing` cannot sign at all.
-            let signature = match sign_token_metadata_for_cli(
+            let signature = sign_token_metadata_for_cli(
                 signing_network.network_id(),
                 &components.identifier,
                 &json,
-            ) {
-                Ok(sig) => Some(sig),
-                Err(e) => {
-                    eprintln!(
-                        "  Warning: '{}' could not be signed ({e}); registering unsigned",
-                        components.name
-                    );
-                    None
-                }
-            };
+            )
+            .map_err(|e| format!("failed to sign token metadata: {e}"))?;
             Ok(TokenMetadataEntry {
                 value: json,
-                signature,
+                signature: Some(signature),
                 origin_chain: None,
             })
         },
