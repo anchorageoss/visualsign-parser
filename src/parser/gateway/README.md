@@ -56,6 +56,11 @@ All env vars are read at startup. Bad values (or an unreachable facilitator)
 disable x402: the gateway logs a warning and continues serving v1 + health
 only, without mounting v2.
 
+The one exception is `X402_PROFILE` itself containing non-UTF-8 bytes: that
+fails the initial `std::env::var` read before the soft-fail x402 setup block
+even runs, so the gateway logs a fatal error and exits with code 1 instead
+of falling back to serving v1 + health.
+
 | Env var                          | Required? | Default                             | Meaning                                                                                |
 | --------------------------------- | --------- | ------------------------------------ | ---------------------------------------------------------------------------------------- |
 | `GATEWAY_PORT`                   | no        | `8080`                              | bind port                                                                              |
