@@ -42,7 +42,6 @@ use borsh::BorshSerialize;
 use generated::parser::{ParsedTransactionPayload, Signature, SignatureScheme};
 use qos_crypto::sha_256;
 use qos_p256::P256Public;
-use std::io::Read;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AttestationError {
@@ -158,27 +157,15 @@ impl AttestationVerifier {
     /// Reads `TVC_DEMO_PINNED_PUBKEY_FILE` with a bounded reader, matching
     /// the repository's file-input convention (`mapping_parser.rs`,
     /// `tx_input.rs`): a mistaken path to a very large file or character
-    /// device must not exhaust memory or hang startup.
+    /// device must not exhaust memory or hang startup. See
+    /// `crate::env_util::read_bounded_file`.
     fn read_pubkey_file(path: &str) -> Result<String, AttestationError> {
-        let file = std::fs::File::open(path).map_err(|e| AttestationError::PubkeyFile {
-            path: path.to_string(),
-            message: e.to_string(),
-        })?;
-        let mut bounded = file.take(MAX_PUBKEY_FILE_SIZE + 1);
-        let mut contents = String::new();
-        bounded
-            .read_to_string(&mut contents)
-            .map_err(|e| AttestationError::PubkeyFile {
-                path: path.to_string(),
-                message: e.to_string(),
-            })?;
-        if contents.len() as u64 > MAX_PUBKEY_FILE_SIZE {
-            return Err(AttestationError::PubkeyFileTooLarge {
-                path: path.to_string(),
-                max: MAX_PUBKEY_FILE_SIZE,
-            });
-        }
-        Ok(contents)
+        crate::env_util::read_bounded_file(
+            path,
+            MAX_PUBKEY_FILE_SIZE,
+            |path, message| AttestationError::PubkeyFile { path, message },
+            |path, max| AttestationError::PubkeyFileTooLarge { path, max },
+        )
     }
 
     pub fn from_hex(hex_value: &str) -> Result<Self, AttestationError> {

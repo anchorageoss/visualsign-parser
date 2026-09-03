@@ -28,7 +28,6 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use std::io::Read;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 
@@ -106,27 +105,15 @@ impl BearerToken {
     /// Reads `GATEWAY_AUTH_BEARER_FILE` with a bounded reader, matching the
     /// repository's file-input convention (`mapping_parser.rs`,
     /// `tx_input.rs`): a mistaken path to a very large file or character
-    /// device must not exhaust memory or prevent startup.
+    /// device must not exhaust memory or prevent startup. See
+    /// `crate::env_util::read_bounded_file`.
     fn read_bearer_file(path: &str) -> Result<String, AuthError> {
-        let file = std::fs::File::open(path).map_err(|e| AuthError::ReadFile {
-            path: path.to_string(),
-            message: e.to_string(),
-        })?;
-        let mut bounded = file.take(MAX_BEARER_FILE_SIZE + 1);
-        let mut contents = String::new();
-        bounded
-            .read_to_string(&mut contents)
-            .map_err(|e| AuthError::ReadFile {
-                path: path.to_string(),
-                message: e.to_string(),
-            })?;
-        if contents.len() as u64 > MAX_BEARER_FILE_SIZE {
-            return Err(AuthError::FileTooLarge {
-                path: path.to_string(),
-                max: MAX_BEARER_FILE_SIZE,
-            });
-        }
-        Ok(contents)
+        crate::env_util::read_bounded_file(
+            path,
+            MAX_BEARER_FILE_SIZE,
+            |path, message| AuthError::ReadFile { path, message },
+            |path, max| AuthError::FileTooLarge { path, max },
+        )
     }
 
     /// Testable core. Takes the resolved contents (not paths). At most one
