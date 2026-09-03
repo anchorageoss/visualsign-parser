@@ -264,7 +264,9 @@ impl X402Config {
             && url.scheme() == "http"
             && matches!(
                 url.host_str(),
-                Some("127.0.0.1") | Some("localhost") | Some("::1")
+                // `Url::host_str()` keeps the brackets on an IPv6 literal
+                // (RFC 3986 authority syntax), so `::1` alone never matches.
+                Some("127.0.0.1") | Some("localhost") | Some("::1") | Some("[::1]")
             );
         if url.scheme() != "https" && !loopback_http_in_local {
             return Err(ConfigError::Invalid {
@@ -612,6 +614,16 @@ mod tests {
                 }
             })
         }
+    }
+
+    #[test]
+    fn from_env_accepts_http_ipv6_loopback_facilitator_under_local_profile() {
+        // `Url::host_str()` returns the bracketed form for an IPv6 literal
+        // ("[::1]", not "::1"); a bare "::1" match arm never fires, so
+        // http://[::1] would otherwise be rejected as a non-https scheme.
+        let cfg = X402Config::from_lookup(lookup(&[("X402_FACILITATOR_URL", "http://[::1]:8090")]))
+            .unwrap();
+        assert_eq!(cfg.facilitator_url.scheme(), "http");
     }
 
     #[test]

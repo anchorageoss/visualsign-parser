@@ -223,7 +223,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn x402_targets_real_settlement(cfg: &X402Config) -> bool {
     let facilitator_is_loopback = matches!(
         cfg.facilitator_url.host_str(),
-        Some("127.0.0.1") | Some("localhost") | Some("::1")
+        // `Url::host_str()` keeps the brackets on an IPv6 literal (RFC 3986
+        // authority syntax), so `::1` alone never matches.
+        Some("127.0.0.1") | Some("localhost") | Some("::1") | Some("[::1]")
     );
     let any_mainnet_tag = cfg
         .price_tags
@@ -319,6 +321,14 @@ mod tests {
     #[test]
     fn localhost_hostname_is_treated_as_loopback() {
         let cfg = base_config("http://localhost:8090", "solana-devnet");
+        assert!(!x402_targets_real_settlement(&cfg));
+    }
+
+    #[test]
+    fn ipv6_loopback_is_treated_as_loopback() {
+        // `Url::host_str()` returns the bracketed form for an IPv6 literal
+        // ("[::1]", not "::1"); a bare "::1" match arm never fires.
+        let cfg = base_config("http://[::1]:8090", "base-sepolia");
         assert!(!x402_targets_real_settlement(&cfg));
     }
 
