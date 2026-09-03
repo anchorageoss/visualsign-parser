@@ -48,7 +48,7 @@ fn main() {
     // Create the parser registry (includes all supported chains). An embedding
     // library picks its own caller-metadata trust posture; this example takes the
     // permissive one since it supplies no ABI mappings at all.
-    let config = ParserConfig::new(visualsign::signing::MetadataTrustPolicy::AcceptUnsigned);
+    let config = ParserConfig::accept_unsigned();
     let registry = create_registry(&config);
 
     // A real Ethereum EIP-1559 transaction (Uniswap swap)
