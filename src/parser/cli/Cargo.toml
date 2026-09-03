@@ -12,8 +12,9 @@ near = ["dep:visualsign-near", "visualsign-near/dev-signing"]
 tron = ["dep:visualsign-tron"]
 diagnostics = [
     "visualsign/diagnostics",
-    "visualsign-solana?/diagnostics",
+    "parser_cli_core/diagnostics",
     "visualsign-near?/diagnostics",
+    "visualsign-solana?/diagnostics",
 ]
 serve = ["dep:axum", "dep:tokio", "dep:serde", "dep:serde_json"]
 

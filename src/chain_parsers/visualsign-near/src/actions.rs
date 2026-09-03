@@ -323,12 +323,13 @@ fn push_amount_and_notes(
     Ok(())
 }
 
-/// Strips everything except printable ASCII and spaces, so a transaction's
-/// JSON args (`memo`, `msg`, `method_name`) cannot smuggle a newline into a
-/// text field's fallback text. The core crate's charset validator permits
-/// `\n` as the wallet's documented multi-line separator, so an unfiltered
-/// attacker-controlled string can render as extra apparent confirmed fields
-/// on the signing screen.
+/// Strips everything except printable ASCII and spaces. Every untrusted string
+/// that becomes field text passes through here first -- a transaction's JSON
+/// args (`memo`, `msg`, `method_name`), and the caller-supplied asset ids a
+/// token-metadata refusal quotes back. The core crate's charset validator
+/// permits `\n` as the wallet's documented multi-line separator, so an
+/// unfiltered attacker-controlled string can render as extra apparent confirmed
+/// fields on the signing screen.
 ///
 /// A literal backslash is stripped too, on availability grounds rather than
 /// spoofing: it serializes as `\\`, so a backslash before `u`/`t`/`r`/`b`/`f`
@@ -339,7 +340,7 @@ fn push_amount_and_notes(
 /// deliberately permits so field text can carry real embedded JSON -- and
 /// `ft_transfer_call`'s `msg` is exactly such a field, so deleting its quotes
 /// would strip structure a signer needs to read literally.
-fn charset_safe(text: &str) -> String {
+pub(crate) fn charset_safe(text: &str) -> String {
     text.chars()
         .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '\\'))
         .collect()

@@ -1,0 +1,72 @@
+{
+  "Fields": [
+    {
+      "FallbackText": "NEAR Mainnet",
+      "Label": "Network",
+      "TextV2": {
+        "Text": "NEAR Mainnet"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "alice.near",
+      "Label": "Signer",
+      "TextV2": {
+        "Text": "alice.near"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "intents.near",
+      "Label": "Verifying Contract",
+      "TextV2": {
+        "Text": "intents.near"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "2020-01-01T00:00:00+00:00",
+      "Label": "Deadline",
+      "TextV2": {
+        "Text": "2020-01-01T00:00:00+00:00"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f",
+      "Label": "Nonce",
+      "TextV2": {
+        "Text": "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "wrap.near",
+      "Label": "Token",
+      "TextV2": {
+        "Text": "wrap.near"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "FallbackText": "bob.near",
+      "Label": "To",
+      "TextV2": {
+        "Text": "bob.near"
+      },
+      "Type": "text_v2"
+    },
+    {
+      "AmountV2": {
+        "Abbreviation": "wNEAR",
+        "Amount": "1"
+      },
+      "FallbackText": "1 wNEAR",
+      "Label": "Amount",
+      "Type": "amount_v2"
+    }
+  ],
+  "PayloadType": "NearTx",
+  "Title": "NEAR Intent",
+  "Version": "0"
+}

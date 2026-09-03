@@ -95,6 +95,12 @@ const MAX_TOKEN_METADATA_ENTRIES: usize = 256;
 /// account id (`nep141:a0b8...factory.bridge.near`), well inside this.
 const MAX_ASSET_ID_BYTES: usize = 128;
 
+/// How much of an oversized asset id the refusal names it by, counted in
+/// characters so a multi-byte boundary cannot be split. Long enough to
+/// distinguish one mapping from another, short enough that the copy stays
+/// bounded whatever the key's length.
+const ASSET_ID_PREVIEW_CHARS: usize = 32;
+
 /// Maximum accepted `decimals` value. `tokens::format_units` computes
 /// `10u128.pow(u32::from(decimals))`, which overflows above 38 -- a remote
 /// panic (debug) or a silently wrapped, wrong-looking amount (release, where
@@ -523,14 +529,44 @@ fn validate_secp256k1(
     ))
 }
 
+/// A caller-supplied token-metadata entry that was refused, and why.
+///
+/// Carried out of extraction so the renderer can surface it to the signer
+/// instead of leaving it in an operator log the wallet never sees.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RejectedTokenMetadata {
+    /// The asset id the refused entry was keyed under, or -- when the key
+    /// itself broke [`MAX_ASSET_ID_BYTES`] -- its first
+    /// [`ASSET_ID_PREVIEW_CHARS`] characters followed by `...`, so refusing an
+    /// oversized key does not copy it whole. A refusal covering the entire map
+    /// rather than one entry is keyed `all assets`.
+    pub asset_id: String,
+    /// Why it was refused, in the same words as the operator log.
+    pub reason: String,
+}
+
+/// Outcome of extracting caller-supplied token metadata: the entries that
+/// survived validation, plus the ones that did not.
+#[derive(Debug, Default)]
+pub struct TokenMetadataExtraction {
+    /// Accepted entries, or `None` when nothing survived (or none was
+    /// supplied) -- shaped so callers can plug it straight into a
+    /// [`visualsign::registry::LayeredRegistry`] request layer.
+    pub registry: Option<NearTokenRegistry>,
+    /// Refused entries, in asset-id order.
+    pub rejected: Vec<RejectedTokenMetadata>,
+}
+
 /// Extract and validate token-metadata entries from `ChainMetadata`, if
 /// present.
 ///
-/// Navigates `ChainMetadata -> Near -> token_mappings`. Returns `None` if the
-/// metadata contains no NEAR token mappings (or no metadata at all), matching
-/// the Ethereum ABI / Solana IDL extraction functions' convention so callers
-/// can plug the result straight into a
-/// [`visualsign::registry::LayeredRegistry`] request layer.
+/// Navigates `ChainMetadata -> Near -> token_mappings`. `registry` is `None`
+/// if the metadata contains no NEAR token mappings (or no metadata at all),
+/// matching the Ethereum ABI / Solana IDL extraction functions' convention.
+///
+/// Every refused entry is also returned in `rejected`: a caller that supplies
+/// metadata the parser then throws away needs to learn that from the payload,
+/// not only from an operator log it has no access to.
 ///
 /// `network` is the NEAR network this request resolved to, taken as a parameter
 /// rather than re-derived from `chain_metadata`: the caller already resolves it
@@ -551,47 +587,85 @@ pub fn try_extract_from_chain_metadata(
     network: NearNetwork,
     allowlist: &SignerAllowlist,
     trust_policy: &MetadataTrustPolicy,
-) -> Option<NearTokenRegistry> {
-    let chain_metadata = chain_metadata?;
-    let chain_metadata::Metadata::Near(near) = chain_metadata.metadata.as_ref()? else {
-        return None;
+) -> TokenMetadataExtraction {
+    let mut rejected: Vec<RejectedTokenMetadata> = Vec::new();
+    let nothing = |rejected: Vec<RejectedTokenMetadata>| TokenMetadataExtraction {
+        registry: None,
+        rejected,
+    };
+
+    let Some(chain_metadata) = chain_metadata else {
+        return nothing(rejected);
+    };
+    let Some(chain_metadata::Metadata::Near(near)) = chain_metadata.metadata.as_ref() else {
+        return nothing(rejected);
     };
     if near.token_mappings.is_empty() {
-        return None;
+        return nothing(rejected);
     }
     // The canonical id, not whatever spelling the request used, so a signature
     // does not depend on the casing a caller happened to send.
     let network_id = network.network_id();
 
     if near.token_mappings.len() > MAX_TOKEN_METADATA_ENTRIES {
-        tracing::warn!(
-            "Ignoring all NEAR token metadata: {} entries exceeds the limit of \
-             {MAX_TOKEN_METADATA_ENTRIES}",
+        let reason = format!(
+            "{} entries exceeds the limit of {MAX_TOKEN_METADATA_ENTRIES}",
             near.token_mappings.len()
         );
-        return None;
+        tracing::warn!("Ignoring all NEAR token metadata: {reason}");
+        // Reported as one refusal covering the whole map rather than one per
+        // entry: the map is refused as a unit, and 256+ identical diagnostics
+        // would bury the reason rather than surface it.
+        rejected.push(RejectedTokenMetadata {
+            asset_id: "all assets".to_string(),
+            reason,
+        });
+        return nothing(rejected);
     }
 
     let mut registry = NearTokenRegistry::default();
     let mut unverified_count: usize = 0;
     for (asset_id, entry) in &near.token_mappings {
-        // First, and quoting only the length: every other refusal echoes the
-        // asset id, so an oversized key is refused before it can be copied into
-        // a message.
+        // Bind each refusal to its `continue` so a new rejection path can't be
+        // added without also reporting it.
+        macro_rules! reject {
+            ($($reason:tt)+) => {{
+                let reason = format!($($reason)+);
+                tracing::warn!("Skipping token metadata for '{asset_id}': {reason}");
+                rejected.push(RejectedTokenMetadata {
+                    asset_id: asset_id.clone(),
+                    reason,
+                });
+                continue;
+            }};
+        }
+
+        // First, and deliberately not through `reject!`: that macro clones the
+        // whole asset id into the rejection, which is the copy this bound exists
+        // to prevent. A fixed-width prefix names the entry the signer's wallet
+        // supplied -- enough to identify which mapping was dropped -- without
+        // reintroducing an unbounded copy, and the reason carries the length.
+        // `rejected_metadata_diagnostics` charset-filters both halves, so the
+        // prefix cannot smuggle control characters onto the signing screen.
         if asset_id.len() > MAX_ASSET_ID_BYTES {
-            tracing::warn!(
-                "Skipping token metadata for an oversized asset id: {} bytes > {MAX_ASSET_ID_BYTES}",
+            let preview: String = asset_id.chars().take(ASSET_ID_PREVIEW_CHARS).collect();
+            let reason = format!(
+                "asset id exceeds size limit ({} bytes > {MAX_ASSET_ID_BYTES})",
                 asset_id.len()
             );
+            tracing::warn!("Skipping token metadata for '{preview}...': {reason}");
+            rejected.push(RejectedTokenMetadata {
+                asset_id: format!("{preview}..."),
+                reason,
+            });
             continue;
         }
 
         if entry.value.len() > MAX_TOKEN_METADATA_VALUE_BYTES {
-            tracing::warn!(
-                "Skipping token metadata for '{asset_id}': exceeds size limit ({} bytes > {MAX_TOKEN_METADATA_VALUE_BYTES})",
+            reject!(
+                "exceeds size limit ({} bytes > {MAX_TOKEN_METADATA_VALUE_BYTES})",
                 entry.value.len()
             );
-            continue;
         }
 
         // Only an omitted field and an explicit Unspecified default to NEAR's
@@ -602,12 +676,7 @@ pub fn try_extract_from_chain_metadata(
         let origin_chain = match entry.origin_chain {
             Some(v) => match TokenOriginChain::try_from(v) {
                 Ok(chain) => chain,
-                Err(_) => {
-                    tracing::warn!(
-                        "Skipping token metadata for '{asset_id}': unrecognized origin_chain {v}"
-                    );
-                    continue;
-                }
+                Err(_) => reject!("unrecognized origin_chain {v}"),
             },
             None => {
                 if entry.signature.is_some() {
@@ -631,47 +700,18 @@ pub fn try_extract_from_chain_metadata(
         // request: under RequireAllowlistedSigner a missing signature is always
         // a rejection, regardless of the asset id.
         if is_unsigned && !trust_policy.accepts_unsigned() {
-            tracing::warn!(
-                "Skipping token metadata for '{asset_id}': this deployment requires signed entries"
-            );
-            continue;
-        }
-
-        // Unattributable metadata may fill a gap for an asset the compiled-in
-        // table doesn't cover, but must never override an already-curated one:
-        // tokens::resolve checks this registry before SEEDS unconditionally, so
-        // allowing it would let an unauthenticated caller shadow verified data
-        // -- turning, e.g., 1 wNEAR into 1000000 wNEAR by claiming the wrong
-        // decimals. Checked cheaply here for an entry carrying no signature at
-        // all; one whose signature proves to be from a key this deployment does
-        // not recognize is caught after verification, below.
-        if is_unsigned && tokens::is_seeded(asset_id) {
-            tracing::warn!(
-                "Skipping unsigned token metadata for '{asset_id}': would override a curated seed"
-            );
-            continue;
+            reject!("this deployment requires signed entries");
         }
 
         let parsed: TokenMetadataValue = match serde_json::from_str(&entry.value) {
             Ok(v) => v,
-            Err(e) => {
-                tracing::warn!("Skipping token metadata for '{asset_id}': invalid value JSON: {e}");
-                continue;
-            }
+            Err(e) => reject!("invalid value JSON: {e}"),
         };
         if parsed.decimals > MAX_TOKEN_DECIMALS {
-            tracing::warn!(
-                "Skipping token metadata for '{asset_id}': decimals {} out of range",
-                parsed.decimals
-            );
-            continue;
+            reject!("decimals {} out of range", parsed.decimals);
         }
         if parsed.symbol.is_empty() || parsed.symbol.len() > MAX_TOKEN_SYMBOL_LEN {
-            tracing::warn!(
-                "Skipping token metadata for '{asset_id}': symbol length {} out of range",
-                parsed.symbol.len()
-            );
-            continue;
+            reject!("symbol length {} out of range", parsed.symbol.len());
         }
         // The symbol is embedded verbatim in an amount's abbreviation and
         // fallback text, so its character content decides what a signer reads.
@@ -688,11 +728,7 @@ pub fn try_extract_from_chain_metadata(
             .chars()
             .all(|c| c == ' ' || (c.is_ascii_graphic() && c != '\\'))
         {
-            tracing::warn!(
-                "Skipping token metadata for '{asset_id}': symbol contains characters outside \
-                 printable ASCII"
-            );
-            continue;
+            reject!("symbol contains characters outside printable ASCII");
         }
 
         // A present signature must verify: one that does not match its own
@@ -723,18 +759,11 @@ pub fn try_extract_from_chain_metadata(
                     &signature,
                     allowlist,
                 ) {
-                    Err(e) => {
-                        tracing::warn!("Skipping token metadata for '{asset_id}': {e}");
-                        continue;
-                    }
+                    Err(e) => reject!("{e}"),
                     Ok(SignerIdentity::Recognized) => TokenProvenance::RecognizedSigner,
                     Ok(SignerIdentity::Unrecognized) => {
                         if !trust_policy.accepts_unsigned() {
-                            tracing::warn!(
-                                "Skipping token metadata for '{asset_id}': signer is not an \
-                                 authorized curator for this origin chain"
-                            );
-                            continue;
+                            reject!("signer is not an authorized curator for this origin chain");
                         }
                         tracing::warn!(
                             "Token metadata for '{asset_id}': signed by a key this deployment \
@@ -746,15 +775,28 @@ pub fn try_extract_from_chain_metadata(
             }
         };
 
-        // The gap-fill rule again, now that identity is settled: a signature
-        // from an unrecognized key must not buy an override the same caller
-        // could not have had by omitting it.
-        if !provenance.verified() && tokens::is_seeded(asset_id) {
-            tracing::warn!(
-                "Skipping token metadata for '{asset_id}': {} would override a curated seed",
-                provenance.override_subject()
-            );
-            continue;
+        // Unattributed metadata may fill a gap for an asset the compiled-in table
+        // doesn't cover, but must never override an already-curated one:
+        // `tokens::resolve` checks this registry before SEEDS unconditionally, so
+        // allowing it would let an unauthenticated caller shadow verified data --
+        // turning, e.g., 1 wNEAR into 1000000 wNEAR by claiming the wrong
+        // decimals. A signature from an unrecognized key must not buy the
+        // override either, since the same caller could have had it by omitting
+        // the signature.
+        //
+        // One check for both cases, placed after the parse so the refusal can
+        // name the values that differ: a bogus `decimals` is the whole attack,
+        // and the signer is owed what was attempted. The parse it waits on is of
+        // an already size-capped string, and no signature verification happens
+        // for the unsigned case, so nothing expensive moves ahead of it.
+        if !provenance.verified() {
+            if let Some(curated) = tokens::seeded_decimals(asset_id) {
+                reject!(
+                    "{} would override a curated seed (proposed decimals {}, curated {curated})",
+                    provenance.override_subject(),
+                    parsed.decimals
+                );
+            }
         }
 
         registry.by_asset_id.insert(
@@ -777,9 +819,12 @@ pub fn try_extract_from_chain_metadata(
         );
     }
     if registry.by_asset_id.is_empty() {
-        return None;
+        return nothing(rejected);
     }
-    Some(registry)
+    TokenMetadataExtraction {
+        registry: Some(registry),
+        rejected,
+    }
 }
 
 /// Deterministic 32-byte seeds used to sign token metadata in local dev
@@ -936,6 +981,18 @@ mod tests {
         assert_eq!(NETWORK.network_id(), NETWORK_ID);
     }
 
+    /// The accepted-entry half of extraction, for cases that assert on what
+    /// survived validation. Cases that assert on refusals call
+    /// [`try_extract_from_chain_metadata`] directly and read `rejected`.
+    fn extract_registry(
+        chain_metadata: Option<&ChainMetadata>,
+        network: NearNetwork,
+        allowlist: &SignerAllowlist,
+        trust_policy: &MetadataTrustPolicy,
+    ) -> Option<NearTokenRegistry> {
+        try_extract_from_chain_metadata(chain_metadata, network, allowlist, trust_policy).registry
+    }
+
     fn accept_unsigned_policy() -> MetadataTrustPolicy {
         MetadataTrustPolicy::AcceptUnsigned
     }
@@ -1007,6 +1064,7 @@ mod tests {
             &allowlist,
             &require_signed_policy_with(allowlist.clone()),
         )
+        .registry
         .expect("an entry signed by the enrolled key must register");
         assert_eq!(
             registry
@@ -1261,7 +1319,7 @@ mod tests {
                 )]),
             })),
         };
-        let registry = try_extract_from_chain_metadata(
+        let registry = extract_registry(
             Some(&metadata),
             NETWORK,
             &empty_allowlists(),
@@ -1304,7 +1362,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &empty_allowlists(),
@@ -1340,7 +1398,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &empty_allowlists(),
@@ -1422,16 +1480,20 @@ mod tests {
             .collect()
     }
 
+    /// `ChainMetadata` carrying exactly the given entries.
+    fn chain_metadata_with(entries: Vec<(&str, TokenMetadataEntry)>) -> ChainMetadata {
+        ChainMetadata {
+            metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                network_id: Some("NEAR_MAINNET".to_string()),
+                token_mappings: make_mappings(entries),
+            })),
+        }
+    }
+
     #[test]
     fn extract_no_metadata_is_none() {
         assert!(
-            try_extract_from_chain_metadata(
-                None,
-                NETWORK,
-                &near_allowlist(),
-                &accept_unsigned_policy()
-            )
-            .is_none()
+            extract_registry(None, NETWORK, &near_allowlist(), &accept_unsigned_policy()).is_none()
         );
     }
 
@@ -1446,7 +1508,7 @@ mod tests {
             )),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &near_allowlist(),
@@ -1474,7 +1536,7 @@ mod tests {
                 )]),
             })),
         };
-        let registry = try_extract_from_chain_metadata(
+        let registry = extract_registry(
             Some(&metadata),
             NETWORK,
             &near_allowlist(),
@@ -1515,7 +1577,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &near_allowlist(),
@@ -1545,7 +1607,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &near_allowlist(),
@@ -1584,7 +1646,7 @@ mod tests {
 
         // The control: checked against the network it was signed for, it
         // registers verified.
-        let mainnet = try_extract_from_chain_metadata(
+        let mainnet = extract_registry(
             Some(&metadata),
             NearNetwork::Mainnet,
             &near_allowlist(),
@@ -1601,7 +1663,7 @@ mod tests {
             "signed entry registers as verified on its own network"
         );
 
-        let testnet = try_extract_from_chain_metadata(
+        let testnet = extract_registry(
             Some(&metadata),
             NearNetwork::Testnet,
             &near_allowlist(),
@@ -1640,7 +1702,7 @@ mod tests {
                 )]),
             })),
         };
-        let registry = try_extract_from_chain_metadata(
+        let registry = extract_registry(
             Some(&metadata),
             NearNetwork::Testnet,
             &near_allowlist(),
@@ -1683,7 +1745,7 @@ mod tests {
                 )]),
             })),
         };
-        let registry = try_extract_from_chain_metadata(
+        let registry = extract_registry(
             Some(&metadata),
             NETWORK,
             &near_allowlist(),
@@ -1718,7 +1780,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &near_allowlist(),
@@ -1752,7 +1814,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &near_allowlist(),
@@ -1783,7 +1845,7 @@ mod tests {
                 token_mappings: entries.into_iter().collect(),
             })),
         };
-        let registry = try_extract_from_chain_metadata(
+        let registry = extract_registry(
             Some(&metadata),
             NETWORK,
             &near_allowlist(),
@@ -1819,7 +1881,7 @@ mod tests {
                 )]),
             })),
         };
-        let registry = try_extract_from_chain_metadata(
+        let registry = extract_registry(
             Some(&metadata),
             NETWORK,
             &near_allowlist(),
@@ -1853,7 +1915,7 @@ mod tests {
                 )]),
             })),
         };
-        let registry = try_extract_from_chain_metadata(
+        let registry = extract_registry(
             Some(&metadata),
             NETWORK,
             &near_allowlist(),
@@ -1889,7 +1951,7 @@ mod tests {
         };
         // No allowlist authorizes the dev seed used above.
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &empty_allowlists(),
@@ -1915,7 +1977,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &near_allowlist(),
@@ -1955,7 +2017,7 @@ mod tests {
                 })),
             };
             assert!(
-                try_extract_from_chain_metadata(
+                extract_registry(
                     Some(&metadata),
                     NETWORK,
                     &near_allowlist(),
@@ -1983,7 +2045,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &near_allowlist(),
@@ -2013,7 +2075,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &near_allowlist(),
@@ -2039,7 +2101,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &near_allowlist(),
@@ -2068,7 +2130,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &near_allowlist(),
@@ -2098,7 +2160,7 @@ mod tests {
             })),
         };
         assert!(
-            try_extract_from_chain_metadata(
+            extract_registry(
                 Some(&metadata),
                 NETWORK,
                 &near_allowlist(),
@@ -2106,6 +2168,329 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    /// Every refusal path reports itself in `rejected`, keyed by asset id.
+    ///
+    /// A refused entry that reported nothing would leave the signer looking at
+    /// an amount rendered without the metadata they supplied, with the reason
+    /// only in an operator log.
+    #[test]
+    fn every_refusal_path_reports_the_rejected_entry() {
+        // Same seeded asset as `VALUE`, differing only in `decimals`, so the
+        // refusal has two distinguishable numbers to name.
+        const SEED_OVERRIDE_VALUE: &str = r#"{"symbol":"USDC.e","decimals":18}"#;
+
+        let signed_by_dev_key = |asset_id: &str, value: &str| {
+            Some(sign_token_metadata_ed25519(
+                NETWORK_ID,
+                asset_id,
+                value,
+                &DEV_NEAR_SIGNING_KEY_SEED,
+                visualsign::signing::near_token_metadata_prehash,
+            ))
+        };
+
+        // (case, asset id, entry, policy, expected reason fragment)
+        let cases: Vec<(&str, &str, TokenMetadataEntry, MetadataTrustPolicy, &str)> = vec![
+            (
+                "oversized value",
+                UNSEEDED_ASSET_ID,
+                TokenMetadataEntry {
+                    value: format!(
+                        r#"{{"symbol":"X","decimals":6,"pad":"{}"}}"#,
+                        "p".repeat(1100)
+                    ),
+                    signature: None,
+                    origin_chain: None,
+                },
+                accept_unsigned_policy(),
+                "exceeds size limit",
+            ),
+            (
+                "unsigned under require-signed",
+                UNSEEDED_ASSET_ID,
+                TokenMetadataEntry {
+                    value: VALUE.to_string(),
+                    signature: None,
+                    origin_chain: None,
+                },
+                require_signed_policy(),
+                "requires signed entries",
+            ),
+            (
+                "unsigned override of a curated seed",
+                ASSET_ID,
+                TokenMetadataEntry {
+                    value: VALUE.to_string(),
+                    signature: None,
+                    origin_chain: None,
+                },
+                accept_unsigned_policy(),
+                "would override a curated seed",
+            ),
+            (
+                // Only a refusal under the strict posture. The permissive one
+                // accepts an unrecognized signer as unverified, on the same
+                // terms as an unsigned entry -- covered by
+                // `extract_accepts_an_unrecognized_signer_as_unverified`.
+                "signature from an unrecognized signer, strict posture",
+                UNSEEDED_ASSET_ID,
+                TokenMetadataEntry {
+                    value: VALUE.to_string(),
+                    signature: signed_by_dev_key(UNSEEDED_ASSET_ID, VALUE),
+                    origin_chain: None,
+                },
+                require_signed_policy_with(SignerAllowlist::new()),
+                "signer is not an authorized curator",
+            ),
+            (
+                "value that isn't the expected JSON",
+                UNSEEDED_ASSET_ID,
+                TokenMetadataEntry {
+                    value: "not json at all".to_string(),
+                    signature: None,
+                    origin_chain: None,
+                },
+                accept_unsigned_policy(),
+                "invalid value JSON",
+            ),
+            (
+                "decimals past the formatting bound",
+                UNSEEDED_ASSET_ID,
+                TokenMetadataEntry {
+                    value: r#"{"symbol":"X","decimals":39}"#.to_string(),
+                    signature: None,
+                    origin_chain: None,
+                },
+                accept_unsigned_policy(),
+                "decimals 39 out of range",
+            ),
+            (
+                "unrecognized origin_chain",
+                UNSEEDED_ASSET_ID,
+                TokenMetadataEntry {
+                    value: VALUE.to_string(),
+                    signature: None,
+                    origin_chain: Some(9999),
+                },
+                accept_unsigned_policy(),
+                "unrecognized origin_chain 9999",
+            ),
+            (
+                "empty symbol",
+                UNSEEDED_ASSET_ID,
+                TokenMetadataEntry {
+                    value: r#"{"symbol":"","decimals":6}"#.to_string(),
+                    signature: None,
+                    origin_chain: None,
+                },
+                accept_unsigned_policy(),
+                "symbol length 0 out of range",
+            ),
+            (
+                // The permissive posture accepts an unrecognized signer, but not
+                // as a licence to override a curated seed: the same terms an
+                // unsigned entry gets, since signing with a key nobody enrolled
+                // buys nothing over omitting the signature. The reason quotes
+                // both decimals because a bogus `decimals` is the whole attack.
+                "unrecognized signer overriding a curated seed",
+                ASSET_ID,
+                TokenMetadataEntry {
+                    value: SEED_OVERRIDE_VALUE.to_string(),
+                    signature: signed_by_dev_key(ASSET_ID, SEED_OVERRIDE_VALUE),
+                    origin_chain: None,
+                },
+                accept_unsigned_policy(),
+                "unrecognized signer would override a curated seed (proposed decimals 18, \
+                 curated 6)",
+            ),
+            (
+                // U+202E RIGHT-TO-LEFT OVERRIDE would reorder the asset name
+                // where the symbol renders.
+                "symbol outside printable ASCII",
+                UNSEEDED_ASSET_ID,
+                TokenMetadataEntry {
+                    value: format!("{{\"symbol\":\"BTC{}\",\"decimals\":8}}", '\u{202E}'),
+                    signature: None,
+                    origin_chain: None,
+                },
+                accept_unsigned_policy(),
+                "symbol contains characters outside printable ASCII",
+            ),
+        ];
+
+        for (case, asset_id, entry, policy, expected_reason) in cases {
+            // An allowlist with no entries at all, so the "unlisted signer"
+            // case is refused on identity rather than on a bad signature.
+            let allowlists = SignerAllowlist::new();
+            let metadata = chain_metadata_with(vec![(asset_id, entry)]);
+            let extraction =
+                try_extract_from_chain_metadata(Some(&metadata), NETWORK, &allowlists, &policy);
+
+            assert!(
+                extraction.registry.is_none(),
+                "{case}: entry must be refused, not registered"
+            );
+            assert_eq!(
+                extraction.rejected.len(),
+                1,
+                "{case}: expected exactly one reported rejection, got {:?}",
+                extraction.rejected
+            );
+            assert_eq!(
+                extraction.rejected[0].asset_id, asset_id,
+                "{case}: rejection must name the asset id it was keyed under"
+            );
+            assert!(
+                extraction.rejected[0].reason.contains(expected_reason),
+                "{case}: reason should mention '{expected_reason}', got '{}'",
+                extraction.rejected[0].reason
+            );
+        }
+    }
+
+    /// An oversized asset id is refused like any other entry, but named by a
+    /// bounded prefix rather than copied whole: the signer still learns which
+    /// mapping was dropped, and the payload never carries the unbounded key
+    /// that `MAX_ASSET_ID_BYTES` exists to keep out of it.
+    #[test]
+    fn an_oversized_asset_id_is_reported_by_a_bounded_prefix() {
+        let oversized = format!("nep141:{}.near", "x".repeat(MAX_ASSET_ID_BYTES));
+        let metadata = chain_metadata_with(vec![(
+            oversized.as_str(),
+            TokenMetadataEntry {
+                value: VALUE.to_string(),
+                signature: None,
+                origin_chain: None,
+            },
+        )]);
+        let extraction = try_extract_from_chain_metadata(
+            Some(&metadata),
+            NETWORK,
+            &near_allowlist(),
+            &accept_unsigned_policy(),
+        );
+
+        assert!(extraction.registry.is_none(), "the entry must be refused");
+        assert_eq!(
+            extraction.rejected.len(),
+            1,
+            "expected exactly one reported rejection, got {:?}",
+            extraction.rejected
+        );
+        let rejection = &extraction.rejected[0];
+        let expected: String = oversized.chars().take(ASSET_ID_PREVIEW_CHARS).collect();
+        assert_eq!(
+            rejection.asset_id,
+            format!("{expected}..."),
+            "the refusal must name the entry by its leading characters"
+        );
+        assert!(
+            !rejection.asset_id.contains(&oversized),
+            "the whole key must not reach the payload: {}",
+            rejection.asset_id
+        );
+        assert!(
+            rejection.reason.contains("exceeds size limit")
+                && rejection.reason.contains(&oversized.len().to_string()),
+            "the refusal must quote the length that broke the bound: {}",
+            rejection.reason
+        );
+    }
+
+    /// The prefix is taken in characters, so a multi-byte key cannot be split
+    /// mid-character -- byte slicing here would panic on the whole request.
+    #[test]
+    fn an_oversized_multibyte_asset_id_is_previewed_on_a_character_boundary() {
+        let oversized = "é".repeat(MAX_ASSET_ID_BYTES);
+        let metadata = chain_metadata_with(vec![(
+            oversized.as_str(),
+            TokenMetadataEntry {
+                value: VALUE.to_string(),
+                signature: None,
+                origin_chain: None,
+            },
+        )]);
+        let extraction = try_extract_from_chain_metadata(
+            Some(&metadata),
+            NETWORK,
+            &near_allowlist(),
+            &accept_unsigned_policy(),
+        );
+
+        assert_eq!(
+            extraction.rejected.len(),
+            1,
+            "expected exactly one reported rejection, got {:?}",
+            extraction.rejected
+        );
+        assert_eq!(
+            extraction.rejected[0].asset_id,
+            format!("{}...", "é".repeat(ASSET_ID_PREVIEW_CHARS)),
+            "the preview must end on a character boundary"
+        );
+    }
+
+    /// An accepted entry reports no rejection, so the diagnostic can't fire on
+    /// the happy path.
+    #[test]
+    fn an_accepted_entry_reports_no_rejection() {
+        let metadata = chain_metadata_with(vec![(
+            UNSEEDED_ASSET_ID,
+            TokenMetadataEntry {
+                value: VALUE.to_string(),
+                signature: None,
+                origin_chain: None,
+            },
+        )]);
+        let extraction = try_extract_from_chain_metadata(
+            Some(&metadata),
+            NETWORK,
+            &near_allowlist(),
+            &accept_unsigned_policy(),
+        );
+        assert!(extraction.registry.is_some(), "entry should be accepted");
+        assert!(
+            extraction.rejected.is_empty(),
+            "an accepted entry must report no rejection, got {:?}",
+            extraction.rejected
+        );
+    }
+
+    /// One refused entry doesn't take the surviving ones down with it.
+    #[test]
+    fn a_refused_entry_does_not_discard_the_entries_beside_it() {
+        let good = "nep141:good-unlisted-token.near";
+        let metadata = chain_metadata_with(vec![
+            (
+                good,
+                TokenMetadataEntry {
+                    value: r#"{"symbol":"GOOD","decimals":6}"#.to_string(),
+                    signature: None,
+                    origin_chain: None,
+                },
+            ),
+            (
+                UNSEEDED_ASSET_ID,
+                TokenMetadataEntry {
+                    value: "not json".to_string(),
+                    signature: None,
+                    origin_chain: None,
+                },
+            ),
+        ]);
+
+        let extraction = try_extract_from_chain_metadata(
+            Some(&metadata),
+            NETWORK,
+            &near_allowlist(),
+            &accept_unsigned_policy(),
+        );
+        let registry = extraction.registry.expect("the good entry should survive");
+        assert!(registry.by_asset_id.contains_key(good));
+        assert_eq!(extraction.rejected.len(), 1);
+        assert_eq!(extraction.rejected[0].asset_id, UNSEEDED_ASSET_ID);
     }
 
     /// A CLI-signed entry must verify under `authorized_token_metadata_signers`
