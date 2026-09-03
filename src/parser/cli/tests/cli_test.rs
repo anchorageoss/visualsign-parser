@@ -1,4 +1,18 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+// Helpers and per-chain fixtures below are shared across this file's tests,
+// so building with only one chain feature (as parser-cli-narrow-build-check
+// in the Makefile does) leaves whatever the other chains' tests alone use
+// genuinely dead. Only enforce dead-code/unused-import lints when every
+// chain feature is on -- the configuration where everything here is used.
+#![cfg_attr(
+    not(all(
+        feature = "ethereum",
+        feature = "solana",
+        feature = "near",
+        feature = "tron"
+    )),
+    allow(dead_code, unused_imports)
+)]
 use parser_cli_core::test_utils::write_temp_json;
 use similar::{ChangeTag, TextDiff};
 use std::fs;
