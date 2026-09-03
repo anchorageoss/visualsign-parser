@@ -16,7 +16,7 @@ use visualsign::field_builders::{
     create_text_field,
 };
 
-use crate::fmt::{format_near, format_tgas};
+use crate::fmt::{charset_safe, format_near, format_tgas};
 
 /// NEAR's native token symbol, used for `AmountV2` abbreviations.
 const NEAR_SYMBOL: &str = "NEAR";
@@ -323,29 +323,6 @@ fn push_amount_and_notes(
     Ok(())
 }
 
-/// Strips everything except printable ASCII and spaces. Every untrusted string
-/// that becomes field text passes through here first -- a transaction's JSON
-/// args (`memo`, `msg`, `method_name`), and the caller-supplied asset ids a
-/// token-metadata refusal quotes back. The core crate's charset validator
-/// permits `\n` as the wallet's documented multi-line separator, so an
-/// unfiltered attacker-controlled string can render as extra apparent confirmed
-/// fields on the signing screen.
-///
-/// A literal backslash is stripped too, on availability grounds rather than
-/// spoofing: it serializes as `\\`, so a backslash before `u`/`t`/`r`/`b`/`f`
-/// or `/` puts a `FORBIDDEN_JSON_ESCAPES` substring in the serialized payload
-/// and `SignablePayload::validate_charset` rejects the whole transaction.
-///
-/// Double quotes are kept. They serialize as `\"`, which the core validator
-/// deliberately permits so field text can carry real embedded JSON -- and
-/// `ft_transfer_call`'s `msg` is exactly such a field, so deleting its quotes
-/// would strip structure a signer needs to read literally.
-pub(crate) fn charset_safe(text: &str) -> String {
-    text.chars()
-        .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '\\'))
-        .collect()
-}
-
 /// Human-readable label for an action variant.
 pub(crate) fn action_label(action: &Action) -> &'static str {
     match action {
@@ -599,7 +576,7 @@ mod tests {
             panic!("expected TextV2, got {:?}", fields[0]);
         };
         assert!(!text_v2.text.contains('\n'));
-        assert_eq!(text_v2.text, "depositAmount: 0.000001 NEAR");
+        assert_eq!(text_v2.text, "deposit?Amount: 0.000001 NEAR");
     }
 
     #[test]
@@ -681,7 +658,7 @@ mod tests {
             .iter()
             .find(|f| field_label(f) == "Message")
             .expect("Message field present");
-        assert_eq!(text_of(message), "pay u0041 now");
+        assert_eq!(text_of(message), "pay ?u0041 now");
     }
 
     fn text_of(field: &SignablePayloadField) -> &str {
