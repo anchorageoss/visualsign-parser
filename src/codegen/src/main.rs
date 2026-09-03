@@ -67,6 +67,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .field_attribute(".parser.EthereumMetadata.abi_mappings", SERDE_DEFAULT)
         .field_attribute(".parser.SolanaMetadata.idl_mappings", SERDE_DEFAULT)
         .field_attribute(".parser.NearMetadata.token_mappings", SERDE_DEFAULT)
+        // serde(default) so JSON callers written before this field existed
+        // (empty payment_marker) keep deserializing without a code change.
+        .field_attribute(".parser.ParseRequest.payment_marker", SERDE_DEFAULT)
         // Represent the abi_type enum as its string name over JSON
         .field_attribute(".parser.Abi.abi_type", SERDE_ABI_TYPE)
         // Likewise origin_chain, whose documented values are the protobuf names
