@@ -58,6 +58,26 @@ pub struct ParseRequest {
     /// emits an empty `intermediate_output` and the signed digest is unchanged.
     #[prost(bool, tag = "4")]
     pub include_intermediate_output: bool,
+    /// Borsh-encoded SignedVerifiedPaymentMarker: a VerifiedPaymentMarker plus
+    /// the gateway's P256 signature over it. Note the wrapper, not the bare
+    /// VerifiedPaymentMarker: an external signer that emits the inner struct
+    /// produces bytes the enclave cannot deserialize. parser_app verifies this
+    /// before processing when payment enforcement is on (PaymentPolicy::Required);
+    /// today every call site passes PaymentPolicy::Disabled, so verification is a
+    /// no-op and this field is not yet enforced. Empty for the open v1 routes and
+    /// for local-dev / gRPC-direct callers. Field 5, not 4: field 4 shipped as
+    /// include_intermediate_output (#414) while payment_marker was still on an
+    /// unmerged branch, so payment_marker moved rather than breaking the wire.
+    /// Size bound: parser_app rejects a payment_marker over 8 KiB on length
+    /// alone, before Borsh-decoding it
+    /// (parser_app::payment_verify::MAX_PAYMENT_MARKER_BYTES). A real marker is
+    /// well under 1 KiB, so the limit is headroom, not a constraint a signer
+    /// has to plan around. The server's whole-request gRPC cap (25MB,
+    /// host_primitives::GRPC_MAX_RECV_MSG_SIZE) still applies on top, as it
+    /// does to every other field on this message.
+    #[prost(bytes = "vec", tag = "5")]
+    #[cfg_attr(feature = "serde_derive", serde(default))]
+    pub payment_marker: ::prost::alloc::vec::Vec<u8>,
 }
 #[cfg_attr(
     feature = "serde_derive",
@@ -244,6 +264,15 @@ pub struct SolanaMetadata {
         ::prost::alloc::string::String,
         Idl,
     >,
+    /// Raw simulateTransaction RPC response bytes (innerInstructions section),
+    /// base64-encoded (matching unsigned_payload's convention), sent with no
+    /// caller-side decode/reshape. The parser runs this through the same
+    /// static-decode path (parse_transaction_with_idls) used for
+    /// unsigned_payload.
+    #[prost(string, optional, tag = "5")]
+    pub simulated_transaction_result: ::core::option::Option<
+        ::prost::alloc::string::String,
+    >,
 }
 #[cfg_attr(
     feature = "serde_derive",
@@ -257,6 +286,43 @@ pub struct NearMetadata {
     /// Network identifier string (e.g., "NEAR_MAINNET", "NEAR_TESTNET")
     #[prost(string, optional, tag = "1")]
     pub network_id: ::core::option::Option<::prost::alloc::string::String>,
+    /// Map of NEAR Intents asset id (e.g. "nep141:wrap.near") to token metadata.
+    /// Allows a wallet to supply symbol/decimals for assets not yet present in
+    /// the parser's compiled-in seed table.
+    #[prost(btree_map = "string, message", tag = "2")]
+    #[cfg_attr(feature = "serde_derive", serde(default))]
+    pub token_mappings: ::prost::alloc::collections::BTreeMap<
+        ::prost::alloc::string::String,
+        TokenMetadataEntry,
+    >,
+}
+#[cfg_attr(
+    feature = "serde_derive",
+    derive(::serde::Serialize, ::serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
+#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TokenMetadataEntry {
+    /// JSON token metadata, e.g. {"symbol":"USDC.e","decimals":6}. Signed
+    /// verbatim as supplied, mirroring Abi.value / Idl.value: the signature (if
+    /// present) covers exactly these bytes, not a re-derived encoding.
+    #[prost(string, tag = "1")]
+    pub value: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "2")]
+    pub signature: ::core::option::Option<SignatureMetadata>,
+    /// Selects the signature curve, dispatched by the origin chain of the
+    /// underlying bridged asset rather than by NEAR itself: Ethereum-origin (and
+    /// EVM-twin) assets verify with secp256k1, Solana-origin (and SVM-twin)
+    /// assets with ed25519, NEAR-native assets with ed25519 via a distinct
+    /// curator identity. Unset defaults to Near.
+    #[prost(enumeration = "TokenOriginChain", optional, tag = "3")]
+    #[cfg_attr(
+        feature = "serde_derive",
+        serde(with = "crate::token_origin_chain_serde", default)
+    )]
+    pub origin_chain: ::core::option::Option<i32>,
 }
 #[cfg_attr(
     feature = "serde_derive",
@@ -381,6 +447,41 @@ impl SignatureScheme {
             "SIGNATURE_SCHEME_TURNKEY_P256_EPHEMERAL_KEY" => {
                 Some(Self::TurnkeyP256EphemeralKey)
             }
+            _ => None,
+        }
+    }
+}
+/// TokenOriginChain selects which curator identity/curve a TokenMetadataEntry
+/// signature is checked against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum TokenOriginChain {
+    /// Treated as Near
+    Unspecified = 0,
+    Near = 1,
+    Ethereum = 2,
+    Solana = 3,
+}
+impl TokenOriginChain {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            TokenOriginChain::Unspecified => "TOKEN_ORIGIN_CHAIN_UNSPECIFIED",
+            TokenOriginChain::Near => "TOKEN_ORIGIN_CHAIN_NEAR",
+            TokenOriginChain::Ethereum => "TOKEN_ORIGIN_CHAIN_ETHEREUM",
+            TokenOriginChain::Solana => "TOKEN_ORIGIN_CHAIN_SOLANA",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "TOKEN_ORIGIN_CHAIN_UNSPECIFIED" => Some(Self::Unspecified),
+            "TOKEN_ORIGIN_CHAIN_NEAR" => Some(Self::Near),
+            "TOKEN_ORIGIN_CHAIN_ETHEREUM" => Some(Self::Ethereum),
+            "TOKEN_ORIGIN_CHAIN_SOLANA" => Some(Self::Solana),
             _ => None,
         }
     }

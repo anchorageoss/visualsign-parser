@@ -9,6 +9,7 @@ use prost::Message;
 use qos_core::protocol::{ProtocolError, msg::ProtocolMsg};
 use tonic::Status;
 
+pub mod payment_marker;
 pub mod turnkey;
 
 /// Buffer size for socket message queue.

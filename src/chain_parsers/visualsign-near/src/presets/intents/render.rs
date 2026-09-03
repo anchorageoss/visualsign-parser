@@ -12,6 +12,8 @@ use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_amount_field, create_text_field};
 use visualsign::registry::LayeredRegistry;
 
+use crate::networks::NearNetwork;
+
 use super::tokens;
 use super::verify::SignatureCheck;
 use super::{NEAR_DECIMALS, NEAR_SYMBOL, NearTokenRegistry};
@@ -42,25 +44,80 @@ fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualS
     Ok(create_text_field("Warning", &format!("{rule}: {message}"))?.signable_payload_field)
 }
 
+/// Report each caller-supplied token-metadata entry the parser refused.
+///
+/// Without this the signer sees only the consequence -- an amount rendered in
+/// raw base units against an `unresolved` asset id, or resolved from a seed
+/// instead of the supplied override -- with no indication that metadata was
+/// supplied and thrown away. A rejection is a soft finding: the intents still
+/// render, since the refusal protects them rather than invalidating them.
+///
+/// Both halves of the message are charset-filtered. `asset_id` is a
+/// caller-controlled map key and `reason` can quote it back (a JSON parse
+/// error, a length), so an embedded newline would otherwise render as extra
+/// apparent fields on the signing screen.
+pub(crate) fn rejected_metadata_diagnostics(
+    rejected: &[super::token_signature::RejectedTokenMetadata],
+) -> Fields {
+    // Infallible by construction: reporting a refusal must never be able to
+    // withhold the transaction. A field that fails to build (an empty message
+    // after charset filtering, say) is logged and dropped, leaving the signer
+    // a payload minus one caveat rather than no payload at all.
+    rejected
+        .iter()
+        .filter_map(|r| {
+            let message = crate::actions::charset_safe(&format!(
+                "token metadata supplied for {} was rejected and not used: {}",
+                r.asset_id, r.reason
+            ));
+            match diagnostic("rejected-token-metadata", &message) {
+                Ok(field) => Some(field),
+                Err(e) => {
+                    tracing::warn!(
+                        "could not render the rejection diagnostic for '{}': {e}",
+                        r.asset_id
+                    );
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
 /// Render one token amount, resolving symbol/decimals when the asset is known;
 /// otherwise show the raw base-unit amount tagged with the unresolved asset id.
+/// Metadata resolved from an unattributed request entry (a gap-fill for an asset
+/// `SEEDS` doesn't cover, either unsigned or signed by a key this deployment has
+/// not enrolled) carries an extra diagnostic alongside the amount naming which,
+/// so the signer sees the caveat rather than just an operator log.
 fn token_amount_field(
     label: &str,
     asset_id: &str,
     raw: u128,
     registry: &Reg,
-) -> Result<SignablePayloadField, VisualSignError> {
+) -> Result<Fields, VisualSignError> {
     match tokens::resolve(asset_id, registry) {
-        Some(meta) => Ok(create_amount_field(
-            label,
-            &tokens::format_units(raw, meta.decimals),
-            &meta.symbol,
-        )?
-        .signable_payload_field),
-        None => Ok(
+        Some(meta) => {
+            let mut fields = vec![
+                create_amount_field(
+                    label,
+                    &tokens::format_units(raw, meta.decimals),
+                    &meta.symbol,
+                )?
+                .signable_payload_field,
+            ];
+            if let Some(cause) = meta.provenance.unverified_cause() {
+                fields.push(diagnostic(
+                    "unverified-token-metadata",
+                    &format!("symbol/decimals for {asset_id}: {cause}"),
+                )?);
+            }
+            Ok(fields)
+        }
+        None => Ok(vec![
             create_text_field(label, &format!("{raw} (unresolved {asset_id})"))?
                 .signable_payload_field,
-        ),
+        ]),
     }
 }
 
@@ -96,6 +153,7 @@ pub(crate) fn section(
     total: usize,
     mp: &MultiPayload,
     registry: &Reg,
+    network: NearNetwork,
 ) -> Result<Fields, VisualSignError> {
     let (check, extracted) = super::verify::verify_and_extract(mp);
     let signer_id = extracted.as_ref().ok().map(|p| p.signer_id.as_str());
@@ -104,7 +162,7 @@ pub(crate) fn section(
     ];
     fields.extend(render_signature(standard_name(mp), &check, signer_id)?);
     match &extracted {
-        Ok(payload) => fields.extend(render_single(payload, registry)?),
+        Ok(payload) => fields.extend(render_single(payload, registry, network)?),
         Err(e) => fields.push(diagnostic(
             "extraction",
             &format!("could not extract the envelope/intents: {e}"),
@@ -156,6 +214,24 @@ pub(crate) fn render_intent(intent: &Intent, registry: &Reg) -> Result<Fields, V
     }
 }
 
+/// Whether [`render_intent`] passes this intent's kind through to a token
+/// registry lookup. Matched exhaustively against the same arms so a kind that
+/// starts (or stops) reading `registry` there forces this to be revisited
+/// rather than silently drifting out of step.
+pub(crate) fn intent_consumes_token_registry(intent: &Intent) -> bool {
+    match intent {
+        Intent::TokenDiff(_) | Intent::Transfer(_) | Intent::FtWithdraw(_) => true,
+        Intent::NftWithdraw(_)
+        | Intent::MtWithdraw(_)
+        | Intent::NativeWithdraw(_)
+        | Intent::AddPublicKey(_)
+        | Intent::RemovePublicKey(_)
+        | Intent::SetAuthByPredecessorId(_)
+        | Intent::StorageDeposit(_)
+        | Intent::AuthCall(_) => false,
+    }
+}
+
 /// Flags an attached NEP-616 `state_init`: a global-contract id plus initial
 /// state, which initializes the callee's contract in the same receipt. The
 /// code/data have no cheap field-level render, so surface that the attachment
@@ -186,7 +262,7 @@ fn render_token_diff(td: &TokenDiff, registry: &Reg) -> Result<Fields, VisualSig
             )));
         }
         let label = if *delta < 0 { "Send" } else { "Receive" };
-        fields.push(token_amount_field(
+        fields.extend(token_amount_field(
             label,
             &token_id.to_string(),
             (*delta).unsigned_abs(),
@@ -205,7 +281,7 @@ fn render_token_diff(td: &TokenDiff, registry: &Reg) -> Result<Fields, VisualSig
 fn render_transfer(t: &Transfer, registry: &Reg) -> Result<Fields, VisualSignError> {
     let mut fields = vec![create_text_field("To", t.receiver_id.as_str())?.signable_payload_field];
     for (token_id, amount) in t.tokens.iter() {
-        fields.push(token_amount_field(
+        fields.extend(token_amount_field(
             "Amount",
             &token_id.to_string(),
             *amount,
@@ -255,13 +331,13 @@ fn render_ft_withdraw(w: &FtWithdraw, registry: &Reg) -> Result<Fields, VisualSi
     let mut fields = vec![
         create_text_field("Token", w.token.as_str())?.signable_payload_field,
         create_text_field("To", w.receiver_id.as_str())?.signable_payload_field,
-        token_amount_field(
-            "Amount",
-            &format!("nep141:{}", w.token),
-            w.amount.0,
-            registry,
-        )?,
     ];
+    fields.extend(token_amount_field(
+        "Amount",
+        &format!("nep141:{}", w.token),
+        w.amount.0,
+        registry,
+    )?);
     if let Some(memo) = &w.memo {
         fields.push(create_text_field("Memo", memo)?.signable_payload_field);
     }
@@ -418,7 +494,27 @@ pub(crate) fn render_envelope(
 pub(crate) fn render_single(
     payload: &DefusePayload<DefuseIntents>,
     registry: &Reg,
+    network: NearNetwork,
 ) -> Result<Fields, VisualSignError> {
+    // Every envelope reaches the signer through here -- the standalone
+    // pre-signature view and each section of an on-chain signed batch alike --
+    // so the network agreement check lives here rather than at either entry
+    // point. `network` is caller-influenceable (a request's `network_id`
+    // overrides the converter's default) and it selects the token-metadata
+    // signature scope, so an envelope naming mainnet accounts must not render
+    // as testnet on either path.
+    //
+    // `ValidationError` is the signal both callers translate back into their own
+    // network-mismatch error; no field builder produces that variant, so it
+    // cannot be confused with a rendering failure.
+    for (role, account_id) in [
+        ("signer", payload.signer_id.as_str()),
+        ("verifying contract", payload.verifying_contract.as_str()),
+    ] {
+        if let Some(mismatch) = crate::networks::network_mismatch(role, account_id, network) {
+            return Err(VisualSignError::ValidationError(mismatch));
+        }
+    }
     let mut fields = render_envelope(payload)?;
     if payload.deadline.has_expired() {
         fields.push(diagnostic(
@@ -450,6 +546,21 @@ mod tests {
 
     fn empty_reg() -> Reg {
         LayeredRegistry::new(Arc::new(NearTokenRegistry::default()))
+    }
+
+    /// A registry whose request-scoped layer has one entry for `asset_id`,
+    /// carrying the given provenance.
+    fn reg_with_entry(asset_id: &str, provenance: super::super::TokenProvenance) -> Reg {
+        let mut request = NearTokenRegistry::default();
+        request.by_asset_id.insert(
+            asset_id.to_string(),
+            super::super::TokenMeta {
+                symbol: "TEST".to_string(),
+                decimals: 6,
+                provenance,
+            },
+        );
+        LayeredRegistry::with_request(Arc::new(NearTokenRegistry::default()), request)
     }
 
     fn intent_from(json: &str) -> Intent {
@@ -677,7 +788,7 @@ mod tests {
         )
         .expect("multi payload json");
 
-        let fields = section(1, 1, &mp, &empty_reg()).expect("render");
+        let fields = section(1, 1, &mp, &empty_reg(), NearNetwork::Mainnet).expect("render");
 
         let has_extraction_warning = fields
             .iter()
@@ -754,6 +865,72 @@ mod tests {
         let intent = intent_from(r#"{"intent":"token_diff","diff":{}}"#);
         let err = render_intent(&intent, &empty_reg()).expect_err("empty diff must be refused");
         assert!(err.to_string().contains("no entries"), "{err}");
+    }
+
+    /// Both unattributed provenances warn, and each names its own cause: the two
+    /// are worth the same in trust terms but are not the same fact, and a signer
+    /// told "unsigned" about a signed entry is told something false.
+    #[test]
+    fn token_amount_flags_each_unverified_provenance_with_its_own_cause() {
+        for (provenance, expected) in [
+            (
+                super::super::TokenProvenance::Unsigned,
+                "unsigned request entry",
+            ),
+            (
+                super::super::TokenProvenance::UnrecognizedSigner,
+                "unrecognized signer (signature verified, key not enrolled)",
+            ),
+        ] {
+            let asset_id = "nep141:gap-fill.near";
+            let fields = token_amount_field(
+                "Amount",
+                asset_id,
+                1_000_000,
+                &reg_with_entry(asset_id, provenance),
+            )
+            .expect("render");
+            let warning = fields
+                .iter()
+                .find(|f| super::super::test_support::is_warning_diagnostic(
+                    f,
+                    "unverified-token-metadata"
+                ))
+                .unwrap_or_else(|| {
+                    panic!("expected an unverified-token-metadata warning for {provenance:?}, got {fields:?}")
+                });
+            let rendered = format!("{warning:?}");
+            assert!(
+                rendered.contains(expected),
+                "{provenance:?} must name its own cause '{expected}', got {rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn token_amount_omits_diagnostic_for_verified_metadata() {
+        for provenance in [
+            super::super::TokenProvenance::Seed,
+            super::super::TokenProvenance::RecognizedSigner,
+        ] {
+            let asset_id = "nep141:verified-token.near";
+            let fields = token_amount_field(
+                "Amount",
+                asset_id,
+                1_000_000,
+                &reg_with_entry(asset_id, provenance),
+            )
+            .expect("render");
+            assert!(
+                !fields
+                    .iter()
+                    .any(|f| super::super::test_support::is_warning_diagnostic(
+                        f,
+                        "unverified-token-metadata"
+                    )),
+                "unexpected unverified-token-metadata warning for {provenance:?}: {fields:?}"
+            );
+        }
     }
 
     #[test]

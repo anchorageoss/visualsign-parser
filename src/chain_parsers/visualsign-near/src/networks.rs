@@ -23,6 +23,18 @@ impl NearNetwork {
         }
     }
 
+    /// The canonical network identifier string, the inverse of
+    /// [`Self::from_network_id`]. Signed scopes use this rather than a
+    /// caller-supplied spelling, so a signature does not depend on the casing
+    /// the request happened to send.
+    #[must_use]
+    pub fn network_id(self) -> &'static str {
+        match self {
+            NearNetwork::Mainnet => "NEAR_MAINNET",
+            NearNetwork::Testnet => "NEAR_TESTNET",
+        }
+    }
+
     /// Parses a canonical network identifier string (e.g. `"NEAR_MAINNET"`,
     /// `"NEAR_TESTNET"`). Case-insensitive.
     #[must_use]
@@ -33,6 +45,32 @@ impl NearNetwork {
             _ => None,
         }
     }
+}
+
+/// Detects an account whose top-level suffix contradicts the resolved network
+/// (`.testnet` under Mainnet, or `.near` under Testnet). `role` names which
+/// account failed, so the error distinguishes one from another. Implicit 64-hex
+/// accounts carry no suffix and are not guarded here.
+///
+/// The account suffix is the network evidence intrinsic to the payload, so it is
+/// what a caller-supplied `network_id` has to agree with: the resolved network
+/// picks the token-metadata signature scope and is rendered to the signer, and
+/// neither may describe a network the accounts contradict.
+///
+/// Applied to the transaction's own accounts in `convert::render_on_chain`, and
+/// to every rendered envelope's accounts in `presets::intents::render_single` --
+/// which both the standalone view and each section of an on-chain signed batch
+/// funnel through. So the same accounts cannot be a hard error on one path and a
+/// clean payload on another.
+#[must_use]
+pub fn network_mismatch(role: &str, account_id: &str, network: NearNetwork) -> Option<String> {
+    let mismatched = match network {
+        NearNetwork::Mainnet => account_id.ends_with(".testnet"),
+        NearNetwork::Testnet => account_id.ends_with(".near"),
+    };
+    mismatched.then(|| {
+        format!("{role} account '{account_id}' does not match resolved network {network:?}")
+    })
 }
 
 /// Extracts a [`NearNetwork`] from per-request [`ChainMetadata`], if present.
@@ -79,6 +117,16 @@ mod tests {
     }
 
     #[test]
+    fn network_id_round_trips_through_from_network_id() {
+        for network in [NearNetwork::Mainnet, NearNetwork::Testnet] {
+            assert_eq!(
+                NearNetwork::from_network_id(network.network_id()),
+                Some(network)
+            );
+        }
+    }
+
+    #[test]
     fn display_names() {
         assert_eq!(NearNetwork::Mainnet.display_name(), "NEAR Mainnet");
         assert_eq!(NearNetwork::Testnet.display_name(), "NEAR Testnet");
@@ -122,6 +170,7 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                 network_id: Some("NEAR_TESTNET".to_string()),
+                token_mappings: Default::default(),
             })),
         };
         assert_eq!(
@@ -139,6 +188,7 @@ mod tests {
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                 network_id: Some("testnet".to_string()),
+                token_mappings: Default::default(),
             })),
         };
         assert!(extract_network_from_metadata(Some(&metadata)).is_err());

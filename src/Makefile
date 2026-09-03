@@ -27,9 +27,11 @@ all: generated
 .PHONY: build
 build:
 	@# Split to avoid Cargo feature unification across the workspace.
-	@# parser_cli enables visualsign-solana/diagnostics and
-	@# visualsign-ethereum/dev-signing; building it together with
-	@# parser_app/grpc-server would unify those features ON for both.
+	@# parser_cli enables visualsign-solana/diagnostics,
+	@# visualsign-ethereum/dev-signing, and visualsign-near/dev-signing;
+	@# building it together with parser_app/grpc-server would unify those
+	@# features ON for both, putting the CLI dev signing keys (and the
+	@# allowlist entries that trust them) into the production binaries.
 	cargo build --workspace --exclude parser_cli
 	cargo build -p parser_cli
 
@@ -44,6 +46,8 @@ test: build
 	@# diagnostics ON: parser_cli + lib tests gated behind the feature.
 	cargo test -p parser_cli --all-targets
 	cargo test -p visualsign --features diagnostics --lib
+	cargo test -p parser_cli_core --features diagnostics --lib
+	cargo test -p visualsign-near --features diagnostics --lib
 	cargo test -p visualsign-solana --features diagnostics --lib
 
 # Solana preset sources, which `cargo fmt` cannot reach. `presets/mod.rs`
@@ -70,6 +74,8 @@ lint:
 	cargo clippy --workspace --exclude parser_cli --all-targets -- -D warnings
 	cargo clippy -p parser_cli --all-targets -- -D warnings
 	cargo clippy -p visualsign --features diagnostics --lib -- -D warnings
+	cargo clippy -p parser_cli_core --features diagnostics --lib -- -D warnings
+	cargo clippy -p visualsign-near --features diagnostics --lib -- -D warnings
 	cargo clippy -p visualsign-solana --features diagnostics --lib -- -D warnings
 
 .PHONY: narrow-build-check
@@ -101,6 +107,33 @@ narrow-build-check:
 		cargo check -p parser_app --no-default-features --features $$c; \
 		cargo clippy -p parser_app --no-default-features --features $$c --all-targets -- -D warnings; \
 	done
+	make dev-signing-absent-check
+
+.PHONY: dev-signing-absent-check
+dev-signing-absent-check:
+	@# `dev-signing` carries hardcoded signing-key seeds and allowlists them,
+	@# so it must never resolve in a binary that ships. Only parser_cli
+	@# enables it (`ethereum`/`near` features above pull
+	@# visualsign-{ethereum,near}/dev-signing), and the ONLY thing keeping it
+	@# off parser_app/grpc-server is that `build` compiles parser_cli in a
+	@# separate cargo invocation -- Cargo unifies features across a single
+	@# invocation, so one `cargo build --workspace` covering both would turn
+	@# dev-signing ON for the attested binary.
+	@#
+	@# Asserted against the recipes rather than the resolved feature graph:
+	@# `cargo tree -e features` does not print enabled features that carry no
+	@# dependency edges, and `dev-signing = []` is exactly that, so a graph
+	@# probe silently matches nothing and passes regardless.
+	@set -e; \
+	bad=$$(grep -nE '^[[:space:]]*cargo (build|test|check|clippy).*--workspace' Makefile \
+		| grep -v 'exclude parser_cli' || true); \
+	if [ -n "$$bad" ]; then \
+		echo "ERROR: --workspace recipe without '--exclude parser_cli' would unify"; \
+		echo "       dev-signing onto parser_app/grpc-server:"; \
+		echo "$$bad"; \
+		exit 1; \
+	fi; \
+	echo "==> no --workspace recipe pulls parser_cli into a shared feature resolution"
 
 .PHONY: feature-matrix-check
 feature-matrix-check:
@@ -111,9 +144,9 @@ feature-matrix-check:
 	@# $(PARSER_APP_CHAINS) above.
 	@#
 	@# Note: `diagnostics` propagates to the always-on `visualsign` core
-	@# crate, and weakly to `visualsign-solana` via the `?` syntax. The
-	@# non-solana + diagnostics combos still exercise the weak-dep path
-	@# (resolving to a no-op for visualsign-solana).
+	@# crate, and weakly to `visualsign-near`/`visualsign-solana` via the
+	@# `?` syntax. Combos without those chains still exercise the weak-dep
+	@# path (resolving to a no-op for the absent crate).
 	@#
 	@# Uses `cargo check` for the same reason as narrow-build-check
 	@# above -- the goal is compile-level regression detection, not

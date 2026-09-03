@@ -1,6 +1,9 @@
 //! Parsing endpoint for `VisualSign`
 
-use crate::{chain_conversion, config::ParserConfig, errors::GrpcError, registry::create_registry};
+use crate::{
+    chain_conversion, config::ParserConfig, errors::GrpcError, payment_verify,
+    payment_verify::PaymentPolicy, registry::create_registry,
+};
 use generated::parser::Chain as ProtoChain;
 use generated::{
     google::rpc::Code,
@@ -26,7 +29,9 @@ pub fn parse(
     parse_request: &ParseRequest,
     ephemeral_key: &P256Pair,
     config: &ParserConfig,
+    policy: &PaymentPolicy,
 ) -> Result<ParseResponse, GrpcError> {
+    payment_verify::verify(parse_request, policy)?;
     let registry = create_registry(config);
     parse_with_registry(parse_request, ephemeral_key, &registry)
 }
@@ -90,11 +95,15 @@ pub(crate) fn parse_with_registry(
 
     // Metadata can be empty; if so, we use an empty vec for hashing to avoid having to deal with
     // optional types in ParsedTransactionPayload.
-    let metadata_bytes = if let Some(metadata) = parse_request.chain_metadata.as_ref() {
-        borsh::to_vec(&metadata).expect("chain_metadata implements borsh::Serialize")
-    } else {
-        vec![]
-    };
+    let metadata_bytes = payment_verify::chain_metadata_bytes(
+        parse_request.chain_metadata.as_ref(),
+    )
+    .map_err(|e| {
+        GrpcError::new(
+            Code::Internal,
+            &format!("chain_metadata borsh encode: {e:?}"),
+        )
+    })?;
 
     let payload = ParsedTransactionPayload {
         parsed_payload: parsed_payload_str.clone(),
@@ -157,7 +166,9 @@ fn signing_digest_bytes(payload: &ParsedTransactionPayload) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::payment_verify::test_support::{make_vpm, sign_with};
     use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata};
+    use qos_p256::sign::P256SignPair;
     use std::collections::BTreeMap;
     use visualsign::vsptrait::{
         ConversionResult, Transaction, TransactionParseError, VisualSignConverter,
@@ -363,6 +374,7 @@ mod tests {
             unsigned_payload: "stub".to_string(),
             chain: ProtoChain::Tron as i32,
             chain_metadata: None,
+            payment_marker: vec![],
         }
     }
 
@@ -444,6 +456,44 @@ mod tests {
              converter skips its inner validate_charset call",
         );
         assert_eq!(err.code, Code::InvalidArgument);
+    }
+
+    /// Regression: every other test in this module exercises `parse_with_registry`
+    /// directly, which never calls `payment_verify::verify`. This test drives the
+    /// public `parse()` entry point (the one production callers actually use) with
+    /// `PaymentPolicy::Required`, so a regression that deletes, reorders, or
+    /// silently ignores the verification call inside `parse()` would fail this
+    /// test even though every `parse_with_registry` test still passes. The marker
+    /// also claims the pinned gateway key but is signed by a different keypair,
+    /// so this doubles as a true-forgery test at the `parse()` boundary (as
+    /// opposed to `payment_verify`'s own unit tests, which cover the same case
+    /// one layer down).
+    #[test]
+    fn parse_rejects_forged_payment_marker_via_public_entry_point() {
+        let pinned_pair = P256SignPair::generate();
+        let attacker_pair = P256SignPair::generate();
+        let pinned_pub_hex = qos_hex::encode(&pinned_pair.public_key().to_bytes());
+        let policy = PaymentPolicy::from_hex(&pinned_pub_hex).unwrap();
+
+        let mut req = stub_request();
+        let vpm = make_vpm(&req, &pinned_pub_hex); // claims the pinned key
+        req.payment_marker = sign_with(&attacker_pair, vpm); // signed by someone else
+
+        let ephemeral_key = P256Pair::generate().expect("generate ephemeral key");
+        let config = ParserConfig::accept_unsigned();
+        let err = parse(&req, &ephemeral_key, &config, &policy).expect_err(
+            "parse() must reject a payment marker forged by a different signer, even though \
+             the marker's claimed gateway_pubkey_hex matches the pinned key, before ever \
+             reaching the transaction converter registry",
+        );
+        assert_eq!(err.code, Code::FailedPrecondition);
+        // The status code alone doesn't distinguish this forgery failure
+        // from `Missing`/`RequestHashMismatch`/`PinnedKeyMismatch`, all of
+        // which also map to `FailedPrecondition`. Assert on the message too
+        // so this test can't silently start passing for the wrong reason
+        // (e.g. if `test_support::make_vpm`'s preimage ever drifted from
+        // `verify()`'s).
+        assert!(err.message.contains("signature"));
     }
 
     fn sample_payload(intermediate_output: Vec<u8>) -> ParsedTransactionPayload {

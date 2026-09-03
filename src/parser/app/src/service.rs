@@ -71,15 +71,20 @@ impl Processor {
 
             let output = match input {
                 qos_parser_request::Input::ParseRequest(parse_request) => {
-                    match crate::routes::parse::parse(parse_request, &ephemeral_key, &self.config)
-                        .map(qos_parser_response::Output::ParseResponse)
-                        .map_err(|e| {
-                            qos_parser_response::Output::Status(Status {
-                                code: e.code as i32,
-                                message: e.message,
-                                details: vec![],
-                            })
-                        }) {
+                    match crate::routes::parse::parse(
+                        parse_request,
+                        &ephemeral_key,
+                        &self.config,
+                        &crate::payment_verify::PaymentPolicy::Disabled,
+                    )
+                    .map(qos_parser_response::Output::ParseResponse)
+                    .map_err(|e| {
+                        qos_parser_response::Output::Status(Status {
+                            code: e.code as i32,
+                            message: e.message,
+                            details: vec![],
+                        })
+                    }) {
                         Ok(o) | Err(o) => o,
                     }
                 }
