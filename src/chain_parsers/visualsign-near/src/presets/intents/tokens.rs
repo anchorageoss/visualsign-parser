@@ -114,9 +114,14 @@ fn usable(meta: TokenMeta) -> Option<TokenMeta> {
     (meta.decimals <= MAX_DECIMALS).then_some(meta)
 }
 
-/// Whether `asset_id` has a compiled-in, verified entry in [`SEEDS`].
-pub(crate) fn is_seeded(asset_id: &str) -> bool {
-    SEEDS.iter().any(|(id, _, _)| *id == asset_id)
+/// The curated `decimals` for `asset_id`, or `None` when [`SEEDS`] does not
+/// cover it. A refusal quotes this against the proposed value, so the signer
+/// sees what was attempted rather than only that something was dropped.
+pub(crate) fn seeded_decimals(asset_id: &str) -> Option<u8> {
+    SEEDS
+        .iter()
+        .find(|(id, _, _)| *id == asset_id)
+        .map(|(_, _, decimals)| *decimals)
 }
 
 /// Resolve an asset id to its metadata: request-scoped override layer first
@@ -286,9 +291,12 @@ mod tests {
     }
 
     #[test]
-    fn is_seeded_matches_seeds_table() {
-        assert!(is_seeded("nep141:wrap.near"));
-        assert!(!is_seeded("nep141:not-a-real-token.near"));
+    /// The extraction path quotes this value against a proposed one when
+    /// refusing an unattributed override, so it has to be the seed's own
+    /// `decimals` and `None` for an asset the table does not cover.
+    fn seeded_decimals_matches_seeds_table() {
+        assert_eq!(seeded_decimals("nep141:wrap.near"), Some(24));
+        assert_eq!(seeded_decimals("nep141:not-a-real-token.near"), None);
     }
 
     #[test]

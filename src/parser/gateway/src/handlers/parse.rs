@@ -115,6 +115,11 @@ pub async fn parse_handler(
         chain,
         chain_metadata,
         include_intermediate_output: wrapper.request.include_intermediate_output,
+        // This gateway does not yet sign a VerifiedPaymentMarker (see
+        // host_primitives::payment_marker); every call site here forwards
+        // an empty marker, which parser_app accepts as long as payment
+        // enforcement is disabled.
+        payment_marker: vec![],
     });
 
     let response = match tokio::time::timeout(PARSE_TIMEOUT, grpc_client.parse(request)).await {
@@ -317,6 +322,19 @@ mod tests {
             unsigned_payload,
             b"some-metadata"
         ));
+    }
+
+    #[test]
+    fn parse_request_json_without_payment_marker_still_deserializes() {
+        // payment_marker (proto field 5) was added after unsignedPayload/chain/
+        // chainMetadata/includeIntermediateOutput shipped. Any JSON caller built
+        // against the earlier shape omits paymentMarker entirely; without
+        // `serde(default)` that's a hard deserialization failure, breaking
+        // backward compatibility for the generated JSON API.
+        let json = r#"{"unsignedPayload":"abc","chain":1,"includeIntermediateOutput":false}"#;
+        let parsed: ParseRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.unsigned_payload, "abc");
+        assert!(parsed.payment_marker.is_empty());
     }
 
     #[test]

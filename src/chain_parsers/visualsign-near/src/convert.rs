@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
-use near_primitives::action::Action;
+use near_primitives::action::{Action, FunctionCallAction};
 use near_primitives::transaction::Transaction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_address_field, create_text_field};
 use visualsign::registry::LayeredRegistry;
-use visualsign::signing::{MetadataTrustPolicy, SignerAllowlist};
+use visualsign::signing::MetadataTrustPolicy;
 use visualsign::vsptrait::{
     ConversionResult, VisualSignConverter, VisualSignConverterFromString, VisualSignOptions,
 };
@@ -16,7 +16,7 @@ use visualsign::{SignablePayload, SignablePayloadField};
 use crate::actions::render_action;
 use crate::networks::{NearNetwork, extract_network_from_metadata, network_mismatch};
 use crate::presets::intents::{
-    NearIntentsError, NearTokenRegistry, authorized_token_metadata_signers,
+    NearIntentsError, NearTokenRegistry, RejectedTokenMetadata, authorized_token_metadata_signers,
     try_extract_token_metadata_from_chain_metadata,
 };
 use crate::tx::NearTransaction;
@@ -36,41 +36,98 @@ use crate::tx::NearTransaction;
 /// present signature is checked against -- its own under the strict posture,
 /// the deployment's `authorized_token_metadata_signers` under the permissive
 /// one. A present signature is checked against that list under either.
+///
+/// Returns the registry plus a diagnostic field for every entry the extraction
+/// refused. Callers render those once per payload, not once per action.
 fn token_registry_for(
     options: &VisualSignOptions,
     network: NearNetwork,
     trust_policy: &MetadataTrustPolicy,
-) -> LayeredRegistry<NearTokenRegistry> {
+) -> RequestTokenRegistry {
     // Identity decides whether an entry renders as verified and whether it may
     // override a curated seed, neither of which the posture itself answers, so a
     // list is needed under both postures. The strict posture carries its own;
     // the permissive one has no payload to carry, so the deployment's
     // env-configured curators stand in.
     //
-    // A posture added upstream after this build recognizes nobody rather than
-    // guessing which of the two it resembles: an empty allowlist leaves every
-    // signature unrecognized, so entries fall back to gap-fill-only terms.
+    // A posture added upstream after this build refuses the request-scoped
+    // metadata outright rather than guessing which of the two it resembles, and
+    // says so: the same fail-closed outcome an empty allowlist would reach, but
+    // stated rather than emergent, so the signer is not left with a silently
+    // thinner payload. Amounts then resolve from `tokens::SEEDS` alone.
     // Unreachable today -- `MetadataTrustPolicy` is `#[non_exhaustive]`, so a
     // third variant cannot be constructed from this crate, which is also why
     // this arm carries no test.
-    let no_signers = SignerAllowlist::new();
+    // NEAR compiles in no global token table -- `tokens::SEEDS` is consulted
+    // separately, after a registry miss -- so the global layer is empty
+    // whichever way this resolves.
+    let global = Arc::new(NearTokenRegistry::default());
     let allowlist = match trust_policy {
         MetadataTrustPolicy::RequireAllowlistedSigner(allow) => allow,
         MetadataTrustPolicy::AcceptUnsigned => authorized_token_metadata_signers(),
-        _ => &no_signers,
+        unknown => {
+            return RequestTokenRegistry {
+                registry: LayeredRegistry::new(global),
+                diagnostics: unknown_posture_diagnostics(unknown),
+            };
+        }
     };
-    let request = try_extract_token_metadata_from_chain_metadata(
+    let extraction = try_extract_token_metadata_from_chain_metadata(
         options.metadata.as_ref(),
         network,
         allowlist,
         trust_policy,
     );
-    match request {
-        Some(request) => {
-            LayeredRegistry::with_request(Arc::new(NearTokenRegistry::default()), request)
-        }
-        None => LayeredRegistry::new(Arc::new(NearTokenRegistry::default())),
+    RequestTokenRegistry {
+        registry: match extraction.registry {
+            Some(request) => LayeredRegistry::with_request(global, request),
+            None => LayeredRegistry::new(global),
+        },
+        diagnostics: crate::presets::intents::rejected_metadata_diagnostics(&extraction.rejected),
     }
+}
+
+/// The token registry one request resolves amounts against, and what building
+/// it refused.
+///
+/// Named rather than a bare pair: the two halves are used at different points
+/// -- the diagnostics go into the payload once, up front, while the registry is
+/// threaded through every action -- and a `(registry, fields)` tuple leaves
+/// nothing at the call site saying which is which.
+struct RequestTokenRegistry {
+    /// Seed lookups only: `tokens::SEEDS` still resolves what this misses.
+    registry: LayeredRegistry<NearTokenRegistry>,
+    /// One field per refused entry, rendered once per payload rather than once
+    /// per action that consults the registry.
+    diagnostics: Vec<SignablePayloadField>,
+}
+
+impl RequestTokenRegistry {
+    /// No caller-supplied metadata is in play: an empty request layer, and no
+    /// refusal to report because nothing was examined.
+    fn empty() -> Self {
+        Self {
+            registry: LayeredRegistry::new(Arc::new(NearTokenRegistry::default())),
+            diagnostics: vec![],
+        }
+    }
+}
+
+/// Refuse the whole request-scoped metadata blob under a trust posture this
+/// build does not recognize, reported as one refusal naming the posture.
+///
+/// One diagnostic rather than one per entry: the posture is a property of the
+/// deployment, not of any entry, and the reason is identical for every one. The
+/// posture's `Display` is what an operator sees in the startup log, so quoting
+/// it here lets the two be matched up.
+fn unknown_posture_diagnostics(policy: &MetadataTrustPolicy) -> Vec<SignablePayloadField> {
+    crate::presets::intents::rejected_metadata_diagnostics(&[RejectedTokenMetadata {
+        asset_id: "all assets".to_string(),
+        reason: format!(
+            "this build does not recognize the deployment's trust posture ({policy}), so no \
+             caller-supplied token metadata was used"
+        ),
+    }])
 }
 
 /// Resolve the network for one request: the `network_id` the request supplied,
@@ -215,6 +272,24 @@ impl NearVisualSignConverter {
             create_address_field("To", tx.receiver_id().as_str(), None, None, None, None)?
                 .signable_payload_field,
         );
+        // Built once for the whole transaction, and only when an action will
+        // consult it. Once, because the metadata is request-scoped: a rejection
+        // is a property of the request, not of each action, and building per
+        // action would repeat every diagnostic for a multi-action transaction.
+        // Only when applicable, because metadata nothing reads cannot mislead
+        // the signer -- a rejection diagnostic on a plain transfer would report
+        // a refusal that changed nothing about what is rendered.
+        let tokens = if tx
+            .actions()
+            .iter()
+            .any(|action| token_metadata_consumer(tx.receiver_id().as_str(), action).is_some())
+        {
+            token_registry_for(options, network, &self.trust_policy)
+        } else {
+            RequestTokenRegistry::empty()
+        };
+        fields.extend(tokens.diagnostics);
+
         let total_actions = tx.actions().len();
         for action in tx.actions() {
             fields.extend(render_action(action, total_actions)?);
@@ -222,8 +297,8 @@ impl NearVisualSignConverter {
                 tx.receiver_id().as_str(),
                 action,
                 options,
+                &tokens.registry,
                 network,
-                &self.trust_policy,
             )?);
         }
 
@@ -252,6 +327,32 @@ impl VisualSignConverterFromString<NearTransaction> for NearVisualSignConverter 
     }
 }
 
+/// The intents verifier contract, and the method on it that carries a signed
+/// intent batch.
+const INTENTS_RECEIVER: &str = "intents.near";
+const EXECUTE_INTENTS_METHOD: &str = "execute_intents";
+
+/// The call on this action that a decoder resolving token amounts will handle,
+/// or `None` when nothing in the action loop consults the request-scoped token
+/// registry.
+///
+/// This is the one place that answers "is caller-supplied token metadata
+/// applicable here?". [`NearVisualSignConverter::render_on_chain`] gates
+/// building the registry on it and [`decode_intents`] dispatches on it, so the
+/// gate can never skip a call the decoder would have resolved amounts for --
+/// which would leave the signer raw base units and no diagnostic explaining
+/// why. A preset that resolves amounts from the registry belongs here.
+fn token_metadata_consumer<'a>(
+    receiver_id: &str,
+    action: &'a Action,
+) -> Option<&'a FunctionCallAction> {
+    let Action::FunctionCall(fc) = action else {
+        return None;
+    };
+    (receiver_id == INTENTS_RECEIVER && fc.method_name == EXECUTE_INTENTS_METHOD)
+        .then(|| fc.as_ref())
+}
+
 /// Decode an `execute_intents` call to `intents.near` and render the signed
 /// intent batch. Any other action or receiver yields no extra fields. A
 /// decode failure surfaces as a conversion error rather than silently
@@ -260,20 +361,13 @@ fn decode_intents(
     receiver_id: &str,
     action: &Action,
     options: &VisualSignOptions,
+    registry: &LayeredRegistry<NearTokenRegistry>,
     network: NearNetwork,
-    trust_policy: &MetadataTrustPolicy,
 ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
-    if receiver_id != "intents.near" {
-        return Ok(vec![]);
-    }
-    let Action::FunctionCall(fc) = action else {
+    let Some(fc) = token_metadata_consumer(receiver_id, action) else {
         return Ok(vec![]);
     };
-    if fc.method_name != "execute_intents" {
-        return Ok(vec![]);
-    }
-    let registry = token_registry_for(options, network, trust_policy);
-    crate::presets::intents::try_decode_execute_intents(&fc.args, &registry, options, network)
+    crate::presets::intents::try_decode_execute_intents(&fc.args, registry, options, network)
         .map_err(intents_error)
 }
 
@@ -297,16 +391,29 @@ fn render_intent_envelope(
     network: NearNetwork,
     trust_policy: &MetadataTrustPolicy,
 ) -> Result<ConversionResult, VisualSignError> {
-    let registry = token_registry_for(options, network, trust_policy);
+    // Built only when the envelope's decoded intents include a kind that
+    // reads it -- the same reasoning as render_on_chain's gate via
+    // token_metadata_consumer, applied here to the intent kinds inside the
+    // envelope rather than to the wrapping action. A plain native_withdraw
+    // (or add_public_key, storage_deposit, ...) carrying unrelated or
+    // malformed caller-supplied token metadata must not get a rejection
+    // diagnostic for metadata nothing here reads.
+    let tokens = if crate::presets::intents::single_intent_consumes_token_registry(json.as_bytes())
+    {
+        token_registry_for(options, network, trust_policy)
+    } else {
+        RequestTokenRegistry::empty()
+    };
     // The resolved network is part of every token-metadata signed scope, so the
     // payload has to show which network that scope was checked against -- the
     // same field, for the same reason, as the on-chain path renders.
     let mut fields =
         vec![create_text_field("Network", network.display_name())?.signable_payload_field];
+    fields.extend(tokens.diagnostics);
     fields.extend(
         crate::presets::intents::try_render_single_intent(
             json.as_bytes(),
-            &registry,
+            &tokens.registry,
             options,
             network,
         )
@@ -366,6 +473,60 @@ mod tests {
             block_hash: CryptoHash::default(),
             actions,
         }))
+    }
+
+    /// A signed single-intent `execute_intents` call: the action shape the
+    /// token registry exists for.
+    fn execute_intents_action() -> Action {
+        let inner = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"rejected-token.near","receiver_id":"bob.near","amount":"1000000"}]}"#;
+        let args = serde_json::json!({"signed":[{
+            "standard": "raw_ed25519",
+            "payload": inner,
+            "public_key": "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN",
+            "signature": "ed25519:3vtbNQJHZfuV1s5DykzyjkbNLc583hnkrhTz57eDhd966iqzkor6Twgr4Loh2C195SCSEsiGfrd6KcxpjNq9ZbVj"
+        }]});
+        Action::FunctionCall(Box::new(FunctionCallAction {
+            method_name: EXECUTE_INTENTS_METHOD.to_string(),
+            args: serde_json::to_vec(&args).unwrap(),
+            gas: Gas::from_gas(30_000_000_000_000),
+            deposit: Balance::from_yoctonear(0),
+        }))
+    }
+
+    /// One caller-supplied token mapping, keyed under `asset_id`, carrying
+    /// `value` as its metadata JSON.
+    fn options_with_token_mapping(asset_id: &str, value: &str) -> VisualSignOptions {
+        VisualSignOptions {
+            metadata: Some(ChainMetadata {
+                metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
+                    network_id: Some("NEAR_MAINNET".to_string()),
+                    token_mappings: [(
+                        asset_id.to_string(),
+                        generated::parser::TokenMetadataEntry {
+                            value: value.to_string(),
+                            signature: None,
+                            origin_chain: None,
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                })),
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn rejection_diagnostic_count(payload: &SignablePayload) -> usize {
+        payload
+            .fields
+            .iter()
+            .filter(|f| {
+                crate::presets::intents::test_support::is_warning_diagnostic(
+                    f,
+                    "rejected-token-metadata",
+                )
+            })
+            .count()
     }
 
     #[test]
@@ -829,5 +990,231 @@ mod tests {
             assert!(json.contains(expected), "missing {expected}: {json}");
         }
         assert!(!json.contains("Standard"), "unexpected signature section");
+    }
+
+    /// Metadata the parser refuses must be visible in the payload, not just in
+    /// an operator log.
+    ///
+    /// The refusal here is the `require-signed` posture dropping an unsigned
+    /// entry. Without the diagnostic, the signer sees an amount in raw base
+    /// units against an `unresolved` asset id and has no way to tell that
+    /// metadata was supplied at all.
+    #[test]
+    fn rejected_metadata_surfaces_a_diagnostic_end_to_end() {
+        let asset_id = "nep141:rejected-token.near";
+        let options = options_with_token_mapping(asset_id, r#"{"symbol":"DROPPED","decimals":6}"#);
+
+        let envelope = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"rejected-token.near","receiver_id":"bob.near","amount":"1000000"}]}"#.to_string();
+        let payload = NearVisualSignConverter::with_trust_policy(
+            MetadataTrustPolicy::RequireAllowlistedSigner(
+                visualsign::signing::SignerAllowlist::new(),
+            ),
+        )
+        .to_visual_sign_payload(NearTransaction::Intent(envelope), options)
+        .expect("convert");
+        let fields = &payload.payload.fields;
+
+        assert!(
+            fields.iter().any(
+                |f| crate::presets::intents::test_support::is_warning_diagnostic(
+                    f,
+                    "rejected-token-metadata"
+                )
+            ),
+            "a refused entry must report itself in the payload: {fields:?}"
+        );
+        let json = payload.payload.to_json().expect("json");
+        assert!(
+            !json.contains("DROPPED"),
+            "the refused entry must not resolve the symbol: {json}"
+        );
+        assert!(
+            json.contains(asset_id),
+            "the diagnostic must name the asset id it refused: {json}"
+        );
+    }
+
+    /// A standalone intent envelope whose only intent never reads the token
+    /// registry (`native_withdraw` moves NEAR itself, not a NEP-141) must not
+    /// get a rejection diagnostic for unrelated or malformed caller-supplied
+    /// token metadata: nothing here consults it, so a refusal would describe a
+    /// problem the rendered payload never had.
+    #[test]
+    fn native_withdraw_envelope_reports_no_refusal_for_metadata_it_never_reads() {
+        let options = options_with_token_mapping("nep141:rejected-token.near", "not valid json");
+        let envelope = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"native_withdraw","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
+
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(NearTransaction::Intent(envelope.to_string()), options)
+            .expect("convert");
+        assert_eq!(
+            rejection_diagnostic_count(&payload.payload),
+            0,
+            "native_withdraw consults no token metadata, so it has no refusal to report: {:?}",
+            payload.payload.fields
+        );
+    }
+
+    /// The gate that decides whether to build the token registry for a
+    /// standalone envelope and the per-intent dispatch that consumes it must
+    /// agree, the same invariant `every_action_that_renders_intents_is_one_the_gate_recognizes`
+    /// checks for the on-chain path. Asserted over every `Intent` kind
+    /// `render_intent` handles, so a kind wired to read the registry there
+    /// without being added to the gate fails here.
+    #[test]
+    fn every_intent_kind_the_registry_gate_recognizes_matches_render_intent() {
+        use crate::presets::intents::single_intent_consumes_token_registry;
+
+        let envelope_with = |intent_json: &str| -> String {
+            format!(
+                r#"{{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{intent_json}]}}"#
+            )
+        };
+        let cases: &[(&str, bool)] = &[
+            (
+                r#"{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1"}"#,
+                true,
+            ),
+            (
+                r#"{"intent":"token_diff","diff":{"nep141:wrap.near":"-1","nep141:usdc.near":"1"}}"#,
+                true,
+            ),
+            (
+                r#"{"intent":"transfer","receiver_id":"bob.near","tokens":{"nep141:wrap.near":"1"}}"#,
+                true,
+            ),
+            (
+                r#"{"intent":"native_withdraw","receiver_id":"bob.near","amount":"1"}"#,
+                false,
+            ),
+            (
+                r#"{"intent":"add_public_key","public_key":"ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"}"#,
+                false,
+            ),
+            (
+                r#"{"intent":"storage_deposit","contract_id":"wrap.near","deposit_for_account_id":"bob.near","amount":"1"}"#,
+                false,
+            ),
+        ];
+        for (intent_json, expected) in cases {
+            let json = envelope_with(intent_json);
+            assert_eq!(
+                single_intent_consumes_token_registry(json.as_bytes()),
+                *expected,
+                "gate disagrees with render_intent for {intent_json}"
+            );
+        }
+    }
+
+    /// The rejection is a property of the request's metadata, so it reports
+    /// once even when several actions consult the registry.
+    #[test]
+    fn rejected_metadata_reports_once_for_a_multi_action_transaction() {
+        let txv0 = TransactionV0 {
+            signer_id: "alice.near".parse().unwrap(),
+            public_key: PublicKey::empty(KeyType::ED25519),
+            nonce: 1,
+            receiver_id: INTENTS_RECEIVER.parse().unwrap(),
+            block_hash: CryptoHash::default(),
+            actions: vec![execute_intents_action(), execute_intents_action()],
+        };
+
+        let options = options_with_token_mapping("nep141:rejected-token.near", "not valid json");
+
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(NearTransaction::OnChain(Transaction::V0(txv0)), options)
+            .expect("convert");
+        assert_eq!(
+            rejection_diagnostic_count(&payload.payload),
+            1,
+            "two actions must not each repeat the request's one rejection"
+        );
+    }
+
+    /// A caller-controlled asset id cannot smuggle a newline into the rejection
+    /// diagnostic, which would render as extra apparent fields on the signing
+    /// screen. Same class as the `memo`/`msg`/`method_name` filtering in
+    /// `actions.rs`, reached through a different field.
+    #[test]
+    fn rejected_metadata_diagnostic_strips_newlines_from_the_asset_id() {
+        let hostile = "nep141:x.near\nAmount: 1000000 NEAR";
+        let options = options_with_token_mapping(hostile, "not valid json");
+
+        let envelope = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000"}]}"#;
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(NearTransaction::Intent(envelope.to_string()), options)
+            .expect("convert");
+        let json = payload.payload.to_json().expect("json");
+
+        assert!(
+            json.contains("rejected-token-metadata"),
+            "the refusal must still be reported: {json}"
+        );
+        assert!(
+            !json.contains("x.near\\nAmount"),
+            "the newline must be filtered out of the rendered text: {json}"
+        );
+    }
+
+    /// A transaction no decoder resolves token amounts for must not carry a
+    /// refusal diagnostic: the metadata was never consulted, so nothing about
+    /// what the signer sees changed, and a caveat about an invisible refusal is
+    /// noise on every plain transfer a wallet happens to attach mappings to.
+    #[test]
+    fn a_transfer_reports_no_refusal_for_metadata_no_action_consults() {
+        let options = options_with_token_mapping("nep141:rejected-token.near", "not valid json");
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(near_tx(vec![transfer()]), options)
+            .expect("convert");
+        assert_eq!(
+            rejection_diagnostic_count(&payload.payload),
+            0,
+            "a plain transfer consults no token metadata, so it has no refusal to report: {:?}",
+            payload.payload.fields
+        );
+    }
+
+    /// The gate that decides whether to build the token registry and the
+    /// dispatch that consumes it must agree. If an action can render intent
+    /// fields while the gate reads it as inapplicable, the decoder resolves
+    /// amounts against an empty registry and the signer gets raw base units
+    /// with no diagnostic saying why. Asserted over every combination rather
+    /// than by inspection, so a preset wired into `decode_intents` alone fails
+    /// here.
+    #[test]
+    fn every_action_that_renders_intents_is_one_the_gate_recognizes() {
+        let other_method = Action::FunctionCall(Box::new(FunctionCallAction {
+            method_name: "ft_transfer".to_string(),
+            args: b"{}".to_vec(),
+            gas: Gas::from_gas(30_000_000_000_000),
+            deposit: Balance::from_yoctonear(0),
+        }));
+        let registry = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+        for receiver in [INTENTS_RECEIVER, "bob.near"] {
+            for action in [execute_intents_action(), other_method.clone(), transfer()] {
+                let rendered = decode_intents(
+                    receiver,
+                    &action,
+                    &VisualSignOptions::default(),
+                    &registry,
+                    NearNetwork::Mainnet,
+                )
+                .expect("decode");
+                if !rendered.is_empty() {
+                    assert!(
+                        token_metadata_consumer(receiver, &action).is_some(),
+                        "{receiver} renders {} intent fields the gate does not recognize, so the \
+                         registry would be skipped: {action:?}",
+                        rendered.len()
+                    );
+                }
+            }
+        }
+        // The invariant holds vacuously if nothing renders, so pin the one
+        // combination that must.
+        assert!(
+            token_metadata_consumer(INTENTS_RECEIVER, &execute_intents_action()).is_some(),
+            "an execute_intents call to the verifier is the gate's whole purpose"
+        );
     }
 }

@@ -117,6 +117,31 @@ The `--network` flag selects the rendered `Network` header — `NEAR_MAINNET` (t
 
 The resolved network also has to agree with the accounts being rendered: an account whose suffix contradicts it (`.testnet` under mainnet, or `.near` under testnet) is refused rather than displayed under a network it does not belong to. This covers the transaction's own accounts and every rendered envelope's `signer_id`/`verifying_contract`. Since the default is mainnet, decoding a `.testnet` envelope needs `--network NEAR_TESTNET` explicitly. Implicit (64-hex) accounts carry no suffix and are not constrained.
 
+### Supplying token metadata locally
+
+Assets the compiled-in seed table doesn't cover render their raw base-unit amount tagged `unresolved <asset id>`. To give the CLI a symbol and decimals for one, pass `--near-token-metadata-mappings`:
+
+```bash
+echo '{"symbol":"MYTOKEN","decimals":8}' > mytoken.json
+
+cargo run --bin parser_cli -- decode \
+  --chain near \
+  --output human \
+  --near-token-metadata-mappings 'MyToken@mytoken.json@nep141:my-token.near' \
+  -t '{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2100-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"my-token.near","receiver_id":"bob.near","amount":"100000000"}]}'
+```
+
+The envelope withdraws `my-token.near`, the asset the mapping covers, so the
+`Amount` field renders as `1 MYTOKEN` rather than `100000000 (unresolved
+nep141:my-token.near)`.
+
+Two details differ from the Ethereum and Solana mapping flags:
+
+- **`@` separates the fields, not `:`.** NEAR Intents asset ids contain their own colons (`nep141:wrap.near`), so a colon-delimited format would truncate the id at its first embedded colon.
+- **The CLI signs each entry it loads** with its local development key, because it runs the require-signed posture — an unsigned entry is dropped rather than trusted. That key is allowlisted only in builds that enable the `dev-signing` feature, which `parser_cli` does and the enclave binary does not. The posture is a per-deployment choice, not a property of the parser: `parser_cli` pins require-signed, while `parser_app` registers the converter with the permissive default.
+
+Repeat the flag for each asset. A mapping that fails to parse or whose file can't be read is reported and skipped; the rest still load.
+
 ### Configuring curator keys
 
 Signer identity is resolved per origin chain from three environment variables, each a comma-separated list of hex public keys:
