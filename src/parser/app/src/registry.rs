@@ -105,7 +105,10 @@ mod tests {
     /// Builds a registry under the given policy and renders the fixture tx, for the
     /// two tests below that assert opposite outcomes for the same conversion.
     fn render_custom_foo(policy: visualsign::signing::MetadataTrustPolicy) -> String {
-        let config = crate::config::ParserConfig::new(policy);
+        let config = crate::config::ParserConfig::new(
+            policy,
+            crate::payment_verify::PaymentPolicy::Disabled,
+        );
         super::create_registry(&config)
             .convert_transaction(
                 &Chain::Ethereum,

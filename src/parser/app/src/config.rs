@@ -10,27 +10,33 @@
 
 use visualsign::signing::MetadataTrustPolicy;
 
+use crate::payment_verify::PaymentPolicy;
+
 /// Configuration a parser process is deployed with.
 #[derive(Debug, Clone)]
 pub struct ParserConfig {
     /// Trust posture for caller-supplied ABI mappings (Ethereum `abi_mappings`).
     pub abi_trust: MetadataTrustPolicy,
+    /// Whether a gateway-signed `VerifiedPaymentMarker` is required on every
+    /// `parse()` call. See [`PaymentPolicy`].
+    pub payment: PaymentPolicy,
 }
 
 impl ParserConfig {
-    /// Builds a config from an explicit ABI trust posture.
+    /// Builds a config from an explicit ABI trust posture and payment policy.
     #[must_use]
-    pub fn new(abi_trust: MetadataTrustPolicy) -> Self {
-        Self { abi_trust }
+    pub fn new(abi_trust: MetadataTrustPolicy, payment: PaymentPolicy) -> Self {
+        Self { abi_trust, payment }
     }
 
     /// The permissive posture, for callers that don't parse `--accept-unsigned-abis`
     /// / `--accept-signatures-from-pubkey` cmdline flags themselves (e.g. the
     /// non-attested dev gRPC server) but still need a `ParserConfig`. Unlike
-    /// [`Self::abi_trust_from_options`], this can't fail.
+    /// [`Self::abi_trust_from_options`], this can't fail. Payment verification is
+    /// disabled: no binary wires up `PaymentPolicy::Required` yet.
     #[must_use]
     pub fn accept_unsigned() -> Self {
-        Self::new(MetadataTrustPolicy::AcceptUnsigned)
+        Self::new(MetadataTrustPolicy::AcceptUnsigned, PaymentPolicy::Disabled)
     }
 
     /// Resolve the two mutually exclusive ABI-trust cmdline options into a posture.

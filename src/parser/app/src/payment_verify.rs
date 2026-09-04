@@ -38,6 +38,7 @@ pub(crate) fn chain_metadata_bytes(
 /// on every parse call. Built by the binary from its own config via
 /// `PaymentPolicy::from_hex`; there is no env-coupled constructor here (see
 /// the module doc above).
+#[derive(Clone)]
 pub enum PaymentPolicy {
     /// No payment enforcement. Used by local-dev / direct-gRPC callers, and
     /// by every call site today (no binary constructs `Required` yet).
