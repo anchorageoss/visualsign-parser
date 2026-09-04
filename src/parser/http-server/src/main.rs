@@ -51,6 +51,7 @@ use host_primitives::turnkey::{
     error_response, success_response,
 };
 use parser_app::config::ParserConfig;
+use parser_app::payment_verify::PaymentPolicy;
 use parser_app::routes::parse::parse;
 use qos_core::handles::EphemeralKeyHandle;
 use qos_p256::P256Pair;
@@ -187,6 +188,10 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
         chain,
         chain_metadata: wrapper.request.chain_metadata.map(ChainMetadata::from),
         include_intermediate_output: wrapper.request.include_intermediate_output,
+        // Payment enforcement isn't wired up on this binary yet (see the doc
+        // comment at the top of this file); the state's PaymentPolicy is always
+        // Disabled, so an empty marker is a no-op regardless of route version.
+        payment_marker: Vec::new(),
     };
 
     let proto_resp = match parse(&proto_req, &state.ephemeral_key, &state.config) {
@@ -321,7 +326,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .map_err(|e| format!("invalid ABI trust config: {e}"))?;
     eprintln!("caller-supplied ABI trust: {abi_trust}");
-    let config = ParserConfig::new(abi_trust);
+    // Payment enforcement is a later PR's scope on this binary (see module docs);
+    // Disabled matches every other binary until one wires PaymentPolicy::Required.
+    let config = ParserConfig::new(abi_trust, PaymentPolicy::Disabled);
 
     let handle = EphemeralKeyHandle::new(qos_core::EPHEMERAL_KEY_FILE.to_string());
     let ephemeral_key = handle
