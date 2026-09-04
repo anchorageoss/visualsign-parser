@@ -3,8 +3,8 @@
 mod account_labels;
 mod config;
 use crate::core::{
-    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    resolve_account_display,
 };
 use config::SystemConfig;
 use solana_program::system_instruction::SystemInstruction;
@@ -117,16 +117,8 @@ fn create_system_preview_layout(
             space,
             owner,
         } => {
-            let new_account = match context.account(1) {
-                Some(AccountRef::Resolved(pk)) => pk.to_string(),
-                Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
-                None => "unknown".to_string(),
-            };
-            let payer = match context.account(0) {
-                Some(AccountRef::Resolved(pk)) => pk.to_string(),
-                Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
-                None => "unknown".to_string(),
-            };
+            let new_account = resolve_account_display(context, 1);
+            let payer = resolve_account_display(context, 0);
 
             let condensed_fields = vec![
                 create_text_field("Action", "Create Account")?,

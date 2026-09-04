@@ -4,8 +4,8 @@
 
 mod config;
 use crate::core::{
-    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    resolve_account_display, resolve_program_display,
 };
 use config::UnknownProgramConfig;
 use solana_parser::{SolanaParsedInstructionData, parse_instruction_with_idl};
@@ -50,21 +50,6 @@ impl InstructionVisualizer for UnknownProgramVisualizer {
 
     fn kind(&self) -> VisualizerKind {
         VisualizerKind::Payments("UnknownProgram")
-    }
-}
-
-fn resolve_program_id_str(context: &VisualizerContext) -> String {
-    match context.program_id() {
-        ProgramRef::Resolved(pk) => pk.to_string(),
-        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
-    }
-}
-
-fn resolve_account_str(context: &VisualizerContext, position: usize) -> String {
-    match context.account(position) {
-        Some(AccountRef::Resolved(pk)) => pk.to_string(),
-        Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
-        None => "unknown".to_string(),
     }
 }
 
@@ -279,7 +264,7 @@ fn create_unknown_program_preview_layout(
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     use visualsign::field_builders::*;
 
-    let program_id_str = resolve_program_id_str(context);
+    let program_id_str = resolve_program_display(context);
     let instruction_data_hex = hex::encode(context.data());
 
     // Condensed view - just the essentials
@@ -366,7 +351,7 @@ fn try_parse_with_idl(
             if let Some(idl_account) = idl_instruction.accounts.get(index) {
                 named_accounts.insert(
                     idl_account.name.clone(),
-                    resolve_account_str(context, index),
+                    resolve_account_display(context, index),
                 );
             }
         }
