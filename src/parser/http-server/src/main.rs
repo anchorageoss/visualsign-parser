@@ -109,11 +109,24 @@ async fn health() -> StatusCode {
 // deserializes the request and discards the original bytes, so verifying
 // the signature would then have to re-serialize the parsed value to get
 // bytes back, changing key order / whitespace / unicode escaping and
-// invalidating every signature. Both routes share one body.
+// invalidating every signature. Both routes share one body. Using `Bytes`
+// instead of `Json<T>` also drops axum's built-in Content-Type check, so
+// `is_json_content_type` below restores it explicitly: without it, a
+// request sent with no Content-Type (or e.g. `text/plain`) would be parsed
+// anyway, unlike `parser_gateway`'s `Json<TurnkeyRequestWrapper>` route
+// (415 on a non-JSON media type).
 async fn parse_v1(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
+    if !is_json_content_type(&headers) {
+        return error_status(
+            &state,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "expected content-type: application/json".to_string(),
+        );
+    }
     // parse() does the full decode/charset-validation/sign path, which is
     // CPU-bound, not I/O-bound. Running it directly on the async task would
     // pin a Tokio worker thread per concurrent request, starving everything
@@ -127,9 +140,36 @@ async fn parse_v1(
 /// deployed URL stable across the stack as later PRs add enforcement here.
 async fn parse_v2(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
+    if !is_json_content_type(&headers) {
+        return error_status(
+            &state,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "expected content-type: application/json".to_string(),
+        );
+    }
     tokio::task::block_in_place(|| handle_parse(&state, &body))
+}
+
+/// Mirrors axum's `Json<T>` extractor Content-Type check (`application/json`
+/// or any `+json` suffix, parameters like `; charset=utf-8` ignored) without
+/// pulling in the `mime` crate: `parse_v1`/`parse_v2` take raw `Bytes` so
+/// that built-in check never runs.
+fn is_json_content_type(headers: &axum::http::HeaderMap) -> bool {
+    let Some(content_type) = headers.get(axum::http::header::CONTENT_TYPE) else {
+        return false;
+    };
+    let Ok(content_type) = content_type.to_str() else {
+        return false;
+    };
+    let essence = content_type.split(';').next().unwrap_or("").trim();
+    let Some((type_, subtype)) = essence.split_once('/') else {
+        return false;
+    };
+    type_.eq_ignore_ascii_case("application")
+        && (subtype.eq_ignore_ascii_case("json") || subtype.to_ascii_lowercase().ends_with("+json"))
 }
 
 /// Deserialize the envelope from the original bytes. Kept separate so the
@@ -464,11 +504,59 @@ mod tests {
         let state = test_app_state();
         let raw = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02","include_intermediate_output":false}}"#;
         let body = axum::body::Bytes::from_static(raw);
-        let (_, Json(resp)) = parse_v1(State(state), body).await;
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("application/json"),
+        );
+        let (_, Json(resp)) = parse_v1(State(state), headers, body).await;
         // Reaching a structured envelope (rather than a panic or a bare axum
         // rejection) proves the handler ran end to end through the real `Bytes`
         // extractor, not a bypassed helper.
         assert!(resp.error.is_some());
+    }
+
+    // Regression pin for the Content-Type gap a raw `Bytes` extractor opens
+    // up: without this check, valid JSON sent with no Content-Type (or e.g.
+    // `text/plain`) would be parsed anyway, unlike `parser_gateway`'s
+    // `Json<TurnkeyRequestWrapper>` route (415 on a non-JSON media type).
+    #[test]
+    fn is_json_content_type_matches_axums_json_extractor_contract() {
+        let with = |value: &str| {
+            let mut headers = axum::http::HeaderMap::new();
+            headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_str(value).unwrap(),
+            );
+            headers
+        };
+        assert!(is_json_content_type(&with("application/json")));
+        assert!(is_json_content_type(&with("APPLICATION/JSON")));
+        assert!(is_json_content_type(&with(
+            "application/json; charset=utf-8"
+        )));
+        assert!(is_json_content_type(&with("application/vnd.api+json")));
+        assert!(!is_json_content_type(&with("text/plain")));
+        assert!(!is_json_content_type(&with("application/xml")));
+        assert!(!is_json_content_type(&axum::http::HeaderMap::new()));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn parse_v1_and_v2_reject_non_json_content_type_with_boot_proof() {
+        let raw = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02","include_intermediate_output":false}}"#;
+        let body = axum::body::Bytes::from_static(raw);
+        let headers = axum::http::HeaderMap::new(); // no Content-Type at all
+
+        let (status, Json(resp)) = parse_v1(State(test_app_state()), headers.clone(), body).await;
+        assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert!(resp.error.is_some());
+        assert!(!resp.boot_proof.ephemeral_public_key_hex.is_empty());
+
+        let body = axum::body::Bytes::from_static(raw);
+        let (status, Json(resp)) = parse_v2(State(test_app_state()), headers, body).await;
+        assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert!(resp.error.is_some());
+        assert!(!resp.boot_proof.ephemeral_public_key_hex.is_empty());
     }
 
     #[test]
