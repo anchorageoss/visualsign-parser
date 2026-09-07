@@ -89,6 +89,7 @@ impl RunningServer {
         // exactly what happens when the binary was built with the `vsock` feature:
         // `EPHEMERAL_KEY_FILE` becomes the absolute in-enclave path, the key we wrote
         // under `work_dir` is invisible, and the process exits before it ever listens.
+        let mut observed_bind = false;
         for _ in 0..100 {
             if let Some(status) = child.try_wait().expect("failed to poll server status") {
                 panic!(
@@ -98,9 +99,23 @@ impl RunningServer {
                 );
             }
             if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                observed_bind = true;
                 break;
             }
             std::thread::sleep(Duration::from_millis(50));
+        }
+        // A child that stays alive without ever accepting a connection is not
+        // covered by the panic above (it never exited). Without this check,
+        // execution falls through into `wait_until_port_is_bound`, whose
+        // linear backoff can run for the ~2 hours noted above before it
+        // panics, stalling CI instead of failing fast within this loop's own
+        // ~5s budget (100 * 50ms).
+        if !observed_bind {
+            panic!(
+                "parser_http_server did not bind to port {port} within the 5s poll budget \
+                 (process is still alive). If the binary was built with --features vsock, \
+                 rebuild without it: the test relies on the dev ephemeral-key path."
+            );
         }
 
         let child: ChildWrapper = child.into();

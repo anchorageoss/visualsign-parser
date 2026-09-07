@@ -163,12 +163,21 @@ jobs:
           # is the host-side counterpart (it signs payment verification for the
           # enclave to check) and isn't a TVC pivot, so it's excluded above and
           # doesn't need a role_note case.
+          # pivot_args_example is target-specific: `pivotArgs` replaces the
+          # complete argument vector (it isn't appended to any defaults), and
+          # unlike parser_http_server (--port / HTTP_PORT default to 3000),
+          # parser_app's CLI (src/parser/app/src/cli.rs) declares --host-ip
+          # and --host-port as required tokens. Reusing parser_http_server's
+          # example for parser_app would make that pivot abort during
+          # argument parsing before /health ever answers.
           case "${TARGET_NAME}" in
             parser_app)
               role_note='The enclave-side binary that speaks gRPC over vsock to QOS. Use this as the TVC pivot when your callers reach the app via Turnkey-internal routing.'
+              pivot_args_example='["--host-ip", "<ip>", "--host-port", "<port>", "--accept-unsigned-abis"]  # --host-ip/--host-port required; swap the last arg for ["--accept-signatures-from-pubkey", "<hex>", ...] instead'
               ;;
             parser_http_server)
               role_note='The HTTP+JSON enclave-side binary intended for TVC public ingress. Cloudflare in front of `app-<uuid>.turnkey.cloud` only accepts HTTP, so this is the variant to pivot when external clients call the app directly. Routes: `GET /health` (Turnkey HTTP health check), `POST /visualsign/api/v1/parse` (open), `POST /visualsign/api/v2/parse` (currently open too, identical to v1; a follow-up PR adds `GATEWAY_SIGNING_PUBKEY_HEX`-gated enforcement here). Deploy with `healthCheckType: TVC_HEALTH_CHECK_TYPE_HTTP`, `publicIngressPort: 3000`.'
+              pivot_args_example='["--accept-unsigned-abis"]  # required; or ["--accept-signatures-from-pubkey", "<hex>", ...] instead (--port defaults to 3000, override via HTTP_PORT if needed)'
               ;;
           esac
 
@@ -215,8 +224,10 @@ jobs:
             # one ABI-trust flag reaches the binary as a CLI arg. There is no
             # env fallback by design, so it must land in pivotArgs here, or
             # the pivot crashes before /health ever answers (Healthy / Desired
-            # Replicas: 0/N).
-            echo '#   "pivotArgs": ["--accept-unsigned-abis"]  # required; or ["--accept-signatures-from-pubkey", "<hex>", ...] instead'
+            # Replicas: 0/N). pivotArgs replaces the whole argument vector, so
+            # the example is target-specific (see pivot_args_example above):
+            # parser_app additionally requires --host-ip/--host-port.
+            echo "#   \"pivotArgs\": ${pivot_args_example}"
             echo 'tvc deploy create tvc-deploy.json'
             echo '```'
           } > "$deploy_md"
