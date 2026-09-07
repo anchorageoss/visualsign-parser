@@ -177,7 +177,7 @@ jobs:
               ;;
             parser_http_server)
               role_note='The HTTP+JSON enclave-side binary intended for TVC public ingress. Cloudflare in front of `app-<uuid>.turnkey.cloud` only accepts HTTP, so this is the variant to pivot when external clients call the app directly. Routes: `GET /health` (Turnkey HTTP health check), `POST /visualsign/api/v1/parse` (open), `POST /visualsign/api/v2/parse` (currently open too, identical to v1; a follow-up PR adds `GATEWAY_SIGNING_PUBKEY_HEX`-gated enforcement here). Deploy with `healthCheckType: TVC_HEALTH_CHECK_TYPE_HTTP`, `publicIngressPort: 3000`.'
-              pivot_args_example='["--accept-unsigned-abis"]  # required; or ["--accept-signatures-from-pubkey", "<hex>", ...] instead (--port defaults to 3000, override via HTTP_PORT if needed)'
+              pivot_args_example='["--accept-unsigned-abis"]  # required; or ["--accept-signatures-from-pubkey", "<hex>", ...] instead. --port defaults to 3000; TVC has no env var injection (pivotArgs replaces the whole argument vector), so to use a different port add ["--port", "<port>"] here and update publicIngressPort below to match'
               ;;
           esac
 
