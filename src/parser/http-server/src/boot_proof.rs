@@ -16,15 +16,14 @@ use qos_p256::P256Pair;
 /// bounded-reader convention in `parser/cli-core/src/mapping_parser.rs`.
 const MAX_MANIFEST_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
-/// Errors surfaced while assembling a boot proof. `Nsm` is declared here
-/// (unused in this PR) so a later NSM-backed `BootProofSource` only has to
-/// touch its own file, not this shared enum.
+/// Errors surfaced while assembling a boot proof. The `String` payloads are
+/// read only through the derived `Debug` (see call sites' `{e:?}`
+/// formatting), which rustc's dead-code analysis doesn't count as a read.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum BootProofError {
     Manifest(String),
     Encode(String),
-    Nsm(String),
 }
 
 pub trait BootProofSource {
@@ -46,13 +45,13 @@ impl StaticBootProof {
         deployment_label: String,
     ) -> Result<Self, BootProofError> {
         let (qos_manifest_b64, qos_manifest_envelope_b64) = read_manifest_borsh_b64()?;
-        Ok(Self {
-            ephemeral_public_key_hex: qos_hex::encode(&ephemeral.public_key().to_bytes()),
+        Ok(Self::new(
+            ephemeral,
             qos_manifest_b64,
             qos_manifest_envelope_b64,
             enclave_app,
             deployment_label,
-        })
+        ))
     }
 
     /// Test-only variant of [`Self::from_enclave_files`] that reads the
@@ -69,13 +68,29 @@ impl StaticBootProof {
     ) -> Result<Self, BootProofError> {
         let (qos_manifest_b64, qos_manifest_envelope_b64) =
             read_manifest_borsh_b64_at(manifest_path)?;
-        Ok(Self {
+        Ok(Self::new(
+            ephemeral,
+            qos_manifest_b64,
+            qos_manifest_envelope_b64,
+            enclave_app,
+            deployment_label,
+        ))
+    }
+
+    fn new(
+        ephemeral: &P256Pair,
+        qos_manifest_b64: String,
+        qos_manifest_envelope_b64: String,
+        enclave_app: String,
+        deployment_label: String,
+    ) -> Self {
+        Self {
             ephemeral_public_key_hex: qos_hex::encode(&ephemeral.public_key().to_bytes()),
             qos_manifest_b64,
             qos_manifest_envelope_b64,
             enclave_app,
             deployment_label,
-        })
+        }
     }
 }
 
@@ -131,19 +146,20 @@ fn read_manifest_envelope_at(path: &Path) -> Result<ManifestEnvelope, BootProofE
 }
 
 fn read_manifest_borsh_b64() -> Result<(String, String), BootProofError> {
-    let envelope = read_manifest_envelope()?;
-    Ok((
-        encode_borsh_b64(&envelope.manifest)?,
-        encode_borsh_b64(&envelope)?,
-    ))
+    encode_manifest_borsh_b64(&read_manifest_envelope()?)
 }
 
 #[cfg(test)]
 fn read_manifest_borsh_b64_at(path: &Path) -> Result<(String, String), BootProofError> {
-    let envelope = read_manifest_envelope_at(path)?;
+    encode_manifest_borsh_b64(&read_manifest_envelope_at(path)?)
+}
+
+fn encode_manifest_borsh_b64(
+    envelope: &ManifestEnvelope,
+) -> Result<(String, String), BootProofError> {
     Ok((
         encode_borsh_b64(&envelope.manifest)?,
-        encode_borsh_b64(&envelope)?,
+        encode_borsh_b64(envelope)?,
     ))
 }
 

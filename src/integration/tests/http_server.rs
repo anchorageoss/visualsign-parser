@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use integration::{ChildWrapper, find_free_port, wait_until_port_is_bound};
 use qos_p256::P256Pair;
+use qos_test_primitives::PathWrapper;
 
 // Same Ethereum signed legacy transaction used by
 // `integration::tests::parser_ethereum_native_transfer_e2e`.
@@ -27,14 +28,22 @@ struct RunningServer {
     base_url: String,
     ephemeral_key: P256Pair,
     _child: ChildWrapper,
-    work_dir: String,
+    _work_dir: PathWrapper<'static>,
 }
 
 impl RunningServer {
     async fn start() -> Self {
         let test_id = format!("{:?}", rand::random::<u64>());
+        // Kept as a plain `String` (not `PathWrapper`) until `RunningServer`
+        // is fully constructed below: `PathWrapper`'s `Drop` deletes this
+        // directory, and Rust runs `Drop` for live locals during panic
+        // unwinding, so wrapping it this early would delete the directory
+        // (ephemeral key, manifest fixture, any server-written artifacts) on
+        // any of the `.expect()`/`panic!()` calls in the rest of this
+        // function, defeating the fail-fast check below whose whole point is
+        // to leave something to inspect after a startup failure.
         let work_dir = format!("./{test_id}-http-server-workdir");
-        let enclave_dir = format!("{work_dir}/local-enclave");
+        let enclave_dir = format!("{}/local-enclave", &*work_dir);
         fs::create_dir_all(&enclave_dir).expect("failed to create local-enclave dir");
 
         let ephemeral_key = P256Pair::generate().expect("failed to generate ephemeral key");
@@ -67,16 +76,19 @@ impl RunningServer {
             .arg("--port")
             .arg(port.to_string())
             .arg("--accept-unsigned-abis")
-            .current_dir(&work_dir)
+            .current_dir(&*work_dir)
             .spawn()
             .expect("failed to spawn parser_http_server");
 
         // Fail fast if the server died instead of binding. `wait_until_port_is_bound`
-        // polls forever, so without this check a server that panics at startup hangs
-        // the test run rather than failing it. That is exactly what happens when the
-        // binary was built with the `vsock` feature: `EPHEMERAL_KEY_FILE` becomes the
-        // absolute in-enclave path, the key we wrote under `work_dir` is invisible,
-        // and the process exits before it ever listens.
+        // only times out after its internal wait loop's linear backoff runs out, a
+        // wall-clock ceiling on the order of two hours (not the 90s that the loop's
+        // upper bound alone would suggest), with a generic panic message; without
+        // this check a server that panics at startup would still fail the test,
+        // just much slower and without saying why. That is
+        // exactly what happens when the binary was built with the `vsock` feature:
+        // `EPHEMERAL_KEY_FILE` becomes the absolute in-enclave path, the key we wrote
+        // under `work_dir` is invisible, and the process exits before it ever listens.
         for _ in 0..100 {
             if let Some(status) = child.try_wait().expect("failed to poll server status") {
                 panic!(
@@ -101,14 +113,8 @@ impl RunningServer {
             base_url: format!("http://127.0.0.1:{port}"),
             ephemeral_key,
             _child: child,
-            work_dir,
+            _work_dir: work_dir.into(),
         }
-    }
-}
-
-impl Drop for RunningServer {
-    fn drop(&mut self) {
-        drop(fs::remove_dir_all(&self.work_dir));
     }
 }
 
