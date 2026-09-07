@@ -466,17 +466,16 @@ fn validate_signer_pubkey(hex_str: &str) -> Result<()> {
         .strip_prefix("0x")
         .or_else(|| hex_str.strip_prefix("0X"))
         .unwrap_or(hex_str);
-    let valid_len = matches!(stripped.len(), 66 | 130);
-    let valid_prefix = match stripped.len() {
-        // 05 is SEC1's "compact" tag (derived y-coordinate); `canonical_pubkey_from_hex`,
-        // what parser_app actually runs on this key, accepts it same as 02/03/04.
-        66 => {
-            stripped.starts_with("02") || stripped.starts_with("03") || stripped.starts_with("05")
-        }
-        130 => stripped.starts_with("04"),
-        _ => false,
+    // 05 is SEC1's "compact" tag (derived y-coordinate); `canonical_pubkey_from_hex`,
+    // what parser_app actually runs on this key, accepts it same as 02/03/04.
+    let tag = match stripped.len() {
+        66 if stripped.starts_with("02") => Some("02 (compressed)"),
+        66 if stripped.starts_with("03") => Some("03 (compressed)"),
+        66 if stripped.starts_with("05") => Some("05 (compact)"),
+        130 if stripped.starts_with("04") => Some("04 (uncompressed)"),
+        _ => None,
     };
-    if !(valid_len && valid_prefix && stripped.bytes().all(|b| b.is_ascii_hexdigit())) {
+    if tag.is_none() || !stripped.bytes().all(|b| b.is_ascii_hexdigit()) {
         bail!(
             "--accept-signatures-from-pubkey must be a 33-byte (02/03/05-prefixed) or \
              65-byte (04-prefixed) hex secp256k1 public key, got {}",
@@ -485,21 +484,12 @@ fn validate_signer_pubkey(hex_str: &str) -> Result<()> {
     }
 
     let bytes = decode_hex_bytes(stripped)?;
-    let key_len = bytes.len();
     if k256::PublicKey::from_sec1_bytes(&bytes).is_err() {
-        let tag = if key_len == 33 {
-            match bytes.first() {
-                Some(0x02) => "02 (compressed)",
-                Some(0x03) => "03 (compressed)",
-                Some(0x05) => "05 (compact)",
-                _ => "unknown",
-            }
-        } else {
-            "04 (uncompressed)"
-        };
         bail!(
-            "--accept-signatures-from-pubkey is well-formed hex (SEC1 {tag}, {key_len} bytes) \
+            "--accept-signatures-from-pubkey is well-formed hex (SEC1 {}, {} bytes) \
              but does not decode to a point on the secp256k1 curve, got {}",
+            tag.unwrap_or("unknown"),
+            bytes.len(),
             truncate_for_error(hex_str)
         );
     }
@@ -583,7 +573,7 @@ mod tests {
         Cli::command().debug_assert();
     }
 
-    fn deploy_args(extra: &[&str]) -> DeployArgs {
+    fn deploy_argv(extra: &[&str]) -> Vec<String> {
         let digest = "a".repeat(64);
         let base = [
             "tvc-deploy",
@@ -597,37 +587,21 @@ mod tests {
             "--operator-id",
             "op",
         ];
-        let argv: Vec<String> = base
-            .iter()
+        base.iter()
             .map(|s| (*s).to_string())
             .chain(extra.iter().map(|s| (*s).to_string()))
-            .collect();
-        match Cli::parse_from(argv).command {
+            .collect()
+    }
+
+    fn deploy_args(extra: &[&str]) -> DeployArgs {
+        match Cli::parse_from(deploy_argv(extra)).command {
             Command::Deploy(args) => args,
             _ => panic!("expected the deploy subcommand"),
         }
     }
 
     fn deploy_error_kind(extra: &[&str]) -> clap::error::ErrorKind {
-        let digest = "a".repeat(64);
-        let base = [
-            "tvc-deploy",
-            "deploy",
-            "--app-id",
-            "app",
-            "--image-url",
-            "img",
-            "--expected-digest",
-            &digest,
-            "--operator-id",
-            "op",
-        ];
-        let argv: Vec<String> = base
-            .iter()
-            .map(|s| (*s).to_string())
-            .chain(extra.iter().map(|s| (*s).to_string()))
-            .collect();
-        Cli::try_parse_from(argv)
+        Cli::try_parse_from(deploy_argv(extra))
             .map(|_| ())
             .expect_err("these args must not parse")
             .kind()
@@ -777,10 +751,7 @@ Deployment: deploy-123
     #[test]
     fn validate_signer_pubkey_compact_through_k256() {
         let compact = real_compact_pubkey_hex();
-        let bytes = (0..compact.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&compact[i..i + 2], 16).expect("valid hex"))
-            .collect::<Vec<u8>>();
+        let bytes = decode_hex_bytes(&compact).expect("valid hex");
         assert_eq!(bytes[0], 0x05, "compact tag");
         assert_eq!(bytes.len(), 33, "compact is 33 bytes");
         k256::PublicKey::from_sec1_bytes(&bytes).expect("k256 must accept SEC1 compact (05) form");
