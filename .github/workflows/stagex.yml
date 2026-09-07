@@ -210,6 +210,13 @@ jobs:
             echo "#   \"expectedPivotDigest\": \"${digest}\""
             echo "#   \"qosVersion\": \"${qos_version}\""
             echo '#   "appId": "<env-specific>"'
+            # Both targets in this case statement fail closed at startup
+            # (see CLAUDE.md's "Deploy-Time ABI Trust Posture") unless exactly
+            # one ABI-trust flag reaches the binary as a CLI arg. There is no
+            # env fallback by design, so it must land in pivotArgs here, or
+            # the pivot crashes before /health ever answers (Healthy / Desired
+            # Replicas: 0/N).
+            echo '#   "pivotArgs": ["--accept-unsigned-abis"]  # required; or ["--accept-signatures-from-pubkey", "<hex>", ...] instead'
             echo 'tvc deploy create tvc-deploy.json'
             echo '```'
           } > "$deploy_md"
