@@ -136,9 +136,6 @@ fn parse_envelope(body: &[u8]) -> Result<TurnkeyRequestWrapper, serde_json::Erro
     serde_json::from_slice(body)
 }
 
-/// Builds the Turnkey-shaped error envelope shared by every non-2xx response
-/// in this binary: `handle_parse`'s own error arms, the 413 rewrite in
-/// `envelope_body_limit_rejection`, and the 404/405 fallbacks below.
 fn error_status(
     state: &AppState,
     status: StatusCode,
@@ -433,19 +430,12 @@ mod tests {
         );
     }
 
-    // Handler-level regression pin, complementing the test above: that one only
-    // calls `parse_envelope` directly and never touches `parse_v1`/`parse_v2`'s
-    // own parameter type, so it would keep passing even if a future change swapped
-    // `body: axum::body::Bytes` for `body: Json<TurnkeyRequestWrapper>` there - axum's
-    // `Json` extractor deserializes and re-serializes before the handler body runs,
-    // which is exactly the byte-changing round trip the seam exists to prevent (see
-    // the module doc on `parse_v1`). Passing a `Bytes` value as the `body` argument
-    // here means that swap would fail to *compile*, catching the regression at build
-    // time rather than needing a runtime assertion this test has no other way to make.
-    // `block_in_place` (used inside `parse_v1`) requires the multi-threaded
-    // runtime; the current-thread flavor other tests in this module use
-    // panics with "can call blocking only when running on the multi-threaded
-    // runtime".
+    // Regression pin complementing the test above: passing `body: Bytes` here
+    // means a future swap to `Json<TurnkeyRequestWrapper>` fails to compile,
+    // catching the byte-reserialization regression (see `parse_v1`'s module
+    // doc) at build time instead of needing a runtime assertion. Needs the
+    // multi-threaded runtime: `block_in_place` panics on the current-thread
+    // flavor other tests in this module use.
     #[tokio::test(flavor = "multi_thread")]
     async fn parse_v1_handler_extracts_raw_bytes_not_a_json_type() {
         let manifest_path = boot_proof::tests::write_test_manifest_fixture();
@@ -485,7 +475,7 @@ mod tests {
         .expect("test manifest fixture should be readable");
         let bp = source.boot_proof();
         assert_eq!(bp.ephemeral_public_key_hex, expected_hex);
-        // A later PR fills the doc; until then it is explicitly empty, never a fake.
+        // Explicitly empty until attestation is wired up; never a fake.
         assert!(bp.aws_attestation_doc_b64.is_empty());
         let value = serde_json::to_value(&bp).unwrap();
         assert_eq!(value.as_object().unwrap().len(), 6);

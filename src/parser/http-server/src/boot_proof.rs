@@ -1,8 +1,8 @@
 //! Where a response's `bootProof` comes from.
 //!
-//! PR 3 ships [`StaticBootProof`] (real ephemeral key + real manifest bytes,
-//! empty attestation doc); a later PR adds an NSM-backed implementation that
-//! fills the attestation doc in.
+//! [`StaticBootProof`] provides a real ephemeral key and real manifest bytes
+//! with an empty attestation doc; a later NSM-backed implementation fills
+//! the attestation doc in.
 
 use std::io::Read as _;
 use std::path::Path;
@@ -27,7 +27,6 @@ pub enum BootProofError {
     Nsm(String),
 }
 
-/// Where a response's `bootProof` comes from.
 pub trait BootProofSource {
     fn boot_proof(&self) -> TurnkeyBootProof;
 }
@@ -83,9 +82,8 @@ impl StaticBootProof {
 impl BootProofSource for StaticBootProof {
     fn boot_proof(&self) -> TurnkeyBootProof {
         TurnkeyBootProof {
-            // Filled by the NSM-backed source in a later PR. Empty, never
-            // faked: a strict verifier must reject an unattested response
-            // outright.
+            // Empty until an NSM-backed source lands; never faked, so a
+            // strict verifier rejects an unattested response outright.
             aws_attestation_doc_b64: String::new(),
             qos_manifest_b64: self.qos_manifest_b64.clone(),
             qos_manifest_envelope_b64: self.qos_manifest_envelope_b64.clone(),
