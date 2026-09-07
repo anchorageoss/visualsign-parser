@@ -430,14 +430,9 @@ mod tests {
         );
     }
 
-    // Regression pin complementing the test above: passing `body: Bytes` here
-    // means a future swap to `Json<TurnkeyRequestWrapper>` fails to compile,
-    // catching the byte-reserialization regression (see `parse_v1`'s module
-    // doc) at build time instead of needing a runtime assertion. Needs the
-    // multi-threaded runtime: `block_in_place` panics on the current-thread
-    // flavor other tests in this module use.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn parse_v1_handler_extracts_raw_bytes_not_a_json_type() {
+    /// Shared by tests that only need a working `AppState` and don't care
+    /// about its specific key/manifest values.
+    fn test_app_state() -> AppState {
         let manifest_path = boot_proof::tests::write_test_manifest_fixture();
         let pair = qos_p256::P256Pair::generate().unwrap();
         let boot_proof = StaticBootProof::from_enclave_files_at(
@@ -447,11 +442,22 @@ mod tests {
             &manifest_path,
         )
         .expect("test manifest fixture should be readable");
-        let state = AppState {
+        AppState {
             ephemeral_key: Arc::new(pair),
             boot_proof: Arc::new(boot_proof),
             config: ParserConfig::accept_unsigned(),
-        };
+        }
+    }
+
+    // Regression pin complementing the test above: passing `body: Bytes` here
+    // means a future swap to `Json<TurnkeyRequestWrapper>` fails to compile,
+    // catching the byte-reserialization regression (see `parse_v1`'s module
+    // doc) at build time instead of needing a runtime assertion. Needs the
+    // multi-threaded runtime: `block_in_place` panics on the current-thread
+    // flavor other tests in this module use.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn parse_v1_handler_extracts_raw_bytes_not_a_json_type() {
+        let state = test_app_state();
         let raw = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02","include_intermediate_output":false}}"#;
         let body = axum::body::Bytes::from_static(raw);
         let (_, Json(resp)) = parse_v1(State(state), body).await;
@@ -494,20 +500,7 @@ mod tests {
     // currently returns that code.
     #[tokio::test]
     async fn fallbacks_carry_their_own_fixed_message_and_boot_proof() {
-        let manifest_path = boot_proof::tests::write_test_manifest_fixture();
-        let pair = qos_p256::P256Pair::generate().unwrap();
-        let boot_proof = StaticBootProof::from_enclave_files_at(
-            &pair,
-            "visualsign-parser".to_string(),
-            "test".to_string(),
-            &manifest_path,
-        )
-        .expect("test manifest fixture should be readable");
-        let state = AppState {
-            ephemeral_key: Arc::new(pair),
-            boot_proof: Arc::new(boot_proof),
-            config: ParserConfig::accept_unsigned(),
-        };
+        let state = test_app_state();
 
         let not_found = not_found_fallback(State(state.clone())).await;
         assert_eq!(not_found.status(), StatusCode::NOT_FOUND);
