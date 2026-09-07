@@ -111,6 +111,11 @@ impl RunningServer {
         // panics, stalling CI instead of failing fast within this loop's own
         // ~5s budget (100 * 50ms).
         if !observed_bind {
+            // `child` is still a raw `std::process::Child` here (not yet wrapped
+            // in `ChildWrapper`), and `std::process::Child`'s `Drop` does not
+            // kill the process. Without an explicit kill, panicking here would
+            // unwind past this still-alive server and leak it on the runner.
+            let _ = child.kill();
             panic!(
                 "parser_http_server did not bind to port {port} within the 5s poll budget \
                  (process is still alive). If the binary was built with --features vsock, \
