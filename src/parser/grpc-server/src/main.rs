@@ -80,7 +80,13 @@ fn abi_trust_from_args() -> Result<MetadataTrustPolicy, String> {
                 }
                 signer_pubkeys.push(key);
             }
-            other => return Err(format!("unexpected argument '{other}'; {USAGE}")),
+            other => {
+                if let Some(key) = other.strip_prefix("--accept-signatures-from-pubkey=") {
+                    signer_pubkeys.push(key.to_string());
+                } else {
+                    return Err(format!("unexpected argument '{other}'; {USAGE}"));
+                }
+            }
         }
     }
 
