@@ -1,7 +1,7 @@
 //! Parsing endpoint for `VisualSign`
 
 use crate::{
-    chain_conversion, errors::GrpcError, payment_verify, payment_verify::PaymentPolicy,
+    chain_conversion, config::ParserConfig, errors::GrpcError, payment_verify,
     registry::create_registry,
 };
 use generated::parser::Chain as ProtoChain;
@@ -28,10 +28,10 @@ use visualsign::vsptrait::VisualSignOptions;
 pub fn parse(
     parse_request: &ParseRequest,
     ephemeral_key: &P256Pair,
-    policy: &PaymentPolicy,
+    config: &ParserConfig,
 ) -> Result<ParseResponse, GrpcError> {
-    payment_verify::verify(parse_request, policy)?;
-    let registry = create_registry();
+    payment_verify::verify(parse_request, &config.payment)?;
+    let registry = create_registry(config);
     parse_with_registry(parse_request, ephemeral_key, &registry)
 }
 
@@ -165,6 +165,7 @@ fn signing_digest_bytes(payload: &ParsedTransactionPayload) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::payment_verify::PaymentPolicy;
     use crate::payment_verify::test_support::{make_vpm, sign_with};
     use generated::parser::{Abi, ChainMetadata, EthereumMetadata, chain_metadata};
     use qos_p256::sign::P256SignPair;
@@ -479,7 +480,9 @@ mod tests {
         req.payment_marker = sign_with(&attacker_pair, vpm); // signed by someone else
 
         let ephemeral_key = P256Pair::generate().expect("generate ephemeral key");
-        let err = parse(&req, &ephemeral_key, &policy).expect_err(
+        let mut config = ParserConfig::accept_unsigned();
+        config.payment = policy;
+        let err = parse(&req, &ephemeral_key, &config).expect_err(
             "parse() must reject a payment marker forged by a different signer, even though \
              the marker's claimed gateway_pubkey_hex matches the pinned key, before ever \
              reaching the transaction converter registry",

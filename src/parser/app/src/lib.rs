@@ -11,6 +11,8 @@
 
 pub mod cli;
 
+pub mod config;
+
 pub mod host;
 
 pub mod service;

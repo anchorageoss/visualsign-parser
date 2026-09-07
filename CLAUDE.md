@@ -95,6 +95,31 @@ Workspace-level clippy lints are enforced in `src/Cargo.toml`:
 
 Exceptions: test modules use `#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`. Build scripts allow `unwrap_used`. Some crates have temporary crate-level exemptions with `TODO(#231)` pending cleanup.
 
+### Deploy-Time ABI Trust Posture
+
+Whether the parser honours caller-supplied Ethereum ABI mappings that carry no signature
+is a deploy-time choice, not a per-request one. `parser_app` requires exactly one of:
+
+- `--accept-unsigned-abis` — unsigned `abi_mappings` are registered. A signature that
+  *is* present must still verify (integrity), but its signer is not checked against an
+  allowlist.
+- `--accept-signatures-from-pubkey <hex>` (repeatable) — every mapping must be signed
+  by one of the given secp256k1 keys; unsigned or otherwise-signed mappings are dropped.
+
+This posture only governs Ethereum `abi_mappings`. Solana `idl_mappings` go through a
+separate, unsigned-accepting path unaffected by either flag: unsigned IDLs are always
+accepted, and the `VISUALSIGN_SOL_IDL_SIGNERS` env var only allowlists signers for
+IDLs that *are* signed.
+
+The intended end state is for the flags to land in the TVC deployment manifest's
+`pivotArgs` (see `tools/tvc-deploy`), so a signer can verify which posture a deployment
+runs out of band; wiring `tools/tvc-deploy` to emit them has not landed yet and is
+tracked as a follow-up. Represented in code by `visualsign::signing::MetadataTrustPolicy`,
+threaded through `parser_app::config::ParserConfig` into
+`EthereumVisualSignConverter::with_policy`. `parser_grpc_server` currently hardcodes
+accept-unsigned (non-attested dev server); exposing the same flags there is a follow-up.
+`parser_cli` runs require-signed against the local dev key it signs its own ABI files with.
+
 ### Design Decisions
 
 - **Deterministic serialization everywhere** — BTreeMap for proto maps, `DeterministicOrdering` trait, alphabetical field ordering for stable metadata hashing (borsh encoding)

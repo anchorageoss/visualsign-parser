@@ -62,10 +62,11 @@ pub struct ParseRequest {
     /// the gateway's P256 signature over it. Note the wrapper, not the bare
     /// VerifiedPaymentMarker: an external signer that emits the inner struct
     /// produces bytes the enclave cannot deserialize. parser_app verifies this
-    /// before processing when payment enforcement is on (PaymentPolicy::Required);
-    /// today every call site passes PaymentPolicy::Disabled, so verification is a
-    /// no-op and this field is not yet enforced. Empty for the open v1 routes and
-    /// for local-dev / gRPC-direct callers. Field 5, not 4: field 4 shipped as
+    /// before processing when payment enforcement is on (ParserConfig.payment ==
+    /// PaymentPolicy::Required); every deployed binary configures
+    /// PaymentPolicy::Disabled today, so verification is a no-op and this field
+    /// is not yet enforced. Empty for the open v1 routes and for local-dev /
+    /// gRPC-direct callers. Field 5, not 4: field 4 shipped as
     /// include_intermediate_output (#414) while payment_marker was still on an
     /// unmerged branch, so payment_marker moved rather than breaking the wire.
     /// Size bound: parser_app rejects a payment_marker over 8 KiB on length
@@ -74,7 +75,10 @@ pub struct ParseRequest {
     /// well under 1 KiB, so the limit is headroom, not a constraint a signer
     /// has to plan around. The server's whole-request gRPC cap (25MB,
     /// host_primitives::GRPC_MAX_RECV_MSG_SIZE) still applies on top, as it
-    /// does to every other field on this message.
+    /// does to every other field on this message. The signature's exact wire
+    /// contract (double SHA-256 pre-hash, raw 64-byte r||s, no DER) is pinned
+    /// against an independently-generated vector in
+    /// parser_app::payment_verify::tests::required_policy_accepts_independently_generated_signature_vector.
     #[prost(bytes = "vec", tag = "5")]
     #[cfg_attr(feature = "serde_derive", serde(default))]
     pub payment_marker: ::prost::alloc::vec::Vec<u8>,
