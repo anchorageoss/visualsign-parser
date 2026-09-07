@@ -105,9 +105,11 @@ async fn health() -> StatusCode {
 }
 
 // Handlers take raw bytes, never `Json<T>`. A later PR verifies an X-Stamp
-// signature over the exact request bytes; a `Json<T>` extractor re-serializes
-// before the handler body runs, changing key order / whitespace / unicode
-// escaping and invalidating every signature. Both routes share one body.
+// signature over the exact request bytes; a `Json<T>` extractor only
+// deserializes the request and discards the original bytes, so verifying
+// the signature would then have to re-serialize the parsed value to get
+// bytes back, changing key order / whitespace / unicode escaping and
+// invalidating every signature. Both routes share one body.
 async fn parse_v1(
     State(state): State<AppState>,
     body: axum::body::Bytes,
@@ -413,10 +415,12 @@ mod tests {
     #[test]
     fn envelope_is_parsed_from_raw_bytes_not_reserialized() {
         // A later PR verifies an X-Stamp signature over the exact request
-        // bytes. If a handler ever takes `Json<T>` and re-serializes, the
-        // bytes change (key order, whitespace, unicode escaping) and every
-        // stamp fails. Locking the seam here means that PR adds one call and
-        // no signature churn.
+        // bytes. If a handler ever takes `Json<T>`, the extractor discards
+        // the original bytes on deserialization, so verification would have
+        // to re-serialize the parsed value to get bytes back, which changes
+        // key order, whitespace, unicode escaping and makes every stamp
+        // fail. Locking the seam here means that PR adds one call and no
+        // signature churn.
         let raw = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02","include_intermediate_output":false}}"#;
         let parsed = parse_envelope(raw).unwrap();
         assert_eq!(parsed.request.chain, "CHAIN_ETHEREUM");
