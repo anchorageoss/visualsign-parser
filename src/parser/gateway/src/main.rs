@@ -1,223 +1,22 @@
-// TODO(#231): Remove these exemptions and fix violations in a follow-up PR.
-#![allow(clippy::unwrap_used)]
+// TODO(#231): Remove this exemption and fix violations in a follow-up PR.
+// unwrap_used and panic have no remaining non-test call sites in this crate;
+// only the SIGTERM-handler setup below still relies on expect_used.
 #![allow(clippy::expect_used)]
-#![allow(clippy::panic)]
 
 use axum::{
-    Json, Router,
+    Router,
     extract::DefaultBodyLimit,
-    extract::State,
-    http::StatusCode,
     routing::{get, post},
 };
-use base64::Engine as _;
-use generated::grpc::health::v1::{
-    HealthCheckRequest, health_check_response::ServingStatus, health_client::HealthClient,
-};
-use generated::parser::{
-    Chain, ChainMetadata, ParseRequest, SignatureScheme, parser_service_client::ParserServiceClient,
-};
+use generated::grpc::health::v1::health_client::HealthClient;
+use generated::parser::parser_service_client::ParserServiceClient;
 use generated::tonic;
 use host_primitives::GRPC_MAX_RECV_MSG_SIZE;
-use host_primitives::turnkey::{
-    TurnkeyBootProof, TurnkeyPayload, TurnkeyRequestWrapper, TurnkeyResponseWrapper,
-    TurnkeySignature, error_response as turnkey_error_response,
-    success_response as turnkey_success_response,
-};
+use parser_gateway::attestation::AttestationVerifier;
+use parser_gateway::auth::BearerToken;
+use parser_gateway::x402_config::X402Config;
 use std::net::SocketAddr;
-use std::time::Duration;
-
-/// Stable mock used in every gateway response. The base64 sentinels decode to
-/// "TURNKEY_GATEWAY_MOCK_BOOT_PROOF" and "TURNKEY_GATEWAY_MOCK_QOS_MANIFEST*" —
-/// pure placeholders, not signed attestation. Real attestation verifiers will
-/// reject them. Kept stable so downstream test fixtures can pin against them.
-const MOCK_BOOT_PROOF_AWS_DOC: &str = "VFVSTktFWV9HQVRFV0FZX01PQ0tfQk9PVF9QUk9PRg==";
-const MOCK_BOOT_PROOF_QOS_MANIFEST: &str = "VFVSTktFWV9HQVRFV0FZX01PQ0tfUU9TX01BTklGRVNU";
-const MOCK_BOOT_PROOF_QOS_MANIFEST_ENV: &str =
-    "VFVSTktFWV9HQVRFV0FZX01PQ0tfUU9TX01BTklGRVNUX0VOVkVMT1BF";
-const MOCK_BOOT_PROOF_EPHEMERAL_PK: &str =
-    "020000000000000000000000000000000000000000000000000000000000000001";
-
-fn mock_boot_proof() -> TurnkeyBootProof {
-    TurnkeyBootProof {
-        aws_attestation_doc_b64: MOCK_BOOT_PROOF_AWS_DOC.to_string(),
-        qos_manifest_b64: MOCK_BOOT_PROOF_QOS_MANIFEST.to_string(),
-        qos_manifest_envelope_b64: MOCK_BOOT_PROOF_QOS_MANIFEST_ENV.to_string(),
-        ephemeral_public_key_hex: MOCK_BOOT_PROOF_EPHEMERAL_PK.to_string(),
-        enclave_app: "visualsign-parser".to_string(),
-        deployment_label: "local-mock".to_string(),
-    }
-}
-
-/// Gateway-local error envelope: always the stable mock boot proof. The gateway
-/// only runs in non-TEE local dev and CI, so it never has a real one.
-fn error_response(msg: String) -> TurnkeyResponseWrapper {
-    turnkey_error_response(msg, mock_boot_proof())
-}
-
-type GrpcClient = ParserServiceClient<tonic::transport::Channel>;
-
-#[derive(Clone)]
-struct AppState {
-    grpc_client: GrpcClient,
-    health_client: HealthClient<tonic::transport::Channel>,
-}
-
-const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
-const PARSE_TIMEOUT: Duration = Duration::from_secs(30);
-
-async fn health_handler(
-    State(AppState {
-        mut health_client, ..
-    }): State<AppState>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    let request = tonic::Request::new(HealthCheckRequest {
-        service: health_check::DEFAULT_SERVICE.to_string(),
-    });
-    match tokio::time::timeout(HEALTH_CHECK_TIMEOUT, health_client.check(request)).await {
-        Ok(Ok(resp)) => {
-            let status = resp.into_inner().status;
-            if status == ServingStatus::Serving as i32 {
-                (StatusCode::OK, Json(serde_json::json!({"status": "ok"})))
-            } else {
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(
-                        serde_json::json!({"status": "unhealthy", "reason": "grpc service not serving"}),
-                    ),
-                )
-            }
-        }
-        Ok(Err(e)) => {
-            eprintln!("health check failed: {e}");
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({"status": "unhealthy", "reason": "backend unavailable"})),
-            )
-        }
-        Err(_) => {
-            eprintln!("health check timed out after {HEALTH_CHECK_TIMEOUT:?}");
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(
-                    serde_json::json!({"status": "unhealthy", "reason": "health check timed out"}),
-                ),
-            )
-        }
-    }
-}
-
-async fn parse_handler(
-    State(AppState {
-        mut grpc_client, ..
-    }): State<AppState>,
-    Json(wrapper): Json<TurnkeyRequestWrapper>,
-) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
-    let chain = match Chain::from_str_name(&wrapper.request.chain) {
-        Some(c) => c as i32,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(error_response(format!(
-                    "unknown chain: {}",
-                    wrapper.request.chain
-                ))),
-            );
-        }
-    };
-
-    let request = tonic::Request::new(ParseRequest {
-        unsigned_payload: wrapper.request.unsigned_payload,
-        chain,
-        chain_metadata: wrapper.request.chain_metadata.map(ChainMetadata::from),
-        include_intermediate_output: wrapper.request.include_intermediate_output,
-        // This local-dev/CI gateway never wraps a real enclave and doesn't
-        // forward an x402 payment marker; the production x402 gateway is
-        // out of this repo.
-        payment_marker: vec![],
-    });
-
-    let response = match tokio::time::timeout(PARSE_TIMEOUT, grpc_client.parse(request)).await {
-        Ok(Ok(r)) => r.into_inner(),
-        Ok(Err(e)) => {
-            let (http_status, msg) = match e.code() {
-                tonic::Code::InvalidArgument => (StatusCode::BAD_REQUEST, e.message().to_string()),
-                tonic::Code::NotFound => (StatusCode::NOT_FOUND, e.message().to_string()),
-                _ => {
-                    eprintln!("gRPC error: {e}");
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "internal error".to_string(),
-                    )
-                }
-            };
-            return (http_status, Json(error_response(msg)));
-        }
-        Err(_) => {
-            eprintln!("parse RPC timed out after {PARSE_TIMEOUT:?}");
-            return (
-                StatusCode::GATEWAY_TIMEOUT,
-                Json(error_response("request timed out".to_string())),
-            );
-        }
-    };
-
-    let parsed_tx = match response.parsed_transaction {
-        Some(tx) => tx,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response(
-                    "missing parsed_transaction in response".to_string(),
-                )),
-            );
-        }
-    };
-
-    let payload = match parsed_tx.payload {
-        Some(p) => p,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(error_response("missing payload in response".to_string())),
-            );
-        }
-    };
-
-    let signature = parsed_tx.signature.map(|sig| {
-        let scheme = match sig.scheme {
-            x if x == SignatureScheme::TurnkeyP256EphemeralKey as i32 => {
-                SignatureScheme::TurnkeyP256EphemeralKey
-            }
-            _ => SignatureScheme::Unspecified,
-        };
-        let scheme_str = scheme.as_str_name();
-        TurnkeySignature {
-            message: sig.message,
-            public_key: sig.public_key,
-            scheme: scheme_str.to_string(),
-            signature: sig.signature,
-        }
-    });
-
-    (
-        StatusCode::OK,
-        Json(turnkey_success_response(
-            mock_boot_proof(),
-            TurnkeyPayload {
-                signable_payload: payload.parsed_payload,
-                metadata_digest: payload.metadata_digest,
-                input_payload_digest: payload.input_payload_digest,
-                // base64 of an empty Vec is "", which serde omits (see
-                // skip_serializing_if) so the non-intermediate response
-                // is unchanged.
-                intermediate_output: base64::engine::general_purpose::STANDARD
-                    .encode(&payload.intermediate_output),
-            },
-            signature,
-        )),
-    )
-}
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -240,30 +39,228 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_encoding_message_size(GRPC_MAX_RECV_MSG_SIZE);
     let health_client = HealthClient::new(channel);
 
-    let state = AppState {
-        grpc_client,
-        health_client,
+    // Distinguish "unset" from "set but not valid UTF-8" the same way the
+    // bearer-token loader does (see auth.rs::read_env_var): collapsing both
+    // into the `local` default would let a malformed deployment env silently
+    // bypass the non-local attestation requirement below instead of failing
+    // startup loudly.
+    let profile_str = match std::env::var("X402_PROFILE") {
+        Ok(v) => v,
+        Err(std::env::VarError::NotPresent) => "local".to_string(),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            eprintln!("FATAL: X402_PROFILE contains invalid (non-UTF-8) bytes");
+            std::process::exit(1);
+        }
+    };
+    let is_local_profile = profile_str == "local";
+
+    // Load x402 config up front (before the attestation decision below) so
+    // that decision can account for whether this profile could actually
+    // settle real money, not just its declared name. `X402_PROFILE=local`
+    // can still be pointed at a mainnet network/payTo and an external,
+    // non-loopback facilitator; in that case, treating it as "no verifier
+    // needed" (the `local` default) would let real USDC settle while
+    // forwarding responses with zero attestation. Config errors here are
+    // handled again, identically, by the soft-fail block below -- this
+    // first load only feeds the attestation-requirement check.
+    //
+    // Also require the config to actually build (e.g. a valid
+    // (payTo, network) combination): `build_middleware` is the real
+    // arbiter of whether x402 will be mounted at all, and the soft-fail
+    // block below disables x402 (keeping v1/health up) on the same
+    // failure. A config that can't build can't settle anything, so it
+    // must not trip the fail-closed attestation requirement.
+    let x402_result = X402Config::from_env();
+    let x402_can_settle_for_real = match &x402_result {
+        Ok(cfg) => cfg.build_middleware().is_ok() && x402_targets_real_settlement(cfg),
+        Err(_) => false,
     };
 
-    // Mount the same handler under both v1 and v2 URLs for local parity with
-    // the production Turnkey visualsign API, which serves /api/v1/parse and
-    // /api/v2/parse from the same backend. The response shape already carries
-    // both v1 fields (signablePayload) and v2 fields (metadataDigest,
-    // inputPayloadDigest) since #287, so a single handler covers both.
-    let app = Router::new()
-        .route("/health", get(health_handler))
-        .route("/visualsign/api/v1/parse", post(parse_handler))
-        .route("/visualsign/api/v2/parse", post(parse_handler))
-        .layer(DefaultBodyLimit::max(GRPC_MAX_RECV_MSG_SIZE))
+    // Build the TVC attestation verifier. The pinned pubkey is provisioned
+    // out-of-band (Turnkey TVC plants it as a launch arg) and must match the
+    // enclave's ephemeral key. Fail-closed whenever the resolved x402 config
+    // can settle real payments: a gateway without a pinned verifier would
+    // happily forward (and settle for) unattested responses.
+    let attestation: Option<Arc<AttestationVerifier>> = match AttestationVerifier::from_env() {
+        Ok(Some(v)) => {
+            let hex = v.pinned_hex();
+            let head = &hex[..8.min(hex.len())];
+            let tail = &hex[hex.len().saturating_sub(8)..];
+            println!("x402 attestation: pinned TVC pubkey {head}..{tail}");
+            Some(Arc::new(v))
+        }
+        Ok(None) => {
+            if is_local_profile && !x402_can_settle_for_real {
+                eprintln!(
+                    "WARNING: TVC_DEMO_PINNED_PUBKEY_HEX not set; gateway will not attest \
+                     parse responses (allowed because X402_PROFILE=local and the resolved \
+                     x402 config is loopback/testnet only)"
+                );
+                None
+            } else {
+                eprintln!(
+                    "FATAL: TVC_DEMO_PINNED_PUBKEY_HEX (or _FILE) is required for \
+                     X402_PROFILE={profile_str}{}",
+                    if is_local_profile {
+                        " because the resolved facilitator/network can settle real payments"
+                    } else {
+                        ""
+                    }
+                );
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("FATAL: invalid TVC verifier pubkey configuration: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let state = parser_gateway::state::AppState {
+        grpc_client,
+        health_client,
+        attestation,
+    };
+
+    // Caps the public ingress body, matching the gRPC backend's own ceiling
+    // (`GRPC_MAX_RECV_MSG_SIZE`) so there's one source of truth for "how big
+    // a request this gateway will ever forward".
+    //
+    // This does NOT need to be smaller to protect the x402-gated route from
+    // pre-paywall parse amplification: `x402_axum::Paygate::handle_request`
+    // reads the payment header and calls the facilitator's `verify` before it
+    // ever calls the inner service, and axum's `Json` extractor (which is
+    // what actually reads request-body bytes) only runs inside that inner
+    // service. An unpaid or invalid-payment request on `/v2/parse` is
+    // rejected without a single body byte being read, regardless of this
+    // limit's value. A previous, smaller value here (2 MiB) was sized against
+    // that now-corrected belief and rejected legitimate multi-mapping
+    // requests: the backend contract (visualsign-ethereum's
+    // `MAX_ABI_JSON_BYTES` / visualsign-solana's `MAX_IDL_JSON_BYTES`) allows
+    // each `abi_mappings`/`idl_mappings` entry up to 1 MiB with no cap on
+    // entry count, so two full-size entries (e.g. a proxy plus its
+    // implementation) alone already exceeded 2 MiB before any JSON envelope
+    // or string-escaping overhead.
+    //
+    // `/v1/parse` has no payment gate at all, so this limit is its only
+    // ingress bound; matching the gRPC ceiling here is exactly its
+    // pre-x402 status quo, not a new exposure.
+    const PUBLIC_BODY_LIMIT_BYTES: usize = GRPC_MAX_RECV_MSG_SIZE;
+
+    let mut app = Router::new()
+        .route(
+            "/health",
+            get(parser_gateway::handlers::health::health_handler),
+        )
+        .route(
+            "/visualsign/api/v1/parse",
+            post(parser_gateway::handlers::parse::parse_handler),
+        );
+
+    // x402 config/price-tag errors are a soft fail: log and keep serving
+    // v1 + health only. Same treatment as an unreachable facilitator below;
+    // an x402-only misconfiguration should not take the unrelated v1 route
+    // down with it.
+    match x402_result {
+        Ok(x402_cfg) => match x402_cfg.build_middleware() {
+            Ok(x402_middleware) => {
+                if let Err(e) =
+                    probe_facilitator(&x402_cfg.facilitator_url, x402_cfg.facilitator_timeout).await
+                {
+                    eprintln!(
+                        "WARNING: x402 disabled; facilitator probe failed for {}: {e}",
+                        x402_cfg.facilitator_url
+                    );
+                } else {
+                    println!("x402 facilitator probe OK");
+                    for tag in &x402_cfg.price_tags {
+                        println!(
+                            "x402 price tag: network={} asset={} price_usd={} payTo={:?}",
+                            tag.network, tag.asset, tag.price_usd, tag.pay_to
+                        );
+                    }
+                    app = app.route(
+                        "/visualsign/api/v2/parse",
+                        post(parser_gateway::handlers::parse::parse_handler).layer(x402_middleware),
+                    );
+                }
+            }
+            Err(e) => eprintln!("WARNING: x402 disabled; failed to build x402 middleware: {e}"),
+        },
+        Err(e) => eprintln!("WARNING: x402 disabled; invalid x402 configuration: {e}"),
+    }
+
+    // Optional shared-bearer-token gate. /health is carved out inside the
+    // middleware (Cloud Run / operator probes don't need the token).
+    let bearer_token = match BearerToken::from_env() {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("FATAL: invalid gateway-auth bearer-token configuration: {e}");
+            std::process::exit(1);
+        }
+    };
+    if let Some(token) = bearer_token.as_ref() {
+        let len = token.byte_len();
+        println!("gateway bearer-token gate enabled ({len}-byte token)");
+    }
+
+    if let Some(token) = bearer_token {
+        app = app.layer(axum::middleware::from_fn_with_state(
+            token,
+            parser_gateway::auth::require_bearer_token,
+        ));
+    }
+    let app = app
+        .layer(DefaultBodyLimit::max(PUBLIC_BODY_LIMIT_BYTES))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| format!("failed to bind {addr}: {e}"))?;
     println!("parser_gateway {} listening on {addr}", env!("VERSION"));
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+    axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
+    Ok(())
+}
+
+/// Whether the resolved x402 config could settle a real (mainnet) payment:
+/// a non-loopback facilitator, or a mainnet price-tag network. Used to
+/// require a pinned attestation verifier even under `X402_PROFILE=local`,
+/// which otherwise defaults to running unattested.
+fn x402_targets_real_settlement(cfg: &X402Config) -> bool {
+    let facilitator_is_loopback = matches!(
+        cfg.facilitator_url.host_str(),
+        // `Url::host_str()` keeps the brackets on an IPv6 literal (RFC 3986
+        // authority syntax), so `::1` alone never matches.
+        Some("127.0.0.1") | Some("localhost") | Some("::1") | Some("[::1]")
+    );
+    let any_mainnet_tag = cfg
+        .price_tags
+        .iter()
+        .any(|tag| matches!(tag.network.as_str(), "base" | "solana"));
+    !facilitator_is_loopback || any_mainnet_tag
+}
+
+async fn probe_facilitator(
+    url: &url::Url,
+    timeout: std::time::Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Resolve "./supported" the same way x402-axum's `FacilitatorClient`
+    // resolves its own `./verify` / `./settle` / `./supported` endpoints
+    // (RFC 3986 relative `Url::join`), not by naively string-appending
+    // "/supported". For a facilitator URL with a non-root path and no
+    // trailing slash the two approaches resolve to different endpoints, so
+    // matching the real client's semantics keeps this probe meaningful
+    // evidence about the path x402-axum will actually use.
+    let probe_url = url.join("./supported")?;
+    let client = reqwest::Client::builder().timeout(timeout).build()?;
+    let resp = client.get(probe_url).send().await?;
+    if !resp.status().is_success() {
+        return Err(format!("facilitator returned {}", resp.status()).into());
+    }
     Ok(())
 }
 
@@ -285,210 +282,78 @@ async fn shutdown_signal() {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use generated::parser::{
-        Abi, AbiType, EthereumMetadata, NearMetadata, SolanaMetadata, TokenMetadataEntry,
-        TokenOriginChain,
-    };
-    use host_primitives::turnkey::{ChainMetadataInput, EMPTY_SHA256};
+    use parser_gateway::x402_config::{PayToAddress, PriceScheme, PriceTagConfig, X402Profile};
+    use std::str::FromStr;
+    use std::time::Duration;
 
-    #[test]
-    fn parse_request_json_without_payment_marker_still_deserializes() {
-        // payment_marker (proto field 5) was added after unsignedPayload/chain/
-        // chainMetadata/includeIntermediateOutput shipped. Any JSON caller built
-        // against the earlier shape omits paymentMarker entirely; without
-        // `serde(default)` that's a hard deserialization failure, breaking
-        // backward compatibility for the generated JSON API.
-        let json = r#"{"unsignedPayload":"abc","chain":1,"includeIntermediateOutput":false}"#;
-        let parsed: ParseRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.unsigned_payload, "abc");
-        assert!(parsed.payment_marker.is_empty());
+    fn base_config(facilitator_url: &str, network: &str) -> X402Config {
+        X402Config {
+            profile: X402Profile::Local,
+            facilitator_url: url::Url::parse(facilitator_url).unwrap(),
+            facilitator_timeout: Duration::from_secs(5),
+            protocol_version: "v2".to_string(),
+            price_tags: vec![PriceTagConfig {
+                network: network.to_string(),
+                asset: "USDC".to_string(),
+                price_usd: rust_decimal::Decimal::from_str("0.001").unwrap(),
+                pay_to: PayToAddress::Evm("0x000000000000000000000000000000000000dEaD".to_string()),
+                scheme: PriceScheme::Exact,
+            }],
+        }
     }
 
     #[test]
-    fn error_response_has_empty_sha256_digests() {
-        let resp = error_response("something broke".to_string());
-        let payload = &resp.response.parsed_transaction.payload;
-        assert_eq!(payload.metadata_digest, EMPTY_SHA256);
-        assert_eq!(payload.input_payload_digest, EMPTY_SHA256);
-        assert!(payload.signable_payload.is_empty());
-        assert_eq!(resp.error.as_deref(), Some("something broke"));
+    fn loopback_testnet_does_not_target_real_settlement() {
+        let cfg = base_config("http://127.0.0.1:8090", "base-sepolia");
+        assert!(!x402_targets_real_settlement(&cfg));
     }
 
     #[test]
-    fn intermediate_output_present_serializes_as_camelcase_base64() {
-        let payload = TurnkeyPayload {
-            signable_payload: "sp".to_string(),
-            metadata_digest: "md".to_string(),
-            input_payload_digest: "ipd".to_string(),
-            intermediate_output: "AQID".to_string(), // base64 of [1,2,3]
-        };
-        let value = serde_json::to_value(&payload).unwrap();
-        assert_eq!(
-            value.get("intermediateOutput").and_then(|v| v.as_str()),
-            Some("AQID"),
-            "non-empty intermediate output must serialize under the camelCase key"
-        );
+    fn non_loopback_facilitator_targets_real_settlement() {
+        // Testnet network, but the facilitator itself is a real external
+        // endpoint that could settle for real -- this must be flagged even
+        // though the network alone would look safe.
+        let cfg = base_config("https://facilitator.payai.network", "base-sepolia");
+        assert!(x402_targets_real_settlement(&cfg));
     }
 
     #[test]
-    fn error_response_carries_mock_boot_proof() {
-        // The wallet-integration contract (see issue #337) requires bootProof
-        // be present on every response, including parse errors — strict
-        // consumers reject responses missing the field outright.
-        let resp = error_response("oops".to_string());
-        assert_eq!(
-            resp.boot_proof.aws_attestation_doc_b64,
-            MOCK_BOOT_PROOF_AWS_DOC
-        );
-        assert_eq!(resp.boot_proof.enclave_app, "visualsign-parser");
-        assert_eq!(resp.boot_proof.deployment_label, "local-mock");
+    fn loopback_facilitator_with_mainnet_network_targets_real_settlement() {
+        // Loopback facilitator, but a mainnet network tag -- still flagged,
+        // since a locally-run facilitator can still forward to real rails.
+        let cfg = base_config("http://127.0.0.1:8090", "base");
+        assert!(x402_targets_real_settlement(&cfg));
     }
 
     #[test]
-    fn mock_boot_proof_matches_production_wire_shape() {
-        // Top-level wire parity: bootProof must sit alongside response, not
-        // nested. bootProof's own field set is covered by
-        // host_primitives::turnkey::boot_proof_wire_shape_is_exactly_six_camel_case_keys.
-        let resp = error_response("x".to_string());
-        let value: serde_json::Value = serde_json::to_value(&resp).unwrap();
-
-        let top_keys: std::collections::BTreeSet<_> =
-            value.as_object().unwrap().keys().cloned().collect();
-        assert!(
-            top_keys.contains("bootProof"),
-            "missing top-level bootProof"
-        );
-        assert!(top_keys.contains("response"), "missing top-level response");
+    fn localhost_hostname_is_treated_as_loopback() {
+        let cfg = base_config("http://localhost:8090", "solana-devnet");
+        assert!(!x402_targets_real_settlement(&cfg));
     }
 
     #[test]
-    fn chain_metadata_input_ethereum_deserializes() {
-        let json = r#"{"chain":"CHAIN_ETHEREUM","networkId":"ETHEREUM_MAINNET"}"#;
-        let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
-        assert!(matches!(parsed, ChainMetadataInput::Ethereum(_)));
+    fn ipv6_loopback_is_treated_as_loopback() {
+        // `Url::host_str()` returns the bracketed form for an IPv6 literal
+        // ("[::1]", not "::1"); a bare "::1" match arm never fires.
+        let cfg = base_config("http://[::1]:8090", "base-sepolia");
+        assert!(!x402_targets_real_settlement(&cfg));
     }
 
     #[test]
-    fn chain_metadata_input_near_deserializes() {
-        let json = r#"{"chain":"CHAIN_NEAR","networkId":"NEAR_MAINNET"}"#;
-        let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
-        assert!(matches!(parsed, ChainMetadataInput::Near(_)));
-    }
-
-    #[test]
-    fn ethereum_metadata_abi_mappings_defaults_when_omitted() {
-        let json = r#"{"networkId":"ETHEREUM_MAINNET"}"#;
-        let parsed: EthereumMetadata = serde_json::from_str(json).unwrap();
-        assert!(parsed.abi_mappings.is_empty());
-    }
-
-    #[test]
-    fn solana_metadata_idl_mappings_defaults_when_omitted() {
-        let json = r#"{"networkId":"SOLANA_MAINNET"}"#;
-        let parsed: SolanaMetadata = serde_json::from_str(json).unwrap();
-        assert!(parsed.idl_mappings.is_empty());
-    }
-
-    #[test]
-    fn abi_type_deserializes_from_string_name() {
-        let json = r#"{"value":"[]","abiType":"ABI_TYPE_PROXY","implementationAddress":"0x2222222222222222222222222222222222222222"}"#;
-        let abi: Abi = serde_json::from_str(json).unwrap();
-        assert_eq!(abi.abi_type, Some(AbiType::Proxy as i32));
-        assert_eq!(
-            abi.implementation_address.as_deref(),
-            Some("0x2222222222222222222222222222222222222222")
-        );
-    }
-
-    #[test]
-    fn abi_type_serializes_as_string_name() {
-        let abi = Abi {
-            value: "[]".to_string(),
-            signature: None,
-            abi_type: Some(AbiType::Proxy as i32),
-            implementation_address: None,
-        };
-        let value = serde_json::to_value(&abi).unwrap();
-        assert_eq!(value.get("abiType").unwrap(), "ABI_TYPE_PROXY");
-    }
-
-    #[test]
-    fn abi_type_defaults_to_none_when_omitted() {
-        let abi: Abi = serde_json::from_str(r#"{"value":"[]"}"#).unwrap();
-        assert_eq!(abi.abi_type, None);
-    }
-
-    #[test]
-    fn abi_type_rejects_unknown_string() {
-        let result: Result<Abi, _> =
-            serde_json::from_str(r#"{"value":"[]","abiType":"ABI_TYPE_BOGUS"}"#);
-        assert!(
-            result.is_err(),
-            "expected deserialization to fail for unknown AbiType variant"
-        );
-    }
-
-    #[test]
-    fn origin_chain_deserializes_from_string_name() {
-        let json = r#"{"value":"{\"symbol\":\"USDC\",\"decimals\":6}","originChain":"TOKEN_ORIGIN_CHAIN_ETHEREUM"}"#;
-        let entry: TokenMetadataEntry = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            entry.origin_chain,
-            Some(TokenOriginChain::Ethereum as i32),
-            "the documented protobuf name must select the Ethereum curve"
-        );
-    }
-
-    #[test]
-    fn origin_chain_serializes_as_string_name() {
-        let entry = TokenMetadataEntry {
-            value: "{}".to_string(),
-            signature: None,
-            origin_chain: Some(TokenOriginChain::Solana as i32),
-        };
-        let value = serde_json::to_value(&entry).unwrap();
-        assert_eq!(
-            value.get("originChain").unwrap(),
-            "TOKEN_ORIGIN_CHAIN_SOLANA"
-        );
-    }
-
-    #[test]
-    fn origin_chain_defaults_to_none_when_omitted() {
-        let entry: TokenMetadataEntry = serde_json::from_str(r#"{"value":"{}"}"#).unwrap();
-        assert_eq!(entry.origin_chain, None);
-    }
-
-    #[test]
-    fn origin_chain_rejects_unknown_string() {
-        let result: Result<TokenMetadataEntry, _> =
-            serde_json::from_str(r#"{"value":"{}","originChain":"TOKEN_ORIGIN_CHAIN_BOGUS"}"#);
-        assert!(
-            result.is_err(),
-            "an origin this build cannot verify must be refused at the API edge"
-        );
-    }
-
-    /// `origin_chain` reaches the gateway nested two levels deep, inside
-    /// `NearMetadata.token_mappings`, so the adapter has to survive the map
-    /// value's own serde rather than only a bare `TokenMetadataEntry`.
-    #[test]
-    fn near_token_mapping_round_trips_origin_chain_by_name() {
-        let json = r#"{"networkId":"NEAR_MAINNET","tokenMappings":{"nep141:usdc.near":{"value":"{\"symbol\":\"USDC\",\"decimals\":6}","originChain":"TOKEN_ORIGIN_CHAIN_ETHEREUM"}}}"#;
-        let parsed: NearMetadata = serde_json::from_str(json).unwrap();
-        let entry = parsed.token_mappings.get("nep141:usdc.near").unwrap();
-        assert_eq!(entry.origin_chain, Some(TokenOriginChain::Ethereum as i32));
-
-        let value = serde_json::to_value(&parsed).unwrap();
-        assert_eq!(
-            value
-                .get("tokenMappings")
-                .and_then(|m| m.get("nep141:usdc.near"))
-                .and_then(|e| e.get("originChain"))
-                .unwrap(),
-            "TOKEN_ORIGIN_CHAIN_ETHEREUM"
-        );
+    fn mismatched_payto_network_combination_does_not_build_even_though_flagged_as_real_settlement()
+    {
+        // A mainnet network tag paired with the wrong chain's payTo address
+        // (e.g. `solana` network with an EVM payTo) is exactly what
+        // `build_middleware` rejects (see x402_config::build_price_tag) --
+        // it can never settle anything. `x402_targets_real_settlement`
+        // alone would still flag it (it only looks at the network name),
+        // which is why `main` ANDs it with `build_middleware().is_ok()`
+        // before treating it as requiring a pinned attestation verifier.
+        let cfg = base_config("http://127.0.0.1:8090", "solana");
+        assert!(x402_targets_real_settlement(&cfg));
+        assert!(cfg.build_middleware().is_err());
     }
 }
