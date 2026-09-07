@@ -122,8 +122,6 @@ fn boot_proof_keys(value: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
-/// Asserts `resp` has `status` and carries exactly `expected_keys` under
-/// `bootProof`; returns the parsed body for any further per-case checks.
 async fn assert_boot_proof_response(
     resp: reqwest::Response,
     status: reqwest::StatusCode,
