@@ -121,15 +121,24 @@ fn test_cli_with_fixtures() {
         // Try JSON parsing; fall back to string comparison for text/human output
         match serde_json::from_str::<serde_json::Value>(actual_output.trim()) {
             Ok(actual_json) => {
-                // JSON output: filter diagnostics and check membership
-                #[cfg_attr(not(feature = "diagnostics"), allow(unused_mut))]
+                // JSON output: filter diagnostics and check membership.
+                //
+                // Diagnostics reach the payload in one of two shapes depending
+                // on the `diagnostics` feature, and the display fixtures pin
+                // neither: with the feature on a diagnostic is its own
+                // `diagnostic` field, with it off the renderer degrades it to a
+                // `text_v2` field labelled "Warning" (see visualsign-near's
+                // `presets::intents::render::diagnostic`). Dropping both keeps
+                // one display fixture valid in every feature configuration --
+                // including the single-chain builds
+                // `parser-cli-narrow-build-check` runs, where `diagnostics` is
+                // off because `--no-default-features` excludes it.
                 let mut display_payload = actual_json.clone();
-                #[cfg(feature = "diagnostics")]
                 if let Some(fields) = display_payload
                     .get_mut("Fields")
                     .and_then(|f| f.as_array_mut())
                 {
-                    fields.retain(|f| f.get("Type").and_then(|t| t.as_str()) != Some("diagnostic"));
+                    fields.retain(|f| !is_diagnostic_field(f));
                 }
 
                 let expected_json: serde_json::Value =
@@ -327,6 +336,20 @@ fn assert_strings_match(test_name: &str, fixture_type: &str, expected: &str, act
 
         panic!("Test case '{test_name}' ({fixture_type}) failed:\n{diff_output}");
     }
+}
+
+/// Is this payload field a rendered diagnostic rather than transaction content?
+///
+/// Both renderings count: the `diagnostic` field type the `diagnostics` feature
+/// produces, and the "Warning" `text_v2` field a renderer degrades to when the
+/// feature is off. Display fixtures describe transaction content only, so both
+/// are filtered before comparing.
+fn is_diagnostic_field(field: &serde_json::Value) -> bool {
+    let field_type = field.get("Type").and_then(|t| t.as_str());
+    if field_type == Some("diagnostic") {
+        return true;
+    }
+    field_type == Some("text_v2") && field.get("Label").and_then(|l| l.as_str()) == Some("Warning")
 }
 
 /// Recursively checks that every field in `expected` is present in `actual`.
