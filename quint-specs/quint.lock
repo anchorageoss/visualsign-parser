@@ -1,0 +1,2579 @@
+version = 1
+
+[survey]
+date = "2026-07-26T06:40:48Z"
+schema = 0
+
+[system]
+systemId = "workspace"
+
+[behaviorTests]
+format = "quint-studio-behavior-tests"
+version = 1
+createdAt = 1788547637886
+complete = true
+
+[[behaviorTests.rows]]
+behaviorId = "removing-a-signature-never-widens-admission"
+component = "metadata-signature-trust"
+headline = "Removing a signature never widens admission"
+kind = "hazard"
+note = "The hazard is the current intended behavior and is positively codified by tests (test_try_extract_unsigned_abi_accepted, test_try_extract_mixed_signed_and_unsigned_both_accepted, test_extract_unsigned_proxy_links_to_unsigned_implementation in src/chain_parsers/visualsign-ethereum/src/abi_metadata.rs), which assert an unsigned entry IS registered while test_try_extract_unauthorized_signer_still_rejected asserts the signed-untrusted form is rejected — so no test would go red; making the hazard unreachable would instead break those three."
+recordedAt = 1788547637883
+status = "untested"
+tests = []
+
+[[behaviorTests.rows]]
+behaviorId = "signed-entry-s-proxy-link-cannot-be-forged"
+component = "metadata-signature-trust"
+headline = "Signed entry's proxy link cannot be forged"
+kind = "hazard"
+note = "Only body and (chain,address) scope tampering are covered; retyping a signed entry to Proxy and setting implementation_address is UNCOVERED and is in fact pinned as intended by test_try_extract_abi_type_outside_signature_scope, which asserts the retyped entry MUST still be admitted."
+recordedAt = 1788547666511
+status = "partial"
+
+[[behaviorTests.rows.tests]]
+hash = "fnv1a64:fbe32e6d2516dc1f"
+line = 690
+name = "test_tampering_detection"
+path = "src/chain_parsers/visualsign-ethereum/src/abi_metadata.rs"
+
+[[behaviorTests.rows.tests]]
+hash = "fnv1a64:fbe32e6d2516dc1f"
+line = 584
+name = "test_signature_bound_to_address_and_chain_rejects_replay"
+path = "src/chain_parsers/visualsign-ethereum/src/abi_metadata.rs"
+
+[[behaviorTests.rows.tests]]
+hash = "fnv1a64:65d30e5a3dd63195"
+line = 196
+name = "test_changing_body_changes_prehash"
+path = "src/visualsign/src/signing.rs"
+
+[[behaviorTests.rows.tests]]
+hash = "fnv1a64:fbe32e6d2516dc1f"
+line = 898
+name = "test_try_extract_abi_type_outside_signature_scope"
+path = "src/chain_parsers/visualsign-ethereum/src/abi_metadata.rs"
+
+[components.cli-input-and-mappings]
+name = "CLI Input And Mappings"
+description = "Resolves the CLI's transaction argument (inline, @file, @stdin) and loads name:identifier:path ABI/IDL mapping files under strict size bounds."
+role = "peripheral"
+rank = 9
+paths = [
+    "src/parser/cli-core/src/tx_input.rs",
+    "src/parser/cli-core/src/mapping_parser.rs",
+    "src/parser/cli-core/src/output.rs",
+    "src/parser/cli/src/main.rs",
+    "src/parser/cli/src/serve.rs",
+]
+tests = [
+    "src/parser/cli-core/src/tx_input.rs (inline mod tests)",
+    "src/parser/cli-core/src/mapping_parser.rs (inline mod tests)",
+    "src/parser/cli/tests/cli_test.rs",
+    "src/parser/cli/tests/fixtures/",
+]
+dependencies = [
+    "converter-registry-dispatch",
+    "signable-payload-validation",
+    "ethereum-calldata-dispatch",
+    "solana-instruction-pipeline",
+    "tron-contract-decoding",
+]
+operations = [
+    "`resolve_transaction_input` (`tx_input.rs:22`) — resolves inline / `@file` / `@-`; reads the filesystem and stdin (mutates external state)",
+    "`read_bounded` (`tx_input.rs:52`) — the 10 MB-capped read behind every `@` form",
+    "`parse_mapping` (`mapping_parser.rs:21`) — splits `name:path:identifier` right-first",
+    "`load_mappings` (`mapping_parser.rs:57`) — reads files, writes warnings to stderr, returns the map plus a fresh-insert count (mutates)",
+    "`load_json_file` (`mapping_parser.rs:120`) — bounded read + JSON well-formedness check",
+    "`OutputFormat::from_str` (`output.rs:19`)",
+    "`HumanReadableFormatter::new` and its `Display` impl (`output.rs:38`)",
+    "`parse_and_display` (`output.rs:188`) — writes stdout and stderr (mutates)",
+    "`prepare_runtime` (`cli-core/src/lib.rs:102`) — registers every plugin and selects one (mutates the registry it builds)",
+    "`run` (`cli-core/src/lib.rs:148`) — the `decode` entry point",
+    "`ChainPlugin::{chain, register, create_metadata}` (`cli-core/src/lib.rs:33`) — `register` mutates the registry",
+    "`main` (`cli/src/main.rs:80`) — sets the process exit code (mutates)",
+    "`serve::run` (`serve.rs:99`) — binds a TCP listener and serves forever (mutates)",
+    "`decode_directory` / `walk` / `decode_file` (`serve.rs:148,161,217`)",
+    "`handle_index` / `handle_payload` / `handle_file` (`serve.rs:255,268,285`)",
+    "`url_encode_path` / `html_escape` (`serve.rs:321,337`)",
+]
+headlineProperties = [
+    "Every `@`-sourced transaction is capped at 10 MB, and the cap is applied to the raw read so whitespace padding cannot be used to slip past it.",
+    "ASCII whitespace is stripped from `@`-sourced input, but non-ASCII whitespace (e.g. NBSP) survives so it fails loudly at decode instead of being silently swallowed.",
+    "A mapping string always splits into exactly `(name, path, identifier)` with the identifier taken from the *last* colon, so a Windows-style `C:/…` path still parses.",
+    "A malformed, oversized, or rejected mapping entry is skipped with a warning and never aborts the rest of the load.",
+    "`load_mappings`'s returned count is the number of distinct newly-inserted identifiers, not the number of accepted entries — a duplicate overwrite does not increment it.",
+    "Every ABI/IDL file is confirmed to be valid JSON under 10 MB before its contents can reach any registry.",
+    "`serve` only ever answers for files it actually enumerated under `--dir`; a request path absent from the walk result is a 404, not a filesystem read.",
+    "Decoded output goes to stdout while hints and the `intermediate_output` hex go to stderr, so stdout stays a single machine-readable document even with `--with-intermediate --output json`.",
+]
+adversarySurface = [
+    "A symlink inside `--dir` that points outside it is followed: `walk` uses `entry.metadata()` (which follows links) rather than `symlink_metadata`, so `serve` can decode and publish content from anywhere the process can read.",
+    "A symlink cycle under `--dir` drives `walk` (`serve.rs:161`) into unbounded recursion with no depth limit until the stack overflows.",
+    "`serve` re-decodes the entire directory on every single request (`load_entries`), so a large tree turns each HTTP GET into an O(tree) parse — a trivial local DoS.",
+    "Duplicate identifiers across `--abi-json-mappings` silently overwrite each other: the last one on the command line wins, marked only by a stderr warning.",
+    "`@-` reads stdin to EOF with no timeout, so a pipe that never closes hangs the CLI indefinitely.",
+    "`--transaction @<path>` will open any file the invoking user can read, and the failure message echoes the path back, so an error line can confirm the existence and readability of arbitrary paths.",
+    "A file that changes between `File::open` and the read is still length-bounded, but a truncated-yet-still-valid-JSON read is accepted and logged as a successful load with no integrity check.",
+]
+specHints = "`read_bounded` uses `read_to_string`, so a non-UTF-8 file surfaces as an IO error rather than a size error — the two rejection reasons are distinguishable only by message text. The 10 MB bound is written three separate times as independent constants (`MAX_TRANSACTION_INPUT_SIZE`, `MAX_JSON_FILE_SIZE`, `serve.rs`'s `MAX_FILE_SIZE`); a model should not assume they move together. `parse_chain` never fails — any unrecognized string becomes `Chain::Custom(s)` — so \"unsupported chain\" is detected only later, when no plugin's `chain()` matches inside `prepare_runtime`. `load_mappings` reports rejections through `eprintln!` rather than a returned error list, so a spec that wants to observe them has to model stderr as an output channel."
+cardRead = true
+connectionsRead = true
+spec = ""
+version = 0
+observationsConfirmed = false
+propertiesConfirmed = false
+confirmedObservations = []
+confirmedProperties = []
+retiredObservations = []
+retiredProperties = []
+wireConfirmed = false
+setupCompleted = false
+cardsDone = false
+
+[components.converter-registry-dispatch]
+name = "Converter Registry Dispatch"
+description = "Routes a raw transaction to the right chain converter - by explicit chain or by format auto-detection - and layers request-scoped registry data over the global one."
+role = "central"
+rank = 6
+paths = [
+    "src/visualsign/src/registry.rs",
+    "src/visualsign/src/vsptrait.rs",
+    "src/parser/app/src/registry.rs",
+    "src/parser/cli-core/src/chains.rs",
+]
+tests = [
+    "src/visualsign/src/registry.rs (inline mod tests)",
+    "src/parser/app/src/registry.rs",
+    "src/examples/library_integration_test.rs",
+]
+dependencies = [
+    "signable-payload-validation",
+    "deterministic-serialization",
+    "ethereum-calldata-dispatch",
+    "solana-instruction-pipeline",
+    "sui-ptb-decoding",
+    "tron-contract-decoding",
+]
+operations = [
+    "`Chain::as_str` (`registry.rs:27`) and `Chain::from_str` (`registry.rs:45`)",
+    "`TransactionConverterRegistry::new` (`registry.rs:127`)",
+    "`TransactionConverterRegistry::register` (`registry.rs:133`) — inserts a type-erased converter (mutates)",
+    "`get_converter` (`registry.rs:142`)",
+    "`convert_transaction` (`registry.rs:146`) — explicit-chain dispatch",
+    "`auto_detect_and_convert` (`registry.rs:163`) — format-sniffing dispatch",
+    "`supported_chains` (`registry.rs:185`)",
+    "`VisualSignConverterAny::{to_visual_sign_payload_from_string_any, supports_format}` (`registry.rs:62,68`)",
+    "`LayeredRegistry::{new, with_request, global, request, lookup, lookup_result}` (`registry.rs:235,245,253,258,281,299`)",
+    "`Transaction::{from_string, transaction_type}` (`vsptrait.rs:98`)",
+    "`VisualSignConverter::{to_visual_sign_payload, to_validated_visual_sign_payload}` (`vsptrait.rs:59,67`)",
+    "`VisualSignConverterFromString::to_visual_sign_payload_from_string` (`vsptrait.rs:110`)",
+    "`ConversionResult::{new, with_intermediate}` (`vsptrait.rs:42,50`)",
+    "`create_registry` (`parser/app/src/registry.rs:12`) — builds the enclave's feature-gated converter set",
+    "`parse_chain` / `available_chains` (`cli-core/src/chains.rs:26,32`)",
+]
+headlineProperties = [
+    "An explicit chain request reaches exactly the converter registered under that chain, or fails with \"No converter registered for chain\".",
+    "Registering a chain twice replaces the earlier converter — the registry holds at most one converter per chain key.",
+    "`LayeredRegistry::lookup` answers from the request layer when it has an answer and falls through to global otherwise, never blending the two.",
+    "`lookup_result` returns global's error when both layers fail, never the request layer's.",
+    "`supports_format` is exactly \"this chain's parser accepts these bytes\", so a converter never claims a format its own `from_string` would reject.",
+    "Built-in chain names resolve case-insensitively, so `\"ETHEREUM\"` and `\"ethereum\"` reach the same converter.",
+]
+adversarySurface = [
+    "`auto_detect_and_convert` (`registry.rs:163`) iterates a `HashMap`, so when two registered chains both accept the same bytes, which chain wins is unspecified and can differ between runs of the same binary — the displayed chain label is decided by hash order, not by a rule.",
+    "`supports_format` runs the full `T::from_string`, so auto-detection parses the input once per candidate chain: an input that is expensive to parse is parsed N times before anything is rendered.",
+    "`Chain::Custom(String)` carries unbounded caller-controlled text, is used directly as a `HashMap` key, and is interpolated into the \"No converter registered for chain: …\" error, so a request can echo arbitrary content back through the failure path.",
+    "`Chain::from_str` lowercases before matching the built-ins but `Chain::Custom` preserves the original case, so `Custom(\"Near\")` and `Custom(\"near\")` are two distinct registry keys while `Ethereum` and `ETHEREUM` are one.",
+    "`auto_detect_and_convert` swallows every per-converter error and continues, so the final \"could not detect transaction type\" message hides the real reason the correct converter failed.",
+]
+specHints = "The registry is written once and then only read, but note that the enclave's `parse()` calls `create_registry()` on *every* request (`parser/app/src/routes/parse.rs:29`) rather than sharing one — so \"build\" and \"use\" are not separated in time the way the type suggests. `Chain` derives `Hash`/`Eq` structurally with no normalization for `Custom`, so key equality is byte equality on the string. `to_validated_visual_sign_payload` is a *default* method, and both the production Ethereum converter and the enclave's own regression stubs override the path around it — a model must not assume charset validation happens inside the converter. `proto_to_registry` (`parser/app/src/chain_conversion.rs:6`) collapses every unmapped proto chain to the single key `Custom(\"custom_unknown\")`, so distinct unknown chains are indistinguishable downstream."
+cardRead = true
+connectionsRead = true
+spec = ""
+version = 0
+observationsConfirmed = false
+propertiesConfirmed = false
+confirmedObservations = []
+confirmedProperties = []
+retiredObservations = []
+retiredProperties = []
+wireConfirmed = false
+setupCompleted = false
+cardsDone = false
+
+[components.deterministic-serialization]
+name = "Deterministic Serialization"
+description = "The cross-cutting guarantee that the same logical transaction always produces the same bytes - in the JSON payload, the borsh metadata encoding, and the Solana intermediate output."
+role = "cross-cutting"
+rank = 10
+paths = [
+    "src/visualsign/src/lib.rs",
+    "src/codegen/src/main.rs",
+    "src/chain_parsers/visualsign-solana/src/intermediate.rs",
+    "src/parser/app/src/routes/parse.rs",
+    "src/generated/src/generated/parser.rs",
+]
+tests = [
+    "src/parser/app/src/routes/parse.rs (metadata_digest_is_deterministic, signing_digest_* tests)",
+    "src/visualsign/src/lib.rs (inline ordering tests)",
+    "src/chain_parsers/visualsign-solana/src/core/visualsign.rs (intermediate output tests)",
+]
+dependencies = [
+    "converter-registry-dispatch",
+    "signable-payload-validation",
+    "solana-instruction-pipeline",
+    "parse-sign-pipeline",
+]
+operations = [
+    "`DeterministicOrdering::verify_deterministic_ordering` (`lib.rs:22`) — the opt-in marker-trait check",
+    "`verify_json_deterministic` (`lib.rs:50`)",
+    "`assert_deterministic` (`lib.rs:46`) — const-context trait assertion",
+    "`impl Serialize for SignablePayloadField` (`lib.rs:354`) — emits a verified, alphabetized key map",
+    "`FieldSerializer::{serialize_to_map, get_expected_fields}` (`lib.rs:246,322`)",
+    "`SignablePayload::verify_field_deterministic_ordering` (`lib.rs:858`)",
+    "`SignablePayload::to_json` (`lib.rs:879`) and `to_pretty_json` (`lib.rs:897`)",
+    "`sort_json_alphabetically` (`lib.rs:902`)",
+    "`codegen::main` (`codegen/src/main.rs:29`) — writes the `generated/` tree, forcing `BTreeMap` for every proto map and `#[borsh(skip)]` on `intermediate_output` (mutates the repo)",
+    "`canonical_args_json` / `canonicalize_value` / `canonicalize_map` (`intermediate.rs:189,209,224`)",
+    "`extract_solana_intermediate_output` (`intermediate.rs:316`)",
+    "`SOLANA_INTERMEDIATE_SCHEMA_VERSION` and the `From` impls that project `SolanaMetadata` into the borsh schema (`intermediate.rs:41` onward)",
+    "`signing_digest_bytes` (`parser/app/src/routes/parse.rs:169`)",
+    "the generated `ParsedTransactionPayload` with its skipped `intermediate_output` field (`generated/src/generated/parser.rs:143`)",
+]
+headlineProperties = [
+    "The same logical payload serializes to byte-identical JSON no matter what order its fields were built in, because every object is re-keyed alphabetically at every depth.",
+    "Every proto `map<..,..>` is a `BTreeMap` (forced by `.btree_map([\".\"])` in codegen), so `metadata_digest` does not depend on the insertion order of `abi_mappings` or `idl_mappings`.",
+    "Serializing a `SignablePayloadField` fails loudly when the emitted key set does not exactly match the variant's expected key set — no silently added or dropped field.",
+    "The Solana intermediate blob is alphabetized at *every* nesting level, so it stays stable even though `serde_json` is built with `preserve_order` transitively in this workspace.",
+    "With an empty `intermediate_output`, the signed bytes are byte-for-byte the legacy four-field borsh encoding, so signatures issued before the field existed still verify.",
+    "The bytes that are signed are derived entirely from the same `payload` value that is returned, so the transported and the signed `intermediate_output` cannot diverge.",
+    "`SOLANA_INTERMEDIATE_SCHEMA_VERSION` is the first field of the blob, so a mirrored decoder can gate on it before reading anything else.",
+]
+adversarySurface = [
+    "The `serialize_field_variant!` macro calls `.unwrap()` on `serde_json::to_value` for every field value (`lib.rs:242`), so any value that fails to serialize panics inside `Serialize` rather than returning a serializer error.",
+    "`SignablePayloadField::Number` serializes as `amount_v2` and reconstructs its abbreviation by stripping the numeric prefix off `fallback_text` (`lib.rs:268`), while `Deserialize` still expects a `number`-tagged object — so serialize-then-deserialize is not the identity for that variant.",
+    "Presence of `intermediate_output` in the digest is out-of-band — there is no tag byte — so a verifier that appends nothing agrees on the empty case but has no way to distinguish \"no intermediate\" from \"an intermediate it did not know to append\".",
+    "`canonical_args_json` falls back to the literal `\"{}\"` if `serde_json::to_string` ever fails (`intermediate.rs:195`), silently substituting an empty object for real decoded args inside bytes that get signed.",
+    "Determinism depends on the checked-in `generated/` tree matching what codegen would produce; that is enforced only by CI's no-diff check, never at runtime.",
+    "`DeterministicOrdering` is a marker trait with a defaulted method, so a new field type can implement it without actually being alphabetically ordered and nothing at compile time catches the lie.",
+]
+specHints = "`verify_json_deterministic` / `verify_deterministic_ordering` are never invoked on the signing path — they are opt-in checks, so a model should not treat them as an enforced invariant. `to_json` sorts the already-serialized value tree while the custom `Serialize` for `SignablePayloadField` already emits from a `BTreeMap`, so the ordering guarantee is established twice by two independent mechanisms. The intermediate schema is mirrored by an out-of-repo consumer and the version constant is the only coupling point, bumped by hand. Crucially, this component's determinism is *not* end-to-end: Tron's converter reads `chrono::Utc::now()` (`visualsign-tron/src/lib.rs:145`), so for that chain \"same transaction bytes ⇒ same signed bytes\" does not hold across time even though everything here is deterministic."
+cardRead = true
+connectionsRead = true
+spec = "quint-specs/deterministic-serialization.qnt"
+version = 1
+observationsConfirmed = false
+propertiesConfirmed = false
+confirmedObservations = []
+confirmedProperties = []
+retiredObservations = []
+retiredProperties = []
+wireConfirmed = false
+setupCompleted = false
+cardsDone = false
+
+[components.deterministic-serialization.oracle]
+format = "quint-oracle-config"
+version = 1
+spec = "quint-specs/deterministic-serialization.qnt"
+main = "deterministic_serialization"
+eventScope = "deterministic-serialization"
+observations = [
+    "flat_args_order_collapsed",
+    "nested_args_order_collapsed",
+    "metadata_order_collapsed",
+    "payload_field_keys_realphabetized",
+    "payload_field_shape_mismatch_rejected",
+    "named_accounts_order_collapsed",
+    "schema_shape_change_observed",
+    "identical_content_signed_identically",
+    "distinct_content_signed_differently",
+    "signed_with_legacy_encoding",
+    "signed_with_appended_intermediate",
+    "intermediate_opt_in_kept_prefix_stable",
+]
+reportDir = "mc-out-deterministic-serialization"
+unguidedStepBudget = 10
+stepReplayBudget = 50
+guardScenarios = false
+
+[components.deterministic-serialization.oracle.studio]
+system = "Deterministic Serialization"
+model = "quint-specs/deterministic-serialization.qnt"
+
+[components.deterministic-serialization.fingerprints]
+spec = "fnv1a64:c5f7600aa81e9494"
+oracle = "fnv1a64:25818af98bede638"
+
+[components.deterministic-serialization.fingerprints.code]
+"src/chain_parsers/visualsign-solana/src/intermediate.rs" = "fnv1a64:269fc5f05a70fcec"
+"src/codegen/src/main.rs" = "fnv1a64:b8ac62a25efafcc6"
+"src/generated/src/generated/parser.rs" = "fnv1a64:3e5561e97577ac5c"
+"src/parser/app/src/routes/parse.rs" = "fnv1a64:f8cc9d3385330f6b"
+"src/visualsign/src/lib.rs" = "fnv1a64:a8b687e490c285c2"
+
+[components.deterministic-serialization.fingerprints.instrumented]
+"quint-specs/oracle-client/rust/Cargo.toml" = "fnv1a64:96293d99372d69f5"
+"quint-specs/oracle-client/rust/src/lib.rs" = "fnv1a64:ef3f33ca4a3f9651"
+
+[components.ethereum-calldata-dispatch]
+name = "Ethereum Calldata Dispatch"
+description = "Chooses which decoder renders an Ethereum transaction's calldata - canonical token, caller ABI, proxy implementation, or raw hex - and in what precedence."
+role = "central"
+rank = 3
+paths = [
+    "src/chain_parsers/visualsign-ethereum/src/lib.rs",
+    "src/chain_parsers/visualsign-ethereum/src/abi_registry.rs",
+    "src/chain_parsers/visualsign-ethereum/src/registry.rs",
+    "src/chain_parsers/visualsign-ethereum/src/contracts/core/",
+    "src/chain_parsers/visualsign-ethereum/src/context.rs",
+    "src/chain_parsers/visualsign-ethereum/src/visualizer.rs",
+    "src/chain_parsers/visualsign-ethereum/src/networks.rs",
+]
+tests = [
+    "src/chain_parsers/visualsign-ethereum/src/lib.rs (inline mod tests)",
+    "src/chain_parsers/visualsign-ethereum/tests/lib_test.rs",
+    "src/chain_parsers/visualsign-ethereum/tests/fixtures/*.input|.expected",
+    "src/chain_parsers/visualsign-ethereum/src/abi_registry.rs (inline mod tests)",
+]
+dependencies = [
+    "shared-encoding-and-time-primitives",
+    "signable-payload-validation",
+    "converter-registry-dispatch",
+    "metadata-signature-trust",
+    "deterministic-serialization",
+]
+operations = [
+    "`EthereumTransactionWrapper::{from_string, from_string_with_options, new, inner}` (`lib.rs:114,135,125,128`)",
+    "`EthereumVisualSignConverter::{new, with_registry, with_registry_and_signers, with_signers}` (`lib.rs:214,177,189,203`)",
+    "`to_visual_sign_payload` (`lib.rs:290`) and the overriding `to_visual_sign_payload_from_string` (`lib.rs:305`)",
+    "`convert_transaction_inner` (`lib.rs:250`)",
+    "`create_layered_registry` (`lib.rs:229`)",
+    "`resolve_chain_id` (`lib.rs:458`)",
+    "`extract_metadata_abi` (`lib.rs:480`)",
+    "`try_known_token_dispatch` (`lib.rs:524`) — the canonical-token short-circuit",
+    "`visualize_with_abi_registry` (`lib.rs:567`) — caller-ABI and proxy resolution",
+    "`convert_to_visual_sign_payload` (`lib.rs:648`) — the precedence ladder itself",
+    "`transaction_to_visual_sign` / `transaction_string_to_visual_sign` (`lib.rs:856,867`)",
+    "`AbiRegistry::{new, register_abi, map_address, map_address_with_type, get_abi_for_address, get_abi_kind, get_implementation_abi, get_abi, list_abis, list_mappings_for_chain}` (`abi_registry.rs:72,98,120,134,163,171,185,207,212,217`) — `register_abi`, `map_address`, `map_address_with_type` mutate",
+    "`ContractRegistry::{new, with_default_protocols, register_contract_typed, register_contract, register_token, register_universal_address, register_chain_specific_address, load_chain_metadata}` (`registry.rs:94,110,134,159,184,268,284,409`) — all `register_*` and `load_chain_metadata` mutate",
+    "`ContractRegistry::{get_contract_type, get_token_symbol, get_token_erc_standard, get_well_known_address, format_token_amount, format_token_amount_u256}` (`registry.rs:205,217,242,310,354,385`)",
+    "`VisualizerContext::{new, for_nested_call, format_token_amount, get_visualizer}` (`context.rs:64,77,94,108`)",
+    "`EthereumVisualizerRegistry::get` (`visualizer.rs:77`), `EthereumVisualizerRegistryBuilder::{new, with_default_protocols, register, build}` (`visualizer.rs:100,110,125,134`) — `register` mutates",
+    "`networks::{get_network_name, get_fee_paying_asset_symbol, chain_id_to_network_id, network_id_to_chain_id, parse_network, extract_chain_id_from_metadata}` (`networks.rs:40,54,67,79,187,230`)",
+    "`ERC20Visualizer::visualize_tx_commands` (`contracts/core/erc20.rs:27`), `ERC721Visualizer::visualize_tx_commands` (`erc721.rs:39`), `ERC1155Visualizer::visualize_tx_commands` (`erc1155.rs:36`)",
+    "`FallbackVisualizer::visualize_hex` (`contracts/core/fallback.rs:24`)",
+    "`DynamicAbiVisualizer::{new, visualize_calldata}` (`contracts/core/dynamic_abi.rs:22,31`)",
+]
+headlineProperties = [
+    "Decoder precedence is fixed and each stage runs only when every earlier stage produced nothing: protocol visualizer, then canonical-token built-in, then caller ABI, then the ERC20 `decode_transfers` fallback, then raw hex.",
+    "A canonical token address can never be decoded by a caller-supplied ABI — the known-token short-circuit always returns a non-empty field, which closes the `input_fields.is_empty()` gate every later stage depends on.",
+    "The known-token lookup consults only the compiled-in global registry and keys off `transaction.chain_id()`, never the caller-influenced resolved chain id.",
+    "If the transaction bytes declare a chain id and metadata resolves to a different one, no payload is produced at all rather than one binding a wrong \"Network\" label to the bytes.",
+    "Calldata always renders as something: the raw-hex fallback guarantees the signer sees the bytes even when nothing decodes.",
+    "A proxy destination is decoded against its linked implementation ABI, and the implementation address is always shown when it drove decoding — including when it was found but could not decode the selector.",
+    "Only `Legacy` and `Eip1559` transaction types convert; every other type is a hard error, never a partial render.",
+]
+adversarySurface = [
+    "`abi_type` and `implementation_address` are not covered by the ABI signature (`abi_metadata.rs:66` documents this), so a tampering caller can flip a signed implementation ABI to `Proxy` or repoint the implementation without invalidating anything.",
+    "For a pre-EIP-155 legacy transaction, `get_token_erc_standard(None, ..)` (`registry.rs:242`) does an address-only scan and takes the first match, so an address registered under different ERC standards on different chains resolves by map iteration order.",
+    "`resolve_chain_id` defaults to chain id 1 for a legacy transaction with no chain id and no metadata (`lib.rs:475`), so a chain-agnostic transaction renders with a confident \"Ethereum Mainnet\" label it never earned.",
+    "The `Proxy` badge drawn on the `To` field comes from unauthenticated caller metadata (`lib.rs:670`), so any address can be labelled a proxy in the signing UI.",
+    "`ERC721Visualizer::visualize_tx_commands` returns `None` for every input today, so a known ERC-721 call falls through to raw hex — safe, but it means the \"known token wins\" property is exercised far less than the code path count suggests.",
+    "A caller-supplied ABI's *parameter names* are unconstrained, so for any non-canonical contract the decoded labels a signer reads are entirely attacker-chosen even when the selector genuinely matches.",
+    "`visualize_with_abi_registry` follows at most one proxy hop; an implementation that is itself registered as a proxy is not followed, so the address shown as \"Implementation\" may not be where the code actually lives.",
+]
+specHints = "`create_layered_registry` (`lib.rs:229`) currently never builds a request layer — the body is a TODO returning `LayeredRegistry::new` — so the layering is global-only today and a spec written against per-request overlay models a path no request takes. `to_visual_sign_payload_from_string` is overridden here to call `to_validated_visual_sign_payload` itself, while `to_visual_sign_payload` and `transaction_to_visual_sign` deliberately bypass charset validation: the invariant is per-entry-point, not per-converter. The real state variable driving the whole ladder is the emptiness of `input_fields` — every stage's guard reads it and `try_known_token_dispatch` returning `Some` is the contract that locks the rest out. Finally, `chain_id` is used with two different meanings in one function: the resolved id for rendering and ABI lookup, and `transaction.chain_id()` for the security-relevant token lookup; conflating them in a model erases the defence."
+cardRead = true
+connectionsRead = true
+spec = ""
+version = 0
+observationsConfirmed = false
+propertiesConfirmed = false
+confirmedObservations = []
+confirmedProperties = []
+retiredObservations = []
+retiredProperties = []
+wireConfirmed = false
+setupCompleted = false
+cardsDone = false
+
+[components.metadata-signature-trust]
+name = "Metadata Signature Trust"
+description = "Admission control for caller-supplied ABI/IDL metadata: a versioned domain-separated prehash plus a curator-key allowlist decide which caller decoders may shape what a human sees, on both the Ethereum ABI and Solana IDL paths."
+role = "central"
+rank = 2
+paths = [
+    "src/visualsign/src/signing.rs",
+    "src/chain_parsers/visualsign-ethereum/src/abi_metadata.rs",
+    "src/chain_parsers/visualsign-solana/src/idl/signature.rs",
+    "src/chain_parsers/visualsign-solana/src/idl/mod.rs",
+]
+tests = [
+    "src/chain_parsers/visualsign-ethereum/src/abi_metadata.rs (inline mod tests)",
+    "src/chain_parsers/visualsign-solana/src/idl/signature.rs (inline mod tests)",
+    "src/chain_parsers/visualsign-solana/src/idl/mod.rs (inline mod tests)",
+    "src/chain_parsers/visualsign-solana/tests/real_idl_validation.rs",
+]
+dependencies = [
+    "shared-encoding-and-time-primitives",
+    "deterministic-serialization",
+    "ethereum-calldata-dispatch",
+    "solana-instruction-pipeline",
+]
+operations = [
+    "`metadata_signing_prehash_v1` (`signing.rs:139`) — the versioned, length-prefixed core construction",
+    "`ethereum_metadata_prehash` (`signing.rs:158`) — scope = 8-byte BE chain_id ++ 20-byte address",
+    "`solana_metadata_prehash` (`signing.rs:167`) — scope = 32-byte program id",
+    "`SignerAllowlist::{new, insert, contains, is_empty, len}` (`signing.rs:88,93,98,103,108`) and its `FromIterator` (`signing.rs:114`) — `insert` mutates",
+    "`try_extract_from_chain_metadata` (`abi_metadata.rs:76`) — the Ethereum admission gate",
+    "`validate_abi_signature` (`abi_metadata.rs:268`)",
+    "`authorized_abi_signers` (`abi_metadata.rs:351`) — reads `VISUALSIGN_ETH_ABI_SIGNERS`",
+    "`resolve_abi_kind` (`abi_metadata.rs:170`), `convert_proto_signature` (`abi_metadata.rs:206`), `canonical_pubkey_from_hex` (`abi_metadata.rs:379`)",
+    "`sign_abi` (`abi_metadata.rs:412`) and `sign_abi_for_cli` (`abi_metadata.rs:470`) — dev-only, gated behind `dev-signing`/`cfg(test)`",
+    "`validate_idl_signature` (`idl/signature.rs:150`)",
+    "`authorized_idl_signers` (`idl/signature.rs:221`) — reads `VISUALSIGN_SOL_IDL_SIGNERS` once into a `OnceLock`",
+    "`convert_proto_signature` (`idl/signature.rs:93`), `decode_hex_fixed` (`idl/signature.rs:113`), `canonical_pubkey_from_hex` (`idl/signature.rs:244`)",
+    "`IdlRegistry::{new, from_idl_mappings, get_all_configs, has_idl, get_program_name, get_idl_name, get_idl}` (`idl/mod.rs:35,66,109,118,141,170,179`)",
+]
+headlineProperties = [
+    "The prehash preimage is injective: length-prefixing every field means no two distinct `(chain_tag, scope, body)` triples can produce the same digest, including when a field is empty or contains would-be separator bytes.",
+    "A signature minted for an ABI at one `(chain_id, address)` does not verify at any other, and an IDL signature does not verify under a different program id.",
+    "An empty allowlist authorizes nothing: signed metadata is rejected outright, which is the fail-closed default.",
+    "An entry that carries a signature must both verify *and* be signed by an allowlisted key; a present-but-invalid signature drops the entry rather than degrading it to \"unsigned\".",
+    "Unsigned entries are still accepted but are counted and reported, so \"accepted\" and \"verified\" are never conflated in the logs.",
+    "Ethereum allowlist comparisons run on the canonical uncompressed SEC1 encoding, so compressed and uncompressed forms of one key are the same entry.",
+    "A caller-supplied IDL for a trusted built-in program is dropped twice — once at extraction and again in `IdlRegistry::from_idl_mappings` — so no attacker-authored body can drive decoding for a program with a canonical identity.",
+    "A caller-supplied program name that collides with a canonical program's label is refused, so a malicious pubkey cannot be rendered as \"System Program\".",
+]
+adversarySurface = [
+    "The Ethereum allowlist is rebuilt from `std::env::var(\"VISUALSIGN_ETH_ABI_SIGNERS\")` on every `EthereumVisualSignConverter::new()` (`abi_metadata.rs:351`), so which signers are trusted can change during a process's lifetime — unlike Solana's, which is frozen in a `OnceLock`.",
+    "Conversely, Solana's `OnceLock` (`idl/signature.rs:221`) means the very first call fixes the allowlist forever; a deployment that sets the env var after that first read silently gets an empty, reject-all allowlist with no error anywhere.",
+    "`convert_proto_signature` takes the *first* metadata entry matching each key (`abi_metadata.rs:206`, `idl/signature.rs:93`), so a proto carrying duplicate `algorithm` or `public_key` pairs is resolved by list order rather than rejected as ambiguous.",
+    "`CLI_DEV_SIGNING_KEY_SEED` is a fixed all-`0x42` seed (`abi_metadata.rs:396`) whose public key is allowlisted whenever `dev-signing` or `cfg(test)` is on — enabling that feature in a shipped binary makes every locally-minted ABI signature acceptable.",
+    "The signature covers only `abi.value`, so `abi_type`, `implementation_address`, and the entry's declared role can all be re-shaped without invalidating it.",
+    "A verified curator signature attests only that a VisualSign-trusted key vouched for the body; it is explicitly *not* the program's on-chain upgrade authority, and the parser has no chain access to check the real one.",
+    "Both paths `continue` past every rejected entry, so a caller supplying a hundred tampered mappings still gets a rendered payload built from whichever few survived, with only log lines marking the difference.",
+]
+specHints = "The two chains' allowlists have genuinely different lifetimes — per-construction for Ethereum, process-once for Solana — so a spec that models one global allowlist erases a real divergence. `authorized_abi_signers` and `authorized_idl_signers` both read the process environment, which is state that is really global and outside the functions' arguments; `extract_idl_mappings_with_signers` (`core/visualsign.rs:196`) exists precisely because that `OnceLock` cannot be reset in-process under edition 2024 + `forbid(unsafe_code)`. Acceptance is per *entry*, not per request: a partly-tampered mapping map yields a partly-populated registry, and `try_extract_from_chain_metadata` returns `None` only when nothing at all survived. `MAX_ABI_JSON_BYTES` is 1 MB on the proto path while the CLI's file path allows 10 MB for the same kind of data. The trusted-program filter being applied twice on the Solana side is deliberate defence in depth — the redundancy is the invariant, not something to normalize away."
+cardRead = true
+connectionsRead = true
+spec = "quint-specs/metadata-signature-trust.qnt"
+version = 6
+observationsConfirmed = true
+propertiesConfirmed = true
+confirmedObservations = [
+    "eth_entry_admitted_as_implementation",
+    "eth_proxy_admitted_with_implementation_link",
+    "eth_proxy_admitted_without_implementation_link",
+    "eth_proxy_implementation_address_was_malformed",
+    "eth_unsigned_entry_admitted",
+    "eth_curator_signed_entry_admitted",
+    "eth_entry_skipped_for_invalid_address",
+    "eth_entry_skipped_for_oversized_body",
+    "eth_entry_skipped_for_unparseable_abi_json",
+    "eth_signature_rejected_for_unauthorized_signer",
+    "eth_signature_rejected_for_wrong_preimage",
+    "eth_signature_rejected_for_unsupported_algorithm",
+    "eth_signature_rejected_for_malformed_key_material",
+    "eth_extraction_yielded_no_registry",
+    "eth_alias_keys_collapsed_to_one_mapping",
+    "eth_mapping_points_at_unregistered_abi",
+    "eth_admitted_entry_carries_unverified_provenance",
+    "eth_implementation_resolved_through_proxy_link",
+    "eth_calldata_fell_back_to_proxy_own_abi",
+    "signature_metadata_duplicate_resolved_by_list_order",
+    "eth_allowlist_built_empty_after_dropping_every_key",
+    "idl_entry_accepted_unsigned",
+    "idl_entry_accepted_curator_signed",
+    "idl_skipped_for_invalid_program_id",
+    "idl_skipped_for_trusted_program",
+    "idl_skipped_for_oversized_body",
+    "idl_skipped_for_invalid_signature",
+    "idl_skipped_for_reserved_program_name",
+    "idl_advertised_but_undecodable",
+    "idl_metadata_name_bypassed_the_reserved_guard",
+    "canonical_program_name_returned",
+    "caller_supplied_program_name_returned",
+    "caller_idl_name_suppressed_for_canonical_program",
+    "sol_allowlist_cached_empty_for_process_life",
+]
+confirmedProperties = [
+    "prehash_encoding_is_injective",
+    "present_but_invalid_signature_is_never_admitted",
+    "oversized_caller_metadata_never_reaches_the_registry",
+    "registered_abi_body_is_always_parseable",
+    "trusted_program_never_gets_a_caller_supplied_idl",
+    "canonical_program_name_is_never_caller_controlled",
+    "canonical_program_never_shows_a_caller_idl_name",
+    "one_bad_entry_never_drops_a_good_one",
+    "every_mapping_resolves_to_a_registered_abi",
+    "empty_allowlist_admits_no_caller_abi",
+    "configured_curator_allowlist_requires_signed_idls",
+    "curator_vouched_address_decodes_the_vouched_body",
+    "dropped_signer_keys_never_silently_invert_admission",
+    "admitted_metadata_mapping_is_never_shadowed",
+    "admitted_signature_carries_no_unverified_fields",
+    "disarmed_curator_config_is_surfaced_to_the_caller",
+    "sol_allowlist_tracks_the_signer_env",
+    "advertised_idl_is_always_decodable",
+    "curator_key_admitting_an_abi_was_deployment_configured",
+    "ambiguous_signature_metadata_is_never_admitted",
+    "partial_caller_mapping_never_silently_renders",
+    "reserved_canonical_label_never_renders_on_a_stranger",
+]
+retiredObservations = []
+retiredProperties = []
+wireConfirmed = true
+setupCompleted = false
+cardsDone = true
+
+[[components.metadata-signature-trust.productIntent.goals]]
+claim = "It should be possible to admit a proxy entry whose implementation_address cannot be parsed, keeping it as a proxy that falls back to its own ABI."
+expectations = [
+    "A malformed `entryProxy.implAddress` yields `entryProxy.implLink` of `NoLink` rather than dropping the entry.",
+    "`entryProxy.abiKind` stays `Proxy` even though no implementation can ever be resolved for it.",
+    "`registry.proxyLink` stays `Empty`, so calldata at the proxy renders against the proxy's own ABI.",
+]
+headline = "Proxy with unparseable target still decodes"
+id = "proxy-with-unparseable-target-still-decodes"
+quint = [
+    "val malformedTargetDegrades =",
+    "  entries.forall(e =>",
+    "    e.abiKind == Proxy and parse(e.implAddress) == Error implies",
+    "      e.implLink == NoLink and e.admission == Admitted)",
+    "val proxyWithoutLinkFallsBack =",
+    "  registry.mappings.keys().forall(a =>",
+    "    not(a.in(registry.proxyLink.keys())) implies",
+    "      decoderFor(a) == ownAbi(a))",
+]
+recordedAt = 1788462741034
+why = "Callers that mistype an implementation address still get a decoded rendering instead of a blank raw-hex screen, which is the whole point of the display-only degradation path."
+
+[[components.metadata-signature-trust.productIntent.goals.run]]
+action = "resolveAbiKind(entryProxy)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.goals.run.effects]]
+field = "entryProxy.implLink"
+from = "Pending"
+to = "NoLink"
+
+[[components.metadata-signature-trust.productIntent.goals.run.facts]]
+fact = "parse(implAddressOf(entryProxy)) == Error"
+
+[[components.metadata-signature-trust.productIntent.goals.run]]
+action = "admitEntry(keyProxy, chain 1)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.goals.run.effects]]
+field = "registry.mappings"
+from = "Empty"
+to = "AddrToProxy"
+
+[[components.metadata-signature-trust.productIntent.goals.run.effects]]
+field = "registry.proxyLink"
+from = "Empty"
+to = "Empty"
+
+[[components.metadata-signature-trust.productIntent.goals.run.facts]]
+fact = "decoderFor(addrProxy) == abiOf(entryProxy)"
+
+[[components.metadata-signature-trust.productIntent.goals.sources]]
+hash = "fnv1a64:fbe32e6d2516dc1f"
+path = "src/chain_parsers/visualsign-ethereum/src/abi_metadata.rs"
+
+[[components.metadata-signature-trust.productIntent.goals.sources]]
+hash = "fnv1a64:83b04a8d8cce1284"
+path = "src/chain_parsers/visualsign-ethereum/src/abi_registry.rs"
+
+[[components.metadata-signature-trust.productIntent.goals.start]]
+field = "entryProxy.abiKind"
+value = "Proxy"
+
+[[components.metadata-signature-trust.productIntent.goals.start]]
+field = "entryProxy.implAddress"
+value = "Malformed"
+
+[[components.metadata-signature-trust.productIntent.goals.start]]
+field = "entryProxy.implLink"
+value = "Pending"
+
+[[components.metadata-signature-trust.productIntent.goals.start]]
+field = "entryProxy.signature"
+value = "Present"
+
+[[components.metadata-signature-trust.productIntent.goals.start]]
+field = "registry.mappings"
+value = "Empty"
+
+[[components.metadata-signature-trust.productIntent.goals.start]]
+field = "registry.proxyLink"
+value = "Empty"
+
+[[components.metadata-signature-trust.productIntent.hazards]]
+claim = "It should be impossible to reach a state where stripping an entry's signature admits an ABI body that the same body signed by a curator had rejected."
+decidedAt = 1788547433903
+decision = "confirmed"
+expectations = [
+    "With `allowlist.keys` `Empty`, an entry whose `signature` is `Present` ends `Rejected`.",
+    "The same body with `signature` `Absent` must not end `Admitted` when the signed form was `Rejected`.",
+    "`registry.mappings` must stay `Empty` for a body no authorized signer vouched for.",
+]
+headline = "Removing a signature never widens admission"
+id = "removing-a-signature-never-widens-admission"
+quint = [
+    "val noDowngradeAdmission =",
+    "  allowlist.keys.size() == 0 implies",
+    "    entries.forall(e => e.admission != Admitted)",
+    "val strippingNeverHelps =",
+    "  admission(unsigned(e)) != Admitted or",
+    "  admission(signed(e)) == Admitted",
+]
+recordedAt = 1788462642111
+why = "In the shipped configuration the allowlist is empty, so a caller that signs its ABI correctly gets it dropped while the same caller that omits the signature gets its decoder shown to the human, inverting the incentive the allowlist exists to create."
+
+[[components.metadata-signature-trust.productIntent.hazards.instead]]
+action = "extractAbis rejects unsignedEntryA"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "entryA.admission"
+from = "Rejected"
+to = "Rejected"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "registry.mappings"
+from = "Empty"
+to = "Empty"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.facts]]
+fact = "allowlist.keys.size() == 0"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "extractAbis(signedEntryA, chain 1)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "entryA.admission"
+from = "Pending"
+to = "Rejected"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "allowlist.keys.size() == 0"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "dropSignature(entryA)"
+actor = "user"
+facts = []
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "entryA.signature"
+from = "Present"
+to = "Absent"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "extractAbis(unsignedEntryA, chain 1)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "entryA.admission"
+from = "Rejected"
+to = "Admitted"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "registry.mappings"
+from = "Empty"
+to = "HasAddrA"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "body(entryA) == body(signedEntryA)"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:fbe32e6d2516dc1f"
+path = "src/chain_parsers/visualsign-ethereum/src/abi_metadata.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:65d30e5a3dd63195"
+path = "src/visualsign/src/signing.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:1f5ce99a7b215660"
+path = "src/chain_parsers/visualsign-ethereum/src/lib.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "allowlist.keys"
+note = "production default no env"
+value = "Empty"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryA.signature"
+value = "Present"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryA.admission"
+value = "Pending"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "registry.mappings"
+value = "Empty"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "verifyPrehash(entryA) == Ok"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "not(signer(entryA).in(allowlist.keys))"
+
+[[components.metadata-signature-trust.productIntent.hazards]]
+claim = "It should be impossible to reach a state where an entry signed as an implementation is admitted as a proxy pointing at an ABI its signer never authorized."
+decidedAt = 1788547438077
+decision = "confirmed"
+expectations = [
+    "`prehash(entryA)` is computed over the ABI JSON body only, so flipping `entryA.abiKind` to `Proxy` leaves `verifyPrehash(entryA)` at `Ok`.",
+    "`registry.proxyLink` ends up pointing `addrA` at `addrB`, whose ABI carries no signature at all.",
+    "Calldata sent to `addrA` is then rendered against `entryB`'s body rather than the signed one.",
+]
+headline = "Signed entry's proxy link cannot be forged"
+id = "signed-entry-s-proxy-link-cannot-be-forged"
+quint = [
+    "val signatureCoversRouting =",
+    "  entries.forall(e =>",
+    "    e.admission == Admitted implies",
+    "      prehash(e) == prehashOf(e.body, e.abiKind, e.implAddress))",
+    "val noUnauthorizedProxyLink =",
+    "  registry.proxyLink.keys().forall(a =>",
+    "    signedRouting(a) == registry.proxyLink.get(a))",
+]
+recordedAt = 1788462669746
+why = "A man-in-the-middle who cannot touch the signed ABI body can still redirect a curated contract's rendering to an ABI of their own choosing, so the human sees labels the curator never approved for that address."
+
+[[components.metadata-signature-trust.productIntent.hazards.instead]]
+action = "extractAbis rejects retyped entryA"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "entryA.admission"
+from = "Pending"
+to = "Rejected"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "registry.proxyLink"
+from = "Empty"
+to = "Empty"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.facts]]
+fact = "prehash(entryA) != prehash(originalA)"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "setAbiType(entryA, Proxy)"
+actor = "user"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "entryA.abiKind"
+from = "Implementation"
+to = "Proxy"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "prehash(entryA) == prehash(originalA)"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "setImplAddress(entryA, addrB)"
+actor = "user"
+facts = []
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "entryA.implAddress"
+from = "Absent"
+to = "addrB"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "extractAbis(entryA, entryB, chain 1)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "entryA.admission"
+from = "Pending"
+to = "Admitted"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "registry.proxyLink"
+from = "Empty"
+to = "AddrAtoAddrB"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "verifyPrehash(entryA) == Ok"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:fbe32e6d2516dc1f"
+path = "src/chain_parsers/visualsign-ethereum/src/abi_metadata.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:65d30e5a3dd63195"
+path = "src/visualsign/src/signing.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:83b04a8d8cce1284"
+path = "src/chain_parsers/visualsign-ethereum/src/abi_registry.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryA.signature"
+value = "Present"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryA.abiKind"
+value = "Implementation"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryA.implAddress"
+value = "Absent"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryA.admission"
+value = "Pending"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryB.signature"
+note = "attacker body at addrB"
+value = "Absent"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "registry.proxyLink"
+value = "Empty"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "signer(entryA).in(allowlist.keys)"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "scope(prehash(entryA)) == (chain, addrA)"
+
+[[components.metadata-signature-trust.productIntent.hazards]]
+claim = "It should be impossible to reach a state where an unparseable entry in the curator-key configuration leaves the allowlist empty, so that every curator-signed ABI is rejected while unsigned ABIs are still admitted."
+decidedAt = 1789134116172
+decision = "confirmed"
+expectations = [
+    "`curatorKeyEntry` is dropped with only a `log::warn!`, so `allowlist.length` stays `0` and nothing distinguishes it from an intentionally unconfigured deployment",
+    "`abiEntryA.status` becomes `Rejected` because an empty allowlist authorizes nothing, even though its signature verifies over the prehash",
+    "`abiEntryB.status` becomes `Admitted` because `abi.signature` is `Absent` and unsigned entries are registered rather than dropped",
+    "the net effect of one config typo is that the caller-ABI path admits only the `Absent`-signature entries",
+]
+headline = "Malformed signer config doesn't silently disarm signing"
+id = "malformed-signer-config-doesn-t-silently-disarm-signing"
+quint = [
+    "val allowlistDisarmed = allowlist.size() == 0",
+    "val signedEntriesRejected = entries.filter(e => e.signature == Present).forall(e => e.status == Rejected)",
+    "val unsignedEntriesAdmitted = entries.filter(e => e.signature == Absent).exists(e => e.status == Admitted)",
+    "val silentDowngrade = allowlistDisarmed and signedEntriesRejected and unsignedEntriesAdmitted",
+    "val noSilentDowngrade = not(silentDowngrade)",
+]
+recordedAt = 1788462704667
+why = "A single typo in a deployment env var would quietly invert the trust model, turning curator-signed ABIs into the only rejected ones while every unsigned caller ABI still shapes what the human signs."
+
+[[components.metadata-signature-trust.productIntent.hazards.instead]]
+action = "rejectUnusableSignerConfig(mappings)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "abiEntryA.status"
+from = "Pending"
+to = "Rejected"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "abiEntryB.status"
+from = "Pending"
+to = "Rejected"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.facts]]
+fact = "registry.abis == Set()"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "authorizedAbiSigners(signerEnv)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "curatorKeyEntry.admission"
+from = "Pending"
+to = "DroppedWithWarning"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "allowlist.length"
+from = "0"
+to = "0"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "not(signer(abiEntryA).in(allowlist))"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "tryExtractFromChainMetadata(mappings)"
+actor = "user"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "abiEntryA.status"
+from = "Pending"
+to = "Rejected"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "abiEntryB.status"
+from = "Pending"
+to = "Admitted"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "registry.abis == Set(address(abiEntryB))"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:fbe32e6d2516dc1f"
+path = "src/chain_parsers/visualsign-ethereum/src/abi_metadata.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:65d30e5a3dd63195"
+path = "src/visualsign/src/signing.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "curatorKeyEntry.encoding"
+note = "one typo in the env var"
+value = "MalformedHex"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "curatorKeyEntry.admission"
+value = "Pending"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "allowlist.length"
+value = "0"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "abiEntryA.signature"
+value = "Present"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "abiEntryB.signature"
+value = "Absent"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "abiEntryA.status"
+value = "Pending"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "abiEntryB.status"
+value = "Pending"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "signer(abiEntryA) == curatorKeyEntry"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "address(abiEntryA) != address(abiEntryB)"
+
+[[components.metadata-signature-trust.productIntent.hazards]]
+claim = "It should be impossible to reach a state where a second map key spelling the same address silently replaces the ABI mapping an earlier admitted entry installed."
+expectations = [
+    "ABIs are registered under the raw map-key string, so `registry.abis` keeps both entries while `registry.mappings` holds only one per parsed address.",
+    "Iteration follows the `BTreeMap` key order, so the lexicographically later spelling wins with no warning logged.",
+    "The signed body stays in `registry.abis` but is unreachable, so `list_abis` still reports it as admitted.",
+]
+headline = "Alias key never replaces an admitted ABI"
+id = "alias-key-never-replaces-an-admitted-abi"
+quint = [
+    "val oneMappingPerAddress =",
+    "  registry.mappings.keys().forall(a =>",
+    "    admittedFor(a).size() <= 1)",
+    "val noSilentShadowing =",
+    "  registry.mappings.keys().forall(a =>",
+    "    registry.mappings.get(a) == firstAdmittedFor(a))",
+]
+recordedAt = 1788462710867
+why = "A caller can append a case-variant duplicate of a curated address and have its own unsigned ABI decide what the human reads, while the displaced signed ABI still appears registered."
+
+[[components.metadata-signature-trust.productIntent.hazards.instead]]
+action = "skipDuplicateAddress(keyLowercase)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "registry.mappings"
+from = "AddrToChecksummed"
+to = "AddrToChecksummed"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "registry.abis"
+from = "HasChecksummed"
+to = "HasChecksummed"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.facts]]
+fact = "parse(keyLowercase) == parse(keyChecksummed)"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "admitEntry(keyChecksummed, chain 1)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "registry.mappings"
+from = "Empty"
+to = "AddrToChecksummed"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "registry.abis"
+from = "Empty"
+to = "HasChecksummed"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "signer(entryChecksummed).in(allowlist.keys)"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "admitEntry(keyLowercase, chain 1)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "registry.mappings"
+from = "AddrToChecksummed"
+to = "AddrToLowercase"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "registry.abis"
+from = "HasChecksummed"
+to = "HasBoth"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "parse(keyLowercase) == parse(keyChecksummed)"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:fbe32e6d2516dc1f"
+path = "src/chain_parsers/visualsign-ethereum/src/abi_metadata.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:83b04a8d8cce1284"
+path = "src/chain_parsers/visualsign-ethereum/src/abi_registry.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:f032f589363957db"
+path = "src/chain_parsers/visualsign-ethereum/src/embedded_abis.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryChecksummed.signature"
+value = "Present"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryLowercase.signature"
+value = "Absent"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "registry.mappings"
+value = "Empty"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "registry.abis"
+value = "Empty"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "parse(keyChecksummed) == parse(keyLowercase)"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "keyChecksummed < keyLowercase"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "body(entryLowercase) != body(entryChecksummed)"
+
+[[components.metadata-signature-trust.productIntent.hazards]]
+claim = "It should be impossible to reach a state where an IDL entry rejected for a bad signature is admitted once its signature field is removed."
+expectations = [
+    "An entry whose `signature` is `Absent` reaches `admission` `Admitted` even though `allowlist.keys` is non-empty",
+    "`registry.configs` gains `progA` carrying the same `AttackerIdl` body that was rejected while signed",
+    "The signed path is strictly harder to pass than the unsigned path for the identical body",
+]
+headline = "Dropping A Signature Must Not Ease Admission"
+id = "dropping-a-signature-must-not-ease-admission"
+quint = [
+    "val unsignedIsNotEasier =",
+    "  allowlist.keys != Set() implies",
+    "    entries.filter(e => e.signature == Absent)",
+    "      .forall(e => e.admission == Rejected)",
+]
+recordedAt = 1788462723846
+why = "An attacker who cannot forge a curator signature can simply omit one, so the allowlist constrains only honest callers."
+
+[[components.metadata-signature-trust.productIntent.hazards.instead]]
+action = "extractIdlMappings(entryA, strictMode)"
+actor = "system"
+facts = []
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "entryA.admission"
+from = "Pending"
+to = "Rejected"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "registry.configs"
+from = "{}"
+to = "{}"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "resubmit(progA, AttackerIdl, Absent)"
+actor = "user"
+facts = []
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "entryA.signature"
+from = "PresentInvalid"
+to = "Absent"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "entryA.admission"
+from = "Rejected"
+to = "Pending"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "extractIdlMappings(entryA, allowlist)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "entryA.admission"
+from = "Pending"
+to = "Admitted"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "registry.configs"
+from = "{}"
+to = "{progA}"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "decoder(progA) == entryA.body"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:85fd4abd024aa099"
+path = "src/chain_parsers/visualsign-solana/src/core/visualsign.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:d271b4ea85d8ef6e"
+path = "src/chain_parsers/visualsign-solana/src/idl/signature.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryA.programId"
+value = "progA"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "not(progA.in(trustedIds))"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryA.body"
+value = "AttackerIdl"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryA.signature"
+value = "PresentInvalid"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryA.admission"
+value = "Rejected"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "allowlist.keys"
+note = "env-configured curator key"
+value = "{curator}"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "registry.configs"
+value = "{}"
+
+[[components.metadata-signature-trust.productIntent.hazards]]
+claim = "It should be impossible to reach a state where an ABI entry is admitted carrying `issuer` and `timestamp` values that the prehash does not cover and no validation step reads."
+expectations = [
+    "`convert_proto_signature` copies `issuer` and `timestamp` out of the proto metadata map into fields marked `#[allow(dead_code)]`, so `validate_abi_signature` never compares them to anything",
+    "`ethereum_metadata_prehash` commits to `DOMAIN`, `chain_tag`, the 8-byte `chain_id` ++ 20-byte address scope, and the ABI JSON body only — `timestamp` and `issuer` are outside the signed preimage",
+    "`abiEntryA.status` becomes `Admitted` because the signature still verifies over an unchanged `prehash(abiEntryA)`",
+    "there is no freshness or expiry check, so a signature minted at `2024-01` is admitted indefinitely and per-entry revocation is impossible without dropping the curator key entirely",
+]
+headline = "Signature fields outside the prehash aren't trusted"
+id = "signature-fields-outside-the-prehash-aren-t-trusted"
+quint = [
+    "val prehashCovers = Set(DOMAIN, chainTag, scope, body)",
+    "val signatureFields = Set(value, algorithm, publicKey, issuer, timestamp)",
+    "val uncovered = signatureFields.exclude(prehashCovers)",
+    "val admittedWithUncoveredFields = entry.status == Admitted and uncovered.size() > 0",
+    "val noUncoveredTrust = not(admittedWithUncoveredFields)",
+]
+recordedAt = 1788462740793
+why = "Fields that look like provenance and freshness are carried all the way into the verifier but bind nothing, so an operator reading `issuer`/`timestamp` in a log or UI would believe an attestation the code never checked."
+
+[[components.metadata-signature-trust.productIntent.hazards.instead]]
+action = "rejectUncoveredSignatureFields(entry)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "abiEntryA.status"
+from = "Pending"
+to = "Rejected"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.facts]]
+fact = "registry.abis == Set()"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "rewriteSignatureMetadata(timestamp)"
+actor = "user"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "curatorSignature.timestamp"
+from = "2024-01"
+to = "2026-09"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "curatorSignature.issuer"
+from = "visualsign-curator"
+to = "acme-audit-team"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "prehash(abiEntryA) == prehash(abiEntryA.original)"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "tryExtractFromChainMetadata(mappings)"
+actor = "user"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "abiEntryA.status"
+from = "Pending"
+to = "Admitted"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "registry.abis == Set(address(abiEntryA))"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:fbe32e6d2516dc1f"
+path = "src/chain_parsers/visualsign-ethereum/src/abi_metadata.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:65d30e5a3dd63195"
+path = "src/visualsign/src/signing.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "abiEntryA.signature"
+value = "Present"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "abiEntryA.status"
+value = "Pending"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "curatorSignature.timestamp"
+value = "2024-01"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "curatorSignature.issuer"
+value = "visualsign-curator"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "curatorSignature.algorithm"
+value = "secp256k1"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "signer(abiEntryA).in(allowlist)"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "prehash(abiEntryA) == sha256(domain ++ scope ++ body)"
+note = "no timestamp or issuer"
+
+[[components.metadata-signature-trust.productIntent.hazards]]
+claim = "It should be impossible to reach a state where every configured curator key is dropped as malformed and parse requests still succeed with no signal."
+expectations = [
+    "A malformed entry in `env.signerList` is skipped, leaving `allowlist.state` at `CachedEmpty` while the operator believes a curator is configured",
+    "`entryB` carries a genuinely valid curator signature yet ends at `admission` `Rejected` with `reject.reason` `NotInAllowlist`",
+    "`response.status` is `Ok` and only `log.lastEvent` records `WarnIgnoredKey`, so the misconfiguration never reaches the caller",
+    "`allowlist.state` is cached for the life of the process, so no later request can recover",
+]
+headline = "Misconfigured Curator Key Must Not Pass Silently"
+id = "misconfigured-curator-key-must-not-pass-silently"
+quint = [
+    "val misconfigIsSurfaced =",
+    "  env.signerList != \"\" and allowlist.keys == Set() implies",
+    "    response.status != Ok",
+]
+recordedAt = 1788462763292
+why = "A single typo in the deployment env silently turns off curator admission for the whole process life, and every legitimately signed IDL is dropped while the request still reports success."
+
+[[components.metadata-signature-trust.productIntent.hazards.instead]]
+action = "toVisualSignPayload(tx, options)"
+actor = "system"
+facts = []
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "response.status"
+from = "Pending"
+to = "Err"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "display.decoder"
+from = "Unset"
+to = "Unset"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "authorizedIdlSigners(env.signerList)"
+actor = "system"
+facts = []
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "allowlist.state"
+from = "Uninitialized"
+note = "OnceLock, once per process"
+to = "CachedEmpty"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "log.lastEvent"
+from = "None"
+to = "WarnIgnoredKey"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "validateIdlSignature(entryB, allowlist)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "entryB.admission"
+from = "Pending"
+to = "Rejected"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "reject.reason"
+from = "None"
+to = "NotInAllowlist"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "allowlist.keys == Set()"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "toVisualSignPayload(tx, options)"
+actor = "system"
+facts = []
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "response.status"
+from = "Pending"
+to = "Ok"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "display.decoder"
+from = "Unset"
+to = "RawFallback"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:d271b4ea85d8ef6e"
+path = "src/chain_parsers/visualsign-solana/src/idl/signature.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:65d30e5a3dd63195"
+path = "src/visualsign/src/signing.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:85fd4abd024aa099"
+path = "src/chain_parsers/visualsign-solana/src/core/visualsign.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "env.signerList"
+note = "one entry, malformed hex"
+value = "curatorHexTypo"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "allowlist.state"
+value = "Uninitialized"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryB.signature"
+value = "PresentValid"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "signer(entryB) == curatorKey"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryB.admission"
+value = "Pending"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "display.decoder"
+value = "Unset"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "response.status"
+value = "Pending"
+
+[[components.metadata-signature-trust.productIntent.hazards]]
+claim = "It should be impossible to reach a state where the registry advertises an IDL for a program whose caller-supplied body cannot be parsed."
+expectations = [
+    "`fromIdlMappings.result` is `Ok` even though the doc comment promises an error when any IDL JSON is invalid",
+    "`jsonParse.outcome` is `ErrSwallowed`: the metadata-name extraction failure is discarded and the body is stored unvalidated with the builtin-override flag set",
+    "`registry.idlAvailability` becomes `Advertised` for `progC` while `getIdl(progC)` is `None`, so `has_idl` and `get_idl` disagree",
+    "No admission step between `extractIdlMappings` and storage ever parses `entryC.body`",
+]
+headline = "Unparseable IDL Body Must Not Enter The Registry"
+id = "unparseable-idl-body-must-not-enter-the-registry"
+quint = [
+    "val advertisedImpliesDecodable =",
+    "  registry.configs.keys().forall(p =>",
+    "    getIdl(p) != None)",
+]
+recordedAt = 1788462814002
+why = "The constructor's Result type promises an error for invalid IDL JSON but never returns one, so an unreadable caller body is stored as a builtin-overriding decoder and every caller of has_idl is told a decoder exists."
+
+[[components.metadata-signature-trust.productIntent.hazards.instead]]
+action = "fromIdlMappings(mapping)"
+actor = "system"
+facts = []
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "fromIdlMappings.result"
+from = "Pending"
+to = "Err"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "registry.configs"
+from = "{}"
+to = "{}"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "registry.idlAvailability"
+from = "Absent"
+to = "Absent"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "extractIdlMappings(entryC, allowlist)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "entryC.admission"
+from = "Pending"
+to = "Admitted"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "mapping.entries"
+from = "{}"
+to = "{progC}"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "sizeOf(entryC.body) < maxIdlJsonBytes"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "fromIdlMappings(mapping)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "jsonParse.outcome"
+from = "Untried"
+to = "ErrSwallowed"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "registry.configs"
+from = "{}"
+to = "{progC}"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "registry.idlAvailability"
+from = "Absent"
+to = "Advertised"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "fromIdlMappings.result"
+from = "Pending"
+to = "Ok"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "getIdl(progC) == None"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:83fc1b2546be04c6"
+path = "src/chain_parsers/visualsign-solana/src/idl/mod.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:85fd4abd024aa099"
+path = "src/chain_parsers/visualsign-solana/src/core/visualsign.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:e6d3348006b1bee0"
+path = "src/chain_parsers/visualsign-solana/src/presets/unknown_program/mod.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryC.programId"
+value = "progC"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "not(progC.in(trustedIds))"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryC.body"
+value = "MalformedJson"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryC.signature"
+value = "Absent"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryC.admission"
+value = "Pending"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "mapping.entries"
+value = "{}"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "registry.configs"
+value = "{}"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "registry.idlAvailability"
+value = "Absent"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "jsonParse.outcome"
+value = "Untried"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "fromIdlMappings.result"
+value = "Pending"
+
+[[components.metadata-signature-trust.productIntent.hazards]]
+claim = "It should be impossible to reach a state where a caller-supplied IDL renders a reserved canonical program label on a pubkey that has no canonical identity."
+expectations = [
+    "The impersonation guard tests only `resolvedName`, which takes `entryD.programName` whenever that field is present, so `entryD.metadataName` is never examined",
+    "`registry.idlNames` is populated from `metadata.name` by a second, independent extraction that applies no reserved-name filter",
+    "`get_idl_name` suppresses a caller metadata name only when the program id itself has a canonical name, which `progD` does not",
+    "The signer sees `My Wallet (name: System Program)` in the `Program` field for a pubkey that is not the System Program",
+]
+headline = "Reserved Canonical Label Must Never Render On A Stranger"
+id = "reserved-canonical-label-must-never-render-on-a-stranger"
+quint = [
+    "val noReservedLabelOnStranger =",
+    "  registry.idlNames.keys().forall(p =>",
+    "    canonicalName(p) == None implies",
+    "      not(registry.idlNames.get(p).in(reservedNames)))",
+]
+recordedAt = 1788462885325
+why = "Supplying a harmless program_name alongside a canonical metadata.name walks straight past the impersonation guard and puts a trusted program's label into the rendered signing payload for an attacker-controlled pubkey."
+
+[[components.metadata-signature-trust.productIntent.hazards.instead]]
+action = "renderProgramField(progD)"
+actor = "system"
+facts = []
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "display.programName"
+from = "Unset"
+to = "My Wallet"
+
+[[components.metadata-signature-trust.productIntent.hazards.instead.effects]]
+field = "display.idlName"
+from = "Unset"
+to = "Unset"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "extractIdlMappings(entryD, allowlist)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "resolvedName"
+from = "Unset"
+to = "My Wallet"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "entryD.admission"
+from = "Pending"
+to = "Admitted"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "not(resolvedName.in(reservedNames))"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "fromIdlMappings(mapping)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "registry.idlNames"
+from = "{}"
+to = "{progD:SystemProg}"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "canonicalName(progD) == None"
+
+[[components.metadata-signature-trust.productIntent.hazards.run]]
+action = "renderProgramField(progD)"
+actor = "system"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "display.programName"
+from = "Unset"
+to = "My Wallet"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.effects]]
+field = "display.idlName"
+from = "Unset"
+to = "System Program"
+
+[[components.metadata-signature-trust.productIntent.hazards.run.facts]]
+fact = "display.idlName.in(reservedNames)"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:85fd4abd024aa099"
+path = "src/chain_parsers/visualsign-solana/src/core/visualsign.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:83fc1b2546be04c6"
+path = "src/chain_parsers/visualsign-solana/src/idl/mod.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:162251f5d4985df5"
+path = "src/chain_parsers/visualsign-solana/src/idl/builtin_programs.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.sources]]
+hash = "fnv1a64:e6d3348006b1bee0"
+path = "src/chain_parsers/visualsign-solana/src/presets/unknown_program/mod.rs"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryD.programId"
+value = "progD"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+fact = "not(progD.in(trustedIds))"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryD.programName"
+note = "benign, passes the name guard"
+value = "My Wallet"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryD.metadataName"
+value = "System Program"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryD.signature"
+value = "Absent"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "entryD.admission"
+value = "Pending"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "resolvedName"
+value = "Unset"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "registry.idlNames"
+value = "{}"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "display.programName"
+value = "Unset"
+
+[[components.metadata-signature-trust.productIntent.hazards.start]]
+field = "display.idlName"
+value = "Unset"
+
+[components.metadata-signature-trust.oracle]
+format = "quint-oracle-config"
+version = 1
+spec = "quint-specs/metadata-signature-trust.qnt"
+main = "metadata_signature_trust"
+eventScope = "metadata-signature-trust"
+observations = [
+    "eth_entry_admitted_as_implementation",
+    "eth_proxy_admitted_with_implementation_link",
+    "eth_proxy_admitted_without_implementation_link",
+    "eth_proxy_implementation_address_was_malformed",
+    "eth_unsigned_entry_admitted",
+    "eth_curator_signed_entry_admitted",
+    "eth_entry_skipped_for_invalid_address",
+    "eth_entry_skipped_for_oversized_body",
+    "eth_entry_skipped_for_unparseable_abi_json",
+    "eth_signature_rejected_for_unauthorized_signer",
+    "eth_signature_rejected_for_wrong_preimage",
+    "eth_signature_rejected_for_unsupported_algorithm",
+    "eth_signature_rejected_for_malformed_key_material",
+    "eth_extraction_yielded_no_registry",
+    "eth_alias_keys_collapsed_to_one_mapping",
+    "eth_mapping_points_at_unregistered_abi",
+    "eth_admitted_entry_carries_unverified_provenance",
+    "eth_implementation_resolved_through_proxy_link",
+    "eth_calldata_fell_back_to_proxy_own_abi",
+    "signature_metadata_duplicate_resolved_by_list_order",
+    "eth_allowlist_built_empty_after_dropping_every_key",
+    "idl_entry_accepted_unsigned",
+    "idl_entry_accepted_curator_signed",
+    "idl_skipped_for_invalid_program_id",
+    "idl_skipped_for_trusted_program",
+    "idl_skipped_for_oversized_body",
+    "idl_skipped_for_invalid_signature",
+    "idl_skipped_for_reserved_program_name",
+    "idl_advertised_but_undecodable",
+    "idl_metadata_name_bypassed_the_reserved_guard",
+    "canonical_program_name_returned",
+    "caller_supplied_program_name_returned",
+    "caller_idl_name_suppressed_for_canonical_program",
+    "sol_allowlist_cached_empty_for_process_life",
+]
+reportDir = "mc-out-metadata-signature-trust"
+testCommand = [
+    "bash",
+    "-c",
+    "set -e; cargo test --manifest-path src/Cargo.toml --features quint-oracle/enabled -p visualsign-ethereum --lib --no-fail-fast abi_metadata:: ; cargo test --manifest-path src/Cargo.toml --features quint-oracle/enabled -p visualsign-solana --lib --no-fail-fast idl",
+]
+unguidedStepBudget = 10
+stepReplayBudget = 50
+guardScenarios = true
+
+[components.metadata-signature-trust.oracle.studio]
+system = "Metadata Signature Trust"
+model = "quint-specs/metadata-signature-trust.qnt"
+invariants = [
+    "prehash_encoding_is_injective",
+    "present_but_invalid_signature_is_never_admitted",
+    "oversized_caller_metadata_never_reaches_the_registry",
+    "registered_abi_body_is_always_parseable",
+    "trusted_program_never_gets_a_caller_supplied_idl",
+    "canonical_program_name_is_never_caller_controlled",
+    "canonical_program_never_shows_a_caller_idl_name",
+    "one_bad_entry_never_drops_a_good_one",
+    "every_mapping_resolves_to_a_registered_abi",
+    "empty_allowlist_admits_no_caller_abi",
+    "configured_curator_allowlist_requires_signed_idls",
+    "curator_vouched_address_decodes_the_vouched_body",
+    "dropped_signer_keys_never_silently_invert_admission",
+    "admitted_metadata_mapping_is_never_shadowed",
+    "admitted_signature_carries_no_unverified_fields",
+    "disarmed_curator_config_is_surfaced_to_the_caller",
+    "sol_allowlist_tracks_the_signer_env",
+    "advertised_idl_is_always_decodable",
+    "curator_key_admitting_an_abi_was_deployment_configured",
+    "ambiguous_signature_metadata_is_never_admitted",
+    "partial_caller_mapping_never_silently_renders",
+    "reserved_canonical_label_never_renders_on_a_stranger",
+]
+
+[[components.metadata-signature-trust.oracle.studio.adversaryDispositions]]
+row = "The Ethereum allowlist is rebuilt from `std::env::var(\"VISUALSIGN_ETH_ABI_SIGNERS\")` on every `EthereumVisualSignConverter::new()` (`abi_metadata.rs:351`), so which signers are trusted can change during a process's lifetime — unlike Solana's, which is frozen in a `OnceLock`."
+disposition = "modeled"
+
+[components.metadata-signature-trust.oracle.studio.adversaryDispositions.groundedBy]
+actions = [
+    "set_eth_signer_env",
+    "build_eth_signer_allowlist",
+    "eth_allowlist_insert_key",
+    "eth_allowlist_from_keys",
+]
+observations = ["eth_allowlist_built_empty_after_dropping_every_key"]
+properties = [
+    "empty_allowlist_admits_no_caller_abi",
+    "dropped_signer_keys_never_silently_invert_admission",
+]
+
+[[components.metadata-signature-trust.oracle.studio.adversaryDispositions]]
+row = "Conversely, Solana's `OnceLock` (`idl/signature.rs:221`) means the very first call fixes the allowlist forever; a deployment that sets the env var after that first read silently gets an empty, reject-all allowlist with no error anywhere."
+disposition = "modeled"
+
+[components.metadata-signature-trust.oracle.studio.adversaryDispositions.groundedBy]
+actions = [
+    "build_sol_signer_allowlist",
+    "set_sol_signer_env",
+]
+observations = ["sol_allowlist_cached_empty_for_process_life"]
+properties = [
+    "sol_allowlist_tracks_the_signer_env",
+    "disarmed_curator_config_is_surfaced_to_the_caller",
+]
+
+[[components.metadata-signature-trust.oracle.studio.adversaryDispositions]]
+row = "`convert_proto_signature` takes the *first* metadata entry matching each key (`abi_metadata.rs:206`, `idl/signature.rs:93`), so a proto carrying duplicate `algorithm` or `public_key` pairs is resolved by list order rather than rejected as ambiguous."
+disposition = "modeled"
+
+[components.metadata-signature-trust.oracle.studio.adversaryDispositions.groundedBy]
+actions = [
+    "attach_eth_signature_with_shadowed_metadata",
+    "attach_idl_signature_with_shadowed_metadata",
+]
+observations = ["signature_metadata_duplicate_resolved_by_list_order"]
+properties = ["ambiguous_signature_metadata_is_never_admitted"]
+
+[[components.metadata-signature-trust.oracle.studio.adversaryDispositions]]
+row = "`CLI_DEV_SIGNING_KEY_SEED` is a fixed all-`0x42` seed (`abi_metadata.rs:396`) whose public key is allowlisted whenever `dev-signing` or `cfg(test)` is on — enabling that feature in a shipped binary makes every locally-minted ABI signature acceptable."
+disposition = "modeled"
+
+[components.metadata-signature-trust.oracle.studio.adversaryDispositions.groundedBy]
+actions = [
+    "build_eth_signer_allowlist",
+    "attach_eth_signature",
+]
+observations = ["eth_curator_signed_entry_admitted"]
+properties = ["curator_key_admitting_an_abi_was_deployment_configured"]
+
+[[components.metadata-signature-trust.oracle.studio.adversaryDispositions]]
+row = "The signature covers only `abi.value`, so `abi_type`, `implementation_address`, and the entry's declared role can all be re-shaped without invalidating it."
+disposition = "modeled"
+
+[components.metadata-signature-trust.oracle.studio.adversaryDispositions.groundedBy]
+actions = [
+    "set_eth_entry_routing",
+    "tamper_eth_abi_body",
+    "set_eth_signature_provenance",
+]
+observations = [
+    "eth_proxy_admitted_with_implementation_link",
+    "eth_admitted_entry_carries_unverified_provenance",
+]
+properties = [
+    "curator_vouched_address_decodes_the_vouched_body",
+    "admitted_signature_carries_no_unverified_fields",
+]
+
+[[components.metadata-signature-trust.oracle.studio.adversaryDispositions]]
+row = "A verified curator signature attests only that a VisualSign-trusted key vouched for the body; it is explicitly *not* the program's on-chain upgrade authority, and the parser has no chain access to check the real one."
+disposition = "declined"
+category = "not-exposed"
+reason = "The on-chain upgrade authority is not reachable from this component at all — the parser runs with no chain access and no request field carries it — so there is no operation or state in which a curator signature could be compared against it; what the curator key does bind (chain tag, scope, body, and allowlist membership) is modeled and grounded by curator_vouched_address_decodes_the_vouched_body and curator_key_admitting_an_abi_was_deployment_configured."
+
+[[components.metadata-signature-trust.oracle.studio.adversaryDispositions]]
+row = "Both paths `continue` past every rejected entry, so a caller supplying a hundred tampered mappings still gets a rendered payload built from whichever few survived, with only log lines marking the difference."
+disposition = "modeled"
+
+[components.metadata-signature-trust.oracle.studio.adversaryDispositions.groundedBy]
+actions = [
+    "eth_skip_invalid_address",
+    "eth_skip_invalid_signature",
+    "eth_skip_unparseable_abi_json",
+    "sol_skip_invalid_signature",
+    "finish_eth_extraction",
+    "build_idl_registry",
+]
+observations = ["eth_extraction_yielded_no_registry"]
+properties = [
+    "partial_caller_mapping_never_silently_renders",
+    "one_bad_entry_never_drops_a_good_one",
+]
+
+[components.metadata-signature-trust.fingerprints]
+spec = "fnv1a64:e772e28eaf43f1b8"
+oracle = "fnv1a64:e6f7b1ec570561c1"
+
+[components.metadata-signature-trust.fingerprints.code]
+"src/chain_parsers/visualsign-ethereum/src/abi_metadata.rs" = "fnv1a64:78b3b7357dbab1a8"
+"src/chain_parsers/visualsign-solana/src/idl/mod.rs" = "fnv1a64:49d0b5ab1ae30c54"
+"src/chain_parsers/visualsign-solana/src/idl/signature.rs" = "fnv1a64:6231c9bfde474a53"
+"src/visualsign/src/signing.rs" = "fnv1a64:65d30e5a3dd63195"
+
+[components.metadata-signature-trust.fingerprints.instrumented]
+"quint-specs/oracle-client/rust/Cargo.toml" = "fnv1a64:a7f7cce4cf73716a"
+"quint-specs/oracle-client/rust/macros/Cargo.toml" = "fnv1a64:25ae8e87ca1e5587"
+"quint-specs/oracle-client/rust/macros/src/lib.rs" = "fnv1a64:c79c00a5f82c3cde"
+"quint-specs/oracle-client/rust/src/lib.rs" = "fnv1a64:7d13f0968325a5d8"
+"quint-specs/oracle-client/rust/src/live.rs" = "fnv1a64:0c96171212feb445"
+"quint-specs/oracle-client/rust/src/live/event.rs" = "fnv1a64:b610035d6435249f"
+"quint-specs/oracle-client/rust/src/live/registry.rs" = "fnv1a64:bf4890ead6ba9d19"
+"quint-specs/oracle-client/rust/src/live/transport.rs" = "fnv1a64:8712d4e9bdf961d7"
+"quint-specs/oracle-client/rust/src/live/value.rs" = "fnv1a64:7c5a5dd102552994"
+"quint-specs/oracle-client/rust/src/macros.rs" = "fnv1a64:f7fd3cd5981f3e14"
+"quint-specs/oracle-client/rust/src/stubs.rs" = "fnv1a64:125aae12fca00bd5"
+
+[components.parse-sign-pipeline]
+name = "Parse And Sign Pipeline"
+description = "The enclave parse endpoint: guard the request, dispatch to a chain converter, unconditionally charset-validate the rendered payload, then borsh-encode it and sign the digest with the ephemeral P256 key."
+role = "central"
+rank = 1
+paths = [
+    "src/parser/app/src/routes/parse.rs",
+    "src/parser/app/src/service.rs",
+    "src/parser/app/src/chain_conversion.rs",
+    "src/parser/app/src/registry.rs",
+    "src/parser/app/src/errors.rs",
+]
+tests = [
+    "src/parser/app/src/routes/parse.rs (inline mod tests)",
+    "src/integration/tests/parser.rs",
+]
+dependencies = [
+    "converter-registry-dispatch",
+    "deterministic-serialization",
+    "signable-payload-validation",
+    "ethereum-calldata-dispatch",
+    "solana-instruction-pipeline",
+    "sui-ptb-decoding",
+    "tron-contract-decoding",
+]
+operations = [
+    "`parse` (`routes/parse.rs:25`) — the production entry point; builds a registry and signs with the ephemeral key (mutates)",
+    "`parse_with_registry` (`routes/parse.rs:35`) — the same pipeline with an injectable registry (test seam)",
+    "`signing_digest_bytes` (`routes/parse.rs:169`) — the single source of truth for what gets signed",
+    "`Processor::new` (`service.rs:24`) — wraps the ephemeral key handle in a shared `RwLock`",
+    "`Processor::process` (`service.rs:32`) — request demux for `ParseRequest` and `HealthRequest`, run under `block_in_place`",
+    "`chain_conversion::proto_to_registry` (`chain_conversion.rs:6`)",
+    "`create_registry` (`registry.rs:12`) — assembles the feature-gated converter set (mutates the registry it builds)",
+    "`GrpcError::{new, internal}` (`errors.rs:16,25`)",
+]
+headlineProperties = [
+    "An empty `unsigned_payload` is rejected before any converter runs.",
+    "Every payload is charset-validated on the signing path regardless of which converter produced it, so a converter that skips its own validation still cannot get a poisoned payload signed.",
+    "Charset validation failures map to `InvalidArgument` and internal serialization failures to `Internal` — the two are never conflated.",
+    "The bytes that are signed are derived from the same `ParsedTransactionPayload` that is returned, so the response's `intermediate_output` is exactly what the digest covers.",
+    "`input_payload_digest` commits to the raw request payload and `metadata_digest` to the borsh-encoded metadata, using the empty-SHA-256 when metadata is absent.",
+    "Production requests always run with `developer_config: None`, so a signed transaction envelope is never unwrapped on this path.",
+    "Nothing is signed unless conversion, charset validation, and JSON serialization all succeeded first.",
+]
+adversarySurface = [
+    "`parse` calls `create_registry()` on every request (`routes/parse.rs:29`), rebuilding every chain converter and — for Ethereum — re-reading the signer allowlist from the environment each time; the cost is entirely attacker-controlled by request rate.",
+    "`borsh::to_vec(&metadata).expect(...)` (`routes/parse.rs:114`) and both `expect` calls inside `signing_digest_bytes` panic rather than error, so a metadata shape that ever fails to encode takes the process down instead of returning `Internal`.",
+    "The `InvalidArgument` message is `format!(\"{e}\")` on the converter's error, so converter-internal detail — including caller-supplied strings echoed into error text — reaches the client verbatim.",
+    "`Processor::process` holds the processor behind an `RwLock` and runs conversion under `block_in_place`, so a burst of expensive parses occupies blocking threads even though no shared state is actually being mutated.",
+    "`proto_to_registry` maps every unrecognized proto chain to one `Custom(\"custom_unknown\")` key, so a request for an unregistered chain reports a missing converter for a chain name the caller never sent.",
+    '''`validate_charset` permits `\n` by design, so a converter that interpolates attacker-controlled text into field strings can still inject line breaks into what the wallet renders — the code comment names Tron's `parameter.type_url` as a live sink.''',
+    "The ephemeral key is fetched from the handle per request; a handle failure surfaces as `Internal` with the debug-formatted error attached to the message.",
+]
+specHints = "The `oracle::event` / `oracle::dispatched` / `oracle::converted` calls woven through both the happy and error paths name exactly the transitions a model should mirror, but they are side effects, not logic. The digest construction is deliberately asymmetric: `intermediate_output` is `#[borsh(skip)]` in the derive and re-appended by hand only when non-empty — that \"presence is out-of-band, no tag byte\" choice is the entire backward-compatibility story and must be modelled explicitly rather than smoothed over. `parse_with_registry` exists purely as a test seam; the production entry point takes no registry. `Processor` holds no mutable state beyond the key handle, so despite the `RwLock` there is no cross-request state to race on."
+cardRead = true
+connectionsRead = true
+spec = "quint-specs/parse-sign-pipeline.qnt"
+version = 1
+observationsConfirmed = true
+propertiesConfirmed = true
+confirmedObservations = [
+    "signed_response_returned",
+    "charset_violation_rejected",
+    "empty_payload_rejected",
+    "unknown_chain_rejected",
+    "unparseable_transaction_rejected",
+    "unregistered_chain_rejected",
+    "signed_with_empty_intermediate_output",
+    "signed_with_intermediate_output",
+    "metadata_digest_agreed_across_insertion_orders",
+    "signed_without_chain_metadata",
+    "signed_with_chain_metadata",
+    "health_check_answered",
+]
+confirmedProperties = []
+retiredObservations = []
+retiredProperties = []
+wireConfirmed = false
+setupCompleted = false
+cardsDone = false
+
+[components.parse-sign-pipeline.oracle]
+format = "quint-oracle-config"
+version = 1
+spec = "quint-specs/parse-sign-pipeline.qnt"
+main = "parse_sign_pipeline"
+eventScope = "parse-sign-pipeline"
+observations = [
+    "signed_response_returned",
+    "charset_violation_rejected",
+    "empty_payload_rejected",
+    "unknown_chain_rejected",
+    "unparseable_transaction_rejected",
+    "unregistered_chain_rejected",
+    "signed_with_empty_intermediate_output",
+    "signed_with_intermediate_output",
+    "metadata_digest_agreed_across_insertion_orders",
+    "signed_without_chain_metadata",
+    "signed_with_chain_metadata",
+    "health_check_answered",
+]
+reportDir = "mc-out-parse-sign-pipeline"
+unguidedStepBudget = 10
+stepReplayBudget = 50
+guardScenarios = false
+
+[components.parse-sign-pipeline.oracle.studio]
+system = "Parse And Sign Pipeline"
+model = "quint-specs/parse-sign-pipeline.qnt"
+
+[components.parse-sign-pipeline.fingerprints]
+spec = "fnv1a64:76e490ef07225ade"
+oracle = "fnv1a64:fa6ea8f321de03e5"
+
+[components.parse-sign-pipeline.fingerprints.code]
+"src/parser/app/src/chain_conversion.rs" = "fnv1a64:6584981dd1ff86c9"
+"src/parser/app/src/errors.rs" = "fnv1a64:0da0c6699076dfdd"
+"src/parser/app/src/registry.rs" = "fnv1a64:06822fd49cead401"
+"src/parser/app/src/routes/parse.rs" = "fnv1a64:f8cc9d3385330f6b"
+"src/parser/app/src/service.rs" = "fnv1a64:82d586acfb23b93a"
+
+[components.parse-sign-pipeline.fingerprints.instrumented]
+"quint-specs/oracle-client/rust/Cargo.toml" = "fnv1a64:96293d99372d69f5"
+"quint-specs/oracle-client/rust/src/lib.rs" = "fnv1a64:ef3f33ca4a3f9651"
+"src/parser/app/src/routes/parse.rs" = "fnv1a64:f8cc9d3385330f6b"
+"src/parser/app/src/service.rs" = "fnv1a64:82d586acfb23b93a"
+
+[components.shared-encoding-and-time-primitives]
+name = "Shared Encoding And Time Primitives"
+description = "The bottom-layer helpers every chain crate routes through: 0x/0X prefix acceptance (optional and mandatory), hex decoding, hex-vs-base64 format detection and naming, and absolute/relative timestamp rendering."
+role = "user"
+rank = 0
+paths = [
+    "src/visualsign/src/encodings.rs",
+    "src/visualsign/src/time_fmt.rs",
+]
+tests = [
+    "src/visualsign/src/encodings.rs (inline mod tests)",
+    "src/visualsign/src/time_fmt.rs (inline mod tests)",
+    "src/chain_parsers/visualsign-tron/src/lib.rs (render_time_field_includes_relative_tag, render_time_field_omits_relative_tag_for_unrepresentable)",
+    "src/chain_parsers/visualsign-ethereum/src/cli_plugin.rs (test_normalize_eth_address)",
+    "src/chain_parsers/visualsign-sui/src/core/transaction/decoder.rs (inline mod tests)",
+]
+dependencies = []
+operations = [
+    "`SupportedEncodings::detect` (`encodings.rs:16`) — hex-vs-base64 format detection",
+    "`SupportedEncodings::as_str` (`encodings.rs:26`) and its `FromStr` (`encodings.rs:44`)",
+    "`strip_hex_prefix` (`encodings.rs:63`) — the single definition of prefix acceptance",
+    "`split_hex_prefix` (`encodings.rs:74`) — for contexts where the prefix is mandatory",
+    "`decode_hex` (`encodings.rs:86`)",
+    "`format_timestamp_ms` (`time_fmt.rs:14`)",
+    "`format_relative_ms` (`time_fmt.rs:25`)",
+]
+headlineProperties = [
+    "Exactly one `0x`/`0X` prefix is stripped, case-insensitively, and only the first — a residual second prefix is left in the body so hex decoding fails rather than silently accepting it.",
+    "`split_hex_prefix` returns `None` exactly when there was no prefix, so callers that require one can turn that into their own error.",
+    "A `0x`-prefixed string is always detected as hex, because the prefix is removed before the all-hex-digits test rather than tripping it.",
+    "An out-of-range timestamp renders as the literal `\"invalid timestamp\"` rather than a plausible-looking wrong date, and `format_relative_ms` returns `None` on exactly the same inputs so no misleading relative tag accompanies it.",
+    "Relative formatting is pure integer math with no `f64`, so the wording is identical across platforms and magnitudes.",
+    "Both time functions agree on what \"representable\" means — each gates on `DateTime::from_timestamp_millis`.",
+]
+adversarySurface = [
+    "`detect` classifies the empty string as `Hex` (all-of-empty is vacuously true), so an empty transaction argument takes the hex branch and surfaces as a hex decode error rather than an \"empty input\" one.",
+    "Any even-length string drawn only from `[0-9a-fA-F]` is indistinguishable from base64 that happens to use the hex alphabet, so such a payload is silently routed to the hex decoder regardless of what the sender meant.",
+    "`decode_hex` accepts unbounded input; every size cap in this system lives in the callers, so a chain crate that forgets one gets no floor bound from here.",
+    "`format_relative_ms` takes `now_ms` as a caller-supplied argument, so a caller that passes a wall clock makes the rendered string time-dependent and the containing payload non-reproducible — which is exactly what the Tron converter does.",
+    "The `\"invalid timestamp\"` marker is an ordinary ASCII string that a decoded field could legitimately contain, so it is not a distinguishable sentinel to anything downstream.",
+]
+specHints = "`strip_hex_prefix` deliberately does not validate hex digits — validity is decided later by `hex::decode` — so a spec should keep prefix-stripping and validation as separate steps rather than fusing them. Relative-time bucketing uses fixed 30-day months with no calendar or leap handling, so \"1 month ago\" means exactly 30 days. These are pure functions with no state; the only nondeterminism a caller can introduce is `now_ms`. Finally, the project rule that no chain crate hand-rolls its own prefix stripping is a codebase-level invariant this module cannot enforce on its own — it is the interesting property here, and it lives outside the file."
+cardRead = true
+connectionsRead = true
+spec = "quint-specs/shared-encoding-and-time-primitives.qnt"
+version = 1
+observationsConfirmed = true
+propertiesConfirmed = true
+confirmedObservations = [
+    "strip_removed_a_lowercase_prefix",
+    "strip_removed_an_uppercase_prefix",
+    "strip_passed_through_unprefixed",
+    "strip_left_a_residual_prefix",
+    "split_accepted_a_prefixed_value",
+    "split_rejected_an_unprefixed_value",
+    "decoded_with_prefix",
+    "decoded_without_prefix",
+    "decoded_uppercase_hex_digits",
+    "decoded_empty_to_zero_bytes",
+    "decode_failed_odd_length",
+    "decode_failed_invalid_character",
+    "detected_hex_after_stripping_prefix",
+    "detected_bare_hex",
+    "detected_base64",
+    "detected_ambiguous_payload_as_hex",
+    "encoding_name_parsed_canonical",
+    "encoding_name_parsed_mixed_case",
+    "encoding_name_rejected",
+    "encoding_rendered_as_hex_name",
+    "encoding_rendered_as_base64_name",
+    "timestamp_rendered_utc",
+    "timestamp_reported_unrepresentable",
+    "timestamp_collapsed_sub_second",
+    "relative_just_now",
+    "relative_in_seconds",
+    "relative_in_minutes",
+    "relative_in_hours",
+    "relative_in_days",
+    "relative_in_months",
+    "relative_future_direction",
+    "relative_past_direction",
+    "relative_omitted_for_unrepresentable",
+    "relative_measured_against_unrepresentable_now",
+    "relative_month_rounded_from_flat_30_days",
+]
+confirmedProperties = [
+    "prefix_never_changes_decoded_bytes",
+    "mandatory_prefix_rejects_exactly_the_passthroughs",
+    "residual_prefix_never_decodes",
+    "every_decodable_input_is_detected_as_hex",
+    "decoded_length_is_half_the_body",
+    "letter_case_never_changes_decoded_bytes",
+    "absolute_and_relative_agree_on_representability",
+    "relative_wording_is_direction_and_number_consistent",
+    "relative_magnitude_brackets_the_real_span",
+    "encoding_names_round_trip",
+    "detect_never_faces_an_ambiguous_payload",
+]
+retiredObservations = []
+retiredProperties = []
+wireConfirmed = true
+setupCompleted = false
+cardsDone = false
+
+[components.shared-encoding-and-time-primitives.oracle]
+format = "quint-oracle-config"
+version = 1
+spec = "quint-specs/shared-encoding-and-time-primitives.qnt"
+main = "shared_encoding_and_time_primitives"
+eventScope = "shared-encoding-and-time-primitives"
+observations = [
+    "strip_removed_a_lowercase_prefix",
+    "strip_removed_an_uppercase_prefix",
+    "strip_passed_through_unprefixed",
+    "strip_left_a_residual_prefix",
+    "split_accepted_a_prefixed_value",
+    "split_rejected_an_unprefixed_value",
+    "decoded_with_prefix",
+    "decoded_without_prefix",
+    "decoded_uppercase_hex_digits",
+    "decoded_empty_to_zero_bytes",
+    "decode_failed_odd_length",
+    "decode_failed_invalid_character",
+    "detected_hex_after_stripping_prefix",
+    "detected_bare_hex",
+    "detected_base64",
+    "detected_ambiguous_payload_as_hex",
+    "encoding_name_parsed_canonical",
+    "encoding_name_parsed_mixed_case",
+    "encoding_name_rejected",
+    "encoding_rendered_as_hex_name",
+    "encoding_rendered_as_base64_name",
+    "timestamp_rendered_utc",
+    "timestamp_reported_unrepresentable",
+    "timestamp_collapsed_sub_second",
+    "relative_just_now",
+    "relative_in_seconds",
+    "relative_in_minutes",
+    "relative_in_hours",
+    "relative_in_days",
+    "relative_in_months",
+    "relative_future_direction",
+    "relative_past_direction",
+    "relative_omitted_for_unrepresentable",
+    "relative_measured_against_unrepresentable_now",
+    "relative_month_rounded_from_flat_30_days",
+]
+reportDir = "mc-out-shared-encoding-and-time-primitives"
+testCommand = [
+    "cargo",
+    "test",
+    "--manifest-path",
+    "src/Cargo.toml",
+    "-p",
+    "visualsign",
+    "--lib",
+    "--features",
+    "quint-oracle/enabled",
+    "--",
+    "encodings::tests",
+    "time_fmt::tests",
+]
+unguidedStepBudget = 10
+stepReplayBudget = 50
+guardScenarios = true
+
+[components.shared-encoding-and-time-primitives.oracle.studio]
+system = "Shared Encoding And Time Primitives"
+model = "quint-specs/shared-encoding-and-time-primitives.qnt"
+invariants = [
+    "prefix_never_changes_decoded_bytes",
+    "mandatory_prefix_rejects_exactly_the_passthroughs",
+    "residual_prefix_never_decodes",
+    "every_decodable_input_is_detected_as_hex",
+    "decoded_length_is_half_the_body",
+    "letter_case_never_changes_decoded_bytes",
+    "absolute_and_relative_agree_on_representability",
+    "relative_wording_is_direction_and_number_consistent",
+    "relative_magnitude_brackets_the_real_span",
+    "encoding_names_round_trip",
+    "detect_never_faces_an_ambiguous_payload",
+]
+
+[[components.shared-encoding-and-time-primitives.oracle.studio.adversaryDispositions]]
+row = "a caller-supplied base64 transaction whose characters happen to all be ASCII hex digits is detected as Hex, so the wrong decoder runs on attacker-chosen input"
+disposition = "modeled"
+
+[components.shared-encoding-and-time-primitives.oracle.studio.adversaryDispositions.groundedBy]
+actions = [
+    "detect_encoding",
+    "decode_hex",
+]
+observations = [
+    "detected_ambiguous_payload_as_hex",
+    "detected_bare_hex",
+]
+properties = [
+    "detect_never_faces_an_ambiguous_payload",
+    "every_decodable_input_is_detected_as_hex",
+]
+
+[[components.shared-encoding-and-time-primitives.oracle.studio.adversaryDispositions]]
+row = "decode_hex(\"\") and decode_hex(\"0x\") both succeed with zero bytes, so a caller relying on a decode error to reject empty input gets an empty payload instead"
+disposition = "modeled"
+
+[components.shared-encoding-and-time-primitives.oracle.studio.adversaryDispositions.groundedBy]
+actions = ["decode_hex"]
+observations = ["decoded_empty_to_zero_bytes"]
+properties = ["decoded_length_is_half_the_body"]
+
+[[components.shared-encoding-and-time-primitives.oracle.studio.adversaryDispositions]]
+row = "odd-length bodies (\"abc\") sit on the boundary between decode error and empty success, and the error carries no position a caller can surface"
+disposition = "modeled"
+
+[components.shared-encoding-and-time-primitives.oracle.studio.adversaryDispositions.groundedBy]
+actions = ["decode_hex"]
+observations = [
+    "decode_failed_odd_length",
+    "decode_failed_invalid_character",
+    "decoded_empty_to_zero_bytes",
+]
+properties = ["decoded_length_is_half_the_body"]
+
+[[components.shared-encoding-and-time-primitives.oracle.studio.adversaryDispositions]]
+row = "i64::MAX / i64::MIN epochs hit chrono's range limit; format_relative_ms widens to i128/u128 so a MIN-vs-MAX difference cannot overflow, but a caller passing a nonsense now_ms still gets confident wording relative to it"
+disposition = "modeled"
+
+[components.shared-encoding-and-time-primitives.oracle.studio.adversaryDispositions.groundedBy]
+actions = [
+    "format_relative_ms",
+    "format_timestamp_ms",
+]
+observations = [
+    "relative_measured_against_unrepresentable_now",
+    "relative_omitted_for_unrepresentable",
+    "timestamp_reported_unrepresentable",
+]
+properties = [
+    "absolute_and_relative_agree_on_representability",
+    "relative_magnitude_brackets_the_real_span",
+    "relative_wording_is_direction_and_number_consistent",
+]
+
+[[components.shared-encoding-and-time-primitives.oracle.studio.adversaryDispositions]]
+row = "a chain crate that hand-rolls prefix stripping instead of these helpers reintroduces per-chain prefix rules, letting the same value be accepted on one chain and rejected on another"
+disposition = "declined"
+category = "caller-contract"
+reason = "The hazard is a chain crate NOT calling these helpers at all, so it produces no call into this component and no transition this component's model could ever observe; the uniformity is a convention CLAUDE.md imposes on callers, enforceable only in each chain crate's own component."
+
+[[components.shared-encoding-and-time-primitives.oracle.studio.adversaryDispositions]]
+row = "MONTH is a flat 30 days with no calendar awareness, so a 31-day expiry renders as 'about 1 month' - a signer reading a relative expiry can be off at the boundary"
+disposition = "modeled"
+
+[components.shared-encoding-and-time-primitives.oracle.studio.adversaryDispositions.groundedBy]
+actions = ["format_relative_ms"]
+observations = [
+    "relative_month_rounded_from_flat_30_days",
+    "relative_in_months",
+    "relative_in_days",
+]
+properties = ["relative_magnitude_brackets_the_real_span"]
+
+[[components.shared-encoding-and-time-primitives.oracle.studio.adversaryDispositions]]
+row = "format_timestamp_ms returns a human string rather than a Result, so an 'invalid timestamp' marker can flow into a signed payload unless the caller also prints the raw epoch"
+disposition = "modeled"
+
+[components.shared-encoding-and-time-primitives.oracle.studio.adversaryDispositions.groundedBy]
+actions = [
+    "format_timestamp_ms",
+    "format_relative_ms",
+]
+observations = [
+    "timestamp_reported_unrepresentable",
+    "timestamp_rendered_utc",
+    "timestamp_collapsed_sub_second",
+]
+properties = ["absolute_and_relative_agree_on_representability"]
+
+[components.shared-encoding-and-time-primitives.fingerprints]
+spec = "fnv1a64:5be08cc3d18ed395"
+oracle = "fnv1a64:67165c9840e889ae"
+
+[components.shared-encoding-and-time-primitives.fingerprints.code]
+"src/visualsign/src/encodings.rs" = "fnv1a64:9dffc24b92bb7187"
+"src/visualsign/src/time_fmt.rs" = "fnv1a64:c8f60b8f79ab8496"
+
+[components.shared-encoding-and-time-primitives.fingerprints.instrumented]
+"quint-specs/oracle-client/rust/Cargo.toml" = "fnv1a64:a7f7cce4cf73716a"
+"quint-specs/oracle-client/rust/macros/Cargo.toml" = "fnv1a64:25ae8e87ca1e5587"
+"quint-specs/oracle-client/rust/macros/src/lib.rs" = "fnv1a64:c79c00a5f82c3cde"
+"quint-specs/oracle-client/rust/src/lib.rs" = "fnv1a64:7d13f0968325a5d8"
+"quint-specs/oracle-client/rust/src/live.rs" = "fnv1a64:0c96171212feb445"
+"quint-specs/oracle-client/rust/src/live/event.rs" = "fnv1a64:b610035d6435249f"
+"quint-specs/oracle-client/rust/src/live/registry.rs" = "fnv1a64:bf4890ead6ba9d19"
+"quint-specs/oracle-client/rust/src/live/transport.rs" = "fnv1a64:8712d4e9bdf961d7"
+"quint-specs/oracle-client/rust/src/live/value.rs" = "fnv1a64:7c5a5dd102552994"
+"quint-specs/oracle-client/rust/src/macros.rs" = "fnv1a64:f7fd3cd5981f3e14"
+"quint-specs/oracle-client/rust/src/stubs.rs" = "fnv1a64:125aae12fca00bd5"
+
+[components.signable-payload-validation]
+name = "Signable Payload Validation"
+description = "The invariants every rendered payload must satisfy before it can be signed: deterministic key ordering, an ASCII-only charset, valid numeric strings, and wallet-renderable field types."
+role = "central"
+rank = 4
+paths = [
+    "src/visualsign/src/lib.rs",
+    "src/visualsign/src/field_builders.rs",
+    "src/visualsign/src/anchorage_render.rs",
+    "src/visualsign/src/lint.rs",
+]
+tests = [
+    "src/visualsign/src/lib.rs (inline mod tests)",
+    "src/visualsign/src/anchorage_render.rs (inline mod tests)",
+    "src/visualsign/src/field_builders.rs (inline mod tests)",
+    "src/integration/tests/parser.rs (parser_charset_validation_all_chains)",
+    "src/visualsign/examples/check_anchorage_render.rs",
+]
+dependencies = []
+operations = [
+    "`SignablePayload::new` (`lib.rs:821`) and `new_with_verified_fields` (`lib.rs:838`)",
+    "`SignablePayload::validate_charset` (`lib.rs:932`) — the ASCII-only + forbidden-escape gate",
+    "`SignablePayload::to_validated_json` (`lib.rs:1005`)",
+    "`SignablePayload::to_json` (`lib.rs:879`) / `to_pretty_json` (`lib.rs:897`)",
+    "`SignablePayload::verify_field_deterministic_ordering` (`lib.rs:858`)",
+    "`SignablePayloadField::{fallback_text, label, field_type}` (`lib.rs:405,423,441`)",
+    "`create_text_field` (`field_builders.rs:32`)",
+    "`create_number_field` (`field_builders.rs:66`)",
+    "`create_amount_field` (`field_builders.rs:94`)",
+    "`create_address_field` (`field_builders.rs:124`)",
+    "`create_raw_data_field` (`field_builders.rs:160`)",
+    "`annotate_field` (`field_builders.rs:183`)",
+    "`create_preview_layout` (`field_builders.rs:193`)",
+    "`create_diagnostic_field` (`field_builders.rs:219`) — feature-gated, also emits a `tracing` warning (mutates the log)",
+    "`validate_number_string` (`field_builders.rs:51`)",
+    "`SignablePayload::anchorage_render_findings` (`anchorage_render.rs:95`)",
+    "`SignablePayload::validate_anchorage_wallet_renderable` (`anchorage_render.rs:105`)",
+    "`check_field` / `wire_type` (`anchorage_render.rs:124,198`)",
+    "`LintConfig::{severity_for, should_report_ok}` (`lint.rs:53,58`) and `Severity::as_str` (`lint.rs:16`)",
+]
+headlineProperties = [
+    "A payload that serializes to anything outside printable ASCII plus ASCII whitespace is rejected before it can be signed.",
+    'The forbidden-escape scan rejects `\u`, `\t`, `\r`, `\b`, `\f` and `\/` in the serialized JSON, closing the control-byte route that would otherwise survive the plain ASCII test.',
+    '`\"` and `\\` are deliberately allowed so field text can carry real embedded JSON, while every byte inside that embedded JSON must still be plain printable ASCII.',
+    "An amount field always carries a non-empty abbreviation; a number field is allowed to have none.",
+    "Every numeric field's value matches the signed-proper-number grammar — no bare `.45`, no trailing `123.`, no multiple decimal points, no non-numeric characters.",
+    "Serializing a field fails loudly when its emitted key set does not match the variant's expected key set, in either direction.",
+    "`validate_anchorage_wallet_renderable` reports every unrenderable field with a JSON-ish path, and a container is itself marked unrenderable whenever any descendant is.",
+    "`list_layout` is never valid as a standalone field — only as the `Condensed`/`Expanded` container of a `preview_layout`.",
+]
+adversarySurface = [
+    '''`\n` is explicitly permitted, so any attacker-controlled string reaching field text can inject line breaks and forge extra display lines in a wallet UI; the code names Tron's `parameter.type_url` as a live, unsanitized sink.''',
+    'Validation runs on the *serialized* text, so a string containing the two literal characters `\` and `u` passes the escape scan while a genuine `\u` escape is caught — the check is textual, not semantic.',
+    "The non-printable-character error reports a byte index into the serialized JSON (`lib.rs:988`), leaking payload shape to whoever reads the error.",
+    "`create_address_field` performs no address validation at all (an explicit TODO at `field_builders.rs:120`), so any string whatsoever renders as an address in the signer's UI.",
+    "`validate_number_string` accepts arbitrarily long digit strings, so a numerically absurd amount is still a \"valid\" field.",
+    "`create_raw_data_field` accepts a caller-supplied fallback string that replaces the hex rendering entirely, so the field labelled \"Raw Data\" need not contain the raw data.",
+    "The `serialize_field_variant!` macro `unwrap()`s inside the `Serialize` impl (`lib.rs:242`), so a serialization failure panics instead of surfacing as the validation error the caller is prepared to handle.",
+]
+specHints = "`validate_charset` can return `SerializationError` as well as `ValidationError`; a caller that treats every error as client-input rejection mis-classifies server bugs, which is why `parse.rs` matches on the variant explicitly. The Anchorage renderability check is a separate opt-in gate and is *not* on the signing path, so a payload can be signed that the wallet cannot draw. `wire_type` reads the `Type` a field actually serializes to — which for the `Number` variant is `amount_v2`, not `number` — so a spec keyed off the Rust variant name will disagree with what the wallet sees. `SIGNED_PROPER_NUMBER_RE` is a process-global `LazyLock` that `expect`s at init. And `SignablePayloadFieldPreviewLayout`'s serializer always emits both `Condensed` and `Expanded` (empty when unset), so \"list missing\" is not a reachable state for the renderability check to catch."
+cardRead = true
+connectionsRead = true
+spec = ""
+version = 0
+observationsConfirmed = false
+propertiesConfirmed = false
+confirmedObservations = []
+confirmedProperties = []
+retiredObservations = []
+retiredProperties = []
+wireConfirmed = false
+setupCompleted = false
+cardsDone = false
+
+[components.solana-instruction-pipeline]
+name = "Solana Instruction Pipeline"
+description = "Decodes legacy and v0 Solana transactions instruction by instruction - resolving account keys and lookup tables, selecting a preset or IDL visualizer, and emitting the policy-engine intermediate output."
+role = "central"
+rank = 5
+paths = [
+    "src/chain_parsers/visualsign-solana/src/core/",
+    "src/chain_parsers/visualsign-solana/src/idl/",
+    "src/chain_parsers/visualsign-solana/src/intermediate.rs",
+    "src/chain_parsers/visualsign-solana/src/presets/",
+]
+tests = [
+    "src/chain_parsers/visualsign-solana/tests/pipeline_integration.rs",
+    "src/chain_parsers/visualsign-solana/tests/semantic_pipeline.rs",
+    "src/chain_parsers/visualsign-solana/tests/spl_token_e2e.rs",
+    "src/chain_parsers/visualsign-solana/tests/real_idl_validation.rs",
+    "src/chain_parsers/visualsign-solana/tests/fuzz_idl_parsing.rs",
+    "src/chain_parsers/visualsign-solana/src/core/instructions.rs (inline mod tests)",
+    "src/chain_parsers/visualsign-solana/tests/fixtures/",
+]
+dependencies = [
+    "shared-encoding-and-time-primitives",
+    "signable-payload-validation",
+    "converter-registry-dispatch",
+    "metadata-signature-trust",
+    "deterministic-serialization",
+]
+operations = [
+    "`SolanaTransactionWrapper::{from_string, transaction_type, new_legacy, new_versioned, inner_legacy, inner_versioned}` (`core/visualsign.rs:78,100,113,117,121,128`)",
+    "`SolanaVisualSignConverter::to_visual_sign_payload` (`core/visualsign.rs:328`)",
+    "`transaction_to_visual_sign` / `versioned_transaction_to_visual_sign` / `transaction_string_to_visual_sign` (`core/visualsign.rs:444,454,467`)",
+    "`extract_idl_mappings` (`core/visualsign.rs:178`) and `extract_idl_mappings_with_signers` (`core/visualsign.rs:196`)",
+    "`extract_name_from_idl_json` (`core/visualsign.rs:~300`)",
+    "`create_idl_registry_from_options` (`core/visualsign.rs:311`)",
+    "`build_intermediate_bytes` (`core/visualsign.rs:422`)",
+    "`decode_instructions` — two signatures, `core/instructions.rs:32` under `diagnostics` and `core/instructions.rs:111` without it",
+    "`scan_instruction_diagnostics` (`core/instructions.rs:159`)",
+    "`decode_transfers` (`core/instructions.rs:253`)",
+    "`decode_v0_transfers` (`core/txtypes/v0.rs:18`), `decode_v0_instructions` (`core/txtypes/v0.rs:138`), `create_address_lookup_table_field` (`core/txtypes/v0.rs:262`)",
+    "`decode_accounts` (`core/accounts/decode.rs:18`), `decode_v0_accounts` (`:88`), `accounts_to_payload_fields` (`:161`), `create_accounts_advanced_preview_layout` (`:193`)",
+    "`VisualizerContext::{new, with_call_depth, idl_registry, sender, instruction_index, call_depth, program_id, account, data, num_accounts, compiled_instruction, account_keys, resolve_program_id, resolve_accounts}` (`core/mod.rs:93,123,128,132,137,145,151,162,171,176,181,186,192,204`)",
+    "`InstructionView::from_context` (`core/mod.rs:237`)",
+    "`InstructionVisualizer::{visualize_tx_commands, get_config, kind, can_handle}` (`core/mod.rs:278`)",
+    "`SolanaIntegrationConfig::{new, data, can_handle}` (`core/mod.rs:262`)",
+    "`visualize_with_any` (`core/mod.rs:308`)",
+    "`available_visualizers` — generated at build time by `build.rs:80`",
+    "`IdlRegistry::{new, from_idl_mappings, has_idl, get_program_name, get_idl_name, get_idl, get_all_configs}` (`idl/mod.rs:35,66,118,141,170,179,109`)",
+    "`extract_solana_intermediate_output` (`intermediate.rs:316`)",
+]
+headlineProperties = [
+    "Every instruction produces exactly one rendered field or one recorded error — nothing is silently dropped from the signer's view.",
+    "The catch-all `unknown_program` visualizer is always placed last in the dispatch list, so a specific preset always wins over it.",
+    "An account or program index that cannot be resolved — a v0 lookup-table reference, or an out-of-bounds index — degrades to an `unresolved(N)` placeholder on the render path rather than aborting the whole transaction.",
+    "Caller-supplied IDLs are dropped for trusted built-in programs, and a caller-supplied name can never override a canonical program name.",
+    "`intermediate_output` is emitted only when the caller opts in, so the default signing path's bytes and digest are unchanged.",
+    "A failure to build the intermediate blob drops it to `None`, so policy evaluation degrades to \"no metadata\" and never to *wrong* metadata.",
+    "A versioned decode is attempted before the legacy fallback, so a v0 transaction is never mis-typed as legacy.",
+]
+adversarySurface = [
+    "The order of the non-`unknown_program` visualizers is raw `fs::read_dir` order with no sort (`build.rs:86`) — notably unlike `emit_module_declarations` directly above it, which does sort — so if two presets claim the same program id, which one renders is decided by filesystem iteration order at build time.",
+    "The human-readable payload and the `intermediate_output` are produced by two *different* decoders over the same bytes (`decode_instructions` vs. `solana_parser::parse_transaction_with_idls`), the classic \"user sees X, policy consumes Y\" divergence — the code documents this as a known, still-open gap.",
+    "`bincode::deserialize::<VersionedTransaction>` is tried first and accepted on success (`core/visualsign.rs:90`), so bytes that parse as both forms are classified by whichever decoder succeeds rather than by the sender's intent.",
+    "Without the `diagnostics` feature the *first* visualizer error aborts the entire transaction, while with it errors are collected and the payload still renders — the same input yields structurally different output depending on build configuration.",
+    "`account_keys[0]` is taken as the sender unconditionally (`core/instructions.rs:79` and `:131`), guarded only by the earlier empty-keys check, so the field is labelled as the sender regardless of whether that key actually signs.",
+    "A caller-supplied IDL for any non-trusted program controls argument names, account names, and value formatting for every instruction on that program — a fully attacker-authored rendering that passes every other guard.",
+    "`IdlRegistry::get_program_name` slices `&program_id_str[..8]` for the unknown-program fallback (`idl/mod.rs:155`), which relies on every rendered pubkey string being at least 8 bytes long.",
+]
+specHints = "`available_visualizers()` is generated at build time from a directory listing, so the visualizer set and its precedence order are not readable anywhere in the source tree and change whenever a preset directory is added. The `diagnostics` cargo feature genuinely changes `decode_instructions`'s signature *and* its failure semantics — a spec must pick one build or model both explicitly. `extract_idl_mappings` reaches the process-wide `authorized_idl_signers()` `OnceLock`, which is why the `_with_signers` variant exists at all. The intermediate path serializes and re-parses the message a second time, so the two decoders read the same bytes through entirely different code; modelling them as one function erases the divergence property that matters most here. `MAX_IDL_JSON_BYTES` bounds each entry at 1 MB with no bound on the number of entries."
+cardRead = true
+connectionsRead = true
+spec = ""
+version = 0
+observationsConfirmed = false
+propertiesConfirmed = false
+confirmedObservations = []
+confirmedProperties = []
+retiredObservations = []
+retiredProperties = []
+wireConfirmed = false
+setupCompleted = false
+cardsDone = false
+
+[components.sui-ptb-decoding]
+name = "Sui PTB Decoding"
+description = "Walks a Sui programmable transaction block's commands and picks the first preset visualizer that claims each (package, module, function)."
+role = "peripheral"
+rank = 7
+paths = [
+    "src/chain_parsers/visualsign-sui/src/core/",
+    "src/chain_parsers/visualsign-sui/src/presets/",
+    "src/chain_parsers/visualsign-sui/src/utils/",
+]
+tests = [
+    "src/chain_parsers/visualsign-sui/src/core/transaction/decoder.rs (inline mod tests)",
+    "src/chain_parsers/visualsign-sui/src/core/commands.rs (inline mod tests)",
+    "src/chain_parsers/visualsign-sui/src/core/visualsign.rs (inline mod tests)",
+    "src/integration/tests/parser.rs (parser_sui_native_transfer_e2e)",
+]
+dependencies = [
+    "shared-encoding-and-time-primitives",
+    "signable-payload-validation",
+    "converter-registry-dispatch",
+]
+operations = [
+    "`SuiTransactionWrapper::{new, inner, from_string, transaction_type}` (`core/visualsign.rs:33,39,45,55`)",
+    "`SuiVisualSignConverter::to_visual_sign_payload` (`core/visualsign.rs:64`)",
+    "`convert_to_visual_sign_payload` (`core/visualsign.rs:83`)",
+    "`transaction_to_visual_sign` / `transaction_string_to_visual_sign` (`core/visualsign.rs:129,144`)",
+    "`decode_commands` (`core/commands.rs:31`)",
+    "`decode_transfers` (`core/commands.rs:61`)",
+    "`available_visualizers` — generated at build time by `build.rs:76`",
+    "`VisualizerContext::{new, sender, command_index, commands, inputs}` (`core/mod.rs:81,96,101,106,111`)",
+    "`CommandVisualizer::{visualize_tx_commands, get_config, kind, can_handle}` (`core/mod.rs:117`)",
+    "`SuiIntegrationConfig::{new, data, can_handle}` (`core/mod.rs:47`)",
+    "`visualize_with_any` (`core/mod.rs:169`)",
+    "`SuiModuleResolver` (`core/helper.rs:1`)",
+    "`truncate_address` (`utils/address.rs:2`)",
+    "`decode_number` (`utils/numeric.rs:20`)",
+    "`get_index` / `get_nested_result_value` / `parse_numeric_argument` / `parse_result_command_index` / `get_tx_type_arg` / `get_object_value` (`utils/tx_args.rs:11,25,57,76,85,97`)",
+    "`Coin::{symbol, base_unit_symbol, get_label}` (`utils/coin.rs:33,37,81`)",
+]
+headlineProperties = [
+    "A command is claimed only by an exact `(package, module, function)` triple match — nothing is matched by prefix, heuristic, or module name alone.",
+    "Only `ProgrammableTransaction` blocks are decoded; every other transaction kind yields an empty command set rather than a partial render.",
+    "The first visualizer that claims a command handles it, and no command is rendered twice within the command pass.",
+    "A visualizer that claims a command and then fails aborts the whole decode, so a claimed-but-broken command never leaks out as a partial or fallback field.",
+    "The network field and the transaction-details field bracket every payload, so the signer always sees the frame even when no command decoded.",
+]
+adversarySurface = [
+    "Visualizer order is unsorted `fs::read_dir` order (`build.rs:82`) and the module's own doc comment says so outright — \"conflicts are resolved by the first visualizer that reports it can handle a command\" — so overlapping presets resolve by filesystem iteration order at build time.",
+    "Unlike Solana, there is no catch-all last visualizer and no per-command raw-hex fallback: an unclaimed `MoveCall` contributes *nothing* to the payload, so a transaction can be signed containing commands the signer was never shown.",
+    "`decode_commands` propagates the first visualizer error as a hard failure for the entire transaction, so one malformed command in a long PTB blanks the whole render rather than degrading it.",
+    "`coin_transfer` is deliberately excluded from `available_visualizers()` (`build.rs:93`) and reachable only through `decode_transfers`, so whether coin transfers appear at all depends on `options.decode_transfers` rather than on the commands actually present.",
+    "`can_handle` matches on `pwc.package.to_hex_literal()`, so the same module and function published at a different package address is not recognized — and conversely a preset's claim over its package address is total.",
+    "The argument accessors (`get_index`, `get_nested_result_value`, `parse_result_command_index`) index into caller-controlled command and input vectors and each returns `Result`, so a hostile PTB chooses which of those errors fires and therefore which transactions fail to render at all.",
+    "`SuiTransactionBlockData::try_from_with_module_cache` runs against a `SuiModuleResolver` with no chain access, so all type resolution is best-effort over data the caller supplied.",
+]
+specHints = "`available_visualizers()` is build-time generated from the directory listing with `coin_transfer` filtered out, so the visualizer set is not readable from the source tree. `decode_transfers` and `decode_commands` each walk every command independently, so a coin-transfer `MoveCall` that a protocol preset also claims can be rendered twice — once by each pass — and the payload's field list is the concatenation of the two. Note there are two distinct `VisualizerContext` types in this codebase, Sui's and Solana's, with different shapes and different resolution semantics; do not share a model between them. Otherwise this component is pure over the decoded `TransactionData` — no registries, no caller metadata, no environment — which makes it the simplest of the chain pipelines to spec."
+cardRead = true
+connectionsRead = true
+spec = ""
+version = 0
+observationsConfirmed = false
+propertiesConfirmed = false
+confirmedObservations = []
+confirmedProperties = []
+retiredObservations = []
+retiredProperties = []
+wireConfirmed = false
+setupCompleted = false
+cardsDone = false
+
+[components.tron-contract-decoding]
+name = "Tron Contract Decoding"
+description = "Decodes a Tron protobuf transaction Raw body into per-contract-type fields, including base58check addresses, TRX amounts and expiry times."
+role = "peripheral"
+rank = 8
+paths = [
+    "src/chain_parsers/visualsign-tron/src/lib.rs",
+    "src/chain_parsers/visualsign-tron/src/cli_plugin.rs",
+]
+tests = ["src/chain_parsers/visualsign-tron/src/lib.rs (inline mod tests, 26 cases)"]
+dependencies = [
+    "shared-encoding-and-time-primitives",
+    "signable-payload-validation",
+    "converter-registry-dispatch",
+    "deterministic-serialization",
+]
+operations = [
+    "`TronTransactionWrapper::{from_string, transaction_type, new, inner}` (`lib.rs:97,105,112,116`)",
+    "`TronVisualSignConverter::to_visual_sign_payload` (`lib.rs:124`)",
+    "`decode_transaction` (`lib.rs:35`)",
+    "`parse_tron_bytes` (`lib.rs:65`) — disambiguates the bare-`Raw` and wrapped-`Transaction` wire forms",
+    "`convert_to_visual_sign_payload` (`lib.rs:137`)",
+    "`decode_contract` (`lib.rs:200`) — appends fields per contract type (mutates the caller's field vector)",
+    "`transaction_to_visual_sign` / `transaction_string_to_visual_sign` (`lib.rs:487,498`)",
+    "`address_to_base58` (`lib.rs:515`)",
+    "`resource_label` (`lib.rs:522`)",
+    "`sun_to_trx_string` (`lib.rs:536`)",
+    "`render_time_field` (`lib.rs:558`)",
+    "`TronPlugin::{chain, register, create_metadata}` (`cli_plugin.rs:31,35,42`) — `register` mutates the registry",
+    "`TronPlugin::new` (`cli_plugin.rs:25`)",
+]
+headlineProperties = [
+    "SUN-to-TRX conversion is exact integer math at any magnitude, with trailing zeros trimmed and no float rounding, so the displayed number is a byte-exact rendering of the on-chain value.",
+    "An address that is not exactly 21 bytes beginning with `0x41` renders as an explicit `<invalid Tron address: …>` marker rather than a plausible-looking but fake base58 string.",
+    "A contract entry with no `parameter` is surfaced as `<missing parameter>` rather than silently skipped, so a malformed transaction is visible to the signer.",
+    "A contract type the decoder does not know still produces a \"Contract Type\" field naming the type url, so a transaction is never shown with an operation silently missing.",
+    "Both the bare `Raw` and the wrapped `Transaction` wire forms decode, and the form that actually carried a contract is the one that wins.",
+    "An unrepresentable timestamp renders with the raw epoch value and no relative tag, so the signer sees the original bytes rather than a confident wrong date.",
+]
+adversarySurface = [
+    "`convert_to_visual_sign_payload` reads `chrono::Utc::now()` (`lib.rs:145`), so the rendered payload — and therefore the signed digest — depends on wall-clock time: the same transaction bytes parsed twice produce different signed output.",
+    '''The unknown-contract branch interpolates the caller-controlled `parameter.type_url` straight into a display field (`lib.rs:474`), and `validate_charset` permits `\n`, so a crafted type url can inject additional display lines; the enclave's own comment names this exact sink as still outstanding.''',
+    "`parse_tron_bytes` disambiguates two protobuf forms that share a field-1 tag by trying both and preferring whichever decoded a contract, so bytes engineered to parse as both — each carrying a contract — resolve to the bare form by branch order regardless of the sender's intent.",
+    "`address_to_base58` checks only length and the `0x41` prefix, so any 21-byte blob starting with `0x41` renders as a confident-looking mainnet address with a valid checksum.",
+    "Vote totals are summed with `saturating_add` (`lib.rs:~442`), so a vote set engineered to overflow silently pins the displayed total at `i64::MAX` instead of failing.",
+    "`timestamp` and `expiration` are signed `i64` values taken verbatim off the wire, so a negative or far-future value routes through the \"invalid timestamp\" path with the raw number still displayed alongside.",
+    "Contract entries are decoded in wire order into one flat field list with no per-contract framing, so a multi-contract transaction's fields interleave with no boundary marker separating one operation's fields from the next's.",
+]
+specHints = "The wall-clock read is the one thing here that breaks \"same bytes ⇒ same payload\", and it is the reason this component cannot inherit the deterministic-serialization guarantee; any determinism property must take `now_ms` as an explicit parameter, the way `render_time_field` already does internally. `TronPlugin::create_metadata` always returns `Ok(None)`, so the whole caller-supplied-metadata and signature-trust surface is simply absent for this chain. Tron emits no `intermediate_output` — `ConversionResult::new` is always used. `decode_contract` appends into a caller-owned `&mut Vec`, so field ordering is the accumulation order across all contracts: position carries meaning that cannot be recovered from the labels alone."
+cardRead = true
+connectionsRead = true
+spec = ""
+version = 0
+observationsConfirmed = false
+propertiesConfirmed = false
+confirmedObservations = []
+confirmedProperties = []
+retiredObservations = []
+retiredProperties = []
+wireConfirmed = false
+setupCompleted = false
+cardsDone = false

@@ -23,8 +23,22 @@ const MAX_ABI_JSON_BYTES: usize = 1_024 * 1_024;
 /// Error type for ABI signature validation.
 #[derive(Debug, thiserror::Error)]
 enum AbiSignatureError {
-    #[error("ABI signature validation failed: {0}")]
-    Validation(String),
+    #[error("ABI signature validation failed: {message}")]
+    Validation {
+        /// Which of the verifier's checks refused the entry. Carried so the caller can
+        /// report the reject branch it took; never rendered in the error message.
+        kind: &'static str,
+        message: String,
+    },
+}
+
+impl AbiSignatureError {
+    /// The reject branch this error came from.
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Validation { kind, .. } => kind,
+        }
+    }
 }
 
 /// Whether an accepted entry's signer identity went unchecked, i.e. nobody
@@ -145,6 +159,51 @@ fn extract_with_provenance(
         return (None, 0);
     }
 
+    // Quint Studio: report the caller-supplied shape of every entry before the loop
+    // consumes it, then the request opening. Actions and argument names are copied from
+    // `quint-specs/metadata-signature-trust.qnt`, which the oracle replays this against.
+    if quint_oracle::enabled() {
+        for (address, abi) in &ethereum.abi_mappings {
+            quint_oracle::Event::builder(quint_oracle::current_test(), "offer_eth_abi_entry")
+                .argument("mapKey", address.as_str(), Some("ETH_MAP_KEYS"))
+                .scope("metadata-signature-trust")
+                .send();
+            let declared_type = match abi.abi_type {
+                None => "unset",
+                Some(v) => match generated::parser::AbiType::try_from(v) {
+                    Ok(generated::parser::AbiType::Proxy) => "proxy",
+                    Ok(generated::parser::AbiType::Implementation) => "implementation",
+                    Ok(generated::parser::AbiType::Unspecified) => "unset",
+                    Err(_) => "unknown_code",
+                },
+            };
+            quint_oracle::Event::builder(quint_oracle::current_test(), "set_eth_entry_routing")
+                .argument("mapKey", address.as_str(), Some("ETH_MAP_KEYS"))
+                .argument("abiType", declared_type, Some("ABI_TYPES"))
+                .argument(
+                    "implKey",
+                    abi.implementation_address.as_deref().unwrap_or(""),
+                    Some("ETH_IMPL_FIELD"),
+                )
+                .scope("metadata-signature-trust")
+                .send();
+            // An entry that arrived carrying a signature. Only the entry is pinned: which
+            // key signed, and what the signature was minted over, are not things this code
+            // can see before it validates -- replay resolves those against the outcome the
+            // verifier reports below.
+            if abi.signature.is_some() {
+                quint_oracle::Event::builder(quint_oracle::current_test(), "attach_eth_signature")
+                    .argument("mapKey", address.as_str(), Some("ETH_MAP_KEYS"))
+                    .scope("metadata-signature-trust")
+                    .send();
+            }
+        }
+        quint_oracle::Event::builder(quint_oracle::current_test(), "begin_eth_extraction")
+            .argument("chainId", chain_id, Some("ETH_CHAIN_IDS"))
+            .scope("metadata-signature-trust")
+            .send();
+    }
+
     let mut registry = AbiRegistry::new();
     let mut unverified_count: usize = 0;
     // Depends only on `policy`, which is fixed for the whole call, so compute
@@ -162,6 +221,15 @@ fn extract_with_provenance(
             Ok(addr) => addr,
             Err(e) => {
                 log::warn!("Skipping ABI mapping with invalid address '{address}': {e}");
+                if quint_oracle::enabled() {
+                    quint_oracle::Event::builder(
+                        quint_oracle::current_test(),
+                        "eth_skip_invalid_address",
+                    )
+                    .argument("mapKey", address.as_str(), Some("ETH_MAP_KEYS"))
+                    .scope("metadata-signature-trust")
+                    .send();
+                }
                 continue;
             }
         };
@@ -172,6 +240,15 @@ fn extract_with_provenance(
                 "Skipping ABI mapping for '{address}': exceeds size limit ({} bytes > {MAX_ABI_JSON_BYTES})",
                 abi.value.len()
             );
+            if quint_oracle::enabled() {
+                quint_oracle::Event::builder(
+                    quint_oracle::current_test(),
+                    "eth_skip_oversized_body",
+                )
+                .argument("mapKey", address.as_str(), Some("ETH_MAP_KEYS"))
+                .scope("metadata-signature-trust")
+                .send();
+            }
             continue;
         }
 
@@ -188,19 +265,53 @@ fn extract_with_provenance(
         match abi.signature.as_ref() {
             Some(proto_sig) => {
                 let signature = convert_proto_signature(proto_sig);
-                if let Err(e) = validate_abi_signature(
+                let verdict = validate_abi_signature(
                     &abi.value,
                     &parsed_address,
                     chain_id,
                     &signature,
                     policy.signer_allowlist(),
-                ) {
+                );
+                // Quint Studio: the verifier has answered. Reported rather than re-derived --
+                // only this code can decide whether the signature verifies and whether its
+                // signer is allowlisted.
+                if quint_oracle::enabled() {
+                    quint_oracle::Event::builder(
+                        quint_oracle::current_test(),
+                        "report_eth_signature_verdict",
+                    )
+                    .argument("mapKey", address.as_str(), Some("ETH_MAP_KEYS"))
+                    .argument(
+                        "verdict",
+                        verdict.as_ref().map_or_else(|e| e.kind(), |()| "accepted"),
+                        Some("SIG_VERDICTS"),
+                    )
+                    .scope("metadata-signature-trust")
+                    .send();
+                }
+                if let Err(e) = verdict {
                     log::warn!(
                         "Skipping ABI mapping for '{address}': signature validation failed: {e}"
                     );
+                    if quint_oracle::enabled() {
+                        quint_oracle::Event::builder(
+                            quint_oracle::current_test(),
+                            "eth_skip_invalid_signature",
+                        )
+                        .argument("mapKey", address.as_str(), Some("ETH_MAP_KEYS"))
+                        .argument("cause", e.kind(), Some("SIG_CAUSES"))
+                        .scope("metadata-signature-trust")
+                        .send();
+                    }
                     continue;
                 }
             }
+            // NOTE(quint-studio): this require-signed/accept-unsigned posture split
+            // (MetadataTrustPolicy) landed on main after the survey that produced
+            // quint-specs/metadata-signature-trust.qnt. This rejection branch is new
+            // and deliberately left uninstrumented rather than guessing at an
+            // observation/cause name the spec doesn't already define — a re-survey
+            // should model it properly.
             None if !policy.accepts_unsigned() => {
                 log::warn!(
                     "Skipping ABI mapping for '{address}': this deployment requires \
@@ -217,7 +328,19 @@ fn extract_with_provenance(
         // module-level security notes.
         let (abi_kind, implementation) = resolve_abi_kind(abi);
 
-        match register_embedded_abi(&mut registry, address, &abi.value) {
+        let registered = register_embedded_abi(&mut registry, address, &abi.value);
+        // Quint Studio: whether the caller's ABI JSON parses is this code's answer.
+        if quint_oracle::enabled() {
+            quint_oracle::Event::builder(
+                quint_oracle::current_test(),
+                "report_eth_abi_body_parse",
+            )
+            .argument("mapKey", address.as_str(), Some("ETH_MAP_KEYS"))
+            .argument("parses", registered.is_ok(), None)
+            .scope("metadata-signature-trust")
+            .send();
+        }
+        match registered {
             Ok(()) => {
                 registry.map_address_with_type(
                     chain_id,
@@ -229,9 +352,24 @@ fn extract_with_provenance(
                 if identity_unverified {
                     unverified_count += 1;
                 }
+                if quint_oracle::enabled() {
+                    quint_oracle::Event::builder(quint_oracle::current_test(), "eth_admit_entry")
+                        .argument("mapKey", address.as_str(), Some("ETH_MAP_KEYS"))
+                        .scope("metadata-signature-trust")
+                        .send();
+                }
             }
             Err(e) => {
                 log::warn!("Skipping ABI mapping for '{address}': {e}");
+                if quint_oracle::enabled() {
+                    quint_oracle::Event::builder(
+                        quint_oracle::current_test(),
+                        "eth_skip_unparseable_abi_json",
+                    )
+                    .argument("mapKey", address.as_str(), Some("ETH_MAP_KEYS"))
+                    .scope("metadata-signature-trust")
+                    .send();
+                }
             }
         }
     }
@@ -240,6 +378,11 @@ fn extract_with_provenance(
             "Accepted {unverified_count} ABI mapping(s) with no verified signer: \
              provenance unestablished"
         );
+    }
+    if quint_oracle::enabled() {
+        quint_oracle::Event::builder(quint_oracle::current_test(), "finish_eth_extraction")
+            .scope("metadata-signature-trust")
+            .send();
     }
     if registry.list_abis().is_empty() {
         return (None, unverified_count);
@@ -367,22 +510,29 @@ fn validate_abi_signature(
     allowlist: Option<&SignerAllowlist>,
 ) -> Result<(), AbiSignatureError> {
     // 1. Get algorithm - must be secp256k1
-    let algorithm = signature
-        .algorithm
-        .as_deref()
-        .ok_or_else(|| AbiSignatureError::Validation("Missing algorithm".to_string()))?;
+    let algorithm = signature.algorithm.as_deref().ok_or_else(|| {
+        AbiSignatureError::Validation {
+            kind: "signature_rejected_missing_algorithm",
+            message: "Missing algorithm".to_string(),
+        }
+    })?;
 
     if algorithm != SUPPORTED_ALGORITHM {
-        return Err(AbiSignatureError::Validation(format!(
-            "Unsupported algorithm: {algorithm}. Only {SUPPORTED_ALGORITHM} is supported."
-        )));
+        return Err(AbiSignatureError::Validation {
+            kind: "signature_rejected_unsupported_algorithm",
+            message: format!(
+                "Unsupported algorithm: {algorithm}. Only {SUPPORTED_ALGORITHM} is supported."
+            ),
+        });
     }
 
     // 2. Get public key
-    let public_key_hex = signature
-        .public_key
-        .as_deref()
-        .ok_or_else(|| AbiSignatureError::Validation("Missing public_key".to_string()))?;
+    let public_key_hex = signature.public_key.as_deref().ok_or_else(|| {
+        AbiSignatureError::Validation {
+            kind: "signature_rejected_missing_public_key",
+            message: "Missing public_key".to_string(),
+        }
+    })?;
 
     // 3. Compute the domain-separated prehash binding chain id + contract address
     //    to the ABI JSON.
@@ -393,26 +543,46 @@ fn validate_abi_signature(
     );
 
     // 4. Decode signature (DER format) from hex (optional 0x/0X prefix tolerated)
-    let sig_bytes = visualsign::encodings::decode_hex(&signature.value)
-        .map_err(|e| AbiSignatureError::Validation(format!("Invalid signature hex: {e}")))?;
+    let sig_bytes = visualsign::encodings::decode_hex(&signature.value).map_err(|e| {
+        AbiSignatureError::Validation {
+            kind: "signature_rejected_invalid_signature_encoding",
+            message: format!("Invalid signature hex: {e}"),
+        }
+    })?;
 
-    let sig = Signature::from_der(&sig_bytes)
-        .map_err(|e| AbiSignatureError::Validation(format!("Invalid DER signature: {e}")))?;
+    let sig = Signature::from_der(&sig_bytes).map_err(|e| AbiSignatureError::Validation {
+        kind: "signature_rejected_invalid_signature_encoding",
+        message: format!("Invalid DER signature: {e}"),
+    })?;
 
     // 5. Decode public key from hex (optional 0x/0X prefix tolerated)
-    let pubkey_bytes = visualsign::encodings::decode_hex(public_key_hex)
-        .map_err(|e| AbiSignatureError::Validation(format!("Invalid public key hex: {e}")))?;
+    let pubkey_bytes = visualsign::encodings::decode_hex(public_key_hex).map_err(|e| {
+        AbiSignatureError::Validation {
+            kind: "signature_rejected_invalid_public_key",
+            message: format!("Invalid public key hex: {e}"),
+        }
+    })?;
 
-    let encoded_point = EncodedPoint::from_bytes(&pubkey_bytes)
-        .map_err(|e| AbiSignatureError::Validation(format!("Invalid public key point: {e}")))?;
+    let encoded_point =
+        EncodedPoint::from_bytes(&pubkey_bytes).map_err(|e| AbiSignatureError::Validation {
+            kind: "signature_rejected_invalid_public_key",
+            message: format!("Invalid public key point: {e}"),
+        })?;
 
-    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)
-        .map_err(|e| AbiSignatureError::Validation(format!("Invalid verifying key: {e}")))?;
+    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point).map_err(|e| {
+        AbiSignatureError::Validation {
+            kind: "signature_rejected_invalid_public_key",
+            message: format!("Invalid verifying key: {e}"),
+        }
+    })?;
 
     // 6. Verify pre-hashed signature (hash was computed in step 3)
-    verifying_key.verify_prehash(&hash, &sig).map_err(|e| {
-        AbiSignatureError::Validation(format!("Signature verification failed: {e}"))
-    })?;
+    verifying_key
+        .verify_prehash(&hash, &sig)
+        .map_err(|e| AbiSignatureError::Validation {
+            kind: "signature_rejected_verification_failed",
+            message: format!("Signature verification failed: {e}"),
+        })?;
 
     // 7. Enforce the authorized-signer allowlist, when the posture enforces
     //    identity. A verified signature only proves the ABI was signed by some
@@ -423,9 +593,10 @@ fn validate_abi_signature(
     if let Some(allowlist) = allowlist {
         let signer_pubkey = verifying_key.to_encoded_point(false);
         if !allowlist.contains(signer_pubkey.as_bytes()) {
-            return Err(AbiSignatureError::Validation(
-                "signer not in allowlist".to_string(),
-            ));
+            return Err(AbiSignatureError::Validation {
+                kind: "signature_rejected_not_in_allowlist",
+                message: "signer not in allowlist".to_string(),
+            });
         }
     }
 
@@ -473,6 +644,13 @@ pub fn authorized_abi_signers() -> SignerAllowlist {
                 None => log::warn!("Ignoring invalid pubkey in VISUALSIGN_ETH_ABI_SIGNERS"),
             }
         }
+    }
+
+    if quint_oracle::enabled() {
+        quint_oracle::Event::builder(quint_oracle::current_test(), "build_eth_signer_allowlist")
+            .argument("devSigning", cfg!(any(test, feature = "dev-signing")), None)
+            .scope("metadata-signature-trust")
+            .send();
     }
 
     allow
