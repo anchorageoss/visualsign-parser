@@ -132,10 +132,10 @@ fn test_cli_with_fixtures() {
                     .and_then(|f| f.as_array_mut())
                 {
                     fields.retain(|f| {
-                        let is_diagnostic =
-                            f.get("Type").and_then(|t| t.as_str()) == Some("diagnostic");
-                        let is_warning_fallback =
-                            f.get("Label").and_then(|l| l.as_str()) == Some("Warning");
+                        let field_type = f.get("Type").and_then(|t| t.as_str());
+                        let is_diagnostic = field_type == Some("diagnostic");
+                        let is_warning_fallback = field_type == Some("text_v2")
+                            && f.get("Label").and_then(|l| l.as_str()) == Some("Warning");
                         !is_diagnostic && !is_warning_fallback
                     });
                 }
