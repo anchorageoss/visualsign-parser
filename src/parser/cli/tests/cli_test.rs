@@ -344,12 +344,71 @@ fn assert_strings_match(test_name: &str, fixture_type: &str, expected: &str, act
 /// produces, and the "Warning" `text_v2` field a renderer degrades to when the
 /// feature is off. Display fixtures describe transaction content only, so both
 /// are filtered before comparing.
+///
+/// The degraded rendering is matched on the label *and* the `<rule>: <message>`
+/// text shape it is built with, not on the label alone -- a chain is free to
+/// label real transaction content "Warning", and dropping such a field would
+/// quietly stop the fixture pinning it. Erring narrow is the safe direction: a
+/// diagnostic this misses fails the comparison loudly, whereas content this
+/// wrongly drops goes unnoticed. Mirrors visualsign-near's own
+/// `presets::intents` test helper, which pairs the label with the rule prefix.
 fn is_diagnostic_field(field: &serde_json::Value) -> bool {
     let field_type = field.get("Type").and_then(|t| t.as_str());
     if field_type == Some("diagnostic") {
         return true;
     }
-    field_type == Some("text_v2") && field.get("Label").and_then(|l| l.as_str()) == Some("Warning")
+    if field_type != Some("text_v2")
+        || field.get("Label").and_then(|l| l.as_str()) != Some("Warning")
+    {
+        return false;
+    }
+    field
+        .get("TextV2")
+        .and_then(|t| t.get("Text"))
+        .and_then(|t| t.as_str())
+        .is_some_and(has_rule_prefix)
+}
+
+/// Does `text` carry the `<rule>: <message>` shape a degraded diagnostic is
+/// formatted with?
+///
+/// `rule` is a bare literal at every call site (`deadline`,
+/// `rejected-token-metadata`), so it never contains whitespace; a message that
+/// happens to contain ": " later on cannot be mistaken for the separator,
+/// since only the first one is considered.
+fn has_rule_prefix(text: &str) -> bool {
+    text.split_once(": ").is_some_and(|(rule, message)| {
+        !rule.is_empty() && !rule.contains(char::is_whitespace) && !message.is_empty()
+    })
+}
+
+#[test]
+fn is_diagnostic_field_matches_both_renderings_but_not_warning_content() {
+    let diagnostic = serde_json::json!({ "Type": "diagnostic", "Label": "Deadline" });
+    assert!(is_diagnostic_field(&diagnostic));
+
+    let degraded = serde_json::json!({
+        "Type": "text_v2",
+        "Label": "Warning",
+        "TextV2": { "Text": "deadline: deadline has passed; the intents would be rejected" },
+    });
+    assert!(is_diagnostic_field(&degraded));
+
+    // A chain labelling real content "Warning" must still be pinned by the
+    // fixture -- no rule prefix, so it is not a degraded diagnostic.
+    let content = serde_json::json!({
+        "Type": "text_v2",
+        "Label": "Warning",
+        "TextV2": { "Text": "this transfer cannot be reversed" },
+    });
+    assert!(!is_diagnostic_field(&content));
+
+    let ordinary = serde_json::json!({
+        "Type": "text_v2",
+        "Label": "To",
+        "TextV2": { "Text": "bob.near" },
+    });
+    assert!(!is_diagnostic_field(&ordinary));
 }
 
 /// Recursively checks that every field in `expected` is present in `actual`.
