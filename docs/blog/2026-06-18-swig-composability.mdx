@@ -1,0 +1,72 @@
+---
+title: "Highlight: composable visualization and the Swig smart wallet"
+description: "Swig is a Solana smart wallet whose transactions wrap other instructions. VisualSign renders the nested intent by composing every other preset, so one integration covers everything Swig can wrap."
+---
+
+Swig is a smart wallet on Solana. Instead of signing a transaction directly, you sign through the Swig program (`swigypWHEksbC64pWKwah1WTeh9JXwx8H1rJHLdbQMB`), which carries the real instructions inside its own. That indirection is what gives Swig sessions, roles, and sub-accounts. It also means a naive wallet shows you "Swig program, 280 bytes" at signing time when you are actually approving a token transfer or a swap.
+
+VisualSign's Swig preset opens that envelope and shows the instructions inside. The interesting part is how little Swig-specific code that takes, and that is the thread of this post: composable visualization is the idea the whole decoder is built on, and Swig is the clearest proof of it so far.
+
+## What the Swig preset decodes
+
+The preset registers for the Swig program id and handles the wallet's instruction set:
+
+- **Wallet lifecycle** — Create Wallet, Add Authority, Remove Authority, Update Authority, Migrate Wallet.
+- **Sessions and sub-accounts** — Create Session, Sub-Account Sign.
+- **Asset movement** — Transfer Assets.
+- **Signing** — Sign Transaction (v1) and Sign Transaction (v2), which carry inner instructions.
+
+The wallet-management operations decode into plain fields: who is being added as an authority, what role a session grants, which wallet is migrating.
+
+<Frame caption="Swig wallet-management operations rendered as human-readable fields.">
+  {/* TODO: add screenshot at /images/blog/swig-wallet-management.png */}
+  ![Swig Create Wallet and Add Authority instructions shown as labeled VisualSign fields](/images/blog/swig-wallet-management.png)
+</Frame>
+
+## One instruction, the whole registry
+
+Sign v1, Sign v2, and Sub-Account Sign each wrap a compact list of inner instructions — the operations the wallet is actually authorizing. The preset decodes that list and hands each inner instruction back to the same dispatcher every other Solana preset goes through:
+
+```text
+Swig Sign v2
+  -> decode the wrapped inner instructions
+  -> for each inner instruction:
+        visualize_with_any(available_visualizers(), context)
+  -> collect the rendered fields under the Swig instruction
+```
+
+So a Sign v2 that wraps a Jupiter swap and an SPL token transfer renders the swap through the Jupiter preset and the transfer through the SPL token path, each with its own labels and account-role mappings — Source, Destination, Owner, Mint, Authority. The Swig preset contains no Jupiter logic and no SPL logic. It knows how to find the inner instructions and asks the registry to render them. The top-level label stays honest about what is happening, for example `Swig: Sign v2 (3 inner instruction(s), role #2)`, and each inner instruction expands underneath.
+
+<Frame caption="A Swig Sign v2 expanded: the wrapped inner instructions render through their own presets, with account roles mapped.">
+  {/* TODO: add screenshot at /images/blog/swig-sign-v2-expanded.png */}
+  ![A Swig Sign v2 transaction expanded to show an inner swap and token transfer, each with Source, Destination, Owner, and Mint fields](/images/blog/swig-sign-v2-expanded.png)
+</Frame>
+
+## One integration, every protocol it wraps
+
+This is where composable visualization pays off. The Swig preset's coverage is the registry's coverage. Add a preset for an unrelated protocol next week, and a Swig transaction that wraps an instruction from that protocol starts rendering it the same day, with no new Swig code. One integration, multiplied by the whole preset set.
+
+It is a good way to think about an integration's leverage: how much it covers relative to the code it adds. For most presets that leverage is one — a preset decodes its own program. Swig's leverage is the size of the registry, because everything it wraps it renders by delegation. The architecture that makes this possible — the build-time registry, the shared IDL parser, deterministic field builders — is the subject of [Composable by design: how Solana presets stack](/blog/2026-05-13-composable-solana-presets). Swig is what that design buys you when a transaction is a container for other transactions.
+
+## What a user sees
+
+All of this lands on the approval screen. Without decoding, a Swig signature is an opaque program call and a blob of bytes. With it, the signer sees the wrapped intent — the swap, the transfer, the authority change — in the same human-readable form as a direct transaction.
+
+<Frame caption="The same Swig transaction: raw bytes on the left, the VisualSign render on the right.">
+  {/* TODO: add screenshot at /images/blog/swig-raw-vs-human.png */}
+  ![Side by side comparison of an opaque raw Swig transaction and its decoded VisualSign output](/images/blog/swig-raw-vs-human.png)
+</Frame>
+
+## Composing untrusted input safely
+
+Inner instructions are attacker-influenced, so the preset composes them carefully:
+
+- **Bounded recursion.** A Sign instruction that nests Sign instructions cannot loop forever. Past `MAX_CALL_DEPTH` the preset renders a "nested too deeply" field and stops, so a crafted transaction cannot exhaust the parser.
+- **No fabricated addresses.** Accounts that the transaction references but does not resolve are rejected, so the render never shows a default zero address as though it were a real destination.
+- **Deterministic output.** Inner instructions render through the same field builders as everything else, so the same wrapped transaction always produces the same bytes — which is what makes the composed payload safe to hash.
+
+Composing untrusted, nested input is exactly where this could go wrong, and the bounds above are what let the registry render it without trusting it.
+
+## Where to go next
+
+Swig is one preset directory like every other Solana integration — see [Adding a Solana preset](/chains/solana) for the shape. For the architecture behind the registry it delegates to, read [Composable by design](/blog/2026-05-13-composable-solana-presets). Recent Solana decoding changes, including the Swig recursion bound, are in the [Changelog](/changelog/solana).
