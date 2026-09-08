@@ -270,6 +270,41 @@ fn extract_idl_mappings_with_signers(
         return BTreeMap::new();
     };
 
+    // Quint Studio: report the caller-supplied shape of every IDL entry before the loop
+    // consumes it, then the request opening. Actions and argument names are copied from
+    // `quint-specs/metadata-signature-trust.qnt`, which the oracle replays this against.
+    if quint_oracle::enabled() {
+        for (program_id, idl) in mappings {
+            quint_oracle::Event::builder(quint_oracle::current_test(), "offer_idl_entry")
+                .argument("programId", program_id.as_str(), Some("SOL_PROGRAM_KEYS"))
+                .scope("metadata-signature-trust")
+                .send();
+            if let Some(name) = idl.program_name.as_deref() {
+                quint_oracle::Event::builder(quint_oracle::current_test(), "set_idl_program_name")
+                    .argument("programId", program_id.as_str(), Some("SOL_PROGRAM_KEYS"))
+                    .argument("name", name, Some("SOL_PROGRAM_NAMES"))
+                    .scope("metadata-signature-trust")
+                    .send();
+            }
+            quint_oracle::Event::builder(quint_oracle::current_test(), "report_idl_body_size")
+                .argument("programId", program_id.as_str(), Some("SOL_PROGRAM_KEYS"))
+                .argument("oversized", idl.value.len() > MAX_IDL_JSON_BYTES, None)
+                .scope("metadata-signature-trust")
+                .send();
+            // An entry that arrived carrying a signature; see the Ethereum twin for why
+            // only the entry is pinned.
+            if idl.signature.is_some() {
+                quint_oracle::Event::builder(quint_oracle::current_test(), "attach_idl_signature")
+                    .argument("programId", program_id.as_str(), Some("SOL_PROGRAM_KEYS"))
+                    .scope("metadata-signature-trust")
+                    .send();
+            }
+        }
+        quint_oracle::Event::builder(quint_oracle::current_test(), "begin_sol_extraction")
+            .scope("metadata-signature-trust")
+            .send();
+    }
+
     let mut out: BTreeMap<String, (String, String)> = BTreeMap::new();
     for (program_id, idl) in mappings {
         // 1. Validate program_id parses as a Solana Pubkey (cheap, fail fast).
@@ -279,6 +314,15 @@ fn extract_idl_mappings_with_signers(
             Ok(pk) => pk,
             Err(_) => {
                 tracing::warn!("Skipping IDL mapping with invalid program_id '{program_id}'");
+                if quint_oracle::enabled() {
+                    quint_oracle::Event::builder(
+                        quint_oracle::current_test(),
+                        "sol_skip_invalid_program_id",
+                    )
+                    .argument("programId", program_id.as_str(), Some("SOL_PROGRAM_KEYS"))
+                    .scope("metadata-signature-trust")
+                    .send();
+                }
                 continue;
             }
         };
@@ -300,6 +344,15 @@ fn extract_idl_mappings_with_signers(
                     "Skipping IDL mapping for '{program_id}': override refused (preset-registered program)"
                 ),
             }
+            if quint_oracle::enabled() {
+                quint_oracle::Event::builder(
+                    quint_oracle::current_test(),
+                    "sol_skip_trusted_program",
+                )
+                .argument("programId", program_id.as_str(), Some("SOL_PROGRAM_KEYS"))
+                .scope("metadata-signature-trust")
+                .send();
+            }
             continue;
         }
 
@@ -309,6 +362,15 @@ fn extract_idl_mappings_with_signers(
                 "Skipping IDL mapping for '{program_id}': exceeds size limit ({} bytes > {MAX_IDL_JSON_BYTES})",
                 idl.value.len()
             );
+            if quint_oracle::enabled() {
+                quint_oracle::Event::builder(
+                    quint_oracle::current_test(),
+                    "sol_skip_oversized_body",
+                )
+                .argument("programId", program_id.as_str(), Some("SOL_PROGRAM_KEYS"))
+                .scope("metadata-signature-trust")
+                .send();
+            }
             continue;
         }
 
@@ -319,12 +381,37 @@ fn extract_idl_mappings_with_signers(
         //    Ethereum. See the security notes on this function.
         if let Some(proto_sig) = idl.signature.as_ref() {
             let local_sig = convert_proto_signature(proto_sig);
-            if let Err(e) =
-                validate_idl_signature(&idl.value, &pubkey.to_bytes(), &local_sig, idl_signers)
-            {
+            let verdict =
+                validate_idl_signature(&idl.value, &pubkey.to_bytes(), &local_sig, idl_signers);
+            // Quint Studio: the verifier has answered; see the Ethereum twin.
+            if quint_oracle::enabled() {
+                quint_oracle::Event::builder(
+                    quint_oracle::current_test(),
+                    "report_idl_signature_verdict",
+                )
+                .argument("programId", program_id.as_str(), Some("SOL_PROGRAM_KEYS"))
+                .argument(
+                    "verdict",
+                    verdict.as_ref().map_or_else(|e| e.kind(), |()| "accepted"),
+                    Some("SIG_VERDICTS"),
+                )
+                .scope("metadata-signature-trust")
+                .send();
+            }
+            if let Err(e) = verdict {
                 tracing::warn!(
                     "Skipping IDL mapping for '{program_id}': signature validation failed: {e}"
                 );
+                if quint_oracle::enabled() {
+                    quint_oracle::Event::builder(
+                        quint_oracle::current_test(),
+                        "sol_skip_invalid_signature",
+                    )
+                    .argument("programId", program_id.as_str(), Some("SOL_PROGRAM_KEYS"))
+                    .argument("cause", e.kind(), Some("SIG_CAUSES"))
+                    .scope("metadata-signature-trust")
+                    .send();
+                }
                 continue;
             }
         }
@@ -344,10 +431,30 @@ fn extract_idl_mappings_with_signers(
             tracing::warn!(
                 "Skipping IDL mapping for '{program_id}': program_name '{name}' is reserved for a different canonical program"
             );
+            if quint_oracle::enabled() {
+                quint_oracle::Event::builder(
+                    quint_oracle::current_test(),
+                    "sol_skip_reserved_program_name",
+                )
+                .argument("programId", program_id.as_str(), Some("SOL_PROGRAM_KEYS"))
+                .scope("metadata-signature-trust")
+                .send();
+            }
             continue;
         }
 
+        if quint_oracle::enabled() {
+            quint_oracle::Event::builder(quint_oracle::current_test(), "sol_accept_entry")
+                .argument("programId", program_id.as_str(), Some("SOL_PROGRAM_KEYS"))
+                .scope("metadata-signature-trust")
+                .send();
+        }
         out.insert(program_id.clone(), (idl.value.clone(), name));
+    }
+    if quint_oracle::enabled() {
+        quint_oracle::Event::builder(quint_oracle::current_test(), "finish_sol_extraction")
+            .scope("metadata-signature-trust")
+            .send();
     }
     out
 }

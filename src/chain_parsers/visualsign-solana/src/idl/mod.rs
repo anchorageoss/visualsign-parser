@@ -92,6 +92,12 @@ impl IdlRegistry {
             names.insert(program_id, program_name);
         }
 
+        if quint_oracle::enabled() {
+            quint_oracle::Event::builder(quint_oracle::current_test(), "build_idl_registry")
+                .scope("metadata-signature-trust")
+                .send();
+        }
+
         Ok(Self {
             configs,
             names,
@@ -140,6 +146,7 @@ impl IdlRegistry {
     /// System Program as "Phantom Wallet" via crafted `idl_mappings`.
     pub fn get_program_name(&self, program_id: &Pubkey) -> String {
         let program_id_str = program_id.to_string();
+
 
         // Canonical names for trusted built-ins always win. This is the
         // primary defence against caller-controlled mislabeling.

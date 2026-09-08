@@ -20,6 +20,11 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tracing = { workspace = true }
 generated = { path = "../generated" }
 
+# Quint Studio oracle instrumentation. Inert by default: without
+# `--features quint-oracle/enabled` every log site compiles to an empty stub and
+# none of the client's dependencies are built, so production builds are untouched.
+quint-oracle = { path = "../../quint-specs/oracle-client/rust" }
+
 [dev-dependencies]
 base64 = "0.22.1"
 
