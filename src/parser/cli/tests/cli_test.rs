@@ -121,15 +121,23 @@ fn test_cli_with_fixtures() {
         // Try JSON parsing; fall back to string comparison for text/human output
         match serde_json::from_str::<serde_json::Value>(actual_output.trim()) {
             Ok(actual_json) => {
-                // JSON output: filter diagnostics and check membership
-                #[cfg_attr(not(feature = "diagnostics"), allow(unused_mut))]
+                // JSON output: filter soft-finding fields and check membership.
+                // A soft finding renders as the structured `Diagnostic` (diagnostics
+                // feature) or, in a build without that feature, as a `Warning`-labelled
+                // text_v2 fallback carrying the same information (see `diagnostic()` in
+                // visualsign-near's render.rs) -- both shapes are display noise here.
                 let mut display_payload = actual_json.clone();
-                #[cfg(feature = "diagnostics")]
                 if let Some(fields) = display_payload
                     .get_mut("Fields")
                     .and_then(|f| f.as_array_mut())
                 {
-                    fields.retain(|f| f.get("Type").and_then(|t| t.as_str()) != Some("diagnostic"));
+                    fields.retain(|f| {
+                        let field_type = f.get("Type").and_then(|t| t.as_str());
+                        let is_diagnostic = field_type == Some("diagnostic");
+                        let is_warning_fallback = field_type == Some("text_v2")
+                            && f.get("Label").and_then(|l| l.as_str()) == Some("Warning");
+                        !is_diagnostic && !is_warning_fallback
+                    });
                 }
 
                 let expected_json: serde_json::Value =
