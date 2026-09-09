@@ -1016,10 +1016,7 @@ mod tests {
         let has_extraction_warning = fields
             .iter()
             .any(|f| super::super::test_support::is_warning_diagnostic(f, "extraction"));
-        assert!(
-            has_extraction_warning,
-            "expected an extraction warning, got {fields:?}"
-        );
+        assert!(has_extraction_warning, "expected an extraction warning");
         let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
         assert!(
             !labels.contains(&"Signer"),
@@ -1188,7 +1185,7 @@ mod tests {
                     "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"
                 );
             }
-            other => panic!("expected TextV2, got {other:?}"),
+            _ => panic!("expected TextV2 field"),
         }
     }
 
@@ -1201,7 +1198,7 @@ mod tests {
                 assert_eq!(common.label, "Auth By Predecessor");
                 assert_eq!(text_v2.text, "enabled");
             }
-            other => panic!("expected TextV2, got {other:?}"),
+            _ => panic!("expected TextV2 field"),
         }
     }
 
@@ -1456,7 +1453,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .unwrap_or_else(|| panic!("no TextV2 field labelled {label}: {fields:?}"))
+            .unwrap_or_else(|| panic!("no TextV2 field labelled {label}"))
     }
 
     /// An intent-carried string an attacker controls, shaped to read as two
@@ -1727,7 +1724,7 @@ mod tests {
             fields
                 .iter()
                 .any(|f| super::super::test_support::is_warning_diagnostic(f, "account-control")),
-            "expected an account-control warning, got {fields:?}"
+            "expected an account-control warning"
         );
     }
 
@@ -1741,7 +1738,7 @@ mod tests {
             fields
                 .iter()
                 .any(|f| super::super::test_support::is_warning_diagnostic(f, "account-control")),
-            "expected an account-control warning, got {fields:?}"
+            "expected an account-control warning"
         );
     }
 
@@ -1763,7 +1760,7 @@ mod tests {
             fields
                 .iter()
                 .any(|f| super::super::test_support::is_warning_diagnostic(f, "account-control")),
-            "expected an account-control warning, got {fields:?}"
+            "expected an account-control warning"
         );
     }
 
@@ -1776,7 +1773,7 @@ mod tests {
             fields
                 .iter()
                 .any(|f| super::super::test_support::is_warning_diagnostic(f, "account-control")),
-            "expected an account-control warning, got {fields:?}"
+            "expected an account-control warning"
         );
     }
 
@@ -1787,7 +1784,7 @@ mod tests {
             !fields
                 .iter()
                 .any(|f| super::super::test_support::is_warning_diagnostic(f, "account-control")),
-            "unexpected account-control warning: {fields:?}"
+            "unexpected account-control warning"
         );
     }
 
@@ -1802,7 +1799,7 @@ mod tests {
             fields
                 .iter()
                 .any(|f| super::super::test_support::is_warning_diagnostic(f, "empty-intents")),
-            "expected an empty-intents warning, got {fields:?}"
+            "expected an empty-intents warning"
         );
     }
 
@@ -1821,7 +1818,7 @@ mod tests {
             fields
                 .iter()
                 .any(|f| super::super::test_support::is_warning_diagnostic(f, "self-transfer")),
-            "expected a self-transfer warning, got {fields:?}"
+            "expected a self-transfer warning"
         );
     }
 
@@ -1837,7 +1834,7 @@ mod tests {
             !fields
                 .iter()
                 .any(|f| super::super::test_support::is_warning_diagnostic(f, "self-transfer")),
-            "unexpected self-transfer warning: {fields:?}"
+            "unexpected self-transfer warning"
         );
     }
 
