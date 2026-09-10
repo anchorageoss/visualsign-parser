@@ -56,7 +56,22 @@ pub fn resolve_transaction_input(input: &str) -> Result<String, String> {
 /// A leading `{` is the whole test. Every JSON transaction format this CLI
 /// accepts is an object, and no hex or base64 body can begin with that byte,
 /// so the two cases cannot be confused.
+///
+/// One leading UTF-8 BOM is dropped before that test runs. A BOM is not
+/// `White_Space`, so `trim_start` leaves it in place and BOM-prefixed JSON --
+/// routine from Windows editors and spreadsheet exports -- would fail the `{`
+/// test and be routed to the stripping branch, silently deleting spaces
+/// *inside* its string values: exactly the corruption this rule exists to
+/// prevent. It is not ASCII whitespace either, so on the other branch it
+/// survives into a hex or base64 body and fails to decode. Dropping it fixes
+/// both, and dropping it (rather than only re-routing) is what makes the file
+/// usable at all, since `serde_json` rejects a leading BOM with "expected
+/// value at line 1 column 1".
+///
+/// Only at offset 0: a U+FEFF anywhere else is ZWNBSP content, not a byte
+/// order mark, and inside a JSON string value it is the caller's data.
 fn resolve_buffer(raw: &str) -> String {
+    let raw = raw.strip_prefix('\u{feff}').unwrap_or(raw);
     if raw.trim_start().starts_with('{') {
         raw.trim().to_string()
     } else {
@@ -140,6 +155,70 @@ mod tests {
         let path = write_temp_json("vsp_tx_input_tests", "tx.json", json);
         let arg = format!("@{}", path.display());
         assert_eq!(resolve_transaction_input(&arg).unwrap(), json);
+    }
+
+    #[test]
+    /// A BOM-prefixed JSON file is routine from Windows editors and
+    /// spreadsheet exports. Before the BOM was dropped, `trim_start` left it
+    /// in place (it is not `White_Space`), the `{` test failed, and the buffer
+    /// went to the stripping branch -- deleting the spaces *inside* the memo
+    /// while still producing valid JSON. Silent corruption of signed content,
+    /// which is the failure this whole rule exists to prevent.
+    #[test]
+    fn bom_prefixed_json_keeps_its_internal_whitespace() {
+        let json = r#"{"memo":"AAA BBB  CCC"}"#;
+        let with_bom = format!("\u{feff}{json}");
+        assert_eq!(resolve_buffer(&with_bom), json);
+    }
+
+    /// End to end through the file path, since the BOM arrives from a file in
+    /// every real report of this.
+    #[test]
+    fn reads_bom_prefixed_json_from_file_without_touching_its_whitespace() {
+        let json = r#"{"memo":"AAA BBB  CCC"}"#;
+        let path = write_temp_json(
+            "vsp_tx_input_tests",
+            "tx_bom.json",
+            &format!("\u{feff}{json}"),
+        );
+        let arg = format!("@{}", path.display());
+        assert_eq!(resolve_transaction_input(&arg).unwrap(), json);
+    }
+
+    /// The BOM is dropped rather than merely re-routed: `serde_json` rejects a
+    /// leading BOM ("expected value at line 1 column 1"), so keeping it would
+    /// trade silent corruption for a confusing parse error instead of making
+    /// the file work.
+    #[test]
+    fn bom_is_removed_not_just_routed() {
+        assert!(!resolve_buffer("\u{feff}{\"a\":1}").starts_with('\u{feff}'));
+    }
+
+    /// A BOM on a hex body is not ASCII whitespace, so it used to survive into
+    /// the decoder and fail there. Same one-BOM rule covers it.
+    #[test]
+    fn bom_prefixed_hex_still_strips_to_a_clean_body() {
+        assert_eq!(
+            resolve_buffer("\u{feff}0a8a01\n0a0207 93\n"),
+            "0a8a010a020793"
+        );
+    }
+
+    /// Only offset 0 is a byte order mark. A U+FEFF inside a JSON string value
+    /// is the caller's data and must survive untouched, so the fix cannot be
+    /// implemented as a global replace.
+    #[test]
+    fn a_bom_inside_a_json_value_is_preserved() {
+        let json = "{\"memo\":\"A\u{feff}B\"}";
+        assert_eq!(resolve_buffer(json), json);
+    }
+
+    /// Exactly one BOM comes off, so a second is still content and still
+    /// routes the buffer honestly rather than being quietly absorbed.
+    #[test]
+    fn only_one_leading_bom_is_dropped() {
+        let doubled = "\u{feff}\u{feff}{\"a\":1}";
+        assert_eq!(resolve_buffer(doubled), "\u{feff}{\"a\":1}");
     }
 
     #[test]
