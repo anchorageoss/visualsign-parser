@@ -157,7 +157,6 @@ mod tests {
         assert_eq!(resolve_transaction_input(&arg).unwrap(), json);
     }
 
-    #[test]
     /// A BOM-prefixed JSON file is routine from Windows editors and
     /// spreadsheet exports. Before the BOM was dropped, `trim_start` left it
     /// in place (it is not `White_Space`), the `{` test failed, and the buffer
