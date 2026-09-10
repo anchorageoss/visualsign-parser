@@ -40,13 +40,39 @@ pub fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, String> {
     })
 }
 
+/// How one chain describes its mappings in the lines [`load_mappings`] logs.
+///
+/// Grouped rather than passed as four strings in a row: they are all
+/// human-readable labels of the same mapping format, and positionally they are
+/// interchangeable to the compiler.
+pub struct MappingFormat<'a> {
+    /// What is being loaded, e.g. `"ABI"`, `"IDL"`, `"token metadata"`.
+    pub kind: &'a str,
+    /// A complete, valid mapping string, printed when parsing fails.
+    pub example: &'a str,
+    /// What the trailing component is, e.g. `"ContractAddress"`, `"AssetId"`.
+    pub identifier_label: &'a str,
+    /// The shape a mapping takes, printed when parsing fails. Chain-specific
+    /// because the separator is: NEAR uses `@`, since a NEAR asset id carries
+    /// its own colons.
+    pub format_hint: &'a str,
+}
+
 /// Load JSON files from CLI mapping strings and build a `BTreeMap`.
 ///
-/// Each mapping string is parsed, the JSON file is loaded, and `build_value` converts
-/// the loaded JSON + components into the target value type. `build_value` returns a
-/// `Result` so post-load steps (e.g. signing) can reject the entry without producing a
-/// misleading "loaded" log line or inflating the success count. The identifier from
-/// the mapping becomes the map key.
+/// Each mapping string is parsed by `parse`, the JSON file is loaded, and
+/// `build_value` converts the loaded JSON + components into the target value
+/// type. `build_value` returns a `Result` so post-load steps (e.g. signing) can
+/// reject the entry without producing a misleading "loaded" log line or
+/// inflating the success count. The identifier from the mapping becomes the map
+/// key.
+///
+/// `parse` is supplied by the caller rather than fixed to [`parse_mapping`]:
+/// the separator differs by chain, and so does what a surplus component means.
+/// The colon-separated form splits from the right so a Windows path keeps its
+/// drive letter, while NEAR's `@`-separated form rejects a fourth component
+/// outright, since an asset id never contains `@` and a path that does would
+/// otherwise be silently mis-split.
 ///
 /// Returns the populated map and the count of newly-inserted entries: those
 /// loaded, accepted by `build_value`, and mapped to a fresh identifier. A
@@ -55,17 +81,22 @@ pub fn parse_mapping(mapping_str: &str) -> Result<MappingComponents, String> {
 /// accepted mappings.
 pub fn load_mappings<V>(
     mappings: &[String],
-    kind: &str,
-    example: &str,
-    identifier_label: &str,
+    format: &MappingFormat<'_>,
+    parse: impl Fn(&str) -> Result<MappingComponents, String>,
     validate_identifier: impl Fn(&str) -> Result<(), String>,
     build_value: impl Fn(&MappingComponents, String) -> Result<V, String>,
 ) -> (std::collections::BTreeMap<String, V>, usize) {
+    let MappingFormat {
+        kind,
+        example,
+        identifier_label,
+        format_hint,
+    } = *format;
     let mut map = std::collections::BTreeMap::new();
     let mut valid_count = 0;
 
     for mapping in mappings {
-        match parse_mapping(mapping) {
+        match parse(mapping) {
             Ok(components) => {
                 if let Err(e) = validate_identifier(&components.identifier) {
                     eprintln!(
@@ -108,7 +139,7 @@ pub fn load_mappings<V>(
             }
             Err(e) => {
                 eprintln!("Error parsing {kind} mapping: {e}");
-                eprintln!("Expected format: Name:/path/to/file.json:{identifier_label}");
+                eprintln!("Expected format: {format_hint}");
                 eprintln!("Example: {example}");
             }
         }
@@ -204,6 +235,18 @@ mod tests {
         assert!(parse_mapping("MyToken:/path/to/file.json:").is_err());
     }
 
+    /// The colon-separated format these tests exercise. Only `kind` and
+    /// `identifier_label` reach an assertion; the other two appear in the
+    /// parse-failure lines.
+    fn test_format<'a>(kind: &'a str, identifier_label: &'a str) -> MappingFormat<'a> {
+        MappingFormat {
+            kind,
+            example: "example",
+            identifier_label,
+            format_hint: "Name:/path/to/file.json:Identifier",
+        }
+    }
+
     fn write_temp_json(name: &str, content: &str) -> std::path::PathBuf {
         crate::test_utils::write_temp_json("vsp_tests", name, content)
     }
@@ -243,9 +286,8 @@ mod tests {
 
         let (map, count) = load_mappings(
             &mappings,
-            "ABI",
-            "example",
-            "Address",
+            &test_format("ABI", "Address"),
+            parse_mapping,
             |_| Ok(()),
             |_comp, json| Ok(json.to_uppercase()),
         );
@@ -261,9 +303,8 @@ mod tests {
         let mappings: Vec<String> = vec![];
         let (map, count) = load_mappings::<String>(
             &mappings,
-            "ABI",
-            "example",
-            "Address",
+            &test_format("ABI", "Address"),
+            parse_mapping,
             |_| Ok(()),
             |_, json| Ok(json),
         );
@@ -276,9 +317,8 @@ mod tests {
         let mappings = vec!["bad-format-no-colons".to_string()];
         let (map, count) = load_mappings::<String>(
             &mappings,
-            "ABI",
-            "example",
-            "Address",
+            &test_format("ABI", "Address"),
+            parse_mapping,
             |_| Ok(()),
             |_, json| Ok(json),
         );
@@ -291,9 +331,8 @@ mod tests {
         let mappings = vec!["Name:/nonexistent/file.json:0xAddr".to_string()];
         let (map, count) = load_mappings::<String>(
             &mappings,
-            "ABI",
-            "example",
-            "Address",
+            &test_format("ABI", "Address"),
+            parse_mapping,
             |_| Ok(()),
             |_, json| Ok(json),
         );
@@ -312,9 +351,8 @@ mod tests {
 
         let (map, count) = load_mappings::<String>(
             &mappings,
-            "ABI",
-            "example",
-            "Address",
+            &test_format("ABI", "Address"),
+            parse_mapping,
             |_| Ok(()),
             |_, json| Ok(json),
         );
@@ -330,9 +368,8 @@ mod tests {
 
         let (map, count) = load_mappings(
             &mappings,
-            "TEST",
-            "ex",
-            "Id",
+            &test_format("TEST", "Id"),
+            parse_mapping,
             |_| Ok(()),
             |components, json| {
                 Ok(format!(
@@ -359,9 +396,8 @@ mod tests {
 
         let (map, count) = load_mappings::<String>(
             &mappings,
-            "ABI",
-            "ex",
-            "Addr",
+            &test_format("ABI", "Addr"),
+            parse_mapping,
             |_| Ok(()),
             |_, json| Ok(json),
         );
@@ -381,9 +417,8 @@ mod tests {
 
         let (map, count) = load_mappings::<String>(
             &mappings,
-            "ABI",
-            "ex",
-            "Addr",
+            &test_format("ABI", "Addr"),
+            parse_mapping,
             |_| Ok(()),
             |components, json| {
                 if components.identifier == "0xReject" {

@@ -9,20 +9,24 @@ use generated::{
 use qos_core::handles::EphemeralKeyHandle;
 use tokio::sync::RwLock;
 
+use crate::config::ParserConfig;
+
 /// Struct holding a request processor for QOS
 #[derive(Debug)]
 pub struct Processor {
     handle: EphemeralKeyHandle,
+    config: ParserConfig,
 }
 
 /// `Processor` shared between tasks
 pub type SharedProcessor = Arc<RwLock<Processor>>;
 
 impl Processor {
-    /// Creates a new request processor. The only argument needed is an ephemeral key handle.
+    /// Creates a new request processor from an ephemeral key handle and the
+    /// deploy-time configuration (see [`ParserConfig`]).
     #[must_use]
-    pub fn new(handle: EphemeralKeyHandle) -> SharedProcessor {
-        Arc::new(RwLock::new(Self { handle }))
+    pub fn new(handle: EphemeralKeyHandle, config: ParserConfig) -> SharedProcessor {
+        Arc::new(RwLock::new(Self { handle, config }))
     }
 }
 
@@ -67,7 +71,7 @@ impl Processor {
 
             let output = match input {
                 qos_parser_request::Input::ParseRequest(parse_request) => {
-                    match crate::routes::parse::parse(parse_request, &ephemeral_key)
+                    match crate::routes::parse::parse(parse_request, &ephemeral_key, &self.config)
                         .map(qos_parser_response::Output::ParseResponse)
                         .map_err(|e| {
                             qos_parser_response::Output::Status(Status {

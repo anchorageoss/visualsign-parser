@@ -1,6 +1,6 @@
 # Changelog drafts
 
-PR authors of user-facing changes drop a fragment here. A maintainer batches drafts into one or more `<Update>` blocks on the matching per-chain or core page (`../solana.mdx`, `../ethereum.mdx`, `../sui.mdx`, `../tron.mdx`, or `../core.mdx`) when a meaningful release ships, then deletes the consumed drafts. The `../changelog.mdx` index itself only links to those pages and carries no `<Update>` blocks.
+PR authors of user-facing changes drop a fragment here. A maintainer batches drafts into one or more `<Update>` blocks on the matching per-chain or core page (`../solana.mdx`, `../ethereum.mdx`, `../sui.mdx`, `../tron.mdx`, `../near.mdx`, or `../core.mdx`) when a meaningful release ships, then deletes the consumed drafts. The `../changelog.mdx` index itself only links to those pages and carries no `<Update>` blocks.
 
 This directory is intentionally not listed in `docs.json` navigation, so Mintlify does not publish it.
 
@@ -12,7 +12,7 @@ Example (`2026-05-05-metadao-futarchy.md`):
 
 ```markdown
 ---
-category: solana                  # one of: solana | ethereum | sui | tron | core
+category: solana                  # one of: solana | ethereum | sui | tron | near | core
 label: "Added MetaDAO Futarchy preset"
 description: ""                   # filled in at curation time with the release version (e.g. "v0.646.0")
 tags: ["Wallet API"]
@@ -29,6 +29,7 @@ The maintainer reads the frontmatter into the corresponding props on `<Update>`,
 - **`ethereum`** — anything under `src/chain_parsers/visualsign-ethereum/`: protocol decoders, ABI registry, contract additions.
 - **`sui`** — anything under `src/chain_parsers/visualsign-sui/`: Move package decoders, programmable transactions.
 - **`tron`** — anything under `src/chain_parsers/visualsign-tron/`: contract decoders, TRC standards.
+- **`near`** — anything under `src/chain_parsers/visualsign-near/`: transaction decoding, the intents preset, signature verification.
 - **`core`** — everything else: core types in `src/visualsign`, field builders, the parser binaries (`src/parser/{cli,app,grpc-server}`), the HTTP gateway, attestation, policy, codegen, integration tests, build infrastructure.
 
 Don't put a chain tag in the `tags` array for per-chain entries — the page already conveys the chain. Reserve tags for audience and theme.

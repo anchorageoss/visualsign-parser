@@ -27,13 +27,14 @@ parser_cli decode --chain <chain> -t <transaction_hex> --output <format>
 
 | Parameter | Description |
 |-----------|-------------|
-| `--chain` | Blockchain type (`ethereum`, `solana`, `sui`, `tron`) |
+| `--chain` | Blockchain type (`ethereum`, `near`, `solana`, `sui`, `tron`) |
 | `-t`, `--transaction` | Raw transaction data (hex encoded) |
 | `--output` | Output format: `text` (default), `json`, or `human` |
 | `--condensed-only` | Show only condensed view (what users see on hardware wallets) |
 | `-n`, `--network` | Network identifier—chain ID (e.g., `1`, `137`) or canonical name (e.g., `ETHEREUM_MAINNET`, `POLYGON_MAINNET`) |
 | `--abi-json-mappings` | Map custom ABI JSON to contract. Format: `Name:/path/to/abi.json:0xAddress`. Can be used multiple times |
 | `--idl-json-mappings` | Map custom IDL JSON to Solana program. Format: `Name:/path/to/idl.json:ProgramId`. Can be used multiple times |
+| `--near-token-metadata-mappings` | Map custom token metadata JSON to a NEAR Intents asset id. Format: `Name@/path/to/token.json@AssetId`. Can be used multiple times |
 
 ## Real-world examples
 

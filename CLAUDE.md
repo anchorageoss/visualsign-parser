@@ -95,6 +95,31 @@ Workspace-level clippy lints are enforced in `src/Cargo.toml`:
 
 Exceptions: test modules use `#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`. Build scripts allow `unwrap_used`. Some crates have temporary crate-level exemptions with `TODO(#231)` pending cleanup.
 
+### Deploy-Time ABI Trust Posture
+
+Whether the parser honours caller-supplied Ethereum ABI mappings that carry no signature
+is a deploy-time choice, not a per-request one. `parser_app` requires exactly one of:
+
+- `--accept-unsigned-abis` — unsigned `abi_mappings` are registered. A signature that
+  *is* present must still verify (integrity), but its signer is not checked against an
+  allowlist.
+- `--accept-signatures-from-pubkey <hex>` (repeatable) — every mapping must be signed
+  by one of the given secp256k1 keys; unsigned or otherwise-signed mappings are dropped.
+
+This posture only governs Ethereum `abi_mappings`. Solana `idl_mappings` go through a
+separate, unsigned-accepting path unaffected by either flag: unsigned IDLs are always
+accepted, and the `VISUALSIGN_SOL_IDL_SIGNERS` env var only allowlists signers for
+IDLs that *are* signed.
+
+The intended end state is for the flags to land in the TVC deployment manifest's
+`pivotArgs` (see `tools/tvc-deploy`), so a signer can verify which posture a deployment
+runs out of band; wiring `tools/tvc-deploy` to emit them has not landed yet and is
+tracked as a follow-up. Represented in code by `visualsign::signing::MetadataTrustPolicy`,
+threaded through `parser_app::config::ParserConfig` into
+`EthereumVisualSignConverter::with_policy`. `parser_grpc_server` currently hardcodes
+accept-unsigned (non-attested dev server); exposing the same flags there is a follow-up.
+`parser_cli` runs require-signed against the local dev key it signs its own ABI files with.
+
 ### Design Decisions
 
 - **Deterministic serialization everywhere** — BTreeMap for proto maps, `DeterministicOrdering` trait, alphabetical field ordering for stable metadata hashing (borsh encoding)
@@ -102,4 +127,4 @@ Exceptions: test modules use `#[allow(clippy::unwrap_used, clippy::expect_used, 
 - **Type-erased converters** — `VisualSignConverterAny` trait objects for polymorphic registry without generics overhead
 - **Feature gates for chains** — Ethereum/Solana gated, extensible to new chains
 - **Rust edition 2024** on nightly channel 1.88
-- **Unified hex/`0x` handling** — All hex inputs (raw transactions, signatures, public keys, addresses) decode through `visualsign::encodings`: `decode_hex` (strip + decode), `strip_hex_prefix`, and `split_hex_prefix`. These accept an optional `0x`/`0X` prefix (case-insensitive). Do not hand-roll prefix stripping per chain. Where a prefix is mandatory (e.g. JSON-RPC quantities/data), use `split_hex_prefix` and turn `None` into an error. New chains and address parsers reuse these rather than introducing their own prefix rules.
+- **Unified hex/`0x` handling** — All hex inputs (raw transactions, signatures, public keys, addresses) decode through `visualsign::encodings`: `decode_hex` (strip + decode), `decode_hex_array::<N>` (strip + decode into a fixed-size `[u8; N]`, for fixed-width public keys and signatures), `strip_hex_prefix`, and `split_hex_prefix`. These accept an optional `0x`/`0X` prefix (case-insensitive). Do not hand-roll prefix stripping or fixed-length checks per chain. Where a prefix is mandatory (e.g. JSON-RPC quantities/data), use `split_hex_prefix` and turn `None` into an error. `decode_hex_array`'s error `Display` is a suffix fragment, so callers wrap it as `format!("Invalid {what} {e}")`. New chains and address parsers reuse these rather than introducing their own prefix rules.
