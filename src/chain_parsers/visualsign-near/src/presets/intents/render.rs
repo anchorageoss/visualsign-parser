@@ -1080,6 +1080,35 @@ mod tests {
         assert_eq!(wnear.abbreviation.as_deref(), Some("wNEAR"));
     }
 
+    /// A `token_diff` entry keyed by an MT asset id whose contract is NOT the
+    /// intents verifier, but whose inner token_id is spelled to round-trip as
+    /// a seeded NEP-141 id, must render unresolved -- this shape shows no
+    /// contract on screen at all (unlike `mt_withdraw`'s separate `Token`
+    /// field), so a misresolution here would give the signer nothing to
+    /// notice.
+    #[test]
+    fn token_diff_with_an_untrusted_mt_contract_is_unresolved() {
+        let intent = intent_from(
+            r#"{"intent":"token_diff","diff":{"nep245:evil.near:nep141:wrap.near":"-2000000000000000000000000"}}"#,
+        );
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        assert!(
+            fields
+                .iter()
+                .all(|f| !matches!(f, SignablePayloadField::AmountV2 { .. })),
+            "expected no resolved AmountV2, got {fields:?}"
+        );
+        match fields.iter().find(|f| label_of(f) == Some("Send")) {
+            Some(SignablePayloadField::TextV2 { text_v2, .. }) => {
+                assert!(
+                    text_v2.text.contains("unresolved"),
+                    "expected an unresolved amount, got {text_v2:?}"
+                );
+            }
+            other => panic!("expected an unresolved text field, got {other:?}"),
+        }
+    }
+
     #[test]
     fn token_diff_refuses_a_zero_delta_entry() {
         let intent = intent_from(
@@ -1345,15 +1374,15 @@ mod tests {
         assert!(labels.contains(&"Storage Deposit"), "labels: {labels:?}");
     }
 
-    /// An MT withdraw whose token_id names a NEP-141 balance a defuse-style
-    /// contract represents as a multi-token (the same convention
+    /// An MT withdraw whose token_id names a NEP-141 balance the intents
+    /// verifier contract represents as a multi-token (the same convention
     /// `tokens::mt_underlying_nep141` recognizes) must resolve through the
     /// registry, not render the raw base-unit amount an unresolved asset
     /// would.
     #[test]
     fn mt_withdraw_resolves_a_wrapped_nep141_balance() {
         let intent = intent_from(
-            r#"{"intent":"mt_withdraw","token":"defuse.near","receiver_id":"alice.near","token_ids":["nep141:wrap.near"],"amounts":["2000000000000000000000000"]}"#,
+            r#"{"intent":"mt_withdraw","token":"intents.near","receiver_id":"alice.near","token_ids":["nep141:wrap.near"],"amounts":["2000000000000000000000000"]}"#,
         );
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         match fields.iter().find(|f| label_of(f) == Some("Amount")) {
@@ -1372,6 +1401,30 @@ mod tests {
     fn mt_withdraw_with_an_unrelated_token_id_is_unresolved() {
         let intent = intent_from(
             r#"{"intent":"mt_withdraw","token":"market.near","receiver_id":"alice.near","token_ids":["gold-sword-42"],"amounts":["5"]}"#,
+        );
+        let fields = render_intent(&intent, &empty_reg()).expect("render");
+        match fields.iter().find(|f| label_of(f) == Some("Amount")) {
+            Some(SignablePayloadField::TextV2 { text_v2, .. }) => {
+                assert!(
+                    text_v2.text.contains("unresolved"),
+                    "expected an unresolved amount, got {text_v2:?}"
+                );
+            }
+            other => panic!("expected an unresolved text field, got {other:?}"),
+        }
+    }
+
+    /// An MT withdraw whose contract is NOT the intents verifier, but whose
+    /// token_id is spelled to round-trip as a seeded NEP-141 id anyway, must
+    /// still render as unresolved. `token_id` is a plain string the deployer
+    /// of `token` fully controls, so it cannot by itself prove the balance is
+    /// the intents verifier's own wNEAR -- only the trusted `contract` half
+    /// can. Without the contract check, this would misrender as a fully
+    /// verified `2 wNEAR`.
+    #[test]
+    fn mt_withdraw_on_an_untrusted_contract_is_unresolved_even_with_a_seeded_token_id() {
+        let intent = intent_from(
+            r#"{"intent":"mt_withdraw","token":"evil.near","receiver_id":"alice.near","token_ids":["nep141:wrap.near"],"amounts":["2000000000000000000000000"]}"#,
         );
         let fields = render_intent(&intent, &empty_reg()).expect("render");
         match fields.iter().find(|f| label_of(f) == Some("Amount")) {

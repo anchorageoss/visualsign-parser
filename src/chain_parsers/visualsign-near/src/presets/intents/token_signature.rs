@@ -1595,7 +1595,7 @@ mod tests {
     // the MT-shaped key while the direct key stays protected.
     #[test]
     fn extract_unsigned_entry_for_mt_wrapped_seeded_asset_rejected() {
-        let mt_asset_id = format!("nep245:defuse.near:{ASSET_ID}");
+        let mt_asset_id = format!("nep245:intents.near:{ASSET_ID}");
         let metadata = ChainMetadata {
             metadata: Some(chain_metadata::Metadata::Near(NearMetadata {
                 network_id: Some("NEAR_MAINNET".to_string()),
