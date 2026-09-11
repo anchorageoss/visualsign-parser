@@ -1,0 +1,20 @@
+# Standalone by design: this crate is vendored verbatim into customer repos,
+# so it is not a member of any workspace in this repository and uses no
+# workspace-inherited fields.
+[package]
+name = "quint-oracle"
+version = "0.1.0"
+edition = "2021"
+description = "Quint Studio oracle instrumentation client. A no-op unless built with `--features quint-oracle/enabled` AND run with QUINT_ORACLE_URL set; production builds compile none of the oracle code or its dependencies."
+license = "Apache-2.0"
+
+[features]
+# Off by default: `cargo build`/`cargo test` carry zero oracle code. Quint
+# Studio's test command turns it on: `cargo test --features quint-oracle/enabled`.
+enabled = ["dep:itf", "dep:serde_json", "dep:ureq"]
+
+[dependencies]
+quint-oracle-macros = { path = "macros" } # tiny, host-side, always present
+itf = { version = "0.3", optional = true }
+serde_json = { version = "1", optional = true }
+ureq = { version = "3", optional = true, default-features = false }

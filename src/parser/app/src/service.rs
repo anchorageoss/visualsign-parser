@@ -56,7 +56,8 @@ impl Processor {
             let input = match request
                 .input
                 .as_ref()
-                .ok_or({
+                .ok_or_else(|| {
+                    crate::oracle::event("reject_missing_input");
                     qos_parser_response::Output::Status(Status {
                         code: Code::InvalidArgument as i32,
                         message: "missing request input".to_string(),
@@ -84,6 +85,7 @@ impl Processor {
                     }
                 }
                 qos_parser_request::Input::HealthRequest(_) => {
+                    crate::oracle::event("health_check");
                     qos_parser_response::Output::HealthResponse(AppHealthResponse { code: 200 })
                 }
             };

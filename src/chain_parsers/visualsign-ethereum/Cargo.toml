@@ -45,6 +45,11 @@ sha2 = "0.10"
 thiserror = "2.0.12"
 visualsign = { workspace = true }
 
+# Quint Studio oracle instrumentation. Inert by default: without
+# `--features quint-oracle/enabled` every log site compiles to an empty stub and
+# none of the client's dependencies are built, so production builds are untouched.
+quint-oracle = { path = "../../../quint-specs/oracle-client/rust" }
+
 [dev-dependencies]
 parser_cli_core = { path = "../../parser/cli-core", features = ["test-utils"] }
 
