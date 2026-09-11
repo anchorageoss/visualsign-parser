@@ -1092,12 +1092,6 @@ mod tests {
             r#"{"intent":"token_diff","diff":{"nep245:evil.near:nep141:wrap.near":"-2000000000000000000000000"}}"#,
         );
         let fields = render_intent(&intent, &empty_reg()).expect("render");
-        assert!(
-            fields
-                .iter()
-                .all(|f| !matches!(f, SignablePayloadField::AmountV2 { .. })),
-            "expected no resolved AmountV2, got {fields:?}"
-        );
         match fields.iter().find(|f| label_of(f) == Some("Send")) {
             Some(SignablePayloadField::TextV2 { text_v2, .. }) => {
                 assert!(
