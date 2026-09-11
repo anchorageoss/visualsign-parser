@@ -20,6 +20,12 @@ ROOT := $(shell git rev-parse --show-toplevel)
 # the PR that introduces it -- which is the right place to catch it.
 PARSER_APP_CHAINS := $(sort $(patsubst visualsign-%,%,$(notdir $(wildcard chain_parsers/visualsign-*))))
 
+# Chains parser_cli can be built with. Unlike PARSER_APP_CHAINS this is not
+# derived from chain_parsers/* -- parser_cli only wires up chains that have a
+# ChainPlugin registered (see parser/cli/src/), which sui and unspecified
+# don't yet, so a subset is the actual rule and a literal list says so.
+PARSER_CLI_CHAINS := ethereum near solana tron
+
 .PHONY: all
 all: generated
 	make build
@@ -108,6 +114,28 @@ narrow-build-check:
 		cargo clippy -p parser_app --no-default-features --features $$c --all-targets -- -D warnings; \
 	done
 	make dev-signing-absent-check
+
+.PHONY: parser-cli-narrow-build-check
+parser-cli-narrow-build-check:
+	@# parser_cli's own release artifact (images/parser_cli/Containerfile)
+	@# builds it with only one chain feature enabled (e.g. --features
+	@# solana) -- a configuration `make test` never exercises, since that
+	@# always builds and tests parser_cli with every default feature on.
+	@# A dependency left unconditional in a chain crate, but gated only
+	@# behind that crate's own default features, compiles fine there and
+	@# breaks silently in this narrower build until someone builds the
+	@# release image (e.g. bs58 in visualsign-solana).
+	@#
+	@# `cargo test`, not `check`: the failure mode of interest is the
+	@# compiled binary panicking or misbehaving against real fixtures
+	@# (tests/cli_test.rs runs CARGO_BIN_EXE_parser_cli end to end), not
+	@# just a compile error.
+	@# `--locked`: matches the release container's flags and keeps this
+	@# check from silently updating Cargo.lock instead of failing.
+	@set -e; for c in $(PARSER_CLI_CHAINS); do \
+		echo "==> parser_cli --features $$c"; \
+		cargo test -p parser_cli --locked --no-default-features --features $$c --all-targets; \
+	done
 
 .PHONY: dev-signing-absent-check
 dev-signing-absent-check:
