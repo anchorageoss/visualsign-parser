@@ -1,5 +1,6 @@
 //! Seeded NEP-141 token table + amount formatting.
 
+use defuse_core::token_id::TokenId;
 use visualsign::registry::LayeredRegistry;
 
 use super::{NearTokenRegistry, TokenMeta};
@@ -114,18 +115,48 @@ fn usable(meta: TokenMeta) -> Option<TokenMeta> {
     (meta.decimals <= MAX_DECIMALS).then_some(meta)
 }
 
+/// If `asset_id` is `nep245:<contract>:<mt_token_id>`, `contract` is the
+/// trusted intents verifier itself ([`INTENTS_RECEIVER`]), and `mt_token_id`
+/// round-trips as a NEP-141 [`TokenId`] -- the convention that contract uses
+/// when it represents one of its own held NEP-141 balances as a multi-token,
+/// e.g. `nep245:intents.near:nep141:wrap.near` (exercised by `defuse-core`'s
+/// own cross-instance MT transfer tests) -- returns that inner asset id so
+/// its already-curated metadata can be borrowed.
+///
+/// `mt_token_id` is a plain string fully controlled by whoever deployed
+/// `contract`, so it cannot itself prove which contract minted it: an
+/// unrelated NEP-245 deployment can mint a `token_id` that spells
+/// `nep141:wrap.near` just as easily as `intents.near` can. Binding to
+/// `INTENTS_RECEIVER` is what makes the borrow trustworthy -- without it, any
+/// deployer could borrow a seeded asset's symbol/decimals for their own
+/// contract's balance. A `contract` other than `INTENTS_RECEIVER`, or an
+/// inner id that isn't NEP-141 (an NFT, or a nested multi-token), does not
+/// match and returns `None`, leaving the amount unresolved. `contract` is a
+/// NEAR account id, which cannot itself contain `:`, so splitting on the
+/// first `:` after the `nep245:` prefix cannot mistake part of `mt_token_id`
+/// for it even though `mt_token_id` may contain further `:`s.
+fn mt_underlying_nep141(asset_id: &str) -> Option<String> {
+    let (contract, mt_token_id) = asset_id.strip_prefix("nep245:")?.split_once(':')?;
+    (contract == crate::convert::INTENTS_RECEIVER
+        && matches!(mt_token_id.parse::<TokenId>(), Ok(TokenId::Nep141(_))))
+    .then(|| mt_token_id.to_string())
+}
+
 /// The curated `decimals` for `asset_id`, or `None` when [`SEEDS`] does not
-/// cover it. A refusal quotes this against the proposed value, so the signer
-/// sees what was attempted rather than only that something was dropped.
+/// cover it (including, for an MT asset, its [`mt_underlying_nep141`]). A
+/// refusal quotes this against the proposed value, so the signer sees what
+/// was attempted rather than only that something was dropped.
 pub(crate) fn seeded_decimals(asset_id: &str) -> Option<u8> {
     SEEDS
         .iter()
         .find(|(id, _, _)| *id == asset_id)
         .map(|(_, _, decimals)| *decimals)
+        .or_else(|| seeded_decimals(&mt_underlying_nep141(asset_id)?))
 }
 
 /// Resolve an asset id to its metadata: request-scoped override layer first
-/// (via the registry), then the compiled-in seed table.
+/// (via the registry), then the compiled-in seed table, then -- for an MT
+/// asset naming a known NEP-141 balance -- that asset's own entry in either.
 pub(crate) fn resolve(
     asset_id: &str,
     registry: &LayeredRegistry<NearTokenRegistry>,
@@ -133,7 +164,7 @@ pub(crate) fn resolve(
     if let Some(meta) = registry.lookup(|r| r.by_asset_id.get(asset_id).cloned()) {
         return usable(meta);
     }
-    SEEDS
+    if let Some(meta) = SEEDS
         .iter()
         .find(|(id, _, _)| *id == asset_id)
         .map(|(_, symbol, decimals)| TokenMeta {
@@ -142,6 +173,10 @@ pub(crate) fn resolve(
             provenance: super::TokenProvenance::Seed,
         })
         .and_then(usable)
+    {
+        return Some(meta);
+    }
+    resolve(&mt_underlying_nep141(asset_id)?, registry)
 }
 
 /// Format `units / 10^decimals` as an exact decimal string, trailing zeros
@@ -193,6 +228,87 @@ mod tests {
     #[test]
     fn unknown_token_is_none() {
         assert!(resolve("nep141:not-a-real-token.near", &empty()).is_none());
+    }
+
+    /// The convention `defuse-core`'s own cross-instance MT transfer tests
+    /// exercise: the intents verifier contract represents a NEP-141 balance
+    /// it holds as a multi-token whose token_id is that asset's own
+    /// `TokenId` string. An MT asset naming a seeded NEP-141 balance this way
+    /// must resolve to that balance's metadata, not sit unresolved just
+    /// because nothing is keyed under the `nep245:...` string itself.
+    #[test]
+    fn mt_asset_wrapping_a_seeded_nep141_balance_resolves() {
+        let meta = resolve("nep245:intents.near:nep141:wrap.near", &empty()).expect("resolves");
+        assert_eq!(meta.symbol, "wNEAR");
+        assert_eq!(meta.decimals, 24);
+    }
+
+    /// An independent NEP-245 contract's own token_id convention has no
+    /// reason to parse as a `TokenId` at all, so it must not resolve --
+    /// falling through to the honest unresolved form, same as any other
+    /// unseeded asset.
+    #[test]
+    fn mt_asset_with_an_opaque_token_id_is_none() {
+        assert!(resolve("nep245:market.near:gold-sword-42", &empty()).is_none());
+    }
+
+    /// The inner id parses, but not as NEP-141 -- an NFT or a nested
+    /// multi-token has no fungible decimals/symbol to borrow, so this must
+    /// not resolve either, rather than misreading `Nep171`/`Nep245` data as
+    /// if it were an amount.
+    #[test]
+    fn mt_asset_wrapping_a_non_nep141_kind_is_none() {
+        assert!(resolve("nep245:intents.near:nep171:nft.near:1", &empty()).is_none());
+    }
+
+    /// The inner id round-trips as a seeded NEP-141 balance, but `contract`
+    /// is not the trusted intents verifier -- an attacker who deploys their
+    /// own NEP-245 contract can mint a `token_id` that spells
+    /// `nep141:wrap.near` just as easily as `intents.near` can, so this must
+    /// not resolve. Without this check, the borrowed wNEAR symbol/decimals
+    /// would apply to a balance an unrelated, unverified contract claims to
+    /// hold.
+    #[test]
+    fn mt_asset_on_an_untrusted_contract_is_none_even_with_a_seeded_inner_id() {
+        assert!(resolve("nep245:evil.near:nep141:wrap.near", &empty()).is_none());
+        assert_eq!(seeded_decimals("nep245:evil.near:nep141:wrap.near"), None);
+    }
+
+    /// A registry override keyed by the exact MT asset id must win over the
+    /// underlying NEP-141's metadata -- the same "specific beats borrowed"
+    /// precedence the direct-key/`SEEDS` ordering already has.
+    #[test]
+    fn mt_specific_override_beats_the_underlying_nep141() {
+        let asset_id = "nep245:intents.near:nep141:wrap.near";
+        let mut request = NearTokenRegistry::default();
+        request.by_asset_id.insert(
+            asset_id.to_string(),
+            TokenMeta {
+                symbol: "WRAPPED-NEAR-SHARE".to_string(),
+                decimals: 8,
+                provenance: TokenProvenance::Unsigned,
+            },
+        );
+        let registry =
+            LayeredRegistry::with_request(Arc::new(NearTokenRegistry::default()), request);
+        let meta = resolve(asset_id, &registry).expect("resolves");
+        assert_eq!(meta.symbol, "WRAPPED-NEAR-SHARE");
+        assert_eq!(meta.decimals, 8);
+    }
+
+    /// The gap-fill rule an unattributed override must respect
+    /// (`token_signature.rs`) checks `seeded_decimals` to decide whether an
+    /// asset is already curated. An MT asset wrapping a seeded NEP-141
+    /// balance must read as covered too, or an unattributed entry could
+    /// smuggle in the wrong decimals for it despite the underlying balance
+    /// being protected.
+    #[test]
+    fn seeded_decimals_sees_through_the_mt_alias() {
+        assert_eq!(
+            seeded_decimals("nep245:intents.near:nep141:wrap.near"),
+            Some(24)
+        );
+        assert_eq!(seeded_decimals("nep245:market.near:gold-sword-42"), None);
     }
 
     // `format_units` scales by `10^decimals`, which overflows `u128` above 38.

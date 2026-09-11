@@ -329,7 +329,7 @@ impl VisualSignConverterFromString<NearTransaction> for NearVisualSignConverter 
 
 /// The intents verifier contract, and the method on it that carries a signed
 /// intent batch.
-const INTENTS_RECEIVER: &str = "intents.near";
+pub(crate) const INTENTS_RECEIVER: &str = "intents.near";
 const EXECUTE_INTENTS_METHOD: &str = "execute_intents";
 
 /// The call on this action that a decoder resolving token amounts will handle,
@@ -1080,6 +1080,10 @@ mod tests {
             ),
             (
                 r#"{"intent":"transfer","receiver_id":"bob.near","tokens":{"nep141:wrap.near":"1"}}"#,
+                true,
+            ),
+            (
+                r#"{"intent":"mt_withdraw","token":"mt.near","receiver_id":"bob.near","token_ids":["1"],"amounts":["1"]}"#,
                 true,
             ),
             (
