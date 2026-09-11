@@ -119,15 +119,34 @@ jobs:
           HOST_IP: ${{ inputs.host_ip || '0.0.0.0' }}
           HOST_PORT: ${{ inputs.host_port || '3000' }}
           ABI_SIGNER_PUBKEY: ${{ inputs.abi_signer_pubkey || '' }}
+          TVC_TEST_ABI_SIGNER: ${{ vars.TVC_TEST_ABI_SIGNER }}
         run: |
+          # Resolved in order. The dispatch guard stays first on purpose:
+          # `app_id` is free text there, so a blank posture must not resolve to
+          # anything -- not even to TVC_TEST_ABI_SIGNER below, which would push
+          # a test key at whatever app was named.
           if [ -z "$ABI_SIGNER_PUBKEY" ] && [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             echo "::error::abi_signer_pubkey is required for workflow_dispatch: pass a hex secp256k1 signer pubkey, or the literal 'unsigned' to explicitly deploy --accept-unsigned-abis."
             exit 1
-          fi
-          if [ "$ABI_SIGNER_PUBKEY" = "unsigned" ] || [ -z "$ABI_SIGNER_PUBKEY" ]; then
+          elif [ "$ABI_SIGNER_PUBKEY" = "unsigned" ]; then
             abi_trust_args=(--accept-unsigned-abis)
-          else
+          elif [ -n "$ABI_SIGNER_PUBKEY" ]; then
             abi_trust_args=(--accept-signatures-from-pubkey "$ABI_SIGNER_PUBKEY")
+          elif [ -n "$TVC_TEST_ABI_SIGNER" ]; then
+            # Label-triggered validation deploy with a test signer configured.
+            # Exercise require-signed: that is the posture where a wrong key or
+            # a bad pivotArgs composition makes parser_app refuse to start, so
+            # it is the one worth validating end to end. The permissive path
+            # cannot fail this way, so validating it proves less.
+            abi_trust_args=(--accept-signatures-from-pubkey "$TVC_TEST_ABI_SIGNER")
+          else
+            # Keeps the label path working with no repo variable set, but says
+            # so instead of falling through silently. A blank input previously
+            # took the permissive branch with no signal -- the behaviour
+            # abi_signer_pubkey's own description gives as the reason it has no
+            # default.
+            echo "::notice::no ABI trust posture given and TVC_TEST_ABI_SIGNER is unset; this validation deploy exercises --accept-unsigned-abis only. Set the TVC_TEST_ABI_SIGNER repo variable to validate require-signed instead."
+            abi_trust_args=(--accept-unsigned-abis)
           fi
           ./tools/tvc-deploy/target/release/tvc-deploy deploy \
             --app-id "$APP_ID" \
