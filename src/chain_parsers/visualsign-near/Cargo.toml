@@ -21,6 +21,7 @@ visualsign = { workspace = true }
 visualsign-intents = { path = "../../visualsign-intents" }
 
 defuse-core = { workspace = true }
+defuse-nep413 = { workspace = true }
 
 [dev-dependencies]
 visualsign-intents = { path = "../../visualsign-intents", features = ["test-support"] }
