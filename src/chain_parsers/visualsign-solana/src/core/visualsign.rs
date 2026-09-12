@@ -19,6 +19,7 @@ use solana_sdk::{
 };
 use std::collections::BTreeMap;
 use std::str::FromStr;
+use visualsign::field_builders::create_text_field;
 use visualsign::signing::SignerAllowlist;
 use visualsign::{
     SignablePayload, SignablePayloadField, SignablePayloadFieldCommon,
@@ -84,10 +85,70 @@ fn append_diagnostics(
 pub enum SolanaTransactionWrapper {
     Legacy(SolanaTransaction),
     Versioned(VersionedTransaction),
+    /// An off-chain message, signed over its own bytes. Solana has no framing
+    /// standard of its own, so the signature covers the string itself rather
+    /// than a digest of a re-serialization -- what renders here has to be
+    /// exactly what gets signed.
+    Message(String),
+}
+
+/// Lift the text out of an off-chain message envelope. Solana adds no framing to
+/// a signed message, so the envelope exists only to tell a message apart from a
+/// transaction on a wire that carries both.
+///
+/// Unknown fields are refused rather than ignored: an envelope carrying
+/// something this build does not understand is not one it can claim to have
+/// rendered in full.
+fn message_from_envelope(json: &str) -> Result<String, String> {
+    let value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let object = value.as_object().ok_or("envelope is not a JSON object")?;
+    for key in object.keys() {
+        if key != "message" {
+            return Err(format!("unexpected field {key:?}"));
+        }
+    }
+    object
+        .get("message")
+        .ok_or("envelope has no message field")?
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| "message is not a string".to_string())
+}
+
+/// Mark what cannot render rather than dropping it.
+///
+/// The module-local `charset_safe` filters unrenderable characters out, which is
+/// safe for an argument preview but not for text a signer approves: deleting
+/// lets two different messages render identically, so a marker keeps distinct
+/// values distinct.
+fn charset_marked(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c == ' ' || (c.is_ascii_graphic() && c != '\\') {
+                c
+            } else {
+                '?'
+            }
+        })
+        .collect()
 }
 
 impl Transaction for SolanaTransactionWrapper {
     fn from_string(data: &str) -> Result<Self, TransactionParseError> {
+        // A message envelope is JSON and a transaction is base64 or hex, so the
+        // two cannot collide: neither alphabet contains `{`. Tried first so a
+        // malformed envelope reports its own error rather than surfacing as a
+        // transaction decode failure.
+        let trimmed = data.trim();
+        if trimmed.starts_with('{') {
+            let message = message_from_envelope(trimmed).map_err(|e| {
+                TransactionParseError::DecodeError(format!(
+                    "input is JSON but not a Solana message envelope: {e}"
+                ))
+            })?;
+            return Ok(Self::Message(message));
+        }
+
         // Detect if format is base64 or hex
         let format = visualsign::encodings::SupportedEncodings::detect(data);
 
@@ -151,6 +212,7 @@ impl Transaction for SolanaTransactionWrapper {
                 VersionedMessage::Legacy(_) => "Solana (Legacy)".to_string(),
                 VersionedMessage::V0(_) => "Solana (V0)".to_string(),
             },
+            Self::Message(_) => "Solana Message".to_string(),
         }
     }
 }
@@ -167,14 +229,21 @@ impl SolanaTransactionWrapper {
     pub fn inner_legacy(&self) -> Option<&SolanaTransaction> {
         match self {
             Self::Legacy(tx) => Some(tx),
-            Self::Versioned(_) => None,
+            Self::Versioned(_) | Self::Message(_) => None,
         }
     }
 
     pub fn inner_versioned(&self) -> Option<&VersionedTransaction> {
         match self {
-            Self::Legacy(_) => None,
             Self::Versioned(tx) => Some(tx),
+            Self::Legacy(_) | Self::Message(_) => None,
+        }
+    }
+
+    pub fn inner_message(&self) -> Option<&str> {
+        match self {
+            Self::Message(message) => Some(message),
+            Self::Legacy(_) | Self::Versioned(_) => None,
         }
     }
 }
@@ -412,6 +481,7 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
                     &lint_config,
                 )?
             }
+            SolanaTransactionWrapper::Message(message) => message_to_visual_sign_payload(message)?,
         };
 
         // Only emit intermediate output when the caller opts in; otherwise the
@@ -433,6 +503,9 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
             SolanaTransactionWrapper::Versioned(versioned_tx) => {
                 hex::encode(versioned_tx.message.serialize())
             }
+            // The signature covers these bytes directly, so there is no message
+            // structure to serialize -- the message is its own preimage.
+            SolanaTransactionWrapper::Message(message) => hex::encode(message.as_bytes()),
         };
 
         let idl_registry = create_idl_registry_from_options(&options)?;
@@ -661,6 +734,21 @@ fn convert_to_visual_sign_payload(
         title.unwrap_or_else(|| "Solana Transaction".to_string()),
         None,
         fields,
+        "SolanaTx".to_string(),
+    ))
+}
+
+/// Render an off-chain message.
+///
+/// The text is charset-marked before it renders: it is caller-supplied and
+/// reaches a signer's screen, where an unmarked line separator could forge a
+/// second field.
+fn message_to_visual_sign_payload(message: &str) -> Result<SignablePayload, VisualSignError> {
+    Ok(SignablePayload::new(
+        0,
+        "Solana Message".to_string(),
+        None,
+        vec![create_text_field("Message", &charset_marked(message))?.signable_payload_field],
         "SolanaTx".to_string(),
     ))
 }
@@ -2539,5 +2627,96 @@ mod tests {
         );
         let mappings = extract_idl_mappings(&options);
         assert_eq!(mappings.len(), 1);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod solana_message_tests {
+    use super::*;
+
+    fn message_text(payload: &SignablePayload) -> String {
+        payload
+            .fields
+            .iter()
+            .find_map(|f| match f {
+                SignablePayloadField::TextV2 { common, text_v2 } if common.label == "Message" => {
+                    Some(text_v2.text.clone())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no Message field in {:?}", payload.fields))
+    }
+
+    fn render(envelope: &str) -> SignablePayload {
+        SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(envelope).expect("decode"),
+                VisualSignOptions::default(),
+            )
+            .expect("convert")
+            .payload
+    }
+
+    #[test]
+    fn message_envelope_decodes_as_a_message() {
+        let tx =
+            SolanaTransactionWrapper::from_string(r#"{"message":"Sign in to app.example.com"}"#)
+                .expect("decode");
+        assert_eq!(tx.inner_message(), Some("Sign in to app.example.com"));
+        assert_eq!(tx.transaction_type(), "Solana Message");
+        assert!(tx.inner_legacy().is_none() && tx.inner_versioned().is_none());
+    }
+
+    /// A transaction is base64 or hex and an envelope is JSON, so neither
+    /// alphabet can produce the other. The transaction path must be untouched.
+    #[test]
+    fn a_transaction_still_decodes_as_a_transaction() {
+        // A minimal legacy transaction: one signature, an empty message body.
+        let tx_b64 = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let decoded = SolanaTransactionWrapper::from_string(tx_b64);
+        assert!(
+            decoded.is_err() || decoded.unwrap().inner_message().is_none(),
+            "base64 input must never be read as a message envelope"
+        );
+    }
+
+    /// An envelope carrying a field this build does not understand has not been
+    /// rendered in full, so it is refused rather than partially shown.
+    #[test]
+    fn unknown_envelope_fields_are_refused() {
+        let result = SolanaTransactionWrapper::from_string(r#"{"message":"hi","extra":1}"#);
+        let Err(TransactionParseError::DecodeError(message)) = result else {
+            panic!("expected a DecodeError for an unknown field");
+        };
+        assert!(
+            message.contains("extra"),
+            "the refusal must name the field: {message}"
+        );
+    }
+
+    #[test]
+    fn message_renders_as_text() {
+        let payload = render(r#"{"message":"Sign in to app.example.com"}"#);
+        assert_eq!(payload.title, "Solana Message");
+        assert_eq!(message_text(&payload), "Sign in to app.example.com");
+    }
+
+    /// The text is caller-supplied and reaches a signer's screen, so a character
+    /// that could forge a line break is marked.
+    #[test]
+    fn message_text_marks_what_cannot_render() {
+        let payload = render(r#"{"message":"innocent\nTo: attacker.sol"}"#);
+        assert_eq!(message_text(&payload), "innocent?To: attacker.sol");
+    }
+
+    /// Marking rather than deleting is what keeps two different messages from
+    /// rendering identically -- a signer comparing them has to be able to tell
+    /// them apart.
+    #[test]
+    fn distinct_messages_stay_distinct() {
+        let with_break = message_text(&render(r#"{"message":"innocent\nTo: attacker.sol"}"#));
+        let without = message_text(&render(r#"{"message":"innocentTo: attacker.sol"}"#));
+        assert_ne!(with_break, without);
     }
 }
