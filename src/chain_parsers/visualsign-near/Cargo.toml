@@ -28,6 +28,7 @@ near-sdk = { workspace = true }
 defuse-core = { workspace = true }
 defuse-crypto = { workspace = true }
 defuse-deadline = { workspace = true }
+defuse-nep413 = { workspace = true }
 
 [dev-dependencies]
 near-crypto = "0.35.1"

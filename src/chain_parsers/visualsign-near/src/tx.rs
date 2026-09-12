@@ -1,9 +1,30 @@
-//! NEAR input decoding: a borsh transaction, or a pre-signature NEAR Intents
-//! envelope (`DefusePayload` JSON, the `near::sign_intent` payload).
+//! NEAR input decoding. The three accepted inputs are envelopes -- what a
+//! signature covers -- rather than applications of them:
 //!
-//! Borsh bytes are never valid JSON, so the two formats are distinguished
-//! unambiguously: a successful borsh decode is a transaction, otherwise the
-//! input is validated as an envelope. Input that is neither is rejected.
+//! - a borsh transaction, signed over `sha256(borsh(tx))`;
+//! - a NEP-413 off-chain message, signed over `sha256(borsh(tag || payload))`;
+//! - a raw message, signed over its own bytes.
+//!
+//! NEAR Intents is content rather than a fourth envelope. A `DefusePayload`
+//! rides in a raw message under the `RawEd25519` standard and inside `message`
+//! under NEP-413, and rendering recognizes it in either, so the envelope decides
+//! what is signed and the content decides what is shown. NEP-413 is NEAR's own
+//! message-signing standard; the verifier documents `RawEd25519` as Phantom's
+//! convention for Solana wallets. Both reach the same verifier, so both decode
+//! here, and a NEAR wallet signing for a NEAR account produces NEP-413.
+//!
+//! Borsh bytes are never valid JSON, so a successful borsh decode is a
+//! transaction and any other input is tried as an envelope. The two JSON
+//! envelopes are disjoint by required field: a `DefusePayload` carries
+//! `signer_id`, `verifying_contract` and `deadline`, none of which NEP-413
+//! declares, and a NEP-413 payload carries `recipient`, which a `DefusePayload`
+//! does not.
+//!
+//! A raw message is accepted only when its content is recognized -- today, a
+//! `DefusePayload`. Unrecognized bytes are rejected rather than rendered
+//! opaquely, so nothing the parser cannot read reaches a signer under an
+//! attestation. NEP-413 differs because its envelope is itself structured: the
+//! recipient and nonce are read even when the message it carries is free text.
 
 use near_primitives::transaction::{SignedTransaction, Transaction};
 use visualsign::encodings::SupportedEncodings;
@@ -14,9 +35,21 @@ use visualsign::vsptrait::{DeveloperConfig, TransactionParseError};
 pub enum NearTransaction {
     /// A borsh-decoded NEAR transaction (`near::sign_transaction`).
     OnChain(Transaction),
-    /// A pre-signature `DefusePayload` JSON envelope (`near::sign_intent`),
-    /// kept as the validated raw text -- rendering re-parses it.
-    Intent(String),
+    /// A raw message, signed over its own bytes -- the `RawEd25519` standard,
+    /// which the verifier documents as Phantom's convention for Solana wallets.
+    /// NEP-413 is NEAR's own message-signing standard, so a NEAR wallet signing
+    /// for a NEAR account produces [`Self::Nep413`] instead. The verifier
+    /// accepts either from an ed25519 key, so both are decoded.
+    ///
+    /// Kept as the validated raw text: the signature covers the string itself
+    /// rather than a digest of a re-serialization, so the bytes rendering reads
+    /// have to be the bytes that get signed.
+    RawMessage(String),
+    /// A NEP-413 off-chain message envelope, kept as the validated raw text --
+    /// rendering re-parses it. NEP-413 wraps an arbitrary `message`, so this
+    /// envelope carries a signing request for any purpose, of which NEAR Intents
+    /// is one.
+    Nep413(String),
 }
 
 impl NearTransaction {
@@ -61,22 +94,33 @@ impl NearTransaction {
         }
         // Validate eagerly so malformed input is rejected at parse time
         // rather than at render time.
-        serde_json::from_str::<
+        let intent_err = match serde_json::from_str::<
             defuse_core::payload::DefusePayload<defuse_core::intents::DefuseIntents>,
         >(trimmed)
-        .map_err(|e| {
-            // Both causes are appended rather than interpolated into the
-            // summary, so the sentence naming the two accepted formats stays
-            // contiguous for callers that match on it.
-            let borsh_cause = borsh_failure
-                .as_deref()
-                .unwrap_or("input is not hex or base64");
-            TransactionParseError::DecodeError(format!(
-                "input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: \
-                 {e}; near borsh decode: {borsh_cause}"
-            ))
-        })?;
-        Ok(Self::Intent(trimmed.to_string()))
+        {
+            Ok(_) => return Ok(Self::RawMessage(trimmed.to_string())),
+            Err(e) => e,
+        };
+
+        // NEP-413 is tried second so input that decodes as a `DefusePayload`
+        // keeps decoding as one. The envelopes are disjoint by required field,
+        // so the order decides only which causes appear when input is neither.
+        let nep413_err = match serde_json::from_str::<defuse_nep413::Nep413Payload>(trimmed) {
+            Ok(_) => return Ok(Self::Nep413(trimmed.to_string())),
+            Err(e) => e,
+        };
+
+        // The causes are appended rather than interpolated into the summary, so
+        // the sentence naming the accepted formats stays contiguous for callers
+        // that match on it.
+        let borsh_cause = borsh_failure
+            .as_deref()
+            .unwrap_or("input is not hex or base64");
+        Err(TransactionParseError::DecodeError(format!(
+            "input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a \
+             NEP-413 message envelope: {intent_err}; nep413 decode: {nep413_err}; near borsh \
+             decode: {borsh_cause}"
+        )))
     }
 }
 
@@ -88,7 +132,8 @@ impl visualsign::vsptrait::Transaction for NearTransaction {
     fn transaction_type(&self) -> String {
         match self {
             Self::OnChain(_) => "NEAR".to_string(),
-            Self::Intent(_) => "NEAR Intent".to_string(),
+            Self::RawMessage(_) => "NEAR Intent".to_string(),
+            Self::Nep413(_) => "NEAR Message".to_string(),
         }
     }
 }
@@ -121,7 +166,7 @@ mod tests {
     fn onchain(tx: &NearTransaction) -> &Transaction {
         match tx {
             NearTransaction::OnChain(inner) => inner,
-            NearTransaction::Intent(_) => panic!("expected OnChain"),
+            other => panic!("expected OnChain, got {other:?}"),
         }
     }
 
@@ -208,8 +253,8 @@ mod tests {
     fn decode_json_envelope_is_intent() {
         let tx = NearTransaction::from_string(SWAP_INTENT).expect("decode intent");
         match tx {
-            NearTransaction::Intent(json) => assert_eq!(json, SWAP_INTENT),
-            NearTransaction::OnChain(_) => panic!("expected Intent"),
+            NearTransaction::RawMessage(json) => assert_eq!(json, SWAP_INTENT),
+            other => panic!("expected Intent, got {other:?}"),
         }
         assert_eq!(
             NearTransaction::from_string(SWAP_INTENT)
@@ -223,6 +268,86 @@ mod tests {
     fn decode_rejects_malformed_json() {
         // Valid JSON, but not a DefusePayload shape.
         let result = NearTransaction::from_string(r#"{"foo":"bar"}"#);
+        assert!(result.is_err());
+    }
+
+    /// A NEP-413 envelope carrying a plain message. `recipient` is what the
+    /// signature binds the message to; it is not an account id in the general
+    /// case, since NEP-413 is used for web sign-in where it is a domain.
+    const PLAIN_NEP413: &str = r#"{"message":"Sign in to app.example.com","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","recipient":"app.example.com"}"#;
+
+    /// The same intents content as `SWAP_INTENT` in a different envelope:
+    /// `signer_id` and `deadline` sit inside `message`, and
+    /// `verifying_contract` comes from the envelope's `recipient`.
+    const NEP413_FRAMED_INTENT: &str = r#"{"message":"{\"signer_id\":\"alice.near\",\"deadline\":\"2999-01-01T00:00:00Z\",\"intents\":[{\"intent\":\"ft_withdraw\",\"token\":\"wrap.near\",\"receiver_id\":\"bob.near\",\"amount\":\"1000000\"}]}","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","recipient":"intents.near"}"#;
+
+    #[test]
+    fn decode_nep413_envelope_is_a_message() {
+        let tx = NearTransaction::from_string(PLAIN_NEP413).expect("decode nep413");
+        match &tx {
+            NearTransaction::Nep413(json) => assert_eq!(json, PLAIN_NEP413),
+            other => panic!("expected Nep413, got {other:?}"),
+        }
+        assert_eq!(tx.transaction_type(), "NEAR Message");
+    }
+
+    /// The decoder tries `DefusePayload` before NEP-413, so the order is
+    /// immaterial only if neither format parses as the other. Asserted at the
+    /// serde layer rather than through the decoder, because it is serde's
+    /// required-field sets that make the ordering safe.
+    #[test]
+    fn the_two_json_envelopes_are_disjoint() {
+        assert!(
+            serde_json::from_str::<defuse_nep413::Nep413Payload>(SWAP_INTENT).is_err(),
+            "a DefusePayload must not parse as a NEP-413 payload"
+        );
+        assert!(
+            serde_json::from_str::<
+                defuse_core::payload::DefusePayload<defuse_core::intents::DefuseIntents>,
+            >(PLAIN_NEP413)
+            .is_err(),
+            "a NEP-413 payload must not parse as a DefusePayload"
+        );
+    }
+
+    /// A NEP-413 envelope carrying intents stays a NEP-413 envelope. The
+    /// envelope decides what the signature covers -- `sha256(borsh(tag ||
+    /// payload))` here, the message's own bytes for a raw message -- so
+    /// decoding this as a raw message would attest a digest the signer never
+    /// produces.
+    #[test]
+    fn a_nep413_envelope_carrying_intents_stays_an_envelope() {
+        let tx = NearTransaction::from_string(NEP413_FRAMED_INTENT).expect("decode");
+        match &tx {
+            NearTransaction::Nep413(json) => assert_eq!(json, NEP413_FRAMED_INTENT),
+            other => panic!("expected Nep413, got {other:?}"),
+        }
+        assert_eq!(tx.transaction_type(), "NEAR Message");
+    }
+
+    #[test]
+    fn decode_error_names_all_three_accepted_formats() {
+        let Err(TransactionParseError::DecodeError(message)) =
+            NearTransaction::from_string(r#"{"foo":"bar"}"#)
+        else {
+            panic!("expected a DecodeError");
+        };
+        for expected in ["borsh transaction", "DefusePayload", "NEP-413"] {
+            assert!(
+                message.contains(expected),
+                "the refusal must name {expected}: {message}"
+            );
+        }
+    }
+
+    /// `recipient` is what a NEP-413 signature binds the message to, so an
+    /// envelope without one is rejected rather than rendered with the field
+    /// blank.
+    #[test]
+    fn decode_rejects_a_nep413_envelope_without_a_recipient() {
+        let result = NearTransaction::from_string(
+            r#"{"message":"hello","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8="}"#,
+        );
         assert!(result.is_err());
     }
 }
