@@ -1,0 +1,34 @@
+[package]
+name = "visualsign-intents"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+base64 = "0.22.1"
+bs58 = "0.5.1"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+ed25519-dalek = "2"
+generated = { path = "../generated" }
+hex = "0.4.3"
+k256 = "0.13"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0.12"
+tracing = { workspace = true }
+visualsign = { workspace = true }
+near-sdk = { workspace = true }
+defuse-core = { workspace = true }
+defuse-crypto = { workspace = true }
+defuse-deadline = { workspace = true }
+defuse-nep413 = { workspace = true }
+
+[features]
+# Dev/CLI helpers for constructing signed TokenMetadataEntry fixtures.
+dev-signing = []
+# Exposes `test_support` to other crates' test builds.
+test-support = []
+# Structured diagnostic fields rather than the Warning-text fallback.
+diagnostics = ["visualsign/diagnostics"]
+
+[dev-dependencies]
+serde_yaml = "0.9"

@@ -22,6 +22,7 @@ serde_json = "1.0"
 thiserror = "2.0.12"
 tracing = { workspace = true }
 visualsign = { workspace = true }
+visualsign-intents = { path = "../../visualsign-intents" }
 
 near-sdk = { workspace = true }
 
@@ -31,14 +32,17 @@ defuse-deadline = { workspace = true }
 defuse-nep413 = { workspace = true }
 
 [dev-dependencies]
+visualsign-intents = { path = "../../visualsign-intents", features = ["test-support"] }
 near-crypto = "0.35.1"
 parser_cli_core = { path = "../../parser/cli-core", features = ["test-utils"] }
 
 [features]
 default = ["cli-plugin"]
 cli-plugin = ["dep:clap", "dep:parser_cli_core"]
-dev-signing = []
-diagnostics = ["visualsign/diagnostics"]
+# Forwarded: the CLI signing helpers this gated now live in visualsign-intents,
+# so parser_cli enabling `visualsign-near/dev-signing` still reaches them.
+dev-signing = ["visualsign-intents/dev-signing"]
+diagnostics = ["visualsign/diagnostics", "visualsign-intents/diagnostics"]
 
 [lints]
 workspace = true
