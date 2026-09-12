@@ -33,6 +33,7 @@ const NEAR_SYMBOL: &str = "NEAR";
 pub fn render_action(
     action: &Action,
     total_actions: usize,
+    receiver_id: &str,
 ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
     match action {
         Action::Transfer(transfer) => {
@@ -47,7 +48,15 @@ pub fn render_action(
             fields.push(
                 create_text_field("Method", &charset_safe(&fc.method_name))?.signable_payload_field,
             );
-            match decode_known_method_args(&fc.method_name, &fc.args)? {
+            // The contract-keyed decoder is tried first: wrap.near names its
+            // own methods, so the receiver decides what they mean, where
+            // ft_transfer and ft_withdraw mean one thing on every token.
+            let decoded =
+                match crate::presets::wrap::decode_args(receiver_id, &fc.method_name, &fc.args)? {
+                    Some(fields) => Some(fields),
+                    None => decode_known_method_args(&fc.method_name, &fc.args)?,
+                };
+            match decoded {
                 Some(args_fields) => fields.extend(args_fields),
                 None if !fc.args.is_empty() => {
                     fields.push(create_raw_data_field(&fc.args, None)?.signable_payload_field);
@@ -462,7 +471,7 @@ mod tests {
         let action = Action::Transfer(TransferAction {
             deposit: Balance::from_yoctonear(1_500_000_000_000_000_000_000_000),
         });
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         assert_eq!(fields.len(), 1);
         match &fields[0] {
             SignablePayloadField::AmountV2 { common, amount_v2 } => {
@@ -485,7 +494,7 @@ mod tests {
             gas: Gas::from_gas(100_000_000_000_000),
             deposit: Balance::from_yoctonear(1),
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Method", "Recipient", "Amount", "Deposit", "Gas"]);
         // Empty msg is skipped, not rendered as an empty field.
@@ -503,7 +512,7 @@ mod tests {
             gas: Gas::from_gas(100_000_000_000_000),
             deposit: Balance::from_yoctonear(1),
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(
             labels,
@@ -540,7 +549,7 @@ mod tests {
                 gas: Gas::from_gas(1_000_000_000_000),
                 deposit: Balance::from_yoctonear(0),
             }));
-            let fields = render_action(&action, 1).expect("render");
+            let fields = render_action(&action, 1, "receiver.near").expect("render");
             let labels: Vec<&str> = fields.iter().map(field_label).collect();
             assert_eq!(labels, ["Method", "Raw Data", "Gas"], "case: {method}");
         }
@@ -556,7 +565,7 @@ mod tests {
             gas: Gas::from_gas(1_000_000_000_000),
             deposit: Balance::from_yoctonear(0),
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Method", "Gas"]);
     }
@@ -571,7 +580,7 @@ mod tests {
             gas: Gas::from_gas(1_000_000_000_000),
             deposit: Balance::from_yoctonear(0),
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let SignablePayloadField::TextV2 { text_v2, .. } = &fields[0] else {
             panic!("expected TextV2, got {:?}", fields[0]);
         };
@@ -589,7 +598,7 @@ mod tests {
             gas: Gas::from_gas(100_000_000_000_000),
             deposit: Balance::from_yoctonear(1),
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let message_field = fields
             .iter()
             .find(|f| field_label(f) == "Message")
@@ -614,7 +623,7 @@ mod tests {
             gas: Gas::from_gas(100_000_000_000_000),
             deposit: Balance::from_yoctonear(1),
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Method", "Raw Data", "Deposit", "Gas"]);
     }
@@ -631,7 +640,7 @@ mod tests {
             gas: Gas::from_gas(100_000_000_000_000),
             deposit: Balance::from_yoctonear(1),
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let message = fields
             .iter()
             .find(|f| field_label(f) == "Message")
@@ -653,7 +662,7 @@ mod tests {
             gas: Gas::from_gas(100_000_000_000_000),
             deposit: Balance::from_yoctonear(1),
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let message = fields
             .iter()
             .find(|f| field_label(f) == "Message")
@@ -681,7 +690,7 @@ mod tests {
     #[test]
     fn unsupported_action_renders_label_text_field() {
         let action = Action::CreateAccount(CreateAccountAction {});
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         assert_eq!(fields.len(), 1);
         match &fields[0] {
             SignablePayloadField::TextV2 { common, text_v2 } => {
@@ -701,7 +710,7 @@ mod tests {
         let action = Action::Transfer(TransferAction {
             deposit: Balance::from_yoctonear(1_500_000_000_000_000_000_000_000),
         });
-        let fields = render_action(&action, 2).expect("render");
+        let fields = render_action(&action, 2, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Action", "Amount"]);
         match &fields[0] {
@@ -720,7 +729,7 @@ mod tests {
             gas: Gas::from_gas(1_000_000_000_000),
             deposit: Balance::from_yoctonear(0),
         }));
-        let fields = render_action(&action, 2).expect("render");
+        let fields = render_action(&action, 2, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Action", "Method", "Gas"]);
         match &fields[0] {
@@ -736,7 +745,7 @@ mod tests {
         let action = Action::Transfer(TransferAction {
             deposit: Balance::from_yoctonear(1),
         });
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Amount"]);
     }
@@ -747,7 +756,7 @@ mod tests {
         let action = Action::DeleteAccount(DeleteAccountAction {
             beneficiary_id: "bob.near".parse().expect("valid account id"),
         });
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Beneficiary"]);
         match &fields[0] {
@@ -770,7 +779,7 @@ mod tests {
                 permission: AccessKeyPermission::FullAccess,
             },
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Public Key", "Permission"]);
         match &fields[1] {
@@ -800,7 +809,7 @@ mod tests {
                 }),
             },
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(
             labels,
@@ -835,7 +844,7 @@ mod tests {
                 }),
             },
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         assert_eq!(text_of(&fields[3]), "ft_transfer\nstorage_deposit");
         match &fields[4] {
             SignablePayloadField::AmountV2 { common, amount_v2 } => {
@@ -864,7 +873,7 @@ mod tests {
                 }),
             },
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         assert_eq!(text_of(&fields[3]), "ft_transfer, storage_deposit");
         assert!(!text_of(&fields[3]).contains('\n'));
     }
@@ -893,7 +902,7 @@ mod tests {
                 ),
             },
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(
             labels,
@@ -925,7 +934,7 @@ mod tests {
                 }),
             },
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(
             labels,
@@ -951,7 +960,7 @@ mod tests {
         let action = Action::DeleteKey(Box::new(DeleteKeyAction {
             public_key: PublicKey::empty(KeyType::ED25519),
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Public Key"]);
     }
@@ -964,7 +973,7 @@ mod tests {
             stake: Balance::from_yoctonear(1_000_000_000_000_000_000_000_000),
             public_key: PublicKey::empty(KeyType::ED25519),
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Stake", "Validator Public Key"]);
     }
@@ -977,7 +986,7 @@ mod tests {
             public_key: PublicKey::empty(KeyType::ED25519),
             deposit: Balance::from_yoctonear(1_000_000_000_000_000_000_000_000),
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Amount", "Gas Key Public Key"]);
         assert_eq!(
@@ -994,7 +1003,7 @@ mod tests {
             public_key: PublicKey::empty(KeyType::ED25519),
             amount: Balance::from_yoctonear(1_000_000_000_000_000_000_000_000),
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Amount", "Gas Key Public Key"]);
     }
@@ -1014,7 +1023,7 @@ mod tests {
             }),
             deposit: Balance::from_yoctonear(1_000_000_000_000_000_000_000_000),
         }));
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         let labels: Vec<&str> = fields.iter().map(field_label).collect();
         assert_eq!(labels, ["Deposit", "State Init"]);
         let state_init_field = &fields[1];
@@ -1028,7 +1037,7 @@ mod tests {
     fn deploy_contract_label_is_marked_not_fully_decoded() {
         use near_primitives::action::DeployContractAction;
         let action = Action::DeployContract(DeployContractAction { code: vec![0u8; 4] });
-        let fields = render_action(&action, 1).expect("render");
+        let fields = render_action(&action, 1, "receiver.near").expect("render");
         assert_eq!(fields.len(), 1);
         match &fields[0] {
             SignablePayloadField::TextV2 { common, text_v2 } => {
@@ -1054,7 +1063,7 @@ mod tests {
             },
             signature: Signature::empty(KeyType::ED25519),
         }));
-        let result = render_action(&action, 1);
+        let result = render_action(&action, 1, "receiver.near");
         assert!(matches!(result, Err(VisualSignError::ValidationError(_))));
     }
 }
