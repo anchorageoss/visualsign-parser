@@ -5276,7 +5276,7 @@
     "allow_signed": false,
     "network_id": null,
     "result": {
-      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: Not all bytes read\"))"
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a NEP-413 message envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; nep413 decode: invalid type: integer `0`, expected struct Nep413Payload at line 1 column 1; near borsh decode: Not all bytes read\"))"
     }
   },
   {
@@ -5333,7 +5333,7 @@
     "allow_signed": false,
     "network_id": null,
     "result": {
-      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid number at line 1 column 2; near borsh decode: Not all bytes read\"))"
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a NEP-413 message envelope: invalid number at line 1 column 2; nep413 decode: invalid number at line 1 column 2; near borsh decode: Not all bytes read\"))"
     }
   },
   {
@@ -5390,7 +5390,7 @@
     "allow_signed": false,
     "network_id": null,
     "result": {
-      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: Not all bytes read\"))"
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a NEP-413 message envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; nep413 decode: invalid type: integer `0`, expected struct Nep413Payload at line 1 column 1; near borsh decode: Not all bytes read\"))"
     }
   },
   {
@@ -5447,7 +5447,7 @@
     "allow_signed": false,
     "network_id": null,
     "result": {
-      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid number at line 1 column 2; near borsh decode: Not all bytes read\"))"
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a NEP-413 message envelope: invalid number at line 1 column 2; nep413 decode: invalid number at line 1 column 2; near borsh decode: Not all bytes read\"))"
     }
   },
   {
@@ -5504,7 +5504,7 @@
     "allow_signed": false,
     "network_id": null,
     "result": {
-      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: Not all bytes read\"))"
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a NEP-413 message envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; nep413 decode: invalid type: integer `0`, expected struct Nep413Payload at line 1 column 1; near borsh decode: Not all bytes read\"))"
     }
   },
   {
@@ -5513,7 +5513,7 @@
     "allow_signed": false,
     "network_id": null,
     "result": {
-      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: Unexpected length of input\"))"
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a NEP-413 message envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; nep413 decode: invalid type: integer `0`, expected struct Nep413Payload at line 1 column 1; near borsh decode: Unexpected length of input\"))"
     }
   },
   {
@@ -5522,7 +5522,7 @@
     "allow_signed": false,
     "network_id": null,
     "result": {
-      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: EOF while parsing a value at line 1 column 0; near borsh decode: Unexpected length of input\"))"
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a NEP-413 message envelope: EOF while parsing a value at line 1 column 0; nep413 decode: EOF while parsing a value at line 1 column 0; near borsh decode: Unexpected length of input\"))"
     }
   },
   {
@@ -5531,7 +5531,7 @@
     "allow_signed": false,
     "network_id": null,
     "result": {
-      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid number at line 1 column 2; near borsh decode: Unexpected length of input\"))"
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a NEP-413 message envelope: invalid number at line 1 column 2; nep413 decode: invalid number at line 1 column 2; near borsh decode: Unexpected length of input\"))"
     }
   },
   {
@@ -5540,7 +5540,7 @@
     "allow_signed": false,
     "network_id": null,
     "result": {
-      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid number at line 1 column 2; near borsh decode: invalid transaction version tag: 2\"))"
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a NEP-413 message envelope: invalid number at line 1 column 2; nep413 decode: invalid number at line 1 column 2; near borsh decode: invalid transaction version tag: 2\"))"
     }
   },
   {
@@ -5549,7 +5549,7 @@
     "allow_signed": false,
     "network_id": null,
     "result": {
-      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: invalid value: \\\"Alice.near\\\", the Account ID contains an invalid character 'A' at index 0\"))"
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a NEP-413 message envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; nep413 decode: invalid type: integer `0`, expected struct Nep413Payload at line 1 column 1; near borsh decode: invalid value: \\\"Alice.near\\\", the Account ID contains an invalid character 'A' at index 0\"))"
     }
   },
   {
@@ -5558,7 +5558,7 @@
     "allow_signed": false,
     "network_id": null,
     "result": {
-      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: unknown key type '7'\"))"
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a NEP-413 message envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; nep413 decode: invalid type: integer `0`, expected struct Nep413Payload at line 1 column 1; near borsh decode: unknown key type '7'\"))"
     }
   },
   {
@@ -5567,7 +5567,7 @@
     "allow_signed": false,
     "network_id": null,
     "result": {
-      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: Unexpected variant tag: 14\"))"
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a NEP-413 message envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; nep413 decode: invalid type: integer `0`, expected struct Nep413Payload at line 1 column 1; near borsh decode: Unexpected variant tag: 14\"))"
     }
   },
   {
@@ -5576,7 +5576,7 @@
     "allow_signed": false,
     "network_id": null,
     "result": {
-      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: DelegateAction mustn't contain a nested one\"))"
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction, a DefusePayload JSON envelope, nor a NEP-413 message envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; nep413 decode: invalid type: integer `0`, expected struct Nep413Payload at line 1 column 1; near borsh decode: DelegateAction mustn't contain a nested one\"))"
     }
   }
 ]

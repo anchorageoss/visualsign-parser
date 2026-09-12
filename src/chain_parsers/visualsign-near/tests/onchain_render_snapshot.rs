@@ -22,6 +22,10 @@
 //! on). The intents signature warning intentionally renders differently for
 //! each feature setting, so both independent outputs are pinned.
 //!
+//! Since the NEP-413 envelope decode, the error text of the "input is neither
+//! ..." refusal cases was updated by hand: no near-primitives build contains the
+//! NEP-413 refusal. Rendered payloads are still the near-primitives capture.
+//!
 //! There is deliberately no regeneration path here: regenerating from this
 //! build would capture the local decoder's output and compare it against
 //! itself. If a render change is ever intended, regenerate only from a build
