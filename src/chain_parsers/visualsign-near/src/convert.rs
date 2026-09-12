@@ -13,7 +13,12 @@ use visualsign::vsptrait::{
 };
 use visualsign::{SignablePayload, SignablePayloadField};
 
+use defuse_core::intents::DefuseIntents;
+use defuse_core::payload::{DefusePayload, ExtractDefusePayload};
+use defuse_nep413::Nep413Payload;
+
 use crate::actions::render_action;
+use crate::fmt::charset_safe;
 use crate::networks::{NearNetwork, extract_network_from_metadata, network_mismatch};
 use crate::presets::intents::{
     NearIntentsError, NearTokenRegistry, RejectedTokenMetadata, authorized_token_metadata_signers,
@@ -230,7 +235,15 @@ impl VisualSignConverter<NearTransaction> for NearVisualSignConverter {
     ) -> Result<ConversionResult, VisualSignError> {
         match transaction {
             NearTransaction::OnChain(tx) => self.render_on_chain(&tx, &options),
-            NearTransaction::Intent(json) => render_intent_envelope(
+            // A raw message reaches here only when its content parsed as a
+            // DefusePayload, so the intents renderer is the whole of it.
+            NearTransaction::RawMessage(json) => render_intent_envelope(
+                &json,
+                &options,
+                resolve_network(&options, self.network)?,
+                &self.trust_policy,
+            ),
+            NearTransaction::Nep413(json) => render_nep413_envelope(
                 &json,
                 &options,
                 resolve_network(&options, self.network)?,
@@ -376,6 +389,111 @@ fn decode_intents(
 /// [`crate::networks::network_mismatch`], so it carries the same error class
 /// rather than becoming a conversion failure because it arrived one layer
 /// deeper.
+/// Render a NEP-413 off-chain message envelope.
+///
+/// NEP-413 wraps an arbitrary `message`, so the envelope says who the message is
+/// for without saying what it does. When the message carries NEAR Intents the
+/// intents render too: a signer approving a token movement has to see the
+/// movement rather than an escaped JSON string.
+///
+/// The extracted payload is re-serialized and passed to the intents entry point
+/// rather than rendered by a direct call, so the `defuse-*` types stay confined
+/// to `presets::intents` as that module's own documentation requires.
+///
+/// Every row the envelope itself supplies carries a `NEP-413` label prefix.
+/// `extract_defuse_payload` derives `verifying_contract` from `recipient` and
+/// reuses the envelope's `nonce`, so an envelope carrying intents renders those
+/// two values twice: once as the envelope states them, once as the intents view
+/// reads them back. The prefix marks which row is which, so the repetition
+/// reads as one value seen from two sides rather than as two rows that
+/// disagree. `Network` keeps its bare label -- it is the resolved network, not
+/// an envelope field, and every NEAR path renders it identically.
+fn render_nep413_envelope(
+    json: &str,
+    options: &VisualSignOptions,
+    network: NearNetwork,
+    trust_policy: &MetadataTrustPolicy,
+) -> Result<ConversionResult, VisualSignError> {
+    // tx.rs already decoded this as a Nep413Payload, so a failure here means the
+    // validated text and the rendered text have diverged rather than that the
+    // caller sent something malformed.
+    let payload: Nep413Payload =
+        serde_json::from_str(json).map_err(|e| VisualSignError::ConversionError(e.to_string()))?;
+
+    // The resolved network is part of every token-metadata signed scope, so the
+    // payload shows which network that scope was checked against -- the same
+    // field, for the same reason, as the intents and on-chain paths render.
+    let mut fields = vec![
+        create_text_field("Network", network.display_name())?.signable_payload_field,
+        create_address_field(
+            "NEP-413 Recipient",
+            &payload.recipient,
+            None,
+            None,
+            None,
+            None,
+        )?
+        .signable_payload_field,
+        create_text_field(
+            "NEP-413 Nonce",
+            &format!("0x{}", hex::encode(payload.nonce)),
+        )?
+        .signable_payload_field,
+    ];
+
+    if let Some(callback_url) = payload.callback_url.as_deref() {
+        fields.push(
+            create_text_field("NEP-413 Callback URL", &charset_safe(callback_url))?
+                .signable_payload_field,
+        );
+    }
+
+    // Lifting the intents out of `message` fails for any message that is not an
+    // intents request, which is the ordinary case for this envelope.
+    let intents_json = payload
+        .clone()
+        .extract_defuse_payload()
+        .ok()
+        .and_then(|defuse: DefusePayload<DefuseIntents>| serde_json::to_vec(&defuse).ok());
+
+    let Some(intents_json) = intents_json else {
+        fields.push(
+            create_text_field("NEP-413 Message", &charset_safe(&payload.message))?
+                .signable_payload_field,
+        );
+        return Ok(ConversionResult::new(SignablePayload::new(
+            PAYLOAD_VERSION,
+            "NEAR Message".to_string(),
+            None,
+            fields,
+            PAYLOAD_TYPE.to_string(),
+        )));
+    };
+
+    let tokens = if crate::presets::intents::single_intent_consumes_token_registry(&intents_json) {
+        token_registry_for(options, network, trust_policy)
+    } else {
+        RequestTokenRegistry::empty()
+    };
+    fields.extend(tokens.diagnostics);
+    let rendered = crate::presets::intents::try_render_single_intent(
+        &intents_json,
+        &tokens.registry,
+        options,
+        network,
+    )
+    .map_err(intents_error)?;
+    fields.extend(rendered.fields);
+
+    Ok(ConversionResult::new(SignablePayload::new(
+        PAYLOAD_VERSION,
+        rendered.title,
+        None,
+        fields,
+        PAYLOAD_TYPE.to_string(),
+    )))
+}
+
 fn intents_error(e: NearIntentsError) -> VisualSignError {
     match e {
         NearIntentsError::NetworkMismatch(mismatch) => VisualSignError::ValidationError(mismatch),
@@ -654,7 +772,7 @@ mod tests {
     fn signed_transfer_hex() -> String {
         let unsigned = match near_tx(vec![transfer()]) {
             NearTransaction::OnChain(tx) => tx,
-            NearTransaction::Intent(_) => panic!("expected OnChain"),
+            other => panic!("expected OnChain, got {other:?}"),
         };
         let signed = SignedTransaction::new(Signature::empty(KeyType::ED25519), unsigned);
         hex::encode(borsh::to_vec(&signed).expect("borsh encode"))
@@ -868,7 +986,7 @@ mod tests {
 
         let err = NearVisualSignConverter::new()
             .to_visual_sign_payload(
-                NearTransaction::Intent(envelope.to_string()),
+                NearTransaction::RawMessage(envelope.to_string()),
                 testnet_request(),
             )
             .expect_err("mainnet accounts under a testnet scope must be refused");
@@ -894,7 +1012,7 @@ mod tests {
 
         let err = NearVisualSignConverter::new()
             .to_visual_sign_payload(
-                NearTransaction::Intent(envelope.to_string()),
+                NearTransaction::RawMessage(envelope.to_string()),
                 testnet_request(),
             )
             .expect_err("a mainnet verifying contract under a testnet scope must be refused");
@@ -913,7 +1031,7 @@ mod tests {
 
         let payload = NearVisualSignConverter::new()
             .to_visual_sign_payload(
-                NearTransaction::Intent(envelope.to_string()),
+                NearTransaction::RawMessage(envelope.to_string()),
                 testnet_request(),
             )
             .expect("testnet accounts under a testnet scope render");
@@ -980,7 +1098,7 @@ mod tests {
         let swap = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2100-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
         let payload = NearVisualSignConverter::new()
             .to_visual_sign_payload(
-                NearTransaction::Intent(swap.to_string()),
+                NearTransaction::RawMessage(swap.to_string()),
                 VisualSignOptions::default(),
             )
             .expect("convert");
@@ -1009,7 +1127,7 @@ mod tests {
                 visualsign::signing::SignerAllowlist::new(),
             ),
         )
-        .to_visual_sign_payload(NearTransaction::Intent(envelope), options)
+        .to_visual_sign_payload(NearTransaction::RawMessage(envelope), options)
         .expect("convert");
         let fields = &payload.payload.fields;
 
@@ -1044,7 +1162,7 @@ mod tests {
         let envelope = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"native_withdraw","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
 
         let payload = NearVisualSignConverter::new()
-            .to_visual_sign_payload(NearTransaction::Intent(envelope.to_string()), options)
+            .to_visual_sign_payload(NearTransaction::RawMessage(envelope.to_string()), options)
             .expect("convert");
         assert_eq!(
             rejection_diagnostic_count(&payload.payload),
@@ -1141,7 +1259,7 @@ mod tests {
 
         let envelope = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000"}]}"#;
         let payload = NearVisualSignConverter::new()
-            .to_visual_sign_payload(NearTransaction::Intent(envelope.to_string()), options)
+            .to_visual_sign_payload(NearTransaction::RawMessage(envelope.to_string()), options)
             .expect("convert");
         let json = payload.payload.to_json().expect("json");
 
@@ -1214,6 +1332,271 @@ mod tests {
         assert!(
             token_metadata_consumer(INTENTS_RECEIVER, &execute_intents_action()).is_some(),
             "an execute_intents call to the verifier is the gate's whole purpose"
+        );
+    }
+
+    const NEP413_NONCE_B64: &str = "XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=";
+
+    /// A NEP-413 envelope. `message` is opaque to the envelope itself;
+    /// `recipient` is what the signature binds it to.
+    fn nep413_envelope(message: &str, recipient: &str, callback_url: Option<&str>) -> String {
+        let mut value = serde_json::json!({
+            "message": message,
+            "nonce": NEP413_NONCE_B64,
+            "recipient": recipient,
+        });
+        if let Some(url) = callback_url {
+            value["callbackUrl"] = serde_json::Value::String(url.to_string());
+        }
+        value.to_string()
+    }
+
+    /// The intents request a NEP-413 `message` carries. `signer_id` and
+    /// `deadline` come from inside the message; `verifying_contract` comes from
+    /// the envelope's `recipient`.
+    fn nep413_intents_message(signer_id: &str) -> String {
+        serde_json::json!({
+            "signer_id": signer_id,
+            "deadline": "2999-01-01T00:00:00Z",
+            "intents": [{
+                "intent": "ft_withdraw",
+                "token": "wrap.near",
+                "receiver_id": "bob.near",
+                "amount": "1000000",
+            }],
+        })
+        .to_string()
+    }
+
+    fn render_nep413(envelope: String, options: VisualSignOptions) -> SignablePayload {
+        NearVisualSignConverter::new()
+            .to_visual_sign_payload(NearTransaction::Nep413(envelope), options)
+            .expect("convert")
+            .payload
+    }
+
+    fn labeled_text(payload: &SignablePayload, label: &str) -> String {
+        payload
+            .fields
+            .iter()
+            .find_map(|f| match f {
+                SignablePayloadField::TextV2 { common, text_v2 } if common.label == label => {
+                    Some(text_v2.text.clone())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no {label} field in {:?}", payload.fields))
+    }
+
+    fn has_labeled_text(payload: &SignablePayload, label: &str) -> bool {
+        payload.fields.iter().any(
+            |f| matches!(f, SignablePayloadField::TextV2 { common, .. } if common.label == label),
+        )
+    }
+
+    /// A NEP-413 message carrying no intents renders its text, plus the
+    /// envelope fields that say who the message is for. The envelope is
+    /// structured even when its message is not, so a signer sees the recipient
+    /// and nonce the signature binds.
+    #[test]
+    fn nep413_plain_message_renders_as_text() {
+        let payload = render_nep413(
+            nep413_envelope("Sign in to app.example.com", "app.example.com", None),
+            VisualSignOptions::default(),
+        );
+
+        assert_eq!(payload.title, "NEAR Message");
+        assert_eq!(labeled_text(&payload, "Network"), "NEAR Mainnet");
+        assert_eq!(
+            labeled_text(&payload, "NEP-413 Message"),
+            "Sign in to app.example.com"
+        );
+        let json = payload.to_json().expect("json");
+        assert!(
+            json.contains("app.example.com"),
+            "the recipient the signature binds must render: {json}"
+        );
+    }
+
+    /// The nonce is part of what the signature covers, so it renders. Hex
+    /// rather than the envelope's base64, matching how the rest of the payload
+    /// renders byte strings.
+    #[test]
+    fn nep413_nonce_renders_as_hex() {
+        use base64::Engine;
+        let expected = format!(
+            "0x{}",
+            hex::encode(
+                base64::engine::general_purpose::STANDARD
+                    .decode(NEP413_NONCE_B64)
+                    .expect("nonce base64")
+            )
+        );
+        let payload = render_nep413(
+            nep413_envelope("hello", "app.example.com", None),
+            VisualSignOptions::default(),
+        );
+        assert_eq!(labeled_text(&payload, "NEP-413 Nonce"), expected);
+    }
+
+    /// The callback URL is optional in the envelope, so it renders only when
+    /// one is present: an empty field would suggest the signature binds a
+    /// callback it does not.
+    #[test]
+    fn nep413_renders_the_callback_url_only_when_the_envelope_carries_one() {
+        let with_url = render_nep413(
+            nep413_envelope(
+                "hello",
+                "app.example.com",
+                Some("https://app.example.com/cb"),
+            ),
+            VisualSignOptions::default(),
+        );
+        assert_eq!(
+            labeled_text(&with_url, "NEP-413 Callback URL"),
+            "https://app.example.com/cb"
+        );
+
+        let without_url = render_nep413(
+            nep413_envelope("hello", "app.example.com", None),
+            VisualSignOptions::default(),
+        );
+        assert!(
+            !has_labeled_text(&without_url, "NEP-413 Callback URL"),
+            "an absent callback URL must not render a field: {:?}",
+            without_url.fields
+        );
+    }
+
+    /// A NEP-413 envelope whose message carries intents renders the intents.
+    /// A signer approving a token movement has to see the movement rather than
+    /// the escaped JSON string that carries it.
+    #[test]
+    fn nep413_framed_intent_renders_the_intent_rather_than_escaped_json() {
+        let payload = render_nep413(
+            nep413_envelope(&nep413_intents_message("alice.near"), "intents.near", None),
+            VisualSignOptions::default(),
+        );
+        let json = payload.to_json().expect("json");
+
+        assert!(
+            !has_labeled_text(&payload, "NEP-413 Message"),
+            "an intents request must not also render as an opaque message: {json}"
+        );
+        assert_ne!(
+            payload.title, "NEAR Message",
+            "the title must name the intent, not the envelope: {json}"
+        );
+        assert!(
+            json.contains("bob.near"),
+            "the intent's receiver must render: {json}"
+        );
+        assert!(
+            json.contains("wrap.near"),
+            "the intent's token must render: {json}"
+        );
+    }
+
+    /// The intents path reached through a NEP-413 envelope enforces the
+    /// resolved network exactly as the raw-message path does. The envelope
+    /// supplies `verifying_contract` from its own `recipient`, so a new field
+    /// feeds the check and must not skip it.
+    #[test]
+    fn nep413_framed_intent_enforces_the_resolved_network() {
+        let err = NearVisualSignConverter::new()
+            .to_visual_sign_payload(
+                NearTransaction::Nep413(nep413_envelope(
+                    &nep413_intents_message("alice.near"),
+                    "intents.near",
+                    None,
+                )),
+                testnet_request(),
+            )
+            .expect_err("mainnet accounts under a testnet scope must be refused");
+        assert!(
+            matches!(err, VisualSignError::ValidationError(_)),
+            "a network mismatch is a validation error on every path, got {err:?}"
+        );
+    }
+
+    /// Every field carries `Label` and `FallbackText` whatever its type, so
+    /// reading the serialized form compares address rows and text rows alike.
+    fn labeled_fallbacks(payload: &SignablePayload) -> Vec<(String, String)> {
+        let json: serde_json::Value =
+            serde_json::from_str(&payload.to_json().expect("json")).expect("parse");
+        json["Fields"]
+            .as_array()
+            .expect("fields")
+            .iter()
+            .map(|f| {
+                (
+                    f["Label"].as_str().unwrap_or_default().to_string(),
+                    f["FallbackText"].as_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect()
+    }
+
+    /// An envelope carrying intents renders the same recipient and nonce twice:
+    /// once as the envelope states them, once as the intents view reads them
+    /// back out. The envelope's rows carry a prefix so a signer reads one value
+    /// seen from two sides rather than two rows that appear to disagree.
+    #[test]
+    fn nep413_framed_intent_distinguishes_envelope_rows_from_intent_rows() {
+        let payload = render_nep413(
+            nep413_envelope(&nep413_intents_message("alice.near"), "intents.near", None),
+            VisualSignOptions::default(),
+        );
+        let rows = labeled_fallbacks(&payload);
+        let value_of = |label: &str| {
+            rows.iter()
+                .find(|(l, _)| l == label)
+                .unwrap_or_else(|| panic!("no {label} row in {rows:?}"))
+                .1
+                .clone()
+        };
+
+        assert_eq!(
+            value_of("NEP-413 Recipient"),
+            value_of("Verifying Contract"),
+            "the envelope's recipient is what the intents view reads as the \
+             verifying contract, so the two rows must agree: {rows:?}"
+        );
+        assert_eq!(
+            value_of("NEP-413 Nonce"),
+            value_of("Nonce"),
+            "the intents view reuses the envelope's nonce: {rows:?}"
+        );
+        for label in ["Nonce", "NEP-413 Nonce"] {
+            assert_eq!(
+                rows.iter().filter(|(l, _)| l == label).count(),
+                1,
+                "{label} must appear once, so neither row reads as a duplicate \
+                 of the other: {rows:?}"
+            );
+        }
+    }
+
+    /// Message and callback URL are caller-supplied and reach a signer's
+    /// screen, so a character that could forge a line break or reorder the
+    /// rendering is marked rather than passed through.
+    #[test]
+    fn nep413_envelope_text_is_charset_safe() {
+        let payload = render_nep413(
+            nep413_envelope(
+                "innocent\nTo: attacker.near",
+                "app.example.com",
+                Some("https://app.example.com/\u{202e}bc"),
+            ),
+            VisualSignOptions::default(),
+        );
+        assert_eq!(
+            labeled_text(&payload, "NEP-413 Message"),
+            "innocent?To: attacker.near"
+        );
+        assert_eq!(
+            labeled_text(&payload, "NEP-413 Callback URL"),
+            "https://app.example.com/?bc"
         );
     }
 }
