@@ -101,7 +101,7 @@ fn invalid_secp256k1_recovery_id_reason(payload: &MultiPayload) -> Option<String
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::presets::intents::args::decode_args;
+    use crate::args::decode_args;
 
     /// The signed payload is verbatim from the pinned dependency's own test
     /// suite -- `defuse/v0.4.2`, `core/src/payload/multi.rs:120` (`fn
@@ -114,7 +114,7 @@ mod tests {
     /// byte-for-byte, so the format cannot be updated without invalidating the
     /// vector. Extraction of a current-format ed25519 envelope is covered by
     /// `super::tests::pipeline_decodes_and_renders_intent_section`.
-    const VECTOR: &[u8] = include_bytes!("../../../tests/fixtures/_vector_raw_ed25519.input");
+    const VECTOR: &[u8] = include_bytes!("../tests/fixtures/_vector_raw_ed25519.input");
 
     #[test]
     fn valid_signature_verifies_natively() {
@@ -177,7 +177,7 @@ mod tests {
     /// longer verifies, not as a fixture that silently rewrites itself under
     /// `UPDATE_TESTDATA=1` and still "passes". `build_erc191_vector()` is used
     /// solely by the drift check below.
-    const ERC191_VECTOR: &[u8] = include_bytes!("../../../tests/fixtures/_vector_erc191.input");
+    const ERC191_VECTOR: &[u8] = include_bytes!("../tests/fixtures/_vector_erc191.input");
 
     fn erc191_vector_path() -> String {
         format!(

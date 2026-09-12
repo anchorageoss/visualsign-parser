@@ -62,7 +62,7 @@ use serde::Deserialize;
 use visualsign::signing::{MetadataTrustPolicy, SignerAllowlist};
 
 use super::{NearTokenRegistry, TokenMeta, TokenProvenance, tokens};
-use crate::networks::NearNetwork;
+use crate::network::SettlementNetwork;
 
 /// The only supported ed25519 algorithm tag (Near and Solana origins).
 const ED25519_ALGORITHM: &str = "ed25519";
@@ -584,7 +584,7 @@ pub struct TokenMetadataExtraction {
 #[must_use]
 pub fn try_extract_from_chain_metadata(
     chain_metadata: Option<&ChainMetadata>,
-    network: NearNetwork,
+    network: SettlementNetwork,
     allowlist: &SignerAllowlist,
     trust_policy: &MetadataTrustPolicy,
 ) -> TokenMetadataExtraction {
@@ -974,7 +974,7 @@ mod tests {
     /// of the signed scope, so signing and verifying must agree on it. The
     /// string and the enum are the same network; `network_ids_agree` gates that.
     const NETWORK_ID: &str = "NEAR_MAINNET";
-    const NETWORK: NearNetwork = NearNetwork::Mainnet;
+    const NETWORK: SettlementNetwork = SettlementNetwork::Mainnet;
 
     #[test]
     fn network_ids_agree() {
@@ -986,7 +986,7 @@ mod tests {
     /// [`try_extract_from_chain_metadata`] directly and read `rejected`.
     fn extract_registry(
         chain_metadata: Option<&ChainMetadata>,
-        network: NearNetwork,
+        network: SettlementNetwork,
         allowlist: &SignerAllowlist,
         trust_policy: &MetadataTrustPolicy,
     ) -> Option<NearTokenRegistry> {
@@ -1648,7 +1648,7 @@ mod tests {
         // registers verified.
         let mainnet = extract_registry(
             Some(&metadata),
-            NearNetwork::Mainnet,
+            SettlementNetwork::Mainnet,
             &near_allowlist(),
             &require_signed_policy(),
         )
@@ -1665,7 +1665,7 @@ mod tests {
 
         let testnet = extract_registry(
             Some(&metadata),
-            NearNetwork::Testnet,
+            SettlementNetwork::Testnet,
             &near_allowlist(),
             &require_signed_policy(),
         );
@@ -1704,7 +1704,7 @@ mod tests {
         };
         let registry = extract_registry(
             Some(&metadata),
-            NearNetwork::Testnet,
+            SettlementNetwork::Testnet,
             &near_allowlist(),
             &require_signed_policy(),
         )

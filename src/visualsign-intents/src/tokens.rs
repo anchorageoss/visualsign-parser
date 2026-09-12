@@ -164,7 +164,7 @@ pub(crate) fn format_units(units: u128, decimals: u8) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::presets::intents::TokenProvenance;
+    use crate::TokenProvenance;
     use std::sync::Arc;
     use visualsign::registry::LayeredRegistry;
 

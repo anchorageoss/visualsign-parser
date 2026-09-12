@@ -1,10 +1,17 @@
 //! NEAR Intents protocol decoder.
 //!
+//! Content, not an envelope: the same `DefusePayload` arrives through a NEAR
+//! transaction, a NEP-413 message, a Solana raw ed25519 message or an ERC-191
+//! message, so this crate knows how to read one and nothing about how it
+//! travelled. It depends on no chain crate.
+//!
 //! Public API uses only `visualsign` types + plain primitives. The defuse-*
 //! and near-sdk transitive dependencies are confined to this module's
 //! internals.
 
 mod args;
+mod fmt;
+pub mod network;
 mod render;
 mod token_signature;
 mod tokens;
@@ -16,7 +23,7 @@ pub use token_signature::{
     try_extract_from_chain_metadata as try_extract_token_metadata_from_chain_metadata,
 };
 
-pub(crate) use render::rejected_metadata_diagnostics;
+pub use render::rejected_metadata_diagnostics;
 
 /// Dev/CLI signing helpers for constructing signed `TokenMetadataEntry` proto
 /// values (e.g. for local test fixtures). Gated the same way as the
@@ -147,7 +154,7 @@ pub fn try_decode_execute_intents(
     args: &[u8],
     token_registry: &visualsign::registry::LayeredRegistry<NearTokenRegistry>,
     _options: &visualsign::vsptrait::VisualSignOptions,
-    network: crate::networks::NearNetwork,
+    network: crate::network::SettlementNetwork,
 ) -> Result<Vec<visualsign::SignablePayloadField>, NearIntentsError> {
     let payloads = args::decode_args(args)?;
     let total = payloads.len();
@@ -202,7 +209,7 @@ pub fn try_render_single_intent(
     payload_json: &[u8],
     token_registry: &visualsign::registry::LayeredRegistry<NearTokenRegistry>,
     _options: &visualsign::vsptrait::VisualSignOptions,
-    network: crate::networks::NearNetwork,
+    network: crate::network::SettlementNetwork,
 ) -> Result<RenderedEnvelope, NearIntentsError> {
     let payload: defuse_core::payload::DefusePayload<defuse_core::intents::DefuseIntents> =
         serde_json::from_slice(payload_json)
@@ -214,15 +221,20 @@ pub fn try_render_single_intent(
     })
 }
 
-/// Test-only matcher shared across this module's test submodules.
-#[cfg(test)]
-pub(crate) mod test_support {
+/// Test-only matcher, shared with the chain crates that render these fields.
+///
+/// Behind a feature rather than `#[cfg(test)]` because a chain crate's tests are
+/// a separate compilation: `visualsign-near` asserts on the same diagnostics
+/// this crate produces, and a second copy of the matcher could drift from the
+/// shape actually emitted.
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support {
     use visualsign::SignablePayloadField;
 
     /// Matches the soft-finding field for `rule` in whichever shape the build
     /// emits: the structured `Diagnostic` (diagnostics feature) or the
     /// `Warning`-labelled text fallback.
-    pub(crate) fn is_warning_diagnostic(field: &SignablePayloadField, rule: &str) -> bool {
+    pub fn is_warning_diagnostic(field: &SignablePayloadField, rule: &str) -> bool {
         #[cfg(feature = "diagnostics")]
         {
             matches!(field, SignablePayloadField::Diagnostic { diagnostic, .. }
@@ -273,7 +285,7 @@ mod tests {
             &bytes,
             &reg,
             &VisualSignOptions::default(),
-            crate::networks::NearNetwork::Mainnet,
+            crate::network::SettlementNetwork::Mainnet,
         )
         .unwrap();
         let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
@@ -321,7 +333,7 @@ mod tests {
             inner.as_bytes(),
             &reg,
             &VisualSignOptions::default(),
-            crate::networks::NearNetwork::Mainnet,
+            crate::network::SettlementNetwork::Mainnet,
         )
         .unwrap();
         let fields = rendered.fields;
@@ -369,7 +381,7 @@ mod tests {
             b"not json",
             &reg,
             &VisualSignOptions::default(),
-            crate::networks::NearNetwork::Mainnet,
+            crate::network::SettlementNetwork::Mainnet,
         )
         .err()
         .expect("malformed JSON should error");
@@ -391,7 +403,7 @@ mod tests {
             &bytes,
             &reg,
             &VisualSignOptions::default(),
-            crate::networks::NearNetwork::Mainnet,
+            crate::network::SettlementNetwork::Mainnet,
         )
         .unwrap();
         let has_deadline_warning = fields

@@ -13,7 +13,7 @@ use visualsign::field_builders::{create_amount_field, create_text_field};
 use visualsign::registry::LayeredRegistry;
 
 use crate::fmt::charset_safe;
-use crate::networks::NearNetwork;
+use crate::network::SettlementNetwork;
 
 use super::tokens;
 use super::verify::SignatureCheck;
@@ -66,7 +66,7 @@ fn diagnostic(rule: &str, message: &str) -> Result<SignablePayloadField, VisualS
 /// JSON parse error, a length); [`diagnostic`] charset-filters the assembled
 /// message, so neither half can render as extra apparent fields on the signing
 /// screen.
-pub(crate) fn rejected_metadata_diagnostics(
+pub fn rejected_metadata_diagnostics(
     rejected: &[super::token_signature::RejectedTokenMetadata],
 ) -> Fields {
     // Infallible by construction: reporting a refusal must never be able to
@@ -221,7 +221,7 @@ pub(crate) fn section(
     total: usize,
     mp: &MultiPayload,
     registry: &Reg,
-    network: NearNetwork,
+    network: SettlementNetwork,
 ) -> Result<Fields, VisualSignError> {
     let (check, extracted) = super::verify::verify_and_extract(mp);
     let signer_id = extracted.as_ref().ok().map(|p| p.signer_id.as_str());
@@ -672,7 +672,7 @@ pub(crate) fn render_envelope(
 pub(crate) fn render_single(
     payload: &DefusePayload<DefuseIntents>,
     registry: &Reg,
-    network: NearNetwork,
+    network: SettlementNetwork,
 ) -> Result<Fields, VisualSignError> {
     // Every envelope reaches the signer through here -- the standalone
     // pre-signature view and each section of an on-chain signed batch alike --
@@ -689,7 +689,8 @@ pub(crate) fn render_single(
         ("signer", payload.signer_id.as_str()),
         ("verifying contract", payload.verifying_contract.as_str()),
     ] {
-        if let Some(mismatch) = crate::networks::network_mismatch(role, account_id, network) {
+        if let Some(mismatch) = crate::network::account_network_mismatch(role, account_id, network)
+        {
             return Err(VisualSignError::ValidationError(mismatch));
         }
     }
@@ -1011,7 +1012,7 @@ mod tests {
         )
         .expect("multi payload json");
 
-        let fields = section(1, 1, &mp, &empty_reg(), NearNetwork::Mainnet).expect("render");
+        let fields = section(1, 1, &mp, &empty_reg(), SettlementNetwork::Mainnet).expect("render");
 
         let has_extraction_warning = fields
             .iter()
@@ -1634,7 +1635,7 @@ mod tests {
             r#"{"standard":"raw_ed25519","payload":"{\"signer_id\":\"alice.near\",\"verifying_contract\":\"intents.near\",\"deadline\":\"2999-01-01T00:00:00Z\",\"nonce\":\"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=\",\"intents\":[{\"intent\":\"innocent\\nTo: attacker.near\"}]}","public_key":"ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN","signature":"ed25519:3vtbNQJHZfuV1s5DykzyjkbNLc583hnkrhTz57eDhd966iqzkor6Twgr4Loh2C195SCSEsiGfrd6KcxpjNq9ZbVj"}"#,
         )
         .expect("multi payload json");
-        let fields = section(1, 1, &mp, &empty_reg(), NearNetwork::Mainnet).expect("render");
+        let fields = section(1, 1, &mp, &empty_reg(), SettlementNetwork::Mainnet).expect("render");
         let extraction = fields
             .iter()
             .find(|f| super::super::test_support::is_warning_diagnostic(f, "extraction"))
@@ -1677,7 +1678,7 @@ mod tests {
         let fields = render_single(
             &payload_with(&format!("[{A_TRANSFER}]")),
             &empty_reg(),
-            NearNetwork::Mainnet,
+            SettlementNetwork::Mainnet,
         )
         .expect("render");
         assert_eq!(intent_lines(&fields), ["Transfer"]);
@@ -1688,7 +1689,7 @@ mod tests {
         let fields = render_single(
             &payload_with(&format!("[{A_TRANSFER},{AN_ADD_KEY}]")),
             &empty_reg(),
-            NearNetwork::Mainnet,
+            SettlementNetwork::Mainnet,
         )
         .expect("render");
         assert_eq!(
@@ -1704,7 +1705,7 @@ mod tests {
         let fields = render_single(
             &payload_with(&format!("[{A_TRANSFER},{AN_ADD_KEY}]")),
             &empty_reg(),
-            NearNetwork::Mainnet,
+            SettlementNetwork::Mainnet,
         )
         .expect("render");
         let labels: Vec<&str> = fields.iter().filter_map(label_of).collect();
@@ -1793,8 +1794,12 @@ mod tests {
     /// burn a user can be tricked into signing.
     #[test]
     fn an_empty_intent_list_warns_that_it_only_burns_the_nonce() {
-        let fields =
-            render_single(&payload_with("[]"), &empty_reg(), NearNetwork::Mainnet).expect("render");
+        let fields = render_single(
+            &payload_with("[]"),
+            &empty_reg(),
+            SettlementNetwork::Mainnet,
+        )
+        .expect("render");
         assert!(
             fields
                 .iter()
@@ -1812,8 +1817,12 @@ mod tests {
             r#"[{}]"#,
             r#"{"intent":"transfer","receiver_id":"alice.near","tokens":{"nep141:wrap.near":"1"}}"#
         );
-        let fields = render_single(&payload_with(&intents), &empty_reg(), NearNetwork::Mainnet)
-            .expect("render");
+        let fields = render_single(
+            &payload_with(&intents),
+            &empty_reg(),
+            SettlementNetwork::Mainnet,
+        )
+        .expect("render");
         assert!(
             fields
                 .iter()
@@ -1827,7 +1836,7 @@ mod tests {
         let fields = render_single(
             &payload_with(&format!("[{A_TRANSFER}]")),
             &empty_reg(),
-            NearNetwork::Mainnet,
+            SettlementNetwork::Mainnet,
         )
         .expect("render");
         assert!(
