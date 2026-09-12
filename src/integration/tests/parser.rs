@@ -1034,10 +1034,22 @@ async fn parser_near_rejects_input_that_is_neither_transaction_nor_intent() {
             .unwrap_err();
 
         assert_eq!(parse_error.code(), Code::InvalidArgument);
+        // Asserted per accepted format rather than on the whole sentence: the
+        // refusal has to name every format it rejected, and a future fourth one
+        // should extend this list rather than silently pass an exact match.
+        for expected in [
+            "borsh transaction",
+            "DefusePayload JSON envelope",
+            "NEP-413 message envelope",
+        ] {
+            assert!(
+                parse_error.message().contains(expected),
+                "refusal must name {expected}: {}",
+                parse_error.message()
+            );
+        }
         assert!(
-            parse_error
-                .message()
-                .contains("neither a NEAR borsh transaction nor a DefusePayload JSON envelope"),
+            parse_error.code() == Code::InvalidArgument,
             "unexpected error message: {}",
             parse_error.message()
         );
