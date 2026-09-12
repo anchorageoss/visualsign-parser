@@ -105,10 +105,77 @@ fn create_priority_fee_field(max_priority_fee_per_gas: u128) -> SignablePayloadF
     }
 }
 
-/// Wrapper around Alloy's transaction type that implements the Transaction trait
+/// An Ethereum input: a transaction, or a personal-sign message.
+///
+/// The variants differ sharply in size because a TypedTransaction carries every
+/// transaction field and a message is one string. Boxing the transaction would
+/// even them out at the cost of an indirection on every construction and match,
+/// and exactly one wrapper exists per request, so the size difference never
+/// multiplies.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct EthereumTransactionWrapper {
-    transaction: TypedTransaction,
+pub enum EthereumTransactionWrapper {
+    Transaction(TypedTransaction),
+    /// A personal-sign message, kept as the validated raw text. ERC-191 frames
+    /// it as `\x19Ethereum Signed Message:\n<len><message>` before hashing, but
+    /// that framing belongs to whoever signs: what renders here is the message
+    /// the signer is being asked to approve.
+    Message(String),
+}
+
+/// Lift the text out of a personal-sign envelope.
+///
+/// A transaction and an envelope are both JSON, so they are told apart by
+/// required field: an envelope carries `message`, which no transaction
+/// declares. Unknown fields are refused rather than ignored -- an envelope
+/// carrying something this build does not understand is not one it can claim to
+/// have rendered in full.
+fn message_from_envelope(json: &str) -> Option<Result<String, String>> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let object = value.as_object()?;
+    if !object.contains_key("message") {
+        return None;
+    }
+    for key in object.keys() {
+        if key != "message" {
+            return Some(Err(format!("unexpected field {key:?}")));
+        }
+    }
+    Some(
+        object["message"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| "message is not a string".to_string()),
+    )
+}
+
+/// Mark what cannot render rather than dropping it: deleting would let two
+/// different messages render identically, and a signer comparing them has to be
+/// able to tell them apart.
+fn charset_marked(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c == ' ' || (c.is_ascii_graphic() && c != '\\') {
+                c
+            } else {
+                '?'
+            }
+        })
+        .collect()
+}
+
+/// Render a personal-sign message.
+fn message_to_visual_sign_payload(message: &str) -> Result<SignablePayload, VisualSignError> {
+    Ok(SignablePayload::new(
+        0,
+        "Ethereum Message".to_string(),
+        None,
+        vec![
+            visualsign::field_builders::create_text_field("Message", &charset_marked(message))?
+                .signable_payload_field,
+        ],
+        "EthereumTx".to_string(),
+    ))
 }
 
 impl Transaction for EthereumTransactionWrapper {
@@ -117,16 +184,28 @@ impl Transaction for EthereumTransactionWrapper {
         Self::from_string_with_options(data, None)
     }
     fn transaction_type(&self) -> String {
-        "Ethereum".to_string()
+        match self {
+            Self::Transaction(_) => "Ethereum".to_string(),
+            Self::Message(_) => "Ethereum Message".to_string(),
+        }
     }
 }
 
 impl EthereumTransactionWrapper {
     pub fn new(transaction: TypedTransaction) -> Self {
-        Self { transaction }
+        Self::Transaction(transaction)
     }
-    pub fn inner(&self) -> &TypedTransaction {
-        &self.transaction
+    pub fn inner(&self) -> Option<&TypedTransaction> {
+        match self {
+            Self::Transaction(transaction) => Some(transaction),
+            Self::Message(_) => None,
+        }
+    }
+    pub fn inner_message(&self) -> Option<&str> {
+        match self {
+            Self::Message(message) => Some(message),
+            Self::Transaction(_) => None,
+        }
     }
 
     /// Parse transaction from string with developer options.
@@ -141,9 +220,17 @@ impl EthereumTransactionWrapper {
         // an unsigned transaction structure (no signature fields), so the
         // allow_signed_transactions flag does not apply.
         if eth_json::is_json_input(data) {
+            if let Some(message) = message_from_envelope(data) {
+                let message = message.map_err(|e| {
+                    TransactionParseError::DecodeError(format!(
+                        "input is a personal-sign envelope but not a valid one: {e}"
+                    ))
+                })?;
+                return Ok(Self::Message(message));
+            }
             let transaction = eth_json::decode_json_transaction(data)
                 .map_err(|e| TransactionParseError::InvalidFormat(e.to_string()))?;
-            return Ok(Self { transaction });
+            return Ok(Self::Transaction(transaction));
         }
 
         // RLP path. detect() recognizes an optional 0x/0X prefix as hex.
@@ -153,7 +240,7 @@ impl EthereumTransactionWrapper {
             .unwrap_or(false);
         let transaction = decode_transaction(data, format, allow_signed)
             .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?;
-        Ok(Self { transaction })
+        Ok(Self::Transaction(transaction))
     }
 }
 
@@ -300,8 +387,14 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
         // Ethereum has no intermediate_output schema yet; the envelope is
         // ready for one (return `ConversionResult::with_intermediate`) without
         // further plumbing changes.
-        let payload =
-            self.convert_transaction_inner(transaction_wrapper.inner().clone(), options)?;
+        let payload = match transaction_wrapper {
+            EthereumTransactionWrapper::Transaction(transaction) => {
+                self.convert_transaction_inner(transaction, options)?
+            }
+            EthereumTransactionWrapper::Message(message) => {
+                message_to_visual_sign_payload(&message)?
+            }
+        };
         Ok(ConversionResult::new(payload))
     }
 }
@@ -2614,7 +2707,9 @@ mod tests {
         );
 
         let wrapper = result.unwrap();
-        let tx = wrapper.inner();
+        let tx = wrapper
+            .inner()
+            .expect("a decoded transaction, not a message");
 
         // Verify we extracted the correct unsigned transaction fields
         assert_eq!(tx.chain_id(), Some(1)); // Mainnet
@@ -2846,5 +2941,90 @@ mod tests {
             address_v2.badge_text.as_deref(),
             Some("Proxy implementation (unresolved)"),
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod ethereum_message_tests {
+    use super::*;
+
+    fn message_text(payload: &SignablePayload) -> String {
+        payload
+            .fields
+            .iter()
+            .find_map(|f| match f {
+                SignablePayloadField::TextV2 { common, text_v2 } if common.label == "Message" => {
+                    Some(text_v2.text.clone())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no Message field in {:?}", payload.fields))
+    }
+
+    fn render(envelope: &str) -> SignablePayload {
+        EthereumVisualSignConverter::new()
+            .to_visual_sign_payload(
+                EthereumTransactionWrapper::from_string(envelope).expect("decode"),
+                VisualSignOptions::default(),
+            )
+            .expect("convert")
+            .payload
+    }
+
+    #[test]
+    fn message_envelope_decodes_as_a_message() {
+        let tx =
+            EthereumTransactionWrapper::from_string(r#"{"message":"Sign in to app.example.com"}"#)
+                .expect("decode");
+        assert_eq!(tx.inner_message(), Some("Sign in to app.example.com"));
+        assert_eq!(tx.transaction_type(), "Ethereum Message");
+        assert!(tx.inner().is_none());
+    }
+
+    /// A transaction and an envelope are both JSON, so they are told apart by
+    /// required field rather than by shape. A transaction must stay a
+    /// transaction.
+    #[test]
+    fn a_transaction_json_still_decodes_as_a_transaction() {
+        let tx_json = r#"{"type":"transaction","to":"0x000000000000000000000000000000000000dEaD",
+            "value":"0xde0b6b3a7640000","nonce":"0x2a","gas":"0x5208",
+            "maxFeePerGas":"0x4a817c800","maxPriorityFeePerGas":"0x3b9aca00",
+            "chainId":"0x1","data":"0x"}"#;
+        let tx = EthereumTransactionWrapper::from_string(tx_json).expect("decode");
+        assert!(
+            tx.inner().is_some(),
+            "a transaction must not read as a message"
+        );
+        assert_eq!(tx.transaction_type(), "Ethereum");
+    }
+
+    #[test]
+    fn unknown_envelope_fields_are_refused() {
+        let result = EthereumTransactionWrapper::from_string(r#"{"message":"hi","extra":1}"#);
+        let Err(TransactionParseError::DecodeError(message)) = result else {
+            panic!("expected a DecodeError for an unknown field");
+        };
+        assert!(
+            message.contains("extra"),
+            "the refusal must name the field: {message}"
+        );
+    }
+
+    #[test]
+    fn message_renders_as_text() {
+        let payload = render(r#"{"message":"Sign in to app.example.com"}"#);
+        assert_eq!(payload.title, "Ethereum Message");
+        assert_eq!(message_text(&payload), "Sign in to app.example.com");
+    }
+
+    /// Marking rather than deleting keeps two different messages from rendering
+    /// identically.
+    #[test]
+    fn message_text_marks_what_cannot_render_and_stays_distinct() {
+        let with_break = message_text(&render(r#"{"message":"innocent\nTo: attacker.eth"}"#));
+        assert_eq!(with_break, "innocent?To: attacker.eth");
+        let without = message_text(&render(r#"{"message":"innocentTo: attacker.eth"}"#));
+        assert_ne!(with_break, without);
     }
 }
