@@ -57,6 +57,10 @@ test: build
 	@# dev-signing ON: the CLI token-metadata tests, whose signing helper moved to
 	@# visualsign-intents and so is out of reach of this crate's cfg(test).
 	cargo test -p visualsign-near --features dev-signing --lib
+	@# intents ON: the message path that renders a DefusePayload carried by a
+	@# Solana or Ethereum signature rather than a NEAR one.
+	cargo test -p visualsign-solana --features intents --lib
+	cargo test -p visualsign-ethereum --features intents --lib
 	cargo test -p visualsign-solana --features diagnostics --lib
 
 # Solana preset sources, which `cargo fmt` cannot reach. `presets/mod.rs`

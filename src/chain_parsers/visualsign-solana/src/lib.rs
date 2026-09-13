@@ -10,6 +10,8 @@ mod integrations;
 /// Chain-specific structured decode emitted as
 /// `ParsedTransactionPayload.intermediate_output`. Published so downstream
 /// consumers can `borsh::from_slice` into the same schema the parser produces.
+#[cfg(feature = "intents")]
+pub mod intents;
 pub mod intermediate;
 mod presets;
 pub mod utils;

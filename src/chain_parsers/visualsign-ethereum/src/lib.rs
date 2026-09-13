@@ -23,8 +23,10 @@ use visualsign::{
     },
 };
 
-#[cfg(feature = "cli-plugin")]
 pub mod cli_plugin;
+#[cfg(feature = "cli-plugin")]
+#[cfg(feature = "intents")]
+pub mod intents;
 
 #[cfg(feature = "cli-plugin")]
 pub use cli_plugin::{EthereumArgs, EthereumPlugin};
@@ -165,7 +167,23 @@ fn charset_marked(text: &str) -> String {
 }
 
 /// Render a personal-sign message.
-fn message_to_visual_sign_payload(message: &str) -> Result<SignablePayload, VisualSignError> {
+#[cfg_attr(not(feature = "intents"), allow(unused_variables))]
+fn message_to_visual_sign_payload(
+    message: &str,
+    options: &VisualSignOptions,
+) -> Result<SignablePayload, VisualSignError> {
+    // A message carrying NEAR Intents renders the intents. A signer approving a
+    // token movement has to see the movement, not the JSON that encodes it.
+    #[cfg(feature = "intents")]
+    if let Some(rendered) = crate::intents::try_render(message.as_bytes(), options)? {
+        return Ok(SignablePayload::new(
+            0,
+            rendered.title,
+            None,
+            rendered.fields,
+            "EthereumTx".to_string(),
+        ));
+    }
     Ok(SignablePayload::new(
         0,
         "Ethereum Message".to_string(),
@@ -392,7 +410,7 @@ impl VisualSignConverter<EthereumTransactionWrapper> for EthereumVisualSignConve
                 self.convert_transaction_inner(transaction, options)?
             }
             EthereumTransactionWrapper::Message(message) => {
-                message_to_visual_sign_payload(&message)?
+                message_to_visual_sign_payload(&message, &options)?
             }
         };
         Ok(ConversionResult::new(payload))
@@ -2970,6 +2988,37 @@ mod ethereum_message_tests {
             )
             .expect("convert")
             .payload
+    }
+
+    /// An Ethereum-keyed identity signs a DefusePayload under ERC-191, so the
+    /// intents arrive as the personal-sign message itself and must render as
+    /// intents rather than as the JSON that encodes them.
+    #[test]
+    #[cfg(feature = "intents")]
+    fn a_message_carrying_intents_renders_them() {
+        let defuse = r#"{"signer_id":"0x1111111111111111111111111111111111111111","verifying_contract":"intents.near","deadline":"2100-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"token_diff","diff":{"nep141:wrap.near":"-1000000000000000000000000","nep141:usdc.near":"998"}}]}"#;
+        let payload = render(&serde_json::json!({ "message": defuse }).to_string());
+        let json = payload.to_json().expect("json");
+
+        assert!(
+            payload.title.contains("Intent"),
+            "the title must name the intent, not the envelope: {json}"
+        );
+        assert!(
+            !payload.fields.iter().any(|f| matches!(
+                f,
+                SignablePayloadField::TextV2 { common, .. } if common.label == "Message"
+            )),
+            "an intents request must not also render as opaque text: {json}"
+        );
+        assert!(
+            json.contains("wNEAR"),
+            "the spent asset must resolve: {json}"
+        );
+        assert!(
+            !json.contains("signer_id"),
+            "raw payload JSON must not reach the signer: {json}"
+        );
     }
 
     #[test]

@@ -481,7 +481,9 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
                     &lint_config,
                 )?
             }
-            SolanaTransactionWrapper::Message(message) => message_to_visual_sign_payload(message)?,
+            SolanaTransactionWrapper::Message(message) => {
+                message_to_visual_sign_payload(message, &options)?
+            }
         };
 
         // Only emit intermediate output when the caller opts in; otherwise the
@@ -743,7 +745,24 @@ fn convert_to_visual_sign_payload(
 /// The text is charset-marked before it renders: it is caller-supplied and
 /// reaches a signer's screen, where an unmarked line separator could forge a
 /// second field.
-fn message_to_visual_sign_payload(message: &str) -> Result<SignablePayload, VisualSignError> {
+#[cfg_attr(not(feature = "intents"), allow(unused_variables))]
+fn message_to_visual_sign_payload(
+    message: &str,
+    options: &VisualSignOptions,
+) -> Result<SignablePayload, VisualSignError> {
+    // A message carrying NEAR Intents renders the intents. A signer approving a
+    // token movement has to see the movement, not the JSON that encodes it --
+    // the same reason the NEAR crate renders them out of a NEP-413 envelope.
+    #[cfg(feature = "intents")]
+    if let Some(rendered) = crate::intents::try_render(message.as_bytes(), options)? {
+        return Ok(SignablePayload::new(
+            0,
+            rendered.title,
+            None,
+            rendered.fields,
+            "SolanaTx".to_string(),
+        ));
+    }
     Ok(SignablePayload::new(
         0,
         "Solana Message".to_string(),
@@ -2656,6 +2675,38 @@ mod solana_message_tests {
             )
             .expect("convert")
             .payload
+    }
+
+    /// A Solana-keyed identity signs a DefusePayload directly under the
+    /// raw_ed25519 standard, so the intents arrive as the message itself. They
+    /// must render as intents: before the decoder was reachable from this crate,
+    /// a signer approving a token movement saw the JSON that encodes it.
+    #[test]
+    #[cfg(feature = "intents")]
+    fn a_message_carrying_intents_renders_them() {
+        let defuse = r#"{"signer_id":"74affa71ab030d400fdfa1bed033dfa6fd3ae34f92d17c046ebe368e80d53751","verifying_contract":"intents.near","deadline":"2100-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"token_diff","diff":{"nep141:wrap.near":"-1000000000000000000000000","nep141:usdc.near":"998"}}]}"#;
+        let payload = render(&serde_json::json!({ "message": defuse }).to_string());
+        let json = payload.to_json().expect("json");
+
+        assert!(
+            payload.title.contains("Intent"),
+            "the title must name the intent, not the envelope: {json}"
+        );
+        assert!(
+            !payload.fields.iter().any(|f| matches!(
+                f,
+                SignablePayloadField::TextV2 { common, .. } if common.label == "Message"
+            )),
+            "an intents request must not also render as opaque text: {json}"
+        );
+        assert!(
+            json.contains("wNEAR"),
+            "the spent asset must resolve: {json}"
+        );
+        assert!(
+            !json.contains("signer_id"),
+            "raw payload JSON must not reach the signer: {json}"
+        );
     }
 
     #[test]
