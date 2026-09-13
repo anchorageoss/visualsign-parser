@@ -111,9 +111,13 @@ fn build_abi_mappings_from_files(
 ) -> (BTreeMap<String, Abi>, usize) {
     let (raw, count) = mapping_parser::load_mappings(
         abi_json_mappings,
-        "ABI",
-        "UniswapV2:path/to/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
-        "ContractAddress",
+        &mapping_parser::MappingFormat {
+            kind: "ABI",
+            example: "UniswapV2:path/to/uniswap.json:0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
+            identifier_label: "ContractAddress",
+            format_hint: "Name:/path/to/file.json:ContractAddress",
+        },
+        mapping_parser::parse_mapping,
         validate_eth_address,
         |components, json| {
             // The CLI runs the require-signed posture against its own dev key (see

@@ -61,6 +61,47 @@ pub mod abi_type_serde {
     }
 }
 
+/// Serde adapter that represents the `parser.TokenMetadataEntry.origin_chain`
+/// enum field as its protobuf string name (e.g.
+/// `"TOKEN_ORIGIN_CHAIN_ETHEREUM"`) over JSON instead of the raw i32
+/// discriminant. Referenced via
+/// `#[serde(with = "crate::token_origin_chain_serde")]` on the generated field.
+/// An unset/unknown value serializes as `null`; an unrecognized string fails
+/// deserialization, so an entry naming an origin this build cannot verify is
+/// refused at the API edge rather than silently defaulting to NEAR.
+#[cfg(feature = "serde_derive")]
+pub mod token_origin_chain_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use crate::parser::TokenOriginChain;
+
+    pub fn serialize<S>(value: &Option<i32>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value.and_then(|v| TokenOriginChain::try_from(v).ok()) {
+            Some(chain) => serializer.serialize_some(chain.as_str_name()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<i32>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let name = Option::<String>::deserialize(deserializer)?;
+        match name {
+            Some(name) => {
+                let chain = TokenOriginChain::from_str_name(&name).ok_or_else(|| {
+                    serde::de::Error::custom(format!("unknown TokenOriginChain variant: {name}"))
+                })?;
+                Ok(Some(chain as i32))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
 // Necessary to enable reflection on gRPC server
 #[cfg(feature = "tonic_types")]
 pub const FILE_DESCRIPTOR_SET: &[u8] = include_bytes!("generated/descriptor.bin");

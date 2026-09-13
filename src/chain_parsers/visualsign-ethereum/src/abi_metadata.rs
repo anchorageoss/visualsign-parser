@@ -1054,6 +1054,7 @@ mod tests {
                 network_id: None,
                 idl: None,
                 idl_mappings: Default::default(),
+                simulated_transaction_result: None,
             })),
         };
         assert!(

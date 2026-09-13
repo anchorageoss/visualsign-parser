@@ -13,6 +13,7 @@ use qos_core::{
 use visualsign::signing::MetadataTrustPolicy;
 
 use crate::config::ParserConfig;
+use crate::payment_verify::PaymentPolicy;
 
 const HOST_IP: &str = "host-ip";
 const HOST_PORT: &str = "host-port";
@@ -153,7 +154,9 @@ impl Cli {
                 Ok(policy) => policy,
                 Err(e) => panic!("Parser: invalid ABI trust configuration: {e}"),
             };
-            let config = ParserConfig::new(abi_trust);
+            // No binary wires up a gateway pubkey yet, so payment verification
+            // stays disabled here too (see `payment_verify` module doc).
+            let config = ParserConfig::new(abi_trust, PaymentPolicy::Disabled);
 
             println!(
                 "---- Starting Parser server (version: {}) -----",

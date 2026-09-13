@@ -1,0 +1,7 @@
+decode
+--chain
+near
+-o
+json
+-t
+{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2020-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}

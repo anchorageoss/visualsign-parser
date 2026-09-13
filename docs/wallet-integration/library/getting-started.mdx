@@ -183,6 +183,7 @@ deploy-time choice, not a per-request one. You pick it when you build the `Parse
 
 ```rust
 use parser_app::config::ParserConfig;
+use parser_app::payment_verify::PaymentPolicy;
 use visualsign::signing::MetadataTrustPolicy;
 use visualsign_ethereum::abi_metadata::signer_allowlist_from_hex;
 
@@ -191,10 +192,14 @@ use visualsign_ethereum::abi_metadata::signer_allowlist_from_hex;
 let permissive = ParserConfig::accept_unsigned();
 
 // Only register mappings signed by an allowlisted secp256k1 key. Unsigned and
-// otherwise-signed mappings are dropped.
+// otherwise-signed mappings are dropped. Payment verification is disabled here;
+// see `PaymentPolicy` if your deployment requires gateway-signed payment markers.
 let allowlist = signer_allowlist_from_hex(&["0x04...".to_string()])
     .expect("invalid signer public key");
-let strict = ParserConfig::new(MetadataTrustPolicy::RequireAllowlistedSigner(allowlist));
+let strict = ParserConfig::new(
+    MetadataTrustPolicy::RequireAllowlistedSigner(allowlist),
+    PaymentPolicy::Disabled,
+);
 ```
 
 Under `RequireAllowlistedSigner`, an empty allowlist rejects every mapping. Note that this

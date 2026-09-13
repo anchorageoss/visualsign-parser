@@ -1,6 +1,8 @@
 //! Turnkey-compatible request/response envelope for parse endpoints.
 
-use generated::parser::{ChainMetadata, EthereumMetadata, SolanaMetadata, chain_metadata};
+use generated::parser::{
+    ChainMetadata, EthereumMetadata, NearMetadata, SolanaMetadata, chain_metadata,
+};
 use serde::{Deserialize, Serialize};
 
 /// SHA-256 of empty input: used as the canonical "no data" sentinel for digest fields
@@ -40,6 +42,8 @@ pub enum ChainMetadataInput {
     Ethereum(EthereumMetadata),
     #[serde(rename = "CHAIN_SOLANA")]
     Solana(SolanaMetadata),
+    #[serde(rename = "CHAIN_NEAR")]
+    Near(NearMetadata),
 }
 
 impl From<ChainMetadataInput> for ChainMetadata {
@@ -47,6 +51,7 @@ impl From<ChainMetadataInput> for ChainMetadata {
         let metadata = match input {
             ChainMetadataInput::Ethereum(eth) => chain_metadata::Metadata::Ethereum(eth),
             ChainMetadataInput::Solana(sol) => chain_metadata::Metadata::Solana(sol),
+            ChainMetadataInput::Near(near) => chain_metadata::Metadata::Near(near),
         };
         ChainMetadata {
             metadata: Some(metadata),

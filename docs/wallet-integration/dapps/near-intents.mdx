@@ -123,6 +123,12 @@ cargo run --bin parser_cli -- decode --chain near --output json \
       "Type": "text_v2"
     },
     {
+      "FallbackText": "FT Withdraw",
+      "Label": "Intent",
+      "TextV2": { "Text": "FT Withdraw" },
+      "Type": "text_v2"
+    },
+    {
       "FallbackText": "wrap.near",
       "Label": "Token",
       "TextV2": { "Text": "wrap.near" },
@@ -142,12 +148,14 @@ cargo run --bin parser_cli -- decode --chain near --output json \
     }
   ],
   "PayloadType": "NearTx",
-  "Title": "NEAR Intent",
+  "Title": "NEAR Intent: FT Withdraw",
   "Version": "0"
 }
 ```
 
 (The example above uses a `ft_withdraw` intent for brevity; a `token_diff` swap renders one `Send`/`Receive` amount field per token in the diff, plus the same `Signer`/`Verifying Contract`/`Deadline`/`Nonce` envelope fields.)
+
+Each intent is preceded by an `Intent` field naming its type, and a single-intent envelope carries that type in its `Title`. An envelope holding more than one numbers them (`1 of 2: Transfer`), so a batch's fields cannot be read as belonging to the wrong intent. Intents that hand over account authority rather than moving a named amount -- `add_public_key`, `remove_public_key`, `set_auth_by_predecessor_id`, `auth_call` -- each carry a warning naming the consequence.
 
 Send this same input under `chain: CHAIN_NEAR` — the parser identifies it as an envelope, not a transaction, because the input is JSON rather than borsh (see [format discrimination](/chains/near#two-input-formats-one-chain-identity)). No signature exists yet at this stage, so nothing renders for it.
 

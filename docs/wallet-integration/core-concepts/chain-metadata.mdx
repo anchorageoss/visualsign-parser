@@ -143,6 +143,80 @@ ChainMetadata: &pb.ChainMetadata{
 | `SOLANA_IDL_TYPE_ANCHOR` | Anchor framework IDL |
 | `SOLANA_IDL_TYPE_SHANK` | Shank IDL format |
 
+## NEAR: Token Metadata
+
+For NEAR Intents, provide a symbol and decimals for asset ids not already in the parser's compiled-in seed table (see [NEAR](../../chains/near#visualization-strategy)). Unlike Ethereum ABIs and Solana IDLs, entries are keyed by NEAR Intents asset id (e.g. `nep141:wrap.near`), not by a contract or program address.
+
+### gRPC example
+
+```go
+request := &pb.ParseRequest{
+    UnsignedPayload: rawTxHex,
+    Chain: pb.Chain_CHAIN_NEAR,
+    ChainMetadata: &pb.ChainMetadata{
+        Metadata: &pb.ChainMetadata_Near{
+            Near: &pb.NearMetadata{
+                NetworkId: proto.String("NEAR_MAINNET"),
+                TokenMappings: map[string]*pb.TokenMetadataEntry{
+                    // An asset the parser's compiled-in table doesn't cover.
+                    // Unsigned entries fill gaps only, so an override of a
+                    // known asset has to carry a signature (see below).
+                    "nep141:514910771af9ca656af840dff83e8264ecf986ca.factory.bridge.near": &pb.TokenMetadataEntry{
+                        Value: `{"symbol":"LINK","decimals":18}`,
+                    },
+                },
+            },
+        },
+    },
+}
+```
+
+### Signed entries (optional)
+
+A `TokenMetadataEntry` can carry an optional signature, so a wallet can trust an entry beyond the raw request itself. Unlike ABI/IDL signing (one curve per chain), the curve here is chosen per entry by `origin_chain`, since a NEAR Intents asset id can describe a NEAR-native asset or one bridged in from another chain:
+
+| `origin_chain` | Curve | Same curator identity family as |
+|----------------|-------|----------------------------------|
+| `TOKEN_ORIGIN_CHAIN_NEAR` (or unset) | ed25519 | A NEAR-only curator key |
+| `TOKEN_ORIGIN_CHAIN_ETHEREUM` | secp256k1 | Ethereum ABI signing |
+| `TOKEN_ORIGIN_CHAIN_SOLANA` | ed25519 | Solana IDL signing |
+
+Over the JSON/HTTP gateway the field carries these protobuf names, not the underlying numbers, and an unrecognized name is rejected rather than defaulted:
+
+```json
+{
+  "networkId": "NEAR_MAINNET",
+  "tokenMappings": {
+    "nep141:514910771af9ca656af840dff83e8264ecf986ca.factory.bridge.near": {
+      "value": "{\"symbol\":\"LINK\",\"decimals\":18}",
+      "originChain": "TOKEN_ORIGIN_CHAIN_ETHEREUM"
+    }
+  }
+}
+```
+
+The signature covers `value`'s bytes verbatim (the same convention as `Abi.value`/`Idl.value`), bound to both the asset id and the NEAR network so it cannot be replayed under a different asset or on the other network. Sign the exact bytes you put in `value` — the parser hashes them as supplied and never re-encodes them, so canonicalizing the JSON before signing produces a different prehash and the signature will not verify.
+
+The network is part of the signed scope because a NEAR implicit account id (a 64-hex address) is the same string on mainnet and testnet. Sign against the canonical id — `NEAR_MAINNET` or `NEAR_TESTNET` — matching the network the request resolves to:
+
+- The request's `network_id`, when it supplies one. An unrecognized value (`testnet` rather than `NEAR_TESTNET`, say) fails the whole request rather than falling back.
+- Otherwise the network the parser was configured for, which is mainnet unless the deployment says otherwise.
+
+This is the same resolution the rendered `Network` field uses, so the network a signature is checked against is always the network the payload displays.
+
+The resolved network must also agree with the accounts in the request. An account whose suffix contradicts it — `.testnet` under mainnet, or `.near` under testnet — fails the whole request rather than rendering under a network it does not belong to. This applies to a transaction's own `signer_id`/`receiver_id` and to every rendered intents envelope's `signer_id`/`verifying_contract`, on both the standalone and the on-chain batch path. Implicit (64-hex) accounts carry no suffix and are not constrained. So a wallet that sets `network_id` must set it to the network its accounts actually live on; supplying `NEAR_TESTNET` for a mainnet envelope is an error, not a relabelling.
+
+An entry whose signature fails to verify is rejected outright, never silently downgraded to unsigned.
+
+An entry the parser cannot attribute to a curator it recognizes — one carrying **no** signature, or one whose signature verifies under a key the deployment has not enrolled — is accepted only when both of these hold:
+
+- The deployment runs a permissive trust posture. `parser_cli` runs the strict posture and rejects both cases.
+- The asset is not already in the parser's compiled-in token table. Unattributed metadata fills gaps for assets the parser doesn't know; it cannot override a curated entry, since `decimals` scales the amount a signer sees.
+
+The two cases are worth the same in trust terms — signing with a key nobody enrolled buys nothing over omitting the signature — so a correction to an already-known asset has to be signed **by a recognized curator**. Where such an entry is accepted as a gap fill, its rendered amount carries an `unverified-token-metadata` warning naming which of the two it was, so the signer is never told an entry was unsigned when it was signed by an unrecognized key. Which keys count as recognized is set per origin chain by the deployment — see [NEAR](../../chains/near#configuring-curator-keys).
+
+See [`visualsign::signing`](https://github.com/anchorageoss/visualsign-parser/blob/main/src/visualsign/src/signing.rs) for the exact prehash construction.
+
 ## Library integration
 
 When using the library directly (not gRPC), pass metadata via `VisualSignOptions`. The Ethereum metadata shape mirrors the proto: a `network_id` and an `abi_mappings` map keyed by contract address.
@@ -189,6 +263,13 @@ See [Library Integration](../library/getting-started) for the full end-to-end ex
 | Anchor build | `target/idl/program_name.json` |
 | On-chain | Some programs publish IDL on-chain |
 | Program repo | Check the program's source repository |
+
+### NEAR token metadata
+
+| Source | How to get |
+|--------|------------|
+| Token contract | `ft_metadata` view call on the NEP-141 account |
+| Omni Bridge registry | `get_token_id` / `get_native_token_id` view calls on `omni.bridge.near` resolve to a NEP-141 account, whose `ft_metadata` then gives symbol/decimals |
 
 ## Without metadata
 
