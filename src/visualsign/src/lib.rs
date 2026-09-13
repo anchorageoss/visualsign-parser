@@ -6,6 +6,7 @@ pub mod anchorage_render;
 pub mod encodings;
 pub mod errors;
 pub mod field_builders;
+pub mod json;
 #[cfg(feature = "diagnostics")]
 pub mod lint;
 pub mod registry;

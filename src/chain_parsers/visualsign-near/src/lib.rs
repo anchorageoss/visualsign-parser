@@ -8,6 +8,7 @@ pub mod actions;
 pub mod cli_plugin;
 pub mod convert;
 pub mod fmt;
+pub mod intermediate;
 pub mod networks;
 pub mod presets;
 pub mod tx;
@@ -15,4 +16,5 @@ pub mod tx;
 #[cfg(feature = "cli-plugin")]
 pub use cli_plugin::{NearArgs, NearPlugin};
 pub use convert::NearVisualSignConverter;
+pub use intermediate::{NEAR_INTERMEDIATE_SCHEMA_VERSION, NearIntermediateOutput};
 pub use tx::NearTransaction;

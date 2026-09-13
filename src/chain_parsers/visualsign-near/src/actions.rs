@@ -332,6 +332,31 @@ fn push_amount_and_notes(
     Ok(())
 }
 
+/// The `near_primitives` variant name for an action.
+///
+/// Machine-facing, unlike [`action_label`]: it names the variant for a consumer
+/// that has to decide what an action is, so it stays stable when a display
+/// string is reworded.
+#[must_use]
+pub fn action_kind(action: &Action) -> &'static str {
+    match action {
+        Action::CreateAccount(_) => "CreateAccount",
+        Action::DeployContract(_) => "DeployContract",
+        Action::FunctionCall(_) => "FunctionCall",
+        Action::Transfer(_) => "Transfer",
+        Action::Stake(_) => "Stake",
+        Action::AddKey(_) => "AddKey",
+        Action::DeleteKey(_) => "DeleteKey",
+        Action::DeleteAccount(_) => "DeleteAccount",
+        Action::Delegate(_) => "Delegate",
+        Action::DeployGlobalContract(_) => "DeployGlobalContract",
+        Action::UseGlobalContract(_) => "UseGlobalContract",
+        Action::DeterministicStateInit(_) => "DeterministicStateInit",
+        Action::TransferToGasKey(_) => "TransferToGasKey",
+        Action::WithdrawFromGasKey(_) => "WithdrawFromGasKey",
+    }
+}
+
 /// Human-readable label for an action variant.
 pub(crate) fn action_label(action: &Action) -> &'static str {
     match action {

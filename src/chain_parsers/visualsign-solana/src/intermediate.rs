@@ -305,48 +305,18 @@ fn idl_source_string(source: &IdlSource) -> String {
     }
 }
 
+/// Serialize decoded call args with keys alphabetized at every nesting level.
+///
+/// The walk itself lives in `visualsign::json` because the NEAR intermediate
+/// output needs the same determinism for the same reason: both schemas are
+/// serialized into what the HSM signs, so object key order cannot depend on how
+/// a value happened to be built.
 fn canonical_args_json(args: &serde_json::Map<String, Value>) -> String {
-    // Canonicalize recursively so *every* nesting level is alphabetized, not
-    // just the top-level map. serde_json::to_string never fails on a
-    // Map<String, Value>; on the off-chance it does we fall back to an empty
-    // object so the surrounding borsh encoding stays well-formed.
-    let canonical = Value::Object(canonicalize_map(args));
+    // serde_json::to_string never fails on a Map<String, Value>; on the
+    // off-chance it does, an empty object keeps the surrounding borsh encoding
+    // well-formed.
+    let canonical = visualsign::json::canonicalize(&Value::Object(args.clone()));
     serde_json::to_string(&canonical).unwrap_or_else(|_| "{}".to_string())
-}
-
-/// Recursively re-key every nested JSON object so its keys appear in sorted
-/// order, independent of `serde_json`'s `preserve_order` build feature.
-///
-/// `serde_json` is built with `preserve_order` elsewhere in the workspace
-/// (pulled in transitively by the Sui chain parser and the integration crate
-/// via `indexmap`), which makes `serde_json::Map` an `IndexMap` that serializes
-/// keys in *insertion* order. Without this walk, only the top-level map would
-/// be alphabetized (by the `BTreeMap` re-key in [`canonicalize_map`]) and
-/// nested objects would leak insertion order into the canonical string —
-/// silently breaking byte-determinism for consumers that mirror this schema.
-/// Arrays are traversed element-wise; scalars are returned unchanged.
-fn canonicalize_value(value: &Value) -> Value {
-    match value {
-        Value::Object(map) => Value::Object(canonicalize_map(map)),
-        Value::Array(items) => Value::Array(items.iter().map(canonicalize_value).collect()),
-        _ => value.clone(),
-    }
-}
-
-/// Build a new `serde_json::Map` whose entries are those of `map`, inserted in
-/// sorted key order and with values recursively canonicalized.
-///
-/// Inserting in sorted order makes the serialized output alphabetized
-/// regardless of whether `serde_json::Map` is backed by `BTreeMap` (default) or
-/// `IndexMap` (`preserve_order`): a `BTreeMap` stays sorted; an `IndexMap`
-/// preserves the (sorted) insertion order we feed it.
-fn canonicalize_map(map: &serde_json::Map<String, Value>) -> serde_json::Map<String, Value> {
-    let sorted: BTreeMap<&String, &Value> = map.iter().collect();
-    let mut out = serde_json::Map::with_capacity(map.len());
-    for (k, v) in sorted {
-        out.insert(k.clone(), canonicalize_value(v));
-    }
-    out
 }
 
 impl From<&SolanaParsedInstructionData> for SolanaParsedInstructionDataIo {
@@ -542,7 +512,8 @@ fn decode_inner_instructions(
                     });
                 }
                 UiParsedInstruction::Parsed(rpc_parsed) => {
-                    let parsed_json = canonicalize_value(&rpc_parsed.parsed).to_string();
+                    let parsed_json =
+                        visualsign::json::canonicalize(&rpc_parsed.parsed).to_string();
                     let program = rpc_parsed.program.clone();
                     let registered_source = crate::idl::builtin_programs::registered_source(
                         &rpc_parsed.program_id,

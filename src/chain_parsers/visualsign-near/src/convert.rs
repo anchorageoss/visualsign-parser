@@ -19,6 +19,7 @@ use defuse_nep413::Nep413Payload;
 
 use crate::actions::render_action;
 use crate::fmt::charset_safe;
+use crate::intermediate::{NearIntermediateOutput, Nep413Io};
 use crate::networks::{NearNetwork, extract_network_from_metadata, network_mismatch};
 use crate::presets::intents::{
     NearIntentsError, NearTokenRegistry, RejectedTokenMetadata, authorized_token_metadata_signers,
@@ -319,13 +320,16 @@ impl NearVisualSignConverter {
             )?);
         }
 
-        Ok(ConversionResult::new(SignablePayload::new(
-            PAYLOAD_VERSION,
-            title_for(tx.actions(), tx.receiver_id().as_str()),
-            None,
-            fields,
-            PAYLOAD_TYPE.to_string(),
-        )))
+        Ok(with_intermediate(
+            SignablePayload::new(
+                PAYLOAD_VERSION,
+                title_for(tx.actions(), tx.receiver_id().as_str()),
+                None,
+                fields,
+                PAYLOAD_TYPE.to_string(),
+            ),
+            &NearIntermediateOutput::for_transaction(network, tx),
+        ))
     }
 }
 
@@ -470,13 +474,16 @@ fn render_nep413_envelope(
             create_text_field("NEP-413 Message", &charset_safe(&payload.message))?
                 .signable_payload_field,
         );
-        return Ok(ConversionResult::new(SignablePayload::new(
-            PAYLOAD_VERSION,
-            "NEAR Message".to_string(),
-            None,
-            fields,
-            PAYLOAD_TYPE.to_string(),
-        )));
+        return Ok(with_intermediate(
+            SignablePayload::new(
+                PAYLOAD_VERSION,
+                "NEAR Message".to_string(),
+                None,
+                fields,
+                PAYLOAD_TYPE.to_string(),
+            ),
+            &NearIntermediateOutput::for_nep413(network, nep413_intermediate(&payload)),
+        ));
     };
 
     let tokens = if crate::presets::intents::single_intent_consumes_token_registry(&intents_json) {
@@ -494,13 +501,46 @@ fn render_nep413_envelope(
     .map_err(intents_error)?;
     fields.extend(rendered.fields);
 
-    Ok(ConversionResult::new(SignablePayload::new(
-        PAYLOAD_VERSION,
-        rendered.title,
-        None,
-        fields,
-        PAYLOAD_TYPE.to_string(),
-    )))
+    Ok(with_intermediate(
+        SignablePayload::new(
+            PAYLOAD_VERSION,
+            rendered.title,
+            None,
+            fields,
+            PAYLOAD_TYPE.to_string(),
+        ),
+        &NearIntermediateOutput::for_nep413(network, nep413_intermediate(&payload)),
+    ))
+}
+
+/// Attach an intermediate output to a rendered payload.
+///
+/// The rendering is what the signer sees, so a structured decode that cannot be
+/// serialized degrades to a result without one rather than turning a successful
+/// rendering into an error.
+fn with_intermediate(
+    payload: SignablePayload,
+    output: &NearIntermediateOutput,
+) -> ConversionResult {
+    match output.to_bytes() {
+        Some(bytes) => ConversionResult::with_intermediate(payload, bytes),
+        None => ConversionResult::new(payload),
+    }
+}
+
+/// The NEP-413 envelope as the intermediate output carries it.
+///
+/// The nonce crosses as base64, the encoding NEP-413 itself uses, rather than
+/// the hex the rendered field shows: the rendering is for a person and this is
+/// for a policy reading the same value a wallet sent.
+fn nep413_intermediate(payload: &Nep413Payload) -> Nep413Io {
+    use base64::Engine;
+    Nep413Io {
+        recipient: payload.recipient.clone(),
+        nonce_base64: base64::engine::general_purpose::STANDARD.encode(payload.nonce),
+        callback_url: payload.callback_url.clone(),
+        message: payload.message.clone(),
+    }
 }
 
 fn intents_error(e: NearIntentsError) -> VisualSignError {
@@ -545,13 +585,16 @@ fn render_intent_envelope(
     )
     .map_err(intents_error)?;
     fields.extend(rendered.fields);
-    Ok(ConversionResult::new(SignablePayload::new(
-        PAYLOAD_VERSION,
-        rendered.title,
-        None,
-        fields,
-        PAYLOAD_TYPE.to_string(),
-    )))
+    Ok(with_intermediate(
+        SignablePayload::new(
+            PAYLOAD_VERSION,
+            rendered.title,
+            None,
+            fields,
+            PAYLOAD_TYPE.to_string(),
+        ),
+        &NearIntermediateOutput::for_raw_message(network, json),
+    ))
 }
 
 /// Title for the payload: a single action names itself, otherwise a generic
