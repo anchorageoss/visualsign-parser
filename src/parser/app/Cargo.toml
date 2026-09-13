@@ -41,9 +41,9 @@ thiserror = "2.0.12"
 # relies on diagnostics being OFF for parser_app/integration to keep the
 # production payload shape. Opt in explicitly with `--features diagnostics`.
 default = ["ethereum", "near", "solana", "sui", "tron", "unspecified"]
-ethereum = ["dep:visualsign-ethereum"]
+ethereum = ["dep:visualsign-ethereum", "visualsign-ethereum/intents"]
 near = ["dep:visualsign-near"]
-solana = ["dep:visualsign-solana"]
+solana = ["dep:visualsign-solana", "visualsign-solana/intents"]
 sui = ["dep:visualsign-sui"]
 tron = ["dep:visualsign-tron"]
 unspecified = ["dep:visualsign-unspecified"]

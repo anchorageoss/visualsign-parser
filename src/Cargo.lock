@@ -15081,6 +15081,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.17",
  "visualsign",
+ "visualsign-intents",
 ]
 
 [[package]]
@@ -15170,6 +15171,7 @@ dependencies = [
  "tokio",
  "tracing",
  "visualsign",
+ "visualsign-intents",
 ]
 
 [[package]]

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
+# Render NEAR Intents carried in an off-chain message. Optional so a build
+# that does not serve intents links neither the decoder nor its defuse deps.
+intents = ["dep:visualsign-intents"]
 default    = ["cli-plugin"]
 cli-plugin = ["dep:clap", "dep:parser_cli_core"]
 diagnostics = ["visualsign/diagnostics"]
@@ -16,6 +19,7 @@ parser_cli_core = { path = "../../parser/cli-core", optional = true }
 tracing = { workspace = true }
 solana_parser = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "594a910" }
 visualsign = { workspace = true }
+visualsign-intents = { path = "../../visualsign-intents", optional = true }
 generated = { path = "../../generated" }
 serde_json = { workspace = true }
 hex = { workspace = true }
