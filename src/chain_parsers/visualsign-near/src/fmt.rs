@@ -1,24 +1,7 @@
 //! yoctoNEAR, Tgas, and field-text formatting helpers.
 
-/// Marker substituted for a character that cannot be rendered.
-///
-/// Substituting rather than deleting keeps distinct inputs distinct: deletion
-/// renders `a\nb` and `ab` identically, so two chain-supplied values a signer
-/// must be able to tell apart can reach the screen as one string. It also
-/// makes the loss visible, instead of presenting what is left as the whole
-/// value.
-///
-/// `visualsign-solana`'s argument renderer marks elided characters the same
-/// way, so a signer reading either chain's fields reads one convention.
-const ELIDED: char = '?';
-
-/// Renders `text` as printable ASCII and spaces, substituting [`ELIDED`] for
-/// every other character, so a chain-supplied string (`memo`, `msg`,
-/// `method_name`, an NFT/MT token id) cannot smuggle a newline into a text
-/// field's fallback text. The core crate's charset validator permits `\n` as
-/// the wallet's documented multi-line separator
-/// (`SignablePayload::validate_charset`), so an unfiltered attacker-controlled
-/// string can render as extra apparent confirmed fields on the signing screen.
+/// Render chain-supplied text safely into a field, marking what cannot be
+/// rendered rather than dropping it.
 ///
 /// Every untrusted string reaching a field on either NEAR path -- the borsh
 /// transaction path and the intents path -- goes through here. Values typed as
@@ -27,36 +10,14 @@ const ELIDED: char = '?';
 ///
 /// `TokenId` is not such a value, despite its account-id-shaped prefix. Its
 /// `FromStr` parses only the contract half as an `AccountId` and takes the
-/// remainder verbatim into a plain `String`, so an asset id needs filtering
-/// like any other caller-supplied text.
+/// remainder verbatim into a plain `String`, so an asset id needs filtering like
+/// any other caller-supplied text.
 ///
-/// Substituting rather than rejecting is deliberate. A legitimate memo
-/// carrying an accented character or an emoji renders with markers instead of
-/// failing the whole parse, which keeps a non-ASCII memo from denying the
-/// signer their transaction.
-///
-/// A literal backslash is marked too, on availability grounds rather than
-/// spoofing: it serializes as `\\`, so a backslash before `u`/`t`/`r`/`b`/`f`
-/// or `/` puts a `FORBIDDEN_JSON_ESCAPES` substring in the serialized payload
-/// and `SignablePayload::validate_charset` rejects the whole transaction.
-///
-/// Double quotes are kept, which is where NEAR's allowed set differs from the
-/// Solana renderer's. They serialize as `\"`, which the core validator
-/// deliberately permits so field text can carry real embedded JSON -- and
-/// `ft_transfer_call`'s `msg` is exactly such a field, so marking its quotes
-/// would obscure structure a signer needs to read literally. The Solana
-/// renderer emits its own `{key:value}` bracketing, where an unescaped quote
-/// is ambiguous, so it marks them.
+/// See [`visualsign::charset::elide_unsupported`] for why marking beats both
+/// dropping and rejecting, and for why double quotes are kept -- which is where
+/// NEAR's allowed set differs from the Solana argument renderer's.
 pub(crate) fn charset_safe(text: &str) -> String {
-    text.chars()
-        .map(|c| {
-            if c == ' ' || (c.is_ascii_graphic() && c != '\\') {
-                c
-            } else {
-                ELIDED
-            }
-        })
-        .collect()
+    visualsign::charset::elide_unsupported(text)
 }
 
 /// Render `units / 10^decimals` as a decimal string with trailing-zero trim.

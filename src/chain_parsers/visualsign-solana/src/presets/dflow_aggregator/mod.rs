@@ -282,9 +282,7 @@ fn format_arg_value(value: &serde_json::Value) -> String {
 /// IDL strings here (pubkeys, enum names) are already clean; this is a
 /// defensive guard so the function's charset-safe contract always holds.
 fn charset_safe(text: &str) -> String {
-    text.chars()
-        .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '"' && c != '\\'))
-        .collect()
+    visualsign::charset::strip_unsupported(text)
 }
 
 /// If every element is an integer in `0..=255`, render the array as a single

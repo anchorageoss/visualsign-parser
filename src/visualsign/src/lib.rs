@@ -3,6 +3,7 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 pub mod anchorage_render;
+pub mod charset;
 pub mod encodings;
 pub mod errors;
 pub mod field_builders;

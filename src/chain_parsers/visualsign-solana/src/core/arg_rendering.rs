@@ -23,9 +23,7 @@ pub fn format_arg_value(value: &serde_json::Value) -> String {
 }
 
 fn charset_safe(text: &str) -> String {
-    text.chars()
-        .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '"' && c != '\\'))
-        .collect()
+    visualsign::charset::strip_unsupported(text)
 }
 
 fn bytes_as_hex(items: &[serde_json::Value]) -> Option<String> {
