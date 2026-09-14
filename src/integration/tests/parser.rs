@@ -1083,12 +1083,16 @@ async fn parser_near_intents_journey_e2e() {
 
         // 2. Deposit into the verifier. ft_transfer_call is a NEP-141 standard
         //    method, so it is decoded by method name on any token contract.
+        //    The amount resolves against the same registry the swap below uses:
+        //    a signer comparing what they deposited against what they are about
+        //    to spend is comparing two identical strings, not 25 base-unit
+        //    digits against a scaled decimal.
         let deposited = hop(&mut client, DEPOSIT).await;
         assert!(
             shows(&deposited, "Recipient", "intents.near"),
             "{deposited}"
         );
-        assert!(shows(&deposited, "Amount", "1"), "{deposited}");
+        assert!(shows(&deposited, "Amount", "1 wNEAR"), "{deposited}");
 
         // 3. The swap. A message, not a transaction, and the intents inside it
         //    render rather than showing the signer an escaped JSON string.
@@ -1113,10 +1117,14 @@ async fn parser_near_intents_journey_e2e() {
             "a rendered intent must not leave raw payload JSON on screen: {swap}"
         );
 
-        // 4. Withdraw back out.
+        // 4. Withdraw back out. The verifier's own ft_withdraw names the token
+        //    in its args rather than being addressed to it, so this is the
+        //    other way the decoder can arrive at an asset id -- and it has to
+        //    reach the same resolved amount.
         let withdrawn = hop(&mut client, WITHDRAW).await;
         assert!(shows(&withdrawn, "Token", "wrap.near"), "{withdrawn}");
         assert!(shows(&withdrawn, "Recipient", "alice.near"), "{withdrawn}");
+        assert!(shows(&withdrawn, "Amount", "1 wNEAR"), "{withdrawn}");
     }
 
     integration::Builder::new().execute(test).await

@@ -111,7 +111,12 @@ pub fn rejected_metadata_diagnostics(
 /// because stripping first would let a crafted id collapse onto a seeded one
 /// (`nep141:wrap\u{7f}.near` -> `nep141:wrap.near`) and borrow that token's
 /// symbol and decimals.
-fn token_amount_field(
+///
+/// Public because a chain's own action decoder renders the same amounts: a
+/// NEP-141 `ft_transfer_call` on NEAR moves the token an intents `transfer`
+/// moves, so the two must agree on its symbol, its scale, and on saying when
+/// the metadata behind them is unverified.
+pub fn token_amount_field(
     label: &str,
     asset_id: &str,
     raw: u128,

@@ -15,8 +15,10 @@ use visualsign::field_builders::{
     create_address_field, create_amount_field, create_number_field, create_raw_data_field,
     create_text_field,
 };
+use visualsign::registry::LayeredRegistry;
 
 use crate::fmt::{charset_safe, format_near, format_tgas};
+use crate::presets::intents::{NearTokenRegistry, token_amount_field};
 
 /// NEAR's native token symbol, used for `AmountV2` abbreviations.
 const NEAR_SYMBOL: &str = "NEAR";
@@ -34,6 +36,7 @@ pub fn render_action(
     action: &Action,
     total_actions: usize,
     receiver_id: &str,
+    registry: &LayeredRegistry<NearTokenRegistry>,
 ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
     match action {
         Action::Transfer(transfer) => {
@@ -54,7 +57,9 @@ pub fn render_action(
             let decoded =
                 match crate::presets::wrap::decode_args(receiver_id, &fc.method_name, &fc.args)? {
                     Some(fields) => Some(fields),
-                    None => decode_known_method_args(&fc.method_name, &fc.args)?,
+                    None => {
+                        decode_known_method_args(receiver_id, &fc.method_name, &fc.args, registry)?
+                    }
                 };
             match decoded {
                 Some(args_fields) => fields.extend(args_fields),
@@ -263,8 +268,10 @@ struct FtWithdrawArgs {
 /// field -- a partially decoded arg set must not masquerade as a fully
 /// understood call.
 fn decode_known_method_args(
+    receiver_id: &str,
     method: &str,
     args: &[u8],
+    registry: &LayeredRegistry<NearTokenRegistry>,
 ) -> Result<Option<Vec<SignablePayloadField>>, VisualSignError> {
     let mut fields = Vec::new();
     match method {
@@ -283,7 +290,16 @@ fn decode_known_method_args(
                 )?
                 .signable_payload_field,
             );
-            push_amount_and_notes(&mut fields, &parsed.amount, &parsed.memo, &parsed.msg)?;
+            // A NEP-141 call names no token: the token *is* the contract the
+            // call is addressed to.
+            push_amount_and_notes(
+                &mut fields,
+                &format!("nep141:{receiver_id}"),
+                &parsed.amount,
+                &parsed.memo,
+                &parsed.msg,
+                registry,
+            )?;
         }
         "ft_withdraw" => {
             let Ok(parsed) = serde_json::from_slice::<FtWithdrawArgs>(args) else {
@@ -304,25 +320,48 @@ fn decode_known_method_args(
                 )?
                 .signable_payload_field,
             );
-            push_amount_and_notes(&mut fields, &parsed.amount, &parsed.memo, &parsed.msg)?;
+            // The verifier's own `ft_withdraw` names the token in its args, so
+            // the receiver here is the verifier rather than the token.
+            push_amount_and_notes(
+                &mut fields,
+                &format!("nep141:{}", parsed.token),
+                &parsed.amount,
+                &parsed.memo,
+                &parsed.msg,
+                registry,
+            )?;
         }
         _ => return Ok(None),
     }
     Ok(Some(fields))
 }
 
-/// Shared tail of the decoded-args fields: the raw token amount plus any
-/// non-empty memo/msg. Amounts stay in raw token units -- decimals belong to
-/// per-token metadata, which has no trustworthy source here yet. The number
-/// field validates the amount is numeric, so a malformed amount rejects the
-/// payload instead of rendering.
+/// Shared tail of the decoded-args fields: the token amount plus any non-empty
+/// memo/msg.
+///
+/// The amount resolves through the same [`token_amount_field`] the intents
+/// renderer uses, against the same registry, so the deposit that moves a token
+/// into `intents.near` and the intent that then moves it inside name the same
+/// scale and the same symbol. An asset the registry cannot resolve renders raw
+/// and says so, rather than guessing at a scale.
+///
+/// A malformed amount rejects the payload rather than rendering: the parse is
+/// what turns the decimal string into the `u128` the resolver formats.
 fn push_amount_and_notes(
     fields: &mut Vec<SignablePayloadField>,
+    asset_id: &str,
     amount: &str,
     memo: &Option<String>,
     msg: &Option<String>,
+    registry: &LayeredRegistry<NearTokenRegistry>,
 ) -> Result<(), VisualSignError> {
-    fields.push(create_number_field("Amount", amount, "raw token units")?.signable_payload_field);
+    let raw: u128 = amount.parse().map_err(|_| {
+        VisualSignError::ValidationError(format!(
+            "token amount is not a u128: {}",
+            charset_safe(amount)
+        ))
+    })?;
+    fields.extend(token_amount_field("Amount", asset_id, raw, registry)?);
     if let Some(memo) = memo.as_deref().filter(|m| !m.is_empty()) {
         fields.push(create_text_field("Memo", &charset_safe(memo))?.signable_payload_field);
     }
@@ -490,6 +529,23 @@ mod tests {
     use near_primitives::action::{CreateAccountAction, TransferAction};
     use near_primitives::types::Balance;
     use visualsign::SignablePayloadField;
+
+    /// Render against an empty request-scoped registry, which is what a
+    /// request supplying no token metadata has. Resolution still finds the
+    /// compiled-in seed table, so a seeded asset renders by symbol here and an
+    /// unseeded one renders raw -- the same two outcomes a real request has.
+    fn render_action(
+        action: &Action,
+        total_actions: usize,
+        receiver_id: &str,
+    ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
+        super::render_action(
+            action,
+            total_actions,
+            receiver_id,
+            &LayeredRegistry::new(std::sync::Arc::new(NearTokenRegistry::default())),
+        )
+    }
 
     #[test]
     fn transfer_renders_single_amount_field() {

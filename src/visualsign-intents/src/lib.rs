@@ -23,7 +23,7 @@ pub use token_signature::{
     try_extract_from_chain_metadata as try_extract_token_metadata_from_chain_metadata,
 };
 
-pub use render::rejected_metadata_diagnostics;
+pub use render::{rejected_metadata_diagnostics, token_amount_field};
 
 /// Dev/CLI signing helpers for constructing signed `TokenMetadataEntry` proto
 /// values (e.g. for local test fixtures). Gated the same way as the

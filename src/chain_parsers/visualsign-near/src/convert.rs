@@ -296,7 +296,7 @@ impl NearVisualSignConverter {
         let tokens = if tx
             .actions()
             .iter()
-            .any(|action| token_metadata_consumer(tx.receiver_id().as_str(), action).is_some())
+            .any(|action| token_metadata_consumer(tx.receiver_id().as_str(), action))
         {
             token_registry_for(options, network, &self.trust_policy)
         } else {
@@ -310,6 +310,7 @@ impl NearVisualSignConverter {
                 action,
                 total_actions,
                 tx.receiver_id().as_str(),
+                &tokens.registry,
             )?);
             fields.extend(decode_intents(
                 tx.receiver_id().as_str(),
@@ -353,17 +354,12 @@ impl VisualSignConverterFromString<NearTransaction> for NearVisualSignConverter 
 pub(crate) const INTENTS_RECEIVER: &str = "intents.near";
 const EXECUTE_INTENTS_METHOD: &str = "execute_intents";
 
-/// The call on this action that a decoder resolving token amounts will handle,
-/// or `None` when nothing in the action loop consults the request-scoped token
-/// registry.
+/// The signed intent batch this action carries, or `None` for anything else.
 ///
-/// This is the one place that answers "is caller-supplied token metadata
-/// applicable here?". [`NearVisualSignConverter::render_on_chain`] gates
-/// building the registry on it and [`decode_intents`] dispatches on it, so the
-/// gate can never skip a call the decoder would have resolved amounts for --
-/// which would leave the signer raw base units and no diagnostic explaining
-/// why. A preset that resolves amounts from the registry belongs here.
-fn token_metadata_consumer<'a>(
+/// Narrower than [`token_metadata_consumer`] on purpose: this selects what
+/// [`decode_intents`] will try to decode, and a call that merely resolves a
+/// token amount is not an intents batch.
+fn execute_intents_call<'a>(
     receiver_id: &str,
     action: &'a Action,
 ) -> Option<&'a FunctionCallAction> {
@@ -372,6 +368,31 @@ fn token_metadata_consumer<'a>(
     };
     (receiver_id == INTENTS_RECEIVER && fc.method_name == EXECUTE_INTENTS_METHOD)
         .then(|| fc.as_ref())
+}
+
+/// Whether rendering this action consults the request-scoped token registry.
+///
+/// This is the one place that answers "is caller-supplied token metadata
+/// applicable here?", and [`NearVisualSignConverter::render_on_chain`] gates
+/// building the registry on it. The gate can never skip a call whose amounts a
+/// decoder would have resolved -- that would leave the signer raw base units
+/// and no diagnostic explaining why -- so anything that reads the registry
+/// belongs here: a signed intent batch, and the NEP-141 movements
+/// `actions::decode_known_method_args` resolves.
+fn token_metadata_consumer(receiver_id: &str, action: &Action) -> bool {
+    if execute_intents_call(receiver_id, action).is_some() {
+        return true;
+    }
+    let Action::FunctionCall(fc) = action else {
+        return false;
+    };
+    // A deposit into `intents.near` and the intent that then moves the same
+    // token must name the same symbol and the same scale, so both resolve
+    // through the same registry.
+    matches!(
+        fc.method_name.as_str(),
+        "ft_transfer" | "ft_transfer_call" | "ft_withdraw"
+    )
 }
 
 /// Decode an `execute_intents` call to `intents.near` and render the signed
@@ -385,7 +406,7 @@ fn decode_intents(
     registry: &LayeredRegistry<NearTokenRegistry>,
     network: NearNetwork,
 ) -> Result<Vec<SignablePayloadField>, VisualSignError> {
-    let Some(fc) = token_metadata_consumer(receiver_id, action) else {
+    let Some(fc) = execute_intents_call(receiver_id, action) else {
         return Ok(vec![]);
     };
     crate::presets::intents::try_decode_execute_intents(
@@ -756,6 +777,81 @@ mod tests {
         assert_eq!(payload.title, "Unwrap");
         let json = payload.to_json().expect("json");
         assert!(json.contains("wNEAR"), "an unwrap moves wNEAR: {json}");
+    }
+
+    /// Depositing into `intents.near` is a NEP-141 `ft_transfer_call` on the
+    /// token contract, and the same wNEAR the intents renderer would show as
+    /// "1 wNEAR" has to read the same here. A raw base-unit amount is 25 digits
+    /// for a 24-decimal token, which a signer comparing the deposit against the
+    /// swap that follows it cannot line up by eye.
+    #[test]
+    fn a_nep141_transfer_resolves_its_amount_against_the_token_it_calls() {
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(
+                wrap_call(
+                    "ft_transfer_call",
+                    r#"{"receiver_id":"intents.near","amount":"1000000000000000000000000","msg":"alice.near"}"#,
+                    1,
+                ),
+                VisualSignOptions::default(),
+            )
+            .expect("convert")
+            .payload;
+        let json = payload.to_json().expect("json");
+        assert!(
+            json.contains("1 wNEAR"),
+            "the deposit must name the token it moves: {json}"
+        );
+        assert!(
+            !json.contains("1000000000000000000000000"),
+            "the raw amount must not survive alongside the resolved one: {json}"
+        );
+    }
+
+    /// An unseeded token has no symbol or scale to resolve against, so the
+    /// amount stays raw and says which asset it could not resolve. Guessing at
+    /// a scale would be worse than showing base units.
+    #[test]
+    fn a_nep141_transfer_of_an_unresolvable_token_renders_raw_and_says_so() {
+        let tx = near_tx_as(
+            "alice.near",
+            "token.example.near",
+            vec![Action::FunctionCall(Box::new(FunctionCallAction {
+                method_name: "ft_transfer".to_string(),
+                args: br#"{"receiver_id":"bob.near","amount":"4200"}"#.to_vec(),
+                gas: Gas::from_gas(30_000_000_000_000),
+                deposit: Balance::from_yoctonear(1),
+            }))],
+        );
+        let payload = NearVisualSignConverter::new()
+            .to_visual_sign_payload(tx, VisualSignOptions::default())
+            .expect("convert")
+            .payload;
+        let json = payload.to_json().expect("json");
+        assert!(
+            json.contains("4200") && json.contains("unresolved"),
+            "an unresolvable token renders raw and names itself: {json}"
+        );
+    }
+
+    /// An amount that is not a u128 rejects the payload rather than rendering.
+    /// It reaches the resolver as a number, so a string that is not one has no
+    /// honest rendering -- and a wallet that sent one is not sending what it
+    /// thinks it is.
+    #[test]
+    fn a_nep141_transfer_with_a_non_numeric_amount_is_rejected() {
+        let result = NearVisualSignConverter::new().to_visual_sign_payload(
+            wrap_call(
+                "ft_transfer_call",
+                r#"{"receiver_id":"intents.near","amount":"lots","msg":""}"#,
+                1,
+            ),
+            VisualSignOptions::default(),
+        );
+        assert!(
+            matches!(result, Err(VisualSignError::ValidationError(_))),
+            "a non-numeric amount must not render: {result:?}"
+        );
     }
 
     /// The same method name on another contract is not a wrap, so the title
@@ -1492,7 +1588,7 @@ mod tests {
                 .expect("decode");
                 if !rendered.is_empty() {
                     assert!(
-                        token_metadata_consumer(receiver, &action).is_some(),
+                        token_metadata_consumer(receiver, &action),
                         "{receiver} renders {} intent fields the gate does not recognize, so the \
                          registry would be skipped: {action:?}",
                         rendered.len()
@@ -1503,7 +1599,7 @@ mod tests {
         // The invariant holds vacuously if nothing renders, so pin the one
         // combination that must.
         assert!(
-            token_metadata_consumer(INTENTS_RECEIVER, &execute_intents_action()).is_some(),
+            token_metadata_consumer(INTENTS_RECEIVER, &execute_intents_action()),
             "an execute_intents call to the verifier is the gate's whole purpose"
         );
     }
