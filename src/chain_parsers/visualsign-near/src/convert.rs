@@ -934,6 +934,42 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    /// A NEP-413 envelope recorded from the live app at near.com, not written
+    /// here -- see tests/fixtures/README.md for how and why.
+    ///
+    /// The rendering is what a signer would approve, so the assertions are the
+    /// facts they need: which intent, to whom, and how much of what.
+    #[test]
+    fn renders_the_transfer_intent_near_com_produces() {
+        const CAPTURED: &str = include_str!("../tests/fixtures/near-com-transfer-intent.json");
+
+        let converter = NearVisualSignConverter::new();
+        let result = converter
+            .to_visual_sign_payload_from_string(CAPTURED.trim(), VisualSignOptions::default())
+            .expect("the payload the live app produces must render");
+        let payload = result.payload;
+
+        assert_eq!(payload.title, "NEAR Intent: Transfer");
+
+        let shows = |label: &str, want: &str| {
+            payload
+                .fields
+                .iter()
+                .any(|f| f.label() == label && f.fallback_text().contains(want))
+        };
+        assert!(shows("Intent", "Transfer"), "{:?}", payload.fields);
+        assert!(
+            shows(
+                "To",
+                "bc285a4d4e98bd8ea3fb4590917628a98400e8c3c85a88ab4b1af783603113ad"
+            ),
+            "the receiver has to reach the signer"
+        );
+        // nep141:wrap.near at 24 decimals, resolved rather than shown raw.
+        assert!(shows("Amount", "25 wNEAR"), "{:?}", payload.fields);
+        assert!(shows("NEP-413 Recipient", "intents.near"));
+    }
+
     #[test]
     fn execute_intents_call_renders_intents() {
         let inner = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
