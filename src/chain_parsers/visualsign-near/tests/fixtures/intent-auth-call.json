@@ -1,0 +1,1 @@
+{"message":"{\"signer_id\":\"alice.near\",\"deadline\":\"2999-01-01T00:00:00Z\",\"intents\":[{\"intent\":\"auth_call\",\"contract_id\":\"vault.near\",\"msg\":\"{\\\"action\\\":\\\"claim\\\"}\",\"attached_deposit\":\"1\"}]}","nonce":"u9yiLWLS64I6o+C0von0Kl0GbNxXM06zHchor8QApqc=","recipient":"intents.near"}

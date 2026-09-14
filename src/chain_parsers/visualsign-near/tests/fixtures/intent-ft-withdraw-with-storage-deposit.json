@@ -1,0 +1,1 @@
+{"message":"{\"signer_id\":\"alice.near\",\"deadline\":\"2999-01-01T00:00:00Z\",\"intents\":[{\"intent\":\"ft_withdraw\",\"token\":\"wrap.near\",\"receiver_id\":\"bob.near\",\"amount\":\"1000000000000000000000000\",\"storage_deposit\":\"1250000000000000000000\"}]}","nonce":"jxiJTboYwOkDoWOyx6z0iXa/WrVlKNkcUndLBBJE+co=","recipient":"intents.near"}

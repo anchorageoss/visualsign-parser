@@ -1,0 +1,1 @@
+{"message":"{\"signer_id\":\"alice.near\",\"deadline\":\"2999-01-01T00:00:00Z\",\"intents\":[{\"intent\":\"nft_withdraw\",\"token\":\"nft.near\",\"receiver_id\":\"bob.near\",\"token_id\":\"1337\",\"memo\":\"deed\"}]}","nonce":"gxL6RmdORIeza3Q04js+e2/qIdGbW34IDae0bIMHsR0=","recipient":"intents.near"}

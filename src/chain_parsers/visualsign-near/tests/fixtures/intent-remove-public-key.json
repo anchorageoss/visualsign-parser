@@ -1,0 +1,1 @@
+{"message":"{\"signer_id\":\"alice.near\",\"deadline\":\"2999-01-01T00:00:00Z\",\"intents\":[{\"intent\":\"remove_public_key\",\"public_key\":\"ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN\"}]}","nonce":"cUEsOwMid3wB4BAJeCp1KG+GY+wQoMKC/J5RGBxgBU4=","recipient":"intents.near"}

@@ -1,0 +1,1 @@
+{"message":"{\"signer_id\":\"alice.near\",\"deadline\":\"2999-01-01T00:00:00Z\",\"intents\":[{\"intent\":\"storage_deposit\",\"contract_id\":\"wrap.near\",\"deposit_for_account_id\":\"bob.near\",\"amount\":\"1250000000000000000000\"}]}","nonce":"0iS14IxRgRyCFItw2B6+Kd+Uu3dlXAuNvdR8sCWMrcM=","recipient":"intents.near"}
