@@ -388,8 +388,16 @@ mod tests {
         // Parsing alone would still pass if the target lost its posture flag, which
         // `Cli::execute` refuses to start without. Resolve it too, so the guard
         // covers the whole startup path the target actually takes.
-        ParserOpts { parsed }
-            .abi_trust()
+        let opts = ParserOpts { parsed };
+        opts.abi_trust()
             .unwrap_or_else(|e| panic!("the parser_app target states no usable ABI posture: {e}"));
+
+        // `abi_trust()` never touches `--host-ip`/`--host-port` -- `OptionsParser`
+        // accepts any string for them, and only `Cli::execute`'s later call to
+        // `host_addr()` actually parses the IP/port and panics on invalid input.
+        // Without this call, a malformed host or port -- the exact class of bug
+        // this guard exists for, since `--usock` was this same recipe's flag
+        // before it -- would still pass.
+        opts.host_addr();
     }
 }
