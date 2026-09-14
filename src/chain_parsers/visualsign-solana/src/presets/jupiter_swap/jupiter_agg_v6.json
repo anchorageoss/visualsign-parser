@@ -2815,6 +2815,10 @@
           {
             "name": "output_amount",
             "type": "u64"
+          },
+          {
+            "name": "amm",
+            "type": "pubkey"
           }
         ],
         "kind": "struct"
