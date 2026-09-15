@@ -169,6 +169,13 @@ impl AbiRegistry {
     ///
     /// Returns `None` if the address is not mapped.
     pub fn get_abi_kind(&self, chain_id: ChainId, address: Address) -> Option<AbiKind> {
+        if quint_oracle::enabled() {
+            quint_oracle::Event::builder(quint_oracle::current_test(), "read_abi_kind")
+                .argument("chainId", chain_id, Some("ETH_CHAIN_IDS"))
+                .argument("addr", address.to_string().as_str(), Some("ETH_ADDRS"))
+                .scope("metadata-signature-trust")
+                .send();
+        }
         self.address_mappings
             .get(&(chain_id, address))
             .map(|m| m.abi_kind)
@@ -187,6 +194,13 @@ impl AbiRegistry {
         chain_id: ChainId,
         proxy: Address,
     ) -> Option<(Address, Arc<JsonAbi>)> {
+        if quint_oracle::enabled() {
+            quint_oracle::Event::builder(quint_oracle::current_test(), "read_implementation_abi")
+                .argument("chainId", chain_id, Some("ETH_CHAIN_IDS"))
+                .argument("addr", proxy.to_string().as_str(), Some("ETH_ADDRS"))
+                .scope("metadata-signature-trust")
+                .send();
+        }
         let mapping = self.address_mappings.get(&(chain_id, proxy))?;
         if mapping.abi_kind != AbiKind::Proxy {
             return None;
