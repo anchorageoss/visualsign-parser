@@ -119,15 +119,42 @@ jobs:
           HOST_IP: ${{ inputs.host_ip || '0.0.0.0' }}
           HOST_PORT: ${{ inputs.host_port || '3000' }}
           ABI_SIGNER_PUBKEY: ${{ inputs.abi_signer_pubkey || '' }}
+          TVC_TEST_ABI_SIGNER: ${{ vars.TVC_TEST_ABI_SIGNER }}
+          # Public half of visualsign-ethereum's CLI_DEV_SIGNING_KEY_SEED.
+          # Pinned by `dev_abi_signer_pubkey_is_pinned` in that crate.
+          DEV_ABI_SIGNER_PUBKEY: 0424653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c119fc5009a032aa9fe47f5e149bb8442f71f884ccb516590686d8ff6ab91c613
         run: |
+          # Resolved in order. The dispatch guard stays first on purpose:
+          # `app_id` is free text there, so a blank posture must not resolve to
+          # anything -- not even to TVC_TEST_ABI_SIGNER below, which would push
+          # a test key at whatever app was named.
           if [ -z "$ABI_SIGNER_PUBKEY" ] && [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             echo "::error::abi_signer_pubkey is required for workflow_dispatch: pass a hex secp256k1 signer pubkey, or the literal 'unsigned' to explicitly deploy --accept-unsigned-abis."
             exit 1
-          fi
-          if [ "$ABI_SIGNER_PUBKEY" = "unsigned" ] || [ -z "$ABI_SIGNER_PUBKEY" ]; then
+          elif [ "$ABI_SIGNER_PUBKEY" = "unsigned" ]; then
             abi_trust_args=(--accept-unsigned-abis)
-          else
+          elif [ -n "$ABI_SIGNER_PUBKEY" ]; then
             abi_trust_args=(--accept-signatures-from-pubkey "$ABI_SIGNER_PUBKEY")
+          else
+            # Label-triggered validation deploy. Always exercise
+            # *require-signed*: that is the posture where a wrong key or a bad
+            # pivotArgs composition makes parser_app refuse to start, so it is
+            # the one worth validating end to end -- the permissive path cannot
+            # fail that way, so validating it proves less.
+            #
+            # The key is derived, not configured: it is the public half of
+            # visualsign-ethereum's CLI_DEV_SIGNING_KEY_SEED, the same dev key
+            # parser_cli signs its own ABI files with, so this needs no repo
+            # variable and no admin action. `dev_abi_signer_pubkey_is_pinned`
+            # in that crate fails if the seed ever changes, so this literal
+            # cannot silently go stale. TVC_TEST_ABI_SIGNER overrides it if a
+            # different signer is ever wanted.
+            #
+            # Safe for this path only because it deploys to the dev TEST app
+            # (vars.TVC_TEST_APP_ID) and the smoke check is a Solana V0+ALT tx,
+            # which no Ethereum ABI posture can affect. Do not point a real app
+            # at a well-known dev key.
+            abi_trust_args=(--accept-signatures-from-pubkey "${TVC_TEST_ABI_SIGNER:-$DEV_ABI_SIGNER_PUBKEY}")
           fi
           ./tools/tvc-deploy/target/release/tvc-deploy deploy \
             --app-id "$APP_ID" \
