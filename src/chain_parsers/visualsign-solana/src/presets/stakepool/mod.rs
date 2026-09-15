@@ -3,7 +3,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    resolve_program_display,
 };
 use config::StakepoolConfig;
 use spl_stake_pool::instruction::StakePoolInstruction;
@@ -38,10 +39,7 @@ fn create_stakepool_preview_layout(
     instruction: &StakePoolInstruction,
     context: &VisualizerContext,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
-    let program_id_str = match context.program_id() {
-        ProgramRef::Resolved(pk) => pk.to_string(),
-        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
-    };
+    let program_id_str = resolve_program_display(context);
     let instruction_name = format_stake_pool_instruction(instruction);
 
     let condensed_fields = vec![create_text_field("Instruction", &instruction_name)?];
