@@ -51,7 +51,11 @@ pub fn resolve_transaction_input(input: &str) -> Result<String, String> {
 /// A JSON envelope is itself a transaction format, and its string values can
 /// legitimately contain spaces, so stripping is confined to the encodings that
 /// cannot carry whitespace at all. Leading/trailing whitespace comes off
-/// either way, so a file ending in a newline behaves the same for both.
+/// either way, so a file ending in a newline behaves the same for both. The
+/// JSON branch trims ASCII whitespace only, for the same reason
+/// `strip_ascii_whitespace` does below: exotic Unicode whitespace (e.g. NBSP)
+/// at the edges of the buffer stays put and surfaces as a decode error
+/// instead of being silently swallowed.
 ///
 /// A leading `{` is the whole test. Every JSON transaction format this CLI
 /// accepts is an object, and no hex or base64 body can begin with that byte,
@@ -72,8 +76,12 @@ pub fn resolve_transaction_input(input: &str) -> Result<String, String> {
 /// order mark, and inside a JSON string value it is the caller's data.
 fn resolve_buffer(raw: &str) -> String {
     let raw = raw.strip_prefix('\u{feff}').unwrap_or(raw);
-    if raw.trim_start().starts_with('{') {
-        raw.trim().to_string()
+    if raw
+        .trim_start_matches(|c: char| c.is_ascii_whitespace())
+        .starts_with('{')
+    {
+        raw.trim_matches(|c: char| c.is_ascii_whitespace())
+            .to_string()
     } else {
         strip_ascii_whitespace(raw)
     }
@@ -218,6 +226,18 @@ mod tests {
     fn only_one_leading_bom_is_dropped() {
         let doubled = "\u{feff}\u{feff}{\"a\":1}";
         assert_eq!(resolve_buffer(doubled), "\u{feff}{\"a\":1}");
+    }
+
+    #[test]
+    fn non_ascii_whitespace_at_json_edges_is_preserved() {
+        // NBSP is `White_Space` per Unicode, so a Unicode-aware trim (as
+        // opposed to the ASCII-only trim `resolve_buffer` uses) would strip
+        // it silently instead of leaving it for `serde_json` to reject. The
+        // leading `{` still passes detection since nothing ASCII-whitespace
+        // precedes it, so this exercises the JSON branch's trim, not the
+        // hex/base64 fallback.
+        let padded = "{\"a\":1}\u{00A0}";
+        assert_eq!(resolve_buffer(padded), padded);
     }
 
     #[test]
