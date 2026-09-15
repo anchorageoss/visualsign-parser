@@ -250,8 +250,7 @@ mod tests {
 
     #[test]
     fn test_build_fallback_fields_renders_unknown_instruction() {
-        let (title, condensed, expanded) =
-            build_fallback_fields(DRIFT_PROGRAM_ID).unwrap();
+        let (title, condensed, expanded) = build_fallback_fields(DRIFT_PROGRAM_ID).unwrap();
         assert_eq!(title, "Drift: Unknown Instruction");
         assert_eq!(condensed.len(), 2);
         assert_eq!(expanded.len(), 2);
@@ -261,8 +260,7 @@ mod tests {
     fn test_build_parsed_fields_renders_deposit_instruction() {
         let instruction = make_parsed_instruction("deposit");
         let (title, condensed, expanded) =
-            build_parsed_fields(&instruction, DRIFT_PROGRAM_ID)
-                .unwrap();
+            build_parsed_fields(&instruction, DRIFT_PROGRAM_ID).unwrap();
         assert_eq!(title, "Drift: deposit");
         assert!(!condensed.is_empty());
         assert!(!expanded.is_empty());

@@ -86,7 +86,11 @@ impl InstructionVisualizer for MeteoraDlmmVisualizer {
             expanded: Some(expanded),
         };
 
-        let fallback_text = format!("Program ID: {}\nData: {}", view.program_id, hex::encode(data));
+        let fallback_text = format!(
+            "Program ID: {}\nData: {}",
+            view.program_id,
+            hex::encode(data)
+        );
 
         Ok(AnnotatedPayloadField {
             static_annotation: None,
@@ -116,11 +120,7 @@ fn get_meteora_dlmm_idl() -> Option<&'static Idl> {
         .as_ref()
 }
 
-fn build_named_accounts(
-    idl: &Idl,
-    data: &[u8],
-    accounts: &[String],
-) -> Vec<(String, String)> {
+fn build_named_accounts(idl: &Idl, data: &[u8], accounts: &[String]) -> Vec<(String, String)> {
     if data.len() < 8 {
         return Vec::new();
     }

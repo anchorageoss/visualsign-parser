@@ -2014,6 +2014,7 @@ dependencies = [
  "anyhow",
  "clap",
  "comfy-table",
+ "k256",
  "qos_p256",
  "serde",
  "serde_json",

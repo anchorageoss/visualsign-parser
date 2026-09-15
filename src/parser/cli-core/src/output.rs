@@ -138,12 +138,51 @@ impl<'a> HumanReadableFormatter<'a> {
                     prefix, common.label, address_v2.address
                 )?;
             }
+            // Rendered rather than falling through to the accessor arm below,
+            // which would reduce a diagnostic to its label and fallback text and
+            // drop the level, rule and instruction index that carry most of its
+            // meaning. `--output json` carries the full structured form; this is
+            // the human view of the same finding.
+            #[cfg(feature = "diagnostics")]
+            SignablePayloadField::Diagnostic { diagnostic, .. } => {
+                write_diagnostic(diagnostic, writer, prefix)?;
+            }
+            // Every remaining variant renders from the accessors, which are
+            // exhaustive over the enum. A variant added later prints its
+            // label and value rather than silently reading as "Unknown".
             _ => {
-                writeln!(writer, "{} Field: {}", prefix, common_label(field))?;
+                writeln!(
+                    writer,
+                    "{} {}: {}",
+                    prefix,
+                    field.label(),
+                    field.fallback_text()
+                )?;
             }
         }
         Ok(())
     }
+}
+
+/// Render one diagnostic as `[level] rule (instruction N): message`.
+///
+/// Split out of `format_field` so that arm stays a single line there: the match
+/// covers every field variant and is already at the length clippy allows.
+#[cfg(feature = "diagnostics")]
+fn write_diagnostic(
+    diagnostic: &visualsign::SignablePayloadFieldDiagnostic,
+    writer: &mut dyn std::fmt::Write,
+    prefix: &str,
+) -> std::fmt::Result {
+    let index = diagnostic
+        .instruction_index
+        .map(|i| format!(" (instruction {i})"))
+        .unwrap_or_default();
+    writeln!(
+        writer,
+        "{} [{}] {}{}: {}",
+        prefix, diagnostic.level, diagnostic.rule, index, diagnostic.message
+    )
 }
 
 impl std::fmt::Display for HumanReadableFormatter<'_> {
@@ -170,17 +209,6 @@ impl std::fmt::Display for HumanReadableFormatter<'_> {
         }
 
         Ok(())
-    }
-}
-
-/// Extracts the common label from any field type.
-fn common_label(field: &SignablePayloadField) -> String {
-    match field {
-        SignablePayloadField::TextV2 { common, .. }
-        | SignablePayloadField::PreviewLayout { common, .. }
-        | SignablePayloadField::AmountV2 { common, .. }
-        | SignablePayloadField::AddressV2 { common, .. } => common.label.clone(),
-        _ => "Unknown".to_string(),
     }
 }
 
@@ -235,4 +263,132 @@ pub fn parse_and_display(
         eprintln!("{}", hex::encode(bytes));
     }
     Ok(())
+}
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use visualsign::field_builders::{
+        create_amount_field, create_number_field, create_preview_layout, create_text_field,
+    };
+    #[cfg(feature = "diagnostics")]
+    use visualsign::{SignablePayloadFieldCommon, SignablePayloadFieldDiagnostic};
+
+    fn payload_of(fields: Vec<SignablePayloadField>) -> SignablePayload {
+        SignablePayload::new(0, "Test".to_string(), None, fields, "TestTx".to_string())
+    }
+
+    fn render(fields: Vec<SignablePayloadField>) -> String {
+        HumanReadableFormatter::new(&payload_of(fields), false).to_string()
+    }
+
+    // `Number` is emitted for the amount of every NEAR fungible-token
+    // transfer. Falling through to the catch-all arm hid the amount behind
+    // "Field: Unknown" while the recipient, memo and gas all rendered.
+    #[test]
+    fn a_number_field_renders_its_label_and_value() {
+        let field = create_number_field("Amount", "1000000", "raw token units")
+            .unwrap()
+            .signable_payload_field;
+        let out = render(vec![field]);
+        assert!(out.contains("Amount: 1000000 raw token units"), "{out}");
+        assert!(!out.contains("Unknown"), "{out}");
+    }
+
+    /// Every variant must render its label and value. The catch-all arm reads
+    /// from `label()`/`fallback_text()`, which are exhaustive over the enum,
+    /// so a variant added later cannot silently print as "Unknown".
+    #[test]
+    fn no_field_variant_renders_as_unknown() {
+        let fields = vec![
+            create_text_field("Note", "hello")
+                .unwrap()
+                .signable_payload_field,
+            create_amount_field("Total", "1.5", "ETH")
+                .unwrap()
+                .signable_payload_field,
+            create_number_field("Count", "7", "items")
+                .unwrap()
+                .signable_payload_field,
+        ];
+        let out = render(fields);
+        assert!(!out.contains("Unknown"), "{out}");
+        for expected in ["Note: hello", "Total: 1.5 ETH", "Count: 7 items"] {
+            assert!(out.contains(expected), "missing {expected} in:\n{out}");
+        }
+    }
+
+    // The Solana presets that emit `Number` -- jupiter_swap's slippage and
+    // platform fee, compute_budget's limits, system's account space -- put it
+    // inside a `PreviewLayout`'s expanded list, so the nested render path is
+    // the one that actually hid them.
+    #[test]
+    fn a_number_nested_in_a_preview_layout_renders_its_label_and_value() {
+        let nested = create_number_field("Slippage", "50", "bps").unwrap();
+        let layout = create_preview_layout("Swap", "via Jupiter".to_string(), vec![nested]);
+        let out = render(vec![layout.signable_payload_field]);
+        assert!(out.contains("Slippage: 50 bps"), "{out}");
+        assert!(!out.contains("Unknown"), "{out}");
+    }
+
+    #[cfg(feature = "diagnostics")]
+    fn diagnostic_field(
+        rule: &str,
+        level: &str,
+        message: &str,
+        instruction_index: Option<u32>,
+    ) -> SignablePayloadField {
+        SignablePayloadField::Diagnostic {
+            common: SignablePayloadFieldCommon {
+                fallback_text: format!("{level}: {message}"),
+                label: rule.to_string(),
+            },
+            diagnostic: SignablePayloadFieldDiagnostic {
+                rule: rule.to_string(),
+                domain: "test".to_string(),
+                level: level.to_string(),
+                message: message.to_string(),
+                instruction_index,
+            },
+        }
+    }
+
+    /// A diagnostic has to say what it found. Falling through to the catch-all
+    /// arm prints "Field: Unknown", which reports that something was emitted
+    /// while withholding every part a reader needs.
+    #[cfg(feature = "diagnostics")]
+    #[test]
+    fn human_output_renders_a_diagnostic_rule_level_and_message() {
+        let rendered = render(vec![diagnostic_field(
+            "deadline",
+            "warn",
+            "deadline has passed",
+            None,
+        )]);
+        assert!(
+            rendered.contains("[warn] deadline: deadline has passed"),
+            "diagnostic should render its level, rule, and message: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Field: Unknown"),
+            "diagnostic must not fall through to the unknown-field arm: {rendered}"
+        );
+    }
+
+    /// Solana's diagnostics carry the instruction they came from; dropping it
+    /// leaves the reader unable to tell which instruction to look at.
+    #[cfg(feature = "diagnostics")]
+    #[test]
+    fn human_output_includes_a_diagnostics_instruction_index() {
+        let rendered = render(vec![diagnostic_field(
+            "transaction::oob_account_index",
+            "warn",
+            "index 7 out of bounds",
+            Some(2),
+        )]);
+        assert!(
+            rendered.contains("(instruction 2)"),
+            "an indexed diagnostic should name its instruction: {rendered}"
+        );
+    }
 }

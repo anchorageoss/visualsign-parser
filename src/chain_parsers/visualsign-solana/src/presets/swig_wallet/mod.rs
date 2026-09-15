@@ -871,10 +871,7 @@ fn build_inner_instruction(
     })
 }
 
-fn visualize_inner_instruction(
-    instruction: Instruction,
-    parent_depth: usize,
-) -> Option<String> {
+fn visualize_inner_instruction(instruction: Instruction, parent_depth: usize) -> Option<String> {
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
     let visualizer_refs: Vec<&dyn InstructionVisualizer> =
         visualizers.iter().map(|viz| viz.as_ref()).collect();
@@ -1140,9 +1137,7 @@ fn nested_too_deeply_field(
     instruction_number: usize,
     depth: usize,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
-    let summary = format!(
-        "Swig: Nested too deeply (depth {depth}, limit {MAX_CALL_DEPTH})"
-    );
+    let summary = format!("Swig: Nested too deeply (depth {depth}, limit {MAX_CALL_DEPTH})");
     let condensed = SignablePayloadFieldListLayout {
         fields: vec![make_text_field("Instruction", summary.clone())?],
     };
@@ -1150,10 +1145,7 @@ fn nested_too_deeply_field(
         fields: vec![
             make_text_field("Instruction Type", "Nested Too Deeply")?,
             make_text_field("Nesting Depth", depth.to_string())?,
-            make_text_field(
-                "Nesting Depth Limit",
-                MAX_CALL_DEPTH.to_string(),
-            )?,
+            make_text_field("Nesting Depth Limit", MAX_CALL_DEPTH.to_string())?,
         ],
     };
     let preview_layout = SignablePayloadFieldPreviewLayout {
@@ -2772,8 +2764,8 @@ mod tests {
             //    data(inner_data)]
             let mut data: Vec<u8> = vec![0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
             for _ in 0..levels {
-                let inner_len = u16::try_from(data.len())
-                    .expect("nested payload exceeds u16 bound");
+                let inner_len =
+                    u16::try_from(data.len()).expect("nested payload exceeds u16 bound");
                 let mut next = Vec::with_capacity(data.len() + 14);
                 // SignV1 header: payload_len = 6 + inner_len (compact bytes wrapping `data`).
                 let payload_len = 6u16 + inner_len;

@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 qos_core = { workspace = true}
+qos_crypto = { workspace = true } # sha_256 for payment_marker hashing
 
 tonic = { version = "0.10", default-features = false }
 prost = { version = "0.12", features = [
@@ -16,6 +17,11 @@ borsh = { version = "1.0", features = [
   "std",
   "derive",
 ], default-features = false }
+generated = { path = "../generated", features = ["serde_derive"] }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

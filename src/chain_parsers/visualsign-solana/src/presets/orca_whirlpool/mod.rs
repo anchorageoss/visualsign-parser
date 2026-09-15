@@ -62,7 +62,11 @@ impl InstructionVisualizer for OrcaWhirlpoolVisualizer {
             expanded: Some(expanded),
         };
 
-        let fallback_text = format!("Program ID: {}\nData: {}", view.program_id, hex::encode(data));
+        let fallback_text = format!(
+            "Program ID: {}\nData: {}",
+            view.program_id,
+            hex::encode(data)
+        );
 
         Ok(AnnotatedPayloadField {
             static_annotation: None,

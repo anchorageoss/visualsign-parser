@@ -7,6 +7,9 @@ publish = false
 [features]
 # Exposes test helper utilities for use in downstream crates' test suites.
 test-utils = []
+# Renders `SignablePayloadField::Diagnostic`, which the core crate only defines
+# under its own `diagnostics` feature.
+diagnostics = ["visualsign/diagnostics"]
 
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }

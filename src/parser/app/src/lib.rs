@@ -11,6 +11,8 @@
 
 pub mod cli;
 
+pub mod config;
+
 pub mod host;
 
 pub mod service;
@@ -20,6 +22,9 @@ pub mod errors;
 pub mod chain_conversion;
 
 pub mod registry;
+
+/// VerifiedPaymentMarker verification
+pub mod payment_verify;
 
 /// Routes for the parser service
 pub mod routes {

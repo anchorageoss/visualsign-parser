@@ -38,14 +38,19 @@ generated = { git = "https://github.com/anchorageoss/visualsign-parser", package
 ### Basic usage
 
 ```rust
+use parser_app::config::ParserConfig;
 use parser_app::registry::create_registry;
 use visualsign::registry::Chain;
 use visualsign::vsptrait::{VisualSignOptions, DeveloperConfig};
 use generated::parser::{ChainMetadata, EthereumMetadata, chain_metadata::Metadata};
 
 fn main() {
-    // Create the parser registry (includes all supported chains)
-    let registry = create_registry();
+    // Create the parser registry (includes all supported chains).
+    // The config picks the ABI trust posture: `accept_unsigned()` registers
+    // caller-supplied ABI mappings that carry no signature. See "ABI trust
+    // posture" below for the stricter alternative.
+    let config = ParserConfig::accept_unsigned();
+    let registry = create_registry(&config);
 
     // Raw transaction hex (with or without 0x prefix)
     // This is a complete EIP-1559 transaction
@@ -163,11 +168,46 @@ let options = VisualSignOptions {
     ..Default::default()
 };
 
-// Parse using the standard registry; ABIs are extracted from metadata automatically
-let registry = create_registry();
+// Parse using the standard registry; ABIs are extracted from metadata automatically.
+// `accept_unsigned()` is required for the `signature: None` mapping above to be registered.
+let config = ParserConfig::accept_unsigned();
+let registry = create_registry(&config);
 let payload = registry.convert_transaction(&Chain::Ethereum, raw_tx, options)
     .expect("failed to parse transaction");
 ```
+
+### ABI trust posture
+
+Whether the parser registers caller-supplied ABI mappings that carry no signature is a
+deploy-time choice, not a per-request one. You pick it when you build the `ParserConfig`:
+
+```rust
+use parser_app::config::ParserConfig;
+use parser_app::payment_verify::PaymentPolicy;
+use visualsign::signing::MetadataTrustPolicy;
+use visualsign_ethereum::abi_metadata::signer_allowlist_from_hex;
+
+// Register unsigned ABI mappings. A signature that is present must still verify,
+// but its signer is not checked against an allowlist.
+let permissive = ParserConfig::accept_unsigned();
+
+// Only register mappings signed by an allowlisted secp256k1 key. Unsigned and
+// otherwise-signed mappings are dropped. Payment verification is disabled here;
+// see `PaymentPolicy` if your deployment requires gateway-signed payment markers.
+let allowlist = signer_allowlist_from_hex(&["0x04...".to_string()])
+    .expect("invalid signer public key");
+let strict = ParserConfig::new(
+    MetadataTrustPolicy::RequireAllowlistedSigner(allowlist),
+    PaymentPolicy::Disabled,
+);
+```
+
+Under `RequireAllowlistedSigner`, an empty allowlist rejects every mapping. Note that this
+posture governs Ethereum `abi_mappings` only. Solana `idl_mappings` go through a separate
+path.
+
+`signer_allowlist_from_hex` comes from the `visualsign-ethereum` crate, so add it to your
+dependencies if you use the strict posture.
 
 ### Adding custom IDLs (Solana)
 

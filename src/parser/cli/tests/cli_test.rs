@@ -1,4 +1,18 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+// Helpers and per-chain fixtures below are shared across this file's tests,
+// so building with only one chain feature (as parser-cli-narrow-build-check
+// in the Makefile does) leaves whatever the other chains' tests alone use
+// genuinely dead. Only enforce dead-code/unused-import lints when every
+// chain feature is on -- the configuration where everything here is used.
+#![cfg_attr(
+    not(all(
+        feature = "ethereum",
+        feature = "solana",
+        feature = "near",
+        feature = "tron"
+    )),
+    allow(dead_code, unused_imports)
+)]
 use parser_cli_core::test_utils::write_temp_json;
 use similar::{ChangeTag, TextDiff};
 use std::fs;
@@ -52,6 +66,8 @@ fn test_cli_with_fixtures() {
     let disabled_chain_prefixes: &[&str] = &[
         #[cfg(not(feature = "ethereum"))]
         "ethereum",
+        #[cfg(not(feature = "near"))]
+        "near",
         #[cfg(not(feature = "solana"))]
         "solana",
         #[cfg(not(feature = "tron"))]
@@ -105,15 +121,23 @@ fn test_cli_with_fixtures() {
         // Try JSON parsing; fall back to string comparison for text/human output
         match serde_json::from_str::<serde_json::Value>(actual_output.trim()) {
             Ok(actual_json) => {
-                // JSON output: filter diagnostics and check membership
-                #[cfg_attr(not(feature = "diagnostics"), allow(unused_mut))]
+                // JSON output: filter soft-finding fields and check membership.
+                // A soft finding renders as the structured `Diagnostic` (diagnostics
+                // feature) or, in a build without that feature, as a `Warning`-labelled
+                // text_v2 fallback carrying the same information (see `diagnostic()` in
+                // visualsign-near's render.rs) -- both shapes are display noise here.
                 let mut display_payload = actual_json.clone();
-                #[cfg(feature = "diagnostics")]
                 if let Some(fields) = display_payload
                     .get_mut("Fields")
                     .and_then(|f| f.as_array_mut())
                 {
-                    fields.retain(|f| f.get("Type").and_then(|t| t.as_str()) != Some("diagnostic"));
+                    fields.retain(|f| {
+                        let field_type = f.get("Type").and_then(|t| t.as_str());
+                        let is_diagnostic = field_type == Some("diagnostic");
+                        let is_warning_fallback = field_type == Some("text_v2")
+                            && f.get("Label").and_then(|l| l.as_str()) == Some("Warning");
+                        !is_diagnostic && !is_warning_fallback
+                    });
                 }
 
                 let expected_json: serde_json::Value =
@@ -633,4 +657,81 @@ fn test_cli_solana_idl_invalid_file_still_parses() {
     let json: serde_json::Value =
         serde_json::from_str(&output).expect("CLI output should be valid JSON");
     assert_eq!(json["Title"], "Solana Transaction")
+}
+
+/// A NEAR Intents envelope withdrawing an asset no compiled-in seed covers, so
+/// only the mapping can resolve its symbol.
+#[cfg(feature = "near")]
+const NEAR_UNSEEDED_INTENT: &str = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2100-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"cli-test-token.near","receiver_id":"bob.near","amount":"2500000"}]}"#;
+
+/// The whole CLI path for `--near-token-metadata-mappings`, through the real
+/// binary: the flag parses, the file loads, the entry is signed with the dev key,
+/// and the strict require-signed posture the NEAR plugin installs accepts it.
+///
+/// Reaching the built binary is the point. The plugin's own tests construct
+/// `NearArgs` directly, so they pass even if clap never exposes the flag or
+/// `parser_cli` stops enabling `visualsign-near/dev-signing` (which would leave
+/// every entry unsigned and dropped).
+#[test]
+#[cfg(feature = "near")]
+fn test_cli_near_token_metadata_mappings() {
+    let token_path = write_temp_json(
+        "vsp_cli_tests",
+        "near_token.json",
+        r#"{"symbol":"CLITOKEN","decimals":6}"#,
+    );
+    let mapping = format!(
+        "CliToken@{}@nep141:cli-test-token.near",
+        token_path.display()
+    );
+
+    let (stdout, stderr) = run_cli_full(&[
+        "decode",
+        "--chain",
+        "near",
+        "--output",
+        "json",
+        "--near-token-metadata-mappings",
+        &mapping,
+        "-t",
+        NEAR_UNSEEDED_INTENT,
+    ]);
+
+    assert!(
+        stderr.contains("Loaded token metadata 'CliToken'"),
+        "Expected per-mapping load line in stderr, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("Successfully loaded 1/1 token metadata mappings"),
+        "Expected 1/1 token metadata mappings loaded, got: {stderr}"
+    );
+    assert!(
+        stdout.contains("CLITOKEN"),
+        "Expected the mapped symbol in the rendered amount, got: {stdout}"
+    );
+}
+
+/// An unreadable mapping file is reported and skipped, not fatal.
+#[test]
+#[cfg(feature = "near")]
+fn test_cli_near_token_metadata_invalid_file_still_parses() {
+    let (stdout, stderr) = run_cli_full(&[
+        "decode",
+        "--chain",
+        "near",
+        "--output",
+        "json",
+        "--near-token-metadata-mappings",
+        "Bad@/nonexistent/token.json@nep141:cli-test-token.near",
+        "-t",
+        NEAR_UNSEEDED_INTENT,
+    ]);
+
+    assert!(
+        stderr.contains("Successfully loaded 0/1 token metadata mappings"),
+        "Expected 0/1 token metadata mappings loaded, got: {stderr}"
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("CLI output should be valid JSON");
+    assert_eq!(json["Title"], "NEAR Intent: FT Withdraw");
 }

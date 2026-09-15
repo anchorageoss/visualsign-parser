@@ -111,14 +111,8 @@ pub fn convert_proto_signature(proto: &generated::parser::SignatureMetadata) -> 
 /// Decode an optionally `0x`/`0X`-prefixed hex string into a fixed-size byte
 /// array, failing if the hex is malformed or the wrong length.
 fn decode_hex_fixed<const N: usize>(value: &str, what: &str) -> Result<[u8; N], IdlSignatureError> {
-    let bytes = visualsign::encodings::decode_hex(value)
-        .map_err(|e| IdlSignatureError::Validation(format!("Invalid {what} hex: {e}")))?;
-    bytes.try_into().map_err(|v: Vec<u8>| {
-        IdlSignatureError::Validation(format!(
-            "Invalid {what} length: expected {N} bytes, got {}",
-            v.len()
-        ))
-    })
+    visualsign::encodings::decode_hex_array::<N>(value)
+        .map_err(|e| IdlSignatureError::Validation(format!("Invalid {what} {e}")))
 }
 
 /// Validate an IDL JSON string against an ed25519 signature, enforcing an

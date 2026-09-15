@@ -78,7 +78,10 @@ impl InstructionVisualizer for MeteoraDammV2Visualizer {
             }),
         };
 
-        let fallback_text = format!("Program ID: {}\nData: {instruction_data_hex}", view.program_id);
+        let fallback_text = format!(
+            "Program ID: {}\nData: {instruction_data_hex}",
+            view.program_id
+        );
 
         Ok(AnnotatedPayloadField {
             static_annotation: None,

@@ -15,7 +15,8 @@
 //! - `signatures` is dropped (unsigned txs have none).
 //! - All maps use `BTreeMap` so Borsh encoding is byte-deterministic.
 //! - `program_call_args` is emitted as a canonical JSON string
-//!   (`program_call_args_json`) because `serde_json::Value` does not implement
+//!   (`program_call_args_json`), as is the RPC's own decode (`parsed_json`),
+//!   because `serde_json::Value` does not implement
 //!   `BorshSerialize`. Keys are alphabetized at *every* nesting level: the
 //!   `serde_json::Value` tree is walked and re-keyed into sorted order, so the
 //!   output is independent of `serde_json`'s `preserve_order` build feature
@@ -26,10 +27,15 @@ use std::collections::BTreeMap;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde_json::Value;
-use solana_parser::solana::structs::{
-    self as parser, IdlSource, SolanaMetadata, SolanaParsedInstructionData,
+use solana_parser::solana::idl_parser::{
+    compute_idl_hash, construct_idl_records_map, create_accounts_map,
+    find_instruction_by_discriminator, parse_data_into_args, resolve_idl_for_record,
 };
-use solana_parser::{CustomIdlConfig, parse_transaction_with_idls};
+use solana_parser::solana::structs::{
+    self as parser, AccountAddress, IdlParseError, IdlSource, SolanaMetadata,
+    SolanaParsedInstructionData,
+};
+use solana_parser::{CustomIdlConfig, parse_transaction_with_idl_records};
 use visualsign::errors::VisualSignError;
 use visualsign::vsptrait::TransactionParseError;
 
@@ -38,7 +44,7 @@ use crate::idl::IdlRegistry;
 /// Version of the `SolanaIntermediateOutput` Borsh schema. Bump on ANY change
 /// to the shape below. Mirrored decoders assert this value, so a bump makes a
 /// schema drift fail loudly instead of silently misparsing.
-pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 1;
+pub const SOLANA_INTERMEDIATE_SCHEMA_VERSION: u16 = 2;
 
 /// Top-level Solana intermediate output. Mirrors `solana_parser::SolanaMetadata`
 /// minus `signatures`.
@@ -54,6 +60,36 @@ pub struct SolanaIntermediateOutput {
     pub spl_transfers: Vec<SplTransfer>,
     pub recent_blockhash: String,
     pub address_table_lookups: Vec<SolanaAddressTableLookup>,
+    pub simulated_instructions: Vec<SolanaSimulatedInstruction>,
+    /// Why the caller's `simulated_transaction_result` could not be read.
+    /// `None` means it was read or none was sent, and `simulated_instructions`
+    /// is authoritative -- empty there means the simulation genuinely had no
+    /// inner instructions.
+    pub simulation_error: Option<SolanaSimulationError>,
+}
+
+/// Why a caller-supplied `simulateTransaction` result could not be read. The
+/// detail is logged at WARN; these variants are the wire contract.
+///
+/// Discriminants start at 1 so 0 is not a value this type can hold: a decoder
+/// that renders `Option::None` as the zero value (borsh-go v0.3.1 does) can
+/// then tell an absent error from `InvalidBase64`.
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[borsh(use_discriminant = true)]
+pub enum SolanaSimulationError {
+    InvalidBase64 = 1,
+    /// Usually the whole JSON-RPC envelope where the bare `result` was expected.
+    InvalidJson = 2,
+    /// `value.err` was set, so the trace is partial and was dropped.
+    SimulationFailed = 3,
+    CallerIdlRecordsUnusable = 4,
+    /// An inner instruction arrived compiled. `simulateTransaction` parses inner
+    /// instructions whatever the transaction encoding, so the input was not one
+    /// of its results.
+    CompiledInstruction = 5,
+    /// An inner instruction's data was not valid base58, which the RPC never
+    /// emits.
+    InvalidInstructionData = 6,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -64,6 +100,53 @@ pub struct SolanaIntermediateInstruction {
     pub address_table_lookups: Vec<SolanaSingleAddressTableLookup>,
     /// `None` when the parser could not match an IDL for this instruction.
     pub parsed_instruction_data: Option<SolanaParsedInstructionDataIo>,
+    pub idl_parse_error: Option<SolanaIdlParseError>,
+    /// Where `program_key` was registered, if at all -- see [`RegisteredSource`].
+    pub registered_source: RegisteredSource,
+}
+
+/// Where a program ID was recognized. Decodability is a separate question --
+/// `system`, `spl_token`, `token_2022`, `compute_budget`,
+/// `associated_token_account`, `stakepool` and `swig_wallet` are all registered
+/// and ship no IDL -- so read `parsed_instruction_data`,
+/// `solana_rpc_parsed_data` and `idl_parse_error` for that.
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegisteredSource {
+    /// Matched `idl::builtin_programs`'s `NATIVE_PROGRAM_NAMES` list (native
+    /// runtime / core SPL programs).
+    Native,
+    /// Matched an in-crate preset visualizer's program ID
+    Preset,
+    /// Matched a program known only via `solana_parser::ProgramType`
+    ThirdParty,
+    /// Matched only via caller-provided `idl_mappings`.
+    CallerSupplied,
+    /// Matched none of the above; nothing was found at all.
+    Unregistered,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SolanaSimulatedInstruction {
+    /// Index of the outer instruction this was invoked under. A grouping key,
+    /// not a unique one: every instruction in a CPI group shares it.
+    pub index: u32,
+    /// `0` when the RPC omitted it. Inner instructions are CPIs, so a real
+    /// value is always >= 2.
+    pub stack_height: u32,
+    pub program_key: String,
+    /// Empty when `solana_rpc_parsed_data` is set: that response shape carries
+    /// its account keys inside `parsed`, under per-program field names.
+    pub accounts: Vec<String>,
+    /// Empty when `solana_rpc_parsed_data` is set: the RPC consumes the
+    /// instruction data to produce `parsed` and does not return it.
+    pub instruction_data_hex: String,
+    pub registered_source: RegisteredSource,
+    pub parsed_instruction_data: Option<SolanaParsedInstructionDataIo>,
+    /// The RPC's own jsonParsed decode, for the recognized programs it returns
+    /// that way (System/Token and friends). `None` for partially-decoded
+    /// instructions, which we IDL-decode into `parsed_instruction_data` instead.
+    pub solana_rpc_parsed_data: Option<SolanaRpcParsedInstructionDataIo>,
+    pub idl_parse_error: Option<SolanaIdlParseError>,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -120,6 +203,41 @@ pub struct SolanaParsedInstructionDataIo {
     /// `"Custom"`. Empty when no IDL was used.
     pub idl_source: String,
     pub idl_hash: String,
+}
+
+/// The RPC's own jsonParsed decode of a simulated instruction, as returned for
+/// recognized programs.
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SolanaRpcParsedInstructionDataIo {
+    pub program: String,
+    pub parsed_json: String,
+}
+
+/// Why IDL decode failed for an instruction, when it was attempted at all.
+/// Mirrors `solana_parser::solana::structs::IdlParseError`, flattened for
+/// Borsh (that upstream type carries no Borsh derive). `None` on
+/// `parsed_instruction_data`/`solana_rpc_parsed_data`'s siblings means either decode
+/// succeeded or no IDL was available to attempt against in the first place --
+/// distinct from an attempt that ran and failed, which this type identifies.
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
+pub enum SolanaIdlParseError {
+    /// The instruction data could not be decoded into the IDL's argument
+    /// types (e.g. an unknown enum variant in the data).
+    DataParseError {
+        instruction_name: String,
+        error: String,
+    },
+    /// The accounts list could not be mapped to the IDL's named accounts.
+    AccountsMapError {
+        instruction_name: String,
+        error: String,
+    },
+    /// No instruction in the IDL matched the discriminator bytes -- the
+    /// program is known, but this specific call isn't one of its documented
+    /// instructions (e.g. an Anchor event-log self-CPI).
+    DiscriminatorNotFound(String),
+    /// The IDL itself could not be resolved (missing, malformed, etc.).
+    IdlResolutionError(String),
 }
 
 // -- From impls --------------------------------------------------------------
@@ -182,6 +300,7 @@ impl From<&parser::SolanaAddressTableLookup> for SolanaAddressTableLookup {
 fn idl_source_string(source: &IdlSource) -> String {
     match source {
         IdlSource::BuiltIn(_) => "BuiltIn".to_string(),
+        IdlSource::Preset => "Preset".to_string(),
         IdlSource::Custom => "Custom".to_string(),
     }
 }
@@ -248,51 +367,441 @@ impl From<&SolanaParsedInstructionData> for SolanaParsedInstructionDataIo {
     }
 }
 
-impl From<&parser::SolanaInstruction> for SolanaIntermediateInstruction {
-    fn from(value: &parser::SolanaInstruction) -> Self {
-        Self {
-            program_key: value.program_key.clone(),
-            accounts: value.accounts.iter().map(SolanaAccount::from).collect(),
-            instruction_data_hex: value.instruction_data_hex.clone(),
-            address_table_lookups: value
-                .address_table_lookups
-                .iter()
-                .map(SolanaSingleAddressTableLookup::from)
-                .collect(),
-            parsed_instruction_data: value
-                .parsed_instruction
-                .as_ref()
-                .map(SolanaParsedInstructionDataIo::from),
+impl From<&IdlParseError> for SolanaIdlParseError {
+    fn from(value: &IdlParseError) -> Self {
+        match value {
+            IdlParseError::DataParseError {
+                instruction_name,
+                error,
+            } => Self::DataParseError {
+                instruction_name: instruction_name.clone(),
+                error: error.clone(),
+            },
+            IdlParseError::AccountsMapError {
+                instruction_name,
+                error,
+            } => Self::AccountsMapError {
+                instruction_name: instruction_name.clone(),
+                error: error.clone(),
+            },
+            IdlParseError::DiscriminatorNotFound(msg) => Self::DiscriminatorNotFound(msg.clone()),
+            IdlParseError::IdlResolutionError(msg) => Self::IdlResolutionError(msg.clone()),
         }
     }
 }
 
-impl From<&SolanaMetadata> for SolanaIntermediateOutput {
-    fn from(value: &SolanaMetadata) -> Self {
-        Self {
-            schema_version: SOLANA_INTERMEDIATE_SCHEMA_VERSION,
-            account_keys: value.account_keys.clone(),
-            program_keys: value.program_keys.clone(),
-            instructions: value
-                .instructions
-                .iter()
-                .map(SolanaIntermediateInstruction::from)
-                .collect(),
-            transfers: value.transfers.iter().map(SolTransfer::from).collect(),
-            spl_transfers: value.spl_transfers.iter().map(SplTransfer::from).collect(),
-            recent_blockhash: value.recent_blockhash.clone(),
-            address_table_lookups: value
-                .address_table_lookups
-                .iter()
-                .map(SolanaAddressTableLookup::from)
-                .collect(),
+/// Builds a [`SolanaIntermediateInstruction`] from `solana_parser`'s own
+/// top-level decode output. Not a `From` impl because `registered_source`
+/// needs `caller_idl_program_ids` (the keys of `IdlRegistry::get_all_configs()`),
+/// which `parser::SolanaInstruction` doesn't carry.
+fn build_intermediate_instruction(
+    value: &parser::SolanaInstruction,
+    caller_idl_program_ids: &std::collections::BTreeMap<String, CustomIdlConfig>,
+) -> SolanaIntermediateInstruction {
+    SolanaIntermediateInstruction {
+        program_key: value.program_key.clone(),
+        accounts: value.accounts.iter().map(SolanaAccount::from).collect(),
+        instruction_data_hex: value.instruction_data_hex.clone(),
+        address_table_lookups: value
+            .address_table_lookups
+            .iter()
+            .map(SolanaSingleAddressTableLookup::from)
+            .collect(),
+        registered_source: crate::idl::builtin_programs::registered_source(
+            &value.program_key,
+            caller_idl_program_ids,
+        ),
+        parsed_instruction_data: value
+            .parsed_instruction
+            .as_ref()
+            .map(SolanaParsedInstructionDataIo::from),
+        idl_parse_error: value
+            .idl_parse_error
+            .as_ref()
+            .map(SolanaIdlParseError::from),
+    }
+}
+
+/// Unmarshals the raw `simulateTransaction` RPC bytes and IDL-decodes every inner
+/// instruction across all groups in one pass, returning a flat, borsh-ready list.
+///
+/// On any problem the list comes back empty with a [`SolanaSimulationError`]
+/// saying why, so "we could not read this" stays distinguishable from "there was
+/// nothing to find". A simulation with no `innerInstructions` is the latter.
+pub(crate) fn parse_and_decode_simulated_instructions(
+    raw_json: &[u8],
+    idl_registry: &IdlRegistry,
+) -> (
+    Vec<SolanaSimulatedInstruction>,
+    Option<SolanaSimulationError>,
+) {
+    let response: solana_rpc_client_types::response::Response<
+        solana_rpc_client_types::response::RpcSimulateTransactionResult,
+    > = match serde_json::from_slice(raw_json) {
+        Ok(response) => response,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "simulated_transaction_result is not a simulateTransaction result"
+            );
+            return (Vec::new(), Some(SolanaSimulationError::InvalidJson));
         }
+    };
+
+    if let Some(err) = &response.value.err {
+        tracing::warn!(
+            error = ?err,
+            "simulated transaction reverted; dropping its partial inner-instruction trace"
+        );
+        return (Vec::new(), Some(SolanaSimulationError::SimulationFailed));
+    }
+
+    let Some(inner_instructions) = response.value.inner_instructions else {
+        return (Vec::new(), None);
+    };
+    decode_inner_instructions(inner_instructions, idl_registry)
+}
+
+/// Builds one [`SolanaSimulatedInstruction`] per inner instruction across every
+/// outer instruction's `UiInnerInstructions` entry, from the raw `simulateTransaction`
+/// RPC shape
+fn decode_inner_instructions(
+    inner_instructions: Vec<solana_transaction_status::UiInnerInstructions>,
+    idl_registry: &IdlRegistry,
+) -> (
+    Vec<SolanaSimulatedInstruction>,
+    Option<SolanaSimulationError>,
+) {
+    use solana_transaction_status::{UiInstruction, UiParsedInstruction};
+
+    let configs = idl_registry.get_all_configs();
+    // Caller records only. Presets come from the process-wide cache and the
+    // builtins from `solana_parser`'s own; `lookup_idl_record` layers the three
+    // per program rather than merging them into one map, so neither the ~2.0 MB
+    // of preset IDLs nor the builtins are cloned per request.
+    //
+    // Defensive: the static path rejects the request over the same records
+    // before this runs.
+    let Some(caller_records) = caller_idl_records(configs) else {
+        tracing::warn!("caller-supplied IDLs could not be built into records");
+        return (
+            Vec::new(),
+            Some(SolanaSimulationError::CallerIdlRecordsUnusable),
+        );
+    };
+
+    let mut simulated_instructions = Vec::new();
+
+    for entry in inner_instructions {
+        let outer_index = u32::from(entry.index);
+
+        for ui_instruction in entry.instructions {
+            let UiInstruction::Parsed(parsed) = ui_instruction else {
+                tracing::warn!(
+                    "unexpected compiled inner instruction in simulated_transaction_result; \
+                     simulateTransaction does not return this shape"
+                );
+                return (Vec::new(), Some(SolanaSimulationError::CompiledInstruction));
+            };
+
+            match parsed {
+                UiParsedInstruction::PartiallyDecoded(decoded) => {
+                    let accounts = decoded.accounts;
+                    let Ok(data) = bs58::decode(&decoded.data).into_vec() else {
+                        tracing::warn!(
+                            program_id = %decoded.program_id,
+                            "inner instruction data is not valid base58"
+                        );
+                        return (
+                            Vec::new(),
+                            Some(SolanaSimulationError::InvalidInstructionData),
+                        );
+                    };
+                    let (parsed_instruction_data, idl_parse_error) =
+                        parse_partially_decoded_instruction_idl(
+                            &decoded.program_id,
+                            &decoded.data,
+                            &accounts,
+                            &caller_records,
+                        );
+                    let registered_source = crate::idl::builtin_programs::registered_source(
+                        &decoded.program_id,
+                        configs,
+                    );
+
+                    simulated_instructions.push(SolanaSimulatedInstruction {
+                        index: outer_index,
+                        stack_height: decoded.stack_height.unwrap_or(0),
+                        program_key: decoded.program_id,
+                        accounts,
+                        instruction_data_hex: hex::encode(&data),
+                        registered_source,
+                        parsed_instruction_data,
+                        solana_rpc_parsed_data: None,
+                        idl_parse_error,
+                    });
+                }
+                UiParsedInstruction::Parsed(rpc_parsed) => {
+                    let parsed_json = canonicalize_value(&rpc_parsed.parsed).to_string();
+                    let program = rpc_parsed.program.clone();
+                    let registered_source = crate::idl::builtin_programs::registered_source(
+                        &rpc_parsed.program_id,
+                        configs,
+                    );
+
+                    simulated_instructions.push(SolanaSimulatedInstruction {
+                        index: outer_index,
+                        stack_height: rpc_parsed.stack_height.unwrap_or(0),
+                        program_key: rpc_parsed.program_id,
+                        accounts: Vec::new(),
+                        instruction_data_hex: String::new(),
+                        registered_source,
+                        parsed_instruction_data: None,
+                        solana_rpc_parsed_data: Some(SolanaRpcParsedInstructionDataIo {
+                            program,
+                            parsed_json,
+                        }),
+                        idl_parse_error: None,
+                    });
+                }
+            }
+        }
+    }
+
+    (simulated_instructions, None)
+}
+
+/// Resolves one program's `IdlRecord` across the three sources, in the same
+/// precedence order the old single merged map encoded: a caller-supplied record
+/// wins, then a preset, then a `solana_parser` builtin.
+///
+/// Layered rather than merged so the preset records (~2.0 MB) and the builtins
+/// are borrowed from their process-wide caches instead of being cloned into a
+/// fresh map on every request.
+fn lookup_idl_record<'a>(
+    program_id: &str,
+    caller_records: &'a BTreeMap<String, solana_parser::solana::structs::IdlRecord>,
+) -> Option<&'a solana_parser::solana::structs::IdlRecord> {
+    if let Some(record) = caller_records.get(program_id) {
+        return Some(record);
+    }
+    if let Some(record) = crate::idl::builtin_programs::preset_idl_records().get(program_id) {
+        return Some(record);
+    }
+    builtin_idl_records().get(program_id)
+}
+
+/// Builds `IdlRecord`s for the caller-supplied IDLs alone.
+///
+/// `construct_idl_records_map` always prepends `solana_parser`'s builtins, so
+/// the builtin entries it returns are dropped here -- [`builtin_idl_records`]
+/// already holds them, cached. `None` signals that a caller IDL failed to parse.
+#[allow(clippy::disallowed_types)]
+fn caller_idl_records(
+    configs: &BTreeMap<String, CustomIdlConfig>,
+) -> Option<BTreeMap<String, solana_parser::solana::structs::IdlRecord>> {
+    if configs.is_empty() {
+        return Some(BTreeMap::new());
+    }
+    let records = construct_idl_records_map(Some(
+        configs
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+    ))
+    .ok()?;
+    Some(
+        records
+            .into_iter()
+            .filter(|(program_id, _)| configs.contains_key(program_id))
+            .collect(),
+    )
+}
+
+/// The full `IdlRecord` map for one request: builtins and presets from their
+/// process-wide caches, caller-supplied IDLs layered on top.
+///
+/// `solana_parser::parse_transaction_with_idl_records` takes the map by value,
+/// so the static path has to materialize one. The saving over passing configs
+/// is the parse-and-re-serialize of every preset IDL, which
+/// `construct_idl_records_map` would otherwise redo on every request.
+///
+/// Precedence matches [`lookup_idl_record`]: caller, then preset, then builtin.
+#[allow(clippy::disallowed_types)]
+fn build_idl_record_map(
+    caller_records: &BTreeMap<String, solana_parser::solana::structs::IdlRecord>,
+) -> std::collections::HashMap<String, solana_parser::solana::structs::IdlRecord> {
+    let mut records: std::collections::HashMap<_, _> = builtin_idl_records()
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    for (program_id, record) in crate::idl::builtin_programs::preset_idl_records() {
+        records.insert(program_id.clone(), record.clone());
+    }
+    for (program_id, record) in caller_records {
+        records.insert(program_id.clone(), record.clone());
+    }
+    records
+}
+
+/// `solana_parser`'s own builtin records, built once per process.
+///
+/// `construct_custom_idl_records_map` takes no arguments and returns the same
+/// 21 records every call, so there is nothing per-request about it.
+fn builtin_idl_records() -> &'static BTreeMap<String, solana_parser::solana::structs::IdlRecord> {
+    static BUILTIN_IDL_RECORDS: std::sync::OnceLock<
+        BTreeMap<String, solana_parser::solana::structs::IdlRecord>,
+    > = std::sync::OnceLock::new();
+    BUILTIN_IDL_RECORDS.get_or_init(|| {
+        solana_parser::construct_custom_idl_records_map()
+            .map(|records| records.into_iter().collect())
+            .unwrap_or_default()
+    })
+}
+
+/// IDL-decodes one `PartiallyDecoded` instruction's raw data, using the exact same
+/// resolution chain the top-level static decoder's private `parse_idl` uses internally.
+/// The record is resolved by [`lookup_idl_record`], mirroring `parse_idl`'s
+/// `custom_idls.get(program_key)`. Returns `(None, None)` when `program_id` has
+/// no `IdlRecord` at all -- nothing was available to attempt against, distinct
+/// from an attempt that ran and failed (`(None, Some(err))`).
+fn parse_partially_decoded_instruction_idl(
+    program_id: &str,
+    data_base58: &str,
+    accounts: &[String],
+    caller_records: &BTreeMap<String, solana_parser::solana::structs::IdlRecord>,
+) -> (
+    Option<SolanaParsedInstructionDataIo>,
+    Option<SolanaIdlParseError>,
+) {
+    let Some(idl_record) = lookup_idl_record(program_id, caller_records) else {
+        return (None, None);
+    };
+    let (idl, idl_json, idl_source) = match resolve_idl_for_record(idl_record, program_id) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                None,
+                Some(SolanaIdlParseError::IdlResolutionError(e.to_string())),
+            );
+        }
+    };
+    // A malformed base58 payload isn't an IDL-resolution problem (the IDL
+    // resolved fine); treat it as "no instruction could be matched" since
+    // there's no byte data to check a discriminator against.
+    let Ok(data) = bs58::decode(data_base58).into_vec() else {
+        return (
+            None,
+            Some(SolanaIdlParseError::DiscriminatorNotFound(
+                "instruction data is not valid base58".to_string(),
+            )),
+        );
+    };
+    let instruction = match find_instruction_by_discriminator(&data, idl.instructions.clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                None,
+                Some(SolanaIdlParseError::DiscriminatorNotFound(e.to_string())),
+            );
+        }
+    };
+    let program_call_args = match parse_data_into_args(&data, &instruction, &idl) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                None,
+                Some(SolanaIdlParseError::DataParseError {
+                    instruction_name: instruction.name,
+                    error: e.to_string(),
+                }),
+            );
+        }
+    };
+    // signer/writable are unavailable for a simulated PartiallyDecoded
+    // instruction; create_accounts_map only reads the account key (via
+    // AccountAddress's Display impl), so the flags below are unused filler
+    // required only by parser::SolanaAccount's shape.
+    let account_addresses: Vec<AccountAddress> = accounts
+        .iter()
+        .map(|account_key| {
+            AccountAddress::Static(parser::SolanaAccount {
+                account_key: account_key.clone(),
+                signer: false,
+                writable: false,
+            })
+        })
+        .collect();
+    let named_accounts = match create_accounts_map(&account_addresses, &instruction) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                None,
+                Some(SolanaIdlParseError::AccountsMapError {
+                    instruction_name: instruction.name,
+                    error: e.to_string(),
+                }),
+            );
+        }
+    };
+    let Some(discriminator) = instruction.discriminator.clone() else {
+        // We only reach here after matching by discriminator above, so this
+        // is unreachable in practice; report it the same way solana_parser's
+        // own parse_idl does for the analogous case.
+        return (
+            None,
+            Some(SolanaIdlParseError::DiscriminatorNotFound(
+                "matched instruction has no discriminator".to_string(),
+            )),
+        );
+    };
+
+    (
+        Some(SolanaParsedInstructionDataIo {
+            instruction_name: instruction.name,
+            discriminator: hex::encode(discriminator),
+            named_accounts: named_accounts.into_iter().collect(),
+            program_call_args_json: canonical_args_json(&program_call_args),
+            idl_source: idl_source_string(&idl_source),
+            idl_hash: compute_idl_hash(&idl_json),
+        }),
+        None,
+    )
+}
+
+/// Builds a [`SolanaIntermediateOutput`] from `solana_parser`'s own top-level
+/// decode output. Not a `From` impl because `registered_source` on each
+/// instruction needs `caller_idl_program_ids` (the keys of
+/// `IdlRegistry::get_all_configs()`), which `SolanaMetadata` doesn't carry.
+fn build_intermediate_output(
+    value: &SolanaMetadata,
+    caller_idl_program_ids: &std::collections::BTreeMap<String, CustomIdlConfig>,
+) -> SolanaIntermediateOutput {
+    SolanaIntermediateOutput {
+        schema_version: SOLANA_INTERMEDIATE_SCHEMA_VERSION,
+        account_keys: value.account_keys.clone(),
+        program_keys: value.program_keys.clone(),
+        instructions: value
+            .instructions
+            .iter()
+            .map(|instruction| build_intermediate_instruction(instruction, caller_idl_program_ids))
+            .collect(),
+        transfers: value.transfers.iter().map(SolTransfer::from).collect(),
+        spl_transfers: value.spl_transfers.iter().map(SplTransfer::from).collect(),
+        recent_blockhash: value.recent_blockhash.clone(),
+        address_table_lookups: value
+            .address_table_lookups
+            .iter()
+            .map(SolanaAddressTableLookup::from)
+            .collect(),
+        simulated_instructions: Vec::new(),
+        simulation_error: None,
     }
 }
 
 // -- Extraction --------------------------------------------------------------
 
-/// Parse the transaction once via `solana_parser::parse_transaction_with_idls`
+/// Parse the transaction once via `solana_parser::parse_transaction_with_idl_records`
 /// and project the result into a Borsh-friendly intermediate output.
 ///
 /// `raw_message_hex` is the hex-encoded serialized message (or full
@@ -308,9 +817,9 @@ impl From<&SolanaMetadata> for SolanaIntermediateOutput {
 /// is generated, and these bytes should be passed through as-is rather than
 /// re-parsed here. Today this re-parses once, best-effort, alongside the
 /// existing VisualSign generation path.
-// `disallowed_types`: the `solana_parser::parse_transaction_with_idls` API
-// requires a `HashMap` for its custom-IDL argument. We build one only as a
-// transient adapter from the deterministic `BTreeMap` registry; it never feeds
+// `disallowed_types`: the `solana_parser::parse_transaction_with_idl_records`
+// API requires a `HashMap` for its record argument. We build one only as a
+// transient adapter from the deterministic `BTreeMap` caches; it never feeds
 // serialized output, so determinism is unaffected.
 #[allow(clippy::disallowed_types)]
 pub(crate) fn extract_solana_intermediate_output(
@@ -318,28 +827,23 @@ pub(crate) fn extract_solana_intermediate_output(
     full_transaction: bool,
     idl_registry: &IdlRegistry,
 ) -> Result<SolanaIntermediateOutput, VisualSignError> {
-    // The registry stores configs in a `BTreeMap` (determinism), but the
-    // parser API takes a `HashMap`; project into one, or `None` when empty.
     let configs = idl_registry.get_all_configs();
-    let custom_idls: Option<std::collections::HashMap<String, CustomIdlConfig>> =
-        if configs.is_empty() {
-            None
-        } else {
-            Some(
-                configs
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect(),
-            )
-        };
+    let caller_records = caller_idl_records(configs).ok_or_else(|| {
+        VisualSignError::ParseError(TransactionParseError::DecodeError(
+            "Failed to build IDL records from caller-supplied IDLs".to_string(),
+        ))
+    })?;
 
-    let response =
-        parse_transaction_with_idls(raw_message_hex.to_string(), full_transaction, custom_idls)
-            .map_err(|e| {
-                VisualSignError::ParseError(TransactionParseError::DecodeError(format!(
-                    "Failed to parse transaction for intermediate output: {e}"
-                )))
-            })?;
+    let response = parse_transaction_with_idl_records(
+        raw_message_hex.to_string(),
+        full_transaction,
+        build_idl_record_map(&caller_records),
+    )
+    .map_err(|e| {
+        VisualSignError::ParseError(TransactionParseError::DecodeError(format!(
+            "Failed to parse transaction for intermediate output: {e}"
+        )))
+    })?;
 
     let metadata = response
         .solana_parsed_transaction
@@ -352,7 +856,7 @@ pub(crate) fn extract_solana_intermediate_output(
             ))
         })?;
 
-    Ok(SolanaIntermediateOutput::from(metadata))
+    Ok(build_intermediate_output(metadata, configs))
 }
 
 #[cfg(test)]
@@ -439,6 +943,7 @@ mod tests {
             idl_source_string(&IdlSource::BuiltIn(ProgramType::Jupiter)),
             "BuiltIn"
         );
+        assert_eq!(idl_source_string(&IdlSource::Preset), "Preset");
         assert_eq!(idl_source_string(&IdlSource::Custom), "Custom");
     }
 
@@ -474,6 +979,136 @@ mod tests {
     }
 
     #[test]
+    fn unreadable_simulation_is_distinguishable_from_an_empty_one() {
+        let empty =
+            br#"{"context":{"slot":1},"value":{"err":null,"logs":[],"innerInstructions":[]}}"#;
+        let (instructions, error) =
+            parse_and_decode_simulated_instructions(empty, &IdlRegistry::new());
+        assert!(instructions.is_empty());
+        assert!(error.is_none(), "genuinely empty carries no error");
+
+        let (instructions, error) =
+            parse_and_decode_simulated_instructions(b"not-json", &IdlRegistry::new());
+        assert!(instructions.is_empty());
+        assert_eq!(error, Some(SolanaSimulationError::InvalidJson));
+    }
+
+    #[test]
+    fn full_jsonrpc_envelope_reports_invalid_json() {
+        let envelope = br#"{"jsonrpc":"2.0","id":1,"result":{"context":{"slot":1},"value":{"err":null,"innerInstructions":[]}}}"#;
+        let (instructions, error) =
+            parse_and_decode_simulated_instructions(envelope, &IdlRegistry::new());
+        assert!(instructions.is_empty());
+        assert_eq!(error, Some(SolanaSimulationError::InvalidJson));
+    }
+
+    #[test]
+    fn reverted_simulation_drops_its_partial_trace() {
+        let reverted = br#"{"context":{"slot":1},"value":{"err":{"InstructionError":[3,{"Custom":6001}]},"logs":[],"innerInstructions":[{"index":0,"instructions":[{"accounts":["D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf"],"data":"3Bxs","programId":"QuaNtZsgYRe5Z9Bk4LZ4cTD9tbkVoyCNf1R2BN9bBDv","stackHeight":2}]}]}}"#;
+        let (instructions, error) =
+            parse_and_decode_simulated_instructions(reverted, &IdlRegistry::new());
+        assert!(
+            instructions.is_empty(),
+            "a partial trace must not attach as a complete one"
+        );
+        assert_eq!(error, Some(SolanaSimulationError::SimulationFailed));
+    }
+
+    #[test]
+    fn compiled_inner_instruction_is_rejected() {
+        let compiled = br#"{"context":{"slot":1},"value":{"err":null,"innerInstructions":[{"index":0,"instructions":[{"programIdIndex":4,"accounts":[1,2],"data":"3Bxs","stackHeight":2}]}]}}"#;
+        let (instructions, error) =
+            parse_and_decode_simulated_instructions(compiled, &IdlRegistry::new());
+        assert!(instructions.is_empty());
+        assert_eq!(error, Some(SolanaSimulationError::CompiledInstruction));
+    }
+
+    #[test]
+    fn simulation_error_round_trips_through_borsh() {
+        for (error, tag) in [
+            (SolanaSimulationError::InvalidBase64, 1u8),
+            (SolanaSimulationError::InvalidJson, 2),
+            (SolanaSimulationError::SimulationFailed, 3),
+            (SolanaSimulationError::CallerIdlRecordsUnusable, 4),
+            (SolanaSimulationError::CompiledInstruction, 5),
+            (SolanaSimulationError::InvalidInstructionData, 6),
+        ] {
+            let io = SolanaIntermediateOutput {
+                schema_version: SOLANA_INTERMEDIATE_SCHEMA_VERSION,
+                account_keys: vec![],
+                program_keys: vec![],
+                instructions: vec![],
+                transfers: vec![],
+                spl_transfers: vec![],
+                recent_blockhash: "blockhash".to_string(),
+                address_table_lookups: vec![],
+                simulated_instructions: vec![],
+                simulation_error: Some(error),
+            };
+            let bytes = borsh::to_vec(&io).expect("borsh serializes");
+            let recovered: SolanaIntermediateOutput =
+                borsh::from_slice(&bytes).expect("borsh deserializes");
+            assert_eq!(io, recovered);
+            // Trailing `01 <tag>`: Some, then the variant. No payload.
+            assert_eq!(bytes[bytes.len() - 2], 1);
+            assert_eq!(bytes[bytes.len() - 1], tag, "{error:?} tag");
+            assert_ne!(tag, 0, "0 stays free to mean None");
+        }
+    }
+
+    #[test]
+    fn registered_source_classifications_from_jupiter_route_simulation() {
+        let raw_json =
+            include_bytes!("../tests/fixtures/simulated_instructions/jupiter_route_sim_resp.json");
+        let response: solana_rpc_client_types::response::Response<
+            solana_rpc_client_types::response::RpcSimulateTransactionResult,
+        > = serde_json::from_slice(raw_json)
+            .expect("fixture parses as a simulateTransaction result");
+        let inner_instructions = response
+            .value
+            .inner_instructions
+            .expect("fixture has innerInstructions");
+
+        let (instructions, simulation_error) =
+            decode_inner_instructions(inner_instructions, &IdlRegistry::new());
+        assert!(simulation_error.is_none());
+        assert_eq!(instructions.len(), 4, "fixture carries four inner calls");
+
+        assert_eq!(
+            instructions[0].program_key,
+            "QuaNtZsgYRe5Z9Bk4LZ4cTD9tbkVoyCNf1R2BN9bBDv"
+        );
+        assert_eq!(
+            instructions[0].registered_source,
+            RegisteredSource::Unregistered
+        );
+        assert!(instructions[0].parsed_instruction_data.is_none());
+        assert!(instructions[0].solana_rpc_parsed_data.is_none());
+
+        for i in [1, 2] {
+            assert_eq!(
+                instructions[i].program_key,
+                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+            );
+            assert_eq!(instructions[i].registered_source, RegisteredSource::Native);
+            assert!(instructions[i].parsed_instruction_data.is_none());
+            assert!(instructions[i].solana_rpc_parsed_data.is_some());
+            assert!(instructions[i].idl_parse_error.is_none());
+        }
+
+        assert_eq!(
+            instructions[3].program_key,
+            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
+        );
+        assert_eq!(instructions[3].registered_source, RegisteredSource::Preset);
+        assert!(instructions[3].parsed_instruction_data.is_none());
+        assert!(matches!(
+            instructions[3].idl_parse_error,
+            Some(SolanaIdlParseError::DiscriminatorNotFound(_))
+        ));
+    }
+
+    #[test]
     fn intermediate_output_round_trip_is_deterministic() {
         let metadata = SolanaMetadata {
             signatures: vec![],
@@ -485,7 +1120,7 @@ mod tests {
             recent_blockhash: "blockhash".to_string(),
             address_table_lookups: vec![],
         };
-        let io = SolanaIntermediateOutput::from(&metadata);
+        let io = build_intermediate_output(&metadata, &std::collections::BTreeMap::new());
         assert_eq!(io.schema_version, SOLANA_INTERMEDIATE_SCHEMA_VERSION);
         assert_eq!(io.account_keys, vec!["A1".to_string(), "B2".to_string()]);
         assert_eq!(io.program_keys, vec!["P1".to_string()]);

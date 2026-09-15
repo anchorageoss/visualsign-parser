@@ -6,11 +6,13 @@ use solana_parser::solana::structs::SolanaAccount;
 use solana_sdk::pubkey::Pubkey;
 
 mod accounts;
+mod arg_rendering;
 mod instructions;
 mod txtypes;
 mod visualsign;
 
 pub use accounts::*;
+pub use arg_rendering::format_arg_value;
 pub use instructions::*;
 pub use txtypes::*;
 pub use visualsign::*;

@@ -28,14 +28,24 @@ Three categories of issues:
 
 ## The `diagnostics` Cargo feature
 
-Diagnostic emission is gated behind a `diagnostics` Cargo feature on `visualsign`, `visualsign-solana`, and `parser_cli`. The default builds:
+Diagnostic emission is gated behind a `diagnostics` Cargo feature on `visualsign`, `visualsign-near`, `visualsign-solana`, and `parser_cli`. The default builds:
 
 - `parser_cli` enables `diagnostics` (default-on); CLI users see the full diagnostic detail.
 - `parser_app` and `parser_grpc_server` do **not** enable it. Their `SignablePayload` shape is stable for HSMs and wallets that derive a metadata digest from it.
 
 When the feature is off, `decode_instructions` returns `Result<Vec<AnnotatedPayloadField>, VisualSignError>` instead of a struct with separate diagnostic and error vectors. Empty `account_keys` and per-instruction visualizer errors abort the decode with `Err`; out-of-bounds indices flow through to the catch-all `unknown_program` visualizer with no diagnostic emission.
 
-Paired `*.diagnostics.expected` fixtures only matter when the feature is on. The CI Makefile splits invocations to defeat Cargo feature unification: `cargo {build,test,clippy} --workspace --exclude parser_cli` covers the OFF path; `-p parser_cli` and `-p visualsign-solana --features diagnostics --lib` cover the ON path.
+Paired `*.diagnostics.expected` fixtures only matter when the feature is on. The CI Makefile splits invocations to defeat Cargo feature unification: `cargo {build,test,clippy} --workspace --exclude parser_cli` covers the OFF path; `-p parser_cli`, `-p visualsign-near --features diagnostics --lib`, and `-p visualsign-solana --features diagnostics --lib` cover the ON path.
+
+## What each chain reports
+
+| Chain | Rules | Shape when the feature is off |
+|-------|-------|-------------------------------|
+| Solana | `transaction::*`, `decode::visualizer_error` — see the rule list below | The decode returns `Err` or drops the diagnostic; see the feature section above |
+| NEAR | `signature`, `account-binding`, `deadline`, `extraction`, `unverified-token-metadata`, `rejected-token-metadata` | A `Warning`-labelled text field carrying `rule: message` |
+| Ethereum | None yet | — |
+
+NEAR's rules are bare names rather than `domain::rule_name`, and every one of them is a *soft finding*: the intents still render, with the problem reported alongside the content it qualifies. Rather than dropping a diagnostic when the feature is off, the NEAR renderer falls back to a `Warning` text field with the same information, so a wallet on a production (diagnostics-off) build still sees the finding — it just isn't machine-readable. `rejected-token-metadata` is the reason caller-supplied token metadata the parser refused is visible to the signer at all; the refusal is otherwise only in an operator log.
 
 ## Adding a diagnostic to a chain parser
 

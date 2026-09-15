@@ -102,11 +102,7 @@ fn load_idl() -> Result<Idl, VisualSignError> {
         .map_err(|e| VisualSignError::DecodeError(format!("Invalid Neutral Trade IDL: {e}")))
 }
 
-fn build_named_accounts(
-    data: &[u8],
-    accounts: &[String],
-    idl: &Idl,
-) -> BTreeMap<String, String> {
+fn build_named_accounts(data: &[u8], accounts: &[String], idl: &Idl) -> BTreeMap<String, String> {
     let mut named_accounts = BTreeMap::new();
 
     let matching_idl_instruction = idl.instructions.iter().find(|inst| {
