@@ -4,8 +4,8 @@
 mod config;
 
 use crate::core::{
-    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    AccountRef, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    resolve_program_display,
 };
 use config::SplTokenConfig;
 use solana_program::program_option::COption;
@@ -69,10 +69,7 @@ struct InstructionView {
 
 impl InstructionView {
     fn from_context(context: &VisualizerContext) -> Self {
-        let program_id = match context.program_id() {
-            ProgramRef::Resolved(pk) => pk.to_string(),
-            ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
-        };
+        let program_id = resolve_program_display(context);
         let accounts = (0..context.num_accounts())
             .map(|i| match context.account(i) {
                 Some(AccountRef::Resolved(pk)) => pk.to_string(),

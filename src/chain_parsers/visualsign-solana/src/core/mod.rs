@@ -473,7 +473,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_account_display_matches_instruction_view() {
+    fn test_resolve_account_and_program_display() {
         let keys = vec![Pubkey::new_unique()]; // only 1 key
         let ci = CompiledInstruction {
             program_id_index: 0,
@@ -488,12 +488,9 @@ mod tests {
         let registry = crate::idl::IdlRegistry::new();
         let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry, 0);
 
-        // Position-addressed resolution agrees with the whole-instruction view,
-        // so a preset reading one account renders the same string either way.
-        let view = InstructionView::from_context(&ctx);
-        assert_eq!(resolve_account_display(&ctx, 0), view.accounts[0]);
-        assert_eq!(resolve_account_display(&ctx, 1), view.accounts[1]);
-        assert_eq!(resolve_program_display(&ctx), view.program_id);
+        assert_eq!(resolve_program_display(&ctx), keys[0].to_string());
+        assert_eq!(resolve_account_display(&ctx, 0), keys[0].to_string());
+        assert_eq!(resolve_account_display(&ctx, 1), "unresolved(50)");
 
         // A position past the instruction's account list stays infallible and
         // reports the position that produced it.

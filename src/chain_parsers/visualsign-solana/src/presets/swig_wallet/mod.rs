@@ -5,8 +5,8 @@ mod config;
 use std::fmt;
 
 use crate::core::{
-    AccountRef, InstructionVisualizer, MAX_CALL_DEPTH, ProgramRef, SolanaIntegrationConfig,
-    VisualizerContext, VisualizerKind, available_visualizers, visualize_with_any,
+    AccountRef, InstructionVisualizer, MAX_CALL_DEPTH, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind, available_visualizers, resolve_program_display, visualize_with_any,
 };
 use config::SwigWalletConfig;
 use solana_parser::solana::structs::SolanaAccount;
@@ -65,10 +65,7 @@ impl InstructionVisualizer for SwigWalletVisualizer {
         let decoded = parse_swig_instruction(context.data(), &accounts, context.call_depth())
             .map_err(|err| VisualSignError::DecodeError(err.to_string()))?;
 
-        let program_id_str = match context.program_id() {
-            ProgramRef::Resolved(pk) => pk.to_string(),
-            ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
-        };
+        let program_id_str = resolve_program_display(context);
 
         let summary = decoded.summary();
         let mut expanded_fields = vec![
