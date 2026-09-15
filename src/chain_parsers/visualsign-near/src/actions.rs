@@ -23,6 +23,23 @@ use crate::presets::intents::{NearTokenRegistry, token_amount_field};
 /// NEAR's native token symbol, used for `AmountV2` abbreviations.
 const NEAR_SYMBOL: &str = "NEAR";
 
+/// The smallest NEAR unit, named rather than written out.
+const YOCTONEAR_SYMBOL: &str = "yoctoNEAR";
+
+/// The amount and unit to show for an attached deposit.
+///
+/// NEP-141 requires a privileged token method to carry exactly one
+/// yoctoNEAR, so that spending one needs a full-access key rather than a
+/// function-call key. In NEAR that deposit renders as a 1 behind 23 zeros,
+/// which a signer has to count digits to recognize; naming the unit says
+/// which deposit it is instead. Every other amount reads in NEAR.
+fn deposit_amount(yocto: u128) -> (String, &'static str) {
+    if yocto == 1 {
+        return ("1".to_string(), YOCTONEAR_SYMBOL);
+    }
+    (format_near(yocto), NEAR_SYMBOL)
+}
+
 /// Render the action-specific fields for a single [`Action`].
 ///
 /// `total_actions` is the number of actions in the transaction this action
@@ -70,9 +87,9 @@ pub fn render_action(
             }
             let deposit = fc.deposit.as_yoctonear();
             if deposit > 0 {
+                let (amount, symbol) = deposit_amount(deposit);
                 fields.push(
-                    create_amount_field("Deposit", &format_near(deposit), NEAR_SYMBOL)?
-                        .signable_payload_field,
+                    create_amount_field("Deposit", &amount, symbol)?.signable_payload_field,
                 );
             }
             fields.push(
@@ -162,13 +179,9 @@ pub fn render_action(
         }
         Action::DeterministicStateInit(a) => {
             let mut fields = action_boundary_field(action, total_actions)?;
+            let (amount, symbol) = deposit_amount(a.deposit.as_yoctonear());
             fields.push(
-                create_amount_field(
-                    "Deposit",
-                    &format_near(a.deposit.as_yoctonear()),
-                    NEAR_SYMBOL,
-                )?
-                .signable_payload_field,
+                create_amount_field("Deposit", &amount, symbol)?.signable_payload_field,
             );
             // `state_init` (the derived account's code/data) has no cheap
             // field-level render, same as DeployContract's raw wasm; flag it
@@ -525,6 +538,29 @@ fn push_gas_key_info_fields(
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
+    /// The NEP-141 marker deposit is named, not spelled out: a signer should
+    /// not have to count 23 zeros to tell it from a real amount.
+    #[test]
+    fn one_yoctonear_deposit_is_named() {
+        assert_eq!(deposit_amount(1), ("1".to_string(), "yoctoNEAR"));
+    }
+
+    /// Every other deposit still reads in NEAR.
+    #[test]
+    fn other_deposits_read_in_near() {
+        assert_eq!(deposit_amount(0), ("0".to_string(), "NEAR"));
+        assert_eq!(
+            deposit_amount(1_000_000_000_000_000_000_000_000),
+            ("1".to_string(), "NEAR")
+        );
+        assert_eq!(deposit_amount(1_250_000_000_000_000_000_000), ("0.00125".to_string(), "NEAR"));
+        // Two yoctoNEAR is not the marker, so it keeps the exact NEAR form.
+        assert_eq!(
+            deposit_amount(2),
+            ("0.000000000000000000000002".to_string(), "NEAR")
+        );
+    }
+
     use super::*;
     use near_primitives::action::{CreateAccountAction, TransferAction};
     use near_primitives::types::Balance;
