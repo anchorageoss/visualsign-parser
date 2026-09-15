@@ -3,8 +3,8 @@
 mod config;
 
 use crate::core::{
-    InstructionView, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind, resolve_program_display,
 };
 use crate::utils::{SwapTokenInfo, get_token_info};
 use config::JupiterSwapConfig;
@@ -438,10 +438,7 @@ fn create_jupiter_preview_layout(
     instruction: &JupiterSwapInstruction,
     context: &VisualizerContext,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
-    let program_id_str = match context.program_id() {
-        ProgramRef::Resolved(pk) => pk.to_string(),
-        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
-    };
+    let program_id_str = resolve_program_display(context);
     let instruction_text = format_jupiter_swap_instruction(instruction);
 
     let condensed = SignablePayloadFieldListLayout {
@@ -487,10 +484,7 @@ fn create_jupiter_swap_expanded_fields(
     instruction: &JupiterSwapInstruction,
     context: &VisualizerContext,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
-    let program_id_str = match context.program_id() {
-        ProgramRef::Resolved(pk) => pk.to_string(),
-        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
-    };
+    let program_id_str = resolve_program_display(context);
     let mut fields = vec![
         create_text_field("Program ID", &program_id_str)
             .map_err(|e| VisualSignError::ConversionError(e.to_string()))?,

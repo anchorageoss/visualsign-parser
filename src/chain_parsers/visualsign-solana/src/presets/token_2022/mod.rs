@@ -3,8 +3,8 @@
 mod config;
 
 use crate::core::{
-    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    AccountRef, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    resolve_program_display,
 };
 use crate::utils::format_token_amount;
 use config::Token2022Config;
@@ -17,13 +17,6 @@ use visualsign::{
 };
 
 static TOKEN_2022_CONFIG: Token2022Config = Token2022Config;
-
-fn resolve_program_id(context: &VisualizerContext) -> String {
-    match context.program_id() {
-        ProgramRef::Resolved(pk) => pk.to_string(),
-        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
-    }
-}
 
 // Token 2022 extension instruction discriminators
 const PAUSABLE_EXTENSION_DISCRIMINATOR: u8 = 44;
@@ -375,7 +368,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Mint", mint)?,
                 create_text_field("Destination Account", account)?,
                 create_text_field("Mint Authority", mint_authority)?,
-                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_text_field("Program ID", &resolve_program_display(context))?,
                 create_raw_data_field(context.data(), None)?,
             ];
 
@@ -404,7 +397,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Token Account", account)?,
                 create_text_field("Mint", mint)?,
                 create_text_field("Authority", authority)?,
-                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_text_field("Program ID", &resolve_program_display(context))?,
                 create_raw_data_field(context.data(), None)?,
             ];
 
@@ -422,7 +415,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Instruction", "Pause")?,
                 create_text_field("Mint", mint)?,
                 create_text_field("Pause Authority", pause_authority)?,
-                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_text_field("Program ID", &resolve_program_display(context))?,
                 create_raw_data_field(context.data(), None)?,
             ];
 
@@ -440,7 +433,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Instruction", "Resume")?,
                 create_text_field("Mint", mint)?,
                 create_text_field("Pause Authority", pause_authority)?,
-                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_text_field("Program ID", &resolve_program_display(context))?,
                 create_raw_data_field(context.data(), None)?,
             ];
 
@@ -471,7 +464,7 @@ fn create_token_2022_preview_layout(
                 create_number_field("Authority Type ID", &authority_type.to_string(), "")?,
                 create_text_field("Current Authority", current_authority)?,
                 create_text_field("New Authority", &new_authority_display)?,
-                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_text_field("Program ID", &resolve_program_display(context))?,
                 create_raw_data_field(context.data(), None)?,
             ];
 
@@ -491,7 +484,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Token Account", account)?,
                 create_text_field("Mint", mint)?,
                 create_text_field("Freeze Authority", freeze_authority)?,
-                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_text_field("Program ID", &resolve_program_display(context))?,
                 create_raw_data_field(context.data(), None)?,
             ];
 
@@ -511,7 +504,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Token Account", account)?,
                 create_text_field("Mint", mint)?,
                 create_text_field("Freeze Authority", freeze_authority)?,
-                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_text_field("Program ID", &resolve_program_display(context))?,
                 create_raw_data_field(context.data(), None)?,
             ];
 
@@ -531,7 +524,7 @@ fn create_token_2022_preview_layout(
                 create_text_field("Token Account", account)?,
                 create_text_field("Destination", destination)?,
                 create_text_field("Owner", owner)?,
-                create_text_field("Program ID", &resolve_program_id(context))?,
+                create_text_field("Program ID", &resolve_program_display(context))?,
                 create_raw_data_field(context.data(), None)?,
             ];
 
@@ -565,7 +558,7 @@ fn create_token_2022_preview_layout(
                 },
                 fallback_text: format!(
                     "Token 2022: {title}\nProgram ID: {}",
-                    resolve_program_id(context)
+                    resolve_program_display(context)
                 ),
             },
             preview_layout,
