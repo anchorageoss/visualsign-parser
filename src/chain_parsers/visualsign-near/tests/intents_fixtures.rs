@@ -114,16 +114,19 @@ const FIXTURES: &[Expected] = &[
         ],
     },
     Expected {
-        // token_ids and amounts are parallel vectors: each pairing has to reach
-        // the signer as one line, or an amount could be read against the wrong
-        // token.
+        // token_ids and amounts are parallel vectors, so each pairing has to
+        // reach the signer unambiguously or an amount could be read against the
+        // wrong token. An amount this build cannot resolve names the asset id it
+        // belongs to, which is what carries the pairing.
         file: "intent-mt-withdraw.json",
         title: "NEAR Intent: MT Withdraw",
         shows: &[
             ("Token", "mt.near"),
             ("To", "bob.near"),
-            ("MT Token", "series-1 x3"),
-            ("MT Token", "series-2 x5"),
+            ("MT Token", "series-1"),
+            ("Amount", "3 (unresolved nep245:mt.near:series-1)"),
+            ("MT Token", "series-2"),
+            ("Amount", "5 (unresolved nep245:mt.near:series-2)"),
         ],
     },
     Expected {

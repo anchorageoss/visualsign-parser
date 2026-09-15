@@ -115,6 +115,11 @@ fn usable(meta: TokenMeta) -> Option<TokenMeta> {
     (meta.decimals <= MAX_DECIMALS).then_some(meta)
 }
 
+/// The intents verifier contract. An intent names it as its
+/// `verifying_contract`, and a multi-token asset id that claims to wrap one of
+/// its NEP-141 balances is only trustworthy when the contract is this one.
+pub const INTENTS_RECEIVER: &str = "intents.near";
+
 /// If `asset_id` is `nep245:<contract>:<mt_token_id>`, `contract` is the
 /// trusted intents verifier itself ([`INTENTS_RECEIVER`]), and `mt_token_id`
 /// round-trips as a NEP-141 [`TokenId`] -- the convention that contract uses
@@ -137,7 +142,7 @@ fn usable(meta: TokenMeta) -> Option<TokenMeta> {
 /// for it even though `mt_token_id` may contain further `:`s.
 fn mt_underlying_nep141(asset_id: &str) -> Option<String> {
     let (contract, mt_token_id) = asset_id.strip_prefix("nep245:")?.split_once(':')?;
-    (contract == crate::convert::INTENTS_RECEIVER
+    (contract == INTENTS_RECEIVER
         && matches!(mt_token_id.parse::<TokenId>(), Ok(TokenId::Nep141(_))))
     .then(|| mt_token_id.to_string())
 }

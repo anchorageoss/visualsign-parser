@@ -351,7 +351,7 @@ impl VisualSignConverterFromString<NearTransaction> for NearVisualSignConverter 
 
 /// The intents verifier contract, and the method on it that carries a signed
 /// intent batch.
-pub(crate) const INTENTS_RECEIVER: &str = "intents.near";
+pub(crate) use visualsign_intents::INTENTS_RECEIVER;
 const EXECUTE_INTENTS_METHOD: &str = "execute_intents";
 
 /// The signed intent batch this action carries, or `None` for anything else.

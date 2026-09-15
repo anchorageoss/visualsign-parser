@@ -24,6 +24,7 @@ pub use token_signature::{
 };
 
 pub use render::{rejected_metadata_diagnostics, token_amount_field};
+pub use tokens::INTENTS_RECEIVER;
 
 /// Dev/CLI signing helpers for constructing signed `TokenMetadataEntry` proto
 /// values (e.g. for local test fixtures). Gated the same way as the
