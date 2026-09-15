@@ -199,8 +199,8 @@ pub struct SolanaParsedInstructionDataIo {
     /// order, so byte-identical inputs produce byte-identical encodings
     /// regardless of `serde_json`'s `preserve_order` build feature.
     pub program_call_args_json: String,
-    /// `"BuiltIn"` (with the inner program-type discriminant collapsed) or
-    /// `"Custom"`. Empty when no IDL was used.
+    /// `"BuiltIn"` (with the inner program-type discriminant collapsed),
+    /// `"Preset"` or `"Custom"`. Empty when no IDL was used.
     pub idl_source: String,
     pub idl_hash: String,
 }
