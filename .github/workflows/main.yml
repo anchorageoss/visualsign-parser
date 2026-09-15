@@ -64,3 +64,19 @@ jobs:
         run: make -C src narrow-build-check
       - name: Check parser_cli narrow feature builds
         run: make -C src parser-cli-narrow-build-check
+
+      # `tools/tvc-deploy` is its own cargo workspace, so `src/Cargo.toml`'s
+      # workspace lints and `make -C src lint|test` cannot reach it, and no
+      # other pull_request-triggered workflow builds it. Its tests ran only
+      # inside `tvc-deploy.yml`'s deploy job, which is gated on
+      # `workflow_dispatch` or the `tvc-deploy-test` label -- so a PR touching
+      # the deploy helper had no CI coverage of it at all.
+      #
+      # `--locked` for the same reason the narrow-build checks use it: this
+      # crate keeps its own Cargo.lock, so without it a stale lock is silently
+      # updated in CI instead of failing.
+      - name: Lint and test the deploy helper (separate workspace)
+        run: |
+          cargo clippy --locked --manifest-path tools/tvc-deploy/Cargo.toml \
+            --all-targets -- -D warnings
+          cargo test --locked --manifest-path tools/tvc-deploy/Cargo.toml

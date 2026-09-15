@@ -704,6 +704,29 @@ mod tests {
     }
 
     /// Canonical uncompressed public-key bytes derived from a 32-byte seed.
+    /// `.github/workflows/tvc-deploy.yml` pins this public key so the
+    /// label-triggered validation deploy can exercise the *require-signed* ABI
+    /// posture without a repo variable or any admin action: it is the public
+    /// half of [`CLI_DEV_SIGNING_KEY_SEED`], the key `parser_cli` already signs
+    /// its own ABI files with.
+    ///
+    /// A workflow cannot import a Rust constant, so the hex is duplicated
+    /// there. This test is what stops that copy going stale: rotate the seed
+    /// and this fails, rather than CI quietly deploying a posture that
+    /// allowlists a key nothing signs with any more -- which would still go
+    /// green, because the smoke check is a Solana transaction that no Ethereum
+    /// ABI posture touches.
+    #[test]
+    fn dev_abi_signer_pubkey_is_pinned() {
+        const PINNED_IN_TVC_DEPLOY_WORKFLOW: &str = "0424653eac434488002cc06bbfb7f10fe18991e35f9fe4302dbea6d2353dc0ab1c119fc5009a032aa9fe47f5e149bb8442f71f884ccb516590686d8ff6ab91c613";
+        let derived = hex::encode(pubkey_bytes_from_seed(&CLI_DEV_SIGNING_KEY_SEED));
+        assert_eq!(
+            derived, PINNED_IN_TVC_DEPLOY_WORKFLOW,
+            "the dev ABI signer changed; update DEV_ABI_SIGNER_PUBKEY in \
+             .github/workflows/tvc-deploy.yml to {derived}"
+        );
+    }
+
     fn pubkey_bytes_from_seed(seed: &[u8; 32]) -> Vec<u8> {
         let signing_key = SigningKey::from_bytes(seed).expect("valid key");
         let verifying_key = VerifyingKey::from(&signing_key);
