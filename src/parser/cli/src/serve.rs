@@ -27,7 +27,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use axum::{
     Json, Router,
     extract::{Path as AxumPath, Query, State},
-    http::StatusCode,
+    http::{HeaderName, HeaderValue, StatusCode, header},
     response::Html,
     routing::get,
 };
@@ -322,6 +322,21 @@ async fn handle_payload(
     }
 }
 
+/// A JSON body that a cache must not keep.
+///
+/// `/next` and `/reset` are GETs that move the cursor. A cached `/next` would
+/// hand back the same payload however many times it was refetched, which
+/// defeats the route's only purpose; a cached `/reset` would return its
+/// acknowledgement without the store ever happening.
+type NoStoreJson = ([(HeaderName, HeaderValue); 1], Json<serde_json::Value>);
+
+fn no_store(value: serde_json::Value) -> NoStoreJson {
+    (
+        [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
+        Json(value),
+    )
+}
+
 /// Serve one payload per call, advancing a shared cursor and wrapping at the
 /// end, so the same URL yields the whole directory over successive fetches.
 ///
@@ -336,7 +351,7 @@ async fn handle_payload(
 async fn handle_next(
     State(state): State<AppState>,
     Query(q): Query<NextQuery>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+) -> Result<NoStoreJson, (StatusCode, String)> {
     let entries = load_entries(&state)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -348,9 +363,9 @@ async fn handle_next(
         )
     })?;
     if q.bare {
-        return Ok(Json(step.payload.clone()));
+        return Ok(no_store(step.payload.clone()));
     }
-    Ok(Json(with_step_diagnostic(
+    Ok(no_store(with_step_diagnostic(
         step.payload,
         step.position,
         step.count,
@@ -360,9 +375,9 @@ async fn handle_next(
 
 /// Put the `/next` cursor back to the first entry. A GET mutates here because
 /// the client this serves can be handed a URL and nothing else.
-async fn handle_reset(State(state): State<AppState>) -> Json<serde_json::Value> {
+async fn handle_reset(State(state): State<AppState>) -> NoStoreJson {
     state.cursor.store(0, Ordering::Relaxed);
-    Json(serde_json::json!({ "reset": true, "next_step": 1 }))
+    no_store(serde_json::json!({ "reset": true, "next_step": 1 }))
 }
 
 /// One position in the walk. Carries the payload rather than the entry, so a
@@ -467,6 +482,28 @@ async fn handle_file(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
+/// Root paths the literal routes take, which the wildcard therefore never
+/// sees. A nested `sub/next` is unaffected: only the exact path collides.
+const RESERVED_ROOT_PATHS: [&str; 2] = ["next", "reset"];
+
+/// The index link for one entry.
+///
+/// A root file named for one of the walk routes cannot be reached at
+/// `/{rel_path}`, because the literal route matches first. Linking it through
+/// `/api/file` keeps every entry in the index reachable. That route answers
+/// with the `{path, ok, payload}` envelope rather than a bare payload, which
+/// is the visible difference for those two names.
+fn entry_href(rel_path: &str) -> String {
+    let encoded = url_encode_path(rel_path);
+    if RESERVED_ROOT_PATHS.contains(&rel_path) {
+        // No slash to escape: only a root name can collide, and a root name
+        // has none.
+        format!("/api/file?path={encoded}")
+    } else {
+        format!("/{encoded}")
+    }
+}
+
 /// Percent-encode the segments that need it so a rel path becomes a URL.
 /// Segment separators (`/`) are preserved. Common safe filename characters
 /// (alphanumerics, `-`, `_`, `.`) are left alone; everything else is
@@ -551,21 +588,21 @@ fn render_html(entries: &[DecodedEntry]) -> String {
 
     for entry in entries {
         let escaped_path = html_escape(&entry.rel_path);
-        let url_path = url_encode_path(&entry.rel_path);
+        let href = entry_href(&entry.rel_path);
         match &entry.result {
             Ok(value) => {
                 let json = serde_json::to_string_pretty(value)
                     .unwrap_or_else(|e| format!("(serialization error: {e})"));
                 let _ = write!(
                     body,
-                    "<details><summary><span class=path>{escaped_path}</span> <a class=open href=\"/{url_path}\">[json]</a><button class=copy type=button>copy</button></summary><pre>{}</pre></details>",
+                    "<details><summary><span class=path>{escaped_path}</span> <a class=open href=\"{href}\">[json]</a><button class=copy type=button>copy</button></summary><pre>{}</pre></details>",
                     html_escape(&json),
                 );
             }
             Err(err) => {
                 let _ = write!(
                     body,
-                    "<details><summary class=err><span class=path>{escaped_path}</span> &mdash; error <a class=open href=\"/{url_path}\">[json]</a><button class=copy type=button>copy</button></summary><pre>{}</pre></details>",
+                    "<details><summary class=err><span class=path>{escaped_path}</span> &mdash; error <a class=open href=\"{href}\">[json]</a><button class=copy type=button>copy</button></summary><pre>{}</pre></details>",
                     html_escape(err),
                 );
             }
@@ -862,6 +899,120 @@ mod tests {
             with_step_diagnostic(&no_fields, 1, 1, "odd.json"),
             no_fields
         );
+    }
+
+    /// State for driving a handler directly. The routes are thin, but the
+    /// wiring they do -- parsing `?bare`, sharing one cursor, refusing an
+    /// empty rotation, setting `no-store` -- is not covered by testing the
+    /// functions underneath them.
+    fn app_state(dir: &Path) -> AppState {
+        AppState {
+            dir: Arc::new(dir.to_path_buf()),
+            chain: Arc::new("ethereum".to_string()),
+            runtime: Arc::new(make_runtime()),
+            cursor: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    fn two_payload_dir(label: &str) -> PathBuf {
+        let dir = temp_dir(label);
+        fs::write(
+            dir.join("a.json"),
+            r#"{"Fields":[{"Label":"L","Type":"text_v2"}],"Title":"A"}"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.join("b.json"),
+            r#"{"Fields":[{"Label":"L","Type":"text_v2"}],"Title":"B"}"#,
+        )
+        .unwrap();
+        dir
+    }
+
+    async fn next(state: &AppState, bare: bool) -> serde_json::Value {
+        let (headers, Json(value)) = handle_next(State(state.clone()), Query(NextQuery { bare }))
+            .await
+            .expect("a payload");
+        // Both walk routes move the cursor, so neither may be cached.
+        assert_eq!(headers[0].0, header::CACHE_CONTROL);
+        assert_eq!(headers[0].1, HeaderValue::from_static("no-store"));
+        value
+    }
+
+    #[tokio::test]
+    async fn next_walks_in_order_and_wraps() {
+        let state = app_state(&two_payload_dir("next_walk"));
+        let titles: Vec<String> = {
+            let mut got = Vec::new();
+            for _ in 0..3 {
+                got.push(next(&state, false).await["Title"].to_string());
+            }
+            got
+        };
+        assert_eq!(titles, vec!["\"A\"", "\"B\"", "\"A\""]);
+    }
+
+    #[tokio::test]
+    async fn next_prepends_the_step_diagnostic_unless_bare() {
+        let state = app_state(&two_payload_dir("next_bare"));
+
+        let decorated = next(&state, false).await;
+        let first = &decorated["Fields"][0];
+        assert_eq!(first["Type"], "diagnostic");
+        assert_eq!(first["Diagnostic"]["Message"], "step 1 of 2: a.json");
+
+        // ?bare=true is the same entry's neighbour, undecorated.
+        let bare = next(&state, true).await;
+        assert_eq!(bare["Title"], "B");
+        assert_eq!(
+            bare["Fields"].as_array().unwrap().len(),
+            1,
+            "no step field was added: {bare}"
+        );
+    }
+
+    #[tokio::test]
+    async fn reset_returns_the_cursor_to_the_first_entry() {
+        let state = app_state(&two_payload_dir("next_reset"));
+        next(&state, false).await;
+        next(&state, false).await;
+
+        let (headers, Json(ack)) = handle_reset(State(state.clone())).await;
+        assert_eq!(headers[0].1, HeaderValue::from_static("no-store"));
+        assert_eq!(ack, serde_json::json!({"reset": true, "next_step": 1}));
+
+        assert_eq!(
+            next(&state, false).await["Fields"][0]["Diagnostic"]["Message"],
+            "step 1 of 2: a.json"
+        );
+    }
+
+    #[tokio::test]
+    async fn next_is_not_found_when_nothing_decodes() {
+        let dir = temp_dir("next_empty");
+        fs::write(dir.join("junk.hex"), "not a transaction").unwrap();
+        let state = app_state(&dir);
+
+        let err = handle_next(State(state), Query(NextQuery { bare: false }))
+            .await
+            .expect_err("nothing to serve");
+        assert_eq!(err.0, StatusCode::NOT_FOUND);
+        assert!(err.1.contains("no decodable payloads"), "got: {}", err.1);
+    }
+
+    #[test]
+    fn a_file_named_for_a_walk_route_links_through_api_file() {
+        // The literal routes match before the wildcard, so a root file with
+        // one of those names is unreachable at /{name} and the index has to
+        // link it elsewhere.
+        assert_eq!(entry_href("next"), "/api/file?path=next");
+        assert_eq!(entry_href("reset"), "/api/file?path=reset");
+        assert_eq!(
+            entry_href("sub/next"),
+            "/sub/next",
+            "only a root name collides"
+        );
+        assert_eq!(entry_href("payload.json"), "/payload.json");
     }
 
     #[test]
