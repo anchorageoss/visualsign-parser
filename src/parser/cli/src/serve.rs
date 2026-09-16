@@ -3,15 +3,26 @@
 //! the results. `.json` files are passed through as-is; other files are
 //! decoded as raw transactions through the chain registry.
 //!
-//! The server binds to `127.0.0.1` only — this is intentional, the feature
-//! is for local triage, not network exposure. There is no auth and no TLS.
+//! The server binds `127.0.0.1` by default: the feature is local triage and
+//! carries no auth and no TLS. `--host` overrides the bind address for the case
+//! where the client is a separate device, such as a phone stepping through
+//! `/next`. Any non-loopback address serves the directory to every host that
+//! can route to the port, which is why it is an argument and not the default.
 //!
 //! Re-decoding happens on every HTTP request rather than once at startup,
 //! so editing a fixture and refreshing the browser is enough to see the
 //! new state — no server restart needed.
+//!
+//! `/next` walks the directory one payload per call, so a client that can be
+//! given a URL but not content steps through every entry by refetching one
+//! address instead of being handed each link in turn. It prepends a
+//! `diagnostic` field naming the file and position, since a payload otherwise
+//! carries nothing that says which file produced it.
 
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::{
     Json, Router,
@@ -55,8 +66,18 @@ pub struct ServeArgs {
     )]
     pub dir: PathBuf,
 
-    /// TCP port to bind on `127.0.0.1`.
-    #[arg(long, default_value_t = 47474, help = "Port to bind on 127.0.0.1")]
+    /// Address to bind. Loopback unless overridden; `0.0.0.0` reaches every
+    /// interface, which is what another device on the network needs.
+    #[arg(
+        long,
+        value_name = "IP",
+        default_value = "127.0.0.1",
+        help = "Address to bind - 0.0.0.0 to accept connections from other hosts"
+    )]
+    pub host: IpAddr,
+
+    /// TCP port to bind.
+    #[arg(long, default_value_t = 47474, help = "Port to bind")]
     pub port: u16,
 
     /// Per-chain CLI args (ABI/IDL mappings, etc.).
@@ -75,11 +96,23 @@ struct AppState {
     dir: Arc<PathBuf>,
     chain: Arc<String>,
     runtime: Arc<Runtime>,
+    /// Call counter behind `/next`, taken modulo the decodable-entry count at
+    /// request time. One cursor per server rather than per client, so two
+    /// viewers stepping at once interleave.
+    cursor: Arc<AtomicUsize>,
 }
 
 #[derive(Deserialize)]
 struct FileQuery {
     path: String,
+}
+
+#[derive(Deserialize)]
+struct NextQuery {
+    /// `?bare=true` returns the payload exactly as the other routes do, with
+    /// no step diagnostic prepended.
+    #[serde(default)]
+    bare: bool,
 }
 
 #[derive(Serialize)]
@@ -93,7 +126,7 @@ struct FileResponse<'a> {
 }
 
 /// Entry point for the `serve` subcommand. Validates the directory, then
-/// serves a small local web UI on `127.0.0.1:port`. Each request triggers
+/// serves a small local web UI on `host:port`. Each request triggers
 /// a fresh re-walk and re-decode of the directory — refresh the browser to
 /// see edits.
 pub fn run(args: &ServeArgs) -> Result<(), String> {
@@ -108,10 +141,17 @@ pub fn run(args: &ServeArgs) -> Result<(), String> {
         dir: Arc::new(args.dir.clone()),
         chain: Arc::new(args.chain.clone()),
         runtime: Arc::new(runtime),
+        cursor: Arc::new(AtomicUsize::new(0)),
     };
+    // `/next` and `/reset` are literal segments, which the router matches
+    // ahead of the `/{*path}` wildcard. Files named `next` or `reset` are
+    // therefore unreachable by path and have to be fetched through
+    // `/api/file?path=`.
     let app = Router::new()
         .route("/", get(handle_index))
         .route("/api/file", get(handle_file))
+        .route("/next", get(handle_next))
+        .route("/reset", get(handle_reset))
         .route("/{*path}", get(handle_payload))
         .with_state(state);
 
@@ -121,7 +161,7 @@ pub fn run(args: &ServeArgs) -> Result<(), String> {
         .map_err(|e| format!("build tokio runtime: {e}"))?;
 
     rt.block_on(async move {
-        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], args.port));
+        let addr = SocketAddr::new(args.host, args.port);
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .map_err(|e| format!("Failed to bind to {addr}: {e}"))?;
@@ -282,6 +322,120 @@ async fn handle_payload(
     }
 }
 
+/// Serve one payload per call, advancing a shared cursor and wrapping at the
+/// end, so the same URL yields the whole directory over successive fetches.
+///
+/// Only entries that decoded are in the rotation: an undecodable file would
+/// have nothing to return, and 422 mid-walk would stall a client that has no
+/// way to skip. `/reset` puts the cursor back to the first entry.
+///
+/// One fetch is one step, so a client that requests twice per view — a
+/// prefetch, a retry, a conditional request it does not cache — advances
+/// twice. The step diagnostic names the file, so a skip is visible rather
+/// than silent.
+async fn handle_next(
+    State(state): State<AppState>,
+    Query(q): Query<NextQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let entries = load_entries(&state)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let tick = state.cursor.fetch_add(1, Ordering::Relaxed);
+    let step = pick_step(&entries, tick).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            "no decodable payloads in directory\n".to_string(),
+        )
+    })?;
+    if q.bare {
+        return Ok(Json(step.payload.clone()));
+    }
+    Ok(Json(with_step_diagnostic(
+        step.payload,
+        step.position,
+        step.count,
+        step.rel_path,
+    )))
+}
+
+/// Put the `/next` cursor back to the first entry. A GET mutates here because
+/// the client this serves can be handed a URL and nothing else.
+async fn handle_reset(State(state): State<AppState>) -> Json<serde_json::Value> {
+    state.cursor.store(0, Ordering::Relaxed);
+    Json(serde_json::json!({ "reset": true, "next_step": 1 }))
+}
+
+/// One position in the walk. Carries the payload rather than the entry, so a
+/// caller never has to re-check that this entry decoded.
+struct StepPick<'a> {
+    /// 1-based, for display.
+    position: usize,
+    /// How many entries are in the rotation.
+    count: usize,
+    rel_path: &'a str,
+    payload: &'a serde_json::Value,
+}
+
+/// The entry `/next` serves on call number `tick`. Counts and indexes only
+/// decodable entries, in the sorted order the index page lists. `None` when the
+/// directory holds nothing that decodes.
+fn pick_step(entries: &[DecodedEntry], tick: usize) -> Option<StepPick<'_>> {
+    let decodable: Vec<(&str, &serde_json::Value)> = entries
+        .iter()
+        .filter_map(|e| e.result.as_ref().ok().map(|v| (e.rel_path.as_str(), v)))
+        .collect();
+    let count = decodable.len();
+    if count == 0 {
+        return None;
+    }
+    let idx = tick % count;
+    decodable.get(idx).map(|(rel_path, payload)| StepPick {
+        position: idx + 1,
+        count,
+        rel_path,
+        payload,
+    })
+}
+
+/// Copy `payload` with a `diagnostic` field prepended naming the file and its
+/// position in the walk.
+///
+/// A `SignablePayload` carries no field identifying its source, so a viewer
+/// handed a bare payload cannot say which file it came from. `diagnostic` is
+/// the field type for a note about a payload rather than content within it,
+/// which is what this is, and clients already render it.
+///
+/// A value with no `Fields` array — a file that is valid JSON but not a
+/// payload — is returned untouched, since there is nowhere to put the field.
+fn with_step_diagnostic(
+    payload: &serde_json::Value,
+    position: usize,
+    count: usize,
+    rel_path: &str,
+) -> serde_json::Value {
+    let message = format!("step {position} of {count}: {rel_path}");
+    let field = serde_json::json!({
+        "Diagnostic": {
+            "Domain": "parser_cli-serve",
+            "Level": "ok",
+            "Message": message,
+            "Rule": "serve::step",
+        },
+        "FallbackText": format!("ok: {message}"),
+        "Label": "step",
+        "Type": "diagnostic",
+    });
+
+    let mut out = payload.clone();
+    match out.get_mut("Fields").and_then(|f| f.as_array_mut()) {
+        Some(fields) => {
+            fields.insert(0, field);
+            out
+        }
+        None => out,
+    }
+}
+
 async fn handle_file(
     State(state): State<AppState>,
     Query(q): Query<FileQuery>,
@@ -418,7 +572,7 @@ fn render_html(entries: &[DecodedEntry]) -> String {
         }
     }
 
-    body.push_str("<footer>Refresh to re-decode from disk. <code>.json</code> files are served as-is; everything else is decoded through the chain registry.</footer>");
+    body.push_str("<footer>Refresh to re-decode from disk. <code>.json</code> files are served as-is; everything else is decoded through the chain registry.<br><a href=\"/next\">/next</a> serves one payload per call and wraps at the end, so a client that takes a URL steps through every entry by refetching it; the payload carries a <code>step</code> diagnostic naming the file. <a href=\"/reset\">/reset</a> returns to the first.</footer>");
 
     format!(
         "<!DOCTYPE html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width, initial-scale=1\"><title>parser_cli serve</title><style>{STYLE}</style></head><body>{body}<script>{COPY_SCRIPT}</script></body></html>"
@@ -599,5 +753,122 @@ mod tests {
         let html = render_error_page("boom");
         assert!(html.contains("name=viewport") && html.contains("width=device-width"));
         assert!(html.contains("boom"));
+    }
+
+    /// Build entries directly rather than through a temp directory: `pick_step`
+    /// cares only about decode success and sort order.
+    fn entry(rel_path: &str, ok: bool) -> DecodedEntry {
+        DecodedEntry {
+            rel_path: rel_path.to_string(),
+            result: if ok {
+                Ok(serde_json::json!({ "Fields": [], "Title": rel_path }))
+            } else {
+                Err("nope".to_string())
+            },
+        }
+    }
+
+    #[test]
+    fn pick_step_walks_in_order_then_wraps() {
+        let entries = vec![entry("01.json", true), entry("02.json", true)];
+        let walk: Vec<(usize, usize, String)> = (0..5)
+            .map(|tick| {
+                let s = pick_step(&entries, tick).unwrap();
+                (s.position, s.count, s.rel_path.to_string())
+            })
+            .collect();
+        assert_eq!(
+            walk,
+            vec![
+                (1, 2, "01.json".to_string()),
+                (2, 2, "02.json".to_string()),
+                (1, 2, "01.json".to_string()),
+                (2, 2, "02.json".to_string()),
+                (1, 2, "01.json".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn pick_step_skips_undecodable_and_counts_only_the_rest() {
+        let entries = vec![
+            entry("01.json", true),
+            entry("02.hex", false),
+            entry("03.json", true),
+        ];
+        let first = pick_step(&entries, 0).unwrap();
+        assert_eq!(
+            (first.position, first.count, first.rel_path),
+            (1, 2, "01.json")
+        );
+        let second = pick_step(&entries, 1).unwrap();
+        assert_eq!(
+            (second.position, second.count, second.rel_path),
+            (2, 2, "03.json")
+        );
+        // Wrapping is over the decodable count, so the broken file never lands.
+        assert_eq!(pick_step(&entries, 2).unwrap().rel_path, "01.json");
+    }
+
+    #[test]
+    fn pick_step_carries_the_decoded_payload() {
+        let entries = vec![entry("01.json", true)];
+        let picked = pick_step(&entries, 0).unwrap();
+        assert_eq!(picked.payload["Title"], "01.json");
+    }
+
+    #[test]
+    fn pick_step_is_none_when_nothing_decodes() {
+        assert!(pick_step(&[], 0).is_none());
+        assert!(pick_step(&[entry("01.hex", false)], 0).is_none());
+    }
+
+    #[test]
+    fn step_diagnostic_leads_the_fields_and_names_the_file() {
+        let payload = serde_json::json!({
+            "Fields": [{ "Label": "Network", "Type": "text_v2" }],
+            "Title": "NEAR Intent",
+        });
+        let out = with_step_diagnostic(&payload, 3, 14, "03-near-register.json");
+        let fields = out["Fields"].as_array().unwrap();
+        assert_eq!(fields.len(), 2, "the original field is kept");
+        assert_eq!(fields[0]["Type"], "diagnostic");
+        assert_eq!(fields[0]["Label"], "step");
+        assert_eq!(
+            fields[0]["Diagnostic"]["Message"],
+            "step 3 of 14: 03-near-register.json"
+        );
+        assert_eq!(
+            fields[0]["Diagnostic"]["Rule"], "serve::step",
+            "namespaced so it cannot collide with a chain parser's rule"
+        );
+        assert_eq!(
+            fields[0]["FallbackText"],
+            "ok: step 3 of 14: 03-near-register.json"
+        );
+        // Everything else is untouched.
+        assert_eq!(out["Title"], "NEAR Intent");
+        assert_eq!(fields[1]["Label"], "Network");
+    }
+
+    #[test]
+    fn step_diagnostic_leaves_a_value_with_no_fields_array_alone() {
+        // A file that is valid JSON but not a payload: there is nowhere to put
+        // the diagnostic, and dropping it beats inventing a shape.
+        let list = serde_json::json!([{ "input": "0xdeadbeef" }]);
+        assert_eq!(with_step_diagnostic(&list, 1, 1, "inputs.json"), list);
+        let no_fields = serde_json::json!({ "Title": "no fields here" });
+        assert_eq!(
+            with_step_diagnostic(&no_fields, 1, 1, "odd.json"),
+            no_fields
+        );
+    }
+
+    #[test]
+    fn index_page_advertises_the_walk_routes() {
+        let entries = vec![entry("01.json", true)];
+        let html = render_html(&entries);
+        assert!(html.contains("href=\"/next\""), "got: {html}");
+        assert!(html.contains("href=\"/reset\""), "got: {html}");
     }
 }
