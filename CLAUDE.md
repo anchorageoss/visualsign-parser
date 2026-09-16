@@ -44,13 +44,16 @@ mind there is no auth and no TLS. Its routes:
 | `/reset` | Puts the `/next` cursor back to the first entry |
 
 `/next` exists for a client that can be given a URL but not content:
-refetching one address steps through the whole directory.
+refetching one address steps through the whole directory. Both it and `/reset`
+answer `Cache-Control: no-store`, since a GET that moves the cursor must not be
+served from a cache.
 It prepends a `diagnostic` field (`Rule: serve::step`) naming the file and
 position, since a `SignablePayload` carries nothing that identifies its
 source; `?bare=true` suppresses that. Only entries that decode are in the
 rotation. One fetch is one step, so a client that requests twice per view
-advances twice - the step diagnostic makes a skip visible. Files named `next`
-or `reset` are shadowed by these routes and must be fetched via `/api/file`.
+advances twice - the step diagnostic makes a skip visible. A root file named `next`
+or `reset` is shadowed by these routes; the index links those entries through
+`/api/file?path=` so every entry stays reachable.
 
 CI requires: codegen produces no diff, clippy passes with `-D warnings`, all tests pass. Protoc v21.4.
 
