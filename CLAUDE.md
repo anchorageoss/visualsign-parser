@@ -30,6 +30,28 @@ cargo run --bin parser_cli -- decode --chain ethereum --network ETHEREUM_MAINNET
 cargo run --bin parser_cli --features serve -- serve --chain ethereum --network ETHEREUM_MAINNET --dir ./txs
 ```
 
+`serve` re-decodes the directory on every request and passes `.json` files
+through as-is. It binds `127.0.0.1` unless `--host` says otherwise; pass
+`--host 0.0.0.0` when the client is another device on the network, keeping in
+mind there is no auth and no TLS. Its routes:
+
+| Route | Returns |
+| --- | --- |
+| `/` | Index of every entry, with its payload inline |
+| `/<rel-path>` | That entry's payload, bare JSON |
+| `/api/file?path=<rel-path>` | The same wrapped as `{path, ok, payload}` or `{path, ok, error}` |
+| `/next` | One payload per call, advancing a shared cursor and wrapping at the end |
+| `/reset` | Puts the `/next` cursor back to the first entry |
+
+`/next` exists for a client that can be given a URL but not content:
+refetching one address steps through the whole directory.
+It prepends a `diagnostic` field (`Rule: serve::step`) naming the file and
+position, since a `SignablePayload` carries nothing that identifies its
+source; `?bare=true` suppresses that. Only entries that decode are in the
+rotation. One fetch is one step, so a client that requests twice per view
+advances twice - the step diagnostic makes a skip visible. Files named `next`
+or `reset` are shadowed by these routes and must be fetched via `/api/file`.
+
 CI requires: codegen produces no diff, clippy passes with `-D warnings`, all tests pass. Protoc v21.4.
 
 ## Architecture
