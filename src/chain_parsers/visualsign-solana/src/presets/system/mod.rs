@@ -3,8 +3,8 @@
 mod account_labels;
 mod config;
 use crate::core::{
-    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    resolve_account_display, resolve_program_display,
 };
 use config::SystemConfig;
 use solana_program::system_instruction::SystemInstruction;
@@ -47,10 +47,7 @@ fn create_system_preview_layout(
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
     use visualsign::field_builders::*;
 
-    let program_id_str = match context.program_id() {
-        ProgramRef::Resolved(pk) => pk.to_string(),
-        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
-    };
+    let program_id_str = resolve_program_display(context);
 
     match instruction {
         SystemInstruction::Transfer { lamports } => {
@@ -117,16 +114,8 @@ fn create_system_preview_layout(
             space,
             owner,
         } => {
-            let new_account = match context.account(1) {
-                Some(AccountRef::Resolved(pk)) => pk.to_string(),
-                Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
-                None => "unknown".to_string(),
-            };
-            let payer = match context.account(0) {
-                Some(AccountRef::Resolved(pk)) => pk.to_string(),
-                Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
-                None => "unknown".to_string(),
-            };
+            let new_account = resolve_account_display(context, 1);
+            let payer = resolve_account_display(context, 0);
 
             let condensed_fields = vec![
                 create_text_field("Action", "Create Account")?,
@@ -233,5 +222,64 @@ fn create_system_preview_layout(
                 },
             })
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use solana_parser::solana::structs::SolanaAccount;
+    use solana_sdk::instruction::CompiledInstruction;
+    use solana_sdk::pubkey::Pubkey;
+
+    fn text_field_value(fields: &[AnnotatedPayloadField], label: &str) -> Option<String> {
+        fields.iter().find_map(|f| match &f.signable_payload_field {
+            SignablePayloadField::TextV2 { common, text_v2 } if common.label == label => {
+                Some(text_v2.text.clone())
+            }
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn test_create_account_with_missing_new_account_index_renders_oob_placeholder() {
+        let keys = vec![Pubkey::new_unique()];
+        let ci = CompiledInstruction {
+            program_id_index: 0,
+            // Only the payer (position 0) is present; New Account (position 1) is OOB.
+            accounts: vec![0],
+            data: vec![],
+        };
+        let sender = SolanaAccount {
+            account_key: keys[0].to_string(),
+            signer: false,
+            writable: false,
+        };
+        let registry = crate::idl::IdlRegistry::new();
+        let ctx = VisualizerContext::new(&sender, &ci, &keys, &registry, 0);
+
+        let instruction = SystemInstruction::CreateAccount {
+            lamports: 100,
+            space: 10,
+            owner: Pubkey::new_unique(),
+        };
+
+        let field = create_system_preview_layout(&instruction, &ctx).unwrap();
+        let SignablePayloadField::PreviewLayout { preview_layout, .. } =
+            field.signable_payload_field
+        else {
+            panic!("expected PreviewLayout");
+        };
+        let expanded = preview_layout.expanded.unwrap();
+
+        assert_eq!(
+            text_field_value(&expanded.fields, "New Account").unwrap(),
+            "unresolved(oob:1)"
+        );
+        assert_eq!(
+            text_field_value(&expanded.fields, "Payer").unwrap(),
+            keys[0].to_string()
+        );
     }
 }
