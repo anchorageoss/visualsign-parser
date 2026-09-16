@@ -70,11 +70,10 @@ pub enum AccountRef<'a> {
 /// always unresolved in the static `account_keys` slice.
 ///
 /// **Partial rendering (catch-all visualizers).**
-/// Pattern-match on `program_id()` and `account(n)` directly and substitute
-/// a placeholder for unresolved indices instead of erroring. The
-/// `unknown_program` preset is the canonical example: it renders
-/// `unresolved(N)` strings so the user still sees *something* for an
-/// instruction no specific visualizer could handle.
+/// Call [`resolve_program_display`] / [`resolve_account_display`] directly at
+/// the specific positions a preset names, instead of building a full
+/// `InstructionView`, so the user still sees *something* for an instruction
+/// no specific visualizer could handle rather than erroring.
 #[derive(Debug, Clone)]
 pub struct VisualizerContext<'a> {
     sender: &'a SolanaAccount,
