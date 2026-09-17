@@ -65,8 +65,23 @@ const ED25519_SIGNATURE_LEN: usize = 64;
 /// Error type for IDL signature validation.
 #[derive(Debug, thiserror::Error)]
 pub enum IdlSignatureError {
-    #[error("IDL signature validation failed: {0}")]
-    Validation(String),
+    #[error("IDL signature validation failed: {message}")]
+    Validation {
+        /// Which of the verifier's checks refused the entry. Carried so the caller can
+        /// report the reject branch it took; never rendered in the error message.
+        kind: &'static str,
+        message: String,
+    },
+}
+
+impl IdlSignatureError {
+    /// The reject branch this error came from.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Validation { kind, .. } => kind,
+        }
+    }
 }
 
 /// IDL signature metadata for validation.
@@ -110,9 +125,20 @@ pub fn convert_proto_signature(proto: &generated::parser::SignatureMetadata) -> 
 
 /// Decode an optionally `0x`/`0X`-prefixed hex string into a fixed-size byte
 /// array, failing if the hex is malformed or the wrong length.
-fn decode_hex_fixed<const N: usize>(value: &str, what: &str) -> Result<[u8; N], IdlSignatureError> {
-    visualsign::encodings::decode_hex_array::<N>(value)
-        .map_err(|e| IdlSignatureError::Validation(format!("Invalid {what} {e}")))
+fn decode_hex_fixed<const N: usize>(
+    value: &str,
+    what: &str,
+    kind: &'static str,
+) -> Result<[u8; N], IdlSignatureError> {
+    let bytes =
+        visualsign::encodings::decode_hex(value).map_err(|e| IdlSignatureError::Validation {
+            kind,
+            message: format!("Invalid {what} hex: {e}"),
+        })?;
+    bytes.try_into().map_err(|v: Vec<u8>| IdlSignatureError::Validation {
+        kind,
+        message: format!("Invalid {what} length: expected {N} bytes, got {}", v.len()),
+    })
 }
 
 /// Validate an IDL JSON string against an ed25519 signature, enforcing an
@@ -147,34 +173,55 @@ pub fn validate_idl_signature(
     signature: &SignatureMetadata,
     allowlist: &SignerAllowlist,
 ) -> Result<(), IdlSignatureError> {
-    let algorithm = signature
-        .algorithm
-        .as_deref()
-        .ok_or_else(|| IdlSignatureError::Validation("Missing algorithm".to_string()))?;
+    let algorithm = signature.algorithm.as_deref().ok_or_else(|| {
+        IdlSignatureError::Validation {
+            kind: "signature_rejected_missing_algorithm",
+            message: "Missing algorithm".to_string(),
+        }
+    })?;
 
     if algorithm != SUPPORTED_ALGORITHM {
-        return Err(IdlSignatureError::Validation(format!(
-            "Unsupported algorithm: {algorithm}. Only {SUPPORTED_ALGORITHM} is supported."
-        )));
+        return Err(IdlSignatureError::Validation {
+            kind: "signature_rejected_unsupported_algorithm",
+            message: format!(
+                "Unsupported algorithm: {algorithm}. Only {SUPPORTED_ALGORITHM} is supported."
+            ),
+        });
     }
 
-    let public_key_hex = signature
-        .public_key
-        .as_deref()
-        .ok_or_else(|| IdlSignatureError::Validation("Missing public_key".to_string()))?;
+    let public_key_hex = signature.public_key.as_deref().ok_or_else(|| {
+        IdlSignatureError::Validation {
+            kind: "signature_rejected_missing_public_key",
+            message: "Missing public_key".to_string(),
+        }
+    })?;
 
     let hash = visualsign::signing::solana_metadata_prehash(program_id, idl_json.as_bytes());
 
-    let sig_bytes = decode_hex_fixed::<ED25519_SIGNATURE_LEN>(&signature.value, "signature")?;
+    let sig_bytes = decode_hex_fixed::<ED25519_SIGNATURE_LEN>(
+        &signature.value,
+        "signature",
+        "signature_rejected_invalid_signature_encoding",
+    )?;
     let sig = Signature::from_bytes(&sig_bytes);
 
-    let pubkey_bytes = decode_hex_fixed::<ED25519_PUBLIC_KEY_LEN>(public_key_hex, "public key")?;
-    let verifying_key = VerifyingKey::from_bytes(&pubkey_bytes)
-        .map_err(|e| IdlSignatureError::Validation(format!("Invalid public key: {e}")))?;
+    let pubkey_bytes = decode_hex_fixed::<ED25519_PUBLIC_KEY_LEN>(
+        public_key_hex,
+        "public key",
+        "signature_rejected_invalid_public_key",
+    )?;
+    let verifying_key =
+        VerifyingKey::from_bytes(&pubkey_bytes).map_err(|e| IdlSignatureError::Validation {
+            kind: "signature_rejected_invalid_public_key",
+            message: format!("Invalid public key: {e}"),
+        })?;
 
-    verifying_key.verify_strict(&hash, &sig).map_err(|e| {
-        IdlSignatureError::Validation(format!("Signature verification failed: {e}"))
-    })?;
+    verifying_key
+        .verify_strict(&hash, &sig)
+        .map_err(|e| IdlSignatureError::Validation {
+            kind: "signature_rejected_verification_failed",
+            message: format!("Signature verification failed: {e}"),
+        })?;
 
     // Enforce the authorized-signer allowlist. A verified signature only proves
     // the IDL was signed by some ed25519 key; it must also be an authorized one.
@@ -183,9 +230,10 @@ pub fn validate_idl_signature(
     // against the allowlist. An empty allowlist contains nothing, so this rejects
     // every signed IDL (fail-closed).
     if !allowlist.contains(&verifying_key.to_bytes()) {
-        return Err(IdlSignatureError::Validation(
-            "signer not in allowlist".to_string(),
-        ));
+        return Err(IdlSignatureError::Validation {
+            kind: "signature_rejected_not_in_allowlist",
+            message: "signer not in allowlist".to_string(),
+        });
     }
 
     Ok(())
@@ -226,6 +274,15 @@ pub fn authorized_idl_signers() -> &'static SignerAllowlist {
             }
         }
 
+        if quint_oracle::enabled() {
+            quint_oracle::Event::builder(
+                quint_oracle::current_test(),
+                "build_sol_signer_allowlist",
+            )
+            .scope("metadata-signature-trust")
+            .send();
+        }
+
         allow
     })
 }
@@ -236,7 +293,12 @@ pub fn authorized_idl_signers() -> &'static SignerAllowlist {
 /// here just confirms the bytes decompress to a real point; the returned bytes
 /// are the same 32 bytes that [`validate_idl_signature`] compares against.
 fn canonical_pubkey_from_hex(hex_str: &str) -> Option<Vec<u8>> {
-    let bytes = decode_hex_fixed::<ED25519_PUBLIC_KEY_LEN>(hex_str, "public key").ok()?;
+    let bytes = decode_hex_fixed::<ED25519_PUBLIC_KEY_LEN>(
+        hex_str,
+        "public key",
+        "signature_rejected_invalid_public_key",
+    )
+    .ok()?;
     let verifying_key = VerifyingKey::from_bytes(&bytes).ok()?;
     Some(verifying_key.to_bytes().to_vec())
 }

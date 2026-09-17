@@ -45,6 +45,9 @@ hex = { workspace = true }
 [dev-dependencies]
 visualsign-solana = { path = "../chain_parsers/visualsign-solana" }
 tracing = { workspace = true }
+# Quint Studio oracle test boundary (one trace per test). Test-only and inert
+# unless the oracle set QUINT_ORACLE_URL.
+quint-oracle = { path = "../../quint-specs/oracle-client/rust" }
 
 [lints]
 workspace = true

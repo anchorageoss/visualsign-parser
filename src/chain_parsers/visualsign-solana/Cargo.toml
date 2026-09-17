@@ -38,6 +38,11 @@ spl-token-2022-interface = "2.1.0"
 ed25519-dalek = "2"
 thiserror = "2.0.12"
 
+# Quint Studio oracle instrumentation. Inert by default: without
+# `--features quint-oracle/enabled` every log site compiles to an empty stub and
+# none of the client's dependencies are built, so production builds are untouched.
+quint-oracle = { path = "../../../quint-specs/oracle-client/rust" }
+
 [dev-dependencies]
 parser_cli_core = { path = "../../parser/cli-core", features = ["test-utils"] }
 solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "594a910", features = ["proptest"] }

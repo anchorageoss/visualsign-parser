@@ -1,7 +1,7 @@
 //! Parsing endpoint for `VisualSign`
 
 use crate::{
-    chain_conversion, config::ParserConfig, errors::GrpcError, payment_verify,
+    chain_conversion, config::ParserConfig, errors::GrpcError, oracle, payment_verify,
     registry::create_registry,
 };
 use generated::parser::Chain as ProtoChain;
@@ -45,6 +45,7 @@ pub(crate) fn parse_with_registry(
 ) -> Result<ParseResponse, GrpcError> {
     let request_payload = parse_request.unsigned_payload.as_str();
     if request_payload.is_empty() {
+        oracle::event("reject_empty_payload");
         return Err(GrpcError::new(
             Code::InvalidArgument,
             "unsigned transaction is empty",
@@ -58,15 +59,30 @@ pub(crate) fn parse_with_registry(
         developer_config: None, // Production API: only accept unsigned transactions
         include_intermediate_output: parse_request.include_intermediate_output,
     };
-    let proto_chain = ProtoChain::try_from(parse_request.chain)
-        .map_err(|_| GrpcError::new(Code::InvalidArgument, "invalid chain"))?;
+    let proto_chain = ProtoChain::try_from(parse_request.chain).map_err(|_| {
+        oracle::event("reject_unknown_chain");
+        GrpcError::new(Code::InvalidArgument, "invalid chain")
+    })?;
     let registry_chain: VisualSignRegistryChain = chain_conversion::proto_to_registry(proto_chain);
 
+    oracle::dispatched(
+        proto_chain.as_str_name(),
+        parse_request.chain_metadata.is_some(),
+        parse_request.include_intermediate_output,
+    );
     let conversion = registry
         .convert_transaction(&registry_chain, request_payload, options)
-        .map_err(|e| GrpcError::new(Code::InvalidArgument, &format!("{e}")))?;
+        .map_err(|e| {
+            oracle::event("conversion_failed");
+            GrpcError::new(Code::InvalidArgument, &format!("{e}"))
+        })?;
     let signable_payload = conversion.payload;
     let intermediate_output = conversion.intermediate_output;
+    oracle::converted(
+        intermediate_output
+            .as_ref()
+            .is_some_and(|bytes| !bytes.is_empty()),
+    );
 
     // Defense-in-depth: validate the charset of the SignablePayload unconditionally
     // on the signing path, regardless of which converter produced it. Per-converter
@@ -82,13 +98,19 @@ pub(crate) fn parse_with_registry(
     // and reserve `InvalidArgument` for genuine validation rejections.
     signable_payload.validate_charset().map_err(|e| match e {
         VisualSignError::ValidationError(_) => {
+            oracle::event("reject_charset_violation");
             GrpcError::new(Code::InvalidArgument, &format!("{e}"))
         }
-        _ => GrpcError::new(Code::Internal, &format!("{e}")),
+        _ => {
+            oracle::event("reject_internal_serialization_failure");
+            GrpcError::new(Code::Internal, &format!("{e}"))
+        }
     })?;
+    oracle::event("charset_validated");
 
     // Convert SignablePayload to String (assuming you want JSON)
     let parsed_payload_str = serde_json::to_string(&signable_payload).map_err(|e| {
+        oracle::event("reject_internal_serialization_failure");
         GrpcError::new(Code::Internal, &format!("Failed to serialize payload: {e}"))
     })?;
 
@@ -117,9 +139,11 @@ pub(crate) fn parse_with_registry(
     };
 
     let digest = sha_256(&signing_digest_bytes(&payload));
-    let sig = ephemeral_key
-        .sign(&digest)
-        .map_err(|e| GrpcError::new(Code::Internal, &format!("{e:?}")))?;
+    let sig = ephemeral_key.sign(&digest).map_err(|e| {
+        oracle::event("reject_internal_serialization_failure");
+        GrpcError::new(Code::Internal, &format!("{e:?}"))
+    })?;
+    oracle::event("sign_parsed_payload");
 
     let signature = Signature {
         public_key: qos_hex::encode(&ephemeral_key.public_key().to_bytes()),
@@ -384,6 +408,7 @@ mod tests {
     /// still reject payloads containing non-ASCII characters before signing.
     #[test]
     fn parse_rejects_non_ascii_payload_when_converter_skips_validation() {
+        let _t = oracle::start_test("parse_rejects_non_ascii_payload_when_converter_skips_validation");
         // U+202E RIGHT-TO-LEFT OVERRIDE: a bidi control that flips display
         // order and is the canonical spoofing primitive.
         let poisoned = "transfer\u{202E}approve";
@@ -414,6 +439,7 @@ mod tests {
     /// unconditional `validate_charset` call doesn't reject legitimate input.
     #[test]
     fn parse_accepts_ascii_payload_when_converter_skips_validation() {
+        let _t = oracle::start_test("parse_accepts_ascii_payload_when_converter_skips_validation");
         let mut registry = TransactionConverterRegistry::new();
         registry.register::<StubTransaction, _>(
             VisualSignRegistryChain::Tron,
@@ -440,6 +466,7 @@ mod tests {
     /// `to_visual_sign_payload_from_string` itself).
     #[test]
     fn parse_rejects_non_ascii_payload_via_default_converter_path() {
+        let _t = oracle::start_test("parse_rejects_non_ascii_payload_via_default_converter_path");
         let poisoned = "transfer\u{202E}approve";
 
         let mut registry = TransactionConverterRegistry::new();
