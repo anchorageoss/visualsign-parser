@@ -10875,7 +10875,7 @@ dependencies = [
 [[package]]
 name = "solana-parser-fuzz-core"
 version = "0.0.0"
-source = "git+https://github.com/anchorageoss/solana-parser.git?rev=594a910#594a9101c5084e4536139201b8c4da72dad63543"
+source = "git+https://github.com/anchorageoss/solana-parser.git?rev=bdc9cd6#bdc9cd6b9067bfcd6b225f7e7caa3de4ecae92e2"
 dependencies = [
  "proptest",
  "serde_json",
@@ -12449,7 +12449,7 @@ dependencies = [
 [[package]]
 name = "solana_parser"
 version = "0.1.0"
-source = "git+https://github.com/anchorageoss/solana-parser.git?rev=594a910#594a9101c5084e4536139201b8c4da72dad63543"
+source = "git+https://github.com/anchorageoss/solana-parser.git?rev=bdc9cd6#bdc9cd6b9067bfcd6b225f7e7caa3de4ecae92e2"
 dependencies = [
  "bincode",
  "bs58 0.5.1",

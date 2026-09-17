@@ -119,7 +119,7 @@ fn build_named_accounts(
     let mut named: Vec<(String, String)> = parsed
         .named_accounts
         .iter()
-        .map(|(name, pubkey)| (name.clone(), pubkey.clone()))
+        .map(|(name, account)| (name.clone(), account.address.clone()))
         .collect();
     named.sort_by(|a, b| a.0.cmp(&b.0));
 

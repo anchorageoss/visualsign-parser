@@ -189,11 +189,25 @@ pub struct SolanaAddressTableLookup {
     pub readonly_indexes: Vec<i32>,
 }
 
+/// An instruction account resolved against the IDL. Mirrors
+/// `solana_parser::solana::structs::NamedAccount` (that upstream type carries
+/// no Borsh derive).
+///
+/// `index` is the account's position in the instruction's own account list.
+/// Names are assigned positionally, so it is equally the account's index in
+/// the IDL's declared account list -- which `named_accounts` would otherwise
+/// lose, being keyed (and therefore alphabetized) by name.
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
+pub struct NamedAccountIo {
+    pub address: String,
+    pub index: u32,
+}
+
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SolanaParsedInstructionDataIo {
     pub instruction_name: String,
     pub discriminator: String,
-    pub named_accounts: BTreeMap<String, String>,
+    pub named_accounts: BTreeMap<String, NamedAccountIo>,
     /// Canonical JSON string with alphabetized keys at every nesting level.
     /// Built by recursively re-keying the `serde_json::Value` tree into sorted
     /// order, so byte-identical inputs produce byte-identical encodings
@@ -351,10 +365,18 @@ fn canonicalize_map(map: &serde_json::Map<String, Value>) -> serde_json::Map<Str
 
 impl From<&SolanaParsedInstructionData> for SolanaParsedInstructionDataIo {
     fn from(value: &SolanaParsedInstructionData) -> Self {
-        let named_accounts: BTreeMap<String, String> = value
+        let named_accounts: BTreeMap<String, NamedAccountIo> = value
             .named_accounts
             .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
+            .map(|(k, v)| {
+                (
+                    k.clone(),
+                    NamedAccountIo {
+                        address: v.address.clone(),
+                        index: v.index as u32,
+                    },
+                )
+            })
             .collect();
         Self {
             instruction_name: value.instruction_name.clone(),
@@ -760,7 +782,18 @@ fn parse_partially_decoded_instruction_idl(
         Some(SolanaParsedInstructionDataIo {
             instruction_name: instruction.name,
             discriminator: hex::encode(discriminator),
-            named_accounts: named_accounts.into_iter().collect(),
+            named_accounts: named_accounts
+                .into_iter()
+                .map(|(name, account)| {
+                    (
+                        name,
+                        NamedAccountIo {
+                            address: account.address,
+                            index: account.index as u32,
+                        },
+                    )
+                })
+                .collect(),
             program_call_args_json: canonical_args_json(&program_call_args),
             idl_source: idl_source_string(&idl_source),
             idl_hash: compute_idl_hash(&idl_json),
@@ -871,7 +904,7 @@ pub(crate) fn extract_solana_intermediate_output(
 mod tests {
     use super::*;
     use serde_json::json;
-    use solana_parser::solana::structs::ProgramType;
+    use solana_parser::solana::structs::{NamedAccount, ProgramType};
     use std::collections::HashMap;
 
     fn args_map(values: &[(&str, Value)]) -> serde_json::Map<String, Value> {
@@ -949,9 +982,23 @@ mod tests {
 
     #[test]
     fn parsed_instruction_data_io_round_trip() {
+        // `authority` is declared second by the IDL but sorts first by name:
+        // the index is what lets a consumer recover the declared order.
         let mut named = HashMap::new();
-        named.insert("mint".to_string(), "Mint11111111111111".to_string());
-        named.insert("authority".to_string(), "Auth1111111111111".to_string());
+        named.insert(
+            "mint".to_string(),
+            NamedAccount {
+                address: "Mint11111111111111".to_string(),
+                index: 0,
+            },
+        );
+        named.insert(
+            "authority".to_string(),
+            NamedAccount {
+                address: "Auth1111111111111".to_string(),
+                index: 1,
+            },
+        );
 
         let upstream = SolanaParsedInstructionData {
             instruction_name: "transfer".to_string(),
@@ -970,6 +1017,15 @@ mod tests {
         // BTreeMap-deterministic key ordering on `named_accounts`.
         let keys: Vec<_> = io.named_accounts.keys().cloned().collect();
         assert_eq!(keys, vec!["authority".to_string(), "mint".to_string()]);
+        // Each account's IDL position survives the round trip, so the
+        // declared order is recoverable despite the alphabetized keys.
+        assert_eq!(io.named_accounts["mint"].address, "Mint11111111111111");
+        assert_eq!(io.named_accounts["mint"].index, 0);
+        assert_eq!(io.named_accounts["authority"].index, 1);
+        let mut by_index: Vec<_> = io.named_accounts.iter().collect();
+        by_index.sort_by_key(|(_, account)| account.index);
+        let declared: Vec<_> = by_index.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(declared, vec!["mint", "authority"]);
         // Args JSON is alphabetized.
         assert_eq!(
             io.program_call_args_json,
