@@ -137,7 +137,7 @@ fn usable(meta: TokenMeta) -> Option<TokenMeta> {
 /// for it even though `mt_token_id` may contain further `:`s.
 fn mt_underlying_nep141(asset_id: &str) -> Option<String> {
     let (contract, mt_token_id) = asset_id.strip_prefix("nep245:")?.split_once(':')?;
-    (contract == crate::convert::INTENTS_RECEIVER
+    (contract == crate::INTENTS_RECEIVER
         && matches!(mt_token_id.parse::<TokenId>(), Ok(TokenId::Nep141(_))))
     .then(|| mt_token_id.to_string())
 }
@@ -199,7 +199,7 @@ pub(crate) fn format_units(units: u128, decimals: u8) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::presets::intents::TokenProvenance;
+    use crate::TokenProvenance;
     use std::sync::Arc;
     use visualsign::registry::LayeredRegistry;
 

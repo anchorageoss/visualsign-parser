@@ -14,6 +14,7 @@ members = [
   "parser/grpc-server",
   "parser/http-server",
   "visualsign",
+  "visualsign-intents",
   "chain_parsers/visualsign-ethereum",
   "chain_parsers/visualsign-near",
   "chain_parsers/visualsign-solana",
