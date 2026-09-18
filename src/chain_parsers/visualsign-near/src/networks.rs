@@ -35,6 +35,17 @@ impl NearNetwork {
         }
     }
 
+    /// The settlement network this network is, for the intents decoder. The two
+    /// types stay separate because this one also names itself to a signer and
+    /// parses caller spellings, neither of which the decoder needs.
+    #[must_use]
+    pub fn settlement(self) -> visualsign_intents::network::SettlementNetwork {
+        match self {
+            NearNetwork::Mainnet => visualsign_intents::network::SettlementNetwork::Mainnet,
+            NearNetwork::Testnet => visualsign_intents::network::SettlementNetwork::Testnet,
+        }
+    }
+
     /// Parses a canonical network identifier string (e.g. `"NEAR_MAINNET"`,
     /// `"NEAR_TESTNET"`). Case-insensitive.
     #[must_use]
@@ -64,13 +75,7 @@ impl NearNetwork {
 /// clean payload on another.
 #[must_use]
 pub fn network_mismatch(role: &str, account_id: &str, network: NearNetwork) -> Option<String> {
-    let mismatched = match network {
-        NearNetwork::Mainnet => account_id.ends_with(".testnet"),
-        NearNetwork::Testnet => account_id.ends_with(".near"),
-    };
-    mismatched.then(|| {
-        format!("{role} account '{account_id}' does not match resolved network {network:?}")
-    })
+    visualsign_intents::network::account_network_mismatch(role, account_id, network.settlement())
 }
 
 /// Extracts a [`NearNetwork`] from per-request [`ChainMetadata`], if present.

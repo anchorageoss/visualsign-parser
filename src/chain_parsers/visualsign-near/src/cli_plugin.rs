@@ -204,6 +204,11 @@ fn create_chain_metadata(
     }))
 }
 
+// The tests below marked `dev-signing` reach `sign_token_metadata_for_cli`,
+// which `visualsign-intents` gates on `cfg(any(test, feature = "dev-signing"))`.
+// A dependency is not compiled with this crate's `cfg(test)`, so only the
+// feature reaches it; src/Makefile runs a pass with it on, as it already does
+// for `diagnostics`.
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
@@ -231,6 +236,7 @@ mod tests {
     }
 
     /// Unwrap the `Near` variant of the metadata oneof.
+    #[cfg(feature = "dev-signing")]
     fn near_metadata(metadata: ChainMetadata) -> NearMetadata {
         let chain_metadata::Metadata::Near(near) = metadata.metadata.unwrap() else {
             panic!("expected Near metadata");
@@ -279,6 +285,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "dev-signing")]
     fn create_metadata_carries_a_token_mapping() {
         let path = write_temp_json("usdc.json", r#"{"symbol":"USDC.e","decimals":6}"#);
         let asset_id = "nep141:a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near";
@@ -306,6 +313,7 @@ mod tests {
     /// Mappings alone are enough to produce metadata; the network flag is
     /// independent of them.
     #[test]
+    #[cfg(feature = "dev-signing")]
     fn create_metadata_carries_mappings_without_a_network() {
         let path = write_temp_json("net_check.json", r#"{"symbol":"X","decimals":6}"#);
         let mappings = vec![format!("X@{}@nep141:x.near", path.display())];
@@ -333,6 +341,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "dev-signing")]
     fn create_metadata_carries_multiple_mappings() {
         let path_a = write_temp_json("a.json", r#"{"symbol":"A","decimals":6}"#);
         let path_b = write_temp_json("b.json", r#"{"symbol":"B","decimals":18}"#);
@@ -356,6 +365,7 @@ mod tests {
     /// with an embedded colon must survive intact, not get truncated at the
     /// first colon the way the shared colon-delimited mapping format would.
     #[test]
+    #[cfg(feature = "dev-signing")]
     fn asset_id_with_embedded_colon_is_preserved() {
         let path = write_temp_json("colon.json", r#"{"symbol":"X","decimals":6}"#);
         let asset_id = "nep141:x.factory.bridge.near";
@@ -374,6 +384,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "dev-signing")]
     fn create_metadata_keeps_valid_mappings_alongside_invalid_ones() {
         let path = write_temp_json("good.json", r#"{"symbol":"GOOD","decimals":6}"#);
         let mappings = vec![
@@ -548,6 +559,7 @@ mod tests {
     /// the dev key from `authorized_token_metadata_signers`, or sign under the
     /// wrong domain tag, and both still pass while the flag resolves nothing.
     #[test]
+    #[cfg(feature = "dev-signing")]
     fn cli_signed_mapping_resolves_through_the_registered_converter() {
         let asset_id = "nep141:test-token.near";
         let path = write_temp_json("e2e.json", r#"{"symbol":"CLISIGNED","decimals":6}"#);
