@@ -74,7 +74,7 @@ fn token_registry_for(
     };
     let extraction = try_extract_token_metadata_from_chain_metadata(
         options.metadata.as_ref(),
-        network,
+        network.settlement(),
         allowlist,
         trust_policy,
     );
@@ -329,7 +329,7 @@ impl VisualSignConverterFromString<NearTransaction> for NearVisualSignConverter 
 
 /// The intents verifier contract, and the method on it that carries a signed
 /// intent batch.
-pub(crate) const INTENTS_RECEIVER: &str = "intents.near";
+pub(crate) use visualsign_intents::INTENTS_RECEIVER;
 const EXECUTE_INTENTS_METHOD: &str = "execute_intents";
 
 /// The call on this action that a decoder resolving token amounts will handle,
@@ -367,8 +367,13 @@ fn decode_intents(
     let Some(fc) = token_metadata_consumer(receiver_id, action) else {
         return Ok(vec![]);
     };
-    crate::presets::intents::try_decode_execute_intents(&fc.args, registry, options, network)
-        .map_err(intents_error)
+    crate::presets::intents::try_decode_execute_intents(
+        &fc.args,
+        registry,
+        options,
+        network.settlement(),
+    )
+    .map_err(intents_error)
 }
 
 /// Surface an intents-decode failure, keeping a network mismatch a validation
@@ -414,7 +419,7 @@ fn render_intent_envelope(
         json.as_bytes(),
         &tokens.registry,
         options,
-        network,
+        network.settlement(),
     )
     .map_err(intents_error)?;
     fields.extend(rendered.fields);
