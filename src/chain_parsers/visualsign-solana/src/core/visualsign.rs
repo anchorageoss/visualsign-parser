@@ -487,7 +487,9 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
                     &lint_config,
                 )?
             }
-            SolanaTransactionWrapper::Message(message) => message_to_visual_sign_payload(message)?,
+            SolanaTransactionWrapper::Message(message) => {
+                message_to_visual_sign_payload(message, &options)?
+            }
         };
 
         // Only emit intermediate output when the caller opts in; otherwise the
@@ -754,7 +756,23 @@ fn convert_to_visual_sign_payload(
 /// The text is charset-escaped before it renders: it is caller-supplied and
 /// reaches a signer's screen, where an unescaped line separator could forge a
 /// second field.
-fn message_to_visual_sign_payload(message: &str) -> Result<SignablePayload, VisualSignError> {
+#[cfg_attr(not(feature = "intents"), allow(unused_variables))]
+fn message_to_visual_sign_payload(
+    message: &str,
+    options: &VisualSignOptions,
+) -> Result<SignablePayload, VisualSignError> {
+    // A message carrying NEAR Intents renders the intents. A signer approving a
+    // token movement has to see the movement, not the JSON that encodes it.
+    #[cfg(feature = "intents")]
+    if let Some(rendered) = crate::intents::try_render(message.as_bytes(), options)? {
+        return Ok(SignablePayload::new(
+            0,
+            rendered.title,
+            None,
+            rendered.fields,
+            "SolanaTx".to_string(),
+        ));
+    }
     Ok(SignablePayload::new(
         0,
         "Solana Message".to_string(),
