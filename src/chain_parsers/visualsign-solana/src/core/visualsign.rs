@@ -631,7 +631,7 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
                 )?
             }
             SolanaTransactionWrapper::Message(envelope) => {
-                message_to_visual_sign_payload(envelope)?
+                message_to_visual_sign_payload(envelope, &options)?
             }
         };
 
@@ -1045,8 +1045,10 @@ fn check_message_domain(message: &[u8]) -> Result<(), VisualSignError> {
 /// The text is escaped before it renders: it is caller-supplied and reaches a
 /// signer's screen, where an unescaped line separator could forge a second
 /// field.
+#[cfg_attr(not(feature = "intents"), allow(unused_variables))]
 fn message_to_visual_sign_payload(
     envelope: &OffChainMessage,
+    options: &VisualSignOptions,
 ) -> Result<SignablePayload, VisualSignError> {
     // `OffChainMessage` has public fields, so an embedder can build the wrapper
     // without the envelope decoder. Check the address here too, so a
@@ -1059,6 +1061,19 @@ fn message_to_visual_sign_payload(
     }
     // Here rather than at decode, so a directly built wrapper is held to it too.
     check_message_domain(envelope.message.as_bytes())?;
+
+    // A message carrying NEAR Intents renders the intents. A signer approving a
+    // token movement has to see the movement, not the JSON that encodes it.
+    #[cfg(feature = "intents")]
+    if let Some(rendered) = crate::intents::try_render(envelope.message.as_bytes(), options)? {
+        return Ok(SignablePayload::new(
+            0,
+            rendered.title,
+            None,
+            rendered.fields,
+            "SolanaTx".to_string(),
+        ));
+    }
     Ok(SignablePayload::new(
         0,
         "Solana Message".to_string(),
