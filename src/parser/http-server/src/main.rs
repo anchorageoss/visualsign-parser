@@ -100,6 +100,10 @@ struct AppState {
     config: ParserConfig,
 }
 
+// Deliberate exception to the "every response carries bootProof" contract:
+// this is Turnkey's infra health check, polled frequently and expected to
+// stay a bare 200 with no body, not the signed-response envelope the parse
+// routes and their error fallbacks return.
 async fn health() -> StatusCode {
     StatusCode::OK
 }
