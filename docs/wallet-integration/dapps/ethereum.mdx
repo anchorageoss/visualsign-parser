@@ -71,20 +71,44 @@ The `Abi` message includes an optional `signature` field. Signing your ABI lets 
 Signature validation in the parser today:
 
 - **Algorithm**: `secp256k1` (no other algorithms are accepted).
-- **Hash**: SHA-256 over the raw ABI JSON string, byte for byte.
+- **Hash**: SHA-256 over a domain-separated preimage, not the raw ABI JSON alone. The preimage length-prefixes and concatenates four fields — the ASCII domain tag `visualsign-metadata-v1`, the chain tag `ethereum`, a 28-byte scope (8-byte big-endian chain ID followed by the 20-byte contract address), and the ABI JSON bytes — each prefixed with its own 8-byte little-endian length. Binding the chain ID and contract address into the hash stops a signature minted for one contract from being replayed against another.
 - **Format**: DER-encoded signature, hex-encoded as the `value`.
 - **Public key**: hex-encoded secp256k1 point, passed in `metadata` under the key `public_key`.
 
 #### A signing example
 
-The signing operation is straightforward: sign the SHA-256 of the canonical ABI JSON. In Node.js:
+Sign the domain-separated prehash, not a plain hash of the ABI JSON. In Node.js:
 
 ```javascript
 import { createHash } from "node:crypto";
 import { secp256k1 } from "@noble/curves/secp256k1";
 
+const DOMAIN = "visualsign-metadata-v1"; // version tag, do not change
+const CHAIN_TAG = "ethereum";
+
+// Prefixes `field` with its own length as an 8-byte little-endian u64.
+function lengthPrefixed(field) {
+  const length = Buffer.alloc(8);
+  length.writeBigUInt64LE(BigInt(field.length));
+  return Buffer.concat([length, field]);
+}
+
 const abiJson = JSON.stringify(abi); // canonical form; no reformat after signing
-const digest = createHash("sha256").update(abiJson).digest();
+const chainId = 1n; // e.g. Ethereum mainnet; must match the chain the ABI is registered on
+const contractAddress = "0xYourContractAddress";
+
+// scope = 8-byte big-endian chain ID || 20-byte contract address
+const chainIdBytes = Buffer.from(chainId.toString(16).padStart(16, "0"), "hex");
+const addressBytes = Buffer.from(contractAddress.slice(2), "hex");
+const scope = Buffer.concat([chainIdBytes, addressBytes]);
+
+const preimage = Buffer.concat([
+  lengthPrefixed(Buffer.from(DOMAIN, "ascii")),
+  lengthPrefixed(Buffer.from(CHAIN_TAG, "ascii")),
+  lengthPrefixed(scope),
+  lengthPrefixed(Buffer.from(abiJson, "utf8")),
+]);
+const digest = createHash("sha256").update(preimage).digest();
 
 // 32-byte secp256k1 private key, hex-encoded. Keep this offline; substitute your own.
 const privateKey = "0000000000000000000000000000000000000000000000000000000000000001";

@@ -936,6 +936,12 @@ async fn parser_near_metadata_network_reaches_the_account_suffix_check_e2e() {
 //     (require_signed_abis_deployment_decodes_allowlisted_signed_abi); there
 //     is no permissive-posture counterpart, since the permissive posture
 //     already honours every signed or unsigned mapping.
+//   - invalidly-signed ABI (well-formed DER, signature does not verify): dropped
+//     under BOTH postures
+//     (accept_unsigned_abis_deployment_drops_invalidly_signed_abi,
+//     require_signed_abis_deployment_drops_invalidly_signed_abi), since
+//     `--accept-unsigned-abis` skips the signer-allowlist check but never skips
+//     signature verification when a signature is present.
 
 /// Unsigned EIP-1559 call to an otherwise-unknown contract, carrying
 /// `frobnicate(uint256,address)` calldata (selector `5c04b43b`). The function is
@@ -967,6 +973,15 @@ const ALLOWLISTED_SIGNER_SIG: &str = "3045022100f64e7822e0762177d0786b7ee5130747
 /// The same ABI signed with scalar `[0x43; 32]`, a key the deployment does not
 /// allowlist. The signature itself is valid; only the signer's identity differs.
 const FOREIGN_SIGNER_SIG: &str = "3045022100d6908186f6a67e1ab526f0662ae4190486eba3a8e7a7f33dd367a1511fe2432c02205f95117f3d1a30315206a33bd90b647209a24fbff4df780254dea97b0e3c4472";
+
+/// `ALLOWLISTED_SIGNER_SIG` with its final byte flipped (`f6` -> `f7`). Still a
+/// structurally well-formed DER signature (same length prefixes, same integer
+/// count), so it exercises signature-verification failure specifically, not DER
+/// parsing failure. Paired with `ABI_SIGNER_PUBKEY` below: this is neither
+/// unsigned nor foreign-signed, it fails cryptographic verification outright,
+/// which must be rejected under EVERY posture, since `--accept-unsigned-abis`
+/// still checks integrity when a signature is present (see `signing.rs`).
+const INVALID_SIGNER_SIG: &str = "3045022100f64e7822e0762177d0786b7ee513074705b11c13dbef491bc27b7f099b8953dc02201265f573895a648a36158c9a9cf4058bb0e6174cf86681e2441d1a8bbe7aa9f7";
 
 /// Uncompressed secp256k1 public key for scalar `[0x43; 32]`.
 const FOREIGN_SIGNER_PUBKEY: &str = "047f31ebc5462c1fdce1b737ecff52d37d75dea43ce11c74d25aa297165faa2007282870f68031e8772062f4f63cd3ecbf834846787f512738ba15664990af4e20";
@@ -1328,6 +1343,57 @@ async fn require_signed_abis_deployment_drops_foreign_signed_abi() {
         assert!(
             !payload.contains("frobnicate"),
             "an ABI signed by a non-allowlisted key must not decode, got: {payload}"
+        );
+        assert!(
+            payload.contains("5c04b43b"),
+            "the undecoded calldata should fall back to raw hex, got: {payload}"
+        );
+    }
+
+    integration::Builder::new()
+        .require_signed_abis(ABI_SIGNER_PUBKEY)
+        .execute(test)
+        .await
+}
+
+/// A cryptographically invalid signature (well-formed DER, but the signature does
+/// not verify) is dropped under the permissive posture too: `--accept-unsigned-abis`
+/// only skips the signer-allowlist check, it does not skip signature verification
+/// when a signature is present. Complements
+/// `accept_unsigned_abis_deployment_decodes_foreign_signed_abi`, where the signature
+/// is valid and only the signer differs; here the signature itself is broken.
+#[tokio::test]
+async fn accept_unsigned_abis_deployment_drops_invalidly_signed_abi() {
+    async fn test(test_args: TestArgs) {
+        let payload =
+            parsed_payload_for_signed_abi(test_args, INVALID_SIGNER_SIG, ABI_SIGNER_PUBKEY).await;
+        assert!(
+            !payload.contains("frobnicate"),
+            "an ABI with an invalid signature must not decode even under accept-unsigned, \
+             got: {payload}"
+        );
+        assert!(
+            payload.contains("5c04b43b"),
+            "the undecoded calldata should fall back to raw hex, got: {payload}"
+        );
+    }
+
+    integration::Builder::new().execute(test).await
+}
+
+/// The same invalid signature is dropped under the strict posture as well, for the
+/// same reason as the permissive-posture case above: verification failure is
+/// independent of the deploy-time posture, only the signer-allowlist check differs
+/// between postures.
+#[tokio::test]
+async fn require_signed_abis_deployment_drops_invalidly_signed_abi() {
+    async fn test(test_args: TestArgs) {
+        let payload =
+            parsed_payload_for_signed_abi(test_args, INVALID_SIGNER_SIG, ABI_SIGNER_PUBKEY).await;
+        assert!(
+            !payload.contains("frobnicate"),
+            "an ABI with an invalid signature must not decode under require-signed, \
+             got: {payload}"
         );
         assert!(
             payload.contains("5c04b43b"),
