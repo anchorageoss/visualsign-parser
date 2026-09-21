@@ -922,7 +922,7 @@ async fn parser_near_metadata_network_reaches_the_account_suffix_check_e2e() {
 // deploy-time flag buys: whether an unverified ABI is honoured is decided by the
 // deployment, not by what the caller put in (or left out of) the request.
 //
-// Two posture pairs, plus one posture-specific acceptance case:
+// Three posture pairs, plus one posture-specific acceptance case:
 //   - unsigned ABI: honoured under `--accept-unsigned-abis`
 //     (accept_unsigned_abis_deployment_decodes_unsigned_abi), dropped under
 //     `--accept-signatures-from-pubkey`

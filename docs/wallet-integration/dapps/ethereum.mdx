@@ -95,7 +95,7 @@ function lengthPrefixed(field) {
 
 const abiJson = JSON.stringify(abi); // canonical form; no reformat after signing
 const chainId = 1n; // e.g. Ethereum mainnet; must match the chain the ABI is registered on
-const contractAddress = "0xYourContractAddress";
+const contractAddress = "0x1234567890123456789012345678901234567890"; // replace with your real contract address
 
 // scope = 8-byte big-endian chain ID || 20-byte contract address
 const chainIdBytes = Buffer.from(chainId.toString(16).padStart(16, "0"), "hex");
