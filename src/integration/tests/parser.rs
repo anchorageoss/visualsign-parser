@@ -917,10 +917,25 @@ async fn parser_near_metadata_network_reaches_the_account_suffix_check_e2e() {
 // Deploy-time ABI trust posture (PRS-556)
 // ---------------------------------------------------------------------------
 //
-// The two tests below send the SAME request to two parser_app instances that
-// differ only in the cmdline they were started with. That is the property the
+// The tests below send the SAME requests to parser_app instances that differ
+// only in the cmdline they were started with. That is the property the
 // deploy-time flag buys: whether an unverified ABI is honoured is decided by the
 // deployment, not by what the caller put in (or left out of) the request.
+//
+// Two posture pairs, plus one posture-specific acceptance case:
+//   - unsigned ABI: honoured under `--accept-unsigned-abis`
+//     (accept_unsigned_abis_deployment_decodes_unsigned_abi), dropped under
+//     `--accept-signatures-from-pubkey`
+//     (require_signed_abis_deployment_drops_unsigned_abi).
+//   - foreign-signed ABI (signed, but not by an allowlisted key): honoured
+//     under `--accept-unsigned-abis`
+//     (accept_unsigned_abis_deployment_decodes_foreign_signed_abi), dropped
+//     under `--accept-signatures-from-pubkey`
+//     (require_signed_abis_deployment_drops_foreign_signed_abi).
+//   - allowlisted-signed ABI: honoured under `--accept-signatures-from-pubkey`
+//     (require_signed_abis_deployment_decodes_allowlisted_signed_abi); there
+//     is no permissive-posture counterpart, since the permissive posture
+//     already honours every signed or unsigned mapping.
 
 /// Unsigned EIP-1559 call to an otherwise-unknown contract, carrying
 /// `frobnicate(uint256,address)` calldata (selector `5c04b43b`). The function is
