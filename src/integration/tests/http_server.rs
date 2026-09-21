@@ -305,10 +305,10 @@ async fn http_server_serves_health_parse_and_errors() {
     .await;
 
     // 7. A body over the 64 KiB `PIVOT_BODY_LIMIT_BYTES` cap returns 413 with
-    //    bootProof (axum's `DefaultBodyLimit` rejection would otherwise bypass
-    //    the Turnkey envelope, same gap as the 404/405 cases above, but
-    //    handled by `envelope_body_limit_rejection` instead of a fallback
-    //    since axum rejects the body before any handler or route-miss fires).
+    //    bootProof. `parse_v1`/`parse_v2` take `Result<Bytes, BytesRejection>`
+    //    instead of a bare `Bytes`, so axum's `DefaultBodyLimit` rejection
+    //    (which would otherwise bypass the Turnkey envelope, same gap as the
+    //    404/405 cases above) is caught and enveloped inside the handler.
     let oversized_body = vec![b'a'; 65 * 1024];
     let too_large = client
         .post(format!("{}/visualsign/api/v1/parse", server.base_url))

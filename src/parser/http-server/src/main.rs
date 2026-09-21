@@ -36,9 +36,8 @@ mod boot_proof;
 
 use axum::{
     Json, Router,
-    extract::{Request, State},
+    extract::State,
     http::StatusCode,
-    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -122,8 +121,12 @@ async fn health() -> StatusCode {
 async fn parse_v1(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    body: axum::body::Bytes,
+    body: Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
+    let body = match body {
+        Ok(b) => b,
+        Err(rejection) => return bytes_rejection_response(&state, &rejection),
+    };
     if !is_json_content_type(&headers) {
         return error_status(
             &state,
@@ -145,8 +148,12 @@ async fn parse_v1(
 async fn parse_v2(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    body: axum::body::Bytes,
+    body: Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
+    let body = match body {
+        Ok(b) => b,
+        Err(rejection) => return bytes_rejection_response(&state, &rejection),
+    };
     if !is_json_content_type(&headers) {
         return error_status(
             &state,
@@ -155,6 +162,29 @@ async fn parse_v2(
         );
     }
     tokio::task::block_in_place(|| handle_parse(&state, &body))
+}
+
+/// `Bytes`'s own `FromRequest` rejection covers every way axum can fail to
+/// buffer the request body: a truncated body, a bad chunked-encoding frame,
+/// an HTTP/2 DATA/END_STREAM length mismatch (`UnknownBodyError`, 400), or
+/// exceeding `PIVOT_BODY_LIMIT_BYTES` (`LengthLimitError`, 413). Taking
+/// `Result<Bytes, BytesRejection>` instead of a bare `Bytes` keeps both paths
+/// inside `handle_parse`'s enveloped-error contract instead of letting axum's
+/// bare rejection response (plain text, no `bootProof`) reach the caller -
+/// axum implements `FromRequest` for `Result<T, T::Rejection>` precisely so
+/// extractor failures can still be handled inside the handler.
+fn bytes_rejection_response(
+    state: &AppState,
+    rejection: &axum::extract::rejection::BytesRejection,
+) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
+    let status = rejection.status();
+    eprintln!("failed to buffer request body: status={status}");
+    let msg = if status == StatusCode::PAYLOAD_TOO_LARGE {
+        "payload too large".to_string()
+    } else {
+        "invalid request body".to_string()
+    };
+    error_status(state, status, msg)
 }
 
 /// Mirrors axum's `Json<T>` extractor Content-Type check (`application/json`
@@ -243,19 +273,22 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
     let proto_resp = match parse(&proto_req, &state.ephemeral_key, &state.config) {
         Ok(r) => r,
         Err(e) => {
-            // Only NotFound carries a message safe to hand back to an
-            // unauthenticated caller. `parse()` maps every converter error to
-            // InvalidArgument (parser/app/src/routes/parse.rs), and those
-            // errors can embed request-controlled data verbatim (e.g. an
-            // invalid NEAR networkId, visualsign-near/src/networks.rs), so
-            // InvalidArgument is logged server-side and replaced with a fixed
-            // message too, matching the other reflection fixes in this file.
+            // No `e.code` arm hands `e.message` back to the caller: `parse()`
+            // maps every converter error to InvalidArgument or Internal
+            // (parser/app/src/routes/parse.rs), and those messages can embed
+            // request-controlled data verbatim (e.g. an invalid NEAR
+            // networkId, visualsign-near/src/networks.rs). A prior version of
+            // this match had a `Code::NotFound` arm that reflected `e.message`
+            // unsanitized; nothing in `parse()` produces that code today, so
+            // it was untested reflection-shaped dead code rather than a real
+            // path. Fold any future code this match doesn't explicitly know
+            // into the same sanitized 500, rather than growing another
+            // untested reflection arm.
             let (http_status, msg) = match e.code {
                 generated::google::rpc::Code::InvalidArgument => {
                     eprintln!("parse failed: code={:?}", e.code);
                     (StatusCode::BAD_REQUEST, "invalid request".to_string())
                 }
-                generated::google::rpc::Code::NotFound => (StatusCode::NOT_FOUND, e.message),
                 _ => {
                     eprintln!("parse failed: {} ({:?})", e.message, e.code);
                     (
@@ -313,37 +346,8 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
     )
 }
 
-/// axum's built-in rejection for an oversized body (413) never reaches
-/// `handle_parse` - `DefaultBodyLimit` rejects the request while reading it,
-/// before any handler runs - so it skips the Turnkey envelope entirely.
-/// Keyed on status alone this is safe only because 413 cannot originate from
-/// a handler: `handle_parse` never returns `PAYLOAD_TOO_LARGE`. 404 and 405
-/// are deliberately NOT handled here, even though axum's default rejections
-/// for them have the same gap - `handle_parse` legitimately returns 404
-/// itself (`Code::NotFound`, with the parser's real error message), and a
-/// status-keyed middleware sitting in front of every handler response cannot
-/// tell that apart from an unmatched route. Those two go through
-/// `Router::fallback` / `Router::method_not_allowed_fallback` below instead,
-/// which axum only invokes when no handler ran at all.
-async fn envelope_body_limit_rejection(
-    State(state): State<AppState>,
-    request: Request,
-    next: Next,
-) -> Response {
-    let response = next.run(request).await;
-    if response.status() == StatusCode::PAYLOAD_TOO_LARGE {
-        return error_status(
-            &state,
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "payload too large".to_string(),
-        )
-        .into_response();
-    }
-    response
-}
-
 /// `Router::fallback` target for unmatched routes. axum only calls this when
-/// no route matched, so it never sees `handle_parse`'s own 404s.
+/// no route matched.
 async fn not_found_fallback(State(state): State<AppState>) -> Response {
     error_status(&state, StatusCode::NOT_FOUND, "not found".to_string()).into_response()
 }
@@ -413,10 +417,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .fallback(not_found_fallback)
         .method_not_allowed_fallback(method_not_allowed_fallback)
         .layer(axum::extract::DefaultBodyLimit::max(PIVOT_BODY_LIMIT_BYTES))
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            envelope_body_limit_rejection,
-        ))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
@@ -516,7 +516,7 @@ mod tests {
             axum::http::header::CONTENT_TYPE,
             axum::http::HeaderValue::from_static("application/json"),
         );
-        let (_, Json(resp)) = parse_v1(State(state), headers, body).await;
+        let (_, Json(resp)) = parse_v1(State(state), headers, Ok(body)).await;
         // Reaching a structured envelope (rather than a panic or a bare axum
         // rejection) proves the handler ran end to end through the real `Bytes`
         // extractor, not a bypassed helper.
@@ -558,13 +558,14 @@ mod tests {
         let body = axum::body::Bytes::from_static(raw);
         let headers = axum::http::HeaderMap::new(); // no Content-Type at all
 
-        let (status, Json(resp)) = parse_v1(State(test_app_state()), headers.clone(), body).await;
+        let (status, Json(resp)) =
+            parse_v1(State(test_app_state()), headers.clone(), Ok(body)).await;
         assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
         assert!(resp.error.is_some());
         assert!(!resp.boot_proof.ephemeral_public_key_hex.is_empty());
 
         let body = axum::body::Bytes::from_static(raw);
-        let (status, Json(resp)) = parse_v2(State(test_app_state()), headers, body).await;
+        let (status, Json(resp)) = parse_v2(State(test_app_state()), headers, Ok(body)).await;
         assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
         assert!(resp.error.is_some());
         assert!(!resp.boot_proof.ephemeral_public_key_hex.is_empty());
@@ -590,17 +591,12 @@ mod tests {
         assert_eq!(value.as_object().unwrap().len(), 6);
     }
 
-    // Regression pin: an earlier version of this middleware rewrote every
-    // 404/405 response by status alone, which clobbered `handle_parse`'s own
-    // 404 (`Code::NotFound`, with the parser's real error message) with this
-    // fixed generic text. `Router::fallback` / `method_not_allowed_fallback`
-    // are only invoked by axum when no handler produced a response at all
-    // (see the axum docs on `method_not_allowed_fallback`), so they can never
-    // run after `handle_parse` - fixing the class of bug structurally rather
-    // than by inspecting response bodies. This test pins the fallbacks'
-    // fixed messages; it cannot exercise `handle_parse`'s own `Code::NotFound`
-    // arm end to end because nothing in `parser_app::routes::parse::parse`
-    // currently returns that code.
+    // Regression pin: `Router::fallback` / `method_not_allowed_fallback` are
+    // only invoked by axum when no handler produced a response at all (see
+    // the axum docs on `method_not_allowed_fallback`), so they can never run
+    // after `handle_parse` and never need to distinguish their own 404/405
+    // from one `handle_parse` might produce. This test pins the fallbacks'
+    // fixed messages.
     #[tokio::test]
     async fn fallbacks_carry_their_own_fixed_message_and_boot_proof() {
         let state = test_app_state();
