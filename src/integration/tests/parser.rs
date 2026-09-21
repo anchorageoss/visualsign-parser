@@ -1097,6 +1097,29 @@ async fn accept_unsigned_abis_deployment_decodes_unsigned_abi() {
     integration::Builder::new().execute(test).await
 }
 
+/// The permissive posture's other accepted shape: a validly signed ABI mapping
+/// from a key the deployment does not (and, under this posture, need not)
+/// allowlist is still honoured. `--accept-unsigned-abis` only skips the signer
+/// allowlist check, it does not skip signature verification, so this is the
+/// counterpart to `require_signed_abis_deployment_drops_foreign_signed_abi`:
+/// there the same foreign-signed mapping is dropped because the posture is
+/// strict, here it is honoured because the posture is permissive.
+#[tokio::test]
+async fn accept_unsigned_abis_deployment_decodes_foreign_signed_abi() {
+    async fn test(test_args: TestArgs) {
+        let payload =
+            parsed_payload_for_signed_abi(test_args, FOREIGN_SIGNER_SIG, FOREIGN_SIGNER_PUBKEY)
+                .await;
+        assert!(
+            payload.contains("frobnicate"),
+            "accept-unsigned deployment should decode a validly signed ABI regardless of \
+             signer, got: {payload}"
+        );
+    }
+
+    integration::Builder::new().execute(test).await
+}
+
 #[tokio::test]
 async fn parser_near_intent_envelope_e2e() {
     async fn test(test_args: TestArgs) {

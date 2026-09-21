@@ -53,7 +53,8 @@ For development, the binary defaults to `integration/fixtures/ephemeral.secret`.
 #### ABI trust posture
 
 Whether caller-supplied Ethereum `abi_mappings` are honoured when they carry no
-signature is chosen at startup, not per request. Pass exactly one of:
+signature is chosen at startup, not per request. We recommend passing exactly one
+of these flags explicitly, rather than relying on the default described below:
 
 ```bash
 # Honour unsigned ABI mappings. A signature that IS present must still verify,
