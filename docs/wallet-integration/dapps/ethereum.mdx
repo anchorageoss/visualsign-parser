@@ -71,20 +71,44 @@ The `Abi` message includes an optional `signature` field. Signing your ABI lets 
 Signature validation in the parser today:
 
 - **Algorithm**: `secp256k1` (no other algorithms are accepted).
-- **Hash**: SHA-256 over the raw ABI JSON string, byte for byte.
+- **Hash**: SHA-256 over a domain-separated preimage, not the raw ABI JSON alone. The preimage length-prefixes and concatenates four fields — the ASCII domain tag `visualsign-metadata-v1`, the chain tag `ethereum`, a 28-byte scope (8-byte big-endian chain ID followed by the 20-byte contract address), and the ABI JSON bytes — each prefixed with its own 8-byte little-endian length. Binding the chain ID and contract address into the hash stops a signature minted for one contract from being replayed against another.
 - **Format**: DER-encoded signature, hex-encoded as the `value`.
 - **Public key**: hex-encoded secp256k1 point, passed in `metadata` under the key `public_key`.
 
 #### A signing example
 
-The signing operation is straightforward: sign the SHA-256 of the canonical ABI JSON. In Node.js:
+Sign the domain-separated prehash, not a plain hash of the ABI JSON. In Node.js:
 
 ```javascript
 import { createHash } from "node:crypto";
 import { secp256k1 } from "@noble/curves/secp256k1";
 
+const DOMAIN = "visualsign-metadata-v1"; // version tag, do not change
+const CHAIN_TAG = "ethereum";
+
+// Prefixes `field` with its own length as an 8-byte little-endian u64.
+function lengthPrefixed(field) {
+  const length = Buffer.alloc(8);
+  length.writeBigUInt64LE(BigInt(field.length));
+  return Buffer.concat([length, field]);
+}
+
 const abiJson = JSON.stringify(abi); // canonical form; no reformat after signing
-const digest = createHash("sha256").update(abiJson).digest();
+const chainId = 1n; // e.g. Ethereum mainnet; must match the chain the ABI is registered on
+const contractAddress = "0x1234567890123456789012345678901234567890"; // replace with your real contract address
+
+// scope = 8-byte big-endian chain ID || 20-byte contract address
+const chainIdBytes = Buffer.from(chainId.toString(16).padStart(16, "0"), "hex");
+const addressBytes = Buffer.from(contractAddress.slice(2), "hex");
+const scope = Buffer.concat([chainIdBytes, addressBytes]);
+
+const preimage = Buffer.concat([
+  lengthPrefixed(Buffer.from(DOMAIN, "ascii")),
+  lengthPrefixed(Buffer.from(CHAIN_TAG, "ascii")),
+  lengthPrefixed(scope),
+  lengthPrefixed(Buffer.from(abiJson, "utf8")),
+]);
+const digest = createHash("sha256").update(preimage).digest();
 
 // 32-byte secp256k1 private key, hex-encoded. Keep this offline; substitute your own.
 const privateKey = "0000000000000000000000000000000000000000000000000000000000000001";
@@ -120,9 +144,16 @@ The metadata bag must contain at least `algorithm` (set to `"secp256k1"`) and `p
 
 #### Trust model
 
-Signing proves the ABI was not modified after you signed it. It does **not** prove who signed it; the parser accepts any well-formed signature from any key. To establish identity, wallets verify your public key against an allowlist they maintain (a static config, a registry of audited dApps, or whatever fits their threat model). Publish your signing key alongside your contracts so wallets can pin it.
+What signing buys you depends on the posture the deployment you're talking to runs. That posture is fixed when the parser is deployed, not per request, so you cannot detect or influence it from your side. There are two:
 
-If signature validation fails, the parser logs a warning and **skips that ABI entry**, falling back to raw-hex rendering for calls to that contract. That means a wrong signature is worse than no signature: users see less information, not more. Ship unsigned ABIs until you're confident the signing pipeline is stable, then add signatures once your wallet integrators are ready to verify them.
+- **Accept-unsigned.** Unsigned ABIs are honoured. A signature that *is* present must still verify against the public key you supply alongside it, so signing proves the ABI was not modified after you signed it, but it does **not** prove who signed it: the signer's identity is not checked against any allowlist. Identity, if anyone establishes it, is established by the wallet.
+- **Require-signed.** Every ABI must carry a signature that verifies *and* whose key is on the deployment's allowlist. Unsigned ABIs and ABIs signed by a key that is not allowlisted are both **dropped**.
+
+Publish your signing key alongside your contracts so wallets and parser operators can pin it.
+
+If an ABI entry is rejected (bad signature under either posture, or unsigned/foreign-signed under require-signed), the parser **skips that entry** and falls back to raw-hex rendering for calls to that contract. The transaction still parses; users just see less information. Nothing in the response distinguishes a dropped entry from one you never sent, so you cannot detect this from the parse result alone.
+
+Practically: a wrong signature is worse than no signature under accept-unsigned, and equally bad under require-signed. Sign your ABIs and get your key allowlisted by the operators you integrate with. Shipping unsigned works only against an accept-unsigned deployment, so treat it as a local development shortcut rather than a rollout strategy.
 
 ## Design calldata that visualizes well
 
