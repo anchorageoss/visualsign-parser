@@ -7449,6 +7449,7 @@ dependencies = [
  "clap",
  "generated",
  "host_primitives",
+ "mime",
  "parser_app",
  "qos_core",
  "qos_hex",

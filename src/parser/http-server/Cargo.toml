@@ -45,6 +45,10 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "
 serde = { workspace = true }
 serde_json = { workspace = true }
 base64 = { workspace = true }
+# Same MIME parser axum-core's `Json` extractor uses internally, for the
+# hand-rolled Content-Type check below (`is_json_content_type`) to match its
+# contract exactly instead of approximating it with string splitting.
+mime = "0.3"
 
 # CLI args. TVC pivots receive config via `pivotArgs`, not env vars; clap's
 # `env = "..."` attribute keeps compose + integration tests working unchanged.

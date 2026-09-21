@@ -158,9 +158,13 @@ async fn parse_v2(
 }
 
 /// Mirrors axum's `Json<T>` extractor Content-Type check (`application/json`
-/// or any `+json` suffix, parameters like `; charset=utf-8` ignored) without
-/// pulling in the `mime` crate: `parse_v1`/`parse_v2` take raw `Bytes` so
-/// that built-in check never runs.
+/// or any `+json` suffix, parameters like `; charset=utf-8` ignored):
+/// `parse_v1`/`parse_v2` take raw `Bytes` so that built-in check never runs.
+/// Parses with the `mime` crate (the same one axum-core's extractor uses
+/// internally) instead of splitting on `/` by hand: a naive
+/// `ends_with("+json")` check accepts malformed media types such as
+/// `application/foo/bar+json` (a second `/` is illegal inside a subtype),
+/// which `mime`'s parser correctly rejects.
 fn is_json_content_type(headers: &axum::http::HeaderMap) -> bool {
     let Some(content_type) = headers.get(axum::http::header::CONTENT_TYPE) else {
         return false;
@@ -168,12 +172,11 @@ fn is_json_content_type(headers: &axum::http::HeaderMap) -> bool {
     let Ok(content_type) = content_type.to_str() else {
         return false;
     };
-    let essence = content_type.split(';').next().unwrap_or("").trim();
-    let Some((type_, subtype)) = essence.split_once('/') else {
+    let Ok(mime) = content_type.parse::<mime::Mime>() else {
         return false;
     };
-    type_.eq_ignore_ascii_case("application")
-        && (subtype.eq_ignore_ascii_case("json") || subtype.to_ascii_lowercase().ends_with("+json"))
+    mime.type_() == mime::APPLICATION
+        && (mime.subtype() == mime::JSON || mime.suffix() == Some(mime::JSON))
 }
 
 /// Deserialize the envelope from the original bytes. Kept separate so the
@@ -543,6 +546,10 @@ mod tests {
         assert!(!is_json_content_type(&with("text/plain")));
         assert!(!is_json_content_type(&with("application/xml")));
         assert!(!is_json_content_type(&axum::http::HeaderMap::new()));
+        // A subtype can't legally contain a second `/`; axum's mime-based
+        // extractor rejects this, so a naive `ends_with("+json")` string
+        // check must not accept it either.
+        assert!(!is_json_content_type(&with("application/foo/bar+json")));
     }
 
     #[tokio::test(flavor = "multi_thread")]
