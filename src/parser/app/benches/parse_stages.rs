@@ -244,13 +244,11 @@ fn bench_registry_dispatch(c: &mut Criterion) {
 
 /// Solana: the chain that emits `intermediate_output`.
 ///
-/// `intermediate_output` is currently produced by a SECOND, independent decode
-/// of the raw message (`extract_solana_intermediate_output` ->
-/// `parse_transaction_with_idls`) rather than being the intermediate
-/// representation the `SignablePayload` is built from. The delta between
-/// `solana/convert` and `solana/convert_with_intermediate` is the cost of that
-/// re-parse, and is the baseline to beat when the structured decode becomes the
-/// single source of truth.
+/// `intermediate_output` is produced by projecting a single structured decode
+/// (`SolanaMetadata`) that the payload's transfer fields are also rendered
+/// from, rather than by a second, independent decode. The delta between
+/// `solana/convert` and `solana/convert_with_intermediate` is the marginal
+/// cost of that projection and its Borsh encoding.
 fn bench_solana_intermediate(c: &mut Criterion) {
     let tx = create_transaction_with_empty_signatures(SOLANA_TRANSFER_MESSAGE);
     let key = P256Pair::generate().expect("keygen");

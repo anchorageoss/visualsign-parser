@@ -54,78 +54,18 @@ pub fn decode_v0_transfers(
         ))
     })?;
 
-    let mut fields = Vec::new();
-
-    // Extract native SOL transfers
-    if let Some(payload) = parsed_transaction
+    let fields = parsed_transaction
         .solana_parsed_transaction
         .payload
         .as_ref()
-    {
-        if let Some(transaction_metadata) = payload.transaction_metadata.as_ref() {
-            // Add native SOL transfers
-            for (i, transfer) in transaction_metadata.transfers.iter().enumerate() {
-                let field = AnnotatedPayloadField {
-                    signable_payload_field: SignablePayloadField::TextV2 {
-                        common: SignablePayloadFieldCommon {
-                            fallback_text: format!(
-                                "Transfer {}: From {} To {} For {}",
-                                i + 1,
-                                transfer.from,
-                                transfer.to,
-                                transfer.amount
-                            ),
-                            label: format!("Transfer {}", i + 1),
-                        },
-                        text_v2: SignablePayloadFieldTextV2 {
-                            text: format!(
-                                "From: {}\nTo: {}\nAmount: {}",
-                                transfer.from, transfer.to, transfer.amount
-                            ),
-                        },
-                    },
-                    static_annotation: None,
-                    dynamic_annotation: None,
-                };
-
-                fields.push(field);
-            }
-
-            // Add SPL token transfers
-            for (i, spl_transfer) in transaction_metadata.spl_transfers.iter().enumerate() {
-                let field = AnnotatedPayloadField {
-                    signable_payload_field: SignablePayloadField::TextV2 {
-                        common: SignablePayloadFieldCommon {
-                            fallback_text: format!(
-                                "SPL Transfer {}: From {} To {} For {}",
-                                i + 1,
-                                spl_transfer.from,
-                                spl_transfer.to,
-                                spl_transfer.amount
-                            ),
-                            label: format!("V0 SPL Transfer {}", i + 1),
-                        },
-                        text_v2: SignablePayloadFieldTextV2 {
-                            text: format!(
-                                "From: {}\nTo: {}\nOwner: {}\nAmount: {}\nMint: {:?}\nDecimals: {:?}\nFee: {:?}",
-                                spl_transfer.from,
-                                spl_transfer.to,
-                                spl_transfer.owner,
-                                spl_transfer.amount,
-                                spl_transfer.token_mint,
-                                spl_transfer.decimals,
-                                spl_transfer.fee
-                            ),
-                        },
-                    },
-                    static_annotation: None,
-                    dynamic_annotation: None,
-                };
-
-                fields.push(field);
-            }
-        }
-    }
+        .and_then(|payload| payload.transaction_metadata.as_ref())
+        .map(|transaction_metadata| {
+            super::super::instructions::decode_transfers_from_metadata(
+                transaction_metadata,
+                "V0 SPL Transfer",
+            )
+        })
+        .unwrap_or_default();
 
     Ok(fields)
 }

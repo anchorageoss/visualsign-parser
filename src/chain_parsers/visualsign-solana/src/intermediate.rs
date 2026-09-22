@@ -804,10 +804,12 @@ pub(crate) fn build_intermediate_output(
 /// Parse the transaction once via `solana_parser::parse_transaction_with_idl_records`
 /// and return the structured metadata.
 ///
-/// This is the single structured decode of the transaction. The human-readable
-/// `SignablePayload` and the Borsh-friendly [`SolanaIntermediateOutput`] are
-/// both derived from the value returned here, so the two cannot diverge by
-/// decoding the same bytes twice.
+/// This is the single structured decode of the transaction. The
+/// human-readable `SignablePayload`'s transfer fields and the Borsh-friendly
+/// [`SolanaIntermediateOutput`] are both derived from the value returned
+/// here, so those two cannot diverge by decoding the same bytes twice.
+/// Instruction-level rendering is not yet a projection of this value (see
+/// `core/visualsign.rs`).
 ///
 /// The intermediate is *not* a pure function of this value: [`build_intermediate_output`]
 /// also takes the caller-IDL program ids, because each instruction's
