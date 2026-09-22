@@ -15,8 +15,9 @@
 //!   envelope types are reused from `host_primitives::turnkey` so the Go
 //!   visualsign-turnkey-client (and any HTTP-only client) keeps working
 //!   byte-for-byte.
-//! - `POST /visualsign/api/v2/parse` - same payload. Open in this PR; a
-//!   later PR adds X-Stamp enforcement and payment enforcement here.
+//! - `POST /visualsign/api/v2/parse` - same payload, gated by the same
+//!   X-Stamp check as v1 when `--allowed-stamp-pubkeys-hex` is set; a later
+//!   PR adds payment enforcement here.
 //!
 //! Configuration (CLI args; env vars listed are clap fallbacks):
 //! - `--port <u16>` / `HTTP_PORT` (default 3000) - Turnkey TVC public ingress.
@@ -27,6 +28,10 @@
 //!   ABI mappings, same posture and same requirement as `parser_app` (see
 //!   `ParserConfig::abi_trust_from_options`). No env fallback: these land in this
 //!   deployment's signed `pivotArgs`, and an env escape hatch would undermine that.
+//! - `--allowed-stamp-pubkeys-hex <csv>` - comma-separated compressed SEC1 hex
+//!   pubkeys allowed to call the parse routes. No env fallback (same
+//!   rationale as the ABI-trust flags above). Absent means the routes stay
+//!   open (today's behavior).
 //!
 //! The ephemeral key is read from `qos_core::EPHEMERAL_KEY_FILE` (provisioned
 //! by QOS inside the enclave). No override flag - if a deployment ever needs
@@ -96,8 +101,10 @@ struct Args {
     /// Comma-separated compressed SEC1 hex pubkeys allowed to call the parse
     /// routes. Absent means the routes stay open (today's behavior);
     /// present means every request must carry a valid X-Stamp from a listed
-    /// key. Delivered via `pivotArgs` at deploy time.
-    #[arg(long, env = "ALLOWED_STAMP_PUBKEYS_HEX")]
+    /// key. No env fallback: this flag lands in this deployment's signed
+    /// `pivotArgs`, and an env escape hatch would undermine that (same
+    /// rationale as the ABI-trust flags above).
+    #[arg(long)]
     allowed_stamp_pubkeys_hex: Option<String>,
 }
 
@@ -154,7 +161,7 @@ async fn parse_v1(
 }
 
 /// v2 is byte-identical to v1 in this PR. Registering it now keeps the
-/// deployed URL stable across the stack as later PRs add payment enforcement here.
+/// deployed URL stable across the stack.
 async fn parse_v2(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -243,7 +250,11 @@ fn handle_parse(
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
     if let Some(allowlist) = state.allowlist.as_deref() {
         if let Err(e) = stamp::verify(headers, body, allowlist) {
-            eprintln!("rejected request: {e:?}");
+            // Bounded discriminant only: `StampError::Malformed` and
+            // `UnsupportedScheme` carry attacker-supplied strings, and this
+            // path runs before any credential is checked, so logging `e`
+            // itself would let an unauthenticated caller amplify enclave logs.
+            eprintln!("rejected request: {}", e.kind());
             // Deliberately coarse: the client learns "not authenticated", not
             // which check failed, so the error text cannot be used to probe
             // the allowlist.
@@ -426,14 +437,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .map_err(|e| format!("failed to build boot proof: {e:?}"))?;
 
-    // Absent means the routes stay open (today's behavior); present means
-    // every request must carry a valid X-Stamp from a listed key.
     let allowlist = args
         .allowed_stamp_pubkeys_hex
         .map(|csv| Allowlist::from_hex_list(&csv))
         .transpose()
         .map_err(|e| format!("invalid --allowed-stamp-pubkeys-hex: {e:?}"))?
         .map(Arc::new);
+    // The cheapest signal an operator or incident responder has for whether
+    // auth is on: without it, the only way to tell is to send an
+    // unauthenticated request and see what comes back. Counts keys, never
+    // prints them (see `Allowlist::len`).
+    match &allowlist {
+        Some(a) => eprintln!("X-Stamp auth: {} allowlisted key(s)", a.len()),
+        None => eprintln!("X-Stamp auth: disabled (routes open)"),
+    }
 
     let state = AppState {
         ephemeral_key: Arc::new(ephemeral_key),
@@ -500,13 +517,13 @@ mod tests {
 
     #[test]
     fn envelope_is_parsed_from_raw_bytes_not_reserialized() {
-        // A later PR verifies an X-Stamp signature over the exact request
-        // bytes. If a handler ever takes `Json<T>`, the extractor discards
-        // the original bytes on deserialization, so verification would have
-        // to re-serialize the parsed value to get bytes back, which changes
-        // key order, whitespace, unicode escaping and makes every stamp
-        // fail. Locking the seam here means that PR adds one call and no
-        // signature churn.
+        // The X-Stamp signature is verified against the exact request bytes
+        // (see `stamp::verify`). If a handler ever takes `Json<T>`, the
+        // extractor discards the original bytes on deserialization, so
+        // verification would have to re-serialize the parsed value to get
+        // bytes back, which changes key order, whitespace, unicode escaping
+        // and makes every stamp fail. Locking the seam here catches that
+        // regression at build time instead of at runtime.
         let raw = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02","include_intermediate_output":false}}"#;
         let parsed = parse_envelope(raw).unwrap();
         assert_eq!(parsed.request.chain, "CHAIN_ETHEREUM");

@@ -18,9 +18,10 @@ const STAMP_HEADER: &str = "X-Stamp";
 const SCHEME_P256: &str = "SIGNATURE_SCHEME_TK_API_P256";
 const SCHEME_SECP256K1: &str = "SIGNATURE_SCHEME_TK_API_SECP256K1";
 
-/// `Malformed` and `UnsupportedScheme` carry context read only via `{e:?}`
-/// in `main.rs`'s deliberately coarse client-facing error (see `verify`'s
-/// callsite); same pattern as `boot_proof::BootProofError`.
+/// A real Turnkey stamp is ~250 bytes; generous headroom over that without
+/// leaving the header effectively unbounded (see `verify`'s size check).
+const MAX_STAMP_HEADER_BYTES: usize = 1024;
+
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum StampError {
@@ -29,6 +30,23 @@ pub enum StampError {
     UnsupportedScheme(String),
     UnknownKey,
     BadSignature,
+}
+
+impl StampError {
+    /// Bounded, caller-uncontrolled discriminant for logging. `Malformed` and
+    /// `UnsupportedScheme` carry attacker-supplied strings (an unbounded
+    /// `scheme`, a `serde_json` error `Display`), so logging `self` with
+    /// `{:?}` would let an unauthenticated caller amplify enclave logs; this
+    /// gives callers something safe to log instead.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::Malformed(_) => "malformed",
+            Self::UnsupportedScheme(_) => "unsupported_scheme",
+            Self::UnknownKey => "unknown_key",
+            Self::BadSignature => "bad_signature",
+        }
+    }
 }
 
 /// Wire form of the header value: base64url-no-pad JSON.
@@ -44,26 +62,26 @@ struct ApiStamp {
     scheme: String,
 }
 
-/// Compressed SEC1 pubkeys permitted to call the parse routes. Delivered via
-/// `pivotArgs` at deploy time, the same mechanism that pins the gateway signing
-/// key, so rotation costs a redeploy but no rebuild. A signed allowlist
-/// document (option c in PRS-581) is the follow-up if that hurts.
+/// Compressed SEC1 pubkeys permitted to call the parse routes.
+///
+/// Deliberately not `visualsign::signing::SignerAllowlist`: that type's
+/// `BTreeSet` lookup isn't constant-time (see `contains_constant_time`
+/// below, needed here because this allowlist gates authentication, not
+/// metadata trust) and it stores keys in the Ethereum ABI path's uncompressed
+/// SEC1 encoding rather than the compressed form Turnkey's stamper uses.
 pub struct Allowlist {
-    keys: Vec<Vec<u8>>,
+    keys: Vec<[u8; 33]>,
 }
 
 impl Allowlist {
     pub fn from_hex_list(csv: &str) -> Result<Self, StampError> {
         let mut keys = Vec::new();
         for entry in csv.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-            let bytes = visualsign::encodings::decode_hex(entry)
-                .map_err(|e| StampError::Malformed(format!("allowlist entry {entry}: {e}")))?;
-            if bytes.len() != 33 {
-                return Err(StampError::Malformed(format!(
-                    "allowlist entry {entry} is {} bytes, expected 33 (compressed SEC1)",
-                    bytes.len()
-                )));
-            }
+            let bytes = visualsign::encodings::decode_hex_array::<33>(entry).map_err(|e| {
+                StampError::Malformed(format!(
+                    "allowlist entry {entry} (compressed SEC1 hex): {e}"
+                ))
+            })?;
             keys.push(bytes);
         }
         if keys.is_empty() {
@@ -72,14 +90,19 @@ impl Allowlist {
         Ok(Self { keys })
     }
 
-    /// Constant-time membership: a timing signal here would leak which keys are
-    /// allowlisted. Same posture as parser_gateway's auth/attestation compares.
-    fn contains(&self, candidate: &[u8]) -> bool {
+    fn contains_constant_time(&self, candidate: &[u8]) -> bool {
         let mut found = subtle::Choice::from(0u8);
         for key in &self.keys {
             found |= key.as_slice().ct_eq(candidate);
         }
         found.into()
+    }
+
+    /// Number of distinct allowlisted keys, for the startup log line only -
+    /// never the keys themselves outside the constant-time compare above.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.keys.len()
     }
 }
 
@@ -92,6 +115,14 @@ impl Allowlist {
 /// cannot be redirected at a different one.
 pub fn verify(headers: &HeaderMap, body: &[u8], allowlist: &Allowlist) -> Result<(), StampError> {
     let raw = headers.get(STAMP_HEADER).ok_or(StampError::Missing)?;
+    // Before any authentication decision, an anonymous caller could otherwise
+    // force base64/JSON decoding and hex parsing on an unbounded header
+    // (hyper's own head-buffer cap is the only thing limiting it), the same
+    // CPU-amplification shape `PIVOT_BODY_LIMIT_BYTES` exists to prevent on
+    // the body.
+    if raw.as_bytes().len() > MAX_STAMP_HEADER_BYTES {
+        return Err(StampError::Malformed("stamp header too large".to_string()));
+    }
     let decoded = BASE64_URL_SAFE_NO_PAD
         .decode(raw.as_bytes())
         .map_err(|e| StampError::Malformed(format!("base64url: {e}")))?;
@@ -100,7 +131,7 @@ pub fn verify(headers: &HeaderMap, body: &[u8], allowlist: &Allowlist) -> Result
 
     let pubkey = visualsign::encodings::decode_hex(&stamp.public_key)
         .map_err(|e| StampError::Malformed(format!("publicKey hex: {e}")))?;
-    if !allowlist.contains(&pubkey) {
+    if !allowlist.contains_constant_time(&pubkey) {
         return Err(StampError::UnknownKey);
     }
     let sig_der = visualsign::encodings::decode_hex(&stamp.signature)
@@ -132,20 +163,30 @@ pub fn verify(headers: &HeaderMap, body: &[u8], allowlist: &Allowlist) -> Result
 mod tests {
     use super::*;
     use axum::http::{HeaderMap, HeaderValue};
-    use turnkey_api_key_stamper::{Stamp, TurnkeyP256ApiKey};
+    use turnkey_api_key_stamper::{Stamp, TurnkeyP256ApiKey, TurnkeySecp256k1ApiKey};
 
-    fn headers_for(key: &TurnkeyP256ApiKey, body: &[u8]) -> HeaderMap {
+    fn headers_for(key: &impl Stamp, body: &[u8]) -> HeaderMap {
         let stamp = key.stamp(body).unwrap();
         let mut headers = HeaderMap::new();
         headers.insert("X-Stamp", HeaderValue::from_str(&stamp.value).unwrap());
         headers
     }
 
+    fn allowlist_of(key: &TurnkeyP256ApiKey) -> Allowlist {
+        Allowlist::from_hex_list(&hex::encode(key.compressed_public_key())).unwrap()
+    }
+
+    /// Shared by tests that only need a key and an allowlist containing it,
+    /// not a specific key/allowlist relationship.
+    fn single_key_allowlist() -> (TurnkeyP256ApiKey, Allowlist) {
+        let key = TurnkeyP256ApiKey::generate();
+        let allowlist = allowlist_of(&key);
+        (key, allowlist)
+    }
+
     #[test]
     fn accepts_a_stamp_from_an_allowlisted_key() {
-        let key = TurnkeyP256ApiKey::generate();
-        let allowlist =
-            Allowlist::from_hex_list(&hex::encode(key.compressed_public_key())).unwrap();
+        let (key, allowlist) = single_key_allowlist();
         let body = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02"}}"#;
         verify(&headers_for(&key, body), body, &allowlist).unwrap();
     }
@@ -154,8 +195,7 @@ mod tests {
     fn rejects_a_stamp_from_an_unlisted_key() {
         let signer = TurnkeyP256ApiKey::generate();
         let other = TurnkeyP256ApiKey::generate();
-        let allowlist =
-            Allowlist::from_hex_list(&hex::encode(other.compressed_public_key())).unwrap();
+        let allowlist = allowlist_of(&other);
         let body = br#"{"request":{}}"#;
         let err = verify(&headers_for(&signer, body), body, &allowlist).unwrap_err();
         assert!(matches!(err, StampError::UnknownKey));
@@ -163,12 +203,7 @@ mod tests {
 
     #[test]
     fn signature_is_checked_against_raw_bytes_not_reserialized_json() {
-        // The acceptance criterion for this PR. The stamp is signed over the
-        // exact bytes; serde's output differs in key order and whitespace, so
-        // verifying the re-serialized form must fail.
-        let key = TurnkeyP256ApiKey::generate();
-        let allowlist =
-            Allowlist::from_hex_list(&hex::encode(key.compressed_public_key())).unwrap();
+        let (key, allowlist) = single_key_allowlist();
         // `serde_json::Value` preserves key insertion order in this workspace
         // (some dependency turns on serde_json's `preserve_order` feature,
         // and Cargo unifies it for every user of the crate), so a re-ordered
@@ -194,9 +229,7 @@ mod tests {
 
     #[test]
     fn rejects_missing_header_and_malformed_encodings() {
-        let key = TurnkeyP256ApiKey::generate();
-        let allowlist =
-            Allowlist::from_hex_list(&hex::encode(key.compressed_public_key())).unwrap();
+        let (_key, allowlist) = single_key_allowlist();
         let body = br#"{}"#;
         assert!(matches!(
             verify(&HeaderMap::new(), body, &allowlist),
@@ -220,10 +253,33 @@ mod tests {
     }
 
     #[test]
-    fn rejects_an_unsupported_scheme() {
-        let key = TurnkeyP256ApiKey::generate();
+    fn accepts_a_stamp_from_an_allowlisted_secp256k1_key() {
+        let key = TurnkeySecp256k1ApiKey::generate();
         let allowlist =
             Allowlist::from_hex_list(&hex::encode(key.compressed_public_key())).unwrap();
+        let body = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02"}}"#;
+        verify(&headers_for(&key, body), body, &allowlist).unwrap();
+    }
+
+    #[test]
+    fn accepts_a_stamp_from_the_second_key_in_a_multi_entry_allowlist() {
+        let first = TurnkeyP256ApiKey::generate();
+        let second = TurnkeyP256ApiKey::generate();
+        // Whitespace around entries and a `0x`-prefixed entry must both be
+        // accepted, and membership must not be limited to the first entry.
+        let csv = format!(
+            " {}, 0x{} ",
+            hex::encode(first.compressed_public_key()),
+            hex::encode(second.compressed_public_key())
+        );
+        let allowlist = Allowlist::from_hex_list(&csv).unwrap();
+        let body = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02"}}"#;
+        verify(&headers_for(&second, body), body, &allowlist).unwrap();
+    }
+
+    #[test]
+    fn rejects_an_unsupported_scheme() {
+        let (key, allowlist) = single_key_allowlist();
         let stamp = serde_json::json!({
             "publicKey": hex::encode(key.compressed_public_key()),
             "signature": "3006020100020100",

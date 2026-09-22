@@ -40,11 +40,9 @@ qos_hex = { workspace = true }
 qos_p256 = { workspace = true }
 borsh = { version = "1", features = ["std", "derive"], default-features = false }
 
-# X-Stamp verification (see src/stamp.rs).
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 k256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 subtle = { version = "2", default-features = false }
-hex = { workspace = true }
 
 # HTTP + serialization.
 axum = { version = "0.8", features = ["http1", "http2", "tokio", "json"], default-features = false }
@@ -63,6 +61,7 @@ clap = { version = "4.0", features = ["derive", "env"] }
 
 [dev-dependencies]
 turnkey_api_key_stamper = "0.10"
+hex = { workspace = true }
 
 [lints]
 workspace = true

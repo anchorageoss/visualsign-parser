@@ -37,8 +37,6 @@ impl RunningServer {
         Self::start_with_args(&[]).await
     }
 
-    /// Same as `start`, but with extra CLI args appended (e.g.
-    /// `--allowed-stamp-pubkeys-hex <csv>`).
     async fn start_with_args(extra_args: &[&str]) -> Self {
         let test_id = format!("{:?}", rand::random::<u64>());
         // Kept as a plain `String` (not `PathWrapper`) until `RunningServer`
@@ -350,15 +348,12 @@ async fn http_server_enforces_x_stamp_when_allowlist_is_configured() {
             "unsigned_payload": ETH_TX_HEX,
         }
     });
-    // Sign the exact bytes sent over the wire, not a re-serialized copy:
-    // this is what the pivot verifies against.
-    let raw_body = serde_json::to_vec(&body).expect("failed to serialize body");
+    let wire_bytes = serde_json::to_vec(&body).expect("failed to serialize body");
 
-    // 1. No X-Stamp header: 401 with bootProof present.
     let unstamped = client
         .post(format!("{}/visualsign/api/v1/parse", server.base_url))
         .header("content-type", "application/json")
-        .body(raw_body.clone())
+        .body(wire_bytes.clone())
         .send()
         .await
         .expect("unstamped request failed");
@@ -372,25 +367,23 @@ async fn http_server_enforces_x_stamp_when_allowlist_is_configured() {
         "401 response must still carry bootProof"
     );
 
-    // 2. Stamped by a listed key: 200.
-    let stamp = allowed.stamp(&raw_body).expect("failed to stamp body");
+    let stamp = allowed.stamp(&wire_bytes).expect("failed to stamp body");
     let listed = client
         .post(format!("{}/visualsign/api/v1/parse", server.base_url))
         .header("content-type", "application/json")
         .header(stamp.name, stamp.value)
-        .body(raw_body.clone())
+        .body(wire_bytes.clone())
         .send()
         .await
         .expect("listed-key request failed");
     assert_eq!(listed.status(), reqwest::StatusCode::OK);
 
-    // 3. Stamped by an unlisted key: 401.
-    let other_stamp = other.stamp(&raw_body).expect("failed to stamp body");
+    let other_stamp = other.stamp(&wire_bytes).expect("failed to stamp body");
     let unlisted = client
         .post(format!("{}/visualsign/api/v1/parse", server.base_url))
         .header("content-type", "application/json")
         .header(other_stamp.name, other_stamp.value)
-        .body(raw_body)
+        .body(wire_bytes)
         .send()
         .await
         .expect("unlisted-key request failed");
