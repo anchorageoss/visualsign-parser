@@ -82,6 +82,17 @@ impl Allowlist {
                     "allowlist entry {entry} (compressed SEC1 hex): {e}"
                 ))
             })?;
+            // decode_hex_array only checks hex syntax and length; without this,
+            // a syntactically-valid but non-curve-point entry would start the
+            // deployment with a silently-dead allowlist slot that can never
+            // authenticate (see PR review).
+            let is_p256 = p256::ecdsa::VerifyingKey::from_sec1_bytes(&bytes).is_ok();
+            let is_secp256k1 = k256::ecdsa::VerifyingKey::from_sec1_bytes(&bytes).is_ok();
+            if !is_p256 && !is_secp256k1 {
+                return Err(StampError::Malformed(format!(
+                    "allowlist entry {entry}: not a valid compressed SEC1 point on P256 or secp256k1"
+                )));
+            }
             keys.push(bytes);
         }
         if keys.is_empty() {
@@ -131,20 +142,25 @@ pub fn verify(headers: &HeaderMap, body: &[u8], allowlist: &Allowlist) -> Result
 
     let pubkey = visualsign::encodings::decode_hex(&stamp.public_key)
         .map_err(|e| StampError::Malformed(format!("publicKey hex: {e}")))?;
-    if !allowlist.contains_constant_time(&pubkey) {
-        return Err(StampError::UnknownKey);
-    }
     let sig_der = visualsign::encodings::decode_hex(&stamp.signature)
         .map_err(|e| StampError::Malformed(format!("signature hex: {e}")))?;
 
-    match stamp.scheme.as_str() {
+    // Run the full parse/verify path unconditionally, before deciding
+    // allowlist membership. An unauthenticated caller supplies `publicKey`
+    // as plain header data (no proof of possession is required to reach
+    // this point), so if membership were checked first, an unlisted
+    // candidate would return here while a listed one paid for DER parsing,
+    // curve validation, and ECDSA verification; that timing gap would let
+    // an attacker fingerprint the allowlist. Equalizing the work for every
+    // syntactically-valid candidate closes that gap (see PR review).
+    let sig_ok = match stamp.scheme.as_str() {
         SCHEME_P256 => {
             use p256::ecdsa::{DerSignature, VerifyingKey, signature::Verifier};
             let key = VerifyingKey::from_sec1_bytes(&pubkey)
                 .map_err(|e| StampError::Malformed(format!("p256 pubkey: {e}")))?;
             let sig = DerSignature::from_bytes(&sig_der)
                 .map_err(|e| StampError::Malformed(format!("p256 der: {e}")))?;
-            key.verify(body, &sig).map_err(|_| StampError::BadSignature)
+            key.verify(body, &sig).is_ok()
         }
         SCHEME_SECP256K1 => {
             use k256::ecdsa::{DerSignature, VerifyingKey, signature::Verifier};
@@ -152,10 +168,18 @@ pub fn verify(headers: &HeaderMap, body: &[u8], allowlist: &Allowlist) -> Result
                 .map_err(|e| StampError::Malformed(format!("k256 pubkey: {e}")))?;
             let sig = DerSignature::from_bytes(&sig_der)
                 .map_err(|e| StampError::Malformed(format!("k256 der: {e}")))?;
-            key.verify(body, &sig).map_err(|_| StampError::BadSignature)
+            key.verify(body, &sig).is_ok()
         }
-        other => Err(StampError::UnsupportedScheme(other.to_string())),
+        other => return Err(StampError::UnsupportedScheme(other.to_string())),
+    };
+
+    if !allowlist.contains_constant_time(&pubkey) {
+        return Err(StampError::UnknownKey);
     }
+    if !sig_ok {
+        return Err(StampError::BadSignature);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
