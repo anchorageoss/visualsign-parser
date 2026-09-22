@@ -302,6 +302,21 @@ mod tests {
     }
 
     #[test]
+    fn rejects_an_allowlist_entry_that_is_not_a_valid_curve_point() {
+        // 33 bytes, valid hex, wrong leading byte for a compressed SEC1 point
+        // (0x04 is the uncompressed-point prefix, invalid at this length).
+        // Regression test for the PR-review fix: `decode_hex_array` only
+        // checks hex syntax and length, so without the SEC1 parse in
+        // `from_hex_list` this entry would silently join the allowlist as a
+        // dead key that can never authenticate.
+        let bad_entry = format!("04{}", "00".repeat(32));
+        assert!(matches!(
+            Allowlist::from_hex_list(&bad_entry),
+            Err(StampError::Malformed(_))
+        ));
+    }
+
+    #[test]
     fn rejects_an_unsupported_scheme() {
         let (key, allowlist) = single_key_allowlist();
         let stamp = serde_json::json!({
