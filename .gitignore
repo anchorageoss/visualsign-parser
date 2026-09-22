@@ -26,6 +26,3 @@ docs/superpowers/
 lcov.info
 *.profraw
 *.profdata
-plans/
-.workflow/
-.quack/
