@@ -505,7 +505,9 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
                     &lint_config,
                 )?
             }
-            SolanaTransactionWrapper::Message(envelope) => message_to_visual_sign_payload(envelope)?,
+            SolanaTransactionWrapper::Message(envelope) => {
+                message_to_visual_sign_payload(envelope)?
+            }
         };
 
         // Only emit intermediate output when the caller opts in; otherwise the
