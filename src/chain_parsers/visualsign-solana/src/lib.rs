@@ -6,6 +6,7 @@ pub use cli_plugin::{SolanaArgs, SolanaPlugin};
 
 mod core;
 mod idl;
+mod inner_transfers;
 mod integrations;
 /// Chain-specific structured decode emitted as
 /// `ParsedTransactionPayload.intermediate_output`. Published so downstream

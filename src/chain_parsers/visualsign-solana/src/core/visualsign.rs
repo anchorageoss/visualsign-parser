@@ -496,6 +496,13 @@ fn build_intermediate_bytes(
             if let Some((instructions, simulation_error)) = raw_simulated_instructions {
                 output.simulated_instructions = instructions;
                 output.simulation_error = simulation_error;
+                // `solana_parser` walks only the message's own instructions, so
+                // CPI legs are lifted in here to complete both arrays.
+                crate::inner_transfers::append_simulated_transfers(
+                    &output.simulated_instructions,
+                    &mut output.transfers,
+                    &mut output.spl_transfers,
+                );
             }
             if !output.simulated_instructions.is_empty() {
                 let unresolved = output
