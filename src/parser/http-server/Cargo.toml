@@ -41,7 +41,9 @@ qos_p256 = { workspace = true }
 borsh = { version = "1", features = ["std", "derive"], default-features = false }
 
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
-k256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+# `precomputed-tables` is a k256 default: keeping it costs binary size but
+# keeps secp256k1 verification on par with the p256 path per request.
+k256 = { version = "0.13", default-features = false, features = ["ecdsa", "std", "precomputed-tables"] }
 subtle = { version = "2", default-features = false }
 
 # HTTP + serialization.

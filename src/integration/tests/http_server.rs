@@ -167,16 +167,20 @@ async fn assert_boot_proof_response(
     value
 }
 
+/// reqwest::Client::new() has no default request timeout, so a server that
+/// accepts a connection but never responds would otherwise hang a test
+/// indefinitely instead of failing it.
+fn test_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("failed to build reqwest client")
+}
+
 #[tokio::test]
 async fn http_server_serves_health_parse_and_errors() {
     let server = RunningServer::start().await;
-    // reqwest::Client::new() has no default request timeout, so a server
-    // that accepts a connection but never responds would otherwise hang
-    // this test indefinitely instead of failing it.
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .expect("failed to build reqwest client");
+    let client = test_client();
 
     // 1. GET /health returns 200.
     let health = client
@@ -340,7 +344,7 @@ async fn http_server_enforces_x_stamp_when_allowlist_is_configured() {
 
     let server =
         RunningServer::start_with_args(&["--allowed-stamp-pubkeys-hex", &allowlist_hex]).await;
-    let client = reqwest::Client::new();
+    let client = test_client();
 
     let body = serde_json::json!({
         "request": {
@@ -350,42 +354,79 @@ async fn http_server_enforces_x_stamp_when_allowlist_is_configured() {
     });
     let wire_bytes = serde_json::to_vec(&body).expect("failed to serialize body");
 
-    let unstamped = client
-        .post(format!("{}/visualsign/api/v1/parse", server.base_url))
-        .header("content-type", "application/json")
-        .body(wire_bytes.clone())
-        .send()
-        .await
-        .expect("unstamped request failed");
-    assert_eq!(unstamped.status(), reqwest::StatusCode::UNAUTHORIZED);
-    let unstamped_value: serde_json::Value = unstamped
-        .json()
-        .await
-        .expect("unstamped response was not valid JSON");
-    assert!(
-        unstamped_value.get("bootProof").is_some(),
-        "401 response must still carry bootProof"
-    );
+    let post = async |route: &str, stamp: Option<(String, String)>| {
+        let mut req = client
+            .post(format!("{}{route}", server.base_url))
+            .header("content-type", "application/json");
+        if let Some((name, value)) = stamp {
+            req = req.header(name, value);
+        }
+        let response = req
+            .body(wire_bytes.clone())
+            .send()
+            .await
+            .expect("request failed");
+        let status = response.status();
+        let text = response.text().await.expect("response body was not UTF-8");
+        (status, text)
+    };
 
-    let stamp = allowed.stamp(&wire_bytes).expect("failed to stamp body");
-    let listed = client
-        .post(format!("{}/visualsign/api/v1/parse", server.base_url))
-        .header("content-type", "application/json")
-        .header(stamp.name, stamp.value)
-        .body(wire_bytes.clone())
-        .send()
-        .await
-        .expect("listed-key request failed");
-    assert_eq!(listed.status(), reqwest::StatusCode::OK);
+    let stamp_from = |key: &TurnkeyP256ApiKey| {
+        let stamp = key.stamp(&wire_bytes).expect("failed to stamp body");
+        Some((stamp.name.to_string(), stamp.value))
+    };
 
-    let other_stamp = other.stamp(&wire_bytes).expect("failed to stamp body");
-    let unlisted = client
-        .post(format!("{}/visualsign/api/v1/parse", server.base_url))
-        .header("content-type", "application/json")
-        .header(other_stamp.name, other_stamp.value)
-        .body(wire_bytes)
-        .send()
-        .await
-        .expect("unlisted-key request failed");
-    assert_eq!(unlisted.status(), reqwest::StatusCode::UNAUTHORIZED);
+    // A stamp whose signature is valid but made over different bytes. This
+    // is the case that exercises the timing-safety property: the key *is*
+    // allowlisted, so the handler runs the full verify path and still has to
+    // answer with the same coarse 401 as an unlisted key.
+    let wrong_body_stamp = {
+        let stamp = allowed
+            .stamp(b"{\"request\":{}}")
+            .expect("failed to stamp body");
+        Some((stamp.name.to_string(), stamp.value))
+    };
+
+    for route in ["/visualsign/api/v1/parse", "/visualsign/api/v2/parse"] {
+        let (status, unstamped) = post(route, None).await;
+        assert_eq!(
+            status,
+            reqwest::StatusCode::UNAUTHORIZED,
+            "{route} unstamped"
+        );
+        let unstamped_value: serde_json::Value =
+            serde_json::from_str(&unstamped).expect("401 body was not valid JSON");
+        assert!(
+            unstamped_value.get("bootProof").is_some(),
+            "{route}: 401 response must still carry bootProof"
+        );
+
+        let (status, unlisted) = post(route, stamp_from(&other)).await;
+        assert_eq!(
+            status,
+            reqwest::StatusCode::UNAUTHORIZED,
+            "{route} unlisted"
+        );
+
+        let (status, bad_sig) = post(route, wrong_body_stamp.clone()).await;
+        assert_eq!(
+            status,
+            reqwest::StatusCode::UNAUTHORIZED,
+            "{route} listed key, signature over other bytes"
+        );
+
+        // The three rejections must be indistinguishable to the caller: a
+        // differing body would tell an unauthenticated prober which check
+        // failed, and so whether a key is on the allowlist. Cheap
+        // deterministic stand-in for measuring the timing side of the same
+        // property.
+        assert_eq!(unstamped, unlisted, "{route}: unstamped vs unlisted 401");
+        assert_eq!(
+            unstamped, bad_sig,
+            "{route}: unstamped vs bad-signature 401"
+        );
+
+        let (status, _) = post(route, stamp_from(&allowed)).await;
+        assert_eq!(status, reqwest::StatusCode::OK, "{route} listed");
+    }
 }

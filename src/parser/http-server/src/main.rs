@@ -28,10 +28,11 @@
 //!   ABI mappings, same posture and same requirement as `parser_app` (see
 //!   `ParserConfig::abi_trust_from_options`). No env fallback: these land in this
 //!   deployment's signed `pivotArgs`, and an env escape hatch would undermine that.
-//! - `--allowed-stamp-pubkeys-hex <csv>` - comma-separated compressed SEC1 hex
-//!   pubkeys allowed to call the parse routes. No env fallback (same
-//!   rationale as the ABI-trust flags above). Absent means the routes stay
-//!   open (today's behavior).
+//! - `--allowed-stamp-pubkeys-hex <csv>` - comma-separated `[<curve>:]<hex>`
+//!   entries (`<curve>` is `p256`, the default, or `secp256k1`) naming the
+//!   compressed SEC1 pubkeys allowed to call the parse routes. No env
+//!   fallback (same rationale as the ABI-trust flags above). Absent means the
+//!   routes stay open (today's behavior).
 //!
 //! The ephemeral key is read from `qos_core::EPHEMERAL_KEY_FILE` (provisioned
 //! by QOS inside the enclave). No override flag - if a deployment ever needs
@@ -98,12 +99,14 @@ struct Args {
     #[arg(long = "accept-signatures-from-pubkey")]
     accept_signatures_from_pubkey: Vec<String>,
 
-    /// Comma-separated compressed SEC1 hex pubkeys allowed to call the parse
-    /// routes. Absent means the routes stay open (today's behavior);
-    /// present means every request must carry a valid X-Stamp from a listed
-    /// key. No env fallback: this flag lands in this deployment's signed
-    /// `pivotArgs`, and an env escape hatch would undermine that (same
-    /// rationale as the ABI-trust flags above).
+    /// Comma-separated `[<curve>:]<hex>` entries naming the compressed SEC1
+    /// pubkeys allowed to call the parse routes, where `<curve>` is `p256`
+    /// (the default) or `secp256k1`. Absent means the routes stay open
+    /// (today's behavior); present means every request must carry a valid
+    /// X-Stamp from a listed key, under that key's own curve. No env
+    /// fallback: this flag lands in this deployment's signed `pivotArgs`, and
+    /// an env escape hatch would undermine that (same rationale as the
+    /// ABI-trust flags above).
     #[arg(long)]
     allowed_stamp_pubkeys_hex: Option<String>,
 }
@@ -160,8 +163,8 @@ async fn parse_v1(
     tokio::task::block_in_place(|| handle_parse(&state, &headers, &body))
 }
 
-/// v2 is byte-identical to v1 in this PR. Registering it now keeps the
-/// deployed URL stable across the stack.
+/// v2 is byte-identical to v1 today, X-Stamp gate included. Registering it
+/// now keeps the deployed URL stable across the stack.
 async fn parse_v2(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -255,9 +258,12 @@ fn handle_parse(
             // path runs before any credential is checked, so logging `e`
             // itself would let an unauthenticated caller amplify enclave logs.
             eprintln!("rejected request: {}", e.kind());
-            // Deliberately coarse: the client learns "not authenticated", not
-            // which check failed, so the error text cannot be used to probe
-            // the allowlist.
+            // Deliberately coarse: the client learns "not authenticated",
+            // not which check failed. Note this does not make the allowlist
+            // secret - it lives in `pivotArgs`, which this very response
+            // discloses via `bootProof.qosManifestB64` (see the PR's open
+            // question); it keeps the auth path from being a second, finer
+            // oracle on top of that.
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(error_response(

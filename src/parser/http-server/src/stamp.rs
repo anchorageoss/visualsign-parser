@@ -62,6 +62,23 @@ struct ApiStamp {
     scheme: String,
 }
 
+/// The curve an allowlist entry is bound to.
+///
+/// A compressed SEC1 point is the same 33 bytes on both curves, and ~half of
+/// the valid x-coordinates on one curve are also valid on the other, so the
+/// bytes alone cannot say which curve a key belongs to. The entry carries the
+/// answer instead (see `CURVE_TAG_*`), and `verify` requires the request's
+/// `scheme` to match it, rather than letting the caller choose which curve
+/// their key is checked against.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum Curve {
+    P256,
+    Secp256k1,
+}
+
+const CURVE_TAG_P256: &str = "p256";
+const CURVE_TAG_SECP256K1: &str = "secp256k1";
+
 /// Compressed SEC1 pubkeys permitted to call the parse routes.
 ///
 /// Deliberately not `visualsign::signing::SignerAllowlist`: that type's
@@ -70,14 +87,28 @@ struct ApiStamp {
 /// metadata trust) and it stores keys in the Ethereum ABI path's uncompressed
 /// SEC1 encoding rather than the compressed form Turnkey's stamper uses.
 pub struct Allowlist {
-    keys: Vec<[u8; 33]>,
+    keys: Vec<(Curve, [u8; 33])>,
 }
 
 impl Allowlist {
+    /// Parses `[<curve>:]<hex>` entries, comma-separated. `<curve>` is
+    /// `p256` (the default, matching Turnkey's default stamping scheme) or
+    /// `secp256k1`.
     pub fn from_hex_list(csv: &str) -> Result<Self, StampError> {
         let mut keys = Vec::new();
         for entry in csv.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-            let bytes = visualsign::encodings::decode_hex_array::<33>(entry).map_err(|e| {
+            let (curve, hex) = match entry.split_once(':') {
+                Some((CURVE_TAG_P256, hex)) => (Curve::P256, hex.trim()),
+                Some((CURVE_TAG_SECP256K1, hex)) => (Curve::Secp256k1, hex.trim()),
+                Some((tag, _)) => {
+                    return Err(StampError::Malformed(format!(
+                        "allowlist entry {entry}: unknown curve tag {tag} (expected \
+                         {CURVE_TAG_P256} or {CURVE_TAG_SECP256K1})"
+                    )));
+                }
+                None => (Curve::P256, entry),
+            };
+            let bytes = visualsign::encodings::decode_hex_array::<33>(hex).map_err(|e| {
                 StampError::Malformed(format!(
                     "allowlist entry {entry} (compressed SEC1 hex): {e}"
                 ))
@@ -86,25 +117,32 @@ impl Allowlist {
             // a syntactically-valid but non-curve-point entry would start the
             // deployment with a silently-dead allowlist slot that can never
             // authenticate (see PR review).
-            let is_p256 = p256::ecdsa::VerifyingKey::from_sec1_bytes(&bytes).is_ok();
-            let is_secp256k1 = k256::ecdsa::VerifyingKey::from_sec1_bytes(&bytes).is_ok();
-            if !is_p256 && !is_secp256k1 {
+            let on_curve = match curve {
+                Curve::P256 => p256::ecdsa::VerifyingKey::from_sec1_bytes(&bytes).is_ok(),
+                Curve::Secp256k1 => k256::ecdsa::VerifyingKey::from_sec1_bytes(&bytes).is_ok(),
+            };
+            if !on_curve {
                 return Err(StampError::Malformed(format!(
-                    "allowlist entry {entry}: not a valid compressed SEC1 point on P256 or secp256k1"
+                    "allowlist entry {entry}: not a valid compressed SEC1 point on {curve:?}"
                 )));
             }
-            keys.push(bytes);
+            keys.push((curve, bytes));
         }
         if keys.is_empty() {
             return Err(StampError::Malformed("allowlist is empty".to_string()));
         }
+        keys.sort_unstable();
+        keys.dedup();
         Ok(Self { keys })
     }
 
-    fn contains_constant_time(&self, candidate: &[u8]) -> bool {
+    /// Constant-time over the key bytes. The curve comparison is not, and
+    /// need not be: it is fixed by the request's own `scheme`.
+    fn contains_constant_time(&self, candidate: &[u8], curve: Curve) -> bool {
         let mut found = subtle::Choice::from(0u8);
-        for key in &self.keys {
-            found |= key.as_slice().ct_eq(candidate);
+        for (entry_curve, key) in &self.keys {
+            let curve_ok = subtle::Choice::from(u8::from(*entry_curve == curve));
+            found |= key.as_slice().ct_eq(candidate) & curve_ok;
         }
         found.into()
     }
@@ -146,21 +184,20 @@ pub fn verify(headers: &HeaderMap, body: &[u8], allowlist: &Allowlist) -> Result
         .map_err(|e| StampError::Malformed(format!("signature hex: {e}")))?;
 
     // Run the full parse/verify path unconditionally, before deciding
-    // allowlist membership. An unauthenticated caller supplies `publicKey`
-    // as plain header data (no proof of possession is required to reach
-    // this point), so if membership were checked first, an unlisted
-    // candidate would return here while a listed one paid for DER parsing,
-    // curve validation, and ECDSA verification; that timing gap would let
-    // an attacker fingerprint the allowlist. Equalizing the work for every
-    // syntactically-valid candidate closes that gap (see PR review).
-    let sig_ok = match stamp.scheme.as_str() {
+    // allowlist membership, so a listed and an unlisted candidate cost the
+    // same DER parsing, curve validation and ECDSA verification. This is
+    // hygiene, not a secrecy guarantee: the allowlist lives in `pivotArgs`,
+    // which every response discloses via `bootProof.qosManifestB64` (see the
+    // PR's open question). It keeps the auth path from being the thing that
+    // leaks it, and holds if that disclosure is ever narrowed.
+    let (curve, sig_ok) = match stamp.scheme.as_str() {
         SCHEME_P256 => {
             use p256::ecdsa::{DerSignature, VerifyingKey, signature::Verifier};
             let key = VerifyingKey::from_sec1_bytes(&pubkey)
                 .map_err(|e| StampError::Malformed(format!("p256 pubkey: {e}")))?;
             let sig = DerSignature::from_bytes(&sig_der)
                 .map_err(|e| StampError::Malformed(format!("p256 der: {e}")))?;
-            key.verify(body, &sig).is_ok()
+            (Curve::P256, key.verify(body, &sig).is_ok())
         }
         SCHEME_SECP256K1 => {
             use k256::ecdsa::{DerSignature, VerifyingKey, signature::Verifier};
@@ -168,12 +205,16 @@ pub fn verify(headers: &HeaderMap, body: &[u8], allowlist: &Allowlist) -> Result
                 .map_err(|e| StampError::Malformed(format!("k256 pubkey: {e}")))?;
             let sig = DerSignature::from_bytes(&sig_der)
                 .map_err(|e| StampError::Malformed(format!("k256 der: {e}")))?;
-            key.verify(body, &sig).is_ok()
+            (Curve::Secp256k1, key.verify(body, &sig).is_ok())
         }
         other => return Err(StampError::UnsupportedScheme(other.to_string())),
     };
 
-    if !allowlist.contains_constant_time(&pubkey) {
+    // Curve-bound: a key listed for one curve does not authorize a signature
+    // under the other. The same 33 bytes are a valid point on both curves
+    // about half the time, so without this the caller's `scheme` would pick
+    // which curve their own allowlisted key is checked against.
+    if !allowlist.contains_constant_time(&pubkey, curve) {
         return Err(StampError::UnknownKey);
     }
     if !sig_ok {
@@ -279,10 +320,52 @@ mod tests {
     #[test]
     fn accepts_a_stamp_from_an_allowlisted_secp256k1_key() {
         let key = TurnkeySecp256k1ApiKey::generate();
-        let allowlist =
-            Allowlist::from_hex_list(&hex::encode(key.compressed_public_key())).unwrap();
+        let allowlist = Allowlist::from_hex_list(&format!(
+            "secp256k1:{}",
+            hex::encode(key.compressed_public_key())
+        ))
+        .unwrap();
         let body = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02"}}"#;
         verify(&headers_for(&key, body), body, &allowlist).unwrap();
+    }
+
+    #[test]
+    fn an_untagged_entry_defaults_to_p256_and_rejects_a_secp256k1_stamp() {
+        // The key-confusion case the curve tag exists to close: a secp256k1
+        // key whose compressed bytes also parse as a P256 point (~half of
+        // them do). Listed untagged, it is a P256 entry, and a secp256k1
+        // stamp from the very same bytes must not satisfy it.
+        let key = std::iter::repeat_with(TurnkeySecp256k1ApiKey::generate)
+            .take(64)
+            .find(|k| {
+                p256::ecdsa::VerifyingKey::from_sec1_bytes(&k.compressed_public_key()).is_ok()
+            })
+            .expect("no secp256k1 key in 64 tries was also a valid P256 point");
+        let allowlist =
+            Allowlist::from_hex_list(&hex::encode(key.compressed_public_key())).unwrap();
+        let body = br#"{"request":{}}"#;
+        let err = verify(&headers_for(&key, body), body, &allowlist).unwrap_err();
+        assert!(matches!(err, StampError::UnknownKey));
+    }
+
+    #[test]
+    fn rejects_an_unknown_curve_tag() {
+        let key = TurnkeyP256ApiKey::generate();
+        let entry = format!("ed25519:{}", hex::encode(key.compressed_public_key()));
+        assert!(matches!(
+            Allowlist::from_hex_list(&entry),
+            Err(StampError::Malformed(_))
+        ));
+    }
+
+    #[test]
+    fn repeated_entries_are_counted_once() {
+        let key = TurnkeyP256ApiKey::generate();
+        let hex_key = hex::encode(key.compressed_public_key());
+        // Same key three ways: bare, `0x`-prefixed, and explicitly tagged.
+        let csv = format!("{hex_key}, 0x{hex_key}, p256:{hex_key}");
+        let allowlist = Allowlist::from_hex_list(&csv).unwrap();
+        assert_eq!(allowlist.len(), 1);
     }
 
     #[test]
