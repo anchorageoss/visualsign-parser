@@ -637,9 +637,12 @@ mod tests {
             .to_visual_sign_payload(tx, VisualSignOptions::default())
             .expect_err("mainnet network with a .testnet receiver is rejected");
         let VisualSignError::ValidationError(message) = err else {
-            panic!("expected ValidationError, got {err:?}");
+            panic!("expected a ValidationError");
         };
-        assert!(message.contains("receiver account"), "message: {message}");
+        assert!(
+            message.contains("receiver account"),
+            "message did not mention the receiver account"
+        );
     }
 
     /// The suffix check is a convention heuristic, so a 64-hex implicit
