@@ -389,8 +389,13 @@ pub struct SolanaVisualSignConverter;
 /// This is the first half of the conversion pipeline: the single structured
 /// decode of the transaction, up to and including `intermediate_output`
 /// creation, with no `SignablePayload` rendering. Exposed so the cost of that
-/// half can be measured on its own (see `benches/solana_stages.rs`) and so
-/// callers that only need policy metadata can skip rendering entirely.
+/// half can be measured on its own (see `benches/solana_stages.rs`).
+///
+/// Unlike the full signing path, this entry point never attaches simulation
+/// data (`simulated_instructions`/`simulation_error` are always empty/`None`),
+/// so its output is a strictly less complete view than what
+/// `SolanaVisualSignConverter::to_visual_sign_payload` emits. Prefer the
+/// converter for anything that needs the full intermediate output.
 ///
 /// `message_hex` is the hex-encoded serialized message.
 pub fn build_solana_intermediate_output(
@@ -411,11 +416,15 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
         let lint_config = visualsign::lint::LintConfig::default();
 
         // Single structured decode. When the caller wants `intermediate_output`
-        // we decode the message once, up front, and render the payload from the
-        // same `SolanaMetadata` the intermediate is projected from. That removes
-        // the second decode and, more importantly, makes the bytes a policy
-        // engine consumes and the fields a human reads two views of one parse
-        // rather than the output of two independent decoders.
+        // we decode the message once, up front, and render the payload's
+        // transfer fields from the same `SolanaMetadata` the intermediate is
+        // projected from. That removes the second decode and, more importantly,
+        // makes the bytes a policy engine consumes and the transfer fields a
+        // human reads two views of one parse rather than the output of two
+        // independent decoders. Instruction-level fields are not yet a
+        // projection of this decode -- they still go through
+        // `decode_instructions`/`decode_v0_instructions`, an independent
+        // decoder over `solana_sdk` message types.
         //
         // When the caller does not ask for intermediate output we skip the
         // serialize + decode entirely, so the default signing path pays nothing
@@ -620,7 +629,9 @@ fn convert_to_visual_sign_payload(
         // decoding here (the default signing path, which performs no shared
         // decode, so its output is unchanged).
         let transfer_fields = match shared_metadata {
-            Some(metadata) => instructions::decode_transfers_from_metadata(metadata),
+            Some(metadata) => {
+                instructions::decode_transfers_from_metadata(metadata, "SPL Transfer")
+            }
             None => instructions::decode_transfers(transaction)?,
         };
         fields.extend(
@@ -801,7 +812,10 @@ fn convert_v0_to_visual_sign_payload(
         // Render from the shared decode when one exists, so the v0 path is a
         // projection of the same parse the intermediate comes from.
         let v0_transfers = match shared_metadata {
-            Some(metadata) => Ok(instructions::decode_transfers_from_metadata(metadata)),
+            Some(metadata) => Ok(instructions::decode_transfers_from_metadata(
+                metadata,
+                "V0 SPL Transfer",
+            )),
             None => decode_v0_transfers(versioned_tx),
         };
         match v0_transfers {
@@ -872,12 +886,12 @@ mod tests {
     /// cross-checked against the human-readable `SignablePayload`.
     ///
     /// This is the only test that drives the production branch
-    /// `to_visual_sign_payload` -> `build_intermediate_bytes` ->
-    /// `extract_solana_intermediate_output` -> borsh ->
+    /// `to_visual_sign_payload` -> `parse_solana_metadata` ->
+    /// `build_intermediate_output` -> borsh ->
     /// `ConversionResult::with_intermediate`, whose output is signed into the
     /// digest and consumed by policy. The cross-check also serves as an
-    /// initial drift guard between the two decoders (see
-    /// `build_intermediate_bytes`).
+    /// initial drift guard between the payload and the intermediate for
+    /// transfer fields (see `decode_transfers_from_metadata`).
     #[test]
     fn intermediate_output_emitted_for_known_transfer() {
         let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
@@ -1033,9 +1047,10 @@ mod tests {
     }
 
     /// The intermediate-output path is best-effort: when `solana_parser` cannot
-    /// decode the message, `build_intermediate_bytes` must degrade to `None`
-    /// rather than panic or surface an error, so the converter still returns
-    /// the `SignablePayload` and policy degrades to "no metadata".
+    /// decode the message, `parse_solana_metadata` returns `Err`, and
+    /// `to_visual_sign_payload` degrades to no intermediate output rather than
+    /// panicking or surfacing an error, so the converter still returns the
+    /// `SignablePayload` and policy degrades to "no metadata".
     #[test]
     fn shared_decode_errors_on_undecodable_input() {
         // `deadbeef` is not a valid Solana message; the shared decode that
@@ -1045,6 +1060,91 @@ mod tests {
         assert!(
             parse_solana_metadata("deadbeef", false, &registry).is_err(),
             "undecodable input must return an error the converter degrades on"
+        );
+    }
+
+    /// The property this refactor rests on: opting into `intermediate_output`
+    /// must not change the human-readable `SignablePayload`. Exercises both
+    /// the legacy path (a native SOL transfer) and the V0 path (an SPL token
+    /// transfer) -- the latter is the one case where the shared-decode
+    /// projection previously diverged from the flag-off rendering (a
+    /// `"V0 SPL Transfer"` vs `"SPL Transfer"` label mismatch).
+    #[test]
+    fn payload_is_unchanged_by_include_intermediate_output_legacy_sol() {
+        let solana_transfer_message = "AgABA3Lgs31rdjnEG5FRyrm2uAi4f+erGdyJl0UtJyMMLGzC9wF+t3qhmhpj3vI369n5Ef5xRLms/Vn8J/Lc7bmoIkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMBafBISARibJ+I25KpHkjLe53ZrqQcLWGy8n97yWD7mAQICAQAMAgAAAADKmjsAAAAA";
+        let transaction = create_transaction_with_empty_signatures(solana_transfer_message);
+
+        let base_options = VisualSignOptions {
+            decode_transfers: true,
+            transaction_name: Some("Parity Test".to_string()),
+            ..VisualSignOptions::default()
+        };
+        let payload_flag_off = to_payload(
+            SolanaTransactionWrapper::from_string(&transaction).expect("parses"),
+            VisualSignOptions {
+                include_intermediate_output: false,
+                ..base_options.clone()
+            },
+        )
+        .expect("flag-off conversion succeeds");
+        let payload_flag_on = to_payload(
+            SolanaTransactionWrapper::from_string(&transaction).expect("parses"),
+            VisualSignOptions {
+                include_intermediate_output: true,
+                ..base_options
+            },
+        )
+        .expect("flag-on conversion succeeds");
+
+        assert_eq!(
+            payload_flag_off, payload_flag_on,
+            "include_intermediate_output must not change the legacy SignablePayload"
+        );
+    }
+
+    #[test]
+    fn payload_is_unchanged_by_include_intermediate_output_v0_spl() {
+        // Generated via solana-tx-constructor: a V0 SPL token transfer, the
+        // same fixture `test_v0_vs_legacy_transfer_comparison` uses.
+        let v0_transaction = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQABBH6MCIdgv94d3c8ywX8gm4JC7lKq8TH6zYjQ6ixtCwbyaLWKvNAoVTqTUi1a9+MHCdQWoCE11bOsRYgQPQhUG3DG+nrzvtutOj1l82qryXQxsbvkwtL24OR8pgIDRS9dYQbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpJd3clp6q69nlSQBm2zHuyGaxkQHMeN8UjpzmOH6qauwBAwMCAQAJA0BCDwAAAAAAAA==";
+
+        let base_options = VisualSignOptions {
+            decode_transfers: true,
+            transaction_name: Some("Parity Test".to_string()),
+            ..VisualSignOptions::default()
+        };
+        let payload_flag_off = to_payload(
+            SolanaTransactionWrapper::from_string(v0_transaction).expect("parses"),
+            VisualSignOptions {
+                include_intermediate_output: false,
+                ..base_options.clone()
+            },
+        )
+        .expect("flag-off conversion succeeds");
+        let payload_flag_on = to_payload(
+            SolanaTransactionWrapper::from_string(v0_transaction).expect("parses"),
+            VisualSignOptions {
+                include_intermediate_output: true,
+                ..base_options
+            },
+        )
+        .expect("flag-on conversion succeeds");
+
+        let spl_label = |payload: &SignablePayload| -> Option<String> {
+            payload
+                .fields
+                .iter()
+                .find(|f| f.label().contains("SPL Transfer"))
+                .map(|f| f.label().to_string())
+        };
+        assert!(
+            spl_label(&payload_flag_off).is_some(),
+            "fixture must decode at least one SPL transfer field"
+        );
+        assert_eq!(
+            payload_flag_off, payload_flag_on,
+            "include_intermediate_output must not change the V0 SignablePayload \
+             (regression guard for the V0 SPL transfer label divergence)"
         );
     }
 

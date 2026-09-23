@@ -270,7 +270,7 @@ pub fn decode_transfers(
         .payload
         .as_ref()
         .and_then(|p| p.transaction_metadata.as_ref())
-        .map(decode_transfers_from_metadata)
+        .map(|metadata| decode_transfers_from_metadata(metadata, "SPL Transfer"))
         .unwrap_or_default())
 }
 
@@ -279,17 +279,22 @@ pub fn decode_transfers(
 /// This is the projection half of [`decode_transfers`], split out so a caller
 /// that has already decoded the transaction (see
 /// `intermediate::parse_solana_metadata`) renders from those structures
-/// instead of decoding a second time. Rendering and the intermediate output
-/// are then projections of one decode and cannot diverge.
-pub fn decode_transfers_from_metadata(
+/// instead of decoding a second time. Transfer rendering and the intermediate
+/// output are then projections of one decode and cannot diverge; instruction
+/// rendering is not (see `core/visualsign.rs`).
+///
+/// `spl_label_prefix` is the SPL transfer field's label prefix (`"SPL
+/// Transfer"` for legacy/versioned-legacy transactions, `"V0 SPL Transfer"`
+/// for V0), so the same projection renders correctly regardless of which
+/// caller's label convention applies.
+pub(crate) fn decode_transfers_from_metadata(
     transaction_metadata: &SolanaMetadata,
+    spl_label_prefix: &str,
 ) -> Vec<AnnotatedPayloadField> {
     let mut fields = Vec::new();
 
-    // Extract native SOL transfers
     // Add native SOL transfers
     for (i, transfer) in transaction_metadata.transfers.iter().enumerate() {
-        // Create the field using the old format for compatibility
         let field = AnnotatedPayloadField {
             signable_payload_field: visualsign::SignablePayloadField::TextV2 {
                 common: visualsign::SignablePayloadFieldCommon {
@@ -328,7 +333,7 @@ pub fn decode_transfers_from_metadata(
                         spl_transfer.to,
                         spl_transfer.amount
                     ),
-                    label: format!("SPL Transfer {}", i + 1),
+                    label: format!("{spl_label_prefix} {}", i + 1),
                 },
                 text_v2: visualsign::SignablePayloadFieldTextV2 {
                     text: format!(
