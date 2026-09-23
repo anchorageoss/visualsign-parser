@@ -258,53 +258,98 @@ impl LendAsset {
         }
     }
 
-    fn has_decimals(&self, denomination: Denomination) -> bool {
-        self.info(denomination).is_some()
-    }
-
-    /// Human amount for a raw value in `denomination`; the raw integer when the
-    /// decimals are unknown (callers label that case as raw units).
-    fn format_amount(&self, raw: u64, denomination: Denomination) -> String {
-        match self.info(denomination) {
-            Some(info) => format_token_amount(raw, info.decimals),
-            None => raw.to_string(),
+    /// One exact amount in `denomination`. Title phrase and row are derived
+    /// from the same classification so they can never disagree.
+    fn amount(&self, raw: u64, denomination: Denomination) -> Amount<'_> {
+        Amount {
+            asset: self,
+            raw,
+            denomination,
         }
     }
 
-    /// `u64::MAX` is rendered as "maximum", never as a 20-digit number: the
-    /// program uses it as an all-available sentinel for withdraw (verified, see
-    /// `WITHDRAW_ALL_AMOUNT`) and the same wording keeps any other instruction
-    /// that receives it honest about what was signed.
-    fn phrase(&self, raw: u64, denomination: Denomination) -> String {
-        let symbol = self.symbol(denomination);
-        if raw == u64::MAX {
-            format!("maximum {symbol}")
-        } else if self.has_decimals(denomination) {
-            format!("{} {symbol}", self.format_amount(raw, denomination))
-        } else {
-            format!("{raw} raw units of {symbol}")
-        }
-    }
-
-    /// A user-set bound (`min_amount_out`, `max_assets`, ...): `u64::MAX` means
-    /// the bound is not in effect.
-    fn bound_phrase(&self, raw: u64, denomination: Denomination) -> String {
+    /// A user-set cap (`max_assets`, `max_shares_burn`): `u64::MAX` means the
+    /// cap is not in effect. Never used for a minimum: a `u64::MAX` floor is an
+    /// unsatisfiable requirement, so minimums render the literal via `amount`.
+    fn max_bound_phrase(&self, raw: u64, denomination: Denomination) -> String {
         if raw == u64::MAX {
             "no limit".to_string()
         } else {
-            self.phrase(raw, denomination)
+            self.amount(raw, denomination).phrase()
+        }
+    }
+}
+
+/// How an exact amount is shown. `u64::MAX` is a verified sentinel only for
+/// `withdraw` (`WITHDRAW_ALL_AMOUNT`, handled by `UserAction` before it gets
+/// here); for every other instruction the program's behaviour is unverified,
+/// so the literal is shown, flagged, and no meaning is claimed.
+enum AmountKind {
+    /// Known decimals: a normalized number.
+    Decimal(String),
+    /// Unknown mint: the raw integer, labelled as raw units.
+    RawUnits,
+    /// `u64::MAX` outside the verified withdraw sentinel.
+    UnverifiedMax,
+}
+
+struct Amount<'a> {
+    asset: &'a LendAsset,
+    raw: u64,
+    denomination: Denomination,
+}
+
+impl Amount<'_> {
+    fn kind(&self) -> AmountKind {
+        if self.raw == u64::MAX {
+            return AmountKind::UnverifiedMax;
+        }
+        match self.asset.info(self.denomination) {
+            Some(info) => AmountKind::Decimal(format_token_amount(self.raw, info.decimals)),
+            None => AmountKind::RawUnits,
+        }
+    }
+
+    /// Lower-case phrase for titles and bound rows: "12.5 USDC",
+    /// "12500000 raw units of So11...1112",
+    /// "18446744073709551615 raw units of USDC (u64::MAX)".
+    fn phrase(&self) -> String {
+        let symbol = self.asset.symbol(self.denomination);
+        match self.kind() {
+            AmountKind::Decimal(amount) => format!("{amount} {symbol}"),
+            AmountKind::RawUnits => format!("{} raw units of {symbol}", self.raw),
+            AmountKind::UnverifiedMax => format!("{} raw units of {symbol} (u64::MAX)", self.raw),
+        }
+    }
+
+    /// The same amount as a row: `amount_v2` when it is a number, text for the
+    /// flagged literal.
+    fn field(&self, label: &str) -> Result<AnnotatedPayloadField, VisualSignError> {
+        let symbol = self.asset.symbol(self.denomination);
+        match self.kind() {
+            AmountKind::Decimal(amount) => create_amount_field(label, &amount, &symbol),
+            AmountKind::RawUnits => create_amount_field(
+                &format!("{label} (raw units)"),
+                &self.raw.to_string(),
+                &symbol,
+            ),
+            AmountKind::UnverifiedMax => create_text_field(label, &self.phrase()),
         }
     }
 }
 
 /// Whose token account receives the action's output. Decided statically from
 /// the signer, the mint and the token program: the signer's associated token
-/// account is a pure function of those three.
+/// account is a pure function of those three. Nothing else is knowable without
+/// chain state, so `Other` only proves "not the signer's associated token
+/// account". A signer-owned auxiliary token account is also flagged; that
+/// false positive is accepted because a missed third party is the worse error.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum RecipientOwnership {
     /// The signer's own associated token account.
     Signer,
-    /// Any other account: a third party, or a non-associated account.
+    /// Not the signer's associated token account: a third party, or a
+    /// signer-owned auxiliary account (flagged anyway, see above).
     Other,
     /// An input was unresolved or not a valid pubkey; nothing is claimed.
     Unknown,
@@ -359,7 +404,10 @@ impl Recipient {
     fn field(&self) -> Result<AnnotatedPayloadField, VisualSignError> {
         let (name, badge) = match self.ownership {
             RecipientOwnership::Signer => (Some("Signer's associated token account"), None),
-            RecipientOwnership::Other => (Some("Not the signer's account"), Some("THIRD PARTY")),
+            RecipientOwnership::Other => (
+                Some("Not the signer's associated token account"),
+                Some("THIRD PARTY"),
+            ),
             RecipientOwnership::Unknown => (None, None),
         };
         create_address_field("Recipient", &self.account, name, None, None, badge)
@@ -445,11 +493,11 @@ impl UserAction {
         match self.kind {
             UserActionKind::Deposit { assets, .. } => format!(
                 "Deposit {} to {JUPITER_EARN_DISPLAY_NAME}",
-                asset.phrase(assets, Denomination::Asset)
+                asset.amount(assets, Denomination::Asset).phrase()
             ),
             UserActionKind::Mint { shares, .. } => format!(
                 "Mint {} on {JUPITER_EARN_DISPLAY_NAME}",
-                asset.phrase(shares, Denomination::Receipt)
+                asset.amount(shares, Denomination::Receipt).phrase()
             ),
             UserActionKind::Withdraw {
                 amount: WITHDRAW_ALL_AMOUNT,
@@ -460,17 +508,17 @@ impl UserAction {
             ),
             UserActionKind::Withdraw { amount, .. } => format!(
                 "Withdraw {} from {JUPITER_EARN_DISPLAY_NAME}",
-                asset.phrase(amount, Denomination::Asset)
+                asset.amount(amount, Denomination::Asset).phrase()
             ),
             UserActionKind::Redeem { shares, .. } => format!(
                 "Redeem {} from {JUPITER_EARN_DISPLAY_NAME}",
-                asset.phrase(shares, Denomination::Receipt)
+                asset.amount(shares, Denomination::Receipt).phrase()
             ),
         }
     }
 
-    /// The exact amount the user signs, as one `amount_v2` row (or a text row
-    /// for the full-position sentinel and for mints without known decimals).
+    /// The exact amount the user signs, as one `amount_v2` row (text for the
+    /// full-position sentinel and for the flagged `u64::MAX` literal).
     fn amount_field(&self) -> Result<AnnotatedPayloadField, VisualSignError> {
         let asset = &self.asset;
         let (raw, denomination) = match self.kind {
@@ -492,22 +540,7 @@ impl UserAction {
             UserActionKind::Withdraw { amount, .. } => (amount, Denomination::Asset),
             UserActionKind::Redeem { shares, .. } => (shares, Denomination::Receipt),
         };
-        if raw == u64::MAX {
-            return create_text_field(
-                "Amount",
-                &format!("Maximum {}", asset.symbol(denomination)),
-            );
-        }
-        let label = if asset.has_decimals(denomination) {
-            "Amount"
-        } else {
-            "Amount (raw units)"
-        };
-        create_amount_field(
-            label,
-            &asset.format_amount(raw, denomination),
-            &asset.symbol(denomination),
-        )
+        asset.amount(raw, denomination).field("Amount")
     }
 
     /// The other leg of the position (receipt minted or burned, asset paid or
@@ -530,7 +563,7 @@ impl UserAction {
                 if let Some(min) = min_receipt_out {
                     fields.push(create_text_field(
                         "Minimum received",
-                        &asset.bound_phrase(min, Denomination::Receipt),
+                        &asset.amount(min, Denomination::Receipt).phrase(),
                     )?);
                 }
             }
@@ -542,7 +575,7 @@ impl UserAction {
                 if let Some(max) = max_assets {
                     fields.push(create_text_field(
                         "Maximum paid",
-                        &asset.bound_phrase(max, Denomination::Asset),
+                        &asset.max_bound_phrase(max, Denomination::Asset),
                     )?);
                 }
             }
@@ -559,7 +592,7 @@ impl UserAction {
                 if let Some(max) = max_shares_burn {
                     fields.push(create_text_field(
                         "Maximum burned",
-                        &asset.bound_phrase(max, Denomination::Receipt),
+                        &asset.max_bound_phrase(max, Denomination::Receipt),
                     )?);
                 }
             }
@@ -573,7 +606,7 @@ impl UserAction {
                 if let Some(min) = min_assets_out {
                     fields.push(create_text_field(
                         "Minimum received",
-                        &asset.bound_phrase(min, Denomination::Asset),
+                        &asset.amount(min, Denomination::Asset).phrase(),
                     )?);
                 }
             }
@@ -817,7 +850,7 @@ mod tests {
         assert_eq!(asset.symbol(Denomination::Asset), "So11...1112");
         assert_eq!(asset.symbol(Denomination::Receipt), "So11...1113");
         assert_eq!(
-            asset.phrase(414_122_446, Denomination::Asset),
+            asset.amount(414_122_446, Denomination::Asset).phrase(),
             "414122446 raw units of So11...1112"
         );
     }
@@ -831,8 +864,14 @@ mod tests {
         .unwrap();
         assert_eq!(asset.symbol(Denomination::Asset), "USDC");
         assert_eq!(asset.symbol(Denomination::Receipt), "jlUSDC");
-        assert_eq!(asset.format_amount(414_122_446, Denomination::Asset), "414.122446");
-        assert_eq!(asset.format_amount(100_000_000, Denomination::Receipt), "100");
+        assert_eq!(
+            asset.amount(414_122_446, Denomination::Asset).phrase(),
+            "414.122446 USDC"
+        );
+        assert_eq!(
+            asset.amount(100_000_000, Denomination::Receipt).phrase(),
+            "100 jlUSDC"
+        );
     }
 
     /// The receipt symbol is never derived from the asset symbol: the JupUSD
