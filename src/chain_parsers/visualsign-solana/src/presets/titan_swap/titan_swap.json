@@ -1,0 +1,910 @@
+{
+  "address": "T1TANpTeScyeqVzzgNViGDNrkQ6qHz9KrSBS4aNXvGT",
+  "metadata": {
+    "name": "titan_swap",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "atlas",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  116,
+                  108,
+                  97,
+                  115
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "swap_route",
+      "discriminator": [
+        86,
+        183,
+        163,
+        144,
+        0,
+        50,
+        173,
+        28
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "atlas",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  116,
+                  108,
+                  97,
+                  115
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "input_mint"
+        },
+        {
+          "name": "input_token_account",
+          "writable": true
+        },
+        {
+          "name": "output_mint"
+        },
+        {
+          "name": "output_token_account",
+          "writable": true
+        },
+        {
+          "name": "input_token_program"
+        },
+        {
+          "name": "output_token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "minimum_amount_out",
+          "type": "u64"
+        },
+        {
+          "name": "mints",
+          "type": "u8"
+        },
+        {
+          "name": "provider_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "service_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "swaps",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "SwapSpecInput"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "swap_route_v2",
+      "discriminator": [
+        249,
+        91,
+        84,
+        33,
+        69,
+        22,
+        0,
+        135
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "atlas",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  116,
+                  108,
+                  97,
+                  115
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "input_mint"
+        },
+        {
+          "name": "input_token_account",
+          "writable": true
+        },
+        {
+          "name": "output_mint"
+        },
+        {
+          "name": "output_token_account",
+          "writable": true
+        },
+        {
+          "name": "input_token_program"
+        },
+        {
+          "name": "output_token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "minimum_amount_out",
+          "type": "u64"
+        },
+        {
+          "name": "mints",
+          "type": "u8"
+        },
+        {
+          "name": "provider_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "service_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "swaps",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "SwapSpecInputV2"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Atlas",
+      "discriminator": [
+        244,
+        18,
+        114,
+        192,
+        112,
+        65,
+        214,
+        116
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "SwapDetails",
+      "discriminator": [
+        101,
+        204,
+        239,
+        162,
+        252,
+        46,
+        220,
+        138
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "TooManySwapsSpecified",
+      "msg": "Too many swaps specified"
+    },
+    {
+      "code": 6001,
+      "name": "TooManyMintsSpecified",
+      "msg": "Too many mints specified"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidPubkeyString",
+      "msg": "Invalid pubkey string"
+    },
+    {
+      "code": 6003,
+      "name": "CheckedArithmeticFailed",
+      "msg": "Checked arithmetic failed"
+    },
+    {
+      "code": 6004,
+      "name": "IntegerConversionFailed",
+      "msg": "Integer conversion failed"
+    },
+    {
+      "code": 6005,
+      "name": "MissingRemainingAccount",
+      "msg": "Missing remaining account"
+    },
+    {
+      "code": 6006,
+      "name": "DeserializationError",
+      "msg": "Deserialization Error"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidSwapInput",
+      "msg": "Invalid Swap Input Error"
+    },
+    {
+      "code": 6008,
+      "name": "LessThanMinimumAmountOut",
+      "msg": "Amount less than minimum specified"
+    },
+    {
+      "code": 6009,
+      "name": "InvalidAccountData",
+      "msg": "Invalid account data"
+    }
+  ],
+  "types": [
+    {
+      "name": "Atlas",
+      "docs": [
+        "Atlas is just a PDA account used to link/sign associated token accounts."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SwapDetails",
+      "docs": [
+        "Event used for logging swap details"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "input_amount",
+            "type": "u64"
+          },
+          {
+            "name": "output_amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SwapSpecInput",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "venue",
+            "type": {
+              "defined": {
+                "name": "Venue"
+              }
+            }
+          },
+          {
+            "name": "from",
+            "type": "u8"
+          },
+          {
+            "name": "to",
+            "type": "u8"
+          },
+          {
+            "name": "weight_bps",
+            "type": "u16"
+          },
+          {
+            "name": "minimum_amount_out",
+            "type": "u64"
+          },
+          {
+            "name": "n_accounts",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SwapSpecInputV2",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "venue",
+            "type": {
+              "defined": {
+                "name": "Venue"
+              }
+            }
+          },
+          {
+            "name": "from",
+            "type": "u8"
+          },
+          {
+            "name": "to",
+            "type": "u8"
+          },
+          {
+            "name": "weight_nanos",
+            "type": "u32"
+          },
+          {
+            "name": "n_accounts",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Venue",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "RaydiumAmm"
+          },
+          {
+            "name": "RaydiumClmm",
+            "fields": [
+              {
+                "name": "pool_price_increases",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "Whirlpools",
+            "fields": [
+              {
+                "name": "a_to_b",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "MeteoraDlmm"
+          },
+          {
+            "name": "MeteoraAmm"
+          },
+          {
+            "name": "Phoenix",
+            "fields": [
+              {
+                "name": "is_buy",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "LifinityV2"
+          },
+          {
+            "name": "OpenbookV2",
+            "fields": [
+              {
+                "name": "is_bid",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "StabbleStableSwap"
+          },
+          {
+            "name": "StabbleWeightedSwap"
+          },
+          {
+            "name": "RaydiumCP"
+          },
+          {
+            "name": "ObricV2",
+            "fields": [
+              {
+                "name": "x_to_y",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "GooseFX"
+          },
+          {
+            "name": "ZeroFi",
+            "fields": [
+              {
+                "name": "expected_amount_out",
+                "type": "u64"
+              }
+            ]
+          },
+          {
+            "name": "SolFi",
+            "fields": [
+              {
+                "name": "is_quote_to_base",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "WooFi"
+          },
+          {
+            "name": "PumpSwap",
+            "fields": [
+              {
+                "name": "is_quote_to_base",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "Manifest",
+            "fields": [
+              {
+                "name": "is_base_in",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "Carrot",
+            "fields": [
+              {
+                "name": "is_crt_in",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "Rubicon"
+          },
+          {
+            "name": "Gavel",
+            "fields": [
+              {
+                "name": "is_sell",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "SanctumDepositWithdraw",
+            "fields": [
+              {
+                "name": "is_deposit",
+                "type": "bool"
+              },
+              {
+                "name": "bridge_stake_seed",
+                "type": {
+                  "option": "u32"
+                }
+              },
+              {
+                "name": "split_at",
+                "type": "u8"
+              }
+            ]
+          },
+          {
+            "name": "Byreal",
+            "fields": [
+              {
+                "name": "pool_price_increases",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "TesseraV",
+            "fields": [
+              {
+                "name": "is_bid",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "Aquifer"
+          },
+          {
+            "name": "FusionAmm",
+            "fields": [
+              {
+                "name": "a_to_b",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "ExponentAmm",
+            "fields": [
+              {
+                "name": "is_buy_pt",
+                "type": "bool"
+              },
+              {
+                "name": "rem_accounts_until",
+                "type": "u8"
+              }
+            ]
+          },
+          {
+            "name": "SarosDlmm",
+            "fields": [
+              {
+                "name": "x_to_y",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "HumidiFi",
+            "fields": [
+              {
+                "name": "is_quote_to_base",
+                "type": "bool"
+              },
+              {
+                "name": "swap_id",
+                "type": "u64"
+              }
+            ]
+          },
+          {
+            "name": "Bonkswap",
+            "fields": [
+              {
+                "name": "x_to_y",
+                "type": "bool"
+              },
+              {
+                "name": "price_limit",
+                "type": "u128"
+              }
+            ]
+          },
+          {
+            "name": "SolFiV2",
+            "fields": [
+              {
+                "name": "is_quote_to_base",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "AlphaQ",
+            "fields": [
+              {
+                "name": "a_to_b",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "PancakeSwap",
+            "fields": [
+              {
+                "name": "pool_price_increases",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "HashFlow",
+            "fields": [
+              {
+                "name": "transaction_id",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "token_from_amount",
+                "type": "u64"
+              },
+              {
+                "name": "token_to_amount",
+                "type": "u64"
+              },
+              {
+                "name": "quote_expiry",
+                "type": "u64"
+              },
+              {
+                "name": "signature",
+                "type": {
+                  "array": [
+                    "u8",
+                    64
+                  ]
+                }
+              },
+              {
+                "name": "recovery_id",
+                "type": "u8"
+              }
+            ]
+          },
+          {
+            "name": "VaultUnstakepool",
+            "fields": [
+              {
+                "name": "split_at",
+                "type": {
+                  "array": [
+                    "u8",
+                    5
+                  ]
+                }
+              },
+              {
+                "name": "lst_amounts",
+                "type": {
+                  "array": [
+                    "u64",
+                    5
+                  ]
+                }
+              },
+              {
+                "name": "seeds",
+                "type": {
+                  "array": [
+                    "u32",
+                    5
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "name": "GoonFi",
+            "fields": [
+              {
+                "name": "is_bid",
+                "type": "bool"
+              },
+              {
+                "name": "blacklist_bump",
+                "type": "u8"
+              }
+            ]
+          },
+          {
+            "name": "RaydiumAmmV2"
+          },
+          {
+            "name": "PumpFun",
+            "fields": [
+              {
+                "name": "is_quote_to_base",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "SarosAmm"
+          },
+          {
+            "name": "RaydiumLaunchpad",
+            "fields": [
+              {
+                "name": "is_quote_to_base",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "MeteoraDammV2"
+          },
+          {
+            "name": "Obsidian"
+          },
+          {
+            "name": "Hylo",
+            "fields": [
+              {
+                "name": "input_enum",
+                "type": "u8"
+              },
+              {
+                "name": "output_enum",
+                "type": "u8"
+              }
+            ]
+          },
+          {
+            "name": "Vertigo",
+            "fields": [
+              {
+                "name": "is_buy",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "Adrena",
+            "fields": [
+              {
+                "name": "is_add_liq",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "Metadao",
+            "fields": [
+              {
+                "name": "is_buy",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "SanctumInfAddLiquidity",
+            "fields": [
+              {
+                "name": "lst_value_calc_accs",
+                "type": "u8"
+              },
+              {
+                "name": "lst_index",
+                "type": "u32"
+              }
+            ]
+          },
+          {
+            "name": "SanctumInfRemoveLiquidity",
+            "fields": [
+              {
+                "name": "lst_value_calc_accs",
+                "type": "u8"
+              },
+              {
+                "name": "lst_index",
+                "type": "u32"
+              }
+            ]
+          },
+          {
+            "name": "SanctumInfSwap",
+            "fields": [
+              {
+                "name": "src_lst_value_calc_accs",
+                "type": "u8"
+              },
+              {
+                "name": "dst_lst_value_calc_accs",
+                "type": "u8"
+              },
+              {
+                "name": "src_lst_index",
+                "type": "u32"
+              },
+              {
+                "name": "dst_lst_index",
+                "type": "u32"
+              }
+            ]
+          },
+          {
+            "name": "MeteoraDBC",
+            "fields": [
+              {
+                "name": "quote_to_base",
+                "type": "bool"
+              }
+            ]
+          },
+          {
+            "name": "TitanLimitOrders",
+            "fields": [
+              {
+                "name": "bumps",
+                "type": {
+                  "array": [
+                    "u8",
+                    3
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "name": "TaurusFi"
+          }
+        ]
+      }
+    }
+  ]
+}
