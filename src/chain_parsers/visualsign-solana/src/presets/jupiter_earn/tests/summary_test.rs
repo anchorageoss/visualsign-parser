@@ -103,6 +103,7 @@ fn test_single_deposit_gets_title_subtitle_and_rows() {
             "From",
             "Program",
             "Amount",
+            "Recipient",
             "Instruction",
             "Receive",
             "Instruction 1",
@@ -123,6 +124,10 @@ fn test_single_deposit_gets_title_subtitle_and_rows() {
     assert_eq!(amount_v2.abbreviation.as_deref(), Some("USDC"));
     assert_eq!(top_level_value(&payload, "Instruction").unwrap(), "deposit");
     assert!(top_level_value(&payload, "Receive").unwrap().starts_with("jlUSDC"));
+    let SignablePayloadField::AddressV2 { address_v2, .. } = &payload.fields[4] else {
+        panic!("Recipient must be an address_v2, got {:?}", payload.fields[4]);
+    };
+    assert_eq!(address_v2.name, "Signer's associated token account");
     payload
         .validate_charset()
         .expect("payload must be ASCII-clean");
@@ -170,6 +175,28 @@ fn test_infrastructure_legs_keep_the_summary() {
 
     assert_eq!(payload.title, "Deposit 414.122446 USDC to Jupiter Lend Earn");
     assert_eq!(top_level_value(&payload, "From").unwrap(), payer.to_string());
+}
+
+/// Creating an associated token account for another wallet spends the fee
+/// payer's rent on a third party. That is not infrastructure, so it blocks
+/// the summary, unlike the payer's own account creation above.
+#[test]
+fn test_ata_creation_for_another_wallet_keeps_default_title() {
+    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let payer = deposit.accounts[0].pubkey;
+    let f_token_mint = deposit.accounts[6].pubkey;
+    let someone_else = Pubkey::new_unique();
+    let create_ata =
+        spl_associated_token_account::instruction::create_associated_token_account_idempotent(
+            &payer,
+            &someone_else,
+            &f_token_mint,
+            &spl_token::id(),
+        );
+
+    let payload = payload_for(&[create_ata, deposit], &payer);
+
+    assert_no_summary(&payload, "Solana Transaction");
 }
 
 /// A deposit bundled with a token transfer to someone else is two actions.
@@ -272,7 +299,15 @@ fn test_v0_single_deposit_gets_summary() {
     assert_eq!(payload.subtitle.as_deref(), Some(JUPITER_EARN_DISPLAY_NAME));
     let labels = top_level_labels(&payload);
     assert!(
-        labels.starts_with(&["Network", "From", "Program", "Amount", "Instruction", "Receive"]),
+        labels.starts_with(&[
+            "Network",
+            "From",
+            "Program",
+            "Amount",
+            "Recipient",
+            "Instruction",
+            "Receive"
+        ]),
         "unexpected v0 top-level layout: {labels:?}"
     );
     assert_eq!(top_level_value(&payload, "From").unwrap(), payer.to_string());

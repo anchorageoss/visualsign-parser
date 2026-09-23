@@ -24,7 +24,10 @@ use config::JupiterEarnConfig;
 use solana_parser::{
     Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
 };
+use solana_sdk::pubkey::Pubkey;
+use spl_associated_token_account::get_associated_token_address_with_program_id;
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use std::sync::OnceLock;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{
@@ -268,19 +271,105 @@ impl LendAsset {
         }
     }
 
+    /// `u64::MAX` is rendered as "maximum", never as a 20-digit number: the
+    /// program uses it as an all-available sentinel for withdraw (verified, see
+    /// `WITHDRAW_ALL_AMOUNT`) and the same wording keeps any other instruction
+    /// that receives it honest about what was signed.
     fn phrase(&self, raw: u64, denomination: Denomination) -> String {
         let symbol = self.symbol(denomination);
-        if self.has_decimals(denomination) {
+        if raw == u64::MAX {
+            format!("maximum {symbol}")
+        } else if self.has_decimals(denomination) {
             format!("{} {symbol}", self.format_amount(raw, denomination))
         } else {
             format!("{raw} raw units of {symbol}")
         }
+    }
+
+    /// A user-set bound (`min_amount_out`, `max_assets`, ...): `u64::MAX` means
+    /// the bound is not in effect.
+    fn bound_phrase(&self, raw: u64, denomination: Denomination) -> String {
+        if raw == u64::MAX {
+            "no limit".to_string()
+        } else {
+            self.phrase(raw, denomination)
+        }
+    }
+}
+
+/// Whose token account receives the action's output. Decided statically from
+/// the signer, the mint and the token program: the signer's associated token
+/// account is a pure function of those three.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RecipientOwnership {
+    /// The signer's own associated token account.
+    Signer,
+    /// Any other account: a third party, or a non-associated account.
+    Other,
+    /// An input was unresolved or not a valid pubkey; nothing is claimed.
+    Unknown,
+}
+
+/// The `recipient_token_account`: where a deposit or mint sends receipt
+/// tokens, and where a withdraw or redeem pays out assets. The IDL puts no
+/// constraint on it, so it must be shown; it is the one account that decides
+/// whether the signer or someone else ends up with the value.
+struct Recipient {
+    account: String,
+    ownership: RecipientOwnership,
+}
+
+impl Recipient {
+    fn from_named_accounts(
+        named_accounts: &BTreeMap<String, String>,
+        received_mint: &str,
+    ) -> Option<Self> {
+        let account = named_accounts.get("recipient_token_account")?.clone();
+        let ownership = match (
+            named_accounts.get("signer"),
+            named_accounts.get("token_program"),
+        ) {
+            (Some(signer), Some(token_program)) => {
+                match (
+                    Pubkey::from_str(signer),
+                    Pubkey::from_str(received_mint),
+                    Pubkey::from_str(token_program),
+                    Pubkey::from_str(&account),
+                ) {
+                    (Ok(signer), Ok(mint), Ok(token_program), Ok(account)) => {
+                        let signer_ata = get_associated_token_address_with_program_id(
+                            &signer,
+                            &mint,
+                            &token_program,
+                        );
+                        if account == signer_ata {
+                            RecipientOwnership::Signer
+                        } else {
+                            RecipientOwnership::Other
+                        }
+                    }
+                    _ => RecipientOwnership::Unknown,
+                }
+            }
+            _ => RecipientOwnership::Unknown,
+        };
+        Some(Self { account, ownership })
+    }
+
+    fn field(&self) -> Result<AnnotatedPayloadField, VisualSignError> {
+        let (name, badge) = match self.ownership {
+            RecipientOwnership::Signer => (Some("Signer's associated token account"), None),
+            RecipientOwnership::Other => (Some("Not the signer's account"), Some("THIRD PARTY")),
+            RecipientOwnership::Unknown => (None, None),
+        };
+        create_address_field("Recipient", &self.account, name, None, None, badge)
     }
 }
 
 /// A user-facing Jupiter Lend Earn action, decoded from a parsed instruction.
 struct UserAction {
     asset: LendAsset,
+    recipient: Option<Recipient>,
     kind: UserActionKind,
 }
 
@@ -327,7 +416,19 @@ impl UserAction {
             _ => return None,
         };
         let asset = LendAsset::from_named_accounts(&instruction.named_accounts)?;
-        Some(Self { asset, kind })
+        // Deposit and mint send receipt tokens to the recipient; withdraw and
+        // redeem pay assets out to it.
+        let received = match kind {
+            UserActionKind::Deposit { .. } | UserActionKind::Mint { .. } => Denomination::Receipt,
+            UserActionKind::Withdraw { .. } | UserActionKind::Redeem { .. } => Denomination::Asset,
+        };
+        let recipient =
+            Recipient::from_named_accounts(&instruction.named_accounts, asset.mint(received));
+        Some(Self {
+            asset,
+            recipient,
+            kind,
+        })
     }
 
     fn action_name(&self) -> &'static str {
@@ -391,6 +492,12 @@ impl UserAction {
             UserActionKind::Withdraw { amount, .. } => (amount, Denomination::Asset),
             UserActionKind::Redeem { shares, .. } => (shares, Denomination::Receipt),
         };
+        if raw == u64::MAX {
+            return create_text_field(
+                "Amount",
+                &format!("Maximum {}", asset.symbol(denomination)),
+            );
+        }
         let label = if asset.has_decimals(denomination) {
             "Amount"
         } else {
@@ -423,7 +530,7 @@ impl UserAction {
                 if let Some(min) = min_receipt_out {
                     fields.push(create_text_field(
                         "Minimum received",
-                        &asset.phrase(min, Denomination::Receipt),
+                        &asset.bound_phrase(min, Denomination::Receipt),
                     )?);
                 }
             }
@@ -435,7 +542,7 @@ impl UserAction {
                 if let Some(max) = max_assets {
                     fields.push(create_text_field(
                         "Maximum paid",
-                        &asset.phrase(max, Denomination::Asset),
+                        &asset.bound_phrase(max, Denomination::Asset),
                     )?);
                 }
             }
@@ -452,7 +559,7 @@ impl UserAction {
                 if let Some(max) = max_shares_burn {
                     fields.push(create_text_field(
                         "Maximum burned",
-                        &asset.phrase(max, Denomination::Receipt),
+                        &asset.bound_phrase(max, Denomination::Receipt),
                     )?);
                 }
             }
@@ -466,7 +573,7 @@ impl UserAction {
                 if let Some(min) = min_assets_out {
                     fields.push(create_text_field(
                         "Minimum received",
-                        &asset.phrase(min, Denomination::Asset),
+                        &asset.bound_phrase(min, Denomination::Asset),
                     )?);
                 }
             }
@@ -475,9 +582,10 @@ impl UserAction {
     }
 
     /// Rows hoisted to the top level of the payload for a single-action
-    /// transaction: the program as a named address, the exact amount, the
-    /// instruction, then the estimated other leg. The signer is omitted because
-    /// the From row already names it (see `transaction_summary`).
+    /// transaction: the program as a named address, the exact amount, who
+    /// receives the output, the instruction, then the estimated other leg. The
+    /// signer is omitted because the From row already names it (see
+    /// `transaction_summary`).
     fn summary_fields(
         &self,
         program_id: &str,
@@ -493,8 +601,11 @@ impl UserAction {
                 None,
             )?,
             self.amount_field()?,
-            create_text_field("Instruction", instruction_name)?,
         ];
+        if let Some(recipient) = &self.recipient {
+            fields.push(recipient.field()?);
+        }
+        fields.push(create_text_field("Instruction", instruction_name)?);
         fields.extend(self.leg_fields()?);
         Ok(fields)
     }
@@ -564,7 +675,8 @@ fn build_parsed_fields(
 }
 
 /// Condensed rows for a user action, ordered by what an approver must confirm
-/// first: program, action, signing wallet, asset, amount, then the other leg.
+/// first: program, action, signing wallet, who receives the output, asset,
+/// amount, then the other leg.
 fn build_user_action_condensed(
     action: &UserAction,
     instruction: &JupiterEarnParsedInstruction,
@@ -584,6 +696,9 @@ fn build_user_action_condensed(
 
     if let Some(signer) = instruction.named_accounts.get("signer") {
         fields.push(create_address_field("Signer", signer, None, None, None, None)?);
+    }
+    if let Some(recipient) = &action.recipient {
+        fields.push(recipient.field()?);
     }
 
     fields.push(action.mint_field("Asset", Denomination::Asset)?);

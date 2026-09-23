@@ -694,20 +694,22 @@ fn apply_transaction_summary(
     if let Some(title) = caller_title {
         return Ok((title, None));
     }
-    let Some(summary) = summary else {
+    // Title and rows travel together: without a fee payer there is no From row
+    // to anchor the hoisted rows, so the whole summary is dropped rather than
+    // leaving a title that the body does not back up. (Both decoders already
+    // return no summary for a message without account keys.)
+    let (Some(summary), Some(fee_payer)) = (summary, fee_payer) else {
         return Ok((default_title.to_string(), None));
     };
-    if let Some(fee_payer) = fee_payer {
-        let mut rows = vec![instructions::create_from_field(fee_payer)?.signable_payload_field];
-        rows.extend(
-            summary
-                .fields
-                .iter()
-                .map(|f| f.signable_payload_field.clone()),
-        );
-        let after_network = fields.len().min(1);
-        fields.splice(after_network..after_network, rows);
-    }
+    let mut rows = vec![instructions::create_from_field(fee_payer)?.signable_payload_field];
+    rows.extend(
+        summary
+            .fields
+            .iter()
+            .map(|f| f.signable_payload_field.clone()),
+    );
+    let after_network = fields.len().min(1);
+    fields.splice(after_network..after_network, rows);
     Ok((summary.title, summary.subtitle))
 }
 
@@ -2682,5 +2684,75 @@ mod tests {
         );
         let mappings = extract_idl_mappings(&options);
         assert_eq!(mappings.len(), 1);
+    }
+
+    fn network_row() -> SignablePayloadField {
+        SignablePayloadField::TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "Solana".to_string(),
+                label: "Network".to_string(),
+            },
+            text_v2: visualsign::SignablePayloadFieldTextV2 {
+                text: "Solana".to_string(),
+            },
+        }
+    }
+
+    fn sample_summary() -> TransactionSummary {
+        TransactionSummary {
+            title: "Do the thing".to_string(),
+            subtitle: Some("Program".to_string()),
+            fields: vec![
+                visualsign::field_builders::create_text_field("Amount", "1").expect("field"),
+            ],
+        }
+    }
+
+    /// Title and rows are one unit: with no fee payer to anchor the From row,
+    /// the summary is dropped entirely rather than titling a body it is not in.
+    #[test]
+    fn apply_transaction_summary_without_fee_payer_keeps_default_title() {
+        let mut fields = vec![network_row()];
+        let (title, subtitle) =
+            apply_transaction_summary(&mut fields, None, Some(sample_summary()), None, "Default")
+                .expect("apply");
+        assert_eq!(title, "Default");
+        assert_eq!(subtitle, None);
+        assert_eq!(fields.len(), 1, "no rows hoisted without a fee payer");
+    }
+
+    #[test]
+    fn apply_transaction_summary_inserts_rows_after_network() {
+        let payer = Pubkey::new_unique();
+        let mut fields = vec![network_row(), network_row()];
+        let (title, subtitle) = apply_transaction_summary(
+            &mut fields,
+            None,
+            Some(sample_summary()),
+            Some(&payer),
+            "Default",
+        )
+        .expect("apply");
+        assert_eq!(title, "Do the thing");
+        assert_eq!(subtitle.as_deref(), Some("Program"));
+        let labels: Vec<&str> = fields.iter().map(|f| f.label().as_str()).collect();
+        assert_eq!(labels, ["Network", "From", "Amount", "Network"]);
+    }
+
+    #[test]
+    fn apply_transaction_summary_caller_title_disables_it() {
+        let payer = Pubkey::new_unique();
+        let mut fields = vec![network_row()];
+        let (title, subtitle) = apply_transaction_summary(
+            &mut fields,
+            Some("Caller".to_string()),
+            Some(sample_summary()),
+            Some(&payer),
+            "Default",
+        )
+        .expect("apply");
+        assert_eq!(title, "Caller");
+        assert_eq!(subtitle, None);
+        assert_eq!(fields.len(), 1);
     }
 }

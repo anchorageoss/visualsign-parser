@@ -423,3 +423,73 @@ fn test_redeem_with_min_amount_out() {
         "1.49 USDC"
     );
 }
+
+/// The recipient token account is the one account the IDL leaves unconstrained,
+/// so it is always shown, and classified as the signer's own associated token
+/// account or not. The fixture deposit mints its receipt tokens to the signer.
+#[test]
+fn test_recipient_row_marks_the_signers_own_account() {
+    let layout = visualize(&instruction_from_fixture(&load_fixture("deposit_usdc")));
+    let condensed = layout.condensed.as_ref().expect("condensed view");
+    let recipient = condensed
+        .fields
+        .iter()
+        .map(|f| &f.signable_payload_field)
+        .find(|f| f.label() == "Recipient")
+        .expect("Recipient row");
+    let SignablePayloadField::AddressV2 { address_v2, .. } = recipient else {
+        panic!("Recipient must be an address_v2");
+    };
+    assert_eq!(address_v2.address, "678f85kKQLNkg6eNhnUmTRXk3Z4LCSKgsVAGW5KPtvq");
+    assert_eq!(address_v2.name, "Signer's associated token account");
+    assert_eq!(address_v2.badge_text, None);
+}
+
+/// A withdraw paying out to someone else's token account must say so: same
+/// title, same amount, but a flagged recipient.
+#[test]
+fn test_recipient_row_flags_a_third_party_account() {
+    let mut instruction = instruction_from_fixture(&load_fixture("withdraw_jupusd"));
+    instruction.accounts[2].pubkey = Pubkey::new_unique(); // `recipient_token_account`
+    let layout = visualize(&instruction);
+
+    assert_eq!(
+        title_of(&layout),
+        "Withdraw 26.177479 JupUSD from Jupiter Lend Earn"
+    );
+    let condensed = layout.condensed.as_ref().expect("condensed view");
+    let recipient = condensed
+        .fields
+        .iter()
+        .map(|f| &f.signable_payload_field)
+        .find(|f| f.label() == "Recipient")
+        .expect("Recipient row");
+    let SignablePayloadField::AddressV2 { address_v2, .. } = recipient else {
+        panic!("Recipient must be an address_v2");
+    };
+    assert_eq!(address_v2.address, instruction.accounts[2].pubkey.to_string());
+    assert_eq!(address_v2.name, "Not the signer's account");
+    assert_eq!(address_v2.badge_text.as_deref(), Some("THIRD PARTY"));
+}
+
+/// `u64::MAX` is never rendered as a 20-digit amount, whatever the instruction.
+#[test]
+fn test_u64_max_renders_as_maximum_for_every_family() {
+    let layout = visualize(&synthetic_instruction("redeem", &[u64::MAX], &[]));
+    assert_eq!(
+        title_of(&layout),
+        "Redeem maximum jlUSDC from Jupiter Lend Earn"
+    );
+    assert_eq!(condensed_value(&layout, "Amount").unwrap(), "Maximum jlUSDC");
+
+    let layout = visualize(&synthetic_instruction("mint", &[u64::MAX], &[]));
+    assert_eq!(title_of(&layout), "Mint maximum jlUSDC on Jupiter Lend Earn");
+
+    // A bound of u64::MAX means the bound is not in effect.
+    let layout = visualize(&synthetic_instruction(
+        "withdraw_with_max_shares_burn",
+        &[10_000_000, u64::MAX],
+        &[],
+    ));
+    assert_eq!(condensed_value(&layout, "Maximum burned").unwrap(), "no limit");
+}

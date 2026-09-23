@@ -3,7 +3,7 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    AccountRef,    InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
 };
 use config::AssociatedTokenAccountConfig;
 use spl_associated_token_account::instruction::AssociatedTokenAccountInstruction;
@@ -38,14 +38,21 @@ impl InstructionVisualizer for AssociatedTokenAccountVisualizer {
         VisualizerKind::Payments("AssociatedTokenAccount")
     }
 
-    /// Creating an associated token account only prepares a destination.
-    /// `RecoverNested` moves tokens, so it is not infrastructure.
+    /// Creating the fee payer's own associated token account only prepares a
+    /// destination. Creating one for another wallet spends the payer's rent on
+    /// a third party, and `RecoverNested` moves tokens, so neither is
+    /// infrastructure. The wallet is the instruction's third account.
     fn is_infrastructure(&self, context: &VisualizerContext) -> bool {
-        matches!(
+        let creates = matches!(
             parse_ata_instruction(context.data()),
             Ok(AssociatedTokenAccountInstruction::Create
                 | AssociatedTokenAccountInstruction::CreateIdempotent)
-        )
+        );
+        let wallet_is_fee_payer = matches!(
+            context.account(2),
+            Some(AccountRef::Resolved(wallet)) if wallet.to_string() == context.sender().account_key
+        );
+        creates && wallet_is_fee_payer
     }
 }
 
