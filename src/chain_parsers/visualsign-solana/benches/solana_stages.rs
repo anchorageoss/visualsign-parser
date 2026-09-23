@@ -1,16 +1,14 @@
 //! Per-stage latency benchmarks for the Solana parse path.
 //!
-//! Solana is the chain that emits `intermediate_output`, and it currently
-//! produces it by decoding the transaction a SECOND time: the human-readable
-//! `SignablePayload` is built by `instructions::decode_instructions`, while the
-//! intermediate blob is built by `extract_solana_intermediate_output` ->
-//! `solana_parser::parse_transaction_with_idls` over the re-serialized message.
+//! Solana is the chain that emits `intermediate_output`. The transaction is
+//! decoded once, up front, into a `SolanaMetadata`; the transfer fields in the
+//! human-readable `SignablePayload` and the Borsh-friendly intermediate output
+//! are both projections of that one decode (see `parse_solana_metadata` and
+//! `build_intermediate_output` in `core/visualsign.rs`).
 //!
 //! The delta between the `convert` and `convert_with_intermediate` groups is
-//! the cost of that re-parse. It is the baseline to beat once the structured
-//! decode becomes the single source of truth and the `SignablePayload` is
-//! derived from it (see the `build_intermediate_bytes` doc comment in
-//! `core/visualsign.rs`).
+//! the marginal cost of projecting and Borsh-encoding the intermediate output
+//! on top of an already-decoded transaction, not a second parse.
 //!
 //! Inputs are the real protocol fixtures under `tests/fixtures/`, each of which
 //! captures one instruction (program id, accounts, base58 data) lifted from a
