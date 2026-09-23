@@ -49,7 +49,9 @@ const JUPITER_EARN_IDL_JSON: &str = include_str!("jupiter_earn.json");
 /// failing on an amount above the balance. Observed on mainnet, e.g.
 /// <https://solscan.io/tx/296YJsTYWiNgJ5b5LENoL6prJeASneukmHofteMdWTvv8DhLNEY19uAEvZYjxQmAWJuCemP4wtzgxtvDXxSS8sXs>
 /// (`withdraw(18446744073709551615)` burned 187,120.685353 jlUSDG and paid out
-/// 199,999.391176 USDG).
+/// 199,999.391176 USDG). Verified for plain `withdraw` only:
+/// `withdraw_with_max_shares_burn` with this amount is not, so it renders the
+/// flagged literal (see `UserAction::withdraws_all`).
 const WITHDRAW_ALL_AMOUNT: u64 = u64::MAX;
 
 const ESTIMATED: &str = "(estimated, rate at execution)";
@@ -488,6 +490,18 @@ impl UserAction {
         }
     }
 
+    /// The verified full-exit sentinel: plain `withdraw(u64::MAX)` with no
+    /// cap. The capped variant is not verified and renders the literal.
+    fn withdraws_all(&self) -> bool {
+        matches!(
+            self.kind,
+            UserActionKind::Withdraw {
+                amount: WITHDRAW_ALL_AMOUNT,
+                max_shares_burn: None,
+            }
+        )
+    }
+
     fn title(&self) -> String {
         let asset = &self.asset;
         match self.kind {
@@ -499,10 +513,7 @@ impl UserAction {
                 "Mint {} on {JUPITER_EARN_DISPLAY_NAME}",
                 asset.amount(shares, Denomination::Receipt).phrase()
             ),
-            UserActionKind::Withdraw {
-                amount: WITHDRAW_ALL_AMOUNT,
-                ..
-            } => format!(
+            UserActionKind::Withdraw { .. } if self.withdraws_all() => format!(
                 "Withdraw full {} position from {JUPITER_EARN_DISPLAY_NAME}",
                 asset.symbol(Denomination::Asset)
             ),
@@ -524,10 +535,7 @@ impl UserAction {
         let (raw, denomination) = match self.kind {
             UserActionKind::Deposit { assets, .. } => (assets, Denomination::Asset),
             UserActionKind::Mint { shares, .. } => (shares, Denomination::Receipt),
-            UserActionKind::Withdraw {
-                amount: WITHDRAW_ALL_AMOUNT,
-                ..
-            } => {
+            UserActionKind::Withdraw { .. } if self.withdraws_all() => {
                 return create_text_field(
                     "Amount",
                     &format!(
@@ -580,10 +588,9 @@ impl UserAction {
                 }
             }
             UserActionKind::Withdraw {
-                amount,
-                max_shares_burn,
+                max_shares_burn, ..
             } => {
-                if amount != WITHDRAW_ALL_AMOUNT {
+                if !self.withdraws_all() {
                     fields.push(create_text_field(
                         "Burn",
                         &format!("{receipt_symbol} {ESTIMATED}"),

@@ -502,6 +502,26 @@ fn test_u64_max_outside_withdraw_renders_the_flagged_literal() {
     );
 }
 
+/// The full-exit sentinel is verified for plain `withdraw` only. The capped
+/// variant with `u64::MAX` renders the flagged literal, an estimated Burn row
+/// and the cap, so no row contradicts another.
+#[test]
+fn test_capped_withdraw_with_u64_max_renders_the_flagged_literal() {
+    let layout = visualize(&synthetic_instruction(
+        "withdraw_with_max_shares_burn",
+        &[u64::MAX, 9_800_000],
+        &[],
+    ));
+    const LITERAL: &str = "18446744073709551615 raw units of USDC (u64::MAX)";
+    assert_eq!(
+        title_of(&layout),
+        format!("Withdraw {LITERAL} from Jupiter Lend Earn")
+    );
+    assert_eq!(condensed_value(&layout, "Amount").unwrap(), LITERAL);
+    assert!(condensed_value(&layout, "Burn").unwrap().starts_with("jlUSDC"));
+    assert_eq!(condensed_value(&layout, "Maximum burned").unwrap(), "9.8 jlUSDC");
+}
+
 /// `u64::MAX` disables a cap, but it does not disable a floor: a minimum of
 /// `u64::MAX` is an unsatisfiable requirement and must be shown as the literal.
 #[test]
