@@ -1,9 +1,15 @@
 ---
 title: Contributing a Visualization
-description: Add transaction support for your DApp or protocol
+description: Add a preset so your protocol's transactions render — per-chain file layout, the Rust you need to write, and the review checklist
 ---
 
-You do not need Rust experience to contribute a visualization. This guide covers the workflow for adding support for your DApp's transactions.
+This guide covers the workflow for adding support for your DApp's transactions.
+
+Every preset involves some Rust. The amount is small and pattern-following — you copy an
+existing preset in the same chain and change the decoding and the field construction — but
+there is no JSON-only path, on any chain. If you are working with an agent, point it at this
+page plus [Field Types](/field-types) and an existing preset in the same chain; those three
+are enough to produce a correct first draft.
 
 ## Before you start
 
@@ -19,13 +25,43 @@ Fork [visualsign-parser](https://github.com/anchorageoss/visualsign-parser) on G
 
 ### 2. Create your visualization
 
-Add a JSON preset file for your protocol in the appropriate chain directory:
+Where the code goes depends on the chain — the two layouts are not interchangeable:
 
-```
-src/chain_parsers/visualsign-<chain>/src/presets/<your-protocol>/
-```
+| Chain | Directory | Files in a preset |
+|---|---|---|
+| Solana | `visualsign-solana/src/presets/<protocol>/` | `config.rs`, `mod.rs`, and `<program>.json` — the Anchor IDL — for an IDL-driven preset |
+| Sui | `visualsign-sui/src/presets/<protocol>/` | `config.rs`, `mod.rs` |
+| Ethereum | `visualsign-ethereum/src/protocols/<protocol>/` | `config.rs`, `mod.rs`, `contracts/` |
+| NEAR | `visualsign-near/src/presets/<protocol>/` | a Rust module; see the note below |
+| Tron | — | no preset directory yet |
 
-Each preset file defines how to decode and display a specific transaction type. See existing presets (like Uniswap, Jupiter, or Cetus) for examples.
+All paths are under `src/chain_parsers/`.
+
+Most Solana presets are IDL-driven and ship the program's Anchor IDL alongside the Rust.
+The exceptions are the native programs — `spl_token`, `compute_budget`,
+`associated_token_account` — which decode instructions by hand and carry a `tests.rs`
+instead of an IDL. If your program has an Anchor IDL, follow the IDL-driven shape.
+
+NEAR has one preset, `intents/`, and it is not the two-file shape: it is a module
+(`args.rs`, `render.rs`, `verify.rs`, `tokens.rs`, `token_signature.rs`) because NEAR
+Intents carries its own signature verification across several schemes. Treat it as a
+reference for a substantial protocol rather than a template to copy for a simple one.
+
+Ethereum has **no** `presets/` directory; its decoders live under `protocols/` and use the
+[`sol!`](https://docs.rs/alloy-sol-types/latest/alloy_sol_types/macro.sol.html) macro for
+type-safe ABI decoding rather than a checked-in ABI file. Tron currently has neither
+directory, so a Tron protocol needs a decoder in the crate itself.
+
+Copy the closest existing preset and adapt it:
+
+- Solana — `presets/marginfi/` (IDL-driven) or `presets/spl_token/`
+- Sui — `presets/cetus/`
+- NEAR — `presets/intents/`
+- Ethereum — `protocols/uniswap/` (it has a `README.md` explaining its structure)
+
+Build field values with the helpers in `visualsign::field_builders` (`create_text_field`,
+`create_amount_field`, `create_address_field`, and so on) rather than constructing field structs
+directly, and keep display strings ASCII — use `>=` not `≥`, `->` not `→`.
 
 ### 3. Test with parser CLI
 
@@ -50,12 +86,34 @@ Run both expanded and condensed views:
 ./target/release/parser_cli decode --chain ethereum -t <tx_hex> --output human --condensed-only
 ```
 
-### 4. Submit a pull request
+### 4. Check what CI checks
+
+CI requires all three of these to pass, so run them before opening the PR:
+
+```bash
+make -C src lint     # cargo clippy --all-targets -- -D warnings
+make -C src test     # builds all crates, then runs every test
+make -C src fmt      # cargo fmt
+```
+
+Judge these by exit code, not by reading the output — clippy's warnings are easy to miss in
+a long log. `make -C src test` is the right command; `cargo test --workspace` fails an
+unrelated integration test for reasons specific to this workspace.
+
+The workspace denies `unwrap()`, `expect()`, `panic!()` and `unsafe` outside test modules,
+so use `?` or `ok_or_else(...)?` in preset code. Test modules opt out with
+`#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`.
+
+### 5. Submit a pull request
 
 Open a pull request with:
 - Your preset file(s)
-- At least one test case with a real mainnet transaction
+- At least one fixture pair — `tests/fixtures/<name>.input` and `<name>.expected` — built
+  from a real mainnet transaction
 - A brief description of your protocol
+
+Commits must be signed; the repository rejects unsigned commits outright rather than
+flagging them.
 
 ## What reviewers look for
 
