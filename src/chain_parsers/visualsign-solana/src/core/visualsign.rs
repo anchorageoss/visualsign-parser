@@ -984,8 +984,17 @@ mod tests {
         );
         assert!(
             decoded.instructions[0].parsed_instruction_data.is_none(),
-            "top-level System transfer has no IDL match (native decode path, not IDL)"
+            "top-level System transfer has no IDL match"
         );
+        let native = decoded.instructions[0]
+            .native_parsed_data
+            .as_ref()
+            .expect("top-level System transfer is jsonParsed-decoded");
+        assert_eq!(native.program, "system");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&native.parsed_json).expect("parsed_json is JSON");
+        assert_eq!(parsed["type"], "transfer");
+        assert_eq!(parsed["info"]["lamports"], 1_000_000_000u64);
         assert_eq!(
             decoded.instructions[0].registered_source,
             RegisteredSource::Native,
