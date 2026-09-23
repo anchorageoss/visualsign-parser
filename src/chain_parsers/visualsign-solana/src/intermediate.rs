@@ -773,7 +773,7 @@ fn parse_partially_decoded_instruction_idl(
 /// decode output. Not a `From` impl because `registered_source` on each
 /// instruction needs `caller_idl_program_ids` (the keys of
 /// `IdlRegistry::get_all_configs()`), which `SolanaMetadata` doesn't carry.
-fn build_intermediate_output(
+pub(crate) fn build_intermediate_output(
     value: &SolanaMetadata,
     caller_idl_program_ids: &std::collections::BTreeMap<String, CustomIdlConfig>,
 ) -> SolanaIntermediateOutput {
@@ -802,7 +802,21 @@ fn build_intermediate_output(
 // -- Extraction --------------------------------------------------------------
 
 /// Parse the transaction once via `solana_parser::parse_transaction_with_idl_records`
-/// and project the result into a Borsh-friendly intermediate output.
+/// and return the structured metadata.
+///
+/// This is the single structured decode of the transaction. The
+/// human-readable `SignablePayload`'s transfer fields and the Borsh-friendly
+/// [`SolanaIntermediateOutput`] are both derived from the value returned
+/// here, so those two cannot diverge by decoding the same bytes twice.
+/// Instruction-level rendering is not yet a projection of this value (see
+/// `core/visualsign.rs`).
+///
+/// The intermediate is *not* a pure function of this value: [`build_intermediate_output`]
+/// also takes the caller-IDL program ids, because each instruction's
+/// `registered_source` records whether its program had a registered IDL --
+/// something `SolanaMetadata` does not carry. So the property is one decode
+/// feeding both views, with the intermediate carrying registry-derived
+/// provenance the rendered payload does not.
 ///
 /// `raw_message_hex` is the hex-encoded serialized message (or full
 /// transaction); `full_transaction` toggles which form is being passed in,
@@ -811,22 +825,16 @@ fn build_intermediate_output(
 /// `pub(crate)` (not `pub`) because it takes the crate-private `IdlRegistry`;
 /// the schema types above are `pub` so external consumers can still decode the
 /// emitted bytes.
-///
-/// Eventual architecture (tracked, not yet implemented): the structured decode
-/// should become the single source of truth from which the VisualSign payload
-/// is generated, and these bytes should be passed through as-is rather than
-/// re-parsed here. Today this re-parses once, best-effort, alongside the
-/// existing VisualSign generation path.
 // `disallowed_types`: the `solana_parser::parse_transaction_with_idl_records`
 // API requires a `HashMap` for its record argument. We build one only as a
 // transient adapter from the deterministic `BTreeMap` caches; it never feeds
 // serialized output, so determinism is unaffected.
 #[allow(clippy::disallowed_types)]
-pub(crate) fn extract_solana_intermediate_output(
+pub(crate) fn parse_solana_metadata(
     raw_message_hex: &str,
     full_transaction: bool,
     idl_registry: &IdlRegistry,
-) -> Result<SolanaIntermediateOutput, VisualSignError> {
+) -> Result<SolanaMetadata, VisualSignError> {
     let configs = idl_registry.get_all_configs();
     let caller_records = caller_idl_records(configs).ok_or_else(|| {
         VisualSignError::ParseError(TransactionParseError::DecodeError(
@@ -845,18 +853,33 @@ pub(crate) fn extract_solana_intermediate_output(
         )))
     })?;
 
-    let metadata = response
+    response
         .solana_parsed_transaction
         .payload
-        .as_ref()
-        .and_then(|p| p.transaction_metadata.as_ref())
+        .and_then(|p| p.transaction_metadata)
         .ok_or_else(|| {
             VisualSignError::ParseError(TransactionParseError::DecodeError(
                 "solana_parser returned no transaction_metadata".to_string(),
             ))
-        })?;
+        })
+}
 
-    Ok(build_intermediate_output(metadata, configs))
+/// Parse a transaction and project it into the Borsh-friendly intermediate
+/// output.
+///
+/// Thin wrapper over [`parse_solana_metadata`]; prefer calling that directly
+/// and projecting when the caller also needs the metadata for rendering, so the
+/// transaction is decoded exactly once.
+pub(crate) fn extract_solana_intermediate_output(
+    raw_message_hex: &str,
+    full_transaction: bool,
+    idl_registry: &IdlRegistry,
+) -> Result<SolanaIntermediateOutput, VisualSignError> {
+    let metadata = parse_solana_metadata(raw_message_hex, full_transaction, idl_registry)?;
+    Ok(build_intermediate_output(
+        &metadata,
+        idl_registry.get_all_configs(),
+    ))
 }
 
 #[cfg(test)]
