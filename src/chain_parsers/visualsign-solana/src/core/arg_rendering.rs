@@ -22,9 +22,33 @@ pub fn format_arg_value(value: &serde_json::Value) -> String {
     }
 }
 
+/// Marker substituted for any character that cannot be rendered.
+///
+/// Substituting rather than deleting keeps distinct inputs distinct: silently
+/// dropping characters made `a"b` and `ab` render identically, so two different
+/// on-chain values could display as the same string. It also makes the loss
+/// visible to whoever reads the field, instead of silently presenting a
+/// truncated value as if it were complete.
+const ELIDED: char = '?';
+
+/// Render `text` as characters that are safe to place in a `SignablePayload`
+/// field, substituting [`ELIDED`] for anything else.
+///
+/// The payload-level charset gate (`SignablePayload::validate_charset`) rejects
+/// the entire payload on any non-ASCII byte, so non-ASCII must be handled here
+/// or a single accented token name fails the whole transaction. `"` and `\` are
+/// substituted too: `validate_charset` itself permits them, but this renderer
+/// emits its own `{key:value}` and `[a,b]` bracketing, and an unescaped quote
+/// inside a value would be indistinguishable from that structure.
 fn charset_safe(text: &str) -> String {
     text.chars()
-        .filter(|&c| c == ' ' || (c.is_ascii_graphic() && c != '"' && c != '\\'))
+        .map(|c| {
+            if c == ' ' || (c.is_ascii_graphic() && c != '"' && c != '\\') {
+                c
+            } else {
+                ELIDED
+            }
+        })
         .collect()
 }
 
@@ -96,9 +120,30 @@ mod tests {
     }
 
     #[test]
-    fn test_string_with_forbidden_chars_is_stripped() {
-        assert_eq!(format_arg_value(&json!("a\"b\\c d")), "abc d");
-        assert_eq!(format_arg_value(&json!("a\tb\rc")), "abc");
+    fn test_forbidden_chars_are_marked_not_deleted() {
+        assert_eq!(format_arg_value(&json!("a\"b\\c d")), "a?b?c d");
+        assert_eq!(format_arg_value(&json!("a\tb\rc")), "a?b?c");
+    }
+
+    /// Deleting unsafe characters let distinct values collapse onto the same
+    /// rendering. Substituting a marker keeps them distinct.
+    #[test]
+    fn test_distinct_values_do_not_collapse() {
+        let quoted = format_arg_value(&json!("a\"b"));
+        let plain = format_arg_value(&json!("ab"));
+        assert_ne!(
+            quoted, plain,
+            "a value containing a quote must not render identically to one without"
+        );
+    }
+
+    /// Non-ASCII must not reach the payload -- `validate_charset` rejects the
+    /// whole payload on any non-ASCII byte -- but its loss should be visible
+    /// rather than silent.
+    #[test]
+    fn test_non_ascii_is_marked() {
+        assert_eq!(format_arg_value(&json!("Caf\u{e9}")), "Caf?");
+        assert!(format_arg_value(&json!("\u{4f60}\u{597d}")).is_ascii());
     }
 
     #[test]
