@@ -995,6 +995,7 @@ mod tests {
             serde_json::from_str(&native.parsed_json).expect("parsed_json is JSON");
         assert_eq!(parsed["type"], "transfer");
         assert_eq!(parsed["info"]["lamports"], 1_000_000_000u64);
+        assert!(decoded.instructions[0].native_parse_error.is_none());
         assert_eq!(
             decoded.instructions[0].registered_source,
             RegisteredSource::Native,
