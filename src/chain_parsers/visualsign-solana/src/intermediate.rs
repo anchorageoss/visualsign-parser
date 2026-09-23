@@ -114,7 +114,7 @@ pub struct SolanaIntermediateInstruction {
     /// but not returned by an RPC node. `None` for other programs,
     /// undecodable data, and instructions that read an account through an
     /// address lookup table.
-    pub native_parsed_data: Option<SolanaJsonParsedInstructionDataIo>,
+    pub native_parsed_data: Option<SolanaNativeParsedInstructionDataIo>,
 }
 
 /// Where a program ID was recognized. Decodability is a separate question --
@@ -157,7 +157,7 @@ pub struct SolanaSimulatedInstruction {
     /// The RPC's own jsonParsed decode, for the recognized programs it returns
     /// that way (System/Token and friends). `None` for partially-decoded
     /// instructions, which we IDL-decode into `parsed_instruction_data` instead.
-    pub solana_rpc_parsed_data: Option<SolanaJsonParsedInstructionDataIo>,
+    pub solana_rpc_parsed_data: Option<SolanaRpcParsedInstructionDataIo>,
     pub idl_parse_error: Option<SolanaIdlParseError>,
 }
 
@@ -217,10 +217,19 @@ pub struct SolanaParsedInstructionDataIo {
     pub idl_hash: String,
 }
 
-/// An instruction in Solana's `jsonParsed` format: the RPC's own decode of a
-/// simulated instruction, or the parser's local decode of a top-level one.
+/// The RPC's own jsonParsed decode of a simulated instruction, as returned for
+/// recognized programs.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SolanaJsonParsedInstructionDataIo {
+pub struct SolanaRpcParsedInstructionDataIo {
+    pub program: String,
+    pub parsed_json: String,
+}
+
+/// The parser's own decode of a top-level native program instruction, in the
+/// same `jsonParsed` format as [`SolanaRpcParsedInstructionDataIo`] but not
+/// returned by an RPC node.
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SolanaNativeParsedInstructionDataIo {
     /// The decoder's program name, e.g. `system`, `spl-token`.
     pub program: String,
     /// Canonical JSON, keys alphabetized at every level. `{"info":..,"type":..}`
@@ -452,7 +461,7 @@ fn build_intermediate_instruction(
 /// can't be reconstructed here.
 fn decode_native_parsed(
     value: &parser::SolanaInstruction,
-) -> Option<SolanaJsonParsedInstructionDataIo> {
+) -> Option<SolanaNativeParsedInstructionDataIo> {
     use solana_transaction_status::parse_instruction::parse;
 
     if !value.address_table_lookups.is_empty() {
@@ -486,7 +495,7 @@ fn decode_native_parsed(
     )
     .ok()?;
 
-    Some(SolanaJsonParsedInstructionDataIo {
+    Some(SolanaNativeParsedInstructionDataIo {
         program: decoded.program,
         parsed_json: canonicalize_value(&decoded.parsed).to_string(),
     })
@@ -627,7 +636,7 @@ fn decode_inner_instructions(
                         instruction_data_hex: String::new(),
                         registered_source,
                         parsed_instruction_data: None,
-                        solana_rpc_parsed_data: Some(SolanaJsonParsedInstructionDataIo {
+                        solana_rpc_parsed_data: Some(SolanaRpcParsedInstructionDataIo {
                             program,
                             parsed_json,
                         }),
@@ -1219,7 +1228,7 @@ mod tests {
         assert!(io.idl_parse_error.is_none());
         assert_eq!(
             io.native_parsed_data,
-            Some(SolanaJsonParsedInstructionDataIo {
+            Some(SolanaNativeParsedInstructionDataIo {
                 program: "system".to_string(),
                 parsed_json: format!(
                     r#"{{"info":{{"destination":"{destination}","lamports":1001,"source":"{source}"}},"type":"transfer"}}"#
