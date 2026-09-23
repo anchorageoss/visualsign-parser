@@ -2,7 +2,7 @@
   "address": "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9",
   "metadata": {
     "name": "lending",
-    "version": "0.1.0",
+    "version": "0.1.4",
     "spec": "0.1.0",
     "description": "Created with Anchor"
   },
@@ -61,7 +61,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": ["lending_admin"]
         },
         {
@@ -72,6 +71,7 @@
         },
         {
           "name": "associated_token_program",
+          "optional": true,
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         },
         {
@@ -141,7 +141,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": ["lending_admin"]
         },
         {
@@ -152,6 +151,7 @@
         },
         {
           "name": "associated_token_program",
+          "optional": true,
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         },
         {
@@ -388,7 +388,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": ["lending_admin"]
         },
         {
@@ -399,6 +398,7 @@
         },
         {
           "name": "associated_token_program",
+          "optional": true,
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         },
         {
@@ -468,7 +468,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": ["lending_admin"]
         },
         {
@@ -479,6 +478,7 @@
         },
         {
           "name": "associated_token_program",
+          "optional": true,
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         },
         {
@@ -573,7 +573,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": ["lending_admin"]
         },
         {
@@ -592,6 +591,107 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "rebalance_with_amounts",
+      "discriminator": [190, 33, 144, 182, 86, 4, 141, 73],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "depositor_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "signer"
+              },
+              {
+                "kind": "account",
+                "path": "token_program"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140, 151, 37, 143, 78, 36, 137, 241, 187, 61, 16, 41, 20, 142,
+                13, 131, 11, 90, 19, 153, 218, 255, 16, 132, 4, 142, 123, 216,
+                219, 233, 248, 89
+              ]
+            }
+          }
+        },
+        {
+          "name": "lending_admin"
+        },
+        {
+          "name": "lending",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": ["lending", "rewards_rate_model"]
+        },
+        {
+          "name": "f_token_mint",
+          "writable": true,
+          "relations": ["lending"]
+        },
+        {
+          "name": "supply_token_reserves_liquidity",
+          "writable": true
+        },
+        {
+          "name": "lending_supply_position_on_liquidity",
+          "writable": true
+        },
+        {
+          "name": "rate_model",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "liquidity",
+          "writable": true
+        },
+        {
+          "name": "liquidity_program",
+          "relations": ["lending_admin"]
+        },
+        {
+          "name": "rewards_rate_model"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": {
+            "option": "u64"
+          }
+        }
+      ]
     },
     {
       "name": "redeem",
@@ -643,7 +743,8 @@
         },
         {
           "name": "claim_account",
-          "writable": true
+          "writable": true,
+          "optional": true
         },
         {
           "name": "liquidity",
@@ -651,7 +752,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": ["lending_admin"]
         },
         {
@@ -662,6 +762,7 @@
         },
         {
           "name": "associated_token_program",
+          "optional": true,
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         },
         {
@@ -727,7 +828,8 @@
         },
         {
           "name": "claim_account",
-          "writable": true
+          "writable": true,
+          "optional": true
         },
         {
           "name": "liquidity",
@@ -735,7 +837,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": ["lending_admin"]
         },
         {
@@ -746,6 +847,7 @@
         },
         {
           "name": "associated_token_program",
+          "optional": true,
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         },
         {
@@ -938,7 +1040,8 @@
         },
         {
           "name": "claim_account",
-          "writable": true
+          "writable": true,
+          "optional": true
         },
         {
           "name": "liquidity",
@@ -946,7 +1049,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": ["lending_admin"]
         },
         {
@@ -957,6 +1059,7 @@
         },
         {
           "name": "associated_token_program",
+          "optional": true,
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         },
         {
@@ -1022,7 +1125,8 @@
         },
         {
           "name": "claim_account",
-          "writable": true
+          "writable": true,
+          "optional": true
         },
         {
           "name": "liquidity",
@@ -1030,7 +1134,6 @@
         },
         {
           "name": "liquidity_program",
-          "writable": true,
           "relations": ["lending_admin"]
         },
         {
@@ -1041,6 +1144,7 @@
         },
         {
           "name": "associated_token_program",
+          "optional": true,
           "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         },
         {
@@ -1597,7 +1701,11 @@
           },
           {
             "name": "withdrawal_limit",
-            "type": "u128"
+            "type": "u64"
+          },
+          {
+            "name": "decay_amount",
+            "type": "u64"
           },
           {
             "name": "last_update",
@@ -1609,7 +1717,11 @@
           },
           {
             "name": "expand_duration",
-            "type": "u64"
+            "type": "u32"
+          },
+          {
+            "name": "decay_duration",
+            "type": "u32"
           },
           {
             "name": "base_withdrawal_limit",
