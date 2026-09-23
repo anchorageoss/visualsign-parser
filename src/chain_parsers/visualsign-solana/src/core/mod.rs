@@ -291,6 +291,19 @@ pub trait SolanaIntegrationConfig {
     }
 }
 
+/// A visualizer's proposal for how a whole transaction should be presented
+/// when its one user action is this instruction. See
+/// [`InstructionVisualizer::transaction_summary`].
+#[derive(Debug, Clone)]
+pub struct TransactionSummary {
+    /// Payload title, e.g. "Deposit 414.122446 USDC to Jupiter Lend Earn".
+    pub title: String,
+    /// Payload subtitle: the verified name of the program acted on.
+    pub subtitle: Option<String>,
+    /// Rows emitted at the top level of the payload, after Network and From.
+    pub fields: Vec<AnnotatedPayloadField>,
+}
+
 pub trait InstructionVisualizer {
     fn visualize_tx_commands(
         &self,
@@ -300,6 +313,29 @@ pub trait InstructionVisualizer {
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig>;
 
     fn kind(&self) -> VisualizerKind;
+
+    /// Transaction-level summary proposed for a recognized user action: the
+    /// payload title, a subtitle and the rows to hoist to the top level.
+    ///
+    /// The converter adopts a summary only when the caller supplied no
+    /// `transaction_name`, exactly one instruction proposes one, and every
+    /// other instruction reports [`is_infrastructure`](Self::is_infrastructure).
+    /// A transaction that also moves value elsewhere, or that no visualizer
+    /// fully recognizes, keeps its default title and layout. Implementations
+    /// must derive the summary from decoded instruction data only, never from
+    /// caller-supplied metadata.
+    fn transaction_summary(&self, _context: &VisualizerContext) -> Option<TransactionSummary> {
+        None
+    }
+
+    /// True when this instruction only prepares the transaction: compute
+    /// budget, durable-nonce advance, associated-token-account creation. Such
+    /// instructions move no value and grant no permission, so they do not
+    /// block another instruction's [`transaction_summary`](Self::transaction_summary).
+    /// Anything that moves funds, including a plain transfer, must stay `false`.
+    fn is_infrastructure(&self, _context: &VisualizerContext) -> bool {
+        false
+    }
 
     fn can_handle(&self, context: &VisualizerContext) -> bool {
         let Some(config) = self.get_config() else {
@@ -318,6 +354,10 @@ pub trait InstructionVisualizer {
 pub struct VisualizeResult {
     pub field: AnnotatedPayloadField,
     pub kind: VisualizerKind,
+    /// The handling visualizer's [`InstructionVisualizer::transaction_summary`].
+    pub summary: Option<TransactionSummary>,
+    /// The handling visualizer's [`InstructionVisualizer::is_infrastructure`].
+    pub infrastructure: bool,
 }
 
 /// Tries multiple visualizers in order, returning the first successful visualization.
@@ -335,6 +375,8 @@ pub fn visualize_with_any(
                 .map(|field| VisualizeResult {
                     field,
                     kind: v.kind(),
+                    summary: v.transaction_summary(context),
+                    infrastructure: v.is_infrastructure(context),
                 }),
         )
     })

@@ -16,8 +16,8 @@
 mod config;
 
 use crate::core::{
-    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind, format_arg_value, is_unresolved_placeholder,
+    InstructionView, InstructionVisualizer, SolanaIntegrationConfig, TransactionSummary,
+    VisualizerContext, VisualizerKind, format_arg_value, is_unresolved_placeholder,
 };
 use crate::utils::{TokenInfo, format_token_amount, lookup_token, truncate_address};
 use config::JupiterEarnConfig;
@@ -119,6 +119,31 @@ impl InstructionVisualizer for JupiterEarnVisualizer {
 
     fn kind(&self) -> VisualizerKind {
         VisualizerKind::Lending(JUPITER_EARN_DISPLAY_NAME)
+    }
+
+    /// A single recognized user action names the whole transaction and hoists
+    /// its key rows to the top level, e.g. "Deposit 414.122446 USDC to Jupiter
+    /// Lend Earn" with Program / Amount / Instruction / Receive rows.
+    ///
+    /// Proposed only when the instruction's signer is the transaction's fee
+    /// payer: the hoisted From row names the fee payer, so a relayed
+    /// transaction must not read as if the relayer were the depositor. Admin
+    /// instructions and undecodable data propose nothing.
+    fn transaction_summary(&self, context: &VisualizerContext) -> Option<TransactionSummary> {
+        let view = InstructionView::from_context(context);
+        let parsed = parse_jupiter_earn_instruction(context.data(), &view.accounts).ok()?;
+        if parsed.named_accounts.get("signer")? != &context.sender().account_key {
+            return None;
+        }
+        let action = UserAction::from_parsed(&parsed)?;
+        let fields = action
+            .summary_fields(&view.program_id, &parsed.parsed.instruction_name)
+            .ok()?;
+        Some(TransactionSummary {
+            title: action.title(),
+            subtitle: Some(JUPITER_EARN_DISPLAY_NAME.to_string()),
+            fields,
+        })
     }
 }
 
@@ -449,6 +474,31 @@ impl UserAction {
         Ok(fields)
     }
 
+    /// Rows hoisted to the top level of the payload for a single-action
+    /// transaction: the program as a named address, the exact amount, the
+    /// instruction, then the estimated other leg. The signer is omitted because
+    /// the From row already names it (see `transaction_summary`).
+    fn summary_fields(
+        &self,
+        program_id: &str,
+        instruction_name: &str,
+    ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+        let mut fields = vec![
+            create_address_field(
+                "Program",
+                program_id,
+                Some(JUPITER_EARN_DISPLAY_NAME),
+                None,
+                None,
+                None,
+            )?,
+            self.amount_field()?,
+            create_text_field("Instruction", instruction_name)?,
+        ];
+        fields.extend(self.leg_fields()?);
+        Ok(fields)
+    }
+
     /// A mint as a named address row: the table's name and symbol when known,
     /// the bare address otherwise.
     fn mint_field(
@@ -578,6 +628,7 @@ fn build_fallback_fields(program_id: &str) -> Result<PreviewParts, VisualSignErr
 mod tests {
     use super::*;
     mod fixture_test;
+    mod summary_test;
 
     #[test]
     fn test_jupiter_earn_idl_loads() {

@@ -37,6 +37,16 @@ impl InstructionVisualizer for AssociatedTokenAccountVisualizer {
     fn kind(&self) -> VisualizerKind {
         VisualizerKind::Payments("AssociatedTokenAccount")
     }
+
+    /// Creating an associated token account only prepares a destination.
+    /// `RecoverNested` moves tokens, so it is not infrastructure.
+    fn is_infrastructure(&self, context: &VisualizerContext) -> bool {
+        matches!(
+            parse_ata_instruction(context.data()),
+            Ok(AssociatedTokenAccountInstruction::Create
+                | AssociatedTokenAccountInstruction::CreateIdempotent)
+        )
+    }
 }
 
 fn create_ata_preview_layout(

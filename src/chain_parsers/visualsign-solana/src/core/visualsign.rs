@@ -2,7 +2,8 @@ use crate::core::txtypes::{
     create_address_lookup_table_field, decode_v0_instructions, decode_v0_transfers,
 };
 use crate::core::{
-    create_accounts_advanced_preview_layout, decode_accounts, decode_v0_accounts, instructions,
+    TransactionSummary, create_accounts_advanced_preview_layout, decode_accounts,
+    decode_v0_accounts, instructions,
 };
 use crate::idl::IdlRegistry;
 use crate::idl::builtin_programs::{
@@ -635,15 +636,20 @@ fn convert_to_visual_sign_payload(
             .map(|e| e.signable_payload_field.clone()),
     );
 
+    #[cfg(feature = "diagnostics")]
+    let summary = decode_result.summary.clone();
+
     #[cfg(not(feature = "diagnostics"))]
-    {
-        let decoded_fields = instructions::decode_instructions(transaction, &idl_registry)?;
+    let summary = {
+        let decoded = instructions::decode_instructions(transaction, &idl_registry)?;
         fields.extend(
-            decoded_fields
+            decoded
+                .fields
                 .iter()
                 .map(|e| e.signable_payload_field.clone()),
         );
-    }
+        decoded.summary
+    };
 
     // Decode and sort accounts using the dedicated function
     let accounts = decode_accounts(message)?;
@@ -656,13 +662,53 @@ fn convert_to_visual_sign_payload(
     #[cfg(feature = "diagnostics")]
     append_diagnostics(&mut fields, &decode_result);
 
+    let (title, subtitle) = apply_transaction_summary(
+        &mut fields,
+        title,
+        summary,
+        message.account_keys.first(),
+        "Solana Transaction",
+    )?;
     Ok(SignablePayload::new(
         0,
-        title.unwrap_or_else(|| "Solana Transaction".to_string()),
-        None,
+        title,
+        subtitle,
         fields,
         "SolanaTx".to_string(),
     ))
+}
+
+/// Applies the instructions' agreed [`TransactionSummary`], if any, to the
+/// payload being built. A caller-supplied title always wins and disables the
+/// summary. Otherwise the summary names the transaction, and a From row for
+/// the fee payer plus the summary's rows are inserted right after Network, so
+/// the approver reads who signs and what for before the per-instruction detail.
+/// Transactions without a summary are untouched.
+fn apply_transaction_summary(
+    fields: &mut Vec<SignablePayloadField>,
+    caller_title: Option<String>,
+    summary: Option<TransactionSummary>,
+    fee_payer: Option<&Pubkey>,
+    default_title: &str,
+) -> Result<(String, Option<String>), VisualSignError> {
+    if let Some(title) = caller_title {
+        return Ok((title, None));
+    }
+    let Some(summary) = summary else {
+        return Ok((default_title.to_string(), None));
+    };
+    if let Some(fee_payer) = fee_payer {
+        let mut rows = vec![instructions::create_from_field(fee_payer)?.signable_payload_field];
+        rows.extend(
+            summary
+                .fields
+                .iter()
+                .map(|f| f.signable_payload_field.clone()),
+        );
+        let after_network = fields.len().min(1);
+        fields.splice(after_network..after_network, rows);
+    }
+    Ok((summary.title, summary.subtitle))
 }
 
 /// Convert versioned Solana transaction to visual sign payload
@@ -754,11 +800,13 @@ fn convert_v0_to_visual_sign_payload(
         );
         fields.push(instruction_field.signable_payload_field.clone());
     }
+    #[cfg(feature = "diagnostics")]
+    let summary = v0_result.summary.clone();
 
     #[cfg(not(feature = "diagnostics"))]
-    match decode_v0_instructions(v0_message, &idl_registry) {
-        Ok(v0_fields) => {
-            for (index, instruction_field) in v0_fields.iter().enumerate() {
+    let summary = match decode_v0_instructions(v0_message, &idl_registry) {
+        Ok(decoded) => {
+            for (index, instruction_field) in decoded.fields.iter().enumerate() {
                 tracing::debug!(
                     "Handling instruction {} with visualizer {:?}",
                     index,
@@ -766,6 +814,7 @@ fn convert_v0_to_visual_sign_payload(
                 );
                 fields.push(instruction_field.signable_payload_field.clone());
             }
+            decoded.summary
         }
         Err(e) => {
             // Add a note about instruction decoding failure
@@ -778,8 +827,9 @@ fn convert_v0_to_visual_sign_payload(
                     text: format!("Instruction decoding failed: {e}"),
                 },
             });
+            None
         }
-    }
+    };
 
     // Process V0 transfer decoding using solana-parser
     if decode_transfers {
@@ -813,10 +863,17 @@ fn convert_v0_to_visual_sign_payload(
     #[cfg(feature = "diagnostics")]
     append_diagnostics(&mut fields, &v0_result);
 
+    let (title, subtitle) = apply_transaction_summary(
+        &mut fields,
+        title,
+        summary,
+        v0_message.account_keys.first(),
+        "Solana V0 Transaction",
+    )?;
     Ok(SignablePayload::new(
         0,
-        title.unwrap_or_else(|| "Solana V0 Transaction".to_string()),
-        None,
+        title,
+        subtitle,
         fields,
         "SolanaTx".to_string(),
     ))
