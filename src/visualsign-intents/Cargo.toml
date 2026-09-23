@@ -31,3 +31,6 @@ diagnostics = ["visualsign/diagnostics"]
 
 [dev-dependencies]
 serde_yaml = "0.9"
+
+[lints]
+workspace = true
