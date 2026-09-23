@@ -2,7 +2,9 @@
 // user action names the whole payload (title, subtitle, hoisted rows), and
 // every case in which it must not.
 
-use super::fixture_test::{instruction_from_fixture, load_fixture, rendered_value, synthetic_instruction};
+use super::fixture_test::{
+    instruction_from_fixture, load_fixture, rendered_value, synthetic_instruction,
+};
 use super::*;
 use crate::core::{SolanaTransactionWrapper, SolanaVisualSignConverter};
 use crate::intermediate::{RegisteredSource, SolanaIntermediateOutput};
@@ -74,7 +76,14 @@ fn preview_titles(payload: &SignablePayload) -> Vec<String> {
 fn assert_no_summary(payload: &SignablePayload, default_title: &str) {
     assert_eq!(payload.title, default_title);
     assert_eq!(payload.subtitle, None);
-    for label in ["From", "Program", "Amount", "Instruction", "Receive", "Burn"] {
+    for label in [
+        "From",
+        "Program",
+        "Amount",
+        "Instruction",
+        "Receive",
+        "Burn",
+    ] {
         assert!(
             top_level_value(payload, label).is_none(),
             "no hoisted {label} row expected, got layout {:?}",
@@ -93,7 +102,10 @@ fn test_single_deposit_gets_title_subtitle_and_rows() {
 
     let payload = payload_for(&[deposit], &payer);
 
-    assert_eq!(payload.title, "Deposit 414.122446 USDC to Jupiter Lend Earn");
+    assert_eq!(
+        payload.title,
+        "Deposit 414.122446 USDC to Jupiter Lend Earn"
+    );
     assert_eq!(payload.subtitle.as_deref(), Some(JUPITER_EARN_DISPLAY_NAME));
     // (`starts_with`: the diagnostics feature appends lint rows after these.)
     let labels = top_level_labels(&payload);
@@ -111,7 +123,10 @@ fn test_single_deposit_gets_title_subtitle_and_rows() {
         ]),
         "unexpected top-level layout: {labels:?}"
     );
-    assert_eq!(top_level_value(&payload, "From").unwrap(), payer.to_string());
+    assert_eq!(
+        top_level_value(&payload, "From").unwrap(),
+        payer.to_string()
+    );
     let SignablePayloadField::AddressV2 { address_v2, .. } = &payload.fields[2] else {
         panic!("Program must be an address_v2, got {:?}", payload.fields[2]);
     };
@@ -123,9 +138,16 @@ fn test_single_deposit_gets_title_subtitle_and_rows() {
     assert_eq!(common.fallback_text, "414.122446 USDC");
     assert_eq!(amount_v2.abbreviation.as_deref(), Some("USDC"));
     assert_eq!(top_level_value(&payload, "Instruction").unwrap(), "deposit");
-    assert!(top_level_value(&payload, "Receive").unwrap().starts_with("jlUSDC"));
+    assert!(
+        top_level_value(&payload, "Receive")
+            .unwrap()
+            .starts_with("jlUSDC")
+    );
     let SignablePayloadField::AddressV2 { address_v2, .. } = &payload.fields[4] else {
-        panic!("Recipient must be an address_v2, got {:?}", payload.fields[4]);
+        panic!(
+            "Recipient must be an address_v2, got {:?}",
+            payload.fields[4]
+        );
     };
     assert_eq!(address_v2.name, "Signer's associated token account");
     payload
@@ -145,10 +167,20 @@ fn test_single_withdraw_gets_title_subtitle_and_rows() {
         "Withdraw 26.177479 JupUSD from Jupiter Lend Earn"
     );
     assert_eq!(payload.subtitle.as_deref(), Some(JUPITER_EARN_DISPLAY_NAME));
-    assert_eq!(top_level_value(&payload, "From").unwrap(), payer.to_string());
+    assert_eq!(
+        top_level_value(&payload, "From").unwrap(),
+        payer.to_string()
+    );
     assert_eq!(top_level_value(&payload, "Amount").unwrap(), "26.177479");
-    assert_eq!(top_level_value(&payload, "Instruction").unwrap(), "withdraw");
-    assert!(top_level_value(&payload, "Burn").unwrap().starts_with("JUICED"));
+    assert_eq!(
+        top_level_value(&payload, "Instruction").unwrap(),
+        "withdraw"
+    );
+    assert!(
+        top_level_value(&payload, "Burn")
+            .unwrap()
+            .starts_with("JUICED")
+    );
     payload.validate_charset().unwrap();
 }
 
@@ -173,8 +205,14 @@ fn test_infrastructure_legs_keep_the_summary() {
 
     let payload = payload_for(&[compute_limit, compute_price, create_ata, deposit], &payer);
 
-    assert_eq!(payload.title, "Deposit 414.122446 USDC to Jupiter Lend Earn");
-    assert_eq!(top_level_value(&payload, "From").unwrap(), payer.to_string());
+    assert_eq!(
+        payload.title,
+        "Deposit 414.122446 USDC to Jupiter Lend Earn"
+    );
+    assert_eq!(
+        top_level_value(&payload, "From").unwrap(),
+        payer.to_string()
+    );
 }
 
 /// Creating an associated token account for another wallet spends the fee
@@ -248,8 +286,7 @@ fn test_deposit_plus_token_transfer_keeps_default_title() {
 fn test_deposit_plus_sol_transfer_keeps_default_title() {
     let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
     let payer = deposit.accounts[0].pubkey;
-    let transfer =
-        solana_sdk::system_instruction::transfer(&payer, &Pubkey::new_unique(), 1_000);
+    let transfer = solana_sdk::system_instruction::transfer(&payer, &Pubkey::new_unique(), 1_000);
 
     let payload = payload_for(&[transfer, deposit], &payer);
 
@@ -316,7 +353,10 @@ fn test_v0_single_deposit_gets_summary() {
 
     let payload = payload_from_b64(&v0_transaction_b64(&[deposit], &payer, &[]));
 
-    assert_eq!(payload.title, "Deposit 414.122446 USDC to Jupiter Lend Earn");
+    assert_eq!(
+        payload.title,
+        "Deposit 414.122446 USDC to Jupiter Lend Earn"
+    );
     assert_eq!(payload.subtitle.as_deref(), Some(JUPITER_EARN_DISPLAY_NAME));
     let labels = top_level_labels(&payload);
     assert!(
@@ -331,7 +371,10 @@ fn test_v0_single_deposit_gets_summary() {
         ]),
         "unexpected v0 top-level layout: {labels:?}"
     );
-    assert_eq!(top_level_value(&payload, "From").unwrap(), payer.to_string());
+    assert_eq!(
+        top_level_value(&payload, "From").unwrap(),
+        payer.to_string()
+    );
 }
 
 /// A v0 deposit whose mints sit in an address lookup table cannot be resolved
@@ -447,7 +490,11 @@ fn test_each_user_action_family_proposes_a_summary() {
         let instruction = synthetic_instruction(name, &args, &[(signer.0, signer.1.as_str())]);
         let payload = payload_for(&[instruction], &payer);
         assert_eq!(payload.title, expected, "{name}");
-        assert_eq!(top_level_value(&payload, "Instruction").unwrap(), name, "{name}");
+        assert_eq!(
+            top_level_value(&payload, "Instruction").unwrap(),
+            name,
+            "{name}"
+        );
     }
 }
 

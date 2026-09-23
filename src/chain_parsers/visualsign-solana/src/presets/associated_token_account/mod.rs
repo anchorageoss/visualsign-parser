@@ -3,7 +3,8 @@
 mod config;
 
 use crate::core::{
-    AccountRef,    InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
+    VisualizerKind,
 };
 use config::AssociatedTokenAccountConfig;
 use spl_associated_token_account::instruction::AssociatedTokenAccountInstruction;

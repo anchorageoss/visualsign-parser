@@ -132,7 +132,11 @@ fn visualize(instruction: &Instruction) -> SignablePayloadFieldPreviewLayout {
 }
 
 fn title_of(layout: &SignablePayloadFieldPreviewLayout) -> String {
-    layout.title.as_ref().map(|t| t.text.clone()).unwrap_or_default()
+    layout
+        .title
+        .as_ref()
+        .map(|t| t.text.clone())
+        .unwrap_or_default()
 }
 
 fn assert_fixture(name: &str) {
@@ -171,8 +175,11 @@ fn test_withdraw_jupusd_fixture() {
 fn test_deposit_condensed_view_is_typed() {
     let layout = visualize(&instruction_from_fixture(&load_fixture("deposit_usdc")));
     let condensed = layout.condensed.as_ref().expect("condensed view");
-    let fields: Vec<&SignablePayloadField> =
-        condensed.fields.iter().map(|f| &f.signable_payload_field).collect();
+    let fields: Vec<&SignablePayloadField> = condensed
+        .fields
+        .iter()
+        .map(|f| &f.signable_payload_field)
+        .collect();
 
     let program = fields
         .iter()
@@ -212,7 +219,10 @@ fn test_deposit_condensed_view_is_typed() {
     let SignablePayloadField::AddressV2 { address_v2, .. } = receipt else {
         panic!("Receipt token must be an address_v2");
     };
-    assert_eq!(address_v2.address, "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D");
+    assert_eq!(
+        address_v2.address,
+        "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D"
+    );
     assert_eq!(address_v2.asset_label, "jlUSDC");
 
     let receive = find_value(&layout, "Receive").expect("Receive row");
@@ -292,7 +302,10 @@ fn test_unresolved_mint_keeps_generic_view() {
     assert!(condensed_value(&preview_layout, "Amount").is_none());
     assert!(condensed_value(&preview_layout, "Asset").is_none());
     let mint = find_value(&preview_layout, "mint").unwrap();
-    assert!(mint.starts_with("unresolved("), "expanded view keeps the placeholder: {mint}");
+    assert!(
+        mint.starts_with("unresolved("),
+        "expanded view keeps the placeholder: {mint}"
+    );
 }
 
 /// An unresolved `recipient_token_account` is treated like an unresolved
@@ -372,7 +385,11 @@ const JL_USDC_MINT: &str = "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D";
 /// Builds `name` from the bundled IDL: its discriminator followed by the `u64`
 /// args in order, over one account per IDL account with `mint` and
 /// `f_token_mint` set to USDC / jlUSDC and every other account a fresh key.
-pub(super) fn synthetic_instruction(name: &str, args: &[u64], overrides: &[(&str, &str)]) -> Instruction {
+pub(super) fn synthetic_instruction(
+    name: &str,
+    args: &[u64],
+    overrides: &[(&str, &str)],
+) -> Instruction {
     let idl = get_jupiter_earn_idl().unwrap();
     let idl_instruction = idl
         .instructions
@@ -446,7 +463,10 @@ fn test_mint_with_max_assets() {
         &[],
     ));
     assert_eq!(title_of(&layout), "Mint 50 jlUSDC on Jupiter Lend Earn");
-    assert_eq!(condensed_value(&layout, "Maximum paid").unwrap(), "52.5 USDC");
+    assert_eq!(
+        condensed_value(&layout, "Maximum paid").unwrap(),
+        "52.5 USDC"
+    );
 }
 
 #[test]
@@ -457,16 +477,30 @@ fn test_withdraw_with_max_shares_burn() {
         &[],
     ));
     assert_eq!(title_of(&layout), "Withdraw 10 USDC from Jupiter Lend Earn");
-    assert!(condensed_value(&layout, "Burn").unwrap().starts_with("jlUSDC"));
-    assert_eq!(condensed_value(&layout, "Maximum burned").unwrap(), "9.8 jlUSDC");
+    assert!(
+        condensed_value(&layout, "Burn")
+            .unwrap()
+            .starts_with("jlUSDC")
+    );
+    assert_eq!(
+        condensed_value(&layout, "Maximum burned").unwrap(),
+        "9.8 jlUSDC"
+    );
 }
 
 #[test]
 fn test_redeem() {
     let layout = visualize(&synthetic_instruction("redeem", &[1_500_000], &[]));
-    assert_eq!(title_of(&layout), "Redeem 1.5 jlUSDC from Jupiter Lend Earn");
+    assert_eq!(
+        title_of(&layout),
+        "Redeem 1.5 jlUSDC from Jupiter Lend Earn"
+    );
     assert_eq!(condensed_value(&layout, "Action").unwrap(), "Redeem");
-    assert!(condensed_value(&layout, "Receive").unwrap().starts_with("USDC"));
+    assert!(
+        condensed_value(&layout, "Receive")
+            .unwrap()
+            .starts_with("USDC")
+    );
 }
 
 #[test]
@@ -476,7 +510,10 @@ fn test_redeem_with_min_amount_out() {
         &[1_500_000, 1_490_000],
         &[],
     ));
-    assert_eq!(title_of(&layout), "Redeem 1.5 jlUSDC from Jupiter Lend Earn");
+    assert_eq!(
+        title_of(&layout),
+        "Redeem 1.5 jlUSDC from Jupiter Lend Earn"
+    );
     assert_eq!(
         condensed_value(&layout, "Minimum received").unwrap(),
         "1.49 USDC"
@@ -499,7 +536,10 @@ fn test_recipient_row_marks_the_signers_own_account() {
     let SignablePayloadField::AddressV2 { address_v2, .. } = recipient else {
         panic!("Recipient must be an address_v2");
     };
-    assert_eq!(address_v2.address, "678f85kKQLNkg6eNhnUmTRXk3Z4LCSKgsVAGW5KPtvq");
+    assert_eq!(
+        address_v2.address,
+        "678f85kKQLNkg6eNhnUmTRXk3Z4LCSKgsVAGW5KPtvq"
+    );
     assert_eq!(address_v2.name, "Signer's associated token account");
     assert_eq!(address_v2.badge_text, None);
 }
@@ -526,11 +566,11 @@ fn test_recipient_row_flags_a_third_party_account() {
     let SignablePayloadField::AddressV2 { address_v2, .. } = recipient else {
         panic!("Recipient must be an address_v2");
     };
-    assert_eq!(address_v2.address, instruction.accounts[2].pubkey.to_string());
     assert_eq!(
-        address_v2.name,
-        "Not the signer's associated token account"
+        address_v2.address,
+        instruction.accounts[2].pubkey.to_string()
     );
+    assert_eq!(address_v2.name, "Not the signer's associated token account");
     assert_eq!(address_v2.badge_text.as_deref(), Some("THIRD PARTY"));
 }
 
@@ -577,8 +617,15 @@ fn test_capped_withdraw_with_u64_max_renders_the_flagged_literal() {
         format!("Withdraw {LITERAL} from Jupiter Lend Earn")
     );
     assert_eq!(condensed_value(&layout, "Amount").unwrap(), LITERAL);
-    assert!(condensed_value(&layout, "Burn").unwrap().starts_with("jlUSDC"));
-    assert_eq!(condensed_value(&layout, "Maximum burned").unwrap(), "9.8 jlUSDC");
+    assert!(
+        condensed_value(&layout, "Burn")
+            .unwrap()
+            .starts_with("jlUSDC")
+    );
+    assert_eq!(
+        condensed_value(&layout, "Maximum burned").unwrap(),
+        "9.8 jlUSDC"
+    );
 }
 
 /// `u64::MAX` disables a cap, but it does not disable a floor: a minimum of
@@ -590,14 +637,20 @@ fn test_u64_max_bound_is_no_limit_only_for_maximums() {
         &[10_000_000, u64::MAX],
         &[],
     ));
-    assert_eq!(condensed_value(&layout, "Maximum burned").unwrap(), "no limit");
+    assert_eq!(
+        condensed_value(&layout, "Maximum burned").unwrap(),
+        "no limit"
+    );
 
     let layout = visualize(&synthetic_instruction(
         "mint_with_max_assets",
         &[50_000_000, u64::MAX],
         &[],
     ));
-    assert_eq!(condensed_value(&layout, "Maximum paid").unwrap(), "no limit");
+    assert_eq!(
+        condensed_value(&layout, "Maximum paid").unwrap(),
+        "no limit"
+    );
 
     let layout = visualize(&synthetic_instruction(
         "deposit_with_min_amount_out",

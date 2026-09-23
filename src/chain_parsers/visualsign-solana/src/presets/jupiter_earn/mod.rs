@@ -443,7 +443,10 @@ enum UserActionKind {
         min_receipt_out: Option<u64>,
     },
     /// `mint` / `mint_with_max_assets`: exact receipt out, assets in.
-    Mint { shares: u64, max_assets: Option<u64> },
+    Mint {
+        shares: u64,
+        max_assets: Option<u64>,
+    },
     /// `withdraw` / `withdraw_with_max_shares_burn`: exact assets out, receipt burned.
     Withdraw {
         amount: u64,
@@ -636,9 +639,7 @@ impl UserAction {
                     )?);
                 }
             }
-            UserActionKind::Redeem {
-                min_assets_out, ..
-            } => {
+            UserActionKind::Redeem { min_assets_out, .. } => {
                 fields.push(create_text_field(
                     "Receive",
                     &format!("{asset_symbol} {ESTIMATED}"),
@@ -766,7 +767,9 @@ fn build_user_action_condensed(
     ];
 
     if let Some(signer) = instruction.named_accounts.get("signer") {
-        fields.push(create_address_field("Signer", signer, None, None, None, None)?);
+        fields.push(create_address_field(
+            "Signer", signer, None, None, None, None,
+        )?);
     }
     fields.push(action.recipient.field()?);
 
@@ -846,11 +849,15 @@ mod tests {
     fn test_jupiter_earn_idl_has_discriminators() {
         let idl = get_jupiter_earn_idl().unwrap();
         for instruction in &idl.instructions {
-            let disc = instruction
-                .discriminator
-                .as_ref()
-                .unwrap_or_else(|| panic!("instruction {} missing discriminator", instruction.name));
-            assert_eq!(disc.len(), 8, "instruction {} discriminator", instruction.name);
+            let disc = instruction.discriminator.as_ref().unwrap_or_else(|| {
+                panic!("instruction {} missing discriminator", instruction.name)
+            });
+            assert_eq!(
+                disc.len(),
+                8,
+                "instruction {} discriminator",
+                instruction.name
+            );
         }
     }
 
