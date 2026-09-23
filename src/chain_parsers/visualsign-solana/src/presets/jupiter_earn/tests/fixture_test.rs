@@ -295,6 +295,65 @@ fn test_unresolved_mint_keeps_generic_view() {
     assert!(mint.starts_with("unresolved("), "expanded view keeps the placeholder: {mint}");
 }
 
+/// An unresolved `recipient_token_account` is treated like an unresolved
+/// mint: no address can be shown or classified, so the instruction keeps the
+/// generic view.
+#[test]
+fn test_unresolved_recipient_keeps_generic_view() {
+    let instruction = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let mut data = InstructionTestContext::from_instruction(&instruction);
+    data.compiled_mut().accounts[2] = 200; // `recipient_token_account`
+    let field = JupiterEarnVisualizer
+        .visualize_tx_commands(&data.context())
+        .unwrap();
+    let SignablePayloadField::PreviewLayout { preview_layout, .. } = field.signable_payload_field
+    else {
+        panic!("expected preview_layout");
+    };
+
+    assert_eq!(title_of(&preview_layout), "Jupiter Lend Earn: deposit");
+    assert!(condensed_value(&preview_layout, "Recipient").is_none());
+    assert!(condensed_value(&preview_layout, "Amount").is_none());
+    let recipient = find_value(&preview_layout, "recipient_token_account").unwrap();
+    assert!(
+        recipient.starts_with("unresolved("),
+        "expanded view keeps the placeholder: {recipient}"
+    );
+}
+
+/// When the token program is unresolved the recipient cannot be classified.
+/// The row must not look safer than a checked third party: it is badged.
+#[test]
+fn test_unverifiable_recipient_is_badged() {
+    let instruction = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let mut data = InstructionTestContext::from_instruction(&instruction);
+    data.compiled_mut().accounts[14] = 200; // `token_program`
+    let field = JupiterEarnVisualizer
+        .visualize_tx_commands(&data.context())
+        .unwrap();
+    let SignablePayloadField::PreviewLayout { preview_layout, .. } = field.signable_payload_field
+    else {
+        panic!("expected preview_layout");
+    };
+
+    assert_eq!(
+        title_of(&preview_layout),
+        "Deposit 414.122446 USDC to Jupiter Lend Earn"
+    );
+    let condensed = preview_layout.condensed.as_ref().expect("condensed view");
+    let recipient = condensed
+        .fields
+        .iter()
+        .map(|f| &f.signable_payload_field)
+        .find(|f| f.label() == "Recipient")
+        .expect("Recipient row");
+    let SignablePayloadField::AddressV2 { address_v2, .. } = recipient else {
+        panic!("Recipient must be an address_v2");
+    };
+    assert_eq!(address_v2.name, "Ownership not verified");
+    assert_eq!(address_v2.badge_text.as_deref(), Some("UNVERIFIED"));
+}
+
 /// Admin instructions are not user actions: generic condensed view.
 #[test]
 fn test_admin_instruction_keeps_generic_view() {

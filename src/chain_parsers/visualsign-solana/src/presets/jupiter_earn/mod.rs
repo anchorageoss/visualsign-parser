@@ -141,6 +141,11 @@ impl InstructionVisualizer for JupiterEarnVisualizer {
             return None;
         }
         let action = UserAction::from_parsed(&parsed)?;
+        // The hoisted rows are what an approver reads first; an unverifiable
+        // recipient must not be promoted there.
+        if action.recipient.ownership == RecipientOwnership::Unknown {
+            return None;
+        }
         let fields = action
             .summary_fields(&view.program_id, &parsed.parsed.instruction_name)
             .ok()?;
@@ -353,7 +358,9 @@ enum RecipientOwnership {
     /// Not the signer's associated token account: a third party, or a
     /// signer-owned auxiliary account (flagged anyway, see above).
     Other,
-    /// An input was unresolved or not a valid pubkey; nothing is claimed.
+    /// The signer or token program was unresolved or not a valid pubkey. The
+    /// row is badged UNVERIFIED so it never looks safer than a checked third
+    /// party, and the instruction proposes no transaction summary.
     Unknown,
 }
 
@@ -367,11 +374,17 @@ struct Recipient {
 }
 
 impl Recipient {
+    /// `None` when the account is missing or an unresolved lookup-table
+    /// placeholder: like the mints, a placeholder is not an address, so the
+    /// instruction falls back to the generic view.
     fn from_named_accounts(
         named_accounts: &BTreeMap<String, String>,
         received_mint: &str,
     ) -> Option<Self> {
         let account = named_accounts.get("recipient_token_account")?.clone();
+        if is_unresolved_placeholder(&account) {
+            return None;
+        }
         let ownership = match (
             named_accounts.get("signer"),
             named_accounts.get("token_program"),
@@ -410,7 +423,7 @@ impl Recipient {
                 Some("Not the signer's associated token account"),
                 Some("THIRD PARTY"),
             ),
-            RecipientOwnership::Unknown => (None, None),
+            RecipientOwnership::Unknown => (Some("Ownership not verified"), Some("UNVERIFIED")),
         };
         create_address_field("Recipient", &self.account, name, None, None, badge)
     }
@@ -419,7 +432,7 @@ impl Recipient {
 /// A user-facing Jupiter Lend Earn action, decoded from a parsed instruction.
 struct UserAction {
     asset: LendAsset,
-    recipient: Option<Recipient>,
+    recipient: Recipient,
     kind: UserActionKind,
 }
 
@@ -444,24 +457,44 @@ enum UserActionKind {
 }
 
 impl UserAction {
+    /// `None` for admin instructions and for anything that does not decode
+    /// fully: a missing amount, a missing bound on a `*_with_*` variant, an
+    /// unresolved mint or recipient. Those keep the generic view rather than
+    /// rendering as a lesser instruction.
     fn from_parsed(instruction: &JupiterEarnParsedInstruction) -> Option<Self> {
         let args = &instruction.parsed.program_call_args;
         let kind = match instruction.parsed.instruction_name.as_str() {
-            "deposit" | "deposit_with_min_amount_out" => UserActionKind::Deposit {
+            "deposit" => UserActionKind::Deposit {
                 assets: u64_arg(args, "assets")?,
-                min_receipt_out: u64_arg(args, "min_amount_out"),
+                min_receipt_out: None,
             },
-            "mint" | "mint_with_max_assets" => UserActionKind::Mint {
+            "deposit_with_min_amount_out" => UserActionKind::Deposit {
+                assets: u64_arg(args, "assets")?,
+                min_receipt_out: Some(u64_arg(args, "min_amount_out")?),
+            },
+            "mint" => UserActionKind::Mint {
                 shares: u64_arg(args, "shares")?,
-                max_assets: u64_arg(args, "max_assets"),
+                max_assets: None,
             },
-            "withdraw" | "withdraw_with_max_shares_burn" => UserActionKind::Withdraw {
+            "mint_with_max_assets" => UserActionKind::Mint {
+                shares: u64_arg(args, "shares")?,
+                max_assets: Some(u64_arg(args, "max_assets")?),
+            },
+            "withdraw" => UserActionKind::Withdraw {
                 amount: u64_arg(args, "amount")?,
-                max_shares_burn: u64_arg(args, "max_shares_burn"),
+                max_shares_burn: None,
             },
-            "redeem" | "redeem_with_min_amount_out" => UserActionKind::Redeem {
+            "withdraw_with_max_shares_burn" => UserActionKind::Withdraw {
+                amount: u64_arg(args, "amount")?,
+                max_shares_burn: Some(u64_arg(args, "max_shares_burn")?),
+            },
+            "redeem" => UserActionKind::Redeem {
                 shares: u64_arg(args, "shares")?,
-                min_assets_out: u64_arg(args, "min_amount_out"),
+                min_assets_out: None,
+            },
+            "redeem_with_min_amount_out" => UserActionKind::Redeem {
+                shares: u64_arg(args, "shares")?,
+                min_assets_out: Some(u64_arg(args, "min_amount_out")?),
             },
             _ => return None,
         };
@@ -473,7 +506,7 @@ impl UserAction {
             UserActionKind::Withdraw { .. } | UserActionKind::Redeem { .. } => Denomination::Asset,
         };
         let recipient =
-            Recipient::from_named_accounts(&instruction.named_accounts, asset.mint(received));
+            Recipient::from_named_accounts(&instruction.named_accounts, asset.mint(received))?;
         Some(Self {
             asset,
             recipient,
@@ -642,9 +675,7 @@ impl UserAction {
             )?,
             self.amount_field()?,
         ];
-        if let Some(recipient) = &self.recipient {
-            fields.push(recipient.field()?);
-        }
+        fields.push(self.recipient.field()?);
         fields.push(create_text_field("Instruction", instruction_name)?);
         fields.extend(self.leg_fields()?);
         Ok(fields)
@@ -737,9 +768,7 @@ fn build_user_action_condensed(
     if let Some(signer) = instruction.named_accounts.get("signer") {
         fields.push(create_address_field("Signer", signer, None, None, None, None)?);
     }
-    if let Some(recipient) = &action.recipient {
-        fields.push(recipient.field()?);
-    }
+    fields.push(action.recipient.field()?);
 
     fields.push(action.mint_field("Asset", Denomination::Asset)?);
     fields.push(action.amount_field()?);
@@ -784,6 +813,28 @@ mod tests {
     use super::*;
     mod fixture_test;
     mod summary_test;
+
+    /// A `*_with_*` variant whose bound fails to decode must not render like
+    /// the unbounded instruction: it is a parse failure and keeps the generic
+    /// view.
+    #[test]
+    fn test_missing_bound_on_with_variant_is_a_parse_failure() {
+        let instruction = fixture_test::synthetic_instruction(
+            "deposit_with_min_amount_out",
+            &[10_000_000, 9_000_000],
+            &[],
+        );
+        let accounts: Vec<String> = instruction
+            .accounts
+            .iter()
+            .map(|a| a.pubkey.to_string())
+            .collect();
+        let mut parsed = parse_jupiter_earn_instruction(&instruction.data, &accounts).unwrap();
+        assert!(UserAction::from_parsed(&parsed).is_some());
+
+        parsed.parsed.program_call_args.remove("min_amount_out");
+        assert!(UserAction::from_parsed(&parsed).is_none());
+    }
 
     #[test]
     fn test_jupiter_earn_idl_loads() {

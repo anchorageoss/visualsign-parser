@@ -199,6 +199,27 @@ fn test_ata_creation_for_another_wallet_keeps_default_title() {
     assert_no_summary(&payload, "Solana Transaction");
 }
 
+/// An associated-token-account creation paid for by a second signer spends
+/// that signer's lamports, not the fee payer's. That is not infrastructure.
+#[test]
+fn test_ata_creation_funded_by_another_signer_keeps_default_title() {
+    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let payer = deposit.accounts[0].pubkey;
+    let f_token_mint = deposit.accounts[6].pubkey;
+    let other_funder = Pubkey::new_unique();
+    let create_ata =
+        spl_associated_token_account::instruction::create_associated_token_account_idempotent(
+            &other_funder,
+            &payer,
+            &f_token_mint,
+            &spl_token::id(),
+        );
+
+    let payload = payload_for(&[create_ata, deposit], &payer);
+
+    assert_no_summary(&payload, "Solana Transaction");
+}
+
 /// A deposit bundled with a token transfer to someone else is two actions.
 /// Naming it after the deposit alone would hide the transfer from the title,
 /// so the default title and layout are kept.
@@ -334,6 +355,54 @@ fn test_v0_deposit_with_mints_in_lookup_table_keeps_default_title() {
     assert!(
         titles.iter().any(|t| t == "Jupiter Lend Earn: deposit"),
         "instruction must fall back to the generic view, got {titles:?}"
+    );
+}
+
+/// A v0 deposit whose recipient token account sits in a lookup table cannot
+/// be shown or classified. Same outcome as an unresolved mint: default title,
+/// no hoisted rows, generic instruction view.
+#[test]
+fn test_v0_deposit_with_recipient_in_lookup_table_keeps_default_title() {
+    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let payer = deposit.accounts[0].pubkey;
+    let recipient = deposit.accounts[2].pubkey;
+    let table = AddressLookupTableAccount {
+        key: Pubkey::new_unique(),
+        addresses: vec![recipient],
+    };
+
+    let payload = payload_from_b64(&v0_transaction_b64(&[deposit], &payer, &[table]));
+
+    assert_no_summary(&payload, "Solana V0 Transaction");
+    let titles = preview_titles(&payload);
+    assert!(
+        titles.iter().any(|t| t == "Jupiter Lend Earn: deposit"),
+        "instruction must fall back to the generic view, got {titles:?}"
+    );
+}
+
+/// A v0 deposit whose token program sits in a lookup table leaves the
+/// recipient unverifiable. The instruction still renders semantically, but
+/// it proposes no summary: the unverified recipient is not hoisted.
+#[test]
+fn test_v0_deposit_with_unverifiable_recipient_keeps_default_title() {
+    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let payer = deposit.accounts[0].pubkey;
+    let token_program = deposit.accounts[14].pubkey;
+    let table = AddressLookupTableAccount {
+        key: Pubkey::new_unique(),
+        addresses: vec![token_program],
+    };
+
+    let payload = payload_from_b64(&v0_transaction_b64(&[deposit], &payer, &[table]));
+
+    assert_no_summary(&payload, "Solana V0 Transaction");
+    let titles = preview_titles(&payload);
+    assert!(
+        titles
+            .iter()
+            .any(|t| t == "Deposit 414.122446 USDC to Jupiter Lend Earn"),
+        "instruction keeps its semantic view, got {titles:?}"
     );
 }
 

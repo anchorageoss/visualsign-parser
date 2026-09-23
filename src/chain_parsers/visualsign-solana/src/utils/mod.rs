@@ -137,11 +137,16 @@ pub fn lookup_token(mint: &str) -> Option<TokenInfo> {
 
 /// Shortens a base58 address for display when no symbol is known:
 /// `EPjFWdd5...` becomes `EPjF...Dt1v`.
+/// "abcd...wxyz" for anything longer than `ADDRESS_TRUNCATION_LENGTH` bytes.
+/// Slices only on char boundaries: an input that cannot be cut cleanly (not a
+/// base58 address) comes back whole instead of panicking.
 pub fn truncate_address(address: &str) -> String {
-    if address.len() > ADDRESS_TRUNCATION_LENGTH {
-        format!("{}...{}", &address[0..4], &address[address.len() - 4..])
-    } else {
-        address.to_string()
+    if address.len() <= ADDRESS_TRUNCATION_LENGTH {
+        return address.to_string();
+    }
+    match (address.get(..4), address.get(address.len() - 4..)) {
+        (Some(head), Some(tail)) => format!("{head}...{tail}"),
+        _ => address.to_string(),
     }
 }
 
@@ -220,6 +225,19 @@ pub fn get_token_info(address: &str, amount: u64) -> SwapTokenInfo {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_truncate_address() {
+        assert_eq!(
+            truncate_address("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
+            "EPjF...Dt1v"
+        );
+        assert_eq!(truncate_address("short"), "short");
+        // Multi-byte input must not panic on a byte-index slice. A cut that
+        // would land inside a char returns the input whole; a clean cut works.
+        assert_eq!(truncate_address("abcéfghijklmn"), "abcéfghijklmn");
+        assert_eq!(truncate_address("abcdéfghijkl"), "abcd...ijkl");
+    }
 
     #[test]
     fn test_format_token_amount_typical_decimals() {
