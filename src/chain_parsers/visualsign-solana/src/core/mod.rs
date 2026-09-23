@@ -235,16 +235,30 @@ pub struct InstructionView {
     pub accounts: Vec<String>,
 }
 
+/// Display placeholder for an account or program index that does not resolve
+/// against the static `account_keys` (address-lookup-table entries, or an
+/// out-of-bounds index).
+pub fn unresolved_placeholder(raw_index: u8) -> String {
+    format!("unresolved({raw_index})")
+}
+
+/// True when `account` is a placeholder from [`unresolved_placeholder`] rather
+/// than a base58 pubkey. Presets that key semantics off an account (a mint, an
+/// authority) must treat such accounts as unknown, never as an address.
+pub fn is_unresolved_placeholder(account: &str) -> bool {
+    account.starts_with("unresolved(")
+}
+
 impl InstructionView {
     pub fn from_context(context: &VisualizerContext) -> Self {
         let program_id = match context.program_id() {
             ProgramRef::Resolved(pk) => pk.to_string(),
-            ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
+            ProgramRef::Unresolved { raw_index } => unresolved_placeholder(raw_index),
         };
         let accounts = (0..context.num_accounts())
             .map(|i| match context.account(i) {
                 Some(AccountRef::Resolved(pk)) => pk.to_string(),
-                Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
+                Some(AccountRef::Unresolved { raw_index }) => unresolved_placeholder(raw_index),
                 // `i` is in `0..num_accounts()`, so this arm is unreachable in
                 // practice, but we keep a total fallback to preserve infallibility.
                 None => format!("unresolved(oob:{i})"),

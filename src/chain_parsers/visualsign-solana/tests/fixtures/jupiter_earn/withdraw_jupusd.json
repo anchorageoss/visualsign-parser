@@ -1,0 +1,132 @@
+{
+  "description": "Jupiter Lend Earn withdraw of 26.177479 JupUSD (mainnet)",
+  "source": "https://solscan.io/tx/65z2qbDMmJsV1g3e1LCuBa9FZrkG2NyzhfQxBKy6BDB7GBSN9Aectc3uCNrtcBBNUFvdy6VHWQNw8Qj3uwEUcKaw",
+  "signature": "65z2qbDMmJsV1g3e1LCuBa9FZrkG2NyzhfQxBKy6BDB7GBSN9Aectc3uCNrtcBBNUFvdy6VHWQNw8Qj3uwEUcKaw",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "Single-instruction legacy transaction: [0] Jupiter Lend Earn withdraw.",
+  "instruction_index": 0,
+  "instruction_data": "PcB3tF1KHa2MDG3KfBFJRV",
+  "program_id": "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9",
+  "accounts": [
+    {
+      "pubkey": "AZEJ91o9yePr2unmzzdEWZPYc5Bi9zJDcEsHsFxp68k1",
+      "signer": true,
+      "writable": true,
+      "description": "signer"
+    },
+    {
+      "pubkey": "5mR5aZDFLh2oRgVhHsBJZPVHvxnJjdfzASNs9KHvViXN",
+      "signer": false,
+      "writable": true,
+      "description": "owner_token_account"
+    },
+    {
+      "pubkey": "3yoAi6qLny1h3fE2pcG7npaQmzXqGVtWyajnyKxzhmkE",
+      "signer": false,
+      "writable": true,
+      "description": "recipient_token_account"
+    },
+    {
+      "pubkey": "5nmGjA4s7ATzpBQXC5RNceRpaJ7pYw2wKsNBWyuSAZV6",
+      "signer": false,
+      "writable": false,
+      "description": "lending_admin"
+    },
+    {
+      "pubkey": "papYEgeG5uPE4niUWZhihUUzVVotJn1mAWbYo2UBSHi",
+      "signer": false,
+      "writable": true,
+      "description": "lending"
+    },
+    {
+      "pubkey": "JuprjznTrTSp2UFa3ZBUFgwdAmtZCq4MQCwysN55USD",
+      "signer": false,
+      "writable": false,
+      "description": "mint"
+    },
+    {
+      "pubkey": "7GxATsNMnaC88vdwd2t3mwrFuQwwGvmYPrUQ4D6FotXk",
+      "signer": false,
+      "writable": true,
+      "description": "f_token_mint"
+    },
+    {
+      "pubkey": "2tQE8jVR5ezDw3PDa21BNzfyQ14Ug5cTf6n3swJNjkod",
+      "signer": false,
+      "writable": true,
+      "description": "supply_token_reserves_liquidity"
+    },
+    {
+      "pubkey": "DXFoJruECdEch2KpzLQ2cSpxoBSsyg4bpYPnHYofsbD4",
+      "signer": false,
+      "writable": true,
+      "description": "lending_supply_position_on_liquidity"
+    },
+    {
+      "pubkey": "2hT44GA9r5PiqsbbmqN5CuF7ymtquoEdokRncAs9CVej",
+      "signer": false,
+      "writable": false,
+      "description": "rate_model"
+    },
+    {
+      "pubkey": "9kGqd5zsQGaFfFPdUuEgbRM4V7x72Jdt7WTS4uRouAQ7",
+      "signer": false,
+      "writable": true,
+      "description": "vault"
+    },
+    {
+      "pubkey": "6q9vTzAsTMEPUCwuhEdJSJdpRNXnubwKZbi2go1B8nvg",
+      "signer": false,
+      "writable": true,
+      "description": "claim_account"
+    },
+    {
+      "pubkey": "7s1da8DduuBFqGra5bJBjpnvL5E9mGzCuMk1Qkh4or2Z",
+      "signer": false,
+      "writable": true,
+      "description": "liquidity"
+    },
+    {
+      "pubkey": "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC",
+      "signer": false,
+      "writable": false,
+      "description": "liquidity_program"
+    },
+    {
+      "pubkey": "E3U32h49TL9Qof3NeLja9qJxTrGYpY1o1NQPtrSLJjcc",
+      "signer": false,
+      "writable": false,
+      "description": "rewards_rate_model"
+    },
+    {
+      "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "signer": false,
+      "writable": false,
+      "description": "token_program"
+    },
+    {
+      "pubkey": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "signer": false,
+      "writable": false,
+      "description": "associated_token_program"
+    },
+    {
+      "pubkey": "11111111111111111111111111111111",
+      "signer": false,
+      "writable": false,
+      "description": "system_program"
+    }
+  ],
+  "expected_title": "Withdraw 26.177479 JupUSD from Jupiter Lend Earn",
+  "expected_fields": {
+    "instruction": "withdraw",
+    "discriminator": "b712469c946da122",
+    "action": "Withdraw",
+    "amount": "26.177479",
+    "mint": "JuprjznTrTSp2UFa3ZBUFgwdAmtZCq4MQCwysN55USD",
+    "f_token_mint": "7GxATsNMnaC88vdwd2t3mwrFuQwwGvmYPrUQ4D6FotXk",
+    "signer": "AZEJ91o9yePr2unmzzdEWZPYc5Bi9zJDcEsHsFxp68k1",
+    "claim_account": "6q9vTzAsTMEPUCwuhEdJSJdpRNXnubwKZbi2go1B8nvg",
+    "raw_data": "b712469c946da122c76f8f0100000000"
+  }
+}

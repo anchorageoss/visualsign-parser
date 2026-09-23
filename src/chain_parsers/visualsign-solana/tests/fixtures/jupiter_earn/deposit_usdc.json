@@ -1,0 +1,126 @@
+{
+  "description": "Jupiter Lend Earn deposit of 414.122446 USDC (mainnet)",
+  "source": "https://solscan.io/tx/4YNKV2kZQv51KQNEkURiUP6G3VFSQWM7avb1GDWbMSU6g4maX4otftDvibRN8sPjiKhqm2QUzJrsRAJ45wEd1Vvp",
+  "signature": "4YNKV2kZQv51KQNEkURiUP6G3VFSQWM7avb1GDWbMSU6g4maX4otftDvibRN8sPjiKhqm2QUzJrsRAJ45wEd1Vvp",
+  "cluster": "mainnet-beta",
+  "full_transaction_note": "3 instructions: [0-1] ComputeBudget, [2] Jupiter Lend Earn deposit. Testing instruction [2].",
+  "instruction_index": 2,
+  "instruction_data": "WuE7HjnsyebPzo2hk43BpK",
+  "program_id": "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9",
+  "accounts": [
+    {
+      "pubkey": "DASPvsk4Pt7o3kRKdJGc33Bv43F6Wdx96zsPaqoD3nV1",
+      "signer": true,
+      "writable": true,
+      "description": "signer"
+    },
+    {
+      "pubkey": "GE8BTcoV5T3SfWmQUB9A3hKhi5RiFmMbmffyux3xWoRL",
+      "signer": false,
+      "writable": true,
+      "description": "depositor_token_account"
+    },
+    {
+      "pubkey": "678f85kKQLNkg6eNhnUmTRXk3Z4LCSKgsVAGW5KPtvq",
+      "signer": false,
+      "writable": true,
+      "description": "recipient_token_account"
+    },
+    {
+      "pubkey": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "signer": false,
+      "writable": false,
+      "description": "mint"
+    },
+    {
+      "pubkey": "5nmGjA4s7ATzpBQXC5RNceRpaJ7pYw2wKsNBWyuSAZV6",
+      "signer": false,
+      "writable": false,
+      "description": "lending_admin"
+    },
+    {
+      "pubkey": "2vVYHYM8VYnvZqQWpTJSj8o8DBf1wM8pVs3bsTgYZiqJ",
+      "signer": false,
+      "writable": true,
+      "description": "lending"
+    },
+    {
+      "pubkey": "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D",
+      "signer": false,
+      "writable": true,
+      "description": "f_token_mint"
+    },
+    {
+      "pubkey": "94vK29npVbyRHXH63rRcTiSr26SFhrQTzbpNJuhQEDu",
+      "signer": false,
+      "writable": true,
+      "description": "supply_token_reserves_liquidity"
+    },
+    {
+      "pubkey": "Hf9gtkM4dpVBahVSzEXSVCAPpKzBsBcns3s8As3z77oF",
+      "signer": false,
+      "writable": true,
+      "description": "lending_supply_position_on_liquidity"
+    },
+    {
+      "pubkey": "5pjzT5dFTsXcwixoab1QDLvZQvpYJxJeBphkyfHGn688",
+      "signer": false,
+      "writable": false,
+      "description": "rate_model"
+    },
+    {
+      "pubkey": "BmkUoKMFYBxNSzWXyUjyMJjMAaVz4d8ZnxwwmhDCUXFB",
+      "signer": false,
+      "writable": true,
+      "description": "vault"
+    },
+    {
+      "pubkey": "7s1da8DduuBFqGra5bJBjpnvL5E9mGzCuMk1Qkh4or2Z",
+      "signer": false,
+      "writable": true,
+      "description": "liquidity"
+    },
+    {
+      "pubkey": "jupeiUmn818Jg1ekPURTpr4mFo29p46vygyykFJ3wZC",
+      "signer": false,
+      "writable": false,
+      "description": "liquidity_program"
+    },
+    {
+      "pubkey": "5xSPBiD3TibamAnwHDhZABdB4z4F9dcj5PnbteroBTTd",
+      "signer": false,
+      "writable": false,
+      "description": "rewards_rate_model"
+    },
+    {
+      "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "signer": false,
+      "writable": false,
+      "description": "token_program"
+    },
+    {
+      "pubkey": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+      "signer": false,
+      "writable": false,
+      "description": "associated_token_program"
+    },
+    {
+      "pubkey": "11111111111111111111111111111111",
+      "signer": false,
+      "writable": false,
+      "description": "system_program"
+    }
+  ],
+  "expected_title": "Deposit 414.122446 USDC to Jupiter Lend Earn",
+  "expected_fields": {
+    "instruction": "deposit",
+    "discriminator": "f223c68952e1f2b6",
+    "action": "Deposit",
+    "amount": "414.122446",
+    "assets": "414122446",
+    "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "f_token_mint": "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D",
+    "signer": "DASPvsk4Pt7o3kRKdJGc33Bv43F6Wdx96zsPaqoD3nV1",
+    "raw_data": "f223c68952e1f2b6ce01af1800000000"
+  }
+}

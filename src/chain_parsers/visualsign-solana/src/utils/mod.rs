@@ -66,7 +66,83 @@ pub fn get_token_lookup_table() -> BTreeMap<&'static str, TokenInfo> {
         },
     );
 
+    // The entries below were verified on 2026-09-23 against mainnet
+    // `getTokenSupply` (decimals) and the Jupiter token list
+    // (`https://lite-api.jup.ag/tokens/v2/search?query=<mint>`, symbol/name).
+
+    // USDG (Global Dollar, Token-2022)
+    tokens.insert(
+        "2u1tszSeqZ3qBWF3uNGPFc8TzMk2tdiwknnRMWGWjGWH",
+        TokenInfo {
+            symbol: "USDG",
+            name: "Global Dollar",
+            decimals: 6,
+        },
+    );
+
+    // JupUSD (Jupiter USD)
+    tokens.insert(
+        "JuprjznTrTSp2UFa3ZBUFgwdAmtZCq4MQCwysN55USD",
+        TokenInfo {
+            symbol: "JupUSD",
+            name: "Jupiter USD",
+            decimals: 6,
+        },
+    );
+
+    // Jupiter Lend Earn receipt tokens (fTokens), one per lending market. The
+    // mint is derived by the program from the underlying asset mint, so these
+    // are stable identifiers.
+    tokens.insert(
+        "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D",
+        TokenInfo {
+            symbol: "jlUSDC",
+            name: "Jupiter Lend USDC",
+            decimals: 6,
+        },
+    );
+    tokens.insert(
+        "Cmn4v2wipYV41dkakDvCgFJpxhtaaKt11NyWV8pjSE8A",
+        TokenInfo {
+            symbol: "jlUSDT",
+            name: "Jupiter Lend USDT",
+            decimals: 6,
+        },
+    );
+    tokens.insert(
+        "9fvHrYNw1A8Evpcj7X2yy4k4fT7nNHcA9L6UsamNHAif",
+        TokenInfo {
+            symbol: "jlUSDG",
+            name: "Jupiter Lend USDG",
+            decimals: 6,
+        },
+    );
+    // The JupUSD market's receipt token is listed as JUICED, not "jlJupUSD".
+    tokens.insert(
+        "7GxATsNMnaC88vdwd2t3mwrFuQwwGvmYPrUQ4D6FotXk",
+        TokenInfo {
+            symbol: "JUICED",
+            name: "JUICED",
+            decimals: 6,
+        },
+    );
+
     tokens
+}
+
+/// Looks a mint up in the static token table.
+pub fn lookup_token(mint: &str) -> Option<TokenInfo> {
+    get_token_lookup_table().get(mint).cloned()
+}
+
+/// Shortens a base58 address for display when no symbol is known:
+/// `EPjFWdd5...` becomes `EPjF...Dt1v`.
+pub fn truncate_address(address: &str) -> String {
+    if address.len() > ADDRESS_TRUNCATION_LENGTH {
+        format!("{}...{}", &address[0..4], &address[address.len() - 4..])
+    } else {
+        address.to_string()
+    }
 }
 
 /// Helper function to format token amounts.
@@ -127,11 +203,7 @@ pub fn get_token_info(address: &str, amount: u64) -> SwapTokenInfo {
         }
     } else {
         // Unknown token - show truncated address
-        let truncated = if address.len() > ADDRESS_TRUNCATION_LENGTH {
-            format!("{}...{}", &address[0..4], &address[address.len() - 4..])
-        } else {
-            address.to_string()
-        };
+        let truncated = truncate_address(address);
 
         SwapTokenInfo {
             address: address.to_string(),
@@ -190,7 +262,11 @@ mod tests {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 pub mod test_utils {
+    use crate::core::VisualizerContext;
     use crate::transaction_string_to_visual_sign;
+    use solana_parser::solana::structs::SolanaAccount;
+    use solana_sdk::instruction::{CompiledInstruction, Instruction};
+    use solana_sdk::pubkey::Pubkey;
     use visualsign::SignablePayload;
     use visualsign::vsptrait::VisualSignOptions;
 
@@ -206,6 +282,60 @@ pub mod test_utils {
             },
         )
         .expect("Failed to visualize tx commands")
+    }
+
+    /// Owned wire data for one `VisualizerContext`: the instruction's program
+    /// at `account_keys[0]`, its accounts after it, and the first instruction
+    /// account as the sender. Presets' instruction-level tests build contexts
+    /// from a resolved `Instruction` through this instead of hand-rolling it.
+    pub struct InstructionTestContext {
+        sender: SolanaAccount,
+        compiled: CompiledInstruction,
+        account_keys: Vec<Pubkey>,
+        registry: crate::idl::IdlRegistry,
+    }
+
+    impl InstructionTestContext {
+        pub fn from_instruction(instruction: &Instruction) -> Self {
+            let mut account_keys = vec![instruction.program_id];
+            account_keys.extend(instruction.accounts.iter().map(|m| m.pubkey));
+            let compiled = CompiledInstruction {
+                program_id_index: 0,
+                accounts: (1..=instruction.accounts.len() as u8).collect(),
+                data: instruction.data.clone(),
+            };
+            let sender = SolanaAccount {
+                account_key: instruction
+                    .accounts
+                    .first()
+                    .map(|m| m.pubkey.to_string())
+                    .unwrap_or_default(),
+                signer: true,
+                writable: true,
+            };
+            Self {
+                sender,
+                compiled,
+                account_keys,
+                registry: crate::idl::IdlRegistry::new(),
+            }
+        }
+
+        /// The compiled instruction, for tests that need to point an account
+        /// at an index outside `account_keys` (an unresolved ALT entry).
+        pub fn compiled_mut(&mut self) -> &mut CompiledInstruction {
+            &mut self.compiled
+        }
+
+        pub fn context(&self) -> VisualizerContext<'_> {
+            VisualizerContext::new(
+                &self.sender,
+                &self.compiled,
+                &self.account_keys,
+                &self.registry,
+                0,
+            )
+        }
     }
 
     pub fn assert_has_field(payload: &SignablePayload, label: &str) {
