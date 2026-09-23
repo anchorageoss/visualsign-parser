@@ -107,27 +107,26 @@ pub struct SolanaIntermediateInstruction {
     pub idl_parse_error: Option<SolanaIdlParseError>,
     /// Where `program_key` was registered, if at all -- see [`RegisteredSource`].
     pub registered_source: RegisteredSource,
-    /// Decode of a native runtime or core SPL program instruction (System, SPL
-    /// Token/Token-2022, ATA, Memo, Stake, Vote, Address Lookup Table, the BPF
-    /// loaders), made by the parser itself in Solana's `jsonParsed` format --
-    /// the same format as a simulated instruction's `solana_rpc_parsed_data`,
-    /// but not returned by an RPC node. `None` for other programs, and when
-    /// `native_parse_error` is set.
-    pub native_parsed_data: Option<SolanaNativeParsedInstructionDataIo>,
-    /// Why an instruction of a `Native` program has no `native_parsed_data`:
+    /// Decode by Solana's own `jsonParsed` decoder (`solana_transaction_status`),
+    /// run by the parser, of a `Native` program instruction it supports
+    /// (System, SPL Token/Token-2022, ATA, Memo, Stake, Vote, Address Lookup
+    /// Table, the BPF loaders). `None` for non-`Native` programs, and when
+    /// `solana_json_parse_error` is set.
+    pub solana_json_parsed_data: Option<SolanaJsonParsedInstructionDataIo>,
+    /// Why an instruction of a `Native` program has no `solana_json_parsed_data`:
     /// Solana's jsonParsed decoder does not support the program (e.g. Compute
     /// Budget, SPL Stake Pool), the instruction reads an account through an
     /// address lookup table, or the decoder rejected it (e.g. an instruction
     /// newer than the decoder). `None` when it was decoded or the program is
     /// not `Native`, so a native instruction is never left undecoded silently.
-    pub native_parse_error: Option<String>,
+    pub solana_json_parse_error: Option<String>,
 }
 
 /// Where a program ID was recognized. Decodability is a separate question --
 /// `system`, `spl_token`, `token_2022`, `compute_budget`,
 /// `associated_token_account`, `stakepool` and `swig_wallet` are all registered
-/// and ship no IDL -- so read `parsed_instruction_data`, `native_parsed_data`,
-/// `solana_rpc_parsed_data`, `idl_parse_error` and `native_parse_error` for
+/// and ship no IDL -- so read `parsed_instruction_data`, `solana_json_parsed_data`,
+/// `solana_rpc_parsed_data`, `idl_parse_error` and `solana_json_parse_error` for
 /// that.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegisteredSource {
@@ -232,11 +231,10 @@ pub struct SolanaRpcParsedInstructionDataIo {
     pub parsed_json: String,
 }
 
-/// The parser's own decode of a top-level native program instruction, in the
-/// same `jsonParsed` format as [`SolanaRpcParsedInstructionDataIo`] but not
-/// returned by an RPC node.
+/// A top-level instruction decoded by Solana's own `jsonParsed` decoder, run
+/// by the parser.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SolanaNativeParsedInstructionDataIo {
+pub struct SolanaJsonParsedInstructionDataIo {
     /// The decoder's program name, e.g. `system`, `spl-token`.
     pub program: String,
     /// Canonical JSON, keys alphabetized at every level. `{"info":..,"type":..}`
@@ -431,7 +429,8 @@ fn build_intermediate_instruction(
 ) -> SolanaIntermediateInstruction {
     let registered_source =
         crate::idl::builtin_programs::registered_source(&value.program_key, caller_idl_program_ids);
-    let (native_parsed_data, native_parse_error) = decode_native_parsed(value, registered_source);
+    let (solana_json_parsed_data, solana_json_parse_error) =
+        decode_solana_json_parsed(value, registered_source);
     SolanaIntermediateInstruction {
         program_key: value.program_key.clone(),
         accounts: value.accounts.iter().map(SolanaAccount::from).collect(),
@@ -450,17 +449,15 @@ fn build_intermediate_instruction(
             .idl_parse_error
             .as_ref()
             .map(SolanaIdlParseError::from),
-        native_parsed_data,
-        native_parse_error,
+        solana_json_parsed_data,
+        solana_json_parse_error,
     }
 }
 
 /// Decodes a top-level instruction with Solana's own `jsonParsed` decoder
-/// (`solana_transaction_status`), the one an RPC node applies to the
-/// simulated inner instructions carried in `solana_rpc_parsed_data`. It
-/// covers System, SPL Token/Token-2022, ATA, Memo, Stake, Vote, Address
-/// Lookup Table and the BPF loaders; the result is passed through as-is, so a
-/// top-level instruction reads exactly like the same call arriving as a CPI.
+/// (`solana_transaction_status`). It covers System, SPL Token/Token-2022, ATA,
+/// Memo, Stake, Vote, Address Lookup Table and the BPF loaders; the result is
+/// passed through as-is.
 ///
 /// Only instructions whose program is [`RegisteredSource::Native`] ever reach
 /// the decoder; every other program returns `(None, None)` untouched. For a
@@ -472,24 +469,24 @@ fn build_intermediate_instruction(
 ///   apart from the static ones, so their positions can't be reconstructed);
 /// - the decoder rejected the instruction (WARN, as that means a gap in the
 ///   decoder or a malformed instruction).
-fn decode_native_parsed(
+fn decode_solana_json_parsed(
     value: &parser::SolanaInstruction,
     registered_source: RegisteredSource,
-) -> (Option<SolanaNativeParsedInstructionDataIo>, Option<String>) {
+) -> (Option<SolanaJsonParsedInstructionDataIo>, Option<String>) {
     if registered_source != RegisteredSource::Native {
         return (None, None);
     }
-    let program_id = match Pubkey::from_str(&value.program_key) {
-        Ok(program_id) => program_id,
-        // Unreachable: every native program ID is a valid pubkey. Reported
-        // rather than dropped all the same.
-        Err(e) => return (None, Some(format!("invalid program key: {e}"))),
-    };
-    if !native_decoder_covers(&program_id) {
+    if !SOLANA_JSON_PARSED_PROGRAMS.contains(&value.program_key.as_str()) {
         let error = "program not supported by Solana's jsonParsed decoder".to_string();
         tracing::debug!(program_key = %value.program_key, %error, "native instruction not decoded");
         return (None, Some(error));
     }
+    let program_id = match Pubkey::from_str(&value.program_key) {
+        Ok(program_id) => program_id,
+        // Unreachable: every listed program ID is a valid pubkey. Reported
+        // rather than dropped all the same.
+        Err(e) => return (None, Some(format!("invalid program key: {e}"))),
+    };
 
     if !value.address_table_lookups.is_empty() {
         let error = "instruction reads an account through an address lookup table".to_string();
@@ -505,30 +502,30 @@ fn decode_native_parsed(
     }
 }
 
-/// Whether Solana's `jsonParsed` decoder handles native program `program_id`.
-/// `parse` looks the program up before reading the instruction, so a probe
-/// with no accounts and no data answers that alone.
-fn native_decoder_covers(program_id: &Pubkey) -> bool {
-    use solana_transaction_status::parse_instruction::{ParseInstructionError, parse};
+/// The `Native` programs Solana's `jsonParsed` decoder supports; only their
+/// instructions are passed to it. Kept in step with the decoder by
+/// `solana_json_parsed_programs_match_the_decoder`, which fails when a
+/// `solana-transaction-status` upgrade adds or drops a program.
+const SOLANA_JSON_PARSED_PROGRAMS: &[&str] = &[
+    "11111111111111111111111111111111",             // System
+    "AddressLookupTab1e1111111111111111111111111",  // Address Lookup Table
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", // Associated Token Account
+    "BPFLoader2111111111111111111111111111111111",  // BPF Loader v2
+    "BPFLoaderUpgradeab1e11111111111111111111111",  // BPF Loader Upgradeable
+    "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo",  // SPL Memo v1
+    "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",  // SPL Memo
+    "Stake11111111111111111111111111111111111111",  // Stake
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",  // SPL Token
+    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",  // SPL Token-2022
+    "Vote111111111111111111111111111111111111111",  // Vote
+];
 
-    let probe = CompiledInstruction {
-        program_id_index: 0,
-        accounts: vec![],
-        data: vec![],
-    };
-    let keys = AccountKeys::new(std::slice::from_ref(program_id), None);
-    !matches!(
-        parse(program_id, &probe, &keys, None),
-        Err(ParseInstructionError::ProgramNotParsable)
-    )
-}
-
-/// Decodes an instruction of a program [`native_decoder_covers`], whose
-/// accounts are all static.
+/// Decodes an instruction of a program in [`SOLANA_JSON_PARSED_PROGRAMS`],
+/// whose accounts are all static.
 fn decode_covered_instruction(
     value: &parser::SolanaInstruction,
     program_id: Pubkey,
-) -> Result<SolanaNativeParsedInstructionDataIo, String> {
+) -> Result<SolanaJsonParsedInstructionDataIo, String> {
     use solana_transaction_status::parse_instruction::parse;
 
     // Rebuild a self-contained instruction: account `i` is key `i`, and the
@@ -567,7 +564,7 @@ fn decode_covered_instruction(
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(SolanaNativeParsedInstructionDataIo {
+    Ok(SolanaJsonParsedInstructionDataIo {
         program: decoded.program,
         parsed_json: canonicalize_value(&decoded.parsed).to_string(),
     })
@@ -1299,15 +1296,15 @@ mod tests {
         assert!(io.parsed_instruction_data.is_none(), "no IDL was used");
         assert!(io.idl_parse_error.is_none());
         assert_eq!(
-            io.native_parsed_data,
-            Some(SolanaNativeParsedInstructionDataIo {
+            io.solana_json_parsed_data,
+            Some(SolanaJsonParsedInstructionDataIo {
                 program: "system".to_string(),
                 parsed_json: format!(
                     r#"{{"info":{{"destination":"{destination}","lamports":1001,"source":"{source}"}},"type":"transfer"}}"#
                 ),
             })
         );
-        assert!(io.native_parse_error.is_none());
+        assert!(io.solana_json_parse_error.is_none());
 
         let bytes = borsh::to_vec(&io).expect("borsh serializes");
         let recovered: SolanaIntermediateInstruction =
@@ -1328,7 +1325,7 @@ mod tests {
             &data,
         );
 
-        let (decoded, error) = decode_native_parsed(&instruction, RegisteredSource::Native);
+        let (decoded, error) = decode_solana_json_parsed(&instruction, RegisteredSource::Native);
         assert_eq!(error, None);
         let decoded = decoded.expect("transferChecked decodes");
 
@@ -1348,7 +1345,7 @@ mod tests {
         let instruction =
             static_instruction("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr", &[], b"hello");
 
-        let (decoded, error) = decode_native_parsed(&instruction, RegisteredSource::Native);
+        let (decoded, error) = decode_solana_json_parsed(&instruction, RegisteredSource::Native);
         assert_eq!(error, None);
         let decoded = decoded.expect("memo decodes");
 
@@ -1368,20 +1365,55 @@ mod tests {
             &[0x02, 0x40, 0x0d, 0x03, 0x00],
         );
         assert_eq!(
-            decode_native_parsed(&compute_budget, RegisteredSource::Native),
+            decode_solana_json_parsed(&compute_budget, RegisteredSource::Native),
             unsupported
         );
         let stake_pool =
             static_instruction("SPoo1Ku8WFXoNDMHPsrGSTSG1Y47rzgn41SLUNakuHy", &[], &[0x0e]);
         assert_eq!(
-            decode_native_parsed(&stake_pool, RegisteredSource::Native),
+            decode_solana_json_parsed(&stake_pool, RegisteredSource::Native),
             unsupported
         );
 
         let dapp = static_instruction(&Pubkey::new_unique().to_string(), &[], &[0x01]);
         assert_eq!(
-            decode_native_parsed(&dapp, RegisteredSource::Unregistered),
+            decode_solana_json_parsed(&dapp, RegisteredSource::Unregistered),
             (None, None)
+        );
+    }
+
+    /// Asks the real decoder about every `Native` program: the ones it supports
+    /// must be exactly `SOLANA_JSON_PARSED_PROGRAMS`. `parse` looks the program
+    /// up before reading the instruction, so an empty probe answers that alone.
+    #[test]
+    fn solana_json_parsed_programs_match_the_decoder() {
+        use solana_transaction_status::parse_instruction::{ParseInstructionError, parse};
+
+        let supported_by_decoder: Vec<&str> = crate::idl::builtin_programs::NATIVE_PROGRAM_NAMES
+            .iter()
+            .map(|(id, _)| *id)
+            .filter(|id| {
+                let program_id = Pubkey::from_str(id).unwrap();
+                let probe = CompiledInstruction {
+                    program_id_index: 0,
+                    accounts: vec![],
+                    data: vec![],
+                };
+                let keys = AccountKeys::new(std::slice::from_ref(&program_id), None);
+                !matches!(
+                    parse(&program_id, &probe, &keys, None),
+                    Err(ParseInstructionError::ProgramNotParsable)
+                )
+            })
+            .collect();
+
+        let mut listed = SOLANA_JSON_PARSED_PROGRAMS.to_vec();
+        let mut supported = supported_by_decoder;
+        listed.sort_unstable();
+        supported.sort_unstable();
+        assert_eq!(
+            listed, supported,
+            "SOLANA_JSON_PARSED_PROGRAMS is out of step with the jsonParsed decoder"
         );
     }
 
@@ -1397,7 +1429,7 @@ mod tests {
             &[0x02, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
         );
         assert!(
-            decode_native_parsed(&transfer, RegisteredSource::Native)
+            decode_solana_json_parsed(&transfer, RegisteredSource::Native)
                 .0
                 .is_some()
         );
@@ -1408,7 +1440,7 @@ mod tests {
             RegisteredSource::Unregistered,
         ] {
             assert_eq!(
-                decode_native_parsed(&transfer, source),
+                decode_solana_json_parsed(&transfer, source),
                 (None, None),
                 "{source:?}"
             );
@@ -1421,7 +1453,7 @@ mod tests {
 
         // The System decoder rejects unknown instruction data.
         let garbage = static_instruction("11111111111111111111111111111111", &[&account], &[0xff]);
-        let (decoded, error) = decode_native_parsed(&garbage, RegisteredSource::Native);
+        let (decoded, error) = decode_solana_json_parsed(&garbage, RegisteredSource::Native);
         assert!(decoded.is_none());
         assert_eq!(error.as_deref(), Some("System instruction not parsable"));
 
@@ -1431,7 +1463,7 @@ mod tests {
             &[&account],
             &[0x02, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
         );
-        let (decoded, error) = decode_native_parsed(&short, RegisteredSource::Native);
+        let (decoded, error) = decode_solana_json_parsed(&short, RegisteredSource::Native);
         assert!(decoded.is_none());
         assert_eq!(error.as_deref(), Some("System instruction key mismatch"));
 
@@ -1449,9 +1481,9 @@ mod tests {
                 writable: true,
             });
         let io = build_intermediate_instruction(&via_alt, &BTreeMap::new());
-        assert!(io.native_parsed_data.is_none());
+        assert!(io.solana_json_parsed_data.is_none());
         assert_eq!(
-            io.native_parse_error.as_deref(),
+            io.solana_json_parse_error.as_deref(),
             Some("instruction reads an account through an address lookup table")
         );
     }
