@@ -552,7 +552,7 @@ fn decode_covered_instruction(
     let instruction = CompiledInstruction {
         program_id_index,
         accounts,
-        data: hex::decode(&value.instruction_data_hex)
+        data: visualsign::encodings::decode_hex(&value.instruction_data_hex)
             .map_err(|e| format!("invalid instruction data hex: {e}"))?,
     };
 
