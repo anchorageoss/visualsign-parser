@@ -99,27 +99,12 @@ pub enum SolanaTransactionWrapper {
 ///
 /// Unknown fields are refused rather than ignored: an envelope carrying
 /// something this build does not understand is not one it can claim to have
-/// rendered in full.
+/// rendered in full. A repeated field is refused the same way: a JSON object
+/// with the same key twice has no single value to render, so accepting
+/// whichever one a generic parser happened to keep would let a signer approve
+/// a message that was never the one shown.
 fn message_from_envelope(json: &str) -> Result<OffChainMessage, String> {
-    let value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let object = value.as_object().ok_or("envelope is not a JSON object")?;
-    for key in object.keys() {
-        if key != "message" && key != "signerAddress" {
-            return Err(format!("unexpected field {key:?}"));
-        }
-    }
-    let field = |name: &str| -> Result<String, String> {
-        object
-            .get(name)
-            .ok_or_else(|| format!("envelope has no {name} field"))?
-            .as_str()
-            .map(str::to_string)
-            .ok_or_else(|| format!("{name} is not a string"))
-    };
-    Ok(OffChainMessage {
-        message: field("message")?,
-        signer_address: field("signerAddress")?,
-    })
+    serde_json::from_str(json).map_err(|e| e.to_string())
 }
 
 /// An off-chain message envelope, after the fields are lifted out.
@@ -131,6 +116,58 @@ fn message_from_envelope(json: &str) -> Result<OffChainMessage, String> {
 pub struct OffChainMessage {
     pub message: String,
     pub signer_address: String,
+}
+
+impl<'de> serde::Deserialize<'de> for OffChainMessage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct EnvelopeVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for EnvelopeVisitor {
+            type Value = OffChainMessage;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a Solana off-chain message envelope")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut message: Option<String> = None;
+                let mut signer_address: Option<String> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "message" if message.is_none() => message = Some(map.next_value()?),
+                        "signerAddress" if signer_address.is_none() => {
+                            signer_address = Some(map.next_value()?);
+                        }
+                        "message" | "signerAddress" => {
+                            return Err(serde::de::Error::custom(format!(
+                                "duplicate field {key:?}"
+                            )));
+                        }
+                        other => {
+                            return Err(serde::de::Error::custom(format!(
+                                "unexpected field {other:?}"
+                            )));
+                        }
+                    }
+                }
+                Ok(OffChainMessage {
+                    message: message
+                        .ok_or_else(|| serde::de::Error::custom("envelope has no message field"))?,
+                    signer_address: signer_address.ok_or_else(|| {
+                        serde::de::Error::custom("envelope has no signerAddress field")
+                    })?,
+                })
+            }
+        }
+
+        deserializer.deserialize_map(EnvelopeVisitor)
+    }
 }
 
 /// Escape what cannot render, rather than dropping it or collapsing it.
@@ -2744,9 +2781,10 @@ mod solana_message_tests {
     fn a_transaction_still_decodes_as_a_transaction() {
         // A minimal legacy transaction: one signature, an empty message body.
         let tx_b64 = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-        let decoded = SolanaTransactionWrapper::from_string(tx_b64);
+        let decoded = SolanaTransactionWrapper::from_string(tx_b64)
+            .expect("a valid base64 transaction must still decode");
         assert!(
-            decoded.is_err() || decoded.unwrap().inner_message().is_none(),
+            decoded.inner_message().is_none(),
             "base64 input must never be read as a message envelope"
         );
     }
@@ -2763,6 +2801,24 @@ mod solana_message_tests {
         };
         assert!(
             message.contains("extra"),
+            "the refusal must name the field: {message}"
+        );
+    }
+
+    /// A JSON object with the same key twice has no single value to render. A
+    /// generic parser resolves it to whichever value it happened to keep,
+    /// which would let a signer approve a message that was never the one
+    /// shown, so it is refused rather than silently resolved.
+    #[test]
+    fn duplicate_envelope_fields_are_refused() {
+        let result = SolanaTransactionWrapper::from_string(
+            r#"{"message":"A","message":"B","signerAddress":"x"}"#,
+        );
+        let Err(TransactionParseError::DecodeError(message)) = result else {
+            panic!("expected a DecodeError for a duplicate field");
+        };
+        assert!(
+            message.contains("message"),
             "the refusal must name the field: {message}"
         );
     }
