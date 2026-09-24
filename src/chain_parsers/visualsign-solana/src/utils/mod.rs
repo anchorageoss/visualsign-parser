@@ -90,26 +90,6 @@ pub fn get_token_lookup_table() -> BTreeMap<&'static str, TokenInfo> {
         },
     );
 
-    // LOCAL TEST ONLY -- DO NOT COMMIT. Anchorage Solana regnet test token
-    // (ANC_SOLANA_R) and its derived Jupiter Lend receipt mint, so the local
-    // compose stack renders normalized amounts.
-    tokens.insert(
-        "FMnpFRyzcuHAnNRHmUKh83kiU7fN55e6RdUxyGes16sv",
-        TokenInfo {
-            symbol: "ANC",
-            name: "Anchorcoin on Solana Regnet",
-            decimals: 9,
-        },
-    );
-    tokens.insert(
-        "6UkQCLqFAXD6hwuAtUoSD3zJZDN1qs1ipJqwpt3XF9Pe",
-        TokenInfo {
-            symbol: "jlANC",
-            name: "Jupiter Lend ANC (regnet, derived)",
-            decimals: 9,
-        },
-    );
-
     // Jupiter Lend Earn receipt tokens (fTokens), one per lending market. The
     // mint is derived by the program from the underlying asset mint, so these
     // are stable identifiers.
