@@ -110,8 +110,8 @@ impl BootProofSource for StaticBootProof {
 }
 
 /// Same six keys as a real proof, every value empty. `qosManifestB64` carries
-/// `pivotArgs` (including the X-Stamp allowlist), so 4xx responses, which any
-/// unauthenticated caller can trigger, get this instead.
+/// `pivotArgs` (including the X-Stamp allowlist), so every error response gets
+/// this instead and only a successful parse discloses the real proof.
 pub fn redacted_boot_proof() -> TurnkeyBootProof {
     TurnkeyBootProof {
         aws_attestation_doc_b64: String::new(),

@@ -169,13 +169,13 @@ async fn assert_boot_proof_response(
     value
 }
 
-/// 4xx responses are reachable without credentials, so they must not carry
-/// `qosManifestB64` (whose `pivotArgs` include the X-Stamp allowlist).
+/// Error responses must not carry `qosManifestB64` (whose `pivotArgs` include
+/// the X-Stamp allowlist); only a successful parse does.
 fn assert_redacted_boot_proof(value: &serde_json::Value) {
     let boot_proof = boot_proof_object(value);
     assert!(
         boot_proof.values().all(|v| v == ""),
-        "4xx bootProof must be redacted, got {boot_proof:?}"
+        "error bootProof must be redacted, got {boot_proof:?}"
     );
 }
 

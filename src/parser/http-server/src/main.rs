@@ -145,11 +145,10 @@ async fn parse_v1(
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
     let body = match body {
         Ok(b) => b,
-        Err(rejection) => return bytes_rejection_response(&state, &rejection),
+        Err(rejection) => return bytes_rejection_response(&rejection),
     };
     if !is_json_content_type(&headers) {
         return error_status(
-            &state,
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "expected content-type: application/json".to_string(),
         );
@@ -172,11 +171,10 @@ async fn parse_v2(
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
     let body = match body {
         Ok(b) => b,
-        Err(rejection) => return bytes_rejection_response(&state, &rejection),
+        Err(rejection) => return bytes_rejection_response(&rejection),
     };
     if !is_json_content_type(&headers) {
         return error_status(
-            &state,
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "expected content-type: application/json".to_string(),
         );
@@ -194,7 +192,6 @@ async fn parse_v2(
 /// axum implements `FromRequest` for `Result<T, T::Rejection>` precisely so
 /// extractor failures can still be handled inside the handler.
 fn bytes_rejection_response(
-    state: &AppState,
     rejection: &axum::extract::rejection::BytesRejection,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
     let status = rejection.status();
@@ -204,7 +201,7 @@ fn bytes_rejection_response(
     } else {
         "invalid request body".to_string()
     };
-    error_status(state, status, msg)
+    error_status(status, msg)
 }
 
 /// Mirrors axum's `Json<T>` extractor Content-Type check (`application/json`
@@ -235,17 +232,11 @@ fn parse_envelope(body: &[u8]) -> Result<TurnkeyRequestWrapper, serde_json::Erro
     serde_json::from_slice(body)
 }
 
-fn error_status(
-    state: &AppState,
-    status: StatusCode,
-    msg: String,
-) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
-    let boot_proof = if status.is_server_error() {
-        state.boot_proof.boot_proof()
-    } else {
-        boot_proof::redacted_boot_proof()
-    };
-    (status, Json(error_response(msg, boot_proof)))
+fn error_status(status: StatusCode, msg: String) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
+    (
+        status,
+        Json(error_response(msg, boot_proof::redacted_boot_proof())),
+    )
 }
 
 fn handle_parse(
@@ -263,7 +254,6 @@ fn handle_parse(
             // Deliberately coarse: the client learns "not authenticated",
             // not which check failed.
             return error_status(
-                state,
                 StatusCode::UNAUTHORIZED,
                 "invalid or missing X-Stamp".to_string(),
             );
@@ -284,11 +274,7 @@ fn handle_parse(
                 e.line(),
                 e.column()
             );
-            return error_status(
-                state,
-                StatusCode::BAD_REQUEST,
-                "invalid request body".to_string(),
-            );
+            return error_status(StatusCode::BAD_REQUEST, "invalid request body".to_string());
         }
     };
 
@@ -298,7 +284,7 @@ fn handle_parse(
         // forge log lines or amplify enclave logs. Drop the value entirely,
         // matching the other bounded-logging fixes in this file.
         eprintln!("unknown chain requested");
-        return error_status(state, StatusCode::BAD_REQUEST, "unknown chain".to_string());
+        return error_status(StatusCode::BAD_REQUEST, "unknown chain".to_string());
     };
 
     let proto_req = generated::parser::ParseRequest {
@@ -339,14 +325,13 @@ fn handle_parse(
                     )
                 }
             };
-            return error_status(state, http_status, msg);
+            return error_status(http_status, msg);
         }
     };
 
     let Some(parsed_tx) = proto_resp.parsed_transaction else {
         eprintln!("parse returned no parsed_transaction");
         return error_status(
-            state,
             StatusCode::INTERNAL_SERVER_ERROR,
             "parser_app returned no parsed_transaction".to_string(),
         );
@@ -354,7 +339,6 @@ fn handle_parse(
     let Some(payload) = parsed_tx.payload else {
         eprintln!("parse returned no payload");
         return error_status(
-            state,
             StatusCode::INTERNAL_SERVER_ERROR,
             "parser_app returned no payload".to_string(),
         );
@@ -390,15 +374,14 @@ fn handle_parse(
 
 /// `Router::fallback` target for unmatched routes. axum only calls this when
 /// no route matched.
-async fn not_found_fallback(State(state): State<AppState>) -> Response {
-    error_status(&state, StatusCode::NOT_FOUND, "not found".to_string()).into_response()
+async fn not_found_fallback() -> Response {
+    error_status(StatusCode::NOT_FOUND, "not found".to_string()).into_response()
 }
 
 /// `Router::method_not_allowed_fallback` target for a matched path called
 /// with an unsupported method.
-async fn method_not_allowed_fallback(State(state): State<AppState>) -> Response {
+async fn method_not_allowed_fallback() -> Response {
     error_status(
-        &state,
         StatusCode::METHOD_NOT_ALLOWED,
         "method not allowed".to_string(),
     )
@@ -641,24 +624,15 @@ mod tests {
     }
 
     #[test]
-    fn error_status_discloses_boot_proof_only_on_server_errors() {
-        let state = test_app_state();
-
-        let (_, Json(resp)) = error_status(
-            &state,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal error".to_string(),
-        );
-        assert!(!resp.boot_proof.qos_manifest_b64.is_empty());
-        assert!(!resp.boot_proof.ephemeral_public_key_hex.is_empty());
-
+    fn error_status_always_redacts_boot_proof() {
         for status in [
             StatusCode::BAD_REQUEST,
             StatusCode::UNAUTHORIZED,
             StatusCode::NOT_FOUND,
             StatusCode::PAYLOAD_TOO_LARGE,
+            StatusCode::INTERNAL_SERVER_ERROR,
         ] {
-            let (_, Json(resp)) = error_status(&state, status, "x".to_string());
+            let (_, Json(resp)) = error_status(status, "x".to_string());
             assert_redacted(&resp.boot_proof);
         }
     }
@@ -691,9 +665,7 @@ mod tests {
     // fixed messages.
     #[tokio::test]
     async fn fallbacks_carry_their_own_fixed_message_and_redacted_boot_proof() {
-        let state = test_app_state();
-
-        let not_found = not_found_fallback(State(state.clone())).await;
+        let not_found = not_found_fallback().await;
         assert_eq!(not_found.status(), StatusCode::NOT_FOUND);
         let body = axum::body::to_bytes(not_found.into_body(), usize::MAX)
             .await
@@ -702,7 +674,7 @@ mod tests {
         assert_eq!(value.get("error").unwrap(), "not found");
         assert_redacted(&serde_json::from_value(value["bootProof"].clone()).unwrap());
 
-        let method_not_allowed = method_not_allowed_fallback(State(state)).await;
+        let method_not_allowed = method_not_allowed_fallback().await;
         assert_eq!(method_not_allowed.status(), StatusCode::METHOD_NOT_ALLOWED);
         let body = axum::body::to_bytes(method_not_allowed.into_body(), usize::MAX)
             .await

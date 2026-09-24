@@ -187,7 +187,7 @@ pub fn verify(headers: &HeaderMap, body: &[u8], allowlist: &Allowlist) -> Result
     // allowlist membership, so a listed and an unlisted candidate cost the
     // same DER parsing, curve validation and ECDSA verification. The
     // allowlist lives in `pivotArgs`, which `bootProof.qosManifestB64` only
-    // carries on 2xx/5xx responses, and a caller can only reach those after
+    // carries on a successful parse, and a caller can only reach that after
     // passing this check.
     let (curve, sig_ok) = match stamp.scheme.as_str() {
         SCHEME_P256 => {
