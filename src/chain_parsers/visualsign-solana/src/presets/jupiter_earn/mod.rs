@@ -141,9 +141,12 @@ impl InstructionVisualizer for JupiterEarnVisualizer {
             return None;
         }
         let action = UserAction::from_parsed(&parsed)?;
-        // The hoisted rows are what an approver reads first; an unverifiable
-        // recipient must not be promoted there.
-        if action.recipient.ownership == RecipientOwnership::Unknown {
+        // The hoisted title and rows are what an approver reads first, so they are
+        // reserved for the case they describe: value staying with the signer. A payout
+        // or receipt to any other account keeps the default title, and the instruction's
+        // own view carries the badged Recipient row. This matches the infrastructure
+        // rule, which already withholds the summary for a third-party ATA rent payment.
+        if action.recipient.ownership != RecipientOwnership::Signer {
             return None;
         }
         let fields = action
@@ -174,16 +177,23 @@ fn parse_jupiter_earn_instruction(
     let idl = get_jupiter_earn_idl().ok_or("Jupiter Lend Earn IDL not available")?;
     let parsed = parse_instruction_with_idl(data, JUPITER_EARN_PROGRAM_ID, idl)?;
 
-    let named_accounts = build_named_accounts(data, idl, accounts);
+    let (named_accounts, accounts_complete) = build_named_accounts(data, idl, accounts);
 
     Ok(JupiterEarnParsedInstruction {
         parsed,
         named_accounts,
+        accounts_complete,
     })
 }
 
-fn build_named_accounts(data: &[u8], idl: &Idl, accounts: &[String]) -> BTreeMap<String, String> {
+/// Maps the instruction's accounts onto the IDL's account names by position, and
+/// reports whether every IDL account was supplied. Anchor lets a client omit trailing
+/// optional accounts; with fewer accounts than the IDL lists, positions after the
+/// omission would carry the wrong names, so callers must not read this map as
+/// semantic when `complete` is false.
+fn build_named_accounts(data: &[u8], idl: &Idl, accounts: &[String]) -> (BTreeMap<String, String>, bool) {
     let mut named_accounts = BTreeMap::new();
+    let mut complete = false;
 
     let idl_instruction = idl.instructions.iter().find(|inst| {
         inst.discriminator
@@ -192,6 +202,7 @@ fn build_named_accounts(data: &[u8], idl: &Idl, accounts: &[String]) -> BTreeMap
     });
 
     if let Some(idl_instruction) = idl_instruction {
+        complete = accounts.len() >= idl_instruction.accounts.len();
         for (index, account_str) in accounts.iter().enumerate() {
             if let Some(idl_account) = idl_instruction.accounts.get(index) {
                 named_accounts.insert(idl_account.name.clone(), account_str.clone());
@@ -199,12 +210,15 @@ fn build_named_accounts(data: &[u8], idl: &Idl, accounts: &[String]) -> BTreeMap
         }
     }
 
-    named_accounts
+    (named_accounts, complete)
 }
 
 struct JupiterEarnParsedInstruction {
     parsed: SolanaParsedInstructionData,
     named_accounts: BTreeMap<String, String>,
+    /// False when the instruction carries fewer accounts than the IDL lists, in which
+    /// case `named_accounts` may be misaligned and no semantic view is derived.
+    accounts_complete: bool,
 }
 
 /// Which side of a lending position an amount is denominated in.
@@ -356,7 +370,8 @@ enum RecipientOwnership {
     /// The signer's own associated token account.
     Signer,
     /// Not the signer's associated token account: a third party, or a
-    /// signer-owned auxiliary account (flagged anyway, see above).
+    /// signer-owned auxiliary account (flagged anyway, see above). No
+    /// transaction summary is proposed for it.
     Other,
     /// The signer or token program was unresolved or not a valid pubkey. The
     /// row is badged UNVERIFIED so it never looks safer than a checked third
@@ -461,10 +476,14 @@ enum UserActionKind {
 
 impl UserAction {
     /// `None` for admin instructions and for anything that does not decode
-    /// fully: a missing amount, a missing bound on a `*_with_*` variant, an
-    /// unresolved mint or recipient. Those keep the generic view rather than
+    /// fully: fewer accounts than the IDL lists (positional names would be
+    /// misaligned), a missing amount, a missing bound on a `*_with_*` variant,
+    /// an unresolved mint or recipient. Those keep the generic view rather than
     /// rendering as a lesser instruction.
     fn from_parsed(instruction: &JupiterEarnParsedInstruction) -> Option<Self> {
+        if !instruction.accounts_complete {
+            return None;
+        }
         let args = &instruction.parsed.program_call_args;
         let kind = match instruction.parsed.instruction_name.as_str() {
             "deposit" => UserActionKind::Deposit {

@@ -2,7 +2,7 @@
 // user action names the whole payload (title, subtitle, hoisted rows), and
 // every case in which it must not.
 
-use super::fixture_test::{
+use super::fixture_test::{JL_USDC_MINT, USDC_MINT, 
     instruction_from_fixture, load_fixture, rendered_value, synthetic_instruction,
 };
 use super::*;
@@ -10,6 +10,7 @@ use crate::core::{SolanaTransactionWrapper, SolanaVisualSignConverter};
 use crate::intermediate::{RegisteredSource, SolanaIntermediateOutput};
 use crate::test_utils::payload_from_b64;
 use base64::Engine;
+use std::str::FromStr;
 use solana_sdk::{
     hash::Hash,
     instruction::Instruction,
@@ -237,6 +238,27 @@ fn test_ata_creation_for_another_wallet_keeps_default_title() {
     assert_no_summary(&payload, "Solana Transaction");
 }
 
+/// A withdraw paying out to an account that is not the signer's associated token
+/// account is not summarized: the top-level title is reserved for value staying
+/// with the signer. The instruction keeps its semantic view with the badged row.
+#[test]
+fn test_third_party_recipient_keeps_default_title() {
+    let mut withdraw = instruction_from_fixture(&load_fixture("withdraw_jupusd"));
+    let payer = withdraw.accounts[0].pubkey;
+    withdraw.accounts[2].pubkey = Pubkey::new_unique(); // `recipient_token_account`
+
+    let payload = payload_for(&[withdraw], &payer);
+
+    assert_no_summary(&payload, "Solana Transaction");
+    let titles = preview_titles(&payload);
+    assert!(
+        titles
+            .iter()
+            .any(|t| t == "Withdraw 26.177479 JupUSD from Jupiter Lend Earn"),
+        "instruction keeps its semantic view, got {titles:?}"
+    );
+}
+
 /// An associated-token-account creation paid for by a second signer spends
 /// that signer's lamports, not the fee payer's. That is not infrastructure.
 #[test]
@@ -450,11 +472,25 @@ fn test_v0_deposit_with_unverifiable_recipient_keeps_default_title() {
 }
 
 /// Every instruction family that proposes a summary does so with its own
-/// wording; a renamed IDL argument would surface here as a default title.
+/// wording; a renamed IDL argument would surface here as a default title. The
+/// recipient is the signer's associated token account for the received mint,
+/// since any other recipient withholds the summary.
 #[test]
 fn test_each_user_action_family_proposes_a_summary() {
     let payer = Pubkey::new_unique();
+    let token_program = spl_token::id();
+    let own_ata = |mint: &str| {
+        spl_associated_token_account::get_associated_token_address_with_program_id(
+            &payer,
+            &Pubkey::from_str(mint).unwrap(),
+            &token_program,
+        )
+        .to_string()
+    };
+    let receipt_recipient = own_ata(JL_USDC_MINT);
+    let asset_recipient = own_ata(USDC_MINT);
     let signer = ("signer", payer.to_string());
+    let token_program_str = token_program.to_string();
     for (name, args, expected) in [
         (
             "deposit_with_min_amount_out",
@@ -487,7 +523,20 @@ fn test_each_user_action_family_proposes_a_summary() {
             "Redeem 1.5 jlUSDC from Jupiter Lend Earn",
         ),
     ] {
-        let instruction = synthetic_instruction(name, &args, &[(signer.0, signer.1.as_str())]);
+        let recipient = if name.starts_with("deposit") || name.starts_with("mint") {
+            receipt_recipient.as_str()
+        } else {
+            asset_recipient.as_str()
+        };
+        let instruction = synthetic_instruction(
+            name,
+            &args,
+            &[
+                (signer.0, signer.1.as_str()),
+                ("recipient_token_account", recipient),
+                ("token_program", token_program_str.as_str()),
+            ],
+        );
         let payload = payload_for(&[instruction], &payer);
         assert_eq!(payload.title, expected, "{name}");
         assert_eq!(

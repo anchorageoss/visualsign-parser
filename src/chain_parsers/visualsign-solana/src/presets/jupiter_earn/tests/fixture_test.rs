@@ -379,8 +379,8 @@ fn test_admin_instruction_keeps_generic_view() {
 // Instruction families without a fixture, assembled from the IDL.
 // ---------------------------------------------------------------------------
 
-const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const JL_USDC_MINT: &str = "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D";
+pub(super) const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+pub(super) const JL_USDC_MINT: &str = "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D";
 
 /// Builds `name` from the bundled IDL: its discriminator followed by the `u64`
 /// args in order, over one account per IDL account with `mint` and
@@ -572,6 +572,22 @@ fn test_recipient_row_flags_a_third_party_account() {
     );
     assert_eq!(address_v2.name, "Not the signer's associated token account");
     assert_eq!(address_v2.badge_text.as_deref(), Some("THIRD PARTY"));
+}
+
+/// Anchor lets a client omit trailing optional accounts. With fewer accounts than
+/// the IDL lists, positional naming would label the wrong pubkey (for example the
+/// wrong account as `token_program`), so the recipient check could misfire and a
+/// self-withdraw could be badged as third party. The instruction must keep the
+/// generic view instead.
+#[test]
+fn test_fewer_accounts_than_idl_keeps_generic_view() {
+    let mut instruction = instruction_from_fixture(&load_fixture("withdraw_jupusd"));
+    instruction.accounts.pop(); // drop the trailing `system_program`
+    let layout = visualize(&instruction);
+
+    assert_eq!(title_of(&layout), "Jupiter Lend Earn: withdraw");
+    assert!(condensed_value(&layout, "Recipient").is_none());
+    assert!(condensed_value(&layout, "Amount").is_none());
 }
 
 /// Only `withdraw(u64::MAX)` has verified sentinel semantics. Everywhere else
