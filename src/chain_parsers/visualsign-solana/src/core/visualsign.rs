@@ -831,6 +831,10 @@ mod tests {
     };
     use crate::test_utils::payload_from_b64;
     use crate::utils::create_transaction_with_empty_signatures;
+    use solana_sdk::compute_budget::ComputeBudgetInstruction;
+    use solana_sdk::instruction::{AccountMeta, Instruction};
+    use solana_sdk::message::Message;
+    use solana_system_interface::program as system_program;
 
     /// Test helper: run the converter and unwrap the `ConversionResult` to the
     /// `SignablePayload` these tests assert against. Intermediate output is
@@ -984,8 +988,18 @@ mod tests {
         );
         assert!(
             decoded.instructions[0].parsed_instruction_data.is_none(),
-            "top-level System transfer has no IDL match (native decode path, not IDL)"
+            "top-level System transfer has no IDL match"
         );
+        let native = decoded.instructions[0]
+            .solana_json_parsed_data
+            .as_ref()
+            .expect("top-level System transfer is jsonParsed-decoded");
+        assert_eq!(native.program, "system");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&native.parsed_json).expect("parsed_json is JSON");
+        assert_eq!(parsed["type"], "transfer");
+        assert_eq!(parsed["info"]["lamports"], 1_000_000_000u64);
+        assert!(decoded.instructions[0].solana_json_parse_error.is_none());
         assert_eq!(
             decoded.instructions[0].registered_source,
             RegisteredSource::Native,
@@ -1015,6 +1029,78 @@ mod tests {
     /// decode the message, `build_intermediate_bytes` must degrade to `None`
     /// rather than panic or surface an error, so the converter still returns
     /// the `SignablePayload` and policy degrades to "no metadata".
+    /// End to end through the converter for the error path: a Compute Budget
+    /// instruction (`Native`, but not supported by Solana's jsonParsed decoder)
+    /// next to a System transfer. The emitted Borsh bytes must carry the error
+    /// on the first instruction and the decode on the second.
+    #[test]
+    fn intermediate_output_reports_unsupported_native_program() {
+        let payer = Pubkey::new_unique();
+        let destination = Pubkey::new_unique();
+        // System `Transfer`: u32 tag 2, then the u64 lamports.
+        let mut transfer_data = vec![0x02, 0x00, 0x00, 0x00];
+        transfer_data.extend_from_slice(&1001u64.to_le_bytes());
+        let transfer = Instruction::new_with_bytes(
+            system_program::id(),
+            &transfer_data,
+            vec![
+                AccountMeta::new(payer, true),
+                AccountMeta::new(destination, false),
+            ],
+        );
+        let transaction = SolanaTransaction::new_unsigned(Message::new(
+            &[
+                ComputeBudgetInstruction::set_compute_unit_price(5_000),
+                transfer,
+            ],
+            Some(&payer),
+        ));
+        let options = VisualSignOptions {
+            include_intermediate_output: true,
+            decode_transfers: true,
+            transaction_name: Some("Solana Transaction".to_string()),
+            ..VisualSignOptions::default()
+        };
+
+        let result = SolanaVisualSignConverter
+            .to_visual_sign_payload(SolanaTransactionWrapper::new_legacy(transaction), options)
+            .expect("conversion succeeds with intermediate output opted in");
+        let bytes = result
+            .intermediate_output
+            .as_ref()
+            .expect("intermediate_output should be emitted");
+        let decoded: SolanaIntermediateOutput =
+            borsh::from_slice(bytes).expect("emitted bytes decode into the published schema");
+
+        assert_eq!(decoded.instructions.len(), 2);
+
+        let compute_budget = &decoded.instructions[0];
+        assert_eq!(
+            compute_budget.program_key,
+            "ComputeBudget111111111111111111111111111111"
+        );
+        assert_eq!(compute_budget.registered_source, RegisteredSource::Native);
+        assert!(compute_budget.solana_json_parsed_data.is_none());
+        assert_eq!(
+            compute_budget.solana_json_parse_error.as_deref(),
+            Some("program not supported by Solana's jsonParsed decoder")
+        );
+
+        let transfer = &decoded.instructions[1];
+        assert!(transfer.solana_json_parse_error.is_none());
+        let json_parsed = transfer
+            .solana_json_parsed_data
+            .as_ref()
+            .expect("System transfer is decoded");
+        assert_eq!(json_parsed.program, "system");
+        assert_eq!(
+            json_parsed.parsed_json,
+            format!(
+                r#"{{"info":{{"destination":"{destination}","lamports":1001,"source":"{payer}"}},"type":"transfer"}}"#
+            )
+        );
+    }
+
     #[test]
     fn build_intermediate_bytes_returns_none_on_undecodable() {
         // `deadbeef` is not a valid Solana message; the best-effort extract
