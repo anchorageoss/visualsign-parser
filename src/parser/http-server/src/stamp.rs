@@ -185,11 +185,10 @@ pub fn verify(headers: &HeaderMap, body: &[u8], allowlist: &Allowlist) -> Result
 
     // Run the full parse/verify path unconditionally, before deciding
     // allowlist membership, so a listed and an unlisted candidate cost the
-    // same DER parsing, curve validation and ECDSA verification. This is
-    // hygiene, not a secrecy guarantee: the allowlist lives in `pivotArgs`,
-    // which every response discloses via `bootProof.qosManifestB64` (see the
-    // PR's open question). It keeps the auth path from being the thing that
-    // leaks it, and holds if that disclosure is ever narrowed.
+    // same DER parsing, curve validation and ECDSA verification. The
+    // allowlist lives in `pivotArgs`, which `bootProof.qosManifestB64` only
+    // carries on 2xx/5xx responses, and a caller can only reach those after
+    // passing this check.
     let (curve, sig_ok) = match stamp.scheme.as_str() {
         SCHEME_P256 => {
             use p256::ecdsa::{DerSignature, VerifyingKey, signature::Verifier};

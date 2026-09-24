@@ -240,10 +240,12 @@ fn error_status(
     status: StatusCode,
     msg: String,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
-    (
-        status,
-        Json(error_response(msg, state.boot_proof.boot_proof())),
-    )
+    let boot_proof = if status.is_server_error() {
+        state.boot_proof.boot_proof()
+    } else {
+        boot_proof::redacted_boot_proof()
+    };
+    (status, Json(error_response(msg, boot_proof)))
 }
 
 fn handle_parse(
@@ -259,17 +261,11 @@ fn handle_parse(
             // itself would let an unauthenticated caller amplify enclave logs.
             eprintln!("rejected request: {}", e.kind());
             // Deliberately coarse: the client learns "not authenticated",
-            // not which check failed. Note this does not make the allowlist
-            // secret - it lives in `pivotArgs`, which this very response
-            // discloses via `bootProof.qosManifestB64` (see the PR's open
-            // question); it keeps the auth path from being a second, finer
-            // oracle on top of that.
-            return (
+            // not which check failed.
+            return error_status(
+                state,
                 StatusCode::UNAUTHORIZED,
-                Json(error_response(
-                    "invalid or missing X-Stamp".to_string(),
-                    state.boot_proof.boot_proof(),
-                )),
+                "invalid or missing X-Stamp".to_string(),
             );
         }
     }
@@ -616,7 +612,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn parse_v1_and_v2_reject_non_json_content_type_with_boot_proof() {
+    async fn parse_v1_and_v2_reject_non_json_content_type_with_redacted_boot_proof() {
         let raw = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02","include_intermediate_output":false}}"#;
         let body = axum::body::Bytes::from_static(raw);
         let headers = axum::http::HeaderMap::new(); // no Content-Type at all
@@ -625,13 +621,46 @@ mod tests {
             parse_v1(State(test_app_state()), headers.clone(), Ok(body)).await;
         assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
         assert!(resp.error.is_some());
-        assert!(!resp.boot_proof.ephemeral_public_key_hex.is_empty());
+        assert_redacted(&resp.boot_proof);
 
         let body = axum::body::Bytes::from_static(raw);
         let (status, Json(resp)) = parse_v2(State(test_app_state()), headers, Ok(body)).await;
         assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
         assert!(resp.error.is_some());
+        assert_redacted(&resp.boot_proof);
+    }
+
+    fn assert_redacted(bp: &host_primitives::turnkey::TurnkeyBootProof) {
+        let value = serde_json::to_value(bp).unwrap();
+        let fields = value.as_object().unwrap();
+        assert_eq!(fields.len(), 6);
+        assert!(
+            fields.values().all(|v| v == ""),
+            "bootProof not redacted: {value}"
+        );
+    }
+
+    #[test]
+    fn error_status_discloses_boot_proof_only_on_server_errors() {
+        let state = test_app_state();
+
+        let (_, Json(resp)) = error_status(
+            &state,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal error".to_string(),
+        );
+        assert!(!resp.boot_proof.qos_manifest_b64.is_empty());
         assert!(!resp.boot_proof.ephemeral_public_key_hex.is_empty());
+
+        for status in [
+            StatusCode::BAD_REQUEST,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::NOT_FOUND,
+            StatusCode::PAYLOAD_TOO_LARGE,
+        ] {
+            let (_, Json(resp)) = error_status(&state, status, "x".to_string());
+            assert_redacted(&resp.boot_proof);
+        }
     }
 
     #[test]
@@ -661,7 +690,7 @@ mod tests {
     // from one `handle_parse` might produce. This test pins the fallbacks'
     // fixed messages.
     #[tokio::test]
-    async fn fallbacks_carry_their_own_fixed_message_and_boot_proof() {
+    async fn fallbacks_carry_their_own_fixed_message_and_redacted_boot_proof() {
         let state = test_app_state();
 
         let not_found = not_found_fallback(State(state.clone())).await;
@@ -671,7 +700,7 @@ mod tests {
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value.get("error").unwrap(), "not found");
-        assert!(value.get("bootProof").is_some());
+        assert_redacted(&serde_json::from_value(value["bootProof"].clone()).unwrap());
 
         let method_not_allowed = method_not_allowed_fallback(State(state)).await;
         assert_eq!(method_not_allowed.status(), StatusCode::METHOD_NOT_ALLOWED);
@@ -680,6 +709,6 @@ mod tests {
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value.get("error").unwrap(), "method not allowed");
-        assert!(value.get("bootProof").is_some());
+        assert_redacted(&serde_json::from_value(value["bootProof"].clone()).unwrap());
     }
 }

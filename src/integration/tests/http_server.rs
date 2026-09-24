@@ -144,14 +144,15 @@ impl RunningServer {
     }
 }
 
-fn boot_proof_keys(value: &serde_json::Value) -> Vec<String> {
+fn boot_proof_object(value: &serde_json::Value) -> &serde_json::Map<String, serde_json::Value> {
     value
         .get("bootProof")
         .and_then(|v| v.as_object())
         .expect("response missing bootProof object")
-        .keys()
-        .cloned()
-        .collect()
+}
+
+fn boot_proof_keys(value: &serde_json::Value) -> Vec<String> {
+    boot_proof_object(value).keys().cloned().collect()
 }
 
 async fn assert_boot_proof_response(
@@ -164,7 +165,18 @@ async fn assert_boot_proof_response(
     let mut keys = boot_proof_keys(&value);
     keys.sort();
     assert_eq!(keys, expected_keys);
+    assert_redacted_boot_proof(&value);
     value
+}
+
+/// 4xx responses are reachable without credentials, so they must not carry
+/// `qosManifestB64` (whose `pivotArgs` include the X-Stamp allowlist).
+fn assert_redacted_boot_proof(value: &serde_json::Value) {
+    let boot_proof = boot_proof_object(value);
+    assert!(
+        boot_proof.values().all(|v| v == ""),
+        "4xx bootProof must be redacted, got {boot_proof:?}"
+    );
 }
 
 /// reqwest::Client::new() has no default request timeout, so a server that
@@ -230,6 +242,7 @@ async fn http_server_serves_health_parse_and_errors() {
     ];
     expected_keys.sort();
     assert_eq!(v1_boot_proof_keys, expected_keys);
+    assert_ne!(v1_value["bootProof"]["qosManifestB64"], "");
 
     // 3. v2 behaves identically to v1 (open in this PR).
     let v2 = client
@@ -281,7 +294,7 @@ async fn http_server_serves_health_parse_and_errors() {
          and the chain decode succeeds"
     );
 
-    // 4. A malformed body returns 400 with a bootProof present.
+    // 4. A malformed body returns 400 with a redacted bootProof.
     let malformed = client
         .post(format!("{}/visualsign/api/v1/parse", server.base_url))
         .header("content-type", "application/json")
@@ -291,7 +304,7 @@ async fn http_server_serves_health_parse_and_errors() {
         .expect("malformed request failed");
     assert_boot_proof_response(malformed, reqwest::StatusCode::BAD_REQUEST, &expected_keys).await;
 
-    // 5. An unmatched route still returns bootProof (axum's default 404
+    // 5. An unmatched route still returns a (redacted) bootProof (axum's default 404
     //    rejection would otherwise bypass the Turnkey envelope entirely).
     let not_found = client
         .get(format!("{}/not-a-real-route", server.base_url))
@@ -300,7 +313,7 @@ async fn http_server_serves_health_parse_and_errors() {
         .expect("not-found request failed");
     assert_boot_proof_response(not_found, reqwest::StatusCode::NOT_FOUND, &expected_keys).await;
 
-    // 6. A disallowed method on a real route still returns bootProof (axum's
+    // 6. A disallowed method on a real route still returns a (redacted) bootProof (axum's
     //    default 405 rejection would otherwise bypass the envelope too).
     let wrong_method = client
         .get(format!("{}/visualsign/api/v1/parse", server.base_url))
@@ -314,7 +327,7 @@ async fn http_server_serves_health_parse_and_errors() {
     )
     .await;
 
-    // 7. A body over the 64 KiB `PIVOT_BODY_LIMIT_BYTES` cap returns 413 with
+    // 7. A body over the 64 KiB `PIVOT_BODY_LIMIT_BYTES` cap returns 413 with a redacted
     //    bootProof. `parse_v1`/`parse_v2` take `Result<Bytes, BytesRejection>`
     //    instead of a bare `Bytes`, so axum's `DefaultBodyLimit` rejection
     //    (which would otherwise bypass the Turnkey envelope, same gap as the
@@ -396,10 +409,7 @@ async fn http_server_enforces_x_stamp_when_allowlist_is_configured() {
         );
         let unstamped_value: serde_json::Value =
             serde_json::from_str(&unstamped).expect("401 body was not valid JSON");
-        assert!(
-            unstamped_value.get("bootProof").is_some(),
-            "{route}: 401 response must still carry bootProof"
-        );
+        assert_redacted_boot_proof(&unstamped_value);
 
         let (status, unlisted) = post(route, stamp_from(&other)).await;
         assert_eq!(
@@ -426,7 +436,10 @@ async fn http_server_enforces_x_stamp_when_allowlist_is_configured() {
             "{route}: unstamped vs bad-signature 401"
         );
 
-        let (status, _) = post(route, stamp_from(&allowed)).await;
+        let (status, ok) = post(route, stamp_from(&allowed)).await;
         assert_eq!(status, reqwest::StatusCode::OK, "{route} listed");
+        let ok_value: serde_json::Value =
+            serde_json::from_str(&ok).expect("200 body was not valid JSON");
+        assert_ne!(ok_value["bootProof"]["qosManifestB64"], "");
     }
 }
