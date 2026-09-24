@@ -678,12 +678,8 @@ fn convert_to_visual_sign_payload(
     ))
 }
 
-/// Applies the instructions' agreed [`TransactionSummary`], if any, to the
-/// payload being built. A caller-supplied title always wins and disables the
-/// summary. Otherwise the summary names the transaction, and a From row for
-/// the fee payer plus the summary's rows are inserted right after Network, so
-/// the approver reads who signs and what for before the per-instruction detail.
-/// Transactions without a summary are untouched.
+/// Applies the adopted [`TransactionSummary`]: a caller-supplied title always wins; otherwise
+/// the summary names the transaction and a From row plus its rows are inserted after Network.
 fn apply_transaction_summary(
     fields: &mut Vec<SignablePayloadField>,
     caller_title: Option<String>,
@@ -694,10 +690,8 @@ fn apply_transaction_summary(
     if let Some(title) = caller_title {
         return Ok((title, None));
     }
-    // Title and rows travel together: without a fee payer there is no From row
-    // to anchor the hoisted rows, so the whole summary is dropped rather than
-    // leaving a title that the body does not back up. (Both decoders already
-    // return no summary for a message without account keys.)
+    // Without a fee payer there is no From row to anchor the hoisted rows, so the whole
+    // summary is dropped rather than leaving a title the body does not back up.
     let (Some(summary), Some(fee_payer)) = (summary, fee_payer) else {
         return Ok((default_title.to_string(), None));
     };

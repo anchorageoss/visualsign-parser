@@ -1,17 +1,6 @@
-//! Jupiter Lend Earn preset implementation for Solana.
-//!
-//! Renders the Jupiter Lend Earn (lending) program `jup3YeL8...`. The
-//! user-facing instructions -- the `deposit`, `withdraw`, `mint` and `redeem`
-//! families -- get a semantic view: an action title, the amount normalized with
-//! the token's decimals and symbol, the asset and receipt-token mints as named
-//! addresses, and the signing wallet. Every other instruction keeps the generic
-//! IDL rendering (program, instruction, named accounts, raw args).
-//!
-//! Only the instruction's own bytes and accounts feed the view. Symbols and
-//! decimals come from the shared `utils` token table, keyed by mint. A mint
-//! outside that table, or one that sits in an address lookup table and cannot
-//! be resolved statically, is never guessed: unknown mints render raw units and
-//! a truncated address, unresolved mints fall back to the generic view.
+//! Jupiter Lend Earn preset. `deposit`/`withdraw`/`mint`/`redeem` get a semantic view;
+//! everything else keeps the generic IDL rendering. Symbols and decimals come only from
+//! the shared `utils` token table; unknown mints render raw units, unresolved ones fall back.
 
 mod config;
 
@@ -44,14 +33,9 @@ const JUPITER_EARN_DISPLAY_NAME: &str = "Jupiter Lend Earn";
 
 const JUPITER_EARN_IDL_JSON: &str = include_str!("jupiter_earn.json");
 
-/// `withdraw(u64::MAX)` is the program's "withdraw everything" sentinel: it
-/// burns the signer's whole fToken balance and pays out its value, instead of
-/// failing on an amount above the balance. Observed on mainnet, e.g.
-/// <https://solscan.io/tx/296YJsTYWiNgJ5b5LENoL6prJeASneukmHofteMdWTvv8DhLNEY19uAEvZYjxQmAWJuCemP4wtzgxtvDXxSS8sXs>
-/// (`withdraw(18446744073709551615)` burned 187,120.685353 jlUSDG and paid out
-/// 199,999.391176 USDG). Verified for plain `withdraw` only:
-/// `withdraw_with_max_shares_burn` with this amount is not, so it renders the
-/// flagged literal (see `UserAction::withdraws_all`).
+/// `withdraw(u64::MAX)` burns the whole fToken balance ("withdraw everything"). Verified on
+/// mainnet for plain `withdraw` only, e.g. <https://solscan.io/tx/296YJsTYWiNgJ5b5LENoL6prJeASneukmHofteMdWTvv8DhLNEY19uAEvZYjxQmAWJuCemP4wtzgxtvDXxSS8sXs>;
+/// the capped variant renders the literal instead (see `UserAction::withdraws_all`).
 const WITHDRAW_ALL_AMOUNT: u64 = u64::MAX;
 
 const ESTIMATED: &str = "(estimated, rate at execution)";
@@ -126,14 +110,8 @@ impl InstructionVisualizer for JupiterEarnVisualizer {
         VisualizerKind::Lending(JUPITER_EARN_DISPLAY_NAME)
     }
 
-    /// A single recognized user action names the whole transaction and hoists
-    /// its key rows to the top level, e.g. "Deposit 414.122446 USDC to Jupiter
-    /// Lend Earn" with Program / Amount / Instruction / Receive rows.
-    ///
-    /// Proposed only when the instruction's signer is the transaction's fee
-    /// payer: the hoisted From row names the fee payer, so a relayed
-    /// transaction must not read as if the relayer were the depositor. Admin
-    /// instructions and undecodable data propose nothing.
+    /// Names the transaction after a single recognized action and hoists its key rows.
+    /// Only when the signer is the fee payer: the hoisted From row names the fee payer.
     fn transaction_summary(&self, context: &VisualizerContext) -> Option<TransactionSummary> {
         let view = InstructionView::from_context(context);
         let parsed = parse_jupiter_earn_instruction(context.data(), &view.accounts).ok()?;
@@ -141,11 +119,8 @@ impl InstructionVisualizer for JupiterEarnVisualizer {
             return None;
         }
         let action = UserAction::from_parsed(&parsed)?;
-        // The hoisted title and rows are what an approver reads first, so they are
-        // reserved for the case they describe: value staying with the signer. A payout
-        // or receipt to any other account keeps the default title, and the instruction's
-        // own view carries the badged Recipient row. This matches the infrastructure
-        // rule, which already withholds the summary for a third-party ATA rent payment.
+        // Hoisted rows are reserved for value staying with the signer. Any other recipient
+        // keeps the default title; the badged Recipient row stays in the instruction view.
         if action.recipient.ownership != RecipientOwnership::Signer {
             return None;
         }
@@ -186,11 +161,8 @@ fn parse_jupiter_earn_instruction(
     })
 }
 
-/// Maps the instruction's accounts onto the IDL's account names by position, and
-/// reports whether every IDL account was supplied. Anchor lets a client omit trailing
-/// optional accounts; with fewer accounts than the IDL lists, positions after the
-/// omission would carry the wrong names, so callers must not read this map as
-/// semantic when `complete` is false.
+/// Positional mapping onto IDL account names. `complete` is false when the instruction
+/// has fewer accounts than the IDL lists (omitted optionals), so names may be misaligned.
 fn build_named_accounts(data: &[u8], idl: &Idl, accounts: &[String]) -> (BTreeMap<String, String>, bool) {
     let mut named_accounts = BTreeMap::new();
     let mut complete = false;
@@ -216,12 +188,9 @@ fn build_named_accounts(data: &[u8], idl: &Idl, accounts: &[String]) -> (BTreeMa
 struct JupiterEarnParsedInstruction {
     parsed: SolanaParsedInstructionData,
     named_accounts: BTreeMap<String, String>,
-    /// False when the instruction carries fewer accounts than the IDL lists, in which
-    /// case `named_accounts` may be misaligned and no semantic view is derived.
     accounts_complete: bool,
 }
 
-/// Which side of a lending position an amount is denominated in.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Denomination {
     /// The underlying asset (USDC, USDG, ...): the instruction's `mint`.
@@ -230,9 +199,7 @@ enum Denomination {
     Receipt,
 }
 
-/// The two mints of a Jupiter Lend Earn position with whatever the shared
-/// token table knows about them. `None` info means "unknown mint": amounts in
-/// that denomination render as raw units and the mint as a truncated address.
+/// Both mints of a position. `None` info = unknown mint: raw units and a truncated address.
 struct LendAsset {
     mint: String,
     info: Option<TokenInfo>,
@@ -241,9 +208,7 @@ struct LendAsset {
 }
 
 impl LendAsset {
-    /// `None` when either mint is missing or is an unresolved lookup-table
-    /// placeholder: a placeholder is not an address and must not be shown as
-    /// one, so the instruction falls back to the generic view.
+    /// `None` on a missing or unresolved (lookup-table placeholder) mint: generic view.
     fn from_named_accounts(named_accounts: &BTreeMap<String, String>) -> Option<Self> {
         let mint = named_accounts.get("mint")?;
         let receipt_mint = named_accounts.get("f_token_mint")?;
@@ -279,8 +244,7 @@ impl LendAsset {
         }
     }
 
-    /// One exact amount in `denomination`. Title phrase and row are derived
-    /// from the same classification so they can never disagree.
+    /// Title phrase and row derive from one classification so they cannot disagree.
     fn amount(&self, raw: u64, denomination: Denomination) -> Amount<'_> {
         Amount {
             asset: self,
@@ -289,9 +253,8 @@ impl LendAsset {
         }
     }
 
-    /// A user-set cap (`max_assets`, `max_shares_burn`): `u64::MAX` means the
-    /// cap is not in effect. Never used for a minimum: a `u64::MAX` floor is an
-    /// unsatisfiable requirement, so minimums render the literal via `amount`.
+    /// Caps only (`max_assets`, `max_shares_burn`): `u64::MAX` means no cap. A `u64::MAX`
+    /// minimum is unsatisfiable, so minimums render the literal via `amount`.
     fn max_bound_phrase(&self, raw: u64, denomination: Denomination) -> String {
         if raw == u64::MAX {
             "no limit".to_string()
@@ -301,16 +264,11 @@ impl LendAsset {
     }
 }
 
-/// How an exact amount is shown. `u64::MAX` is a verified sentinel only for
-/// `withdraw` (`WITHDRAW_ALL_AMOUNT`, handled by `UserAction` before it gets
-/// here); for every other instruction the program's behaviour is unverified,
-/// so the literal is shown, flagged, and no meaning is claimed.
+/// `u64::MAX` is a verified sentinel only for `withdraw` (handled before this); for
+/// every other instruction the literal is shown and flagged, and no meaning is claimed.
 enum AmountKind {
-    /// Known decimals: a normalized number.
     Decimal(String),
-    /// Unknown mint: the raw integer, labelled as raw units.
     RawUnits,
-    /// `u64::MAX` outside the verified withdraw sentinel.
     UnverifiedMax,
 }
 
@@ -331,9 +289,7 @@ impl Amount<'_> {
         }
     }
 
-    /// Lower-case phrase for titles and bound rows: "12.5 USDC",
-    /// "12500000 raw units of So11...1112",
-    /// "18446744073709551615 raw units of USDC (u64::MAX)".
+    /// Lower-case phrase: "12.5 USDC", "12500000 raw units of So11...1112", "... (u64::MAX)".
     fn phrase(&self) -> String {
         let symbol = self.asset.symbol(self.denomination);
         match self.kind() {
@@ -343,8 +299,6 @@ impl Amount<'_> {
         }
     }
 
-    /// The same amount as a row: `amount_v2` when it is a number, text for the
-    /// flagged literal.
     fn field(&self, label: &str) -> Result<AnnotatedPayloadField, VisualSignError> {
         let symbol = self.asset.symbol(self.denomination);
         match self.kind() {
@@ -359,39 +313,24 @@ impl Amount<'_> {
     }
 }
 
-/// Whose token account receives the action's output. Decided statically from
-/// the signer, the mint and the token program: the signer's associated token
-/// account is a pure function of those three. Nothing else is knowable without
-/// chain state, so `Other` only proves "not the signer's associated token
-/// account". A signer-owned auxiliary token account is also flagged; that
-/// false positive is accepted because a missed third party is the worse error.
+/// Static classification: the signer's ATA is a pure function of signer, mint and token
+/// program. `Other` also catches signer-owned auxiliary accounts; that false positive is accepted.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum RecipientOwnership {
-    /// The signer's own associated token account.
     Signer,
-    /// Not the signer's associated token account: a third party, or a
-    /// signer-owned auxiliary account (flagged anyway, see above). No
-    /// transaction summary is proposed for it.
+    /// Not the signer's ATA (third party or auxiliary account). No summary is proposed.
     Other,
-    /// The signer or token program was unresolved or not a valid pubkey. The
-    /// row is badged UNVERIFIED so it never looks safer than a checked third
-    /// party, and the instruction proposes no transaction summary.
+    /// Signer or token program unresolved: badged UNVERIFIED, no summary is proposed.
     Unknown,
 }
 
-/// The `recipient_token_account`: where a deposit or mint sends receipt
-/// tokens, and where a withdraw or redeem pays out assets. The IDL puts no
-/// constraint on it, so it must be shown; it is the one account that decides
-/// whether the signer or someone else ends up with the value.
+/// `recipient_token_account`: unconstrained by the IDL, so it decides who ends up with the value.
 struct Recipient {
     account: String,
     ownership: RecipientOwnership,
 }
 
 impl Recipient {
-    /// `None` when the account is missing or an unresolved lookup-table
-    /// placeholder: like the mints, a placeholder is not an address, so the
-    /// instruction falls back to the generic view.
     fn from_named_accounts(
         named_accounts: &BTreeMap<String, String>,
         received_mint: &str,
@@ -444,7 +383,6 @@ impl Recipient {
     }
 }
 
-/// A user-facing Jupiter Lend Earn action, decoded from a parsed instruction.
 struct UserAction {
     asset: LendAsset,
     recipient: Recipient,
@@ -475,11 +413,8 @@ enum UserActionKind {
 }
 
 impl UserAction {
-    /// `None` for admin instructions and for anything that does not decode
-    /// fully: fewer accounts than the IDL lists (positional names would be
-    /// misaligned), a missing amount, a missing bound on a `*_with_*` variant,
-    /// an unresolved mint or recipient. Those keep the generic view rather than
-    /// rendering as a lesser instruction.
+    /// `None` for admin instructions and anything not fully decoded (short account list, missing
+    /// amount or bound, unresolved mint or recipient): those keep the generic view.
     fn from_parsed(instruction: &JupiterEarnParsedInstruction) -> Option<Self> {
         if !instruction.accounts_complete {
             return None;
@@ -545,8 +480,7 @@ impl UserAction {
         }
     }
 
-    /// The verified full-exit sentinel: plain `withdraw(u64::MAX)` with no
-    /// cap. The capped variant is not verified and renders the literal.
+    /// Plain `withdraw(u64::MAX)` only; the capped variant is unverified and renders the literal.
     fn withdraws_all(&self) -> bool {
         matches!(
             self.kind,
@@ -583,8 +517,6 @@ impl UserAction {
         }
     }
 
-    /// The exact amount the user signs, as one `amount_v2` row (text for the
-    /// full-position sentinel and for the flagged `u64::MAX` literal).
     fn amount_field(&self) -> Result<AnnotatedPayloadField, VisualSignError> {
         let asset = &self.asset;
         let (raw, denomination) = match self.kind {
@@ -606,9 +538,7 @@ impl UserAction {
         asset.amount(raw, denomination).field("Amount")
     }
 
-    /// The other leg of the position (receipt minted or burned, asset paid or
-    /// received), which the program settles at its execution-time rate, plus
-    /// any user-set bound on it.
+    /// The other leg, settled at the program's execution-time rate, plus any user-set bound.
     fn leg_fields(&self) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
         let asset = &self.asset;
         let mut fields = Vec::new();
@@ -674,11 +604,8 @@ impl UserAction {
         Ok(fields)
     }
 
-    /// Rows hoisted to the top level of the payload for a single-action
-    /// transaction: the program as a named address, the exact amount, who
-    /// receives the output, the instruction, then the estimated other leg. The
-    /// signer is omitted because the From row already names it (see
-    /// `transaction_summary`).
+    /// Top-level rows for a single-action transaction. The signer is omitted because the
+    /// From row already names it.
     fn summary_fields(
         &self,
         program_id: &str,
@@ -701,8 +628,6 @@ impl UserAction {
         Ok(fields)
     }
 
-    /// A mint as a named address row: the table's name and symbol when known,
-    /// the bare address otherwise.
     fn mint_field(
         &self,
         label: &str,
@@ -765,9 +690,7 @@ fn build_parsed_fields(
     Ok((title, condensed_fields, expanded_fields))
 }
 
-/// Condensed rows for a user action, ordered by what an approver must confirm
-/// first: program, action, signing wallet, who receives the output, asset,
-/// amount, then the other leg.
+/// Ordered by what an approver confirms first.
 fn build_user_action_condensed(
     action: &UserAction,
     instruction: &JupiterEarnParsedInstruction,
@@ -836,9 +759,8 @@ mod tests {
     mod fixture_test;
     mod summary_test;
 
-    /// A `*_with_*` variant whose bound fails to decode must not render like
-    /// the unbounded instruction: it is a parse failure and keeps the generic
-    /// view.
+    /// A `*_with_*` variant with an undecodable bound must not render like the unbounded
+    /// instruction: it is a parse failure and keeps the generic view.
     #[test]
     fn test_missing_bound_on_with_variant_is_a_parse_failure() {
         let instruction = fixture_test::synthetic_instruction(
@@ -880,9 +802,8 @@ mod tests {
         }
     }
 
-    /// Every instruction this preset renders semantically must exist in the
-    /// bundled IDL under exactly this name, or it would silently fall back to
-    /// the generic view.
+    /// Every semantically rendered instruction must exist in the bundled IDL under this
+    /// exact name, or it silently falls back to the generic view.
     #[test]
     fn test_jupiter_earn_idl_covers_user_facing_instructions() {
         let idl = get_jupiter_earn_idl().unwrap();

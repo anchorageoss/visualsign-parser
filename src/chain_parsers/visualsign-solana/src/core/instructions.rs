@@ -18,14 +18,9 @@ use visualsign::lint::LintConfig;
 // available_visualizers and related items, which are used to decode and visualize instructions.
 include!(concat!(env!("OUT_DIR"), "/generated_visualizers.rs"));
 
-/// Folds the per-instruction [`VisualizeResult`]s of one transaction into the
-/// transaction-level decision of [`InstructionVisualizer::transaction_summary`].
-///
-/// A summary is adopted only when exactly one instruction proposes one and
-/// every other instruction is infrastructure. Any instruction that is neither
-/// (a transfer, a second action, an unhandled or failed instruction) blocks it,
-/// so a single action can never name a transaction that also does something
-/// else.
+/// Folds per-instruction results into the transaction-level summary decision: adopted only
+/// when exactly one instruction proposes and every other one is infrastructure. A transfer,
+/// a second action, or an unhandled or failed instruction blocks it.
 #[derive(Default)]
 pub struct SummaryAccumulator {
     proposals: Vec<TransactionSummary>,
@@ -62,8 +57,7 @@ pub struct DecodedInstructions {
     pub summary: Option<TransactionSummary>,
 }
 
-/// Top-level "From" row naming the fee payer (`account_keys[0]`, the first
-/// signer), emitted with an adopted [`TransactionSummary`].
+/// Top-level "From" row naming the fee payer (`account_keys[0]`).
 pub fn create_from_field(
     fee_payer: &solana_sdk::pubkey::Pubkey,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {

@@ -238,16 +238,14 @@ pub struct InstructionView {
     pub accounts: Vec<String>,
 }
 
-/// Display placeholder for an account or program index that does not resolve
-/// against the static `account_keys` (address-lookup-table entries, or an
-/// out-of-bounds index).
+/// Display placeholder for an index that does not resolve against the static
+/// `account_keys` (address-lookup-table entry or out-of-bounds index).
 pub fn unresolved_placeholder(raw_index: u8) -> String {
     format!("unresolved({raw_index})")
 }
 
-/// True when `account` is a placeholder from [`unresolved_placeholder`] rather
-/// than a base58 pubkey. Presets that key semantics off an account (a mint, an
-/// authority) must treat such accounts as unknown, never as an address.
+/// True for a placeholder from [`unresolved_placeholder`]. Presets keying semantics off
+/// an account (a mint, an authority) must treat it as unknown, never as an address.
 pub fn is_unresolved_placeholder(account: &str) -> bool {
     account.starts_with("unresolved(")
 }
@@ -294,8 +292,7 @@ pub trait SolanaIntegrationConfig {
     }
 }
 
-/// A visualizer's proposal for how a whole transaction should be presented
-/// when its one user action is this instruction. See
+/// A visualizer's proposal for presenting the whole transaction; see
 /// [`InstructionVisualizer::transaction_summary`].
 #[derive(Debug, Clone)]
 pub struct TransactionSummary {
@@ -317,25 +314,18 @@ pub trait InstructionVisualizer {
 
     fn kind(&self) -> VisualizerKind;
 
-    /// Transaction-level summary proposed for a recognized user action: the
-    /// payload title, a subtitle and the rows to hoist to the top level.
-    ///
-    /// The converter adopts a summary only when the caller supplied no
-    /// `transaction_name`, exactly one instruction proposes one, and every
-    /// other instruction reports [`is_infrastructure`](Self::is_infrastructure).
-    /// A transaction that also moves value elsewhere, or that no visualizer
-    /// fully recognizes, keeps its default title and layout. Implementations
-    /// must derive the summary from decoded instruction data only, never from
+    /// Transaction-level summary (title, subtitle, hoisted rows) for a recognized user action.
+    /// Adopted only when the caller supplied no `transaction_name`, exactly one instruction
+    /// proposes one, and every other instruction is [`is_infrastructure`](Self::is_infrastructure).
+    /// Must derive from decoded instruction data only, never from caller-supplied metadata.
     /// caller-supplied metadata.
     fn transaction_summary(&self, _context: &VisualizerContext) -> Option<TransactionSummary> {
         None
     }
 
-    /// True when this instruction only prepares the transaction: compute
-    /// budget, durable-nonce advance, associated-token-account creation. Such
-    /// instructions move no value and grant no permission, so they do not
-    /// block another instruction's [`transaction_summary`](Self::transaction_summary).
-    /// Anything that moves funds, including a plain transfer, must stay `false`.
+    /// True when the instruction only prepares the transaction (compute budget, nonce advance,
+    /// own ATA creation) and so does not block another instruction's summary. Anything that
+    /// moves funds, including a plain transfer, must stay `false`.
     fn is_infrastructure(&self, _context: &VisualizerContext) -> bool {
         false
     }

@@ -39,12 +39,9 @@ impl InstructionVisualizer for AssociatedTokenAccountVisualizer {
         VisualizerKind::Payments("AssociatedTokenAccount")
     }
 
-    /// Creating the fee payer's own associated token account only prepares a
-    /// destination. Creating one for another wallet spends the payer's rent on
-    /// a third party, a create funded by another signer spends someone else's
-    /// lamports, and `RecoverNested` moves tokens, so none of those is
-    /// infrastructure. The funding account is the first account, the wallet
-    /// the third; both must be the fee payer.
+    /// Only the fee payer creating its own ATA is infrastructure: funder (account 0) and wallet
+    /// (account 2) must both be the fee payer. Creating for another wallet or with another
+    /// funder spends someone's lamports on a third party, and `RecoverNested` moves tokens.
     fn is_infrastructure(&self, context: &VisualizerContext) -> bool {
         let creates = matches!(
             parse_ata_instruction(context.data()),

@@ -66,9 +66,8 @@ pub fn get_token_lookup_table() -> BTreeMap<&'static str, TokenInfo> {
         },
     );
 
-    // The entries below were verified on 2026-09-23 against mainnet
-    // `getTokenSupply` (decimals) and the Jupiter token list
-    // (`https://lite-api.jup.ag/tokens/v2/search?query=<mint>`, symbol/name).
+    // Verified 2026-09-23: decimals via mainnet `getTokenSupply`, symbol/name via the Jupiter
+    // token list (`https://lite-api.jup.ag/tokens/v2/search?query=<mint>`).
 
     // USDG (Global Dollar, Token-2022)
     tokens.insert(
@@ -90,9 +89,7 @@ pub fn get_token_lookup_table() -> BTreeMap<&'static str, TokenInfo> {
         },
     );
 
-    // Jupiter Lend Earn receipt tokens (fTokens), one per lending market. The
-    // mint is derived by the program from the underlying asset mint, so these
-    // are stable identifiers.
+    // Jupiter Lend Earn receipt tokens (fTokens), one per market; the mint is program-derived.
     tokens.insert(
         "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D",
         TokenInfo {
@@ -135,11 +132,9 @@ pub fn lookup_token(mint: &str) -> Option<TokenInfo> {
     get_token_lookup_table().get(mint).cloned()
 }
 
-/// Shortens a base58 address for display when no symbol is known:
-/// `EPjFWdd5...` becomes `EPjF...Dt1v`.
-/// "abcd...wxyz" for anything longer than `ADDRESS_TRUNCATION_LENGTH` bytes.
-/// Slices only on char boundaries: an input that cannot be cut cleanly (not a
-/// base58 address) comes back whole instead of panicking.
+/// Shortens a base58 address for display: `EPjFWdd5...` becomes `EPjF...Dt1v`.
+/// "abcd...wxyz" for anything longer than `ADDRESS_TRUNCATION_LENGTH` bytes. Cuts only on
+/// char boundaries; input that cannot be cut cleanly comes back whole instead of panicking.
 pub fn truncate_address(address: &str) -> String {
     if address.len() <= ADDRESS_TRUNCATION_LENGTH {
         return address.to_string();
@@ -233,8 +228,7 @@ mod tests {
             "EPjF...Dt1v"
         );
         assert_eq!(truncate_address("short"), "short");
-        // Multi-byte input must not panic on a byte-index slice. A cut that
-        // would land inside a char returns the input whole; a clean cut works.
+        // A cut inside a multi-byte char returns the input whole; a clean cut works.
         assert_eq!(truncate_address("abcéfghijklmn"), "abcéfghijklmn");
         assert_eq!(truncate_address("abcdéfghijkl"), "abcd...ijkl");
     }
@@ -302,10 +296,8 @@ pub mod test_utils {
         .expect("Failed to visualize tx commands")
     }
 
-    /// Owned wire data for one `VisualizerContext`: the instruction's program
-    /// at `account_keys[0]`, its accounts after it, and the first instruction
-    /// account as the sender. Presets' instruction-level tests build contexts
-    /// from a resolved `Instruction` through this instead of hand-rolling it.
+    /// Owned wire data for one `VisualizerContext` built from a resolved `Instruction`:
+    /// program at `account_keys[0]`, accounts after it, first account as the sender.
     pub struct InstructionTestContext {
         sender: SolanaAccount,
         compiled: CompiledInstruction,
@@ -339,8 +331,7 @@ pub mod test_utils {
             }
         }
 
-        /// The compiled instruction, for tests that need to point an account
-        /// at an index outside `account_keys` (an unresolved ALT entry).
+        /// For tests that point an account at an index outside `account_keys` (unresolved ALT entry).
         pub fn compiled_mut(&mut self) -> &mut CompiledInstruction {
             &mut self.compiled
         }
