@@ -8,6 +8,9 @@ use solana_sdk::pubkey::Pubkey;
 mod accounts;
 mod arg_rendering;
 mod instructions;
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod summary_tests;
 mod txtypes;
 mod visualsign;
 
