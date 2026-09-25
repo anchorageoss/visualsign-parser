@@ -49,8 +49,8 @@ use base64::Engine as _;
 use clap::Parser;
 use qos_core::handles::EphemeralKeyHandle;
 use qos_core::protocol::services::boot::VersionedManifestEnvelope;
-use qos_nsm::NsmProvider;
 use qos_nsm::types::{NsmRequest, NsmResponse};
+use qos_nsm::{NsmProvider, nitro};
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -62,10 +62,6 @@ use tokio::sync::Mutex as AsyncMutex;
 /// error instead of an HTTP request that never returns.
 const NSM_CALL_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Validity of the certificate NSM embeds in an attestation doc. A cached doc
-/// older than this is expired for verifiers, so `/health` stops passing.
-const ATTESTATION_CERT_LIFETIME: Duration = Duration::from_secs(3 * 60 * 60);
-
 #[derive(Parser, Debug)]
 struct Args {
     /// HTTP port to listen on.
@@ -76,10 +72,10 @@ struct Args {
     #[arg(long, env = "BENCH_ITERATIONS", default_value_t = 50)]
     bench_iterations: usize,
 
-    /// Re-attest once the cached doc is this old; must stay below the ~3h
-    /// certificate lifetime.
-    #[arg(long, env = "REFRESH_AFTER_SECS", default_value_t = 2 * 60 * 60)]
-    refresh_after_secs: u64,
+    /// Re-attest once the cached doc's certificate chain has less than this
+    /// long left before its earliest `notAfter`.
+    #[arg(long, env = "REFRESH_MARGIN_SECS", default_value_t = 30 * 60)]
+    refresh_margin_secs: u64,
 
     /// How often the watcher re-reads the ephemeral key and manifest.
     #[arg(long, env = "WATCH_INTERVAL_SECS", default_value_t = 10)]
@@ -90,22 +86,48 @@ struct AppState {
     attempt: AtomicU64,
     /// Held across the whole check-and-attest in [`ensure_fresh`].
     cache: AsyncMutex<Option<CachedProof>>,
-    /// When the cached doc was attested, mirrored outside `cache` so `/health`
-    /// never waits behind an in-flight NSM call.
-    attested_at: Mutex<Option<Instant>>,
-    refresh_after: Duration,
+    /// When the cached doc's certificate chain expires, mirrored outside
+    /// `cache` so `/health` never waits behind an in-flight NSM call.
+    valid_until: Mutex<Option<Instant>>,
+    refresh_margin: Duration,
 }
 
 impl AppState {
-    fn set_attested_at(&self, at: Option<Instant>) {
-        *self.attested_at.lock().unwrap_or_else(|e| e.into_inner()) = at;
+    fn set_valid_until(&self, at: Option<Instant>) {
+        *self.valid_until.lock().unwrap_or_else(|e| e.into_inner()) = at;
     }
 
     fn healthy(&self) -> bool {
-        self.attested_at
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .is_some_and(|at| at.elapsed() < ATTESTATION_CERT_LIFETIME)
+        healthy_at(
+            *self.valid_until.lock().unwrap_or_else(|e| e.into_inner()),
+            Instant::now(),
+        )
+    }
+}
+
+/// Healthy strictly before the cached chain's expiry; at or after it, not.
+fn healthy_at(valid_until: Option<Instant>, now: Instant) -> bool {
+    valid_until.is_some_and(|until| now < until)
+}
+
+/// Why the cache can't serve `inputs` at `now`, or `None` if it can.
+/// Refreshes when the remaining validity is at or below `margin`.
+fn refresh_reason(
+    cached: Option<&CachedProof>,
+    inputs: &ProbeInputs,
+    now: Instant,
+    margin: Duration,
+) -> Option<&'static str> {
+    match cached {
+        None => Some("initial"),
+        Some(c) if c.ephemeral_public_key != inputs.ephemeral_public_key => {
+            Some("ephemeral key changed")
+        }
+        Some(c) if c.user_data != inputs.user_data => Some("manifest hash changed"),
+        Some(c) if c.valid_until.saturating_duration_since(now) <= margin => {
+            Some("certificate within refresh margin of expiry")
+        }
+        Some(_) => None,
     }
 }
 
@@ -114,7 +136,9 @@ impl AppState {
 struct CachedProof {
     ephemeral_public_key: Vec<u8>,
     user_data: Vec<u8>,
-    attested_at: Instant,
+    /// Monotonic deadline derived from the verified chain's earliest
+    /// `notAfter` (see [`cert_validity`]).
+    valid_until: Instant,
     result: ProbeResult,
 }
 
@@ -151,6 +175,48 @@ struct ProbeResult {
     user_data_source: String,
     manifest_version: Option<&'static str>,
     manifest_hash_hex: Option<String>,
+    /// Earliest `notAfter` across the doc's leaf cert and CA bundle, once the
+    /// doc verified against the AWS Nitro root.
+    cert_not_after_unix: Option<u64>,
+    /// `cert_not_after_unix` minus the doc's own NSM timestamp.
+    cert_seconds_left: Option<u64>,
+    /// Why the doc didn't verify / parse, if it didn't.
+    cert_error: Option<String>,
+}
+
+/// Verifies `document` (COSE Sign1) against the AWS Nitro root at the doc's
+/// own NSM timestamp, then returns the earliest `notAfter` across the chain
+/// and how long that leaves from the doc's timestamp. The NSM timestamp is
+/// used instead of the enclave clock, which isn't trusted.
+fn cert_validity(document: &[u8]) -> Result<(u64, Duration), String> {
+    use x509_cert::der::Decode as _;
+
+    let root = nitro::cert_from_pem(nitro::AWS_ROOT_CERT_PEM)
+        .map_err(|e| format!("AWS root cert: {e:?}"))?;
+    let timestamp_secs = nitro::unsafe_attestation_doc_from_der(document)
+        .map_err(|e| format!("attestation doc decode: {e:?}"))?
+        .timestamp
+        / 1000;
+    let doc = nitro::attestation_doc_from_der(document, &root, timestamp_secs)
+        .map_err(|e| format!("attestation doc verify: {e:?}"))?;
+
+    let mut not_after = u64::MAX;
+    for der in
+        std::iter::once(doc.certificate.as_slice()).chain(doc.cabundle.iter().map(|c| c.as_slice()))
+    {
+        let cert = x509_cert::Certificate::from_der(der).map_err(|e| format!("cert parse: {e}"))?;
+        let secs = cert
+            .tbs_certificate
+            .validity
+            .not_after
+            .to_unix_duration()
+            .as_secs();
+        not_after = not_after.min(secs);
+    }
+    Ok((
+        not_after,
+        Duration::from_secs(not_after.saturating_sub(timestamp_secs)),
+    ))
 }
 
 fn load_inputs() -> Result<ProbeInputs, String> {
@@ -212,6 +278,14 @@ fn run_probe<A: NsmProvider>(attestor: &A, inputs: &ProbeInputs, attempt: u64) -
         NsmResponse::Attestation { document } => (true, None, document),
         other => (false, Some(format!("{other:?}")), Vec::new()),
     };
+    let (cert_not_after_unix, cert_seconds_left, cert_error) = if ok {
+        match cert_validity(&document) {
+            Ok((not_after, left)) => (Some(not_after), Some(left.as_secs()), None),
+            Err(e) => (None, None, Some(e)),
+        }
+    } else {
+        (None, None, None)
+    };
 
     ProbeResult {
         ok,
@@ -227,6 +301,9 @@ fn run_probe<A: NsmProvider>(attestor: &A, inputs: &ProbeInputs, attempt: u64) -
         manifest_hash_hex: inputs
             .manifest_version
             .map(|_| qos_hex::encode(&inputs.user_data)),
+        cert_not_after_unix,
+        cert_seconds_left,
+        cert_error,
     }
 }
 
@@ -243,6 +320,9 @@ fn failed(attempt: u64, error: String) -> ProbeResult {
         user_data_source: String::new(),
         manifest_version: None,
         manifest_hash_hex: None,
+        cert_not_after_unix: None,
+        cert_seconds_left: None,
+        cert_error: None,
     }
 }
 
@@ -260,12 +340,15 @@ async fn bounded<T: Send + 'static>(
 
 fn log_result(route: &str, result: &ProbeResult) {
     eprintln!(
-        "nsm_probe: route={route} attempt={} ok={} cached={} latency_us={} document_len={} manifest_version={:?} manifest_hash={:?} ephemeral_pub={} error={:?}",
+        "nsm_probe: route={route} attempt={} ok={} cached={} latency_us={} document_len={} cert_not_after_unix={:?} cert_minutes_left={:?} cert_error={:?} manifest_version={:?} manifest_hash={:?} ephemeral_pub={} error={:?}",
         result.attempt,
         result.ok,
         result.cached,
         result.latency_us,
         result.document_len,
+        result.cert_not_after_unix,
+        result.cert_seconds_left.map(|s| s / 60),
+        result.cert_error,
         result.manifest_version,
         result.manifest_hash_hex,
         result.ephemeral_public_key_hex,
@@ -295,7 +378,9 @@ async fn probe_once(state: &AppState) -> ProbeResult {
 }
 
 /// Returns the cached attestation if it still matches the on-disk inputs and
-/// is younger than `refresh_after`; otherwise attests live and replaces it.
+/// its certificate chain has more than `refresh_margin` left; otherwise
+/// attests live and replaces it. Only docs that verify against the AWS root
+/// (so have a known expiry) are cached.
 ///
 /// The cache lock is held across the check *and* the NSM call, so concurrent
 /// callers (the watcher and `/proof` requests) single-flight one refresh
@@ -308,28 +393,34 @@ async fn ensure_fresh(state: &AppState, route: &str) -> ProbeResult {
         Ok(inputs) => inputs,
         Err(e) => return failed(attempt, e),
     };
-    let reason = match cache.as_ref() {
-        None => "initial",
-        Some(c) if !c.matches(&inputs) => "ephemeral key or manifest changed",
-        Some(c) if c.attested_at.elapsed() >= state.refresh_after => "refresh_after elapsed",
-        Some(c) => {
-            let mut result = c.result.clone();
-            result.cached = true;
-            return result;
-        }
+    let Some(reason) = refresh_reason(
+        cache.as_ref(),
+        &inputs,
+        Instant::now(),
+        state.refresh_margin,
+    ) else {
+        let mut result = cache
+            .as_ref()
+            .map(|c| c.result.clone())
+            .unwrap_or_else(|| failed(attempt, "cache emptied under lock".to_string()));
+        result.cached = true;
+        return result;
     };
     eprintln!("nsm_probe: route={route} re-attesting: {reason}");
 
     let result = match attest_live(attempt).await {
-        Ok((inputs, result)) if result.ok => {
-            let attested_at = Instant::now();
+        // Only cache a doc that verified and has validity left; an already-
+        // expired chain would report healthy for zero time and thrash.
+        Ok((inputs, result)) if result.ok && result.cert_seconds_left.is_some_and(|s| s > 0) => {
+            let left = Duration::from_secs(result.cert_seconds_left.unwrap_or_default());
+            let valid_until = Instant::now() + left;
             *cache = Some(CachedProof {
                 ephemeral_public_key: inputs.ephemeral_public_key,
                 user_data: inputs.user_data,
-                attested_at,
+                valid_until,
                 result: result.clone(),
             });
-            state.set_attested_at(Some(attested_at));
+            state.set_valid_until(Some(valid_until));
             result
         }
         Ok((_, result)) => result,
@@ -339,7 +430,7 @@ async fn ensure_fresh(state: &AppState, route: &str) -> ProbeResult {
         // The cached doc attests a key/manifest that's no longer current;
         // don't keep serving it (or reporting healthy) after a failed refresh.
         *cache = None;
-        state.set_attested_at(None);
+        state.set_valid_until(None);
     }
     log_result(route, &result);
     result
@@ -428,18 +519,11 @@ async fn proof(State(state): State<Arc<AppState>>) -> Json<ProbeResult> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let refresh_after = Duration::from_secs(args.refresh_after_secs);
-    if refresh_after >= ATTESTATION_CERT_LIFETIME {
-        return Err(format!(
-            "--refresh-after-secs must be below the {ATTESTATION_CERT_LIFETIME:?} certificate lifetime"
-        )
-        .into());
-    }
     let state = Arc::new(AppState {
         attempt: AtomicU64::new(0),
         cache: AsyncMutex::new(None),
-        attested_at: Mutex::new(None),
-        refresh_after,
+        valid_until: Mutex::new(None),
+        refresh_margin: Duration::from_secs(args.refresh_margin_secs),
     });
 
     let iterations = args.bench_iterations;
@@ -552,6 +636,10 @@ mod tests {
             result.ephemeral_public_key_hex,
             qos_hex::encode(&[0xAB; 33])
         );
+        // A mock doc isn't a real COSE Sign1, so it gets no expiry and would
+        // never be cached or report healthy.
+        assert!(result.cert_seconds_left.is_none());
+        assert!(result.cert_error.is_some());
     }
 
     #[test]
@@ -598,7 +686,7 @@ mod tests {
         let cached = CachedProof {
             ephemeral_public_key: inputs.ephemeral_public_key.clone(),
             user_data: inputs.user_data.clone(),
-            attested_at: Instant::now(),
+            valid_until: Instant::now(),
             result: run_probe(&attestor, &inputs, 1),
         };
         assert!(cached.matches(&inputs));
@@ -617,20 +705,147 @@ mod tests {
         let state = AppState {
             attempt: AtomicU64::new(0),
             cache: AsyncMutex::new(None),
-            attested_at: Mutex::new(None),
-            refresh_after: Duration::from_secs(60),
+            valid_until: Mutex::new(None),
+            refresh_margin: Duration::from_secs(60),
         };
         assert!(!state.healthy(), "no attestation yet");
 
-        state.set_attested_at(Some(Instant::now()));
+        state.set_valid_until(Some(Instant::now() + Duration::from_secs(60)));
         assert!(state.healthy());
 
-        if let Some(expired) = Instant::now().checked_sub(ATTESTATION_CERT_LIFETIME) {
-            state.set_attested_at(Some(expired));
-            assert!(!state.healthy(), "cert lifetime elapsed");
-        }
+        state.set_valid_until(Some(Instant::now()));
+        assert!(!state.healthy(), "certificate expired");
 
-        state.set_attested_at(None);
+        state.set_valid_until(None);
         assert!(!state.healthy(), "cleared after failed refresh");
+    }
+
+    /// Real Nitro attestation doc (tkhq/qos `qos_nsm/src/static/mock_attestation_doc`).
+    /// Metadata, extracted with `examples/dump_doc.rs`:
+    /// - NSM timestamp: 1657117102484 ms (2022-07-06T14:18:22.484Z)
+    /// - leaf `notAfter`: 2022-07-06T17:18:22Z = 1657127902 (earliest in chain)
+    /// - `cabundle[3]` (instance) `notAfter`: 2022-07-07T10:01:19Z = 1657188079
+    const NITRO_DOC: &[u8] = include_bytes!("../tests/fixtures/nitro_attestation_doc");
+    const NITRO_DOC_TIMESTAMP_SECS: u64 = 1_657_117_102;
+    const NITRO_LEAF_NOT_AFTER: u64 = 1_657_127_902;
+
+    #[test]
+    fn cert_validity_reads_leaf_expiry_from_real_doc() {
+        let (not_after, left) = cert_validity(NITRO_DOC).unwrap();
+        assert_eq!(
+            not_after, NITRO_LEAF_NOT_AFTER,
+            "earliest notAfter is the leaf"
+        );
+        assert_eq!(
+            left,
+            Duration::from_secs(NITRO_LEAF_NOT_AFTER - NITRO_DOC_TIMESTAMP_SECS)
+        );
+        assert_eq!(
+            left,
+            Duration::from_secs(3 * 60 * 60),
+            "NSM leaf lives exactly 3h"
+        );
+    }
+
+    #[test]
+    fn cert_validity_uses_doc_timestamp_not_wall_clock() {
+        // The 2022 chain is long expired by wall-clock time; it must still
+        // verify because validation happens at the doc's own NSM timestamp.
+        assert!(cert_validity(NITRO_DOC).is_ok());
+    }
+
+    #[test]
+    fn cert_validity_rejects_tampered_signature() {
+        let mut doc = NITRO_DOC.to_vec();
+        let last = doc.len() - 1;
+        doc[last] ^= 0x01;
+        let err = cert_validity(&doc).unwrap_err();
+        assert!(err.starts_with("attestation doc verify"), "{err}");
+    }
+
+    #[test]
+    fn cert_validity_rejects_truncated_and_empty_docs() {
+        for doc in [&NITRO_DOC[..NITRO_DOC.len() / 2], &[][..]] {
+            let err = cert_validity(doc).unwrap_err();
+            assert!(err.starts_with("attestation doc decode"), "{err}");
+        }
+    }
+
+    fn cached_with(inputs: &ProbeInputs, valid_until: Instant) -> CachedProof {
+        let attestor = MockAttestor {
+            document: vec![0xCC; 4],
+        };
+        CachedProof {
+            ephemeral_public_key: inputs.ephemeral_public_key.clone(),
+            user_data: inputs.user_data.clone(),
+            valid_until,
+            result: run_probe(&attestor, inputs, 1),
+        }
+    }
+
+    #[test]
+    fn refresh_reason_boundaries() {
+        let margin = Duration::from_secs(30 * 60);
+        let now = Instant::now();
+        let inputs = test_inputs(Some("v2"));
+        let at = |left: Duration| cached_with(&inputs, now + left);
+
+        assert_eq!(refresh_reason(None, &inputs, now, margin), Some("initial"));
+
+        // Just outside the margin: serve from cache.
+        let c = at(margin + Duration::from_secs(1));
+        assert_eq!(refresh_reason(Some(&c), &inputs, now, margin), None);
+
+        // Exactly at the margin: refresh (inclusive).
+        let c = at(margin);
+        assert_eq!(
+            refresh_reason(Some(&c), &inputs, now, margin),
+            Some("certificate within refresh margin of expiry")
+        );
+
+        // At / past expiry: refresh.
+        let c = at(Duration::ZERO);
+        assert!(refresh_reason(Some(&c), &inputs, now, margin).is_some());
+        let c = at(Duration::ZERO);
+        assert!(refresh_reason(Some(&c), &inputs, now + Duration::from_secs(1), margin).is_some());
+
+        // Zero margin: serve until the instant of expiry, refresh at it.
+        let c = at(Duration::from_secs(1));
+        assert_eq!(refresh_reason(Some(&c), &inputs, now, Duration::ZERO), None);
+        let c = at(Duration::ZERO);
+        assert!(refresh_reason(Some(&c), &inputs, now, Duration::ZERO).is_some());
+    }
+
+    #[test]
+    fn refresh_reason_input_changes_win_over_freshness() {
+        let now = Instant::now();
+        let inputs = test_inputs(Some("v2"));
+        let fresh = cached_with(&inputs, now + Duration::from_secs(3 * 60 * 60));
+
+        let mut rotated = test_inputs(Some("v2"));
+        rotated.ephemeral_public_key = vec![0xCD; 33];
+        assert_eq!(
+            refresh_reason(Some(&fresh), &rotated, now, Duration::ZERO),
+            Some("ephemeral key changed")
+        );
+
+        let mut new_manifest = test_inputs(Some("v2"));
+        new_manifest.user_data = b"other".to_vec();
+        assert_eq!(
+            refresh_reason(Some(&fresh), &new_manifest, now, Duration::ZERO),
+            Some("manifest hash changed")
+        );
+    }
+
+    #[test]
+    fn healthy_at_boundaries() {
+        let now = Instant::now();
+        assert!(!healthy_at(None, now));
+        assert!(healthy_at(Some(now + Duration::from_secs(1)), now));
+        assert!(
+            !healthy_at(Some(now), now),
+            "unhealthy at the instant of expiry"
+        );
+        assert!(!healthy_at(Some(now), now + Duration::from_secs(1)));
     }
 }
