@@ -1,0 +1,38 @@
+[package]
+name = "nsm_probe"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+# Same NSM/QOS call surface #452's `NsmBootProof` needs (ephemeral key +
+# manifest hash + a real `/dev/nsm` attestation call) — this binary exists to
+# validate that call reaches the device and succeeds under a real TVC
+# deployment before #452 builds on top of it.
+qos_core = { workspace = true }
+qos_nsm = { workspace = true }
+qos_hex = { workspace = true }
+
+# HTTP, so a human can curl the result from outside the enclave instead of
+# needing enclave console access. Minimal feature set: GET only, no bodies.
+axum = { version = "0.8", features = ["http1", "tokio", "json"], default-features = false }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+clap = { version = "4.0", features = ["derive", "env"] }
+
+[features]
+# Switches qos_core constants (EPHEMERAL_KEY_FILE, MANIFEST_FILE) to their
+# in-enclave absolute paths instead of the local-dev `./local-enclave/...`
+# paths. This binary only ever runs as a TVC pivot, so it must be on for any
+# real deployment — mirrors parser_http_server's identically-named,
+# identically-purposed feature (images/nsm_probe/Containerfile sets it).
+vsock = ["qos_core/vm"]
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "nsm_probe"
+path = "src/main.rs"
