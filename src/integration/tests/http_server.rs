@@ -6,6 +6,7 @@ use std::time::Duration;
 use integration::{ChildWrapper, find_free_port, wait_until_port_is_bound};
 use qos_p256::P256Pair;
 use qos_test_primitives::PathWrapper;
+use turnkey_api_key_stamper::{Stamp, TurnkeyP256ApiKey};
 
 // Same Ethereum signed legacy transaction used by
 // `integration::tests::parser_ethereum_native_transfer_e2e`.
@@ -33,6 +34,10 @@ struct RunningServer {
 
 impl RunningServer {
     async fn start() -> Self {
+        Self::start_with_args(&[]).await
+    }
+
+    async fn start_with_args(extra_args: &[&str]) -> Self {
         let test_id = format!("{:?}", rand::random::<u64>());
         // Kept as a plain `String` (not `PathWrapper`) until `RunningServer`
         // is fully constructed below: `PathWrapper`'s `Drop` deletes this
@@ -76,7 +81,8 @@ impl RunningServer {
             .arg("--port")
             .arg(port.to_string())
             .arg("--accept-unsigned-abis")
-            .current_dir(&*work_dir)
+            .args(extra_args)
+            .current_dir(&work_dir)
             .spawn()
             .expect("failed to spawn parser_http_server");
 
@@ -138,14 +144,15 @@ impl RunningServer {
     }
 }
 
-fn boot_proof_keys(value: &serde_json::Value) -> Vec<String> {
+fn boot_proof_object(value: &serde_json::Value) -> &serde_json::Map<String, serde_json::Value> {
     value
         .get("bootProof")
         .and_then(|v| v.as_object())
         .expect("response missing bootProof object")
-        .keys()
-        .cloned()
-        .collect()
+}
+
+fn boot_proof_keys(value: &serde_json::Value) -> Vec<String> {
+    boot_proof_object(value).keys().cloned().collect()
 }
 
 async fn assert_boot_proof_response(
@@ -158,19 +165,34 @@ async fn assert_boot_proof_response(
     let mut keys = boot_proof_keys(&value);
     keys.sort();
     assert_eq!(keys, expected_keys);
+    assert_redacted_boot_proof(&value);
     value
+}
+
+/// Error responses must not carry `qosManifestB64` (whose `pivotArgs` include
+/// the X-Stamp allowlist); only a successful parse does.
+fn assert_redacted_boot_proof(value: &serde_json::Value) {
+    let boot_proof = boot_proof_object(value);
+    assert!(
+        boot_proof.values().all(|v| v == ""),
+        "error bootProof must be redacted, got {boot_proof:?}"
+    );
+}
+
+/// reqwest::Client::new() has no default request timeout, so a server that
+/// accepts a connection but never responds would otherwise hang a test
+/// indefinitely instead of failing it.
+fn test_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("failed to build reqwest client")
 }
 
 #[tokio::test]
 async fn http_server_serves_health_parse_and_errors() {
     let server = RunningServer::start().await;
-    // reqwest::Client::new() has no default request timeout, so a server
-    // that accepts a connection but never responds would otherwise hang
-    // this test indefinitely instead of failing it.
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .expect("failed to build reqwest client");
+    let client = test_client();
 
     // 1. GET /health returns 200.
     let health = client
@@ -220,6 +242,7 @@ async fn http_server_serves_health_parse_and_errors() {
     ];
     expected_keys.sort();
     assert_eq!(v1_boot_proof_keys, expected_keys);
+    assert_ne!(v1_value["bootProof"]["qosManifestB64"], "");
 
     // 3. v2 behaves identically to v1 (open in this PR).
     let v2 = client
@@ -271,7 +294,7 @@ async fn http_server_serves_health_parse_and_errors() {
          and the chain decode succeeds"
     );
 
-    // 4. A malformed body returns 400 with a bootProof present.
+    // 4. A malformed body returns 400 with a redacted bootProof.
     let malformed = client
         .post(format!("{}/visualsign/api/v1/parse", server.base_url))
         .header("content-type", "application/json")
@@ -281,7 +304,7 @@ async fn http_server_serves_health_parse_and_errors() {
         .expect("malformed request failed");
     assert_boot_proof_response(malformed, reqwest::StatusCode::BAD_REQUEST, &expected_keys).await;
 
-    // 5. An unmatched route still returns bootProof (axum's default 404
+    // 5. An unmatched route still returns a (redacted) bootProof (axum's default 404
     //    rejection would otherwise bypass the Turnkey envelope entirely).
     let not_found = client
         .get(format!("{}/not-a-real-route", server.base_url))
@@ -290,7 +313,7 @@ async fn http_server_serves_health_parse_and_errors() {
         .expect("not-found request failed");
     assert_boot_proof_response(not_found, reqwest::StatusCode::NOT_FOUND, &expected_keys).await;
 
-    // 6. A disallowed method on a real route still returns bootProof (axum's
+    // 6. A disallowed method on a real route still returns a (redacted) bootProof (axum's
     //    default 405 rejection would otherwise bypass the envelope too).
     let wrong_method = client
         .get(format!("{}/visualsign/api/v1/parse", server.base_url))
@@ -304,7 +327,7 @@ async fn http_server_serves_health_parse_and_errors() {
     )
     .await;
 
-    // 7. A body over the 64 KiB `PIVOT_BODY_LIMIT_BYTES` cap returns 413 with
+    // 7. A body over the 64 KiB `PIVOT_BODY_LIMIT_BYTES` cap returns 413 with a redacted
     //    bootProof. `parse_v1`/`parse_v2` take `Result<Bytes, BytesRejection>`
     //    instead of a bare `Bytes`, so axum's `DefaultBodyLimit` rejection
     //    (which would otherwise bypass the Turnkey envelope, same gap as the
@@ -324,4 +347,99 @@ async fn http_server_serves_health_parse_and_errors() {
     )
     .await;
     assert_eq!(too_large_value.get("error").unwrap(), "payload too large");
+}
+
+#[tokio::test]
+async fn http_server_enforces_x_stamp_when_allowlist_is_configured() {
+    let allowed = TurnkeyP256ApiKey::generate();
+    let other = TurnkeyP256ApiKey::generate();
+    let allowlist_hex = hex::encode(allowed.compressed_public_key());
+
+    let server =
+        RunningServer::start_with_args(&["--allowed-stamp-pubkeys-hex", &allowlist_hex]).await;
+    let client = test_client();
+
+    let body = serde_json::json!({
+        "request": {
+            "chain": "CHAIN_ETHEREUM",
+            "unsigned_payload": ETH_TX_HEX,
+        }
+    });
+    let wire_bytes = serde_json::to_vec(&body).expect("failed to serialize body");
+
+    let post = async |route: &str, stamp: Option<(String, String)>| {
+        let mut req = client
+            .post(format!("{}{route}", server.base_url))
+            .header("content-type", "application/json");
+        if let Some((name, value)) = stamp {
+            req = req.header(name, value);
+        }
+        let response = req
+            .body(wire_bytes.clone())
+            .send()
+            .await
+            .expect("request failed");
+        let status = response.status();
+        let text = response.text().await.expect("response body was not UTF-8");
+        (status, text)
+    };
+
+    let stamp_from = |key: &TurnkeyP256ApiKey| {
+        let stamp = key.stamp(&wire_bytes).expect("failed to stamp body");
+        Some((stamp.name.to_string(), stamp.value))
+    };
+
+    // A stamp whose signature is valid but made over different bytes. This
+    // is the case that exercises the timing-safety property: the key *is*
+    // allowlisted, so the handler runs the full verify path and still has to
+    // answer with the same coarse 401 as an unlisted key.
+    let wrong_body_stamp = {
+        let stamp = allowed
+            .stamp(b"{\"request\":{}}")
+            .expect("failed to stamp body");
+        Some((stamp.name.to_string(), stamp.value))
+    };
+
+    for route in ["/visualsign/api/v1/parse", "/visualsign/api/v2/parse"] {
+        let (status, unstamped) = post(route, None).await;
+        assert_eq!(
+            status,
+            reqwest::StatusCode::UNAUTHORIZED,
+            "{route} unstamped"
+        );
+        let unstamped_value: serde_json::Value =
+            serde_json::from_str(&unstamped).expect("401 body was not valid JSON");
+        assert_redacted_boot_proof(&unstamped_value);
+
+        let (status, unlisted) = post(route, stamp_from(&other)).await;
+        assert_eq!(
+            status,
+            reqwest::StatusCode::UNAUTHORIZED,
+            "{route} unlisted"
+        );
+
+        let (status, bad_sig) = post(route, wrong_body_stamp.clone()).await;
+        assert_eq!(
+            status,
+            reqwest::StatusCode::UNAUTHORIZED,
+            "{route} listed key, signature over other bytes"
+        );
+
+        // The three rejections must be indistinguishable to the caller: a
+        // differing body would tell an unauthenticated prober which check
+        // failed, and so whether a key is on the allowlist. Cheap
+        // deterministic stand-in for measuring the timing side of the same
+        // property.
+        assert_eq!(unstamped, unlisted, "{route}: unstamped vs unlisted 401");
+        assert_eq!(
+            unstamped, bad_sig,
+            "{route}: unstamped vs bad-signature 401"
+        );
+
+        let (status, ok) = post(route, stamp_from(&allowed)).await;
+        assert_eq!(status, reqwest::StatusCode::OK, "{route} listed");
+        let ok_value: serde_json::Value =
+            serde_json::from_str(&ok).expect("200 body was not valid JSON");
+        assert_ne!(ok_value["bootProof"]["qosManifestB64"], "");
+    }
 }

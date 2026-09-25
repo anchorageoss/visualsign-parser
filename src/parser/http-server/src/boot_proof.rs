@@ -109,6 +109,20 @@ impl BootProofSource for StaticBootProof {
     }
 }
 
+/// Same six keys as a real proof, every value empty. `qosManifestB64` carries
+/// `pivotArgs` (including the X-Stamp allowlist), so every error response gets
+/// this instead and only a successful parse discloses the real proof.
+pub fn redacted_boot_proof() -> TurnkeyBootProof {
+    TurnkeyBootProof {
+        aws_attestation_doc_b64: String::new(),
+        qos_manifest_b64: String::new(),
+        qos_manifest_envelope_b64: String::new(),
+        ephemeral_public_key_hex: String::new(),
+        enclave_app: String::new(),
+        deployment_label: String::new(),
+    }
+}
+
 /// `/qos.manifest` holds JSON at qos rev 365ba7ed, but the wallet contract's
 /// `qosManifestB64` / `qosManifestEnvelopeB64` are *borsh* bytes: the Go
 /// verifier borsh-deserializes both (visualsign-turnkeyclient

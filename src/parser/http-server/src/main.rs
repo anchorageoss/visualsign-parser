@@ -15,8 +15,9 @@
 //!   envelope types are reused from `host_primitives::turnkey` so the Go
 //!   visualsign-turnkey-client (and any HTTP-only client) keeps working
 //!   byte-for-byte.
-//! - `POST /visualsign/api/v2/parse` - same payload. Open in this PR; a
-//!   later PR adds X-Stamp enforcement and payment enforcement here.
+//! - `POST /visualsign/api/v2/parse` - same payload, gated by the same
+//!   X-Stamp check as v1 when `--allowed-stamp-pubkeys-hex` is set; a later
+//!   PR adds payment enforcement here.
 //!
 //! Configuration (CLI args; env vars listed are clap fallbacks):
 //! - `--port <u16>` / `HTTP_PORT` (default 3000) - Turnkey TVC public ingress.
@@ -27,17 +28,23 @@
 //!   ABI mappings, same posture and same requirement as `parser_app` (see
 //!   `ParserConfig::abi_trust_from_options`). No env fallback: these land in this
 //!   deployment's signed `pivotArgs`, and an env escape hatch would undermine that.
+//! - `--allowed-stamp-pubkeys-hex <csv>` - comma-separated `[<curve>:]<hex>`
+//!   entries (`<curve>` is `p256`, the default, or `secp256k1`) naming the
+//!   compressed SEC1 pubkeys allowed to call the parse routes. No env
+//!   fallback (same rationale as the ABI-trust flags above). Absent means the
+//!   routes stay open (today's behavior).
 //!
 //! The ephemeral key is read from `qos_core::EPHEMERAL_KEY_FILE` (provisioned
 //! by QOS inside the enclave). No override flag - if a deployment ever needs
 //! a non-canonical path, bind-mount it instead.
 
 mod boot_proof;
+mod stamp;
 
 use axum::{
     Json, Router,
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -54,6 +61,7 @@ use parser_app::payment_verify::PaymentPolicy;
 use parser_app::routes::parse::parse;
 use qos_core::handles::EphemeralKeyHandle;
 use qos_p256::P256Pair;
+use stamp::Allowlist;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -90,6 +98,17 @@ struct Args {
     /// default); a build without it refuses to start when this flag is given.
     #[arg(long = "accept-signatures-from-pubkey")]
     accept_signatures_from_pubkey: Vec<String>,
+
+    /// Comma-separated `[<curve>:]<hex>` entries naming the compressed SEC1
+    /// pubkeys allowed to call the parse routes, where `<curve>` is `p256`
+    /// (the default) or `secp256k1`. Absent means the routes stay open
+    /// (today's behavior); present means every request must carry a valid
+    /// X-Stamp from a listed key, under that key's own curve. No env
+    /// fallback: this flag lands in this deployment's signed `pivotArgs`, and
+    /// an env escape hatch would undermine that (same rationale as the
+    /// ABI-trust flags above).
+    #[arg(long)]
+    allowed_stamp_pubkeys_hex: Option<String>,
 }
 
 #[derive(Clone)]
@@ -97,6 +116,7 @@ struct AppState {
     ephemeral_key: Arc<P256Pair>,
     boot_proof: Arc<dyn BootProofSource + Send + Sync>,
     config: ParserConfig,
+    allowlist: Option<Arc<Allowlist>>,
 }
 
 // Deliberate exception to the "every response carries bootProof" contract:
@@ -107,8 +127,8 @@ async fn health() -> StatusCode {
     StatusCode::OK
 }
 
-// Handlers take raw bytes, never `Json<T>`. A later PR verifies an X-Stamp
-// signature over the exact request bytes; a `Json<T>` extractor only
+// Handlers take raw bytes, never `Json<T>`. The X-Stamp signature is
+// verified against the exact request bytes; a `Json<T>` extractor only
 // deserializes the request and discards the original bytes, so verifying
 // the signature would then have to re-serialize the parsed value to get
 // bytes back, changing key order / whitespace / unicode escaping and
@@ -120,16 +140,15 @@ async fn health() -> StatusCode {
 // (415 on a non-JSON media type).
 async fn parse_v1(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    headers: HeaderMap,
     body: Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
     let body = match body {
         Ok(b) => b,
-        Err(rejection) => return bytes_rejection_response(&state, &rejection),
+        Err(rejection) => return bytes_rejection_response(&rejection),
     };
     if !is_json_content_type(&headers) {
         return error_status(
-            &state,
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "expected content-type: application/json".to_string(),
         );
@@ -140,28 +159,27 @@ async fn parse_v1(
     // else on that worker (including GET /health) on a 1-2 vCPU TVC replica.
     // Matches the block_in_place precedent parser_app::service::Processor::process
     // already uses around this same parse() call on the vsock/gRPC path.
-    tokio::task::block_in_place(|| handle_parse(&state, &body))
+    tokio::task::block_in_place(|| handle_parse(&state, &headers, &body))
 }
 
-/// v2 is byte-identical to v1 in this PR. Registering it now keeps the
-/// deployed URL stable across the stack as later PRs add enforcement here.
+/// v2 is byte-identical to v1 today, X-Stamp gate included. Registering it
+/// now keeps the deployed URL stable across the stack.
 async fn parse_v2(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    headers: HeaderMap,
     body: Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
     let body = match body {
         Ok(b) => b,
-        Err(rejection) => return bytes_rejection_response(&state, &rejection),
+        Err(rejection) => return bytes_rejection_response(&rejection),
     };
     if !is_json_content_type(&headers) {
         return error_status(
-            &state,
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "expected content-type: application/json".to_string(),
         );
     }
-    tokio::task::block_in_place(|| handle_parse(&state, &body))
+    tokio::task::block_in_place(|| handle_parse(&state, &headers, &body))
 }
 
 /// `Bytes`'s own `FromRequest` rejection covers every way axum can fail to
@@ -174,7 +192,6 @@ async fn parse_v2(
 /// axum implements `FromRequest` for `Result<T, T::Rejection>` precisely so
 /// extractor failures can still be handled inside the handler.
 fn bytes_rejection_response(
-    state: &AppState,
     rejection: &axum::extract::rejection::BytesRejection,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
     let status = rejection.status();
@@ -184,7 +201,7 @@ fn bytes_rejection_response(
     } else {
         "invalid request body".to_string()
     };
-    error_status(state, status, msg)
+    error_status(status, msg)
 }
 
 /// Mirrors axum's `Json<T>` extractor Content-Type check (`application/json`
@@ -215,19 +232,34 @@ fn parse_envelope(body: &[u8]) -> Result<TurnkeyRequestWrapper, serde_json::Erro
     serde_json::from_slice(body)
 }
 
-fn error_status(
-    state: &AppState,
-    status: StatusCode,
-    msg: String,
-) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
+fn error_status(status: StatusCode, msg: String) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
     (
         status,
-        Json(error_response(msg, state.boot_proof.boot_proof())),
+        Json(error_response(msg, boot_proof::redacted_boot_proof())),
     )
 }
 
-fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
-    // A later PR inserts the X-Stamp check here, before anything else touches `body`.
+fn handle_parse(
+    state: &AppState,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
+    if let Some(allowlist) = state.allowlist.as_deref() {
+        if let Err(e) = stamp::verify(headers, body, allowlist) {
+            // Bounded discriminant only: `StampError::Malformed` and
+            // `UnsupportedScheme` carry attacker-supplied strings, and this
+            // path runs before any credential is checked, so logging `e`
+            // itself would let an unauthenticated caller amplify enclave logs.
+            eprintln!("rejected request: {}", e.kind());
+            // Deliberately coarse: the client learns "not authenticated",
+            // not which check failed.
+            return error_status(
+                StatusCode::UNAUTHORIZED,
+                "invalid or missing X-Stamp".to_string(),
+            );
+        }
+    }
+
     let wrapper = match parse_envelope(body) {
         Ok(w) => w,
         Err(e) => {
@@ -242,11 +274,7 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
                 e.line(),
                 e.column()
             );
-            return error_status(
-                state,
-                StatusCode::BAD_REQUEST,
-                "invalid request body".to_string(),
-            );
+            return error_status(StatusCode::BAD_REQUEST, "invalid request body".to_string());
         }
     };
 
@@ -256,7 +284,7 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
         // forge log lines or amplify enclave logs. Drop the value entirely,
         // matching the other bounded-logging fixes in this file.
         eprintln!("unknown chain requested");
-        return error_status(state, StatusCode::BAD_REQUEST, "unknown chain".to_string());
+        return error_status(StatusCode::BAD_REQUEST, "unknown chain".to_string());
     };
 
     let proto_req = generated::parser::ParseRequest {
@@ -297,14 +325,13 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
                     )
                 }
             };
-            return error_status(state, http_status, msg);
+            return error_status(http_status, msg);
         }
     };
 
     let Some(parsed_tx) = proto_resp.parsed_transaction else {
         eprintln!("parse returned no parsed_transaction");
         return error_status(
-            state,
             StatusCode::INTERNAL_SERVER_ERROR,
             "parser_app returned no parsed_transaction".to_string(),
         );
@@ -312,7 +339,6 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
     let Some(payload) = parsed_tx.payload else {
         eprintln!("parse returned no payload");
         return error_status(
-            state,
             StatusCode::INTERNAL_SERVER_ERROR,
             "parser_app returned no payload".to_string(),
         );
@@ -348,15 +374,14 @@ fn handle_parse(state: &AppState, body: &[u8]) -> (StatusCode, Json<TurnkeyRespo
 
 /// `Router::fallback` target for unmatched routes. axum only calls this when
 /// no route matched.
-async fn not_found_fallback(State(state): State<AppState>) -> Response {
-    error_status(&state, StatusCode::NOT_FOUND, "not found".to_string()).into_response()
+async fn not_found_fallback() -> Response {
+    error_status(StatusCode::NOT_FOUND, "not found".to_string()).into_response()
 }
 
 /// `Router::method_not_allowed_fallback` target for a matched path called
 /// with an unsupported method.
-async fn method_not_allowed_fallback(State(state): State<AppState>) -> Response {
+async fn method_not_allowed_fallback() -> Response {
     error_status(
-        &state,
         StatusCode::METHOD_NOT_ALLOWED,
         "method not allowed".to_string(),
     )
@@ -397,10 +422,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .map_err(|e| format!("failed to build boot proof: {e:?}"))?;
 
+    let allowlist = args
+        .allowed_stamp_pubkeys_hex
+        .map(|csv| Allowlist::from_hex_list(&csv))
+        .transpose()
+        .map_err(|e| format!("invalid --allowed-stamp-pubkeys-hex: {e:?}"))?
+        .map(Arc::new);
+    // The cheapest signal an operator or incident responder has for whether
+    // auth is on: without it, the only way to tell is to send an
+    // unauthenticated request and see what comes back. Counts keys, never
+    // prints them (see `Allowlist::len`).
+    match &allowlist {
+        Some(a) => eprintln!("X-Stamp auth: {} allowlisted key(s)", a.len()),
+        None => eprintln!("X-Stamp auth: disabled (routes open)"),
+    }
+
     let state = AppState {
         ephemeral_key: Arc::new(ephemeral_key),
         boot_proof: Arc::new(boot_proof),
         config,
+        allowlist,
     };
 
     // 64 KiB caps every parse-request body the TVC pivot will accept.
@@ -461,13 +502,13 @@ mod tests {
 
     #[test]
     fn envelope_is_parsed_from_raw_bytes_not_reserialized() {
-        // A later PR verifies an X-Stamp signature over the exact request
-        // bytes. If a handler ever takes `Json<T>`, the extractor discards
-        // the original bytes on deserialization, so verification would have
-        // to re-serialize the parsed value to get bytes back, which changes
-        // key order, whitespace, unicode escaping and makes every stamp
-        // fail. Locking the seam here means that PR adds one call and no
-        // signature churn.
+        // The X-Stamp signature is verified against the exact request bytes
+        // (see `stamp::verify`). If a handler ever takes `Json<T>`, the
+        // extractor discards the original bytes on deserialization, so
+        // verification would have to re-serialize the parsed value to get
+        // bytes back, which changes key order, whitespace, unicode escaping
+        // and makes every stamp fail. Locking the seam here catches that
+        // regression at build time instead of at runtime.
         let raw = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02","include_intermediate_output":false}}"#;
         let parsed = parse_envelope(raw).unwrap();
         assert_eq!(parsed.request.chain, "CHAIN_ETHEREUM");
@@ -497,6 +538,7 @@ mod tests {
             ephemeral_key: Arc::new(pair),
             boot_proof: Arc::new(boot_proof),
             config: ParserConfig::accept_unsigned(),
+            allowlist: None,
         }
     }
 
@@ -553,7 +595,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn parse_v1_and_v2_reject_non_json_content_type_with_boot_proof() {
+    async fn parse_v1_and_v2_reject_non_json_content_type_with_redacted_boot_proof() {
         let raw = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02","include_intermediate_output":false}}"#;
         let body = axum::body::Bytes::from_static(raw);
         let headers = axum::http::HeaderMap::new(); // no Content-Type at all
@@ -562,13 +604,37 @@ mod tests {
             parse_v1(State(test_app_state()), headers.clone(), Ok(body)).await;
         assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
         assert!(resp.error.is_some());
-        assert!(!resp.boot_proof.ephemeral_public_key_hex.is_empty());
+        assert_redacted(&resp.boot_proof);
 
         let body = axum::body::Bytes::from_static(raw);
         let (status, Json(resp)) = parse_v2(State(test_app_state()), headers, Ok(body)).await;
         assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
         assert!(resp.error.is_some());
-        assert!(!resp.boot_proof.ephemeral_public_key_hex.is_empty());
+        assert_redacted(&resp.boot_proof);
+    }
+
+    fn assert_redacted(bp: &host_primitives::turnkey::TurnkeyBootProof) {
+        let value = serde_json::to_value(bp).unwrap();
+        let fields = value.as_object().unwrap();
+        assert_eq!(fields.len(), 6);
+        assert!(
+            fields.values().all(|v| v == ""),
+            "bootProof not redacted: {value}"
+        );
+    }
+
+    #[test]
+    fn error_status_always_redacts_boot_proof() {
+        for status in [
+            StatusCode::BAD_REQUEST,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::NOT_FOUND,
+            StatusCode::PAYLOAD_TOO_LARGE,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ] {
+            let (_, Json(resp)) = error_status(status, "x".to_string());
+            assert_redacted(&resp.boot_proof);
+        }
     }
 
     #[test]
@@ -598,25 +664,23 @@ mod tests {
     // from one `handle_parse` might produce. This test pins the fallbacks'
     // fixed messages.
     #[tokio::test]
-    async fn fallbacks_carry_their_own_fixed_message_and_boot_proof() {
-        let state = test_app_state();
-
-        let not_found = not_found_fallback(State(state.clone())).await;
+    async fn fallbacks_carry_their_own_fixed_message_and_redacted_boot_proof() {
+        let not_found = not_found_fallback().await;
         assert_eq!(not_found.status(), StatusCode::NOT_FOUND);
         let body = axum::body::to_bytes(not_found.into_body(), usize::MAX)
             .await
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value.get("error").unwrap(), "not found");
-        assert!(value.get("bootProof").is_some());
+        assert_redacted(&serde_json::from_value(value["bootProof"].clone()).unwrap());
 
-        let method_not_allowed = method_not_allowed_fallback(State(state)).await;
+        let method_not_allowed = method_not_allowed_fallback().await;
         assert_eq!(method_not_allowed.status(), StatusCode::METHOD_NOT_ALLOWED);
         let body = axum::body::to_bytes(method_not_allowed.into_body(), usize::MAX)
             .await
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value.get("error").unwrap(), "method not allowed");
-        assert!(value.get("bootProof").is_some());
+        assert_redacted(&serde_json::from_value(value["bootProof"].clone()).unwrap());
     }
 }
