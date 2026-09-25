@@ -5,16 +5,16 @@ ENV RUSTFLAGS='-C target-feature=+crt-static'
 ENV CARGOFLAGS='--target x86_64-unknown-linux-musl --no-default-features --locked --release'
 
 # Directory for Rust artifacts
-ENV RELEASE_DIR=/src/parser/nsm-probe/target/x86_64-unknown-linux-musl/release
+ENV RELEASE_DIR=/src/target/x86_64-unknown-linux-musl/release
 
 # Load Rust sources
 ADD src /src
 WORKDIR /src/
 
-# nsm_probe is a standalone crate (own Cargo.lock, QOS 0.12.1), not a
-# workspace member: pre-fetch its deps so the build can run `--network=none`.
-WORKDIR /src/parser/nsm-probe
+# pre-fetch all workspace deps; we need them to build with `--network=none` later
 RUN cargo fetch
+
+WORKDIR /src/parser/nsm-probe
 RUN --network=none <<-EOF
     set -eu
     cargo build ${CARGOFLAGS} --features vsock
