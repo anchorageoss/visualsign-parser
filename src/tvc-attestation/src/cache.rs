@@ -212,9 +212,19 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
         }
     }
 
-    /// Call [`Self::get`] every `interval` for the life of the task, so key
+    /// Spawn a tokio task that calls [`Self::get`] every `interval`, so key
     /// rotation and expiry are handled without waiting for a request.
-    pub async fn watch(self: Arc<Self>, interval: Duration) {
+    ///
+    /// The task only awaits; file reads and the NSM call run on the blocking
+    /// pool. Keep the handle: abort it on shutdown, or `select!` on it to
+    /// notice if it ever exits. If it dies, nothing extends the cached
+    /// deadline, so [`Self::healthy`] goes false at certificate expiry
+    /// (fail-closed). A zero `interval` is treated as 1ms.
+    pub fn spawn_watcher(self: &Arc<Self>, interval: Duration) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(Arc::clone(self).watch(interval.max(Duration::from_millis(1))))
+    }
+
+    async fn watch(self: Arc<Self>, interval: Duration) {
         let mut ticker = tokio::time::interval(interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
@@ -531,6 +541,51 @@ mod tests {
             .with_call_timeout(Duration::from_millis(20));
         let err = cache.get().await.unwrap_err();
         assert!(matches!(err, AttestationError::Task(_)), "{err}");
+    }
+
+    #[tokio::test]
+    async fn watcher_refreshes_on_rotation_without_requests() {
+        let nsm = FakeNsm::new(NITRO_DOC);
+        let (load, current) = loader(inputs(1, 1));
+        let cache = Arc::new(AttestationCache::new(Arc::clone(&nsm), load));
+        let watcher = cache.spawn_watcher(Duration::from_millis(5));
+
+        // The NSM call is counted before the doc is verified and stored, so
+        // wait on the stored effect, not the counter.
+        wait_for(|| cache.healthy()).await;
+        assert_eq!(nsm.calls(), 1, "first tick attests once");
+
+        *current.lock().unwrap() = inputs(2, 1);
+        wait_for(|| nsm.calls() == 2).await;
+        // `get` takes the cache lock, so it waits out the watcher's in-flight
+        // refresh and then sees the rotated doc as current.
+        let (served, reason) = cache.get().await.unwrap();
+        assert_eq!(reason, None, "watcher already refreshed");
+        assert_eq!(served.inputs, inputs(2, 1));
+
+        watcher.abort();
+        assert!(watcher.await.unwrap_err().is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn zero_interval_watcher_does_not_panic() {
+        let nsm = FakeNsm::new(NITRO_DOC);
+        let (load, _) = loader(inputs(1, 1));
+        let cache = Arc::new(AttestationCache::new(Arc::clone(&nsm), load));
+        let watcher = cache.spawn_watcher(Duration::ZERO);
+        wait_for(|| nsm.calls() >= 1).await;
+        assert!(!watcher.is_finished(), "still running");
+        watcher.abort();
+    }
+
+    /// Poll `cond` for up to 5s; the watcher runs on real time and the
+    /// blocking pool, so tests wait for its effect instead of sleeping blind.
+    async fn wait_for(cond: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !cond() {
+            assert!(Instant::now() < deadline, "condition not met within 5s");
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
     }
 
     #[test]
