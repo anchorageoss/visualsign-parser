@@ -163,7 +163,11 @@ fn parse_jupiter_earn_instruction(
 
 /// Positional mapping onto IDL account names. `complete` is false when the instruction
 /// has fewer accounts than the IDL lists (omitted optionals), so names may be misaligned.
-fn build_named_accounts(data: &[u8], idl: &Idl, accounts: &[String]) -> (BTreeMap<String, String>, bool) {
+fn build_named_accounts(
+    data: &[u8],
+    idl: &Idl,
+    accounts: &[String],
+) -> (BTreeMap<String, String>, bool) {
     let mut named_accounts = BTreeMap::new();
     let mut complete = false;
 
@@ -320,8 +324,19 @@ enum RecipientOwnership {
     Signer,
     /// Not the signer's ATA (third party or auxiliary account). No summary is proposed.
     Other,
-    /// Signer or token program unresolved: badged UNVERIFIED, no summary is proposed.
+    /// Signer or token program unresolved or unknown: badged UNVERIFIED, no summary is proposed.
     Unknown,
+}
+
+/// `token_program` is author-controlled; ATA derivation only means anything under the two
+/// real token programs, so any other key must not classify the recipient.
+fn is_known_token_program(token_program: &Pubkey) -> bool {
+    *token_program == spl_token::id() || *token_program == token_2022_program_id()
+}
+
+/// `spl_token_2022` addresses use a different key type; compare through the raw bytes.
+fn token_2022_program_id() -> Pubkey {
+    Pubkey::new_from_array(spl_token_2022::id().to_bytes())
 }
 
 /// `recipient_token_account`: unconstrained by the IDL, so it decides who ends up with the value.
@@ -350,7 +365,9 @@ impl Recipient {
                     Pubkey::from_str(token_program),
                     Pubkey::from_str(&account),
                 ) {
-                    (Ok(signer), Ok(mint), Ok(token_program), Ok(account)) => {
+                    (Ok(signer), Ok(mint), Ok(token_program), Ok(account))
+                        if is_known_token_program(&token_program) =>
+                    {
                         let signer_ata = get_associated_token_address_with_program_id(
                             &signer,
                             &mint,

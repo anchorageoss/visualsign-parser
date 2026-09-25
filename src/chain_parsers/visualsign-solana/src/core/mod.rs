@@ -3,11 +3,13 @@ use std::collections::BTreeMap;
 use ::visualsign::AnnotatedPayloadField;
 use ::visualsign::errors::VisualSignError;
 use solana_parser::solana::structs::SolanaAccount;
+use solana_sdk::compute_budget::ComputeBudgetInstruction;
 use solana_sdk::pubkey::Pubkey;
 
 mod accounts;
 mod arg_rendering;
 mod instructions;
+mod priority_fee;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod summary_tests;
@@ -318,16 +320,19 @@ pub trait InstructionVisualizer {
     /// Adopted only when the caller supplied no `transaction_name`, exactly one instruction
     /// proposes one, and every other instruction is [`is_infrastructure`](Self::is_infrastructure).
     /// Must derive from decoded instruction data only, never from caller-supplied metadata.
-    /// caller-supplied metadata.
     fn transaction_summary(&self, _context: &VisualizerContext) -> Option<TransactionSummary> {
         None
     }
 
     /// True when the instruction only prepares the transaction (compute budget, nonce advance,
-    /// own ATA creation) and so does not block another instruction's summary. Anything that
-    /// moves funds, including a plain transfer, must stay `false`.
+    /// own ATA creation). Anything that moves funds to another party must stay `false`.
     fn is_infrastructure(&self, _context: &VisualizerContext) -> bool {
         false
+    }
+
+    /// The compute-budget request, if any; the summary gate hoists the resulting priority fee.
+    fn compute_budget(&self, _context: &VisualizerContext) -> Option<ComputeBudgetInstruction> {
+        None
     }
 
     fn can_handle(&self, context: &VisualizerContext) -> bool {
@@ -351,6 +356,8 @@ pub struct VisualizeResult {
     pub summary: Option<TransactionSummary>,
     /// The handling visualizer's [`InstructionVisualizer::is_infrastructure`].
     pub infrastructure: bool,
+    /// The handling visualizer's [`InstructionVisualizer::compute_budget`].
+    pub compute_budget: Option<ComputeBudgetInstruction>,
 }
 
 /// Tries multiple visualizers in order, returning the first successful visualization.
@@ -370,6 +377,7 @@ pub fn visualize_with_any(
                     kind: v.kind(),
                     summary: v.transaction_summary(context),
                     infrastructure: v.is_infrastructure(context),
+                    compute_budget: v.compute_budget(context),
                 }),
         )
     })

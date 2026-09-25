@@ -367,6 +367,73 @@ fn test_unverifiable_recipient_is_badged() {
     assert_eq!(address_v2.badge_text.as_deref(), Some("UNVERIFIED"));
 }
 
+/// A bogus `token_program`, with the recipient set to the ATA derived under it, must stay
+/// unverified.
+#[test]
+fn test_recipient_with_unknown_token_program_is_unverified() {
+    let mut instruction = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let signer = instruction.accounts[0].pubkey;
+    let f_token_mint = instruction.accounts[6].pubkey;
+    let bogus_token_program = Pubkey::new_unique();
+    instruction.accounts[14].pubkey = bogus_token_program; // `token_program`
+    instruction.accounts[2].pubkey =
+        get_associated_token_address_with_program_id(&signer, &f_token_mint, &bogus_token_program); // `recipient_token_account`
+    let layout = visualize(&instruction);
+
+    assert_eq!(
+        title_of(&layout),
+        "Deposit 414.122446 USDC to Jupiter Lend Earn"
+    );
+    let condensed = layout.condensed.as_ref().expect("condensed view");
+    let recipient = condensed
+        .fields
+        .iter()
+        .map(|f| &f.signable_payload_field)
+        .find(|f| f.label() == "Recipient")
+        .expect("Recipient row");
+    let SignablePayloadField::AddressV2 { address_v2, .. } = recipient else {
+        panic!("Recipient must be an address_v2");
+    };
+    assert_eq!(address_v2.name, "Ownership not verified");
+    assert_eq!(address_v2.badge_text.as_deref(), Some("UNVERIFIED"));
+}
+
+/// Token-2022 is the other real token program: the signer's Token-2022 ATA is recognized.
+#[test]
+fn test_recipient_under_token_2022_is_the_signers_ata() {
+    let signer = Pubkey::new_unique();
+    let token_program = token_2022_program_id();
+    let recipient = get_associated_token_address_with_program_id(
+        &signer,
+        &Pubkey::from_str(JL_USDC_MINT).unwrap(),
+        &token_program,
+    );
+    let instruction = synthetic_instruction(
+        "deposit",
+        &[10_000_000],
+        &[
+            ("signer", &signer.to_string()),
+            ("recipient_token_account", &recipient.to_string()),
+            ("token_program", &token_program.to_string()),
+        ],
+    );
+    let layout = visualize(&instruction);
+
+    let condensed = layout.condensed.as_ref().expect("condensed view");
+    let recipient_row = condensed
+        .fields
+        .iter()
+        .map(|f| &f.signable_payload_field)
+        .find(|f| f.label() == "Recipient")
+        .expect("Recipient row");
+    let SignablePayloadField::AddressV2 { address_v2, .. } = recipient_row else {
+        panic!("Recipient must be an address_v2");
+    };
+    assert_eq!(address_v2.address, recipient.to_string());
+    assert_eq!(address_v2.name, "Signer's associated token account");
+    assert_eq!(address_v2.badge_text, None);
+}
+
 /// Admin instructions are not user actions: generic condensed view.
 #[test]
 fn test_admin_instruction_keeps_generic_view() {

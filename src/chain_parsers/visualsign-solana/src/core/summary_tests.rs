@@ -6,6 +6,7 @@
 
 use super::*;
 use ::visualsign::field_builders::create_text_field;
+use solana_sdk::compute_budget::ComputeBudgetInstruction;
 use solana_sdk::instruction::CompiledInstruction;
 
 /// A visualizer for one program that renders a fixed row and reports whatever
@@ -198,6 +199,7 @@ fn accumulator_adopts_a_single_proposal() {
         kind: VisualizerKind::Payments("test"),
         summary: Some(summary("Do the thing")),
         infrastructure: false,
+        compute_budget: None,
     };
     accumulator.observe(&mut result);
     assert!(
@@ -220,11 +222,104 @@ fn accumulator_yields_nothing_without_a_proposal() {
         kind: VisualizerKind::Payments("test"),
         summary: None,
         infrastructure: true,
+        compute_budget: None,
     };
     accumulator.observe(&mut infra);
     assert!(
         accumulator.finish().is_none(),
         "infrastructure alone proposes no summary"
+    );
+}
+
+fn proposal() -> VisualizeResult {
+    VisualizeResult {
+        field: create_text_field("Action", "rendered").expect("field"),
+        kind: VisualizerKind::Payments("test"),
+        summary: Some(summary("Do the thing")),
+        infrastructure: false,
+        compute_budget: None,
+    }
+}
+
+fn compute_budget(request: ComputeBudgetInstruction) -> VisualizeResult {
+    VisualizeResult {
+        field: create_text_field("ComputeBudget", "rendered").expect("field"),
+        kind: VisualizerKind::Payments("test"),
+        summary: None,
+        infrastructure: true,
+        compute_budget: Some(request),
+    }
+}
+
+fn finish_with(results: Vec<VisualizeResult>) -> Option<TransactionSummary> {
+    let mut accumulator = SummaryAccumulator::default();
+    for mut result in results {
+        accumulator.observe(&mut result);
+    }
+    accumulator.finish()
+}
+
+/// Infrastructure still costs the fee payer the priority fee, so it is appended as a SOL row.
+#[test]
+fn accumulator_appends_the_priority_fee_to_the_adopted_summary() {
+    let adopted = finish_with(vec![
+        compute_budget(ComputeBudgetInstruction::SetComputeUnitLimit(300_000)),
+        compute_budget(ComputeBudgetInstruction::SetComputeUnitPrice(50_000)),
+        proposal(),
+    ])
+    .expect("summary adopted");
+    assert_eq!(labels(&adopted.fields), ["Amount", "Priority fee"]);
+    assert_eq!(
+        adopted.fields[1].signable_payload_field.fallback_text(),
+        "0.000015 SOL"
+    );
+}
+
+/// No unit limit: the fee is an upper bound at the runtime maximum, and the label says so.
+#[test]
+fn accumulator_bounds_the_priority_fee_when_no_limit_is_requested() {
+    let adopted = finish_with(vec![
+        proposal(),
+        compute_budget(ComputeBudgetInstruction::SetComputeUnitPrice(1_000_000_000)),
+    ])
+    .expect("summary adopted");
+    assert_eq!(labels(&adopted.fields), ["Amount", "Maximum priority fee"]);
+    assert_eq!(
+        adopted.fields[1].signable_payload_field.fallback_text(),
+        "1.4 SOL"
+    );
+}
+
+/// A limit alone, or a zero price, costs nothing beyond the base fee: no row.
+#[test]
+fn accumulator_adds_no_fee_row_without_a_positive_price() {
+    let adopted = finish_with(vec![
+        compute_budget(ComputeBudgetInstruction::SetComputeUnitLimit(300_000)),
+        compute_budget(ComputeBudgetInstruction::SetComputeUnitPrice(0)),
+        proposal(),
+    ])
+    .expect("summary adopted");
+    assert_eq!(labels(&adopted.fields), ["Amount"]);
+}
+
+/// The runtime rejects a duplicate price or limit, so the summary fails closed.
+#[test]
+fn accumulator_rejects_duplicate_compute_budget_requests() {
+    assert!(
+        finish_with(vec![
+            compute_budget(ComputeBudgetInstruction::SetComputeUnitPrice(1)),
+            compute_budget(ComputeBudgetInstruction::SetComputeUnitPrice(2)),
+            proposal(),
+        ])
+        .is_none()
+    );
+    assert!(
+        finish_with(vec![
+            proposal(),
+            compute_budget(ComputeBudgetInstruction::SetComputeUnitLimit(1)),
+            compute_budget(ComputeBudgetInstruction::SetComputeUnitLimit(2)),
+        ])
+        .is_none()
     );
 }
 

@@ -2,15 +2,15 @@
 // user action names the whole payload (title, subtitle, hoisted rows), and
 // every case in which it must not.
 
-use super::fixture_test::{JL_USDC_MINT, USDC_MINT, 
-    instruction_from_fixture, load_fixture, rendered_value, synthetic_instruction,
+use super::fixture_test::{
+    JL_USDC_MINT, USDC_MINT, instruction_from_fixture, load_fixture, rendered_value,
+    synthetic_instruction,
 };
 use super::*;
 use crate::core::{SolanaTransactionWrapper, SolanaVisualSignConverter};
 use crate::intermediate::{RegisteredSource, SolanaIntermediateOutput};
 use crate::test_utils::payload_from_b64;
 use base64::Engine;
-use std::str::FromStr;
 use solana_sdk::{
     hash::Hash,
     instruction::Instruction,
@@ -19,6 +19,7 @@ use solana_sdk::{
     signature::Signature,
     transaction::{Transaction, VersionedTransaction},
 };
+use std::str::FromStr;
 use visualsign::vsptrait::{Transaction as _, VisualSignConverter, VisualSignOptions};
 use visualsign::{SignablePayload, SignablePayloadField};
 
@@ -185,8 +186,8 @@ fn test_single_withdraw_gets_title_subtitle_and_rows() {
     payload.validate_charset().unwrap();
 }
 
-/// Infrastructure legs (associated-token-account creation, compute budget)
-/// prepare the transaction and move nothing, so the deposit still names it.
+/// Infrastructure legs (ATA creation, compute budget) move nothing to a third
+/// party, so the deposit still names it; the priority fee is hoisted in SOL.
 #[test]
 fn test_infrastructure_legs_keep_the_summary() {
     let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
@@ -213,6 +214,99 @@ fn test_infrastructure_legs_keep_the_summary() {
     assert_eq!(
         top_level_value(&payload, "From").unwrap(),
         payer.to_string()
+    );
+    let labels = top_level_labels(&payload);
+    assert!(
+        labels.starts_with(&[
+            "Network",
+            "From",
+            "Program",
+            "Amount",
+            "Recipient",
+            "Instruction",
+            "Receive",
+            "Priority fee",
+            "Instruction 1",
+        ]),
+        "unexpected top-level layout: {labels:?}"
+    );
+    let fee = payload
+        .fields
+        .iter()
+        .find(|f| f.label() == "Priority fee")
+        .expect("Priority fee row");
+    assert_eq!(fee.fallback_text(), "0.000015 SOL");
+}
+
+/// No unit limit: the fee row is an upper bound at the runtime maximum and says so.
+#[test]
+fn test_uncapped_priority_fee_is_hoisted_as_a_maximum() {
+    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let payer = deposit.accounts[0].pubkey;
+    let compute_price =
+        solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_price(1_000_000_000);
+
+    let payload = payload_for(&[compute_price, deposit], &payer);
+
+    assert_eq!(
+        payload.title,
+        "Deposit 414.122446 USDC to Jupiter Lend Earn"
+    );
+    assert!(top_level_value(&payload, "Priority fee").is_none());
+    let fee = payload
+        .fields
+        .iter()
+        .find(|f| f.label() == "Maximum priority fee")
+        .expect("Maximum priority fee row");
+    assert_eq!(fee.fallback_text(), "1.4 SOL");
+}
+
+/// A deposit with no compute-unit price pays only the base fee: no fee row.
+#[test]
+fn test_summary_without_a_unit_price_has_no_fee_row() {
+    let deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let payer = deposit.accounts[0].pubkey;
+    let compute_limit =
+        solana_sdk::compute_budget::ComputeBudgetInstruction::set_compute_unit_limit(300_000);
+
+    let payload = payload_for(&[compute_limit, deposit], &payer);
+
+    assert_eq!(
+        payload.title,
+        "Deposit 414.122446 USDC to Jupiter Lend Earn"
+    );
+    let labels = top_level_labels(&payload);
+    assert!(
+        !labels.iter().any(|l| l.contains("riority fee")),
+        "no fee row expected, got {labels:?}"
+    );
+}
+
+/// A forged `token_program`, with the recipient set to the ATA derived under it,
+/// must not pass as the signer's account: unverified recipient, no summary.
+#[test]
+fn test_forged_token_program_keeps_default_title() {
+    let mut deposit = instruction_from_fixture(&load_fixture("deposit_usdc"));
+    let payer = deposit.accounts[0].pubkey;
+    let f_token_mint = deposit.accounts[6].pubkey;
+    let bogus_token_program = Pubkey::new_unique();
+    deposit.accounts[14].pubkey = bogus_token_program; // `token_program`
+    deposit.accounts[2].pubkey =
+        spl_associated_token_account::get_associated_token_address_with_program_id(
+            &payer,
+            &f_token_mint,
+            &bogus_token_program,
+        ); // `recipient_token_account`
+
+    let payload = payload_for(&[deposit], &payer);
+
+    assert_no_summary(&payload, "Solana Transaction");
+    let titles = preview_titles(&payload);
+    assert!(
+        titles
+            .iter()
+            .any(|t| t == "Deposit 414.122446 USDC to Jupiter Lend Earn"),
+        "instruction keeps its semantic view, got {titles:?}"
     );
 }
 

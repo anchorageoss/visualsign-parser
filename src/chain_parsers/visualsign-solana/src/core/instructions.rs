@@ -1,3 +1,4 @@
+use crate::core::priority_fee::PriorityFee;
 use crate::core::{
     InstructionVisualizer, TransactionSummary, VisualizeResult, VisualizerContext,
     visualize_with_any,
@@ -25,11 +26,15 @@ include!(concat!(env!("OUT_DIR"), "/generated_visualizers.rs"));
 pub struct SummaryAccumulator {
     proposals: Vec<TransactionSummary>,
     blocked: bool,
+    priority_fee: PriorityFee,
 }
 
 impl SummaryAccumulator {
-    /// Records a rendered instruction, taking its proposal out of `result`.
+    /// Records a rendered instruction, taking its proposal and compute-budget request.
     pub fn observe(&mut self, result: &mut VisualizeResult) {
+        if let Some(request) = result.compute_budget.take() {
+            self.priority_fee.record(&request);
+        }
         match result.summary.take() {
             Some(summary) => self.proposals.push(summary),
             None if result.infrastructure => {}
@@ -42,11 +47,16 @@ impl SummaryAccumulator {
         self.blocked = true;
     }
 
+    /// A priority fee row that cannot be rendered fails closed: no summary.
     pub fn finish(mut self) -> Option<TransactionSummary> {
-        if self.blocked || self.proposals.len() != 1 {
+        if self.blocked || self.priority_fee.is_invalid() || self.proposals.len() != 1 {
             return None;
         }
-        self.proposals.pop()
+        let mut summary = self.proposals.pop()?;
+        if let Some(estimate) = self.priority_fee.estimate() {
+            summary.fields.push(estimate.field().ok()?);
+        }
+        Some(summary)
     }
 }
 

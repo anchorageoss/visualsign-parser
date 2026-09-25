@@ -45,6 +45,10 @@ impl InstructionVisualizer for ComputeBudgetVisualizer {
     fn is_infrastructure(&self, context: &VisualizerContext) -> bool {
         ComputeBudgetInstruction::try_from_slice(context.data()).is_ok()
     }
+
+    fn compute_budget(&self, context: &VisualizerContext) -> Option<ComputeBudgetInstruction> {
+        ComputeBudgetInstruction::try_from_slice(context.data()).ok()
+    }
 }
 
 fn format_compute_budget_instruction(instruction: &ComputeBudgetInstruction) -> String {
