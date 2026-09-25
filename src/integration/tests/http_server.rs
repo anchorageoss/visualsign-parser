@@ -29,7 +29,7 @@ struct RunningServer {
     base_url: String,
     ephemeral_key: P256Pair,
     _child: ChildWrapper,
-    _work_dir: PathWrapper<'static>,
+    _work_dir: PathWrapper<String>,
 }
 
 impl RunningServer {
