@@ -14,6 +14,7 @@ members = [
   "parser/gateway",
   "parser/grpc-server",
   "parser/http-server",
+  "parser/nsm-probe",
   "visualsign",
   "chain_parsers/visualsign-ethereum",
   "chain_parsers/visualsign-near",
@@ -24,9 +25,6 @@ members = [
   "solana_test_utils",
   "tools/idl-meta",
 ]
-# Standalone: pins QOS 0.12.1, whose exact libc pin conflicts with the
-# workspace qos rev, so it keeps its own Cargo.lock.
-exclude = ["parser/nsm-probe"]
 
 resolver = "3"
 
