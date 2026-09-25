@@ -68,6 +68,15 @@ pub struct Attestation {
     valid_until: Instant,
 }
 
+impl Attestation {
+    /// How long until this doc's certificate chain expires, on the monotonic
+    /// clock; zero once expired.
+    #[must_use]
+    pub fn valid_for(&self) -> Duration {
+        self.valid_until.saturating_duration_since(Instant::now())
+    }
+}
+
 /// Why the cache re-attested.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefreshReason {
@@ -107,6 +116,39 @@ pub fn healthy_at(valid_until: Option<Instant>, now: Instant) -> bool {
     valid_until.is_some_and(|until| now < until)
 }
 
+/// Counters for how the cache has behaved, for status endpoints and soak
+/// tests: a steady rise in `near_expiry` shows certificate-driven refresh is
+/// working; `ephemeral_key_changed` shows the setup -> live key rotation.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CacheStats {
+    pub initial: u64,
+    pub ephemeral_key_changed: u64,
+    pub manifest_changed: u64,
+    pub near_expiry: u64,
+    /// `get` calls that returned an error.
+    pub failures: u64,
+    pub last_error: Option<String>,
+}
+
+impl CacheStats {
+    fn record(
+        &mut self,
+        outcome: &Result<(Arc<Attestation>, Option<RefreshReason>), AttestationError>,
+    ) {
+        match outcome {
+            Ok((_, Some(RefreshReason::Initial))) => self.initial += 1,
+            Ok((_, Some(RefreshReason::EphemeralKeyChanged))) => self.ephemeral_key_changed += 1,
+            Ok((_, Some(RefreshReason::ManifestChanged))) => self.manifest_changed += 1,
+            Ok((_, Some(RefreshReason::NearExpiry))) => self.near_expiry += 1,
+            Ok((_, None)) => {}
+            Err(e) => {
+                self.failures += 1;
+                self.last_error = Some(e.to_string());
+            }
+        }
+    }
+}
+
 /// Loads the current [`Inputs`]; blocking, run off the async runtime.
 pub type InputLoader = Arc<dyn Fn() -> Result<Inputs, AttestationError> + Send + Sync>;
 
@@ -123,6 +165,7 @@ pub struct AttestationCache<A> {
     /// `current`'s deadline, mirrored so [`Self::healthy`] never waits behind
     /// an in-flight NSM call.
     valid_until: Mutex<Option<Instant>>,
+    stats: Mutex<CacheStats>,
 }
 
 impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
@@ -135,6 +178,7 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
             call_timeout: DEFAULT_CALL_TIMEOUT,
             current: AsyncMutex::new(None),
             valid_until: Mutex::new(None),
+            stats: Mutex::new(CacheStats::default()),
         }
     }
 
@@ -170,6 +214,22 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
     /// Any [`AttestationError`] from loading inputs or attesting, when there's
     /// no valid doc for the current inputs to fall back to.
     pub async fn get(&self) -> Result<(Arc<Attestation>, Option<RefreshReason>), AttestationError> {
+        let outcome = self.get_inner().await;
+        self.stats
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .record(&outcome);
+        outcome
+    }
+
+    /// Refresh and failure counts since construction.
+    pub fn stats(&self) -> CacheStats {
+        self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    async fn get_inner(
+        &self,
+    ) -> Result<(Arc<Attestation>, Option<RefreshReason>), AttestationError> {
         let mut current = self.current.lock().await;
 
         let load = Arc::clone(&self.load);
@@ -441,6 +501,8 @@ mod tests {
         let (first, reason) = cache.get().await.unwrap();
         assert_eq!(reason, Some(RefreshReason::Initial));
         assert_eq!(first.cert.remaining, Duration::from_secs(3 * 60 * 60));
+        let left = first.valid_for();
+        assert!(left <= first.cert.remaining && left > Duration::from_secs(3 * 60 * 60 - 60));
         assert!(cache.healthy());
 
         let (again, reason) = cache.get().await.unwrap();
@@ -453,6 +515,16 @@ mod tests {
         assert_eq!(reason, Some(RefreshReason::EphemeralKeyChanged));
         assert_eq!(rotated.inputs, inputs(2, 1));
         assert_eq!(nsm.calls(), 2);
+
+        assert_eq!(
+            cache.stats(),
+            CacheStats {
+                initial: 1,
+                ephemeral_key_changed: 1,
+                ..CacheStats::default()
+            },
+            "cache hits aren't counted"
+        );
     }
 
     #[tokio::test]
@@ -481,6 +553,16 @@ mod tests {
         // Nothing cached: the next call attests again.
         cache.get().await.unwrap_err();
         assert_eq!(nsm.calls(), 2);
+
+        let stats = cache.stats();
+        assert_eq!(stats.failures, 2);
+        assert_eq!(stats.initial, 0);
+        assert!(
+            stats
+                .last_error
+                .unwrap()
+                .contains("attestation certificate")
+        );
     }
 
     #[tokio::test]
@@ -517,6 +599,14 @@ mod tests {
             "still-valid doc served on failed refresh"
         );
         assert!(cache.healthy());
+        // Served, so not a failure; and no refresh happened.
+        assert_eq!(
+            cache.stats(),
+            CacheStats {
+                initial: 1,
+                ..CacheStats::default()
+            }
+        );
     }
 
     #[tokio::test]
