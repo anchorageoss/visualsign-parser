@@ -1,0 +1,29 @@
+[package]
+name = "nsm_probe"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+# Thin TVC pivot over tvc-attestation: soak-tests the cache + watcher on a
+# real deployment (refresh near cert expiry, key rotation) before #452 uses it.
+tvc-attestation = { path = "../../tvc-attestation" }
+qos_nsm = { workspace = true }
+qos_hex = { workspace = true }
+
+axum = { version = "0.8", features = ["http1", "tokio", "json"], default-features = false }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net", "time"] }
+serde = { workspace = true, features = ["derive"] }
+base64 = { workspace = true }
+clap = { version = "4.0", features = ["derive", "env"] }
+
+[features]
+# In-enclave file paths; images/nsm_probe/Containerfile builds with it.
+vsock = ["tvc-attestation/enclave"]
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "nsm_probe"
+path = "src/main.rs"

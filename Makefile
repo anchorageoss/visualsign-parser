@@ -14,6 +14,10 @@ out/parser_http_server/index.json: \
 	$(shell git ls-files images/parser_http_server src)
 	$(call build,parser_http_server)
 
+out/nsm_probe/index.json: \
+	$(shell git ls-files images/nsm_probe src)
+	$(call build,nsm_probe)
+
 .PHONY: non-oci-docker-images
 non-oci-docker-images:
 	docker buildx build --load --tag anchorageoss-visualsign-parser/parser_app -f images/parser_app/Containerfile .
