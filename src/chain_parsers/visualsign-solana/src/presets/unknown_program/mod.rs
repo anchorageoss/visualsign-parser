@@ -35,9 +35,10 @@ impl InstructionVisualizer for UnknownProgramVisualizer {
         // Try IDL parsing only if program_id is resolvable
         if let ProgramRef::Resolved(program_id) = context.program_id()
             && idl_registry.has_idl(program_id)
-                && let Ok(field) = try_idl_parsing(context, idl_registry) {
-                    return Ok(field);
-                }
+            && let Ok(field) = try_idl_parsing(context, idl_registry)
+        {
+            return Ok(field);
+        }
 
         create_unknown_program_preview_layout(context)
     }

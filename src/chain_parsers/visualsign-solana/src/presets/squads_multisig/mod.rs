@@ -286,9 +286,10 @@ fn build_parsed_fields(
             &instruction.named_accounts,
             program_id,
             context,
-        )? {
-            return Ok(fields);
-        }
+        )?
+    {
+        return Ok(fields);
+    }
 
     build_generic_fields(parsed, &instruction.named_accounts, program_id)
 }

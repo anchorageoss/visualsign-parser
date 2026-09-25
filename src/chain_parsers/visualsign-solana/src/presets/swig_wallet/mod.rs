@@ -824,21 +824,23 @@ fn describe_inner_instruction(
     };
 
     if let Some(instruction) = build_inner_instruction(program_id, accounts, data)
-        && let Some(summary) = visualize_inner_instruction(instruction, parent_depth) {
-            return summary;
-        }
+        && let Some(summary) = visualize_inner_instruction(instruction, parent_depth)
+    {
+        return summary;
+    }
 
     if program_id == &spl_token::ID {
         if let Ok(ix) = TokenInstruction::unpack(data)
-            && let Some(summary) = format_token_instruction_summary(ix, accounts) {
-                return summary;
-            }
+            && let Some(summary) = format_token_instruction_summary(ix, accounts)
+        {
+            return summary;
+        }
     } else if program_id == &system_program::ID
         && let Ok(SystemInstruction::Transfer { lamports }) =
             bincode::deserialize::<SystemInstruction>(data)
-        {
-            return format_native_sol_transfer(accounts, lamports);
-        }
+    {
+        return format_native_sol_transfer(accounts, lamports);
+    }
 
     fallback()
 }
