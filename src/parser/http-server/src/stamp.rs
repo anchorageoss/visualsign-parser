@@ -231,6 +231,7 @@ pub fn verify(headers: &HeaderMap, body: &[u8], allowlist: &Allowlist) -> Result
 mod tests {
     use super::*;
     use axum::http::{HeaderMap, HeaderValue};
+    use k256::ecdsa::Signature;
     use turnkey_api_key_stamper::{Stamp, TurnkeyP256ApiKey, TurnkeySecp256k1ApiKey};
 
     fn headers_for(key: &impl Stamp, body: &[u8]) -> HeaderMap {
@@ -347,9 +348,8 @@ mod tests {
         let decoded = BASE64_URL_SAFE_NO_PAD.decode(&stamp.value).unwrap();
         let mut json: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
         let der = hex::decode(json["signature"].as_str().unwrap()).unwrap();
-        let low = k256::ecdsa::Signature::from_der(&der).unwrap();
-        let high = k256::ecdsa::Signature::from_scalars(low.r().to_bytes(), (-*low.s()).to_bytes())
-            .unwrap();
+        let low = Signature::from_der(&der).unwrap();
+        let high = Signature::from_scalars(low.r().to_bytes(), (-*low.s()).to_bytes()).unwrap();
         assert!(high.normalize_s().is_some(), "fixture must be high-S");
         json["signature"] = hex::encode(high.to_der().as_bytes()).into();
 
