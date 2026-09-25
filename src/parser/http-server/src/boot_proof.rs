@@ -196,12 +196,8 @@ fn encode_borsh_b64(v: &impl borsh::BorshSerialize) -> Result<String, BootProofE
 /// cmd/verify.go`) sets `SkipTimestampCheck: true`, so there is no freshness
 /// window to satisfy.
 pub struct NsmBootProof {
+    base: StaticBootProof,
     aws_attestation_doc_b64: String,
-    qos_manifest_b64: String,
-    qos_manifest_envelope_b64: String,
-    ephemeral_public_key_hex: String,
-    enclave_app: String,
-    deployment_label: String,
 }
 
 impl NsmBootProof {
@@ -239,7 +235,7 @@ impl NsmBootProof {
         let response = attestor.nsm_process_request(NsmRequest::Attestation {
             user_data: Some(manifest_hash),
             nonce: None,
-            public_key: Some(ephemeral_public_key.clone()),
+            public_key: Some(ephemeral_public_key),
         });
         let document = match response {
             NsmResponse::Attestation { document } => document,
@@ -249,12 +245,14 @@ impl NsmBootProof {
         let (qos_manifest_b64, qos_manifest_envelope_b64) = encode_manifest_borsh_b64(envelope)?;
 
         Ok(Self {
+            base: StaticBootProof::new(
+                ephemeral,
+                qos_manifest_b64,
+                qos_manifest_envelope_b64,
+                enclave_app,
+                deployment_label,
+            ),
             aws_attestation_doc_b64: base64::engine::general_purpose::STANDARD.encode(document),
-            qos_manifest_b64,
-            qos_manifest_envelope_b64,
-            ephemeral_public_key_hex: qos_hex::encode(&ephemeral_public_key),
-            enclave_app,
-            deployment_label,
         })
     }
 }
@@ -263,11 +261,7 @@ impl BootProofSource for NsmBootProof {
     fn boot_proof(&self) -> TurnkeyBootProof {
         TurnkeyBootProof {
             aws_attestation_doc_b64: self.aws_attestation_doc_b64.clone(),
-            qos_manifest_b64: self.qos_manifest_b64.clone(),
-            qos_manifest_envelope_b64: self.qos_manifest_envelope_b64.clone(),
-            ephemeral_public_key_hex: self.ephemeral_public_key_hex.clone(),
-            enclave_app: self.enclave_app.clone(),
-            deployment_label: self.deployment_label.clone(),
+            ..self.base.boot_proof()
         }
     }
 }
