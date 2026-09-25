@@ -376,12 +376,17 @@ pub(crate) mod tests {
 
     struct CountingAttestor {
         calls: Arc<AtomicUsize>,
+        // Captures the last request so tests can assert on the
+        // security-critical fields (`user_data`, `public_key`, `nonce`),
+        // not just that the attestor was called.
+        last_request: Arc<std::sync::Mutex<Option<NsmRequest>>>,
         document: Vec<u8>,
     }
 
     impl NsmProvider for CountingAttestor {
-        fn nsm_process_request(&self, _request: NsmRequest) -> NsmResponse {
+        fn nsm_process_request(&self, request: NsmRequest) -> NsmResponse {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            *self.last_request.lock().unwrap() = Some(request);
             NsmResponse::Attestation {
                 document: self.document.clone(),
             }
@@ -400,13 +405,17 @@ pub(crate) mod tests {
         // cmd/verify.go sets SkipTimestampCheck: true), so caching is safe
         // rather than merely cheap.
         let calls = Arc::new(AtomicUsize::new(0));
+        let last_request = Arc::new(std::sync::Mutex::new(None));
+        let envelope = sample_manifest_envelope();
+        let ephemeral = qos_p256::P256Pair::generate().unwrap();
         let source = NsmBootProof::from_envelope(
             CountingAttestor {
                 calls: calls.clone(),
+                last_request: last_request.clone(),
                 document: vec![0xAA; 64],
             },
-            &sample_manifest_envelope(),
-            &qos_p256::P256Pair::generate().unwrap(),
+            &envelope,
+            &ephemeral,
             "visualsign-parser".to_string(),
             "test".to_string(),
         )
@@ -423,6 +432,21 @@ pub(crate) mod tests {
             calls.load(Ordering::SeqCst),
             1,
             "doc must be generated once"
+        );
+
+        // The NSM input contract: user_data is the manifest's qos_hash,
+        // public_key is the ephemeral key bytes, and nonce is None (the
+        // doc must not be request-bound, see the module doc above).
+        use qos_core::protocol::QosHash;
+        let expected_request = NsmRequest::Attestation {
+            user_data: Some(envelope.manifest.qos_hash().to_vec()),
+            nonce: None,
+            public_key: Some(ephemeral.public_key().to_bytes()),
+        };
+        assert_eq!(
+            *last_request.lock().unwrap(),
+            Some(expected_request),
+            "NSM request must carry the manifest hash, ephemeral public key, and no nonce"
         );
     }
 }
