@@ -1,56 +1,29 @@
 [package]
 name = "nsm_probe"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 publish = false
 
 [dependencies]
-# Same NSM/QOS call surface #452's `NsmBootProof` needs (ephemeral key +
-# manifest hash + a real `/dev/nsm` attestation call) — this binary exists to
-# validate that call reaches the device and succeeds under a real TVC
-# deployment before #452 builds on top of it.
-#
-# Pinned to QOS 0.12.1 (82d8e18b) directly rather than the workspace rev: that
-# is the QOS TVC actually boots, and its `/qos.manifest` (string-encoded
-# numerics, `VersionedManifestEnvelope` v0/v1/v2) doesn't parse with the older
-# workspace pin.
-qos_core = { git = "https://github.com/tkhq/qos.git", rev = "82d8e18b8875362cdb639f962b6a7f78bd42d320", default-features = false }
-qos_nsm = { git = "https://github.com/tkhq/qos.git", rev = "82d8e18b8875362cdb639f962b6a7f78bd42d320", default-features = false }
-qos_hex = { git = "https://github.com/tkhq/qos.git", rev = "82d8e18b8875362cdb639f962b6a7f78bd42d320", default-features = false }
+# Thin TVC pivot over tvc-attestation: soak-tests the cache + watcher on a
+# real deployment (refresh near cert expiry, key rotation) before #452 uses it.
+tvc-attestation = { path = "../../tvc-attestation" }
+qos_nsm = { workspace = true }
+qos_hex = { workspace = true }
 
-# HTTP, so a human can curl the result from outside the enclave instead of
-# needing enclave console access. Minimal feature set: GET only, no bodies.
 axum = { version = "0.8", features = ["http1", "tokio", "json"], default-features = false }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "time"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-# Read notAfter from the attestation doc's NSM certificate chain (same crate
-# + version qos_nsm uses to parse it).
-x509-cert = "0.2.5"
-base64 = "0.22"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net", "time"] }
+serde = { workspace = true, features = ["derive"] }
+base64 = { workspace = true }
 clap = { version = "4.0", features = ["derive", "env"] }
 
 [features]
-# Switches qos_core constants (EPHEMERAL_KEY_FILE, MANIFEST_FILE) to their
-# in-enclave absolute paths instead of the local-dev `./local-enclave/...`
-# paths. This binary only ever runs as a TVC pivot, so it must be on for any
-# real deployment — mirrors parser_http_server's identically-named,
-# identically-purposed feature (images/nsm_probe/Containerfile sets it).
-# QOS 0.12.1 dropped `qos_core/vm` (paths are always absolute), so this is
-# now a no-op kept only so the Containerfile's `--features vsock` still works.
-vsock = []
+# In-enclave file paths; images/nsm_probe/Containerfile builds with it.
+vsock = ["tvc-attestation/enclave"]
 
-[lints.clippy]
-unwrap_used = "deny"
-expect_used = "deny"
-panic = "deny"
-
-[lints.rust]
-unsafe_code = "forbid"
+[lints]
+workspace = true
 
 [[bin]]
 name = "nsm_probe"
 path = "src/main.rs"
-
-# Not a workspace member (see src/Cargo.toml `exclude`).
-[workspace]
