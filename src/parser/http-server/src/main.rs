@@ -34,7 +34,7 @@
 //!   fallback (same rationale as the ABI-trust flags above). Absent means the
 //!   routes stay open (today's behavior).
 //!
-//! The ephemeral key is read from `qos_core::EPHEMERAL_KEY_FILE` (provisioned
+//! The ephemeral key is read from `tvc_attestation::paths::EPHEMERAL_KEY_FILE` (provisioned
 //! by QOS inside the enclave). No override flag - if a deployment ever needs
 //! a non-canonical path, bind-mount it instead.
 
@@ -405,14 +405,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Disabled matches every other binary until one wires PaymentPolicy::Required.
     let config = ParserConfig::new(abi_trust, PaymentPolicy::Disabled);
 
-    let handle = EphemeralKeyHandle::new(qos_core::EPHEMERAL_KEY_FILE.to_string());
+    let handle = EphemeralKeyHandle::new(tvc_attestation::paths::EPHEMERAL_KEY_FILE.to_string());
     let ephemeral_key = handle
         .get_ephemeral_key()
         .map_err(|e| format!("failed to load ephemeral key: {e}"))?;
     eprintln!(
         "parser_http_server {} loaded ephemeral key from {}",
         env!("VERSION"),
-        qos_core::EPHEMERAL_KEY_FILE,
+        tvc_attestation::paths::EPHEMERAL_KEY_FILE,
     );
 
     let boot_proof = StaticBootProof::from_enclave_files(

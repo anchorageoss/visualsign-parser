@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "tvc-attestation",
   "codegen",
   "examples",
   "generated",
@@ -53,14 +54,14 @@ repository = "https://github.com/anchorageoss/visualsign-parser"
 #       https://github.com/tkhq/qos/commit/4371d44e672a1322d15ef929cfd32169ebb0bd0f
 #     scripts/extract-nitro-pcrs.sh reads the marker line below to reproduce them.
 # qos-deployment-rev = 4371d44e672a1322d15ef929cfd32169ebb0bd0f
-qos_client = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
-qos_core = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
-qos_crypto = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
-qos_hex = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
-qos_net = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
-qos_nsm = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
-qos_p256 = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
-qos_test_primitives = { git = "https://github.com/tkhq/qos.git", rev = "365ba7ed529bc5af617bcfb27502c3efce8b37ae", default-features = false }
+qos_client = { git = "https://github.com/tkhq/qos.git", rev = "82d8e18b8875362cdb639f962b6a7f78bd42d320", default-features = false }
+qos_core = { git = "https://github.com/tkhq/qos.git", rev = "82d8e18b8875362cdb639f962b6a7f78bd42d320", default-features = false }
+qos_crypto = { git = "https://github.com/tkhq/qos.git", rev = "82d8e18b8875362cdb639f962b6a7f78bd42d320", default-features = false }
+qos_hex = { git = "https://github.com/tkhq/qos.git", rev = "82d8e18b8875362cdb639f962b6a7f78bd42d320", default-features = false }
+qos_net = { git = "https://github.com/tkhq/qos.git", rev = "82d8e18b8875362cdb639f962b6a7f78bd42d320", default-features = false }
+qos_nsm = { git = "https://github.com/tkhq/qos.git", rev = "82d8e18b8875362cdb639f962b6a7f78bd42d320", default-features = false }
+qos_p256 = { git = "https://github.com/tkhq/qos.git", rev = "82d8e18b8875362cdb639f962b6a7f78bd42d320", default-features = false }
+qos_test_primitives = { git = "https://github.com/tkhq/qos.git", rev = "82d8e18b8875362cdb639f962b6a7f78bd42d320", default-features = false }
 
 # Common dependencies
 base64 = "0.22.1"

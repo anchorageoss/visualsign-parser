@@ -1,0 +1,28 @@
+[package]
+name = "tvc-attestation"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "What a Turnkey Verifiable Cloud pivot needs to attest itself: QOS manifest + ephemeral key, NSM attestation verified against the AWS Nitro root, cached"
+
+[dependencies]
+qos_core = { workspace = true }
+qos_nsm = { workspace = true }
+borsh = { version = "1", features = ["std"], default-features = false }
+base64 = { workspace = true }
+# Reads notAfter from the attestation doc's NSM certificate chain; same crate +
+# version qos_nsm parses it with.
+x509-cert = "0.2.5"
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "test-util"] }
+
+[features]
+# In-enclave absolute paths (`/qos.manifest`, `/qos.ephemeral.key`) instead of
+# the local-dev `./local-enclave/...` ones. QOS 0.12.1 dropped `qos_core/vm`,
+# which used to make this switch, so it lives here now.
+enclave = []
+
+[lints]
+workspace = true
