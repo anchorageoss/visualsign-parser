@@ -2,7 +2,8 @@ use crate::core::txtypes::{
     create_address_lookup_table_field, decode_v0_instructions, decode_v0_transfers,
 };
 use crate::core::{
-    create_accounts_advanced_preview_layout, decode_accounts, decode_v0_accounts, instructions,
+    TransactionSummary, create_accounts_advanced_preview_layout, decode_accounts,
+    decode_v0_accounts, instructions,
 };
 use crate::idl::IdlRegistry;
 use crate::idl::builtin_programs::{
@@ -635,15 +636,20 @@ fn convert_to_visual_sign_payload(
             .map(|e| e.signable_payload_field.clone()),
     );
 
+    #[cfg(feature = "diagnostics")]
+    let summary = decode_result.summary.clone();
+
     #[cfg(not(feature = "diagnostics"))]
-    {
-        let decoded_fields = instructions::decode_instructions(transaction, &idl_registry)?;
+    let summary = {
+        let decoded = instructions::decode_instructions(transaction, &idl_registry)?;
         fields.extend(
-            decoded_fields
+            decoded
+                .fields
                 .iter()
                 .map(|e| e.signable_payload_field.clone()),
         );
-    }
+        decoded.summary
+    };
 
     // Decode and sort accounts using the dedicated function
     let accounts = decode_accounts(message)?;
@@ -656,13 +662,49 @@ fn convert_to_visual_sign_payload(
     #[cfg(feature = "diagnostics")]
     append_diagnostics(&mut fields, &decode_result);
 
+    let (title, subtitle) = apply_transaction_summary(
+        &mut fields,
+        title,
+        summary,
+        message.account_keys.first(),
+        "Solana Transaction",
+    )?;
     Ok(SignablePayload::new(
         0,
-        title.unwrap_or_else(|| "Solana Transaction".to_string()),
-        None,
+        title,
+        subtitle,
         fields,
         "SolanaTx".to_string(),
     ))
+}
+
+/// Applies the adopted [`TransactionSummary`]: a caller-supplied title always wins; otherwise
+/// the summary names the transaction and a From row plus its rows are inserted after Network.
+fn apply_transaction_summary(
+    fields: &mut Vec<SignablePayloadField>,
+    caller_title: Option<String>,
+    summary: Option<TransactionSummary>,
+    fee_payer: Option<&Pubkey>,
+    default_title: &str,
+) -> Result<(String, Option<String>), VisualSignError> {
+    if let Some(title) = caller_title {
+        return Ok((title, None));
+    }
+    // Without a fee payer there is no From row to anchor the hoisted rows, so the whole
+    // summary is dropped rather than leaving a title the body does not back up.
+    let (Some(summary), Some(fee_payer)) = (summary, fee_payer) else {
+        return Ok((default_title.to_string(), None));
+    };
+    let mut rows = vec![instructions::create_from_field(fee_payer)?.signable_payload_field];
+    rows.extend(
+        summary
+            .fields
+            .iter()
+            .map(|f| f.signable_payload_field.clone()),
+    );
+    let after_network = fields.len().min(1);
+    fields.splice(after_network..after_network, rows);
+    Ok((summary.title, summary.subtitle))
 }
 
 /// Convert versioned Solana transaction to visual sign payload
@@ -754,11 +796,13 @@ fn convert_v0_to_visual_sign_payload(
         );
         fields.push(instruction_field.signable_payload_field.clone());
     }
+    #[cfg(feature = "diagnostics")]
+    let summary = v0_result.summary.clone();
 
     #[cfg(not(feature = "diagnostics"))]
-    match decode_v0_instructions(v0_message, &idl_registry) {
-        Ok(v0_fields) => {
-            for (index, instruction_field) in v0_fields.iter().enumerate() {
+    let summary = match decode_v0_instructions(v0_message, &idl_registry) {
+        Ok(decoded) => {
+            for (index, instruction_field) in decoded.fields.iter().enumerate() {
                 tracing::debug!(
                     "Handling instruction {} with visualizer {:?}",
                     index,
@@ -766,6 +810,7 @@ fn convert_v0_to_visual_sign_payload(
                 );
                 fields.push(instruction_field.signable_payload_field.clone());
             }
+            decoded.summary
         }
         Err(e) => {
             // Add a note about instruction decoding failure
@@ -778,8 +823,9 @@ fn convert_v0_to_visual_sign_payload(
                     text: format!("Instruction decoding failed: {e}"),
                 },
             });
+            None
         }
-    }
+    };
 
     // Process V0 transfer decoding using solana-parser
     if decode_transfers {
@@ -813,10 +859,17 @@ fn convert_v0_to_visual_sign_payload(
     #[cfg(feature = "diagnostics")]
     append_diagnostics(&mut fields, &v0_result);
 
+    let (title, subtitle) = apply_transaction_summary(
+        &mut fields,
+        title,
+        summary,
+        v0_message.account_keys.first(),
+        "Solana V0 Transaction",
+    )?;
     Ok(SignablePayload::new(
         0,
-        title.unwrap_or_else(|| "Solana V0 Transaction".to_string()),
-        None,
+        title,
+        subtitle,
         fields,
         "SolanaTx".to_string(),
     ))
@@ -2625,5 +2678,75 @@ mod tests {
         );
         let mappings = extract_idl_mappings(&options);
         assert_eq!(mappings.len(), 1);
+    }
+
+    fn network_row() -> SignablePayloadField {
+        SignablePayloadField::TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "Solana".to_string(),
+                label: "Network".to_string(),
+            },
+            text_v2: visualsign::SignablePayloadFieldTextV2 {
+                text: "Solana".to_string(),
+            },
+        }
+    }
+
+    fn sample_summary() -> TransactionSummary {
+        TransactionSummary {
+            title: "Do the thing".to_string(),
+            subtitle: Some("Program".to_string()),
+            fields: vec![
+                visualsign::field_builders::create_text_field("Amount", "1").expect("field"),
+            ],
+        }
+    }
+
+    /// Title and rows are one unit: with no fee payer to anchor the From row,
+    /// the summary is dropped entirely rather than titling a body it is not in.
+    #[test]
+    fn apply_transaction_summary_without_fee_payer_keeps_default_title() {
+        let mut fields = vec![network_row()];
+        let (title, subtitle) =
+            apply_transaction_summary(&mut fields, None, Some(sample_summary()), None, "Default")
+                .expect("apply");
+        assert_eq!(title, "Default");
+        assert_eq!(subtitle, None);
+        assert_eq!(fields.len(), 1, "no rows hoisted without a fee payer");
+    }
+
+    #[test]
+    fn apply_transaction_summary_inserts_rows_after_network() {
+        let payer = Pubkey::new_unique();
+        let mut fields = vec![network_row(), network_row()];
+        let (title, subtitle) = apply_transaction_summary(
+            &mut fields,
+            None,
+            Some(sample_summary()),
+            Some(&payer),
+            "Default",
+        )
+        .expect("apply");
+        assert_eq!(title, "Do the thing");
+        assert_eq!(subtitle.as_deref(), Some("Program"));
+        let labels: Vec<&str> = fields.iter().map(|f| f.label().as_str()).collect();
+        assert_eq!(labels, ["Network", "From", "Amount", "Network"]);
+    }
+
+    #[test]
+    fn apply_transaction_summary_caller_title_disables_it() {
+        let payer = Pubkey::new_unique();
+        let mut fields = vec![network_row()];
+        let (title, subtitle) = apply_transaction_summary(
+            &mut fields,
+            Some("Caller".to_string()),
+            Some(sample_summary()),
+            Some(&payer),
+            "Default",
+        )
+        .expect("apply");
+        assert_eq!(title, "Caller");
+        assert_eq!(subtitle, None);
+        assert_eq!(fields.len(), 1);
     }
 }

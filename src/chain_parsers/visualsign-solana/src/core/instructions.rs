@@ -1,4 +1,8 @@
-use crate::core::{InstructionVisualizer, VisualizerContext, visualize_with_any};
+use crate::core::priority_fee::PriorityFee;
+use crate::core::{
+    InstructionVisualizer, TransactionSummary, VisualizeResult, VisualizerContext,
+    visualize_with_any,
+};
 use crate::idl::IdlRegistry;
 use solana_parser::solana::parser::parse_transaction;
 use solana_parser::solana::structs::SolanaAccount;
@@ -15,6 +19,68 @@ use visualsign::lint::LintConfig;
 // available_visualizers and related items, which are used to decode and visualize instructions.
 include!(concat!(env!("OUT_DIR"), "/generated_visualizers.rs"));
 
+/// Folds per-instruction results into the transaction-level summary decision: adopted only
+/// when exactly one instruction proposes and every other one is infrastructure. A transfer,
+/// a second action, or an unhandled or failed instruction blocks it.
+#[derive(Default)]
+pub struct SummaryAccumulator {
+    proposals: Vec<TransactionSummary>,
+    blocked: bool,
+    priority_fee: PriorityFee,
+}
+
+impl SummaryAccumulator {
+    /// Records a rendered instruction, taking its proposal and compute-budget request.
+    pub fn observe(&mut self, result: &mut VisualizeResult) {
+        if let Some(request) = result.compute_budget.take() {
+            self.priority_fee.record(&request);
+        }
+        match result.summary.take() {
+            Some(summary) => self.proposals.push(summary),
+            None if result.infrastructure => {}
+            None => self.blocked = true,
+        }
+    }
+
+    /// Records an instruction that could not be rendered.
+    pub fn block(&mut self) {
+        self.blocked = true;
+    }
+
+    /// A priority fee row that cannot be rendered fails closed: no summary.
+    pub fn finish(mut self) -> Option<TransactionSummary> {
+        if self.blocked || self.priority_fee.is_invalid() || self.proposals.len() != 1 {
+            return None;
+        }
+        let mut summary = self.proposals.pop()?;
+        if let Some(estimate) = self.priority_fee.estimate() {
+            summary.fields.push(estimate.field().ok()?);
+        }
+        Some(summary)
+    }
+}
+
+/// Rendered instructions plus the transaction-level summary they agreed on.
+#[derive(Debug)]
+pub struct DecodedInstructions {
+    pub fields: Vec<AnnotatedPayloadField>,
+    pub summary: Option<TransactionSummary>,
+}
+
+/// Top-level "From" row naming the fee payer (`account_keys[0]`).
+pub fn create_from_field(
+    fee_payer: &solana_sdk::pubkey::Pubkey,
+) -> Result<AnnotatedPayloadField, VisualSignError> {
+    visualsign::field_builders::create_address_field(
+        "From",
+        &fee_payer.to_string(),
+        None,
+        None,
+        None,
+        None,
+    )
+}
+
 /// Result of decoding instructions: display fields, per-instruction errors,
 /// and lint diagnostics separately. The function always succeeds — individual
 /// instruction failures are captured in `errors` rather than aborting the parse.
@@ -23,6 +89,7 @@ pub struct DecodeInstructionsResult {
     pub fields: Vec<AnnotatedPayloadField>,
     pub errors: Vec<(usize, VisualSignError)>,
     pub diagnostics: Vec<AnnotatedPayloadField>,
+    pub summary: Option<TransactionSummary>,
 }
 
 /// Visualizes all the instructions and related fields in a transaction/message.
@@ -62,6 +129,7 @@ pub fn decode_instructions(
             fields: Vec::new(),
             errors: Vec::new(),
             diagnostics,
+            summary: None,
         };
     }
 
@@ -73,6 +141,7 @@ pub fn decode_instructions(
     // Visualization: process every instruction (no skipping)
     let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
     let mut errors: Vec<(usize, VisualSignError)> = Vec::new();
+    let mut summary = SummaryAccumulator::default();
 
     for (i, ci) in message.instructions.iter().enumerate() {
         let sender = SolanaAccount {
@@ -84,14 +153,23 @@ pub fn decode_instructions(
         let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry, i);
 
         match visualize_with_any(&visualizers_refs, &context) {
-            Some(Ok(viz_result)) => fields.push(viz_result.field),
-            Some(Err(e)) => errors.push((i, e)),
-            None => errors.push((
-                i,
-                VisualSignError::DecodeError(format!(
-                    "No visualizer available for instruction at index {i}"
-                )),
-            )),
+            Some(Ok(mut viz_result)) => {
+                summary.observe(&mut viz_result);
+                fields.push(viz_result.field);
+            }
+            Some(Err(e)) => {
+                summary.block();
+                errors.push((i, e));
+            }
+            None => {
+                summary.block();
+                errors.push((
+                    i,
+                    VisualSignError::DecodeError(format!(
+                        "No visualizer available for instruction at index {i}"
+                    )),
+                ));
+            }
         }
     }
 
@@ -99,6 +177,7 @@ pub fn decode_instructions(
         fields,
         errors,
         diagnostics,
+        summary: summary.finish(),
     }
 }
 
@@ -111,7 +190,7 @@ pub fn decode_instructions(
 pub fn decode_instructions(
     transaction: &SolanaTransaction,
     idl_registry: &IdlRegistry,
-) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+) -> Result<DecodedInstructions, VisualSignError> {
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
     let visualizers_refs: Vec<&dyn InstructionVisualizer> =
         visualizers.iter().map(|v| v.as_ref()).collect::<Vec<_>>();
@@ -126,6 +205,7 @@ pub fn decode_instructions(
     }
 
     let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
+    let mut summary = SummaryAccumulator::default();
     for (i, ci) in message.instructions.iter().enumerate() {
         let sender = SolanaAccount {
             account_key: account_keys[0].to_string(),
@@ -136,7 +216,10 @@ pub fn decode_instructions(
         let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry, i);
 
         match visualize_with_any(&visualizers_refs, &context) {
-            Some(Ok(viz_result)) => fields.push(viz_result.field),
+            Some(Ok(mut viz_result)) => {
+                summary.observe(&mut viz_result);
+                fields.push(viz_result.field);
+            }
             Some(Err(e)) => {
                 return Err(VisualSignError::DecodeError(format!(
                     "instruction {i}: {e}"
@@ -150,7 +233,10 @@ pub fn decode_instructions(
         }
     }
 
-    Ok(fields)
+    Ok(DecodedInstructions {
+        fields,
+        summary: summary.finish(),
+    })
 }
 
 /// Scan compiled instructions for inaccessible indices and emit diagnostics.
@@ -395,7 +481,9 @@ mod off_tests {
             }],
         );
         let registry = IdlRegistry::new();
-        let fields = decode_instructions(&tx, &registry).expect("OOB program_id should not abort");
+        let fields = decode_instructions(&tx, &registry)
+            .expect("OOB program_id should not abort")
+            .fields;
         assert_eq!(fields.len(), 1, "exactly one rendered instruction");
     }
 
@@ -415,8 +503,9 @@ mod off_tests {
             }],
         );
         let registry = IdlRegistry::new();
-        let fields =
-            decode_instructions(&tx, &registry).expect("OOB account_index should not abort");
+        let fields = decode_instructions(&tx, &registry)
+            .expect("OOB account_index should not abort")
+            .fields;
         assert_eq!(fields.len(), 1);
     }
 
@@ -440,7 +529,8 @@ mod off_tests {
         );
         let registry = IdlRegistry::new();
         let fields = decode_instructions(&tx, &registry)
-            .expect("v0+ALT account must not abort an IDL preset");
+            .expect("v0+ALT account must not abort an IDL preset")
+            .fields;
         assert_eq!(fields.len(), 1, "one field per instruction");
     }
 
@@ -469,7 +559,8 @@ mod off_tests {
         );
         let registry = IdlRegistry::new();
         let fields = decode_instructions(&tx, &registry)
-            .expect("v0+ALT account must not abort an IDL preset");
+            .expect("v0+ALT account must not abort an IDL preset")
+            .fields;
         assert_eq!(fields.len(), 1);
 
         // Dig into the expanded preview fields and assert that the IDL-named

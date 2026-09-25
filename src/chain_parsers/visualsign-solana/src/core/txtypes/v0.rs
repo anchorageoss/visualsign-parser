@@ -1,8 +1,10 @@
 #[cfg(feature = "diagnostics")]
 use crate::core::DecodeInstructionsResult;
+#[cfg(not(feature = "diagnostics"))]
+use crate::core::DecodedInstructions;
 use crate::core::{
-    InstructionVisualizer, SolanaAccount, VisualizerContext, available_visualizers,
-    visualize_with_any,
+    InstructionVisualizer, SolanaAccount, SummaryAccumulator, VisualizerContext,
+    available_visualizers, visualize_with_any,
 };
 use solana_sdk::transaction::VersionedTransaction;
 #[cfg(feature = "diagnostics")]
@@ -166,6 +168,7 @@ pub fn decode_v0_instructions(
             fields: Vec::new(),
             errors: Vec::new(),
             diagnostics,
+            summary: None,
         };
     }
 
@@ -180,6 +183,7 @@ pub fn decode_v0_instructions(
     // Visualization: process every instruction (no skipping)
     let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
     let mut errors: Vec<(usize, VisualSignError)> = Vec::new();
+    let mut summary = SummaryAccumulator::default();
 
     for (i, ci) in v0_message.instructions.iter().enumerate() {
         let sender = SolanaAccount {
@@ -191,14 +195,23 @@ pub fn decode_v0_instructions(
         let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry, i);
 
         match visualize_with_any(&visualizers_refs, &context) {
-            Some(Ok(viz_result)) => fields.push(viz_result.field),
-            Some(Err(e)) => errors.push((i, e)),
-            None => errors.push((
-                i,
-                VisualSignError::DecodeError(format!(
-                    "No visualizer available for instruction at index {i}"
-                )),
-            )),
+            Some(Ok(mut viz_result)) => {
+                summary.observe(&mut viz_result);
+                fields.push(viz_result.field);
+            }
+            Some(Err(e)) => {
+                summary.block();
+                errors.push((i, e));
+            }
+            None => {
+                summary.block();
+                errors.push((
+                    i,
+                    VisualSignError::DecodeError(format!(
+                        "No visualizer available for instruction at index {i}"
+                    )),
+                ));
+            }
         }
     }
 
@@ -206,6 +219,7 @@ pub fn decode_v0_instructions(
         fields,
         errors,
         diagnostics,
+        summary: summary.finish(),
     }
 }
 
@@ -216,7 +230,7 @@ pub fn decode_v0_instructions(
 pub fn decode_v0_instructions(
     v0_message: &solana_sdk::message::v0::Message,
     idl_registry: &crate::idl::IdlRegistry,
-) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+) -> Result<DecodedInstructions, VisualSignError> {
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
     let visualizers_refs: Vec<&dyn InstructionVisualizer> =
         visualizers.iter().map(|v| v.as_ref()).collect::<Vec<_>>();
@@ -230,6 +244,7 @@ pub fn decode_v0_instructions(
     }
 
     let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
+    let mut summary = SummaryAccumulator::default();
     for (i, ci) in v0_message.instructions.iter().enumerate() {
         let sender = SolanaAccount {
             account_key: account_keys[0].to_string(),
@@ -240,7 +255,10 @@ pub fn decode_v0_instructions(
         let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry, i);
 
         match visualize_with_any(&visualizers_refs, &context) {
-            Some(Ok(viz_result)) => fields.push(viz_result.field),
+            Some(Ok(mut viz_result)) => {
+                summary.observe(&mut viz_result);
+                fields.push(viz_result.field);
+            }
             Some(Err(e)) => {
                 return Err(VisualSignError::DecodeError(format!(
                     "instruction {i}: {e}"
@@ -254,7 +272,10 @@ pub fn decode_v0_instructions(
         }
     }
 
-    Ok(fields)
+    Ok(DecodedInstructions {
+        fields,
+        summary: summary.finish(),
+    })
 }
 
 /// Create a rich address lookup table field with detailed information
@@ -470,7 +491,9 @@ mod off_tests {
             }],
         );
         let registry = crate::idl::IdlRegistry::new();
-        let fields = decode_v0_instructions(&msg, &registry).expect("OOB should not abort");
+        let fields = decode_v0_instructions(&msg, &registry)
+            .expect("OOB should not abort")
+            .fields;
         assert_eq!(fields.len(), 1);
     }
 }
