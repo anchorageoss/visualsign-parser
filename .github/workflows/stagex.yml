@@ -292,3 +292,83 @@ jobs:
           else
             echo "No release to update (SEMVER_TAG='${SEMVER_TAG:-<unset>}'); skipping release-notes update."
           fi
+
+  # THROWAWAY, manual-only. Builds and pushes nsm_probe (source in
+  # parser/nsm-probe) — a diagnostic pivot with no parsing/wallet surface,
+  # built solely to validate the /dev/nsm reachability question PR #452 is
+  # blocked on under a real TVC deployment. Deliberately NOT part of the
+  # `parser` matrix above: it must never build on a push to main or a version
+  # tag, so it never gets a `:latest`/`:v*` tag or a release-notes entry.
+  # workflow_dispatch only — delete this job once #452's NSM approach is
+  # validated (or replaced) and the deployment/image are no longer needed.
+  nsm_probe:
+    name: Build nsm_probe (throwaway TVC validation)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      packages: write
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Docker setup
+        uses: ./.github/actions/docker-setup
+        with:
+          dockerHub: ${{ secrets.DOCKERHUB_API_KEY }}
+
+      - name: Build nsm_probe
+        run: make VERSION="0.0.0-nsm-probe" -j"$(nproc)" out/nsm_probe/index.json
+
+      - name: Load artifact to Docker
+        run: env -C out/nsm_probe tar -cf - . | docker load
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push + print TVC deploy instructions
+        run: |
+          sha_tag="$(git rev-parse HEAD)"
+          docker tag anchorageoss-visualsign-parser/nsm_probe:latest "ghcr.io/anchorageoss/nsm_probe:${sha_tag}"
+          docker push "ghcr.io/anchorageoss/nsm_probe:${sha_tag}"
+          container_url="ghcr.io/anchorageoss/nsm_probe:${sha_tag}"
+          container_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${container_url}" | cut -d '@' -f 2)
+          docker create --name tmp-extract "${container_url}" /bin/true
+          docker cp tmp-extract:/nsm_probe /tmp/binary
+          docker rm tmp-extract
+          digest=$(sha256sum /tmp/binary | awk '{print $1}')
+          pinned_url="${container_url}@${container_digest}"
+          {
+            echo "## THROWAWAY nsm_probe TVC deployment details"
+            echo ""
+            echo "Diagnostic-only. No wallet/parsing surface. Delete the TVC deployment"
+            echo "(and this image) once the /dev/nsm reachability question is answered."
+            echo ""
+            echo "- **Container Image URL**: \`${pinned_url}\`"
+            echo "- **Executable path**: \`/nsm_probe\`"
+            echo "- **Expected Executable Digest**: \`${digest}\`"
+            echo "- **QOS Version**: \`0.12.0\`"
+            echo ""
+            echo "### Kick off deployment with \`tvc\`"
+            echo ""
+            echo '```bash'
+            echo 'tvc deploy init -o tvc-deploy-nsm-probe.json'
+            echo '# Edit tvc-deploy-nsm-probe.json to set:'
+            echo "#   \"pivotContainerImageUrl\": \"${pinned_url}\""
+            echo '#   "pivotPath": "/nsm_probe"'
+            echo "#   \"expectedPivotDigest\": \"${digest}\""
+            echo '#   "qosVersion": "0.12.0"'
+            echo '#   "appId": "<env-specific throwaway app id, do not reuse a real parser app id>"'
+            echo '#   "pivotArgs": []  # no flags required; --port defaults to 3000'
+            echo '#   "healthCheckType": "TVC_HEALTH_CHECK_TYPE_HTTP"'
+            echo '#   "publicIngressPort": 3000'
+            echo 'tvc deploy create tvc-deploy-nsm-probe.json'
+            echo '```'
+            echo ""
+            echo "### Read the result"
+            echo ""
+            echo '```bash'
+            echo 'curl "https://<app-uuid>.turnkey.cloud/probe"   # call it a few times, not just once'
+            echo '```'
+            echo ""
+            echo "Then \`tvc-deploy delete-deployment\` / delete the app, and delete this GHCR image."
+          } >> "$GITHUB_STEP_SUMMARY"
