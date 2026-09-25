@@ -1,8 +1,8 @@
 //! Where a response's `bootProof` comes from.
 //!
-//! [`StaticBootProof`] provides a real ephemeral key and real manifest bytes
-//! with an empty attestation doc; a later NSM-backed implementation fills
-//! the attestation doc in.
+//! [`StaticBootProof`] carries a real ephemeral key and real manifest bytes
+//! but an empty attestation doc; [`NsmBootProof`] fills the doc in from a
+//! real `/dev/nsm` call.
 
 use std::io::Read as _;
 use std::path::Path;
@@ -24,6 +24,7 @@ const MAX_MANIFEST_FILE_SIZE: u64 = 10 * 1024 * 1024;
 pub enum BootProofError {
     Manifest(String),
     Encode(String),
+    Nsm(String),
 }
 
 pub trait BootProofSource {
@@ -130,8 +131,8 @@ pub fn redacted_boot_proof() -> TurnkeyBootProof {
 /// sha256(borsh(manifest)). Base64-ing the file bytes directly would produce
 /// fields no verifier can read. So: read JSON, re-encode with borsh.
 ///
-/// Shared by `StaticBootProof` and (in a later PR) an NSM-backed source,
-/// which also needs the envelope for `manifest.qos_hash()`.
+/// Shared by `StaticBootProof` and `NsmBootProof`, which also needs the
+/// envelope for `manifest.qos_hash()`.
 pub fn read_manifest_envelope() -> Result<ManifestEnvelope, BootProofError> {
     read_manifest_envelope_at(Path::new(qos_core::MANIFEST_FILE))
 }
@@ -183,14 +184,102 @@ fn encode_borsh_b64(v: &impl borsh::BorshSerialize) -> Result<String, BootProofE
     Ok(engine.encode(bytes))
 }
 
+/// NSM-backed boot proof: the real AWS Nitro attestation document, generated
+/// once at construction and reused for every response.
+///
+/// Reproduces qos_core's post-boot attestation call
+/// (`protocol/services/attestation.rs::get_post_boot_attestation_doc`): the
+/// manifest hash goes in `user_data`, the ephemeral pubkey in `public_key`,
+/// and `nonce` stays `None`. That makes the document not request-bound, so
+/// generating it once at startup (rather than per request) is correct, not
+/// just cheap: our reference verifier (`visualsign-turnkeyclient
+/// cmd/verify.go`) sets `SkipTimestampCheck: true`, so there is no freshness
+/// window to satisfy.
+pub struct NsmBootProof {
+    base: StaticBootProof,
+    aws_attestation_doc_b64: String,
+}
+
+impl NsmBootProof {
+    /// Production constructor: calls the real `/dev/nsm` device.
+    pub fn new(
+        ephemeral: &P256Pair,
+        enclave_app: String,
+        deployment_label: String,
+    ) -> Result<Self, BootProofError> {
+        Self::from_envelope(
+            qos_nsm::Nsm,
+            &read_manifest_envelope()?,
+            ephemeral,
+            enclave_app,
+            deployment_label,
+        )
+    }
+
+    /// Test seam: takes any `NsmProvider` and an already-read envelope so
+    /// unit tests can assert the attestor is called exactly once without
+    /// touching `/dev/nsm` or `qos_core::MANIFEST_FILE`.
+    fn from_envelope<A: qos_nsm::NsmProvider>(
+        attestor: A,
+        envelope: &ManifestEnvelope,
+        ephemeral: &P256Pair,
+        enclave_app: String,
+        deployment_label: String,
+    ) -> Result<Self, BootProofError> {
+        use qos_core::protocol::QosHash;
+        use qos_nsm::types::{NsmRequest, NsmResponse};
+
+        let manifest_hash = envelope.manifest.qos_hash().to_vec();
+        let ephemeral_public_key = ephemeral.public_key().to_bytes();
+
+        let response = attestor.nsm_process_request(NsmRequest::Attestation {
+            user_data: Some(manifest_hash),
+            nonce: None,
+            public_key: Some(ephemeral_public_key),
+        });
+        let document = match response {
+            NsmResponse::Attestation { document } => document,
+            other => return Err(BootProofError::Nsm(format!("{other:?}"))),
+        };
+
+        let (qos_manifest_b64, qos_manifest_envelope_b64) = encode_manifest_borsh_b64(envelope)?;
+
+        Ok(Self {
+            base: StaticBootProof::new(
+                ephemeral,
+                qos_manifest_b64,
+                qos_manifest_envelope_b64,
+                enclave_app,
+                deployment_label,
+            ),
+            aws_attestation_doc_b64: base64::engine::general_purpose::STANDARD.encode(document),
+        })
+    }
+}
+
+impl BootProofSource for NsmBootProof {
+    fn boot_proof(&self) -> TurnkeyBootProof {
+        TurnkeyBootProof {
+            aws_attestation_doc_b64: self.aws_attestation_doc_b64.clone(),
+            ..self.base.boot_proof()
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 pub(crate) mod tests {
     use super::*;
+    use qos_core::protocol::QosHash;
     use qos_core::protocol::services::boot::{
         Manifest, ManifestSet, Namespace, NitroConfig, PatchSet, PivotConfig, RestartPolicy,
         ShareSet,
     };
+    use qos_nsm::NsmProvider;
+    use qos_nsm::nitro::AttestError;
+    use qos_nsm::types::{NsmRequest, NsmResponse};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     // Built field-by-field rather than via `ManifestEnvelope::default()`:
     // that impl only exists behind qos_core's `mock` feature, which cannot
@@ -284,5 +373,80 @@ pub(crate) mod tests {
         let decoded_envelope: ManifestEnvelope =
             borsh::from_slice(&engine.decode(envelope_b64).unwrap()).unwrap();
         assert_eq!(decoded_envelope, envelope);
+    }
+
+    struct CountingAttestor {
+        calls: Arc<AtomicUsize>,
+        // Captures the last request so tests can assert on the
+        // security-critical fields (`user_data`, `public_key`, `nonce`),
+        // not just that the attestor was called.
+        last_request: Arc<std::sync::Mutex<Option<NsmRequest>>>,
+        document: Vec<u8>,
+    }
+
+    impl NsmProvider for CountingAttestor {
+        fn nsm_process_request(&self, request: NsmRequest) -> NsmResponse {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            *self.last_request.lock().unwrap() = Some(request);
+            NsmResponse::Attestation {
+                document: self.document.clone(),
+            }
+        }
+
+        fn timestamp_ms(&self) -> Result<u64, AttestError> {
+            Ok(0)
+        }
+    }
+
+    #[test]
+    fn nsm_boot_proof_generates_once_and_reuses_the_document() {
+        // The production route passes nonce: None, so the doc is not
+        // request-bound and can be generated at startup. Our own verifier
+        // does not check the timestamp either (visualsign-turnkeyclient
+        // cmd/verify.go sets SkipTimestampCheck: true), so caching is safe
+        // rather than merely cheap.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let last_request = Arc::new(std::sync::Mutex::new(None));
+        let envelope = sample_manifest_envelope();
+        let ephemeral = qos_p256::P256Pair::generate().unwrap();
+        let source = NsmBootProof::from_envelope(
+            CountingAttestor {
+                calls: calls.clone(),
+                last_request: last_request.clone(),
+                document: vec![0xAA; 64],
+            },
+            &envelope,
+            &ephemeral,
+            "visualsign-parser".to_string(),
+            "test".to_string(),
+        )
+        .unwrap();
+
+        let first = source.boot_proof();
+        let second = source.boot_proof();
+        assert_eq!(
+            first.aws_attestation_doc_b64,
+            second.aws_attestation_doc_b64
+        );
+        assert!(!first.aws_attestation_doc_b64.is_empty());
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "doc must be generated once"
+        );
+
+        // The NSM input contract: user_data is the manifest's qos_hash,
+        // public_key is the ephemeral key bytes, and nonce is None (the
+        // doc must not be request-bound, see the module doc above).
+        let expected_request = NsmRequest::Attestation {
+            user_data: Some(envelope.manifest.qos_hash().to_vec()),
+            nonce: None,
+            public_key: Some(ephemeral.public_key().to_bytes()),
+        };
+        assert_eq!(
+            *last_request.lock().unwrap(),
+            Some(expected_request),
+            "NSM request must carry the manifest hash, ephemeral public key, and no nonce"
+        );
     }
 }

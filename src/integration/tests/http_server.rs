@@ -81,6 +81,8 @@ impl RunningServer {
             .arg("--port")
             .arg(port.to_string())
             .arg("--accept-unsigned-abis")
+            .arg("--boot-proof-source")
+            .arg("static")
             .args(extra_args)
             .current_dir(&work_dir)
             .spawn()

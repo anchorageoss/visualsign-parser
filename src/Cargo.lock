@@ -7457,6 +7457,7 @@ dependencies = [
  "parser_app",
  "qos_core",
  "qos_hex",
+ "qos_nsm",
  "qos_p256",
  "serde",
  "serde_json",
