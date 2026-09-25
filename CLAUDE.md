@@ -9,8 +9,9 @@ All commands run from `src/`:
 ```bash
 make -C src build          # Build all workspace crates
 make -C src test           # Build all, then run all tests (integration tests need binaries)
-make -C src lint           # cargo clippy --all-targets -- -D warnings
-make -C src fmt            # cargo fmt
+make -C src lint           # fmt-check, then cargo clippy --all-targets -- -D warnings
+make -C src fmt            # cargo fmt + rustfmt on Solana presets (plain `cargo fmt` misses them)
+make -C src fmt-check      # Same file set as fmt, check only
 make -C src generated      # Regenerate protobuf types (tonic_build), then fmt
 make -C src grpc-server    # Run the gRPC server locally
 ```

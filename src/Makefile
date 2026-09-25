@@ -67,15 +67,26 @@ test: build
 # out of the gate as soon as it goes stale.
 SOLANA_PRESET_SOURCES := $(shell find chain_parsers/visualsign-solana/src/presets -name '*.rs' 2>/dev/null | sort)
 
-.PHONY: fmt
-fmt:
-	cargo fmt
+.PHONY: check-preset-sources
+check-preset-sources:
 	@test -n "$(SOLANA_PRESET_SOURCES)" || { echo "no preset sources found under chain_parsers/visualsign-solana/src/presets"; exit 1; }
+
+.PHONY: fmt
+fmt: check-preset-sources
+	cargo fmt
 	@echo "rustfmt $(words $(SOLANA_PRESET_SOURCES)) Solana preset sources"
 	@rustfmt $(SOLANA_PRESET_SOURCES)
 
+# Checks the same file set `fmt` formats, so `cargo fmt --check` passing alone
+# is never mistaken for a clean tree (it misses every preset source above).
+.PHONY: fmt-check
+fmt-check: check-preset-sources
+	cargo fmt --check
+	@echo "rustfmt --check $(words $(SOLANA_PRESET_SOURCES)) Solana preset sources"
+	@rustfmt --check $(SOLANA_PRESET_SOURCES) || { echo "formatting drift: run 'make -C src fmt'"; exit 1; }
+
 .PHONY: lint
-lint:
+lint: fmt-check
 	cargo clippy --version
 	cargo clippy --workspace --exclude parser_cli --all-targets -- -D warnings
 	cargo clippy -p parser_cli --all-targets -- -D warnings
