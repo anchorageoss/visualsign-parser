@@ -358,10 +358,10 @@ fn extract_name_from_idl_json(idl_json: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(idl_json).ok()?;
 
     // Try "metadata.name" first (Anchor IDL format)
-    if let Some(metadata) = value.get("metadata") {
-        if let Some(name) = metadata.get("name").and_then(|n| n.as_str()) {
-            return Some(name.to_string());
-        }
+    if let Some(metadata) = value.get("metadata")
+        && let Some(name) = metadata.get("name").and_then(|n| n.as_str())
+    {
+        return Some(name.to_string());
     }
 
     // Try "name" field directly
@@ -1401,13 +1401,12 @@ mod tests {
                 );
 
                 // Check first field is total count
-                if let Some(first_field) = expanded_fields.first() {
-                    if let SignablePayloadField::TextV2 { common, .. } =
+                if let Some(first_field) = expanded_fields.first()
+                    && let SignablePayloadField::TextV2 { common, .. } =
                         &first_field.signable_payload_field
-                    {
-                        assert_eq!(common.label, "Total Tables");
-                        assert_eq!(common.fallback_text, "2");
-                    }
+                {
+                    assert_eq!(common.label, "Total Tables");
+                    assert_eq!(common.fallback_text, "2");
                 }
 
                 println!(

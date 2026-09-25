@@ -442,7 +442,7 @@ impl UniversalRouterVisualizer {
     ///   `trailing_fee`, not `leading_fee`.
     fn decode_v3_path(path: &[u8]) -> Option<(Address, Address, u32, u32, usize)> {
         // Single hop minimum: 20 + 23 = 43 bytes. Each additional hop adds 23 bytes.
-        if path.len() < 43 || (path.len() - 20) % 23 != 0 {
+        if path.len() < 43 || !(path.len() - 20).is_multiple_of(23) {
             return None;
         }
         let first_token = Address::from_slice(&path[0..20]);
@@ -2294,21 +2294,19 @@ mod tests {
         let field =
             UniversalRouterVisualizer::decode_permit2_permit(&permit_single, 1, Some(&registry));
 
-        if let SignablePayloadField::PreviewLayout { preview_layout, .. } = field {
-            if let Some(expanded) = &preview_layout.expanded {
-                for f in &expanded.fields {
-                    if let SignablePayloadField::PreviewLayout {
-                        common,
-                        preview_layout: inner_preview,
-                    } = &f.signable_payload_field
-                    {
-                        if common.label.contains("Expires") {
-                            if let Some(subtitle) = &inner_preview.subtitle {
-                                // Should show a valid date in 2030
-                                assert!(subtitle.text.contains("2030"));
-                            }
-                        }
-                    }
+        if let SignablePayloadField::PreviewLayout { preview_layout, .. } = field
+            && let Some(expanded) = &preview_layout.expanded
+        {
+            for f in &expanded.fields {
+                if let SignablePayloadField::PreviewLayout {
+                    common,
+                    preview_layout: inner_preview,
+                } = &f.signable_payload_field
+                    && common.label.contains("Expires")
+                    && let Some(subtitle) = &inner_preview.subtitle
+                {
+                    // Should show a valid date in 2030
+                    assert!(subtitle.text.contains("2030"));
                 }
             }
         }

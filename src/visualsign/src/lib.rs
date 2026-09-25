@@ -1897,7 +1897,7 @@ mod tests {
         // Test that the original SignablePayloadField enum passes all verification
         // This confirms our refactoring maintains correctness and adds verification
 
-        let test_fields = vec![
+        let test_fields = [
             // TextV2
             SignablePayloadField::TextV2 {
                 common: SignablePayloadFieldCommon {

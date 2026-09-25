@@ -77,12 +77,11 @@ impl IdlRegistry {
             }
 
             // Extract IDL name from JSON metadata
-            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&idl_json) {
-                if let Some(metadata) = json_value.get("metadata") {
-                    if let Some(idl_name) = metadata.get("name").and_then(|n| n.as_str()) {
-                        idl_names.insert(program_id.clone(), idl_name.to_string());
-                    }
-                }
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&idl_json)
+                && let Some(metadata) = json_value.get("metadata")
+                && let Some(idl_name) = metadata.get("name").and_then(|n| n.as_str())
+            {
+                idl_names.insert(program_id.clone(), idl_name.to_string());
             }
 
             // Convert IDL JSON to solana_parser CustomIdlConfig

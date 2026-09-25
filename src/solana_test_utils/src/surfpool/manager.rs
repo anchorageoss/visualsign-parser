@@ -97,6 +97,8 @@ impl SurfpoolManager {
     /// timeout. Running it on a Tokio worker thread would stall other tasks,
     /// so each probe is dispatched via `spawn_blocking` and the inter-attempt
     /// delay uses `tokio::time::sleep`.
+    // `RpcClient` returns the SDK's large `ClientError` by value; we can't shrink it.
+    #[allow(clippy::result_large_err)]
     pub async fn wait_ready(&self) -> Result<()> {
         let max_attempts = 30;
         let delay = Duration::from_millis(500);
@@ -198,6 +200,8 @@ impl Drop for SurfpoolManager {
 /// - the transaction confirms carrying a `TransactionError`
 /// - it stays unconfirmed for the whole budget, in which case the last
 ///   RPC-level error (if any) is attached
+// `RpcClient` returns the SDK's large `ClientError` by value; we can't shrink it.
+#[allow(clippy::result_large_err)]
 async fn airdrop_with(
     client: Arc<RpcClient>,
     pubkey: &Pubkey,

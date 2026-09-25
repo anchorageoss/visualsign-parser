@@ -30,7 +30,7 @@ where
                 let bytes = json_array_to_bytes(&value.value().to_json_value()).map_err(|e| {
                     VisualSignError::DecodeError(format!("Invalid pure value bytes: {e}"))
                 })?;
-                T::from_le_bytes(&bytes).map_err(|e| VisualSignError::DecodeError(e.to_string()))
+                T::from_le_bytes(&bytes).map_err(|e| VisualSignError::DecodeError(e.clone()))
             }
             Some(_) => T::from_move_value(value),
         },
