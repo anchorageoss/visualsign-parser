@@ -33,9 +33,10 @@
 //!   compressed SEC1 pubkeys allowed to call the parse routes. No env
 //!   fallback (same rationale as the ABI-trust flags above). Absent means the
 //!   routes stay open (today's behavior).
-//! - `--boot-proof-source <static|nsm>` / `BOOT_PROOF_SOURCE` (default
-//!   `static`) - `nsm` calls the real `/dev/nsm` device once at startup for
-//!   the response `bootProof`'s attestation document.
+//! - `--boot-proof-source <static|nsm>` (default `static`) - `nsm` calls the
+//!   real `/dev/nsm` device once at startup for the response `bootProof`'s
+//!   attestation document. No env fallback (same rationale as the ABI-trust
+//!   flags above).
 //!
 //! The ephemeral key is read from `qos_core::EPHEMERAL_KEY_FILE` (provisioned
 //! by QOS inside the enclave). No override flag - if a deployment ever needs
@@ -118,7 +119,7 @@ struct Args {
     /// run with since they have no `/dev/nsm`. `nsm` calls the real NSM
     /// device once at startup and reuses the resulting document for every
     /// response.
-    #[arg(long, env = "BOOT_PROOF_SOURCE", default_value = "static")]
+    #[arg(long, default_value = "static")]
     boot_proof_source: BootProofSourceKind,
 }
 
