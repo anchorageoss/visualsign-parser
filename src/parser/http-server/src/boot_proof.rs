@@ -270,6 +270,7 @@ impl BootProofSource for NsmBootProof {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 pub(crate) mod tests {
     use super::*;
+    use qos_core::protocol::QosHash;
     use qos_core::protocol::services::boot::{
         Manifest, ManifestSet, Namespace, NitroConfig, PatchSet, PivotConfig, RestartPolicy,
         ShareSet,
@@ -437,7 +438,6 @@ pub(crate) mod tests {
         // The NSM input contract: user_data is the manifest's qos_hash,
         // public_key is the ephemeral key bytes, and nonce is None (the
         // doc must not be request-bound, see the module doc above).
-        use qos_core::protocol::QosHash;
         let expected_request = NsmRequest::Attestation {
             user_data: Some(envelope.manifest.qos_hash().to_vec()),
             nonce: None,
