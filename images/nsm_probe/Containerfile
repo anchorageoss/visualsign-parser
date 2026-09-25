@@ -1,20 +1,20 @@
-FROM stagex/pallet-rust:1.88.0@sha256:b9021d2b75eac64fe8b931d96dde63ef11792e5023cee77c3471ccc34a95a377 AS build
+FROM stagex/pallet-rust:1.94.0@sha256:2fbe7b164dd92edb9c1096152f6d27592d8a69b1b8eb2fc907b5fadea7d11668 AS build
 
 # Rust configuration
 ENV RUSTFLAGS='-C target-feature=+crt-static'
 ENV CARGOFLAGS='--target x86_64-unknown-linux-musl --no-default-features --locked --release'
 
 # Directory for Rust artifacts
-ENV RELEASE_DIR=/src/target/x86_64-unknown-linux-musl/release
+ENV RELEASE_DIR=/src/parser/nsm-probe/target/x86_64-unknown-linux-musl/release
 
 # Load Rust sources
 ADD src /src
 WORKDIR /src/
 
-# pre-fetch all workspace deps; we need them to build with `--network=none` later
-RUN cargo fetch
-
+# nsm_probe is a standalone crate (own Cargo.lock, QOS 0.12.1), not a
+# workspace member: pre-fetch its deps so the build can run `--network=none`.
 WORKDIR /src/parser/nsm-probe
+RUN cargo fetch
 RUN --network=none <<-EOF
     set -eu
     cargo build ${CARGOFLAGS} --features vsock
