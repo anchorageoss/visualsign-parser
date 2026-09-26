@@ -1,7 +1,8 @@
 //! Helpers for decoding primitive numeric types and bool from Sui `Pure` inputs.
 //!
 //! Constraints and behavior:
-//! - Only `Pure` call args are supported. `Object` arguments return `DecodeError`.
+//! - Only `Pure` call args are supported. `Object` and `FundsWithdrawal` arguments return
+//!   `DecodeError`.
 //! - Supported types implement `FromLeBytes` (`bool`, `u8`, `u16`, `u32`, `u64`, `u128`).
 //! - JSON arrays of bytes are converted to little-endian values; type-tagged values are decoded
 //!   via `SuiJsonValue::to_move_value` when available.
@@ -24,6 +25,9 @@ where
     match call_arg {
         SuiCallArg::Object(_) => Err(VisualSignError::DecodeError(
             "Unexpected object in `decode_number`".to_string(),
+        )),
+        SuiCallArg::FundsWithdrawal(_) => Err(VisualSignError::DecodeError(
+            "Unexpected funds withdrawal in `decode_number`".to_string(),
         )),
         SuiCallArg::Pure(value) => match value.value_type() {
             None => {
