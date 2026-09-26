@@ -48,10 +48,8 @@ pub fn build_maybe_disc_bytes(
     inst_idx: usize,
     data: Vec<u8>,
 ) -> Vec<u8> {
-    if use_valid_disc {
-        if let Some((_idl, disc_data)) = build_disc_data(idl_json, inst_idx, &data) {
-            return disc_data;
-        }
+    if use_valid_disc && let Some((_idl, disc_data)) = build_disc_data(idl_json, inst_idx, &data) {
+        return disc_data;
     }
     data
 }
@@ -130,10 +128,9 @@ pub fn instruction_fields(payload: &SignablePayload) -> Vec<&SignablePayloadFiel
                 common,
                 preview_layout,
             } = f
+                && !non_instruction_labels.contains(&common.label.as_str())
             {
-                if !non_instruction_labels.contains(&common.label.as_str()) {
-                    return Some(preview_layout);
-                }
+                return Some(preview_layout);
             }
             None
         })
@@ -143,10 +140,10 @@ pub fn instruction_fields(payload: &SignablePayload) -> Vec<&SignablePayloadFiel
 /// Searches a flat slice of AnnotatedPayloadFields for a TextV2 field with the given label.
 pub fn find_text(fields: &[AnnotatedPayloadField], label: &str) -> Option<String> {
     fields.iter().find_map(|f| {
-        if let SignablePayloadField::TextV2 { common, text_v2 } = &f.signable_payload_field {
-            if common.label == label {
-                return Some(text_v2.text.clone());
-            }
+        if let SignablePayloadField::TextV2 { common, text_v2 } = &f.signable_payload_field
+            && common.label == label
+        {
+            return Some(text_v2.text.clone());
         }
         None
     })

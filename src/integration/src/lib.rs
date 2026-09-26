@@ -236,7 +236,7 @@ impl Builder {
     }
 }
 
-fn setup_manifest(test_id: &str) -> PathWrapper {
+fn setup_manifest(test_id: &str) -> PathWrapper<'_> {
     let path: PathWrapper = format!("./{test_id}.manifest_envelope").into();
     let (patch_set, _) = make_patch_set(3, 2);
     let manifest = Manifest {

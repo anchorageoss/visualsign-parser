@@ -244,20 +244,20 @@ fn handle_parse(
     headers: &HeaderMap,
     body: &[u8],
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
-    if let Some(allowlist) = state.allowlist.as_deref() {
-        if let Err(e) = stamp::verify(headers, body, allowlist) {
-            // Bounded discriminant only: `StampError::Malformed` and
-            // `UnsupportedScheme` carry attacker-supplied strings, and this
-            // path runs before any credential is checked, so logging `e`
-            // itself would let an unauthenticated caller amplify enclave logs.
-            eprintln!("rejected request: {}", e.kind());
-            // Deliberately coarse: the client learns "not authenticated",
-            // not which check failed.
-            return error_status(
-                StatusCode::UNAUTHORIZED,
-                "invalid or missing X-Stamp".to_string(),
-            );
-        }
+    if let Some(allowlist) = state.allowlist.as_deref()
+        && let Err(e) = stamp::verify(headers, body, allowlist)
+    {
+        // Bounded discriminant only: `StampError::Malformed` and
+        // `UnsupportedScheme` carry attacker-supplied strings, and this
+        // path runs before any credential is checked, so logging `e`
+        // itself would let an unauthenticated caller amplify enclave logs.
+        eprintln!("rejected request: {}", e.kind());
+        // Deliberately coarse: the client learns "not authenticated",
+        // not which check failed.
+        return error_status(
+            StatusCode::UNAUTHORIZED,
+            "invalid or missing X-Stamp".to_string(),
+        );
     }
 
     let wrapper = match parse_envelope(body) {

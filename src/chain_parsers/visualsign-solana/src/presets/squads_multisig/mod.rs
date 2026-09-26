@@ -280,15 +280,15 @@ fn build_parsed_fields(
     let parsed = &instruction.parsed;
 
     // Special case: decode nested transaction message for vaultTransactionCreate
-    if parsed.instruction_name == "vaultTransactionCreate" {
-        if let Some(fields) = try_build_vault_transaction_fields(
+    if parsed.instruction_name == "vaultTransactionCreate"
+        && let Some(fields) = try_build_vault_transaction_fields(
             parsed,
             &instruction.named_accounts,
             program_id,
             context,
-        )? {
-            return Ok(fields);
-        }
+        )?
+    {
+        return Ok(fields);
     }
 
     build_generic_fields(parsed, &instruction.named_accounts, program_id)
