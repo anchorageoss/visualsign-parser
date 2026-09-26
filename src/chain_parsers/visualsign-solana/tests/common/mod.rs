@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 
+use base64::Engine;
 use generated::parser::{ChainMetadata, Idl as ProtoIdl, SolanaMetadata, chain_metadata};
 use solana_parser::decode_idl_data;
 use solana_parser::solana::structs::Idl;
@@ -11,30 +12,65 @@ use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::message::Message;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::transaction::Transaction as SolanaTransaction;
-use visualsign::vsptrait::VisualSignOptions;
+use solana_test_utils::{SurfpoolConfig, SurfpoolManager};
+use visualsign::vsptrait::{Transaction, VisualSignConverter, VisualSignOptions};
 use visualsign::{
     AnnotatedPayloadField, SignablePayload, SignablePayloadField, SignablePayloadFieldPreviewLayout,
 };
+use visualsign_solana::{SolanaTransactionWrapper, SolanaVisualSignConverter};
+
+/// Why `build_disc_data` (below) failed to produce discriminator-prefixed
+/// instruction data for a given IDL.
+pub(crate) enum DiscDataError {
+    DecodeRejected(String),
+    NoInstructions,
+    NoDiscriminator(usize),
+}
+
+impl std::fmt::Display for DiscDataError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DecodeRejected(e) => write!(f, "decode_idl_data rejected the IDL: {e}"),
+            Self::NoInstructions => write!(f, "IDL has no instructions"),
+            Self::NoDiscriminator(idx) => write!(f, "instructions[{idx}] has no discriminator"),
+        }
+    }
+}
+
+/// Decode an IDL JSON string, extract the discriminator for the instruction at
+/// `inst_idx`, and return `(idl, data)` where `data` = discriminator ++ `arg_bytes`.
+pub(crate) fn try_build_disc_data(
+    idl_json: &str,
+    inst_idx: usize,
+    arg_bytes: &[u8],
+) -> Result<(Idl, Vec<u8>), DiscDataError> {
+    let idl =
+        decode_idl_data(idl_json).map_err(|e| DiscDataError::DecodeRejected(e.to_string()))?;
+    if idl.instructions.is_empty() {
+        return Err(DiscDataError::NoInstructions);
+    }
+    let sel_idx = inst_idx % idl.instructions.len();
+    let disc = idl.instructions[sel_idx]
+        .discriminator
+        .as_ref()
+        .ok_or(DiscDataError::NoDiscriminator(sel_idx))?;
+    let mut data = disc.clone();
+    data.extend_from_slice(arg_bytes);
+    Ok((idl, data))
+}
 
 /// Decode an IDL JSON string, extract the discriminator for the instruction at
 /// `inst_idx`, and return `(idl, data)` where `data` = discriminator ++ `arg_bytes`.
 ///
 /// Returns `None` if decoding fails, the IDL has no instructions, or the
-/// selected instruction has no discriminator.
+/// selected instruction has no discriminator. Use `try_build_disc_data` (crate-
+/// internal) when the caller wants to report which failure mode occurred.
 pub fn build_disc_data(
     idl_json: &str,
     inst_idx: usize,
     arg_bytes: &[u8],
 ) -> Option<(Idl, Vec<u8>)> {
-    let idl = decode_idl_data(idl_json).ok()?;
-    if idl.instructions.is_empty() {
-        return None;
-    }
-    let inst = &idl.instructions[inst_idx % idl.instructions.len()];
-    let disc = inst.discriminator.as_ref()?;
-    let mut data = disc.clone();
-    data.extend_from_slice(arg_bytes);
-    Some((idl, data))
+    try_build_disc_data(idl_json, inst_idx, arg_bytes).ok()
 }
 
 /// Build instruction bytes using a 50/50 valid-discriminator / random-data split.
@@ -165,4 +201,70 @@ pub fn load_idl_from_env() -> Option<(String, solana_parser::solana::structs::Id
             None
         }
     }
+}
+
+// ── Surfpool roundtrip ────────────────────────────────────────────────────────
+
+/// Per-IDL roundtrip: decode the IDL, build a synthetic transaction whose data
+/// starts with the first instruction's discriminator, run it through the
+/// visual-sign converter, and assert the payload is non-empty.
+///
+/// Network-bound: starts a `surfpool` mainnet fork and requires the `surfpool`
+/// binary on `$PATH`. Callers are responsible for marking their tests with
+/// `#[ignore]`. Use the `idl_test!` macro for the standard wrapper.
+///
+/// To loop over many IDLs without paying the surfpool startup cost per IDL,
+/// start one `SurfpoolManager` yourself and call `run_idl_roundtrip_inner`
+/// in the loop.
+pub async fn run_idl_roundtrip(idl_label: &str, idl_json: &str) {
+    let _manager = SurfpoolManager::start(SurfpoolConfig::default())
+        .await
+        .expect("surfpool should start");
+    run_idl_roundtrip_inner(idl_label, idl_json);
+}
+
+/// Body of `run_idl_roundtrip` minus the `SurfpoolManager` start. Use when
+/// running many IDLs in sequence under a single shared manager.
+pub fn run_idl_roundtrip_inner(idl_label: &str, idl_json: &str) {
+    // A red test names the IDL and the actual cause (decode rejection from a
+    // malformed IDL, empty instruction list, or a missing discriminator).
+    let (_idl, data) =
+        try_build_disc_data(idl_json, 0, &[0u8; 32]).unwrap_or_else(|e| panic!("{idl_label}: {e}"));
+
+    let program_id = Pubkey::new_unique();
+    let tx = build_transaction(program_id, vec![Pubkey::new_unique()], data);
+    let tx_bytes = bincode::serialize(&tx).expect("tx should serialize");
+    let tx_b64 = base64::engine::general_purpose::STANDARD.encode(&tx_bytes);
+
+    let wrapper = SolanaTransactionWrapper::from_string(&tx_b64)
+        .expect("from_string should succeed for a valid base64 transaction");
+
+    let options = options_with_idl(&program_id, idl_json, "test_program");
+    let payload = SolanaVisualSignConverter
+        .to_visual_sign_payload(wrapper, options)
+        .expect("converter should succeed")
+        .payload;
+
+    assert!(
+        !payload.fields.is_empty(),
+        "payload must contain at least one field"
+    );
+}
+
+/// Generate a `#[tokio::test] #[ignore]` that runs `run_idl_roundtrip` against
+/// the provided IDL string. Works for both upstream `embedded_idls` consts and
+/// vsp-local IDL JSON via `include_str!`.
+///
+/// Any sibling test file can call this macro unqualified after `mod common;` —
+/// `#[macro_export]` puts it at the test binary's crate root, so neither
+/// `#[macro_use]` nor an explicit `use` is required.
+#[macro_export]
+macro_rules! idl_test {
+    ($name:ident, $idl:expr) => {
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore]
+        async fn $name() {
+            $crate::common::run_idl_roundtrip(stringify!($name), $idl).await;
+        }
+    };
 }
