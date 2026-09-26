@@ -36,6 +36,8 @@ pub enum VisualizerKind {
     StakingPools(&'static str),
     /// Payment and simple transfer-related operations
     Payments(&'static str),
+    /// Cross-chain bridges that mint or burn wrapped assets
+    Bridge(&'static str),
 }
 
 pub struct SuiIntegrationConfigData {
