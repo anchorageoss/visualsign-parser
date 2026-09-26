@@ -15,6 +15,9 @@ crate::chain_config! {
             deposit as Deposit => DepositFunctions: {
                 deposit as Deposit => DepositIndexes(),
             },
+            withdraw as Withdraw => WithdrawFunctions: {
+                request_withdrawal as RequestWithdrawal => RequestWithdrawalIndexes(),
+            },
         }
     },
 }

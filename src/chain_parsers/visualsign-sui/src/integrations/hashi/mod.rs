@@ -1,13 +1,19 @@
 mod config;
 
 use config::{
-    Config, DepositFunctions, HASHI_CONFIG, HashiDeployment, HashiModules, deployment_for,
+    BitcoinNetwork, Config, DepositFunctions, HASHI_CONFIG, HashiDeployment, HashiModules,
+    WithdrawFunctions, deployment_for,
 };
 
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
 use crate::utils::{decode_number, get_object_value, pure_bcs_bytes};
 
-use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand, SuiProgrammableMoveCall};
+use bech32::{ToBase32, Variant, u5};
+use move_core_types::language_storage::TypeTag;
+use sui_json_rpc_types::{
+    SuiArgument, SuiCallArg, SuiCommand, SuiProgrammableMoveCall, SuiReservation, SuiWithdrawFrom,
+    SuiWithdrawalTypeArg,
+};
 use sui_types::base_types::ObjectID;
 
 use visualsign::{
@@ -20,6 +26,9 @@ use visualsign::{
 const HBTC_SYMBOL: &str = "hBTC";
 const SATS_UNIT: &str = "sats";
 const SATS_PER_BTC: u64 = 100_000_000;
+
+const P2WPKH_PROGRAM_LEN: usize = 20;
+const P2TR_PROGRAM_LEN: usize = 32;
 
 pub struct HashiVisualizer;
 
@@ -45,6 +54,11 @@ impl CommandVisualizer for HashiVisualizer {
         match pwc.module.as_str().try_into()? {
             HashiModules::Deposit => match pwc.function.as_str().try_into()? {
                 DepositFunctions::Deposit => Self::handle_deposit(context, pwc, deployment),
+            },
+            HashiModules::Withdraw => match pwc.function.as_str().try_into()? {
+                WithdrawFunctions::RequestWithdrawal => {
+                    Self::handle_request_withdrawal(context, pwc, deployment)
+                }
             },
         }
     }
@@ -142,6 +156,101 @@ impl HashiVisualizer {
             expanded,
         )])
     }
+
+    fn handle_request_withdrawal(
+        context: &VisualizerContext,
+        pwc: &SuiProgrammableMoveCall,
+        deployment: &HashiDeployment,
+    ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+        let network = deployment.bitcoin_network;
+        let hashi_object = get_object_value(&pwc.arguments, context.inputs(), 0)?;
+        let amount_sats =
+            resolve_balance_amount(context, deployment, argument_at(&pwc.arguments, 2, "btc")?)?;
+        let address_argument = argument_at(&pwc.arguments, 3, "bitcoin_address")?;
+        ensure_unmodified_before(
+            context,
+            deployment,
+            address_argument,
+            context.command_index(),
+            "bitcoin_address",
+        )?;
+        let address_bytes =
+            pure_bcs_bytes(input_at(context, address_argument, "bitcoin_address")?)?;
+        let bitcoin_address = encode_bitcoin_address(&address_bytes, network)?;
+
+        let amount_btc = format_btc(amount_sats);
+        let title_text = format!(
+            "Hashi Withdraw {amount_btc} {HBTC_SYMBOL}{}",
+            network.title_suffix()
+        );
+        let subtitle_text = format!("To {bitcoin_address}");
+
+        let condensed = SignablePayloadFieldListLayout {
+            fields: vec![create_text_field(
+                "Summary",
+                &format!(
+                    "Request a withdrawal of {amount_btc} {HBTC_SYMBOL} to {bitcoin_address} on {}. The bridge sends the BTC minus the Bitcoin miner fee.",
+                    network.display_name()
+                ),
+            )?],
+        };
+
+        let expanded = SignablePayloadFieldListLayout {
+            fields: vec![
+                create_amount_field("Withdrawal Amount", &amount_btc, HBTC_SYMBOL)?,
+                create_amount_field(
+                    "Withdrawal Amount (sats)",
+                    &amount_sats.to_string(),
+                    SATS_UNIT,
+                )?,
+                create_address_field(
+                    "Bitcoin Recipient",
+                    &bitcoin_address,
+                    None,
+                    None,
+                    None,
+                    None,
+                )?,
+                create_text_field("Bitcoin Network", network.display_name())?,
+                create_text_field(
+                    "Network Fee",
+                    "The Bitcoin miner fee is subtracted from the withdrawal amount",
+                )?,
+                create_address_field(
+                    "Sender",
+                    &context.sender().to_string(),
+                    None,
+                    None,
+                    None,
+                    None,
+                )?,
+                create_address_field(
+                    "Bridge Object",
+                    &hashi_object.to_string(),
+                    None,
+                    None,
+                    None,
+                    None,
+                )?,
+                create_address_field(
+                    "Bridge Package",
+                    &pwc.package.to_string(),
+                    None,
+                    None,
+                    None,
+                    None,
+                )?,
+            ],
+        };
+
+        Ok(vec![preview_field(
+            title_text,
+            subtitle_text,
+            "Hashi Withdrawal",
+            condensed,
+            expanded,
+        )])
+    }
 }
 
 struct DepositUtxo {
@@ -206,6 +315,226 @@ fn resolve_utxo(
         amount_sats,
         recipient,
     })
+}
+
+enum BalanceFunding {
+    Coin,
+    AddressBalance,
+}
+
+/// Follows the `Balance<BTC>` argument of `withdraw::request_withdrawal` back to
+/// the amount it carries: through `coin::into_balance<BTC>` to the `SplitCoins`
+/// amount the coin was cut from or the reservation of the `coin::redeem_funds`
+/// that produced it, or through `balance::redeem_funds<BTC>` to the reserved
+/// amount of the address-balance withdrawal. Any other funding shape, such as
+/// passing a whole coin to `into_balance`, is reported as undecodable rather
+/// than guessed.
+fn resolve_balance_amount(
+    context: &VisualizerContext,
+    deployment: &HashiDeployment,
+    balance_argument: SuiArgument,
+) -> Result<u64, VisualSignError> {
+    let (producer_index, producer, funding) =
+        match producing_command(context, context.command_index(), balance_argument, "btc")? {
+            (index, SuiCommand::MoveCall(call))
+                if call.package == ObjectID::from_single_byte(2) =>
+            {
+                let funding = match (call.module.as_str(), call.function.as_str()) {
+                    ("coin", "into_balance") => BalanceFunding::Coin,
+                    ("balance", "redeem_funds") => BalanceFunding::AddressBalance,
+                    _ => return Err(unsupported_funding()),
+                };
+                (index, call, funding)
+            }
+            _ => return Err(unsupported_funding()),
+        };
+
+    let expected_coin_type = hbtc_coin_type(deployment)?;
+    if !producer
+        .type_arguments
+        .first()
+        .is_some_and(|coin_type| coin_type_matches(coin_type, &expected_coin_type))
+    {
+        return Err(VisualSignError::MissingData(format!(
+            "Withdrawal balance is not a Balance<{expected_coin_type}>"
+        )));
+    }
+    ensure_unmodified_before(
+        context,
+        deployment,
+        balance_argument,
+        context.command_index(),
+        "btc",
+    )?;
+
+    match funding {
+        BalanceFunding::Coin => resolve_coin_amount(
+            context,
+            deployment,
+            producer_index,
+            producer,
+            &expected_coin_type,
+        ),
+        BalanceFunding::AddressBalance => resolve_redeemed_amount(
+            context,
+            deployment,
+            producer_index,
+            producer,
+            &expected_coin_type,
+        ),
+    }
+}
+
+fn unsupported_funding() -> VisualSignError {
+    VisualSignError::MissingData(
+        "Withdrawal balance is not produced by 0x2::coin::into_balance or 0x2::balance::redeem_funds"
+            .into(),
+    )
+}
+
+fn hbtc_coin_type(deployment: &HashiDeployment) -> Result<String, VisualSignError> {
+    let type_origin = deployment.type_origin().ok_or_else(|| {
+        VisualSignError::MissingData("Hashi deployment has an invalid type origin id".into())
+    })?;
+    Ok(format!("{}::btc::BTC", type_origin.to_hex_literal()))
+}
+
+/// `redeem_funds` withdraws exactly the withdrawal's limit, which starts as the
+/// signed reservation amount. `withdrawal_split` and `withdrawal_join` change
+/// that limit, so any earlier command that may modify the input is rejected.
+fn resolve_redeemed_amount(
+    context: &VisualizerContext,
+    deployment: &HashiDeployment,
+    redeem_index: usize,
+    redeem: &SuiProgrammableMoveCall,
+    expected_coin_type: &str,
+) -> Result<u64, VisualSignError> {
+    let withdrawal_argument = argument_at(&redeem.arguments, 0, "withdrawal")?;
+    let SuiCallArg::FundsWithdrawal(withdrawal) =
+        input_at(context, withdrawal_argument, "withdrawal")?
+    else {
+        return Err(VisualSignError::MissingData(
+            "Redeemed withdrawal is not a funds withdrawal input".into(),
+        ));
+    };
+    let SuiWithdrawalTypeArg::Balance(balance_type) = &withdrawal.type_arg;
+    let balance_type: TypeTag = balance_type
+        .clone()
+        .try_into()
+        .map_err(|e| VisualSignError::DecodeError(format!("Invalid funds withdrawal type: {e}")))?;
+    if !coin_type_matches(&balance_type.to_string(), expected_coin_type) {
+        return Err(VisualSignError::MissingData(format!(
+            "Funds withdrawal is not denominated in {expected_coin_type}"
+        )));
+    }
+    if withdrawal.withdraw_from != SuiWithdrawFrom::Sender {
+        return Err(VisualSignError::MissingData(
+            "Withdrawing from the sponsor's address balance is not supported".into(),
+        ));
+    }
+    ensure_unmodified_before(
+        context,
+        deployment,
+        withdrawal_argument,
+        redeem_index,
+        "withdrawal",
+    )?;
+    let SuiReservation::MaxAmountU64(amount) = withdrawal.reservation;
+    Ok(amount)
+}
+
+fn resolve_coin_amount(
+    context: &VisualizerContext,
+    deployment: &HashiDeployment,
+    into_balance_index: usize,
+    into_balance: &SuiProgrammableMoveCall,
+    expected_coin_type: &str,
+) -> Result<u64, VisualSignError> {
+    let coin_argument = argument_at(&into_balance.arguments, 0, "coin")?;
+    match coin_argument {
+        SuiArgument::GasCoin => {
+            return Err(VisualSignError::MissingData(
+                "The gas coin cannot fund an hBTC withdrawal".into(),
+            ));
+        }
+        SuiArgument::Input(_) => {
+            return Err(VisualSignError::MissingData(
+                "Withdrawing a whole coin is not supported: its amount is not part of the transaction"
+                    .into(),
+            ));
+        }
+        SuiArgument::Result(_) | SuiArgument::NestedResult(_, _) => {}
+    }
+    let (coin_producer_index, coin_producer) = producing_command(
+        context,
+        into_balance_index,
+        coin_argument,
+        "withdrawal coin",
+    )?;
+    ensure_unmodified_before(
+        context,
+        deployment,
+        coin_argument,
+        into_balance_index,
+        "withdrawal coin",
+    )?;
+    let (split_source, amounts) = match coin_producer {
+        SuiCommand::SplitCoins(split_source, amounts) => (split_source, amounts),
+        SuiCommand::MoveCall(redeem)
+            if redeem.package == ObjectID::from_single_byte(2)
+                && redeem.module == "coin"
+                && redeem.function == "redeem_funds" =>
+        {
+            return resolve_redeemed_amount(
+                context,
+                deployment,
+                coin_producer_index,
+                redeem,
+                expected_coin_type,
+            );
+        }
+        _ => {
+            return Err(VisualSignError::MissingData(
+                "Withdrawal coin is not produced by SplitCoins or 0x2::coin::redeem_funds".into(),
+            ));
+        }
+    };
+    if split_from_gas_coin(context, coin_producer_index, *split_source)? {
+        return Err(VisualSignError::MissingData(
+            "The gas coin cannot fund an hBTC withdrawal".into(),
+        ));
+    }
+    let (_, result_index) = result_reference(coin_argument, "withdrawal coin")?;
+    let amount_argument = *amounts.get(result_index).ok_or_else(|| {
+        VisualSignError::MissingData("SplitCoins amount for the withdrawal coin not found".into())
+    })?;
+    ensure_unmodified_before(
+        context,
+        deployment,
+        amount_argument,
+        coin_producer_index,
+        "split amount",
+    )?;
+
+    decode_number::<u64>(input_at(context, amount_argument, "split amount")?)
+}
+
+/// A split keeps its source's coin type, so a coin split, directly or through
+/// further splits, from the gas coin is `Coin<SUI>`.
+fn split_from_gas_coin(
+    context: &VisualizerContext,
+    split_index: usize,
+    split_source: SuiArgument,
+) -> Result<bool, VisualSignError> {
+    let (mut consumer, mut source) = (split_index, split_source);
+    while result_slot(source).is_some() {
+        let (index, command) = producing_command(context, consumer, source, "split source")?;
+        let SuiCommand::SplitCoins(parent_source, _) = command else {
+            return Ok(false);
+        };
+        (consumer, source) = (index, *parent_source);
+    }
+    Ok(matches!(source, SuiArgument::GasCoin))
 }
 
 /// Any command can take a pure input or a result by `&mut` and hand a rewritten
@@ -379,6 +708,17 @@ fn input_at<'a>(
         .ok_or_else(|| VisualSignError::MissingData(format!("Input for `{name}` not found")))
 }
 
+fn coin_type_matches(actual: &str, expected: &str) -> bool {
+    let normalize = |coin_type: &str| {
+        coin_type.split_once("::").and_then(|(address, rest)| {
+            ObjectID::from_hex_literal(address)
+                .ok()
+                .map(|id| (id, rest.to_string()))
+        })
+    };
+    normalize(actual).is_some_and(|actual| Some(actual) == normalize(expected))
+}
+
 /// Bitcoin displays txids byte-reversed relative to their internal order,
 /// which is the order Hashi stores in the Move `address`.
 fn bitcoin_txid_display(bcs_bytes: &[u8]) -> Result<String, VisualSignError> {
@@ -398,6 +738,34 @@ fn decode_optional_address(bcs_bytes: &[u8]) -> Result<Option<String>, VisualSig
         VisualSignError::DecodeError(format!("Invalid derivation_path encoding: {e}"))
     })?;
     Ok(path.map(|address| ObjectID::new(address).to_string()))
+}
+
+/// Matches how the Hashi committee builds the payout script
+/// (`script_pubkey_from_witness_program` in the Hashi repo): 20 bytes is a v0
+/// P2WPKH (bech32) and 32 bytes is always a v1 P2TR (bech32m), never P2WSH.
+fn encode_bitcoin_address(
+    bcs_bytes: &[u8],
+    network: BitcoinNetwork,
+) -> Result<String, VisualSignError> {
+    let program: Vec<u8> = bcs::from_bytes(bcs_bytes).map_err(|e| {
+        VisualSignError::DecodeError(format!("Invalid bitcoin_address encoding: {e}"))
+    })?;
+    let (witness_version, variant) = match program.len() {
+        P2WPKH_PROGRAM_LEN => (0, Variant::Bech32),
+        P2TR_PROGRAM_LEN => (1, Variant::Bech32m),
+        other => {
+            return Err(VisualSignError::DecodeError(format!(
+                "Bitcoin address must be a 20-byte P2WPKH or 32-byte P2TR program, got {other} bytes"
+            )));
+        }
+    };
+    let version = u5::try_from_u8(witness_version)
+        .map_err(|e| VisualSignError::DecodeError(format!("Invalid witness version: {e}")))?;
+    let data: Vec<u5> = std::iter::once(version)
+        .chain(program.to_base32())
+        .collect();
+    bech32::encode(network.bech32_hrp(), data, variant)
+        .map_err(|e| VisualSignError::DecodeError(format!("Bitcoin address encoding failed: {e}")))
 }
 
 fn format_btc(sats: u64) -> String {
