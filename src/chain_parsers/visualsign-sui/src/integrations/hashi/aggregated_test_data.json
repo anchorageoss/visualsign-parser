@@ -23,5 +23,60 @@
         }
       }
     }
+  },
+  "withdraw": {
+    "request_withdrawal": {
+      "label": "Hashi Withdrawal",
+      "operations": {
+        "4BESv9z6m2PRHUXg4uniDXQpeMtKsk9vxc7h2jgogVga": {
+          "data": "AAAGAQAETLegbttHy6uqYfYltoIFZ53NT/TTvIl6F19g6se+VDKUrzoAAAAAILfAYZeRCyO1GObRK67M13CWhwABa2i0IM++lOJfwNv7AQDkPMvc1ODTxJwpHP6L95OdB8dwencTkpkDnbYNi/ZXf39EuTcAAAAAIKMLcQEAAAAAuQQAAKysrKysrKysrKysrKysrKysrKysAAijC3EBAAAAAAEBIsDOZs4J3y3IijG9Mg1Bd7dmUYubiAEDaM+9zXJFKPi3jwIwAAAAAAEBAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGAQAAAAAAAAAAACEgp5DVVrhqKilenjK1T+u/XCmD6U/9R2KpwAmlENn57gUEAwEAAAEBAQACAQAAAQECAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgRjb2luDGludG9fYmFsYW5jZQEH/OoQytu1U8SHQgFYSr9odxWSZ4lS79lXsugsAQx/Q2ADYnRjA0JUQwABAwEAAAAAj379dDiX/eSMw1tiA81yx61CSPDrAqmtN45KLTnMLH4Id2l0aGRyYXcScmVxdWVzdF93aXRoZHJhd2FsAAQBAwABBAACAgABBQCIIwxj7mN3SZG30E+kwdbSafZFHGmxOEg4M3VzUJPFlgH7mYUoZBuCFJL75c5D8Ou3BEZVa9ipyiwkfY60o4EZxX35XTsAAAAAIBO7KenF3UQkAPhf+YMkkG/3t0n1IewF5Wb1MCp008L1iCMMY+5jd0mRt9BPpMHW0mn2RRxpsThIODN1c1CTxZboAwAAAAAAADRHqgAAAAAAAA==",
+          "command_index": 3,
+          "visualize_result_index": 0,
+          "asserts": {
+            "Bitcoin Recipient": "tb1p57gd244cdg4zjh57x265l6alts5c8620l4rk92wqpxj3pk0eaczsau385x",
+            "Bitcoin Network": "Bitcoin Signet",
+            "Bridge Object": "0x22c0ce66ce09df2dc88a31bd320d4177b766518b9b88010368cfbdcd724528f8",
+            "Bridge Package": "0x8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e",
+            "Withdrawal Amount": "0.24185763",
+            "Withdrawal Amount (sats)": "24185763",
+            "Summary": "Request a withdrawal of 0.24185763 hBTC to tb1p57gd244cdg4zjh57x265l6alts5c8620l4rk92wqpxj3pk0eaczsau385x on Bitcoin Signet. The bridge sends the BTC minus the Bitcoin miner fee.",
+            "Network Fee": "The Bitcoin miner fee is subtracted from the withdrawal amount",
+            "Sender": "0x88230c63ee63774991b7d04fa4c1d6d269f6451c69b13848383375735093c596"
+          }
+        },
+        "E7fvzD239zzTLnhTVsuXVKPKKkFUKSRvdR43oJ8Je8cD": {
+          "data": "AAAEAQEiwM5mzgnfLciKMb0yDUF3t2ZRi5uIAQNoz73NckUo+LePAjAAAAAAAQEBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYBAAAAAAAAAAAAFRS6/O2KSEG+WWXid5P6qHKQLldW3QIAgJaYAAAAAAAAB/zqEMrbtVPEh0IBWEq/aHcVkmeJUu/ZV7LoLAEMf0NgA2J0YwNCVEMAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIHYmFsYW5jZQxyZWRlZW1fZnVuZHMBB/zqEMrbtVPEh0IBWEq/aHcVkmeJUu/ZV7LoLAEMf0NgA2J0YwNCVEMAAQEDAACPfv10OJf95IzDW2IDzXLHrUJI8OsCqa03jkotOcwsfgh3aXRoZHJhdxJyZXF1ZXN0X3dpdGhkcmF3YWwABAEAAAEBAAMAAAAAAQIA8NN0fbZV/854OsRIJfMihd4Sk2+TGUyakEM1UTvTpb0B8cK9cxkX0TXjFVaRMwJ+00T7u4OPR/eNAGJUrpznWRM0g7o6AAAAACAoVQ9oG2Z3d1N0F9lKk1/5HHTTdjvUNT2BMW04pMW8tvDTdH22Vf/OeDrESCXzIoXeEpNvkxlMmpBDNVE706W96AMAAAAAAAB0dZkAAAAAAAA=",
+          "command_index": 1,
+          "visualize_result_index": 0,
+          "asserts": {
+            "Bitcoin Recipient": "tb1qht7wmzjggxl9je0zw7fl42rjjqh9w4ka2lwv3u",
+            "Bitcoin Network": "Bitcoin Signet",
+            "Bridge Object": "0x22c0ce66ce09df2dc88a31bd320d4177b766518b9b88010368cfbdcd724528f8",
+            "Bridge Package": "0x8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e",
+            "Withdrawal Amount": "0.1",
+            "Withdrawal Amount (sats)": "10000000",
+            "Summary": "Request a withdrawal of 0.1 hBTC to tb1qht7wmzjggxl9je0zw7fl42rjjqh9w4ka2lwv3u on Bitcoin Signet. The bridge sends the BTC minus the Bitcoin miner fee.",
+            "Network Fee": "The Bitcoin miner fee is subtracted from the withdrawal amount",
+            "Sender": "0xf0d3747db655ffce783ac44825f32285de12936f93194c9a904335513bd3a5bd"
+          }
+        },
+        "8cxs733Zm4LYaVnJBMUptjvr3CXxp2ETwBGpfxnR7kcf": {
+          "data": "AAAHAQEiwM5mzgnfLciKMb0yDUF3t2ZRi5uIAQNoz73NckUo+LePAjAAAAAAAQEBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYBAAAAAAAAAAAAISCuF/uuZbHAz9iv5YI8wbQxvH2TGWYbNxbtQTjDMTXzVgEAQOhf3NL1A+RwGnv9da5YpawqATZw96Q87nerUlcDx4k90Tg7AAAAACCqQI+27lLPkZd1mugSlshmDBqkNzikxyvPv2XxAfUtGgIAOvs5CAAAAAAAB/zqEMrbtVPEh0IBWEq/aHcVkmeJUu/ZV7LoLAEMf0NgA2J0YwNCVEMAAAAIvFySCAAAAAAAIB/Dj3a/xnOdyewnjZWx2k92G2yFUfaehHldg4W7buXEBgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgRjb2luDHJlZGVlbV9mdW5kcwEH/OoQytu1U8SHQgFYSr9odxWSZ4lS79lXsugsAQx/Q2ADYnRjA0JUQwABAQQAAwEDAAECAAACAQMAAQEFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgRjb2luDGludG9fYmFsYW5jZQEH/OoQytu1U8SHQgFYSr9odxWSZ4lS79lXsugsAQx/Q2ADYnRjA0JUQwABAwIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIEY29pbgpzZW5kX2Z1bmRzAQf86hDK27VTxIdCAVhKv2h3FZJniVLv2Vey6CwBDH9DYANidGMDQlRDAAIBAwABBgAAj379dDiX/eSMw1tiA81yx61CSPDrAqmtN45KLTnMLH4Id2l0aGRyYXcScmVxdWVzdF93aXRoZHJhd2FsAAQBAAABAQADAwAAAAECAB/Dj3a/xnOdyewnjZWx2k92G2yFUfaehHldg4W7buXEAB/Dj3a/xnOdyewnjZWx2k92G2yFUfaehHldg4W7buXE6AMAAAAAAACUQYcAAAAAAAIBuQQAAAAAAAABugQAAAAAAAAAACBMeK2s8qL1rYDyftfVSqadOnjxymf9757PV1T1uLt3sLWxYLY=",
+          "command_index": 5,
+          "visualize_result_index": 0,
+          "asserts": {
+            "Bitcoin Recipient": "tb1p4ctlhtn9k8qvlk90ukpresd5xx78mycevcdnw9hdgyuvxvf47dtq2epyfv",
+            "Bitcoin Network": "Bitcoin Signet",
+            "Bridge Object": "0x22c0ce66ce09df2dc88a31bd320d4177b766518b9b88010368cfbdcd724528f8",
+            "Bridge Package": "0x8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e",
+            "Withdrawal Amount": "1.43809724",
+            "Withdrawal Amount (sats)": "143809724",
+            "Summary": "Request a withdrawal of 1.43809724 hBTC to tb1p4ctlhtn9k8qvlk90ukpresd5xx78mycevcdnw9hdgyuvxvf47dtq2epyfv on Bitcoin Signet. The bridge sends the BTC minus the Bitcoin miner fee.",
+            "Network Fee": "The Bitcoin miner fee is subtracted from the withdrawal amount",
+            "Sender": "0x1fc38f76bfc6739dc9ec278d95b1da4f761b6c8551f69e84795d8385bb6ee5c4"
+          }
+        }
+      }
+    }
   }
 }
