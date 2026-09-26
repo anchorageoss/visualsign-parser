@@ -1,8 +1,12 @@
-//! Helpers for decoding primitive numeric types and bool from Sui `Pure` inputs.
+//! Helpers for reading Sui `Pure` inputs: `decode_number` decodes primitive
+//! numeric types and bool, and `pure_bcs_bytes` returns an untyped input's raw
+//! BCS bytes for callers that decode other shapes themselves.
 //!
 //! Constraints and behavior:
-//! - Only `Pure` call args are supported. `Object` and `FundsWithdrawal` arguments return
-//!   `DecodeError`.
+//! - Only `Pure` call args are supported. `Object` and `FundsWithdrawal`
+//!   arguments return `DecodeError` from `decode_number` and `MissingData` from
+//!   `pure_bcs_bytes`, which also rejects typed values because their JSON form
+//!   differs from the BCS encoding.
 //! - Supported types implement `FromLeBytes` (`bool`, `u8`, `u16`, `u32`, `u64`, `u128`).
 //! - JSON arrays of bytes are converted to little-endian values; type-tagged values are decoded
 //!   via `SuiJsonValue::to_move_value` when available.
@@ -38,6 +42,24 @@ where
             }
             Some(_) => T::from_move_value(value),
         },
+    }
+}
+
+/// Returns the raw BCS bytes of an untyped `Pure` input. Typed values are
+/// rejected because their JSON form is no longer the BCS encoding.
+pub fn pure_bcs_bytes(call_arg: &SuiCallArg) -> Result<Vec<u8>, VisualSignError> {
+    match call_arg {
+        SuiCallArg::Object(_) => Err(VisualSignError::MissingData(
+            "Unexpected object where pure bytes were expected".to_string(),
+        )),
+        SuiCallArg::FundsWithdrawal(_) => Err(VisualSignError::MissingData(
+            "Unexpected funds withdrawal where pure bytes were expected".to_string(),
+        )),
+        SuiCallArg::Pure(value) if value.value_type().is_some() => Err(
+            VisualSignError::MissingData("Unexpected typed pure value".to_string()),
+        ),
+        SuiCallArg::Pure(value) => json_array_to_bytes(&value.value().to_json_value())
+            .map_err(|e| VisualSignError::DecodeError(format!("Invalid pure value bytes: {e}"))),
     }
 }
 
