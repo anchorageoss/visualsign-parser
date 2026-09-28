@@ -75,6 +75,9 @@ struct Refreshes {
     ephemeral_key_changed: u64,
     manifest_changed: u64,
     near_expiry: u64,
+    /// Near-expiry attempts where NSM returned the same (not yet rotated)
+    /// leaf; the cached doc was kept and the next attempt backed off.
+    near_expiry_same_cert: u64,
 }
 
 #[derive(Serialize)]
@@ -123,6 +126,7 @@ async fn status(State(state): State<Arc<AppState>>) -> Json<Status> {
         ephemeral_key_changed,
         manifest_changed,
         near_expiry,
+        near_expiry_same_cert,
         failures,
         last_error,
     } = state.cache.stats();
@@ -134,6 +138,7 @@ async fn status(State(state): State<Arc<AppState>>) -> Json<Status> {
             ephemeral_key_changed,
             manifest_changed,
             near_expiry,
+            near_expiry_same_cert,
         },
         failures,
         last_error,
