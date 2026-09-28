@@ -23,8 +23,18 @@ use crate::manifest::read_manifest_envelope;
 /// an error instead of a request that never returns.
 pub const DEFAULT_CALL_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Re-attest once this little validity is left. The NSM leaf lives ~3h.
+/// Re-attest once this little validity is left.
+///
+/// NSM reuses its ~3h leaf certificate across attestations and only issues a
+/// new one shortly before expiry (~15m left, observed on TVC with QOS 0.12.1),
+/// so a refresh inside this margin often returns the same leaf; see
+/// [`DEFAULT_RETRY_BACKOFF`].
 pub const DEFAULT_REFRESH_MARGIN: Duration = Duration::from_secs(30 * 60);
+
+/// After a near-expiry refresh that returned the same leaf (or failed), wait
+/// this long before the next near-expiry attempt, instead of re-attesting on
+/// every watcher tick until NSM rotates the leaf.
+pub const DEFAULT_RETRY_BACKOFF: Duration = Duration::from_secs(60);
 
 /// What an attestation commits to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,6 +135,10 @@ pub struct CacheStats {
     pub ephemeral_key_changed: u64,
     pub manifest_changed: u64,
     pub near_expiry: u64,
+    /// Near-expiry refreshes where NSM returned the same leaf certificate
+    /// (not yet rotated); the cached doc was kept and the next attempt
+    /// backed off.
+    pub near_expiry_same_cert: u64,
     /// `get` calls that returned an error.
     pub failures: u64,
     pub last_error: Option<String>,
@@ -157,6 +171,7 @@ pub struct AttestationCache<A> {
     attestor: Arc<A>,
     load: InputLoader,
     refresh_margin: Duration,
+    retry_backoff: Duration,
     call_timeout: Duration,
     /// Held across the whole check-and-attest, so concurrent callers
     /// single-flight one refresh instead of racing duplicate NSM calls or
@@ -165,6 +180,9 @@ pub struct AttestationCache<A> {
     /// `current`'s deadline, mirrored so [`Self::healthy`] never waits behind
     /// an in-flight NSM call.
     valid_until: Mutex<Option<Instant>>,
+    /// No near-expiry attempt before this instant (set after one returned the
+    /// same leaf or failed). Only touched while `current` is locked.
+    near_expiry_retry_after: Mutex<Option<Instant>>,
     stats: Mutex<CacheStats>,
 }
 
@@ -175,9 +193,11 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
             attestor,
             load,
             refresh_margin: DEFAULT_REFRESH_MARGIN,
+            retry_backoff: DEFAULT_RETRY_BACKOFF,
             call_timeout: DEFAULT_CALL_TIMEOUT,
             current: AsyncMutex::new(None),
             valid_until: Mutex::new(None),
+            near_expiry_retry_after: Mutex::new(None),
             stats: Mutex::new(CacheStats::default()),
         }
     }
@@ -185,6 +205,12 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
     #[must_use]
     pub fn with_refresh_margin(mut self, margin: Duration) -> Self {
         self.refresh_margin = margin;
+        self
+    }
+
+    #[must_use]
+    pub fn with_retry_backoff(mut self, backoff: Duration) -> Self {
+        self.retry_backoff = backoff;
         self
     }
 
@@ -205,7 +231,9 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
     /// The current attestation, re-attesting first if the inputs changed or
     /// the cached doc is within the refresh margin of expiry.
     ///
-    /// If a near-expiry refresh fails, the still-valid cached doc is returned.
+    /// If a near-expiry refresh fails, or NSM hands back the same leaf
+    /// certificate, the still-valid cached doc is returned and further
+    /// near-expiry attempts wait `retry_backoff`.
     /// If a refresh after an input change fails, the stale doc is dropped (and
     /// [`Self::healthy`] goes false) rather than served.
     ///
@@ -247,10 +275,31 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
                 "cache emptied under lock".to_string(),
             ));
         };
+        if reason == RefreshReason::NearExpiry
+            && self
+                .retry_after()
+                .is_some_and(|until| Instant::now() < until)
+            && let Some(attestation) = current.as_ref()
+        {
+            return Ok((Arc::clone(attestation), None));
+        }
 
         let (load, attestor) = (Arc::clone(&self.load), Arc::clone(&self.attestor));
         match self.bounded(move || attest(&*attestor, load()?)).await {
             Ok(fresh) => {
+                if reason == RefreshReason::NearExpiry
+                    && let Some(old) = current.as_ref()
+                    && fresh.cert.not_after_unix <= old.cert.not_after_unix
+                {
+                    // NSM hasn't rotated its leaf yet: nothing gained.
+                    self.set_retry_after(Some(Instant::now() + self.retry_backoff));
+                    self.stats
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .near_expiry_same_cert += 1;
+                    return Ok((Arc::clone(old), None));
+                }
+                self.set_retry_after(None);
                 let fresh = Arc::new(fresh);
                 self.set_valid_until(Some(fresh.valid_until));
                 *current = Some(Arc::clone(&fresh));
@@ -261,11 +310,13 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
                     if reason == RefreshReason::NearExpiry
                         && healthy_at(Some(old.valid_until), Instant::now()) =>
                 {
+                    self.set_retry_after(Some(Instant::now() + self.retry_backoff));
                     Ok((Arc::clone(old), None))
                 }
                 _ => {
                     *current = None;
                     self.set_valid_until(None);
+                    self.set_retry_after(None);
                     Err(e)
                 }
             },
@@ -299,6 +350,20 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
                 Err(e) => eprintln!("attestation: refresh failed: {e}"),
             }
         }
+    }
+
+    fn retry_after(&self) -> Option<Instant> {
+        *self
+            .near_expiry_retry_after
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn set_retry_after(&self, until: Option<Instant>) {
+        *self
+            .near_expiry_retry_after
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = until;
     }
 
     fn set_valid_until(&self, until: Option<Instant>) {
@@ -607,6 +672,67 @@ mod tests {
                 ..CacheStats::default()
             }
         );
+    }
+
+    #[tokio::test]
+    async fn near_expiry_same_leaf_backs_off_instead_of_looping() {
+        // The fixture always carries the same leaf, like NSM before it
+        // rotates; a margin longer than its 3h life makes every get due.
+        let nsm = FakeNsm::new(NITRO_DOC);
+        let (load, _) = loader(inputs(1, 1));
+        let cache = AttestationCache::new(Arc::clone(&nsm), load)
+            .with_refresh_margin(Duration::from_secs(4 * 60 * 60))
+            .with_retry_backoff(Duration::from_secs(60 * 60));
+        let (first, _) = cache.get().await.unwrap();
+
+        let (served, reason) = cache.get().await.unwrap();
+        assert_eq!(reason, None, "same leaf is not a refresh");
+        assert!(Arc::ptr_eq(&first, &served), "cached doc kept");
+        assert_eq!(nsm.calls(), 2, "one near-expiry attempt");
+
+        for _ in 0..10 {
+            cache.get().await.unwrap();
+        }
+        assert_eq!(nsm.calls(), 2, "backed off: no NSM call per get");
+        assert!(cache.healthy());
+        assert_eq!(
+            cache.stats(),
+            CacheStats {
+                initial: 1,
+                near_expiry_same_cert: 1,
+                ..CacheStats::default()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn zero_backoff_retries_same_leaf_every_get() {
+        let nsm = FakeNsm::new(NITRO_DOC);
+        let (load, _) = loader(inputs(1, 1));
+        let cache = AttestationCache::new(Arc::clone(&nsm), load)
+            .with_refresh_margin(Duration::from_secs(4 * 60 * 60))
+            .with_retry_backoff(Duration::ZERO);
+        for _ in 0..4 {
+            cache.get().await.unwrap();
+        }
+        assert_eq!(nsm.calls(), 4);
+        assert_eq!(cache.stats().near_expiry_same_cert, 3);
+    }
+
+    #[tokio::test]
+    async fn input_change_ignores_near_expiry_backoff() {
+        let nsm = FakeNsm::new(NITRO_DOC);
+        let (load, current) = loader(inputs(1, 1));
+        let cache = AttestationCache::new(Arc::clone(&nsm), load)
+            .with_refresh_margin(Duration::from_secs(4 * 60 * 60))
+            .with_retry_backoff(Duration::from_secs(60 * 60));
+        cache.get().await.unwrap();
+        cache.get().await.unwrap(); // same leaf -> backoff armed
+        *current.lock().unwrap() = inputs(2, 1);
+        let (rotated, reason) = cache.get().await.unwrap();
+        assert_eq!(reason, Some(RefreshReason::EphemeralKeyChanged));
+        assert_eq!(rotated.inputs, inputs(2, 1));
+        assert_eq!(nsm.calls(), 3);
     }
 
     #[tokio::test]
