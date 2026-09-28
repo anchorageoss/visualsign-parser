@@ -13,10 +13,14 @@ base64 = { workspace = true }
 # Reads notAfter from the attestation doc's NSM certificate chain; same crate +
 # version qos_nsm parses it with.
 x509-cert = "0.2.5"
+# `AttestationDoc`, the type qos_nsm verifies into; same version qos pins.
+aws-nitro-enclaves-nsm-api = { version = "0.4", default-features = false }
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "test-util"] }
+qos_crypto = { workspace = true }
+serde_bytes = "0.11"
+qos_hex = { workspace = true }
 
 [features]
 # In-enclave absolute paths (`/qos.manifest`, `/qos.ephemeral.key`) instead of

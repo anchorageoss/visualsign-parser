@@ -20,13 +20,16 @@ use tvc_attestation::paths;
 pub enum BootProofError {
     Manifest(String),
     Encode(String),
+    /// Anything else from `tvc_attestation` (key, NSM, certificate, binding).
+    Attestation(AttestationError),
 }
 
 impl From<AttestationError> for BootProofError {
     fn from(e: AttestationError) -> Self {
         match e {
+            AttestationError::Manifest(e) => Self::Manifest(e),
             AttestationError::Encode(e) => Self::Encode(e),
-            other => Self::Manifest(other.to_string()),
+            other => Self::Attestation(other),
         }
     }
 }
@@ -120,8 +123,10 @@ impl BootProofSource for StaticBootProof {
 }
 
 /// Same six keys as a real proof, every value empty. `qosManifestB64` carries
-/// `pivotArgs` (including the X-Stamp allowlist), so every error response gets
-/// this instead and only a successful parse discloses the real proof.
+/// `pivotArgs` (including the X-Stamp allowlist) and, for v2 manifests,
+/// `pivot.env`; every error response gets this instead, and only a successful
+/// parse discloses the real proof. Don't put anything in pivot args or env
+/// that must stay private: a successful response publishes it.
 pub fn redacted_boot_proof() -> TurnkeyBootProof {
     TurnkeyBootProof {
         aws_attestation_doc_b64: String::new(),
@@ -149,9 +154,11 @@ pub(crate) mod tests {
     use super::*;
     use base64::Engine as _;
     use qos_core::protocol::services::boot::{
-        Manifest, ManifestEnvelope, ManifestSet, Namespace, NitroConfig, PatchSet, PivotConfig,
-        RestartPolicy, ShareSet,
+        Manifest, ManifestEnvelope, ManifestEnvelopeV2, ManifestSet, ManifestV2, ManifestVersion,
+        Namespace, NitroConfig, PatchSet, PivotConfig, PivotConfigV2, RestartPolicy, ShareSet,
+        VersionedManifestEnvelope,
     };
+    use tvc_attestation::manifest::decode_manifest_envelope;
 
     // Built field-by-field rather than via `ManifestEnvelope::default()`:
     // that impl only exists behind qos_core's `mock` feature, which cannot
@@ -245,5 +252,66 @@ pub(crate) mod tests {
         let decoded_envelope: ManifestEnvelope =
             borsh::from_slice(&engine.decode(encoded.envelope_b64).unwrap()).unwrap();
         assert_eq!(decoded_envelope, envelope);
+    }
+
+    fn sample_v2_envelope() -> ManifestEnvelopeV2 {
+        let v1 = sample_manifest_envelope().manifest;
+        ManifestEnvelopeV2 {
+            manifest: ManifestV2 {
+                version: ManifestVersion::V2,
+                namespace: v1.namespace,
+                pivot: PivotConfigV2 {
+                    hash: v1.pivot.hash,
+                    restart: v1.pivot.restart,
+                    bridge_config: v1.pivot.bridge_config,
+                    debug_mode: v1.pivot.debug_mode,
+                    args: vec!["--host-port".to_string(), "3000".to_string()],
+                    env: Default::default(),
+                },
+                manifest_set: v1.manifest_set,
+                share_set: v1.share_set,
+                enclave: v1.enclave,
+                dns: None,
+            },
+            manifest_set_approvals: Vec::new(),
+            share_set_approvals: Vec::new(),
+        }
+    }
+
+    // A v2 `/qos.manifest` (what TVC writes for new apps) through this
+    // crate's own seam: the boot proof must carry QOS storage JSON that
+    // decodes back to the same envelope, not borsh (v2 is JSON-only).
+    #[test]
+    fn v2_manifest_file_reaches_boot_proof_as_storage_json() {
+        let engine = base64::engine::general_purpose::STANDARD;
+        let envelope = VersionedManifestEnvelope::V2(sample_v2_envelope());
+        let path = std::env::temp_dir().join(format!(
+            "parser-http-server-test-manifest-v2-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&path, envelope.to_storage_vec().unwrap()).unwrap();
+
+        let pair = P256Pair::generate().unwrap();
+        let proof = StaticBootProof::from_enclave_files_at(
+            &pair,
+            "app".to_string(),
+            "l".to_string(),
+            &path,
+        )
+        .unwrap()
+        .boot_proof();
+        std::fs::remove_file(&path).unwrap();
+
+        let envelope_bytes = engine.decode(proof.qos_manifest_envelope_b64).unwrap();
+        assert_eq!(envelope_bytes.first(), Some(&b'{'), "v2 envelope is JSON");
+        assert_eq!(decode_manifest_envelope(&envelope_bytes).unwrap(), envelope);
+
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&engine.decode(proof.qos_manifest_b64).unwrap()).unwrap();
+        assert_eq!(manifest["version"], "v2");
+        assert_eq!(
+            manifest["pivot"]["args"],
+            serde_json::json!(["--host-port", "3000"])
+        );
     }
 }
