@@ -12,6 +12,7 @@ use sui_json_rpc_types::SuiTransactionBlockData;
 use sui_types::transaction::TransactionData;
 
 use crate::core::commands;
+use crate::intermediate::build_intermediate_output;
 use visualsign::{
     SignablePayload, SignablePayloadField,
     encodings::SupportedEncodings,
@@ -69,48 +70,86 @@ impl VisualSignConverter<SuiTransactionWrapper> for SuiVisualSignConverter {
     ) -> Result<ConversionResult, VisualSignError> {
         let transaction = transaction_wrapper.inner();
 
-        // Sui has no intermediate_output schema yet; envelope-ready via
-        // `ConversionResult::with_intermediate` when one is added.
+        let block_data: SuiTransactionBlockData =
+            SuiTransactionBlockData::try_from_with_module_cache(
+                transaction.clone(),
+                &SyncModuleCache::new(SuiModuleResolver),
+            )
+            .map_err(|e| {
+                VisualSignError::ParseError(TransactionParseError::DecodeError(e.to_string()))
+            })?;
+
         let payload = convert_to_visual_sign_payload(
             transaction,
+            &block_data,
             options.decode_transfers,
             options.transaction_name,
         )?;
-        Ok(ConversionResult::new(payload))
+
+        // Only emit intermediate output when the caller opts in; otherwise the
+        // response stays byte-identical to the path without it.
+        if !options.include_intermediate_output {
+            return Ok(ConversionResult::new(payload));
+        }
+
+        Ok(match build_intermediate_bytes(transaction, &block_data) {
+            Some(bytes) => ConversionResult::with_intermediate(payload, bytes),
+            None => ConversionResult::new(payload),
+        })
+    }
+}
+
+/// Build the borsh-encoded intermediate output for a Sui transaction.
+///
+/// Best-effort: a transaction the intermediate schema cannot describe drops
+/// the intermediate output rather than failing the conversion, so consumers
+/// see no metadata instead of partial metadata. The `SignablePayload` is still
+/// returned.
+fn build_intermediate_bytes(
+    transaction: &TransactionData,
+    block_data: &SuiTransactionBlockData,
+) -> Option<Vec<u8>> {
+    match build_intermediate_output(transaction, block_data) {
+        Ok(output) => match borsh::to_vec(&output) {
+            Ok(bytes) => Some(bytes),
+            Err(err) => {
+                tracing::warn!("Failed to borsh-encode Sui intermediate output: {err}");
+                None
+            }
+        },
+        Err(err) => {
+            tracing::warn!("Failed to build Sui intermediate output: {err}");
+            None
+        }
     }
 }
 
 /// Convert Sui transaction to a `VisualSign` payload.
 fn convert_to_visual_sign_payload(
     transaction: &TransactionData,
+    block_data: &SuiTransactionBlockData,
     decode_transfers: bool,
     title: Option<String>,
 ) -> Result<SignablePayload, VisualSignError> {
-    let block_data: SuiTransactionBlockData = SuiTransactionBlockData::try_from_with_module_cache(
-        transaction.clone(),
-        &SyncModuleCache::new(SuiModuleResolver),
-    )
-    .map_err(|e| VisualSignError::ParseError(TransactionParseError::DecodeError(e.to_string())))?;
-
     let mut fields: Vec<SignablePayloadField> = vec![get_tx_network()?.signable_payload_field];
 
     if decode_transfers {
         fields.extend(
-            commands::decode_transfers(&block_data)?
+            commands::decode_transfers(block_data)?
                 .iter()
                 .map(|e| e.signable_payload_field.clone()),
         );
     }
 
     fields.extend(
-        decode_commands(&block_data)?
+        decode_commands(block_data)?
             .iter()
             .map(|e| e.signable_payload_field.clone()),
     );
 
-    fields.push(get_tx_details(transaction, &block_data)?.signable_payload_field);
+    fields.push(get_tx_details(transaction, block_data)?.signable_payload_field);
 
-    let title = title.unwrap_or_else(|| determine_transaction_type_string(&block_data).to_string());
+    let title = title.unwrap_or_else(|| determine_transaction_type_string(block_data).to_string());
     Ok(SignablePayload::new(
         0,
         title,
