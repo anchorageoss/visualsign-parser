@@ -6,6 +6,10 @@
 //! The operator seed resolves flag -> env `TVC_CI_OPERATOR_SEED` -> none; when
 //! none is given, approval uses the logged-in org operator key (`tvc login`).
 //!
+//! `deploy-pivot` runs the same digest gate / create / approve / poll / set-live
+//! flow for any pivot binary (path, args, health-check type, debug mode given
+//! as flags) -- e.g. throwaway diagnostic pivots.
+//!
 //! See `tvc-deploy --help` for the full subcommand list (invite/dismiss-invite,
 //! activity approve/reject, tag and policy CRUD -- all in `invite.rs`).
 //!
@@ -51,6 +55,8 @@ enum Command {
     GenOperatorKey(GenOperatorKeyArgs),
     /// Deploy parser_app: digest-gate, create, approve, poll healthy, set live
     Deploy(DeployArgs),
+    /// Deploy any pivot binary: same flow as `deploy`, pivot path/args/health given as flags
+    DeployPivot(DeployPivotArgs),
     /// Run only the digest gate: extract /parser_app from the image and compare its sha256
     VerifyDigest(VerifyDigestArgs),
     /// Delete a single deployment by id (consensus via approve-activity)
@@ -133,6 +139,74 @@ struct DeployArgs {
     org: invite::OrgArgs,
 }
 
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum HealthCheck {
+    Http,
+    Grpc,
+}
+
+impl HealthCheck {
+    fn tvc_value(self) -> &'static str {
+        match self {
+            Self::Http => "TVC_HEALTH_CHECK_TYPE_HTTP",
+            Self::Grpc => "TVC_HEALTH_CHECK_TYPE_GRPC",
+        }
+    }
+}
+
+#[derive(clap::Args)]
+struct DeployPivotArgs {
+    #[arg(long)]
+    app_id: String,
+    /// Pinned image, `repo:<tag>@sha256:<digest>`
+    #[arg(long)]
+    image_url: String,
+    /// Absolute path of the pivot binary inside the image, e.g. /nsm_probe
+    #[arg(long)]
+    pivot_path: String,
+    /// Expected sha256 of the image's pivot binary (64 hex chars)
+    #[arg(long)]
+    expected_digest: String,
+    /// One pivot argument; repeat for each (order kept)
+    #[arg(long = "pivot-arg", value_name = "ARG", allow_hyphen_values = true)]
+    pivot_args: Vec<String>,
+    #[arg(long, value_enum)]
+    health_check: HealthCheck,
+    /// Health-check and public-ingress port
+    #[arg(long, default_value_t = 3000)]
+    port: u16,
+    #[arg(long)]
+    operator_id: String,
+    /// Path to the operator seed file; falls back to env TVC_CI_OPERATOR_SEED,
+    /// then to the logged-in org operator key, if omitted
+    #[arg(long)]
+    operator_seed: Option<PathBuf>,
+    #[arg(long, default_value = "0.12.1")]
+    qos_version: String,
+    /// Deploy in TVC debug mode (zeroed PCRs, readable enclave logs). The app must
+    /// have been created with debug-mode deployments enabled. Never for production
+    #[arg(long)]
+    dangerous_debug_mode: bool,
+    /// Skip the check for an existing pending deploy activity for this app-id
+    #[arg(long)]
+    force: bool,
+    #[command(flatten)]
+    org: invite::OrgArgs,
+}
+
+/// Everything the shared create/approve/poll/set-live flow needs.
+struct DeploySpec<'a> {
+    app_id: &'a str,
+    image_url: &'a str,
+    pivot_path: &'a str,
+    expected_digest: &'a str,
+    operator_id: &'a str,
+    operator_seed: Option<&'a Path>,
+    force: bool,
+    org: Option<&'a str>,
+    config: serde_json::Value,
+}
+
 #[derive(clap::Args)]
 struct VerifyDigestArgs {
     #[arg(long)]
@@ -158,6 +232,7 @@ fn run() -> Result<()> {
     match cli.command {
         Command::GenOperatorKey(args) => gen_operator_key(&args),
         Command::Deploy(args) => deploy(&sh, &args),
+        Command::DeployPivot(args) => deploy_pivot(&sh, &args),
         Command::VerifyDigest(args) => verify_digest(&sh, &args),
         Command::DeleteDeployment(args) => invite::delete_deployment(&args),
         Command::Prune(args) => invite::prune(&sh, &args),
@@ -211,23 +286,92 @@ fn write_secret_file(path: &Path, contents: &str) -> Result<()> {
 }
 
 fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
-    validate_digest(&args.expected_digest)?;
     for key in &args.accept_signatures_from_pubkey {
         validate_signer_pubkey(key)?;
     }
+    // gRPC health is mandatory for parser_app.
+    let config = serde_json::json!({
+        "appId": args.app_id,
+        "qosVersion": args.qos_version,
+        "pivotContainerImageUrl": args.image_url,
+        "pivotPath": "/parser_app",
+        "pivotArgs": pivot_args(args),
+        "expectedPivotDigest": args.expected_digest,
+        "debugMode": false,
+        "healthCheckType": "TVC_HEALTH_CHECK_TYPE_GRPC",
+        "healthCheckPort": args.host_port,
+        "publicIngressPort": args.host_port,
+    });
+    run_deploy(
+        sh,
+        &DeploySpec {
+            app_id: &args.app_id,
+            image_url: &args.image_url,
+            pivot_path: "/parser_app",
+            expected_digest: &args.expected_digest,
+            operator_id: &args.operator_id,
+            operator_seed: args.operator_seed.as_deref(),
+            force: args.force,
+            org: args.org.as_deref(),
+            config,
+        },
+    )
+}
 
-    if !args.force {
+fn deploy_pivot(sh: &Shell, args: &DeployPivotArgs) -> Result<()> {
+    if !args.pivot_path.starts_with('/') {
+        bail!("--pivot-path must be absolute, got {:?}", args.pivot_path);
+    }
+    if args.dangerous_debug_mode {
+        println!("WARNING: deploying in TVC debug mode (zeroed PCRs); not for production");
+    }
+    run_deploy(
+        sh,
+        &DeploySpec {
+            app_id: &args.app_id,
+            image_url: &args.image_url,
+            pivot_path: &args.pivot_path,
+            expected_digest: &args.expected_digest,
+            operator_id: &args.operator_id,
+            operator_seed: args.operator_seed.as_deref(),
+            force: args.force,
+            org: args.org.as_deref(),
+            config: pivot_config(args),
+        },
+    )
+}
+
+fn pivot_config(args: &DeployPivotArgs) -> serde_json::Value {
+    serde_json::json!({
+        "appId": args.app_id,
+        "qosVersion": args.qos_version,
+        "pivotContainerImageUrl": args.image_url,
+        "pivotPath": args.pivot_path,
+        "pivotArgs": args.pivot_args,
+        "expectedPivotDigest": args.expected_digest,
+        "dangerousDeployDebugMode": args.dangerous_debug_mode,
+        "healthCheckType": args.health_check.tvc_value(),
+        "healthCheckPort": args.port,
+        "publicIngressPort": args.port,
+    })
+}
+
+/// Digest gate, create, approve, poll healthy, set live.
+fn run_deploy(sh: &Shell, spec: &DeploySpec) -> Result<()> {
+    validate_digest(spec.expected_digest)?;
+
+    if !spec.force {
         // Turnkey has no dedup for create_tvc_deployment: submitting the same
         // deploy twice while the first is still ConsensusNeeded creates a
         // second, independent activity instead of reusing it (see README).
-        let pending = invite::find_pending_deployments(args.org.as_deref(), &args.app_id)?;
+        let pending = invite::find_pending_deployments(spec.org, spec.app_id)?;
         if !pending.is_empty() {
             let ids: Vec<&str> = pending.iter().map(|a| a.id.as_str()).collect();
             bail!(
                 "app {} already has {} deployment activity(ies) awaiting consensus: {}\n\
                  approve or reject the existing one first (tvc-deploy approve-activity / \
                  reject-activity --activity-id <id>), or pass --force to submit anyway",
-                args.app_id,
+                spec.app_id,
                 ids.len(),
                 ids.join(", ")
             );
@@ -236,9 +380,9 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
 
     // Safety gate: re-derive the pivot binary digest from the image and confirm
     // it matches --expected-digest, tying the submitted digest to the real binary.
-    verify_image_digest(sh, &args.image_url, &args.expected_digest)?;
+    verify_image_digest(sh, spec.image_url, spec.pivot_path, spec.expected_digest)?;
 
-    let seed = resolve_seed_file(args.operator_seed.as_deref())?;
+    let seed = resolve_seed_file(spec.operator_seed)?;
     // Pass --operator-seed only when we have one; otherwise tvc approves with the
     // logged-in org operator key (the local `tvc login` path).
     let seed_args: Vec<OsString> = match &seed {
@@ -249,33 +393,13 @@ fn deploy(sh: &Shell, args: &DeployArgs) -> Result<()> {
         }
     };
     let cfg_path = temp_path("tvc-deploy", "json");
-    let (app_id, image, digest, operator_id, qos, host_port) = (
-        &args.app_id,
-        &args.image_url,
-        &args.expected_digest,
-        &args.operator_id,
-        &args.qos_version,
-        args.host_port,
-    );
+    let (app_id, operator_id) = (spec.app_id, spec.operator_id);
 
     // Everything that can fail after the seed file exists runs inside this
     // closure, so the seed + config temp files are always cleaned up below
     // (otherwise an early `?` would leave the operator seed on disk).
     let outcome = (|| -> Result<String> {
-        // Assemble the deployment config (gRPC health is mandatory for parser_app).
-        let cfg = serde_json::json!({
-            "appId": app_id,
-            "qosVersion": qos,
-            "pivotContainerImageUrl": image,
-            "pivotPath": "/parser_app",
-            "pivotArgs": pivot_args(args),
-            "expectedPivotDigest": digest,
-            "debugMode": false,
-            "healthCheckType": "TVC_HEALTH_CHECK_TYPE_GRPC",
-            "healthCheckPort": host_port,
-            "publicIngressPort": host_port,
-        });
-        std::fs::write(&cfg_path, serde_json::to_vec_pretty(&cfg)?)
+        std::fs::write(&cfg_path, serde_json::to_vec_pretty(&spec.config)?)
             .with_context(|| format!("write {}", cfg_path.display()))?;
 
         let created = cmd!(sh, "tvc deploy create --config-file {cfg_path}")
@@ -330,24 +454,24 @@ fn pivot_args(args: &DeployArgs) -> Vec<String> {
 /// Same check, same message, one implementation.
 fn verify_digest(sh: &Shell, args: &VerifyDigestArgs) -> Result<()> {
     validate_digest(&args.expected_digest)?;
-    verify_image_digest(sh, &args.image_url, &args.expected_digest)
+    verify_image_digest(sh, &args.image_url, "/parser_app", &args.expected_digest)
 }
 
-/// Extract `/parser_app` from the image and sha256 it; it MUST equal the
+/// Extract `pivot_path` from the image and sha256 it; it MUST equal the
 /// submitted `--expected-digest`. Ties the deployed digest to the real binary.
-fn verify_image_digest(sh: &Shell, image: &str, expected: &str) -> Result<()> {
+fn verify_image_digest(sh: &Shell, image: &str, pivot_path: &str, expected: &str) -> Result<()> {
     let cid = cmd!(sh, "docker create {image} /bin/true")
         .read()
         .context("docker create (digest gate)")?;
     let cid = cid.trim().to_owned();
-    let bin = temp_path("parser_app", "bin");
-    let target = format!("{cid}:/parser_app");
+    let bin = temp_path("pivot", "bin");
+    let target = format!("{cid}:{pivot_path}");
     // Extract + hash the pivot binary, then ALWAYS clean up the container and the
     // temp file regardless of where this fails (no leftover binary on error).
     let hashed = (|| -> Result<String> {
         cmd!(sh, "docker cp {target} {bin}")
             .run()
-            .context("docker cp /parser_app")?;
+            .with_context(|| format!("docker cp {pivot_path}"))?;
         let sha = cmd!(sh, "sha256sum {bin}").read().context("sha256sum")?;
         Ok(sha.split_whitespace().next().unwrap_or_default().to_owned())
     })();
@@ -356,10 +480,10 @@ fn verify_image_digest(sh: &Shell, image: &str, expected: &str) -> Result<()> {
     let actual = hashed?;
     if !actual.eq_ignore_ascii_case(expected) {
         bail!(
-            "DIGEST GATE FAILED: image /parser_app sha256 {actual} != expected {expected}; refusing to deploy"
+            "DIGEST GATE FAILED: image {pivot_path} sha256 {actual} != expected {expected}; refusing to deploy"
         );
     }
-    println!("digest gate passed: image /parser_app sha256 == {expected}");
+    println!("digest gate passed: image {pivot_path} sha256 == {expected}");
     Ok(())
 }
 
@@ -810,5 +934,90 @@ Deployment: deploy-123
     fn parse_after_returns_none_when_marker_missing_or_value_empty() {
         assert_eq!(parse_after("no marker here", "Deployment ID:"), None);
         assert_eq!(parse_after("Deployment ID:   \n", "Deployment ID:"), None);
+    }
+
+    fn deploy_pivot_argv(extra: &[&str]) -> Vec<String> {
+        let digest = "b".repeat(64);
+        let base = [
+            "tvc-deploy",
+            "deploy-pivot",
+            "--app-id",
+            "app",
+            "--image-url",
+            "img",
+            "--pivot-path",
+            "/nsm_probe",
+            "--expected-digest",
+            &digest,
+            "--operator-id",
+            "op",
+        ];
+        base.iter()
+            .map(|s| (*s).to_string())
+            .chain(extra.iter().map(|s| (*s).to_string()))
+            .collect()
+    }
+
+    fn deploy_pivot_args(extra: &[&str]) -> DeployPivotArgs {
+        match Cli::parse_from(deploy_pivot_argv(extra)).command {
+            Command::DeployPivot(args) => args,
+            _ => panic!("expected the deploy-pivot subcommand"),
+        }
+    }
+
+    #[test]
+    fn deploy_pivot_config_http_debug() {
+        let args = deploy_pivot_args(&["--health-check", "http", "--dangerous-debug-mode"]);
+        assert_eq!(
+            pivot_config(&args),
+            serde_json::json!({
+                "appId": "app",
+                "qosVersion": "0.12.1",
+                "pivotContainerImageUrl": "img",
+                "pivotPath": "/nsm_probe",
+                "pivotArgs": [],
+                "expectedPivotDigest": "b".repeat(64),
+                "dangerousDeployDebugMode": true,
+                "healthCheckType": "TVC_HEALTH_CHECK_TYPE_HTTP",
+                "healthCheckPort": 3000,
+                "publicIngressPort": 3000,
+            })
+        );
+    }
+
+    #[test]
+    fn deploy_pivot_defaults_to_non_debug_and_keeps_arg_order() {
+        let args = deploy_pivot_args(&[
+            "--health-check",
+            "grpc",
+            "--port",
+            "4000",
+            "--pivot-arg",
+            "--host-port",
+            "--pivot-arg",
+            "4000",
+        ]);
+        let cfg = pivot_config(&args);
+        assert_eq!(cfg["dangerousDeployDebugMode"], false);
+        assert_eq!(cfg["healthCheckType"], "TVC_HEALTH_CHECK_TYPE_GRPC");
+        assert_eq!(cfg["healthCheckPort"], 4000);
+        assert_eq!(cfg["pivotArgs"], serde_json::json!(["--host-port", "4000"]));
+    }
+
+    #[test]
+    fn deploy_pivot_requires_health_check_and_pivot_path() {
+        let err = Cli::try_parse_from(deploy_pivot_argv(&[]))
+            .map(|_| ())
+            .expect_err("--health-check is required");
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+
+        let argv: Vec<String> = deploy_pivot_argv(&["--health-check", "http"])
+            .into_iter()
+            .filter(|a| a != "--pivot-path" && a != "/nsm_probe")
+            .collect();
+        let err = Cli::try_parse_from(argv)
+            .map(|_| ())
+            .expect_err("--pivot-path is required");
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
     }
 }
