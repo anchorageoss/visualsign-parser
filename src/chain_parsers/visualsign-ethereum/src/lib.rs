@@ -585,23 +585,23 @@ fn visualize_with_abi_registry(
     //   2. Impl ABI present but selector not found → [unresolved_implementation_field]
     //      + best-effort proxy-own-ABI decode (or raw hex if that also misses)
     //   3. No impl ABI linked → fall through to proxy's own ABI (non-proxy path below)
-    if abi_reg.get_abi_kind(chain_id, to) == Some(abi_registry::AbiKind::Proxy) {
-        if let Some((impl_addr, impl_abi)) = abi_reg.get_implementation_abi(chain_id, to) {
-            if let Some(field) = decode(impl_abi) {
-                return vec![implementation_address_field(impl_addr), field];
-            }
-            // impl ABI present but selector not found — still surface the implementation
-            // address (as unresolved) and attempt proxy's own ABI as the decode fallback.
-            // If neither ABI matches, append raw hex so the signer always sees the
-            // calldata bytes even when the function is unrecognized.
-            let mut fields = vec![unresolved_implementation_field(impl_addr)];
-            if let Some(field) = abi_reg.get_abi_for_address(chain_id, to).and_then(decode) {
-                fields.push(field);
-            } else {
-                fields.push(contracts::core::FallbackVisualizer::new().visualize_hex(input));
-            }
-            return fields;
+    if abi_reg.get_abi_kind(chain_id, to) == Some(abi_registry::AbiKind::Proxy)
+        && let Some((impl_addr, impl_abi)) = abi_reg.get_implementation_abi(chain_id, to)
+    {
+        if let Some(field) = decode(impl_abi) {
+            return vec![implementation_address_field(impl_addr), field];
         }
+        // impl ABI present but selector not found — still surface the implementation
+        // address (as unresolved) and attempt proxy's own ABI as the decode fallback.
+        // If neither ABI matches, append raw hex so the signer always sees the
+        // calldata bytes even when the function is unrecognized.
+        let mut fields = vec![unresolved_implementation_field(impl_addr)];
+        if let Some(field) = abi_reg.get_abi_for_address(chain_id, to).and_then(decode) {
+            fields.push(field);
+        } else {
+            fields.push(contracts::core::FallbackVisualizer::new().visualize_hex(input));
+        }
+        return fields;
     }
 
     // Non-proxy destinations and proxy fallback without a linked implementation address.
@@ -750,41 +750,31 @@ fn convert_to_visual_sign_payload(
 
         // Try to visualize using the registered visualizers
         let chain_id_val = chain_id;
-        if let Some(to_address) = transaction.to() {
-            if let Some(contract_type) =
+        if let Some(to_address) = transaction.to()
+            && let Some(contract_type) =
                 layered_registry.lookup(|r| r.get_contract_type(chain_id_val, to_address))
+            && visualizer_registry.get(&contract_type).is_some()
+        {
+            // Check if this is a Universal Router contract and visualize it
+            if contract_type
+                == crate::protocols::uniswap::config::UniswapUniversalRouter::short_type_id()
             {
-                if visualizer_registry.get(&contract_type).is_some() {
-                    // Check if this is a Universal Router contract and visualize it
-                    if contract_type
-                        == crate::protocols::uniswap::config::UniswapUniversalRouter::short_type_id(
-                        )
-                    {
-                        if let Some(field) = (protocols::uniswap::UniversalRouterVisualizer {})
-                            .visualize_tx_commands(
-                                input,
-                                chain_id_val,
-                                Some(layered_registry.global()),
-                            )
-                        {
-                            input_fields.push(field);
-                        }
-                    }
-                    // Check if this is a Permit2 contract and visualize it
-                    else if contract_type
-                        == crate::protocols::uniswap::config::Permit2Contract::short_type_id()
-                    {
-                        if let Some(field) = (protocols::uniswap::Permit2Visualizer)
-                            .visualize_tx_commands(
-                                input,
-                                chain_id_val,
-                                Some(layered_registry.global()),
-                            )
-                        {
-                            input_fields.push(field);
-                        }
-                    }
+                if let Some(field) = (protocols::uniswap::UniversalRouterVisualizer {})
+                    .visualize_tx_commands(input, chain_id_val, Some(layered_registry.global()))
+                {
+                    input_fields.push(field);
                 }
+            }
+            // Check if this is a Permit2 contract and visualize it
+            else if contract_type
+                == crate::protocols::uniswap::config::Permit2Contract::short_type_id()
+                && let Some(field) = (protocols::uniswap::Permit2Visualizer).visualize_tx_commands(
+                    input,
+                    chain_id_val,
+                    Some(layered_registry.global()),
+                )
+            {
+                input_fields.push(field);
             }
         }
 
@@ -795,17 +785,16 @@ fn convert_to_visual_sign_payload(
         // `Some` when it fires, so the `extend` flips `input_fields.is_empty()`
         // to false and the caller-ABI path and ERC20 `decode_transfers`
         // fallback below both skip on their existing `is_empty` gates.
-        if input_fields.is_empty() {
-            if let Some(to_address) = transaction.to() {
-                if let Some(known_fields) = try_known_token_dispatch(
-                    layered_registry,
-                    transaction.chain_id(),
-                    to_address,
-                    input,
-                ) {
-                    input_fields.extend(known_fields);
-                }
-            }
+        if input_fields.is_empty()
+            && let Some(to_address) = transaction.to()
+            && let Some(known_fields) = try_known_token_dispatch(
+                layered_registry,
+                transaction.chain_id(),
+                to_address,
+                input,
+            )
+        {
+            input_fields.extend(known_fields);
         }
 
         // Try dynamic ABI visualization if available. Skipped for known tokens
@@ -815,12 +804,12 @@ fn convert_to_visual_sign_payload(
         // implementation ABI rather than assuming the proxy address is the
         // implementation; this stays strictly after the known-token short-circuit,
         // so a caller-supplied "proxy" entry can never redirect a canonical token.
-        if input_fields.is_empty() {
-            if let (Some(to_address), Some(abi_reg)) = (transaction.to(), abi_registry) {
-                input_fields.extend(visualize_with_abi_registry(
-                    abi_reg, chain_id, to_address, input,
-                ));
-            }
+        if input_fields.is_empty()
+            && let (Some(to_address), Some(abi_reg)) = (transaction.to(), abi_registry)
+        {
+            input_fields.extend(visualize_with_abi_registry(
+                abi_reg, chain_id, to_address, input,
+            ));
         }
 
         // Fallback: Try ERC20 if decode_transfers is enabled. Skipped for
@@ -832,11 +821,11 @@ fn convert_to_visual_sign_payload(
         // `None` (e.g. a selector the built-in decoder doesn't recognize),
         // undermining the "canonical-token short-circuit wins over any other
         // decoder" property.
-        if input_fields.is_empty() && options.decode_transfers {
-            if let Some(field) = (contracts::core::ERC20Visualizer {}).visualize_tx_commands(input)
-            {
-                input_fields.push(field);
-            }
+        if input_fields.is_empty()
+            && options.decode_transfers
+            && let Some(field) = (contracts::core::ERC20Visualizer {}).visualize_tx_commands(input)
+        {
+            input_fields.push(field);
         }
         if input_fields.is_empty() {
             input_fields.push(contracts::core::FallbackVisualizer::new().visualize_hex(input));

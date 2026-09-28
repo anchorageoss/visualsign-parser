@@ -16,6 +16,7 @@ fn process_deterministic_type<T: DeterministicOrdering>(value: &T) -> Result<Str
 
 // Example of a type that would FAIL compile-time checking if it doesn't implement DeterministicOrdering
 #[derive(serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)] // illustrative only; never constructed
 struct BadType {
     field_b: String,
     field_a: String, // Note: fields are not alphabetically ordered in the struct

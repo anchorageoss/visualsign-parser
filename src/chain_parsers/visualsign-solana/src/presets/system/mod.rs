@@ -39,6 +39,15 @@ impl InstructionVisualizer for SystemVisualizer {
     fn kind(&self) -> VisualizerKind {
         VisualizerKind::Payments("System")
     }
+
+    /// Only the durable-nonce advance is infrastructure; every other system
+    /// instruction (transfer, create account, ...) moves lamports or state.
+    fn is_infrastructure(&self, context: &VisualizerContext) -> bool {
+        matches!(
+            bincode::deserialize::<SystemInstruction>(context.data()),
+            Ok(SystemInstruction::AdvanceNonceAccount)
+        )
+    }
 }
 
 fn create_system_preview_layout(

@@ -153,8 +153,7 @@ pub fn run(shared: &SharedArgs, plugins: &[Box<dyn ChainPlugin>]) -> Result<(), 
         shared.with_intermediate,
     )?;
 
-    let raw_tx =
-        tx_input::resolve_transaction_input(&shared.transaction).map_err(|e| e.to_string())?;
+    let raw_tx = tx_input::resolve_transaction_input(&shared.transaction)?;
 
     output::parse_and_display(
         &shared.chain,

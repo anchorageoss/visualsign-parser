@@ -112,7 +112,7 @@ struct DeployArgs {
     /// then to the logged-in org operator key, if omitted
     #[arg(long)]
     operator_seed: Option<PathBuf>,
-    #[arg(long, default_value = "0.12.0")]
+    #[arg(long, default_value = "0.12.1")]
     qos_version: String,
     #[arg(long, default_value = "0.0.0.0")]
     host_ip: String,

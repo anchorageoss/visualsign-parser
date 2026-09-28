@@ -42,7 +42,7 @@ use std::sync::OnceLock;
 /// mislabeling would be deceptive to a signer.
 ///
 /// Sorted by program ID string for easier auditing.
-const NATIVE_PROGRAM_NAMES: &[(&str, &str)] = &[
+pub(crate) const NATIVE_PROGRAM_NAMES: &[(&str, &str)] = &[
     // System program. Note the base58 representation is all '1's (32 zero bytes).
     ("11111111111111111111111111111111", "System Program"),
     (

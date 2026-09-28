@@ -3,11 +3,16 @@ use std::collections::BTreeMap;
 use ::visualsign::AnnotatedPayloadField;
 use ::visualsign::errors::VisualSignError;
 use solana_parser::solana::structs::SolanaAccount;
+use solana_sdk::compute_budget::ComputeBudgetInstruction;
 use solana_sdk::pubkey::Pubkey;
 
 mod accounts;
 mod arg_rendering;
 mod instructions;
+mod priority_fee;
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod summary_tests;
 mod txtypes;
 mod visualsign;
 
@@ -235,16 +240,28 @@ pub struct InstructionView {
     pub accounts: Vec<String>,
 }
 
+/// Display placeholder for an index that does not resolve against the static
+/// `account_keys` (address-lookup-table entry or out-of-bounds index).
+pub fn unresolved_placeholder(raw_index: u8) -> String {
+    format!("unresolved({raw_index})")
+}
+
+/// True for a placeholder from [`unresolved_placeholder`]. Presets keying semantics off
+/// an account (a mint, an authority) must treat it as unknown, never as an address.
+pub fn is_unresolved_placeholder(account: &str) -> bool {
+    account.starts_with("unresolved(")
+}
+
 impl InstructionView {
     pub fn from_context(context: &VisualizerContext) -> Self {
         let program_id = match context.program_id() {
             ProgramRef::Resolved(pk) => pk.to_string(),
-            ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
+            ProgramRef::Unresolved { raw_index } => unresolved_placeholder(raw_index),
         };
         let accounts = (0..context.num_accounts())
             .map(|i| match context.account(i) {
                 Some(AccountRef::Resolved(pk)) => pk.to_string(),
-                Some(AccountRef::Unresolved { raw_index }) => format!("unresolved({raw_index})"),
+                Some(AccountRef::Unresolved { raw_index }) => unresolved_placeholder(raw_index),
                 // `i` is in `0..num_accounts()`, so this arm is unreachable in
                 // practice, but we keep a total fallback to preserve infallibility.
                 None => format!("unresolved(oob:{i})"),
@@ -277,6 +294,18 @@ pub trait SolanaIntegrationConfig {
     }
 }
 
+/// A visualizer's proposal for presenting the whole transaction; see
+/// [`InstructionVisualizer::transaction_summary`].
+#[derive(Debug, Clone)]
+pub struct TransactionSummary {
+    /// Payload title, e.g. "Deposit 414.122446 USDC to Jupiter Lend Earn".
+    pub title: String,
+    /// Payload subtitle: the verified name of the program acted on.
+    pub subtitle: Option<String>,
+    /// Rows emitted at the top level of the payload, after Network and From.
+    pub fields: Vec<AnnotatedPayloadField>,
+}
+
 pub trait InstructionVisualizer {
     fn visualize_tx_commands(
         &self,
@@ -286,6 +315,25 @@ pub trait InstructionVisualizer {
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig>;
 
     fn kind(&self) -> VisualizerKind;
+
+    /// Transaction-level summary (title, subtitle, hoisted rows) for a recognized user action.
+    /// Adopted only when the caller supplied no `transaction_name`, exactly one instruction
+    /// proposes one, and every other instruction is [`is_infrastructure`](Self::is_infrastructure).
+    /// Must derive from decoded instruction data only, never from caller-supplied metadata.
+    fn transaction_summary(&self, _context: &VisualizerContext) -> Option<TransactionSummary> {
+        None
+    }
+
+    /// True when the instruction only prepares the transaction (compute budget, nonce advance,
+    /// own ATA creation). Anything that moves funds to another party must stay `false`.
+    fn is_infrastructure(&self, _context: &VisualizerContext) -> bool {
+        false
+    }
+
+    /// The compute-budget request, if any; the summary gate hoists the resulting priority fee.
+    fn compute_budget(&self, _context: &VisualizerContext) -> Option<ComputeBudgetInstruction> {
+        None
+    }
 
     fn can_handle(&self, context: &VisualizerContext) -> bool {
         let Some(config) = self.get_config() else {
@@ -304,6 +352,12 @@ pub trait InstructionVisualizer {
 pub struct VisualizeResult {
     pub field: AnnotatedPayloadField,
     pub kind: VisualizerKind,
+    /// The handling visualizer's [`InstructionVisualizer::transaction_summary`].
+    pub summary: Option<TransactionSummary>,
+    /// The handling visualizer's [`InstructionVisualizer::is_infrastructure`].
+    pub infrastructure: bool,
+    /// The handling visualizer's [`InstructionVisualizer::compute_budget`].
+    pub compute_budget: Option<ComputeBudgetInstruction>,
 }
 
 /// Tries multiple visualizers in order, returning the first successful visualization.
@@ -321,6 +375,9 @@ pub fn visualize_with_any(
                 .map(|field| VisualizeResult {
                     field,
                     kind: v.kind(),
+                    summary: v.transaction_summary(context),
+                    infrastructure: v.is_infrastructure(context),
+                    compute_budget: v.compute_budget(context),
                 }),
         )
     })
