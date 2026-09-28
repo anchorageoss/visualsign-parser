@@ -211,7 +211,7 @@ pub fn load_idl_from_env() -> Option<(String, solana_parser::solana::structs::Id
 ///
 /// Network-bound: starts a `surfpool` mainnet fork and requires the `surfpool`
 /// binary on `$PATH`. Callers are responsible for marking their tests with
-/// `#[ignore]`. Use the `idl_test!` macro for the standard wrapper.
+/// `#[ignore]`. Use the `idl_tests!` macro for the standard wrapper.
 ///
 /// To loop over many IDLs without paying the surfpool startup cost per IDL,
 /// start one `SurfpoolManager` yourself and call `run_idl_roundtrip_inner`
@@ -251,20 +251,32 @@ pub fn run_idl_roundtrip_inner(idl_label: &str, idl_json: &str) {
     );
 }
 
-/// Generate a `#[tokio::test] #[ignore]` that runs `run_idl_roundtrip` against
-/// the provided IDL string. Works for both upstream `embedded_idls` consts and
-/// vsp-local IDL JSON via `include_str!`.
+/// Generate a `#[tokio::test] #[ignore]` per `name => idl` pair, each running
+/// `run_idl_roundtrip` against the given IDL string (works for both upstream
+/// `embedded_idls` consts and vsp-local IDL JSON via `include_str!`), plus a
+/// `const NAMED_IDLS: &[&str]` listing every `idl` expression from this same
+/// invocation.
+///
+/// `NAMED_IDLS` exists so a completeness check (e.g. against
+/// `solana_parser::ProgramType::all()`) can assert against the IDLs this
+/// macro actually generated tests for, instead of a hand-typed list that
+/// could silently drift from it — deleting a pair here removes its test and
+/// its `NAMED_IDLS` entry atomically.
 ///
 /// Any sibling test file can call this macro unqualified after `mod common;` —
 /// `#[macro_export]` puts it at the test binary's crate root, so neither
 /// `#[macro_use]` nor an explicit `use` is required.
 #[macro_export]
-macro_rules! idl_test {
-    ($name:ident, $idl:expr) => {
-        #[tokio::test(flavor = "multi_thread")]
-        #[ignore]
-        async fn $name() {
-            $crate::common::run_idl_roundtrip(stringify!($name), $idl).await;
-        }
+macro_rules! idl_tests {
+    ($($name:ident => $idl:expr),+ $(,)?) => {
+        $(
+            #[tokio::test(flavor = "multi_thread")]
+            #[ignore]
+            async fn $name() {
+                $crate::common::run_idl_roundtrip(stringify!($name), $idl).await;
+            }
+        )+
+
+        const NAMED_IDLS: &[&str] = &[$($idl),+];
     };
 }
