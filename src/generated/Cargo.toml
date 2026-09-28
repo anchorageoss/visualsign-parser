@@ -6,10 +6,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-qos_crypto = { workspace = true}
-qos_nsm = { workspace = true}
 qos_hex = { workspace = true}
-qos_p256 = { workspace = true}
 
 prost = { version = "0.12", features = [
   "prost-derive",
@@ -25,7 +22,6 @@ borsh = { version = "1.5.7", features = [
 serde = { version = "1", features = [
   "derive",
 ], optional = true, default-features = false }
-serde_json = { version = "1", optional = true, default-features = false }
 tonic = { version = "0.10", optional = true, features = [
   "transport",
 ], default-features = false }
@@ -33,7 +29,7 @@ tonic-reflection = { version = "0.10", optional = true, default-features = false
 
 [features]
 # Derive serde serialize/deserialize on some select types and general serde compatibility
-serde_derive = ["serde", "serde_json"]
+serde_derive = ["serde"]
 # Tonic server and clients
 tonic_types = ["tonic", "tonic-reflection"]
 

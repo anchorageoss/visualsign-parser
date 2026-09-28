@@ -74,6 +74,13 @@ fmt:
 	@echo "rustfmt $(words $(SOLANA_PRESET_SOURCES)) Solana preset sources"
 	@rustfmt $(SOLANA_PRESET_SOURCES)
 
+.PHONY: unused-deps
+# Fails on declared-but-unused dependencies. Needs `cargo install cargo-machete`;
+# a false positive (e.g. a binary only spawned by tests) goes in the crate's
+# `[package.metadata.cargo-machete] ignored = [...]` with a reason.
+unused-deps:
+	cargo machete
+
 .PHONY: lint
 lint:
 	cargo clippy --version
