@@ -16,7 +16,6 @@ fn process_deterministic_type<T: DeterministicOrdering>(value: &T) -> Result<Str
 
 // Example of a type that would FAIL compile-time checking if it doesn't implement DeterministicOrdering
 #[derive(serde::Serialize, serde::Deserialize)]
-#[allow(dead_code)] // illustrative only; never constructed
 struct BadType {
     field_b: String,
     field_a: String, // Note: fields are not alphabetically ordered in the struct
@@ -44,9 +43,14 @@ fn main() {
     const _: visualsign::StaticAssertDeterministic<SignablePayloadField> =
         assert_deterministic::<SignablePayloadField>();
 
-    // This would fail at compile time if uncommented (BadType doesn't implement DeterministicOrdering):
-    // let bad = BadType { field_b: "b".into(), field_a: "a".into() };
-    // let _result = process_deterministic_type(&bad);  // COMPILE ERROR!
+    // Constructing BadType is fine; only handing it to a DeterministicOrdering
+    // bound is rejected. Uncomment the call to see the compile error:
+    let bad = BadType {
+        field_b: "b".into(),
+        field_a: "a".into(),
+    };
+    let _ = serde_json::to_string(&bad);
+    // let _result = process_deterministic_type(&bad); // COMPILE ERROR!
 
     println!("All types passed compile-time deterministic ordering checks!");
 }

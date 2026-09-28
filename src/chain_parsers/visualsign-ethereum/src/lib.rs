@@ -758,12 +758,10 @@ fn convert_to_visual_sign_payload(
             // Check if this is a Universal Router contract and visualize it
             if contract_type
                 == crate::protocols::uniswap::config::UniswapUniversalRouter::short_type_id()
-            {
-                if let Some(field) = (protocols::uniswap::UniversalRouterVisualizer {})
+                && let Some(field) = (protocols::uniswap::UniversalRouterVisualizer {})
                     .visualize_tx_commands(input, chain_id_val, Some(layered_registry.global()))
-                {
-                    input_fields.push(field);
-                }
+            {
+                input_fields.push(field);
             }
             // Check if this is a Permit2 contract and visualize it
             else if contract_type
