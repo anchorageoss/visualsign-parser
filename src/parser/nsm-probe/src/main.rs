@@ -63,6 +63,8 @@ struct Status {
     uptime_secs: u64,
     healthy: bool,
     refreshes: Refreshes,
+    /// Near-expiry refreshes that failed while the valid doc kept being served.
+    refresh_failures: u64,
     failures: u64,
     last_error: Option<String>,
     /// `None` if there's no valid attestation right now.
@@ -127,6 +129,7 @@ async fn status(State(state): State<Arc<AppState>>) -> Json<Status> {
         manifest_changed,
         near_expiry,
         near_expiry_same_cert,
+        refresh_failures,
         failures,
         last_error,
     } = state.cache.stats();
@@ -140,6 +143,7 @@ async fn status(State(state): State<Arc<AppState>>) -> Json<Status> {
             near_expiry,
             near_expiry_same_cert,
         },
+        refresh_failures,
         failures,
         last_error,
         current,
