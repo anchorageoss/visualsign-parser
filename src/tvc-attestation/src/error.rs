@@ -13,6 +13,9 @@ pub enum AttestationError {
     Nsm(String),
     /// The attestation doc didn't decode or verify against the AWS root.
     Certificate(String),
+    /// The doc verified but doesn't attest the requested ephemeral key /
+    /// manifest hash (or carries an unexpected nonce).
+    Binding(String),
     /// The blocking NSM task panicked or exceeded its deadline.
     Task(String),
 }
@@ -25,6 +28,7 @@ impl fmt::Display for AttestationError {
             Self::EphemeralKey(e) => write!(f, "ephemeral key: {e}"),
             Self::Nsm(e) => write!(f, "nsm: {e}"),
             Self::Certificate(e) => write!(f, "attestation certificate: {e}"),
+            Self::Binding(e) => write!(f, "attestation binding: {e}"),
             Self::Task(e) => write!(f, "attestation task: {e}"),
         }
     }

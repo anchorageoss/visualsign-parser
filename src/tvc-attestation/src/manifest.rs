@@ -266,6 +266,13 @@ pub(crate) mod tests {
             Some(&b'{'),
             "v2 manifest must be JSON"
         );
+
+        // What verifiers rely on: the attestation's `user_data` is the hash
+        // of exactly these manifest bytes.
+        assert_eq!(
+            qos_crypto::sha_256(&manifest_bytes).to_vec(),
+            envelope.manifest_hash().to_vec()
+        );
     }
 
     #[test]
