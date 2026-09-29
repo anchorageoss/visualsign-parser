@@ -255,7 +255,11 @@ fn pure_address(input: &SuiCallArg, value: &SuiPureValue) -> Option<SuiAddress> 
 }
 
 fn expiration_string(expiration: &TransactionExpiration) -> Result<String, VisualSignError> {
-    let optional = |value: Option<u64>| value.map_or(Value::Null, |v| v.to_string().into());
+    let optional = |value: Option<u64>| {
+        value.map_or(Value::Null, |epoch_or_timestamp| {
+            epoch_or_timestamp.to_string().into()
+        })
+    };
     let value = match expiration {
         TransactionExpiration::None => return Ok(String::new()),
         TransactionExpiration::Epoch(epoch) => json!({ "epoch": epoch.to_string() }),
@@ -285,7 +289,7 @@ fn expiration_string(expiration: &TransactionExpiration) -> Result<String, Visua
 /// order at every level before serializing.
 fn canonical_json(value: &Value) -> Result<String, VisualSignError> {
     serde_json::to_string(&canonicalize(value))
-        .map_err(|e| VisualSignError::DecodeError(format!("Failed to serialize JSON: {e}")))
+        .map_err(|err| VisualSignError::DecodeError(format!("Failed to serialize JSON: {err}")))
 }
 
 fn canonicalize(value: &Value) -> Value {
@@ -393,7 +397,9 @@ mod tests {
 
     fn programmable(tx: &mut TransactionData) -> &mut ProgrammableTransaction {
         match tx.kind_mut() {
-            TransactionKind::ProgrammableTransaction(pt) => pt,
+            TransactionKind::ProgrammableTransaction(programmable_transaction) => {
+                programmable_transaction
+            }
             _ => panic!("expected a programmable transaction"),
         }
     }
@@ -401,9 +407,9 @@ mod tests {
     /// The plain PTB with its inputs and commands replaced.
     fn ptb_with(inputs: Vec<CallArg>, commands: Vec<Command>) -> TransactionData {
         let mut tx = tx_from_b64(PLAIN_PTB);
-        let pt = programmable(&mut tx);
-        pt.inputs = inputs;
-        pt.commands = commands;
+        let programmable_transaction = programmable(&mut tx);
+        programmable_transaction.inputs = inputs;
+        programmable_transaction.commands = commands;
         tx
     }
 
@@ -482,7 +488,12 @@ mod tests {
         let commands: Vec<(&str, &str)> = decoded
             .commands
             .iter()
-            .map(|c| (c.command_kind.as_str(), c.call_args_json.as_str()))
+            .map(|command| {
+                (
+                    command.command_kind.as_str(),
+                    command.call_args_json.as_str(),
+                )
+            })
             .collect();
         assert_eq!(
             commands,
@@ -522,13 +533,13 @@ mod tests {
         let calls: Vec<_> = decoded
             .commands
             .iter()
-            .map(|c| {
+            .map(|command| {
                 (
-                    c.command_kind.as_str(),
-                    c.package.as_str(),
-                    c.module_name.as_str(),
-                    c.function.as_str(),
-                    c.call_args_json.as_str(),
+                    command.command_kind.as_str(),
+                    command.package.as_str(),
+                    command.module_name.as_str(),
+                    command.function.as_str(),
+                    command.call_args_json.as_str(),
                 )
             })
             .collect();
@@ -604,7 +615,7 @@ mod tests {
         let kinds: Vec<&str> = output
             .commands
             .iter()
-            .map(|c| c.command_kind.as_str())
+            .map(|command| command.command_kind.as_str())
             .collect();
         assert_eq!(
             kinds,
@@ -641,7 +652,7 @@ mod tests {
         let output = output_for(&all_kinds_tx());
         let args: Vec<&str> = output.commands[1..]
             .iter()
-            .map(|c| c.call_args_json.as_str())
+            .map(|command| command.call_args_json.as_str())
             .collect();
         let object_1 = hex_id(0x11);
         let object_2 = hex_id(0x22);
