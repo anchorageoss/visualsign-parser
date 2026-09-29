@@ -45,6 +45,8 @@ use visualsign::vsptrait::TransactionParseError;
 
 use crate::idl::IdlRegistry;
 
+mod native_instruction_data;
+
 /// Version of the `SolanaIntermediateOutput` Borsh schema. Bump on ANY change
 /// to the shape below. Mirrored decoders assert this value, so a bump makes a
 /// schema drift fail loudly instead of silently misparsing.
@@ -102,7 +104,9 @@ pub struct SolanaIntermediateInstruction {
     pub accounts: Vec<SolanaAccount>,
     pub instruction_data_hex: String,
     pub address_table_lookups: Vec<SolanaSingleAddressTableLookup>,
-    /// `None` when the parser could not match an IDL for this instruction.
+    /// The IDL decode, or for a native instruction without one, its
+    /// `solana_json_parsed_data` with the discriminator recovered (empty
+    /// `idl_source`). `None` when neither applies.
     pub parsed_instruction_data: Option<SolanaParsedInstructionDataIo>,
     pub idl_parse_error: Option<SolanaIdlParseError>,
     /// Where `program_key` was registered, if at all -- see [`RegisteredSource`].
@@ -159,6 +163,9 @@ pub struct SolanaSimulatedInstruction {
     /// instruction data to produce `parsed` and does not return it.
     pub instruction_data_hex: String,
     pub registered_source: RegisteredSource,
+    /// The IDL decode of a partially-decoded instruction, or for an RPC-parsed
+    /// one, `solana_rpc_parsed_data` with the discriminator recovered from its
+    /// `type` (empty `idl_source`). `None` when neither applies.
     pub parsed_instruction_data: Option<SolanaParsedInstructionDataIo>,
     /// The RPC's own jsonParsed decode, for the recognized programs it returns
     /// that way (System/Token and friends). `None` for partially-decoded
@@ -431,6 +438,11 @@ fn build_intermediate_instruction(
         crate::idl::builtin_programs::registered_source(&value.program_key, caller_idl_program_ids);
     let (solana_json_parsed_data, solana_json_parse_error) =
         decode_solana_json_parsed(value, registered_source);
+    let parsed_instruction_data = value
+        .parsed_instruction
+        .as_ref()
+        .map(SolanaParsedInstructionDataIo::from)
+        .or_else(|| native_parsed_instruction_data(value, solana_json_parsed_data.as_ref()));
     SolanaIntermediateInstruction {
         program_key: value.program_key.clone(),
         accounts: value.accounts.iter().map(SolanaAccount::from).collect(),
@@ -441,10 +453,7 @@ fn build_intermediate_instruction(
             .map(SolanaSingleAddressTableLookup::from)
             .collect(),
         registered_source,
-        parsed_instruction_data: value
-            .parsed_instruction
-            .as_ref()
-            .map(SolanaParsedInstructionDataIo::from),
+        parsed_instruction_data,
         idl_parse_error: value
             .idl_parse_error
             .as_ref()
@@ -452,6 +461,17 @@ fn build_intermediate_instruction(
         solana_json_parsed_data,
         solana_json_parse_error,
     }
+}
+
+/// `parsed_instruction_data` for a top-level native instruction with no IDL,
+/// from its `jsonParsed` decode, checked against its own instruction data.
+fn native_parsed_instruction_data(
+    value: &parser::SolanaInstruction,
+    json_parsed: Option<&SolanaJsonParsedInstructionDataIo>,
+) -> Option<SolanaParsedInstructionDataIo> {
+    let parsed: Value = serde_json::from_str(&json_parsed?.parsed_json).ok()?;
+    let data = visualsign::encodings::decode_hex(&value.instruction_data_hex).ok()?;
+    native_instruction_data::from_json_parsed(&value.program_key, &parsed, Some(&data))
 }
 
 /// Decodes a top-level instruction with Solana's own `jsonParsed` decoder
@@ -696,6 +716,12 @@ fn decode_inner_instructions(
                         &rpc_parsed.program_id,
                         configs,
                     );
+                    // No instruction data to check against: the RPC consumed it.
+                    let parsed_instruction_data = native_instruction_data::from_json_parsed(
+                        &rpc_parsed.program_id,
+                        &rpc_parsed.parsed,
+                        None,
+                    );
 
                     simulated_instructions.push(SolanaSimulatedInstruction {
                         index: outer_index,
@@ -704,7 +730,7 @@ fn decode_inner_instructions(
                         accounts: Vec::new(),
                         instruction_data_hex: String::new(),
                         registered_source,
-                        parsed_instruction_data: None,
+                        parsed_instruction_data,
                         solana_rpc_parsed_data: Some(SolanaRpcParsedInstructionDataIo {
                             program,
                             parsed_json,
@@ -1239,7 +1265,13 @@ mod tests {
                 "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
             );
             assert_eq!(instructions[i].registered_source, RegisteredSource::Native);
-            assert!(instructions[i].parsed_instruction_data.is_none());
+            let parsed = instructions[i]
+                .parsed_instruction_data
+                .as_ref()
+                .expect("RPC-parsed Token transfer gets parsed_instruction_data");
+            assert_eq!(parsed.instruction_name, "transfer");
+            assert_eq!(parsed.discriminator, "03");
+            assert!(parsed.idl_source.is_empty());
             assert!(instructions[i].solana_rpc_parsed_data.is_some());
             assert!(instructions[i].idl_parse_error.is_none());
         }
@@ -1293,7 +1325,20 @@ mod tests {
         let io = build_intermediate_instruction(&instruction, &BTreeMap::new());
 
         assert_eq!(io.registered_source, RegisteredSource::Native);
-        assert!(io.parsed_instruction_data.is_none(), "no IDL was used");
+        assert_eq!(
+            io.parsed_instruction_data,
+            Some(SolanaParsedInstructionDataIo {
+                instruction_name: "transfer".to_string(),
+                discriminator: "02000000".to_string(),
+                named_accounts: BTreeMap::new(),
+                program_call_args_json: format!(
+                    r#"{{"destination":"{destination}","lamports":1001,"source":"{source}"}}"#
+                ),
+                idl_source: String::new(),
+                idl_hash: String::new(),
+            }),
+            "no IDL: built from the jsonParsed decode"
+        );
         assert!(io.idl_parse_error.is_none());
         assert_eq!(
             io.solana_json_parsed_data,
@@ -1310,6 +1355,154 @@ mod tests {
         let recovered: SolanaIntermediateInstruction =
             borsh::from_slice(&bytes).expect("borsh deserializes");
         assert_eq!(io, recovered);
+    }
+
+    fn keys<const N: usize>() -> [String; N] {
+        std::array::from_fn(|_| Pubkey::new_unique().to_string())
+    }
+
+    fn top_level_discriminator(
+        program_key: &str,
+        accounts: &[String],
+        data: &[u8],
+    ) -> Option<String> {
+        let accounts: Vec<&str> = accounts.iter().map(String::as_str).collect();
+        let io = build_intermediate_instruction(
+            &static_instruction(program_key, &accounts, data),
+            &BTreeMap::new(),
+        );
+        io.parsed_instruction_data
+            .map(|parsed| parsed.discriminator)
+    }
+
+    #[test]
+    fn top_level_native_instructions_get_their_discriminator() {
+        let token = spl_token::id().to_string();
+        let mut transfer_checked = vec![12];
+        transfer_checked.extend_from_slice(&20_000u64.to_le_bytes());
+        transfer_checked.push(6);
+        assert_eq!(
+            top_level_discriminator(&token, &keys::<4>(), &transfer_checked).as_deref(),
+            Some("0c")
+        );
+
+        let mut mint_to = vec![7];
+        mint_to.extend_from_slice(&18_827u64.to_le_bytes());
+        assert_eq!(
+            top_level_discriminator(&token, &keys::<3>(), &mint_to).as_deref(),
+            Some("07")
+        );
+
+        let ata = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+        assert_eq!(
+            top_level_discriminator(ata, &keys::<6>(), &[1]).as_deref(),
+            Some("01")
+        );
+        // Legacy `create` has no data, so no discriminator prefixes it.
+        assert_eq!(top_level_discriminator(ata, &keys::<6>(), &[]), None);
+
+        let token_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+        assert_eq!(
+            top_level_discriminator(token_2022, &keys::<2>(), &[44, 1]).as_deref(),
+            Some("2c01")
+        );
+    }
+
+    #[test]
+    fn rpc_parsed_inner_instructions_get_their_discriminator() {
+        let [
+            owner,
+            source,
+            destination,
+            pool,
+            mint,
+            receipt_mint,
+            receipt_account,
+            mint_authority,
+        ] = keys::<8>();
+        let liquidity = Pubkey::new_unique().to_string();
+        let token = spl_token::id().to_string();
+        let raw_json = serde_json::to_vec(&serde_json::json!({
+            "context": { "slot": 1 },
+            "value": {
+                "err": null,
+                "logs": [],
+                "innerInstructions": [{
+                    "index": 1,
+                    "instructions": [
+                        {
+                            "programId": liquidity,
+                            "accounts": [pool, destination],
+                            "data": "3Bxs",
+                            "stackHeight": 2
+                        },
+                        {
+                            "program": "spl-token",
+                            "programId": token,
+                            "parsed": {
+                                "type": "transferChecked",
+                                "info": {
+                                    "authority": owner,
+                                    "destination": destination,
+                                    "mint": mint,
+                                    "source": source,
+                                    "tokenAmount": {
+                                        "amount": "20000",
+                                        "decimals": 6,
+                                        "uiAmount": 0.02,
+                                        "uiAmountString": "0.02"
+                                    }
+                                }
+                            },
+                            "stackHeight": 2
+                        },
+                        {
+                            "program": "spl-token",
+                            "programId": token,
+                            "parsed": {
+                                "type": "mintTo",
+                                "info": {
+                                    "account": receipt_account,
+                                    "amount": "18827",
+                                    "mint": receipt_mint,
+                                    "mintAuthority": mint_authority
+                                }
+                            },
+                            "stackHeight": 2
+                        }
+                    ]
+                }]
+            }
+        }))
+        .unwrap();
+
+        let (instructions, simulation_error) =
+            parse_and_decode_simulated_instructions(&raw_json, &IdlRegistry::new());
+        assert!(simulation_error.is_none());
+        assert_eq!(instructions.len(), 3);
+
+        assert!(instructions[0].parsed_instruction_data.is_none());
+        assert!(!instructions[0].instruction_data_hex.is_empty());
+
+        let transfer = instructions[1]
+            .parsed_instruction_data
+            .as_ref()
+            .expect("transferChecked is mapped");
+        assert_eq!(transfer.instruction_name, "transferChecked");
+        assert_eq!(transfer.discriminator, "0c");
+        let args: Value = serde_json::from_str(&transfer.program_call_args_json).unwrap();
+        assert_eq!(args["source"], source.as_str());
+        assert_eq!(args["tokenAmount"]["amount"], "20000");
+        assert!(instructions[1].instruction_data_hex.is_empty());
+        assert!(instructions[1].solana_rpc_parsed_data.is_some());
+
+        let mint_to = instructions[2]
+            .parsed_instruction_data
+            .as_ref()
+            .expect("mintTo is mapped");
+        assert_eq!(mint_to.instruction_name, "mintTo");
+        assert_eq!(mint_to.discriminator, "07");
+        assert!(instructions[2].solana_rpc_parsed_data.is_some());
     }
 
     #[test]
