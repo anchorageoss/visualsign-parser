@@ -1039,9 +1039,16 @@ mod tests {
             1,
             "static decode is unaffected by the simulation result"
         );
+        let parsed_instruction = decoded.instructions[0]
+            .parsed_instruction_data
+            .as_ref()
+            .expect(
+                "top-level System transfer gets parsed_instruction_data from its jsonParsed decode",
+            );
+        assert_eq!(parsed_instruction.discriminator, "02000000");
         assert!(
-            decoded.instructions[0].parsed_instruction_data.is_none(),
-            "top-level System transfer has no IDL match"
+            parsed_instruction.idl_source.is_empty(),
+            "no IDL match: built from the jsonParsed decode"
         );
         let native = decoded.instructions[0]
             .solana_json_parsed_data
