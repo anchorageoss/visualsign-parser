@@ -1,7 +1,8 @@
-//! `parsed_instruction_data` for native-program instructions that Solana's
-//! `jsonParsed` decoder covers, built from that decode instead of an IDL.
+//! `parsed_instruction_data` for simulated (CPI) instructions that the RPC
+//! returns parsed.
 //!
-//! The RPC returns inner (CPI) instructions of these programs parsed, with no
+//! `simulateTransaction` returns inner instructions of the programs its
+//! `jsonParsed` decoder covers as `{program, programId, parsed}`, with no
 //! instruction data, so a consumer that identifies calls by discriminator has
 //! nothing to read. This module recovers the discriminator from the decode's
 //! `type` and carries its `info` as the call args.
@@ -9,8 +10,9 @@
 //! Discriminators are the exact bytes a consumer keys calls by: the variant
 //! index at the program's native width (1 byte for SPL Token, Token-2022 and
 //! ATA; `u32` LE for System), plus the sub-instruction byte for Token-2022
-//! extension instructions. An instruction type not listed here gets no
-//! `parsed_instruction_data`, so it stays unidentified rather than guessed.
+//! extension instructions. A type is mapped only when it has a single encoding;
+//! anything else gets no `parsed_instruction_data`, so it stays unidentified
+//! rather than guessed.
 
 use serde_json::Value;
 
@@ -99,9 +101,10 @@ fn system_instruction(instruction_type: &str) -> Option<u32> {
     })
 }
 
+/// `create` is left out: the program also accepts it with empty data, and the
+/// RPC does not say which encoding was used.
 fn associated_token_instruction(instruction_type: &str) -> Option<u8> {
     Some(match instruction_type {
-        "create" => 0,
         "createIdempotent" => 1,
         "recoverNested" => 2,
         _ => return None,
@@ -124,33 +127,17 @@ fn discriminator(program_id: &str, instruction_type: &str) -> Option<Vec<u8>> {
     }
 }
 
-/// Builds `parsed_instruction_data` from a `jsonParsed` decode
-/// (`{"type": .., "info": ..}`) of an instruction of `program_id`.
-///
-/// `raw_data` is the instruction data when known (top-level instructions). The
-/// discriminator must then prefix it; on a mismatch this returns `None` and the
-/// consumer keeps reading the raw bytes. Inner instructions pass `None`: the RPC
-/// dropped their data, so the decode's `type` is all there is.
+/// Builds `parsed_instruction_data` from the RPC's `jsonParsed` decode
+/// (`{"type": .., "info": ..}`) of a simulated instruction of `program_id`.
 ///
 /// `info` goes into `program_call_args_json` whole; `named_accounts` stays
 /// empty, as the decode names accounts under per-program keys, not IDL names.
-pub(super) fn from_json_parsed(
+pub(super) fn from_rpc_parsed(
     program_id: &str,
     parsed: &Value,
-    raw_data: Option<&[u8]>,
 ) -> Option<SolanaParsedInstructionDataIo> {
     let instruction_type = parsed.get("type")?.as_str()?;
     let discriminator = discriminator(program_id, instruction_type)?;
-    if let Some(data) = raw_data
-        && !data.starts_with(&discriminator)
-    {
-        tracing::warn!(
-            %program_id,
-            %instruction_type,
-            "jsonParsed type does not match the instruction data's discriminator"
-        );
-        return None;
-    }
     let program_call_args_json = match parsed.get("info") {
         Some(info @ Value::Object(_)) => canonicalize_value(info).to_string(),
         _ => "{}".to_string(),
@@ -188,7 +175,7 @@ mod tests {
         ];
         for (program_id, instruction_type, expected) in cases {
             let parsed = json!({ "type": instruction_type, "info": {} });
-            let io = from_json_parsed(program_id, &parsed, None)
+            let io = from_rpc_parsed(program_id, &parsed)
                 .unwrap_or_else(|| panic!("{instruction_type} on {program_id} is mapped"));
             assert_eq!(io.discriminator, *expected, "{instruction_type}");
             assert_eq!(io.instruction_name, *instruction_type);
@@ -198,25 +185,25 @@ mod tests {
     #[test]
     fn token_2022_only_types_are_not_mapped_for_spl_token() {
         let parsed = json!({ "type": "pause", "info": {} });
-        assert!(from_json_parsed(TOKEN_PROGRAM, &parsed, None).is_none());
-        assert!(from_json_parsed(TOKEN_2022_PROGRAM, &parsed, None).is_some());
+        assert!(from_rpc_parsed(TOKEN_PROGRAM, &parsed).is_none());
+        assert!(from_rpc_parsed(TOKEN_2022_PROGRAM, &parsed).is_some());
     }
 
     #[test]
     fn unmapped_types_programs_and_shapes_get_nothing() {
         let unknown_type = json!({ "type": "transferCheckedWithFee", "info": {} });
-        assert!(from_json_parsed(TOKEN_2022_PROGRAM, &unknown_type, None).is_none());
+        assert!(from_rpc_parsed(TOKEN_2022_PROGRAM, &unknown_type).is_none());
+
+        // ATA `create` has two encodings; the RPC hides which one ran.
+        let create = json!({ "type": "create", "info": {} });
+        assert!(from_rpc_parsed(ATA_PROGRAM, &create).is_none());
 
         let stake = json!({ "type": "delegate", "info": {} });
-        assert!(
-            from_json_parsed("Stake11111111111111111111111111111111111111", &stake, None).is_none()
-        );
+        assert!(from_rpc_parsed("Stake11111111111111111111111111111111111111", &stake).is_none());
 
         // SPL Memo decodes to a bare string.
         let memo = json!("hello");
-        assert!(
-            from_json_parsed("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr", &memo, None).is_none()
-        );
+        assert!(from_rpc_parsed("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr", &memo).is_none());
     }
 
     #[test]
@@ -229,7 +216,7 @@ mod tests {
                 "authority": "A",
             },
         });
-        let io = from_json_parsed(TOKEN_PROGRAM, &parsed, None).expect("mapped");
+        let io = from_rpc_parsed(TOKEN_PROGRAM, &parsed).expect("mapped");
         assert_eq!(
             io.program_call_args_json,
             r#"{"authority":"A","source":"S","tokenAmount":{"amount":"20000","decimals":6,"uiAmountString":"0.02"}}"#
@@ -237,21 +224,5 @@ mod tests {
         assert!(io.named_accounts.is_empty());
         assert!(io.idl_source.is_empty());
         assert!(io.idl_hash.is_empty());
-    }
-
-    #[test]
-    fn raw_data_must_start_with_the_discriminator() {
-        let parsed = json!({ "type": "transferChecked", "info": {} });
-        let mut data = vec![12];
-        data.extend_from_slice(&20_000u64.to_le_bytes());
-        data.push(6);
-        assert!(from_json_parsed(TOKEN_PROGRAM, &parsed, Some(&data)).is_some());
-
-        data[0] = 3;
-        assert!(from_json_parsed(TOKEN_PROGRAM, &parsed, Some(&data)).is_none());
-
-        // Legacy ATA `create` carries no data; its `00` cannot prefix it.
-        let create = json!({ "type": "create", "info": {} });
-        assert!(from_json_parsed(ATA_PROGRAM, &create, Some(&[])).is_none());
     }
 }
