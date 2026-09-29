@@ -140,6 +140,13 @@ pub(super) fn from_json_parsed(
     raw_data: Option<&[u8]>,
 ) -> Option<SolanaParsedInstructionDataIo> {
     let instruction_type = parsed.get("type")?.as_str()?;
+    // ATA `create` also accepts empty data; publish `00` only when the bytes show it.
+    if program_id == ATA_PROGRAM
+        && instruction_type == "create"
+        && raw_data.is_none_or(<[u8]>::is_empty)
+    {
+        return None;
+    }
     let discriminator = discriminator(program_id, instruction_type)?;
     if let Some(data) = raw_data
         && !data.starts_with(&discriminator)
@@ -249,9 +256,15 @@ mod tests {
 
         data[0] = 3;
         assert!(from_json_parsed(TOKEN_PROGRAM, &parsed, Some(&data)).is_none());
+    }
 
-        // Legacy ATA `create` carries no data; its `00` cannot prefix it.
+    #[test]
+    fn ata_create_needs_its_bytes() {
         let create = json!({ "type": "create", "info": {} });
+        let io = from_json_parsed(ATA_PROGRAM, &create, Some(&[0])).expect("explicit 00");
+        assert_eq!(io.discriminator, "00");
+        // Legacy empty-data create, and inner (RPC-parsed) create with no bytes.
         assert!(from_json_parsed(ATA_PROGRAM, &create, Some(&[])).is_none());
+        assert!(from_json_parsed(ATA_PROGRAM, &create, None).is_none());
     }
 }
