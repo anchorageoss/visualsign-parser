@@ -161,10 +161,7 @@ pub struct SolanaSimulatedInstruction {
     /// instruction data to produce `parsed` and does not return it.
     pub instruction_data_hex: String,
     pub registered_source: RegisteredSource,
-    /// The IDL decode of a partially-decoded instruction, or for an RPC-parsed
-    /// one, the discriminator recovered from `solana_rpc_parsed_data`'s `type`
-    /// with its `info` as the args (empty `idl_source`). `None` when neither
-    /// applies.
+    /// IDL decode, or for RPC-parsed instructions, the discriminator recovered from `type`.
     pub parsed_instruction_data: Option<SolanaParsedInstructionDataIo>,
     /// The RPC's own jsonParsed decode, for the recognized programs it returns
     /// that way (System/Token and friends). `None` for partially-decoded
@@ -1432,7 +1429,7 @@ mod tests {
         assert_eq!(mint_to.instruction_name, "mintTo");
         assert_eq!(mint_to.discriminator, "07");
 
-        // ATA `create` may carry `00` or no data; the RPC hides which.
+        // ATA `create` is unmapped: its encoding is ambiguous.
         assert!(instructions[3].parsed_instruction_data.is_none());
         assert!(instructions[3].solana_rpc_parsed_data.is_some());
     }

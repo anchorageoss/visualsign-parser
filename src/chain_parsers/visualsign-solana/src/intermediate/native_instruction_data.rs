@@ -1,18 +1,4 @@
-//! `parsed_instruction_data` for simulated (CPI) instructions that the RPC
-//! returns parsed.
-//!
-//! `simulateTransaction` returns inner instructions of the programs its
-//! `jsonParsed` decoder covers as `{program, programId, parsed}`, with no
-//! instruction data, so a consumer that identifies calls by discriminator has
-//! nothing to read. This module recovers the discriminator from the decode's
-//! `type` and carries its `info` as the call args.
-//!
-//! Discriminators are the exact bytes a consumer keys calls by: the variant
-//! index at the program's native width (1 byte for SPL Token, Token-2022 and
-//! ATA; `u32` LE for System), plus the sub-instruction byte for Token-2022
-//! extension instructions. A type is mapped only when it has a single encoding;
-//! anything else gets no `parsed_instruction_data`, so it stays unidentified
-//! rather than guessed.
+//! Recovers discriminators for RPC-parsed simulated instructions, which arrive without instruction data.
 
 use serde_json::Value;
 
@@ -23,11 +9,10 @@ const ATA_PROGRAM: &str = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 const TOKEN_PROGRAM: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN_2022_PROGRAM: &str = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
-/// Token-2022 `PausableExtension` instruction prefix; its sub-instruction follows.
+/// Token-2022 `PausableExtension` prefix; a sub-instruction byte follows.
 const TOKEN_2022_PAUSABLE_EXTENSION: u8 = 44;
 
-/// `jsonParsed` type names as `solana-transaction-status` emits them, mapped to
-/// the `TokenInstruction` variant index. Shared by SPL Token and Token-2022.
+/// `jsonParsed` type name to `TokenInstruction` index; shared by SPL Token and Token-2022.
 fn token_instruction(instruction_type: &str) -> Option<u8> {
     Some(match instruction_type {
         "initializeMint" => 0,
@@ -59,8 +44,7 @@ fn token_instruction(instruction_type: &str) -> Option<u8> {
     })
 }
 
-/// Token-2022-only instructions: single-byte ones, then the pausable
-/// extension's `[44, sub]`. Other extensions are not mapped.
+/// Token-2022-only instructions; of the extensions, only pausable is mapped.
 fn token_2022_only_instruction(instruction_type: &str) -> Option<Vec<u8>> {
     let single = match instruction_type {
         "initializeMintCloseAuthority" => 25,
@@ -101,8 +85,7 @@ fn system_instruction(instruction_type: &str) -> Option<u32> {
     })
 }
 
-/// `create` is left out: the program also accepts it with empty data, and the
-/// RPC does not say which encoding was used.
+/// `create` is omitted: it also accepts empty data, and the RPC hides which ran.
 fn associated_token_instruction(instruction_type: &str) -> Option<u8> {
     Some(match instruction_type {
         "createIdempotent" => 1,
@@ -111,8 +94,7 @@ fn associated_token_instruction(instruction_type: &str) -> Option<u8> {
     })
 }
 
-/// The discriminator bytes for a `jsonParsed` instruction type, or `None` when
-/// the program or type is not mapped.
+/// Discriminator bytes for a `jsonParsed` type, or `None` if unmapped.
 fn discriminator(program_id: &str, instruction_type: &str) -> Option<Vec<u8>> {
     match program_id {
         SYSTEM_PROGRAM => {
@@ -127,11 +109,7 @@ fn discriminator(program_id: &str, instruction_type: &str) -> Option<Vec<u8>> {
     }
 }
 
-/// Builds `parsed_instruction_data` from the RPC's `jsonParsed` decode
-/// (`{"type": .., "info": ..}`) of a simulated instruction of `program_id`.
-///
-/// `info` goes into `program_call_args_json` whole; `named_accounts` stays
-/// empty, as the decode names accounts under per-program keys, not IDL names.
+/// `parsed_instruction_data` from an RPC `{type, info}` decode; `info` becomes the args.
 pub(super) fn from_rpc_parsed(
     program_id: &str,
     parsed: &Value,
@@ -194,7 +172,6 @@ mod tests {
         let unknown_type = json!({ "type": "transferCheckedWithFee", "info": {} });
         assert!(from_rpc_parsed(TOKEN_2022_PROGRAM, &unknown_type).is_none());
 
-        // ATA `create` has two encodings; the RPC hides which one ran.
         let create = json!({ "type": "create", "info": {} });
         assert!(from_rpc_parsed(ATA_PROGRAM, &create).is_none());
 
