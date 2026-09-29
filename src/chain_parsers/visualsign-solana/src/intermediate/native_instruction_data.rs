@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use super::{SolanaParsedInstructionDataIo, canonicalize_value};
+use super::SolanaParsedInstructionDataIo;
 
 const SYSTEM_PROGRAM: &str = "11111111111111111111111111111111";
 const ATA_PROGRAM: &str = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
@@ -109,7 +109,7 @@ fn discriminator(program_id: &str, instruction_type: &str) -> Option<Vec<u8>> {
     }
 }
 
-/// `parsed_instruction_data` from an RPC `{type, info}` decode; `info` becomes the args.
+/// `parsed_instruction_data` from a canonicalized RPC `{type, info}` decode; `info` becomes the args.
 pub(super) fn from_rpc_parsed(
     program_id: &str,
     parsed: &Value,
@@ -117,7 +117,7 @@ pub(super) fn from_rpc_parsed(
     let instruction_type = parsed.get("type")?.as_str()?;
     let discriminator = discriminator(program_id, instruction_type)?;
     let program_call_args_json = match parsed.get("info") {
-        Some(info @ Value::Object(_)) => canonicalize_value(info).to_string(),
+        Some(info @ Value::Object(_)) => info.to_string(),
         _ => "{}".to_string(),
     };
     Some(SolanaParsedInstructionDataIo {
@@ -184,15 +184,15 @@ mod tests {
     }
 
     #[test]
-    fn info_becomes_canonical_call_args() {
-        let parsed = json!({
+    fn info_becomes_call_args() {
+        let parsed = super::super::canonicalize_value(&json!({
             "type": "transferChecked",
             "info": {
                 "tokenAmount": { "uiAmountString": "0.02", "amount": "20000", "decimals": 6 },
                 "source": "S",
                 "authority": "A",
             },
-        });
+        }));
         let io = from_rpc_parsed(TOKEN_PROGRAM, &parsed).expect("mapped");
         assert_eq!(
             io.program_call_args_json,

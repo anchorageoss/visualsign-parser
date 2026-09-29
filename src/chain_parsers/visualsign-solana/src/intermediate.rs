@@ -693,16 +693,15 @@ fn decode_inner_instructions(
                     });
                 }
                 UiParsedInstruction::Parsed(rpc_parsed) => {
-                    let parsed_json = canonicalize_value(&rpc_parsed.parsed).to_string();
+                    let parsed = canonicalize_value(&rpc_parsed.parsed);
+                    let parsed_json = parsed.to_string();
                     let program = rpc_parsed.program.clone();
                     let registered_source = crate::idl::builtin_programs::registered_source(
                         &rpc_parsed.program_id,
                         configs,
                     );
-                    let parsed_instruction_data = native_instruction_data::from_rpc_parsed(
-                        &rpc_parsed.program_id,
-                        &rpc_parsed.parsed,
-                    );
+                    let parsed_instruction_data =
+                        native_instruction_data::from_rpc_parsed(&rpc_parsed.program_id, &parsed);
 
                     simulated_instructions.push(SolanaSimulatedInstruction {
                         index: outer_index,
