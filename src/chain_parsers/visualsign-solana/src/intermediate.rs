@@ -469,6 +469,7 @@ fn native_parsed_instruction_data(
     value: &parser::SolanaInstruction,
     json_parsed: Option<&SolanaJsonParsedInstructionDataIo>,
 ) -> Option<SolanaParsedInstructionDataIo> {
+    // `parsed_json` is already canonical, so parsing it back keeps key order.
     let parsed: Value = serde_json::from_str(&json_parsed?.parsed_json).ok()?;
     let data = visualsign::encodings::decode_hex(&value.instruction_data_hex).ok()?;
     native_instruction_data::from_json_parsed(&value.program_key, &parsed, Some(&data))
@@ -710,7 +711,8 @@ fn decode_inner_instructions(
                     });
                 }
                 UiParsedInstruction::Parsed(rpc_parsed) => {
-                    let parsed_json = canonicalize_value(&rpc_parsed.parsed).to_string();
+                    let parsed = canonicalize_value(&rpc_parsed.parsed);
+                    let parsed_json = parsed.to_string();
                     let program = rpc_parsed.program.clone();
                     let registered_source = crate::idl::builtin_programs::registered_source(
                         &rpc_parsed.program_id,
@@ -719,7 +721,7 @@ fn decode_inner_instructions(
                     // No instruction data to check against: the RPC consumed it.
                     let parsed_instruction_data = native_instruction_data::from_json_parsed(
                         &rpc_parsed.program_id,
-                        &rpc_parsed.parsed,
+                        &parsed,
                         None,
                     );
 
