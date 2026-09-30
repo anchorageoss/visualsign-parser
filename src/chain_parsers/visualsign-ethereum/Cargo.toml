@@ -34,7 +34,7 @@ chrono = { version = "0.4", features = ["std", "clock"] }
 clap            = { version = "4.0", features = ["derive"], optional = true }
 generated = { path = "../../generated" }
 hex = "0.4.3"
-k256 = { version = "0.12", features = ["ecdsa"], default-features = false }
+k256 = { version = "0.14", features = ["ecdsa"], default-features = false }
 log = "0.4"
 num_enum = "0.7.2"
 parser_cli_core = { path = "../../parser/cli-core", optional = true }
