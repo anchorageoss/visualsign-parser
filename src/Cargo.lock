@@ -171,7 +171,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b163ff4acf0eac29af05a911397cc418a76e153467b859398adc26cb9335a611"
 dependencies = [
  "alloy-primitives",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "strum 0.27.2",
 ]
 
@@ -199,7 +199,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -235,7 +235,7 @@ dependencies = [
  "futures",
  "futures-util",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -264,7 +264,7 @@ dependencies = [
  "alloy-rlp",
  "crc",
  "serde",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -289,7 +289,7 @@ dependencies = [
  "alloy-rlp",
  "borsh 1.6.0",
  "serde",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -312,7 +312,7 @@ dependencies = [
  "serde",
  "serde_with",
  "sha2 0.10.9",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -338,7 +338,7 @@ dependencies = [
  "http 1.4.0",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tracing",
 ]
 
@@ -365,7 +365,7 @@ dependencies = [
  "futures-utils-wasm",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -439,7 +439,7 @@ dependencies = [
  "pin-project",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "wasmtimer",
@@ -516,7 +516,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -542,7 +542,7 @@ dependencies = [
  "either",
  "elliptic-curve 0.13.8",
  "k256 0.13.4",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -633,7 +633,7 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
  "tower 0.5.2",
  "tracing",
@@ -789,7 +789,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -800,7 +800,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1240,7 +1240,7 @@ dependencies = [
  "nom",
  "num-traits",
  "rusticata-macros",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "time",
 ]
 
@@ -2191,9 +2191,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.42"
+version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "145052bdd345b87320e369255277e3fb5152762ad123a901ef5c262dd38fe8d2"
+checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
  "js-sys",
@@ -2242,9 +2242,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.54"
+version = "4.5.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6e6ff9dcd79cff5cd969a17a545d79e84ab086e444102a591e288a8aa3ce394"
+checksum = "2797f34da339ce31042b27d23607e051786132987f595b02ba4f6a6dffb7030a"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -2252,9 +2252,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.54"
+version = "4.5.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa42cf4d2b7a41bc8f663a7cab4031ebafa1bf3875705bfaf8466dc60ab52c00"
+checksum = "24a241312cea5059b13574bb9b3861cabf758b879c15190b37b6d6fd63ab6876"
 dependencies = [
  "anstream",
  "anstyle",
@@ -2265,9 +2265,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.5.49"
+version = "4.5.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a0b5487afeab2deb2ff4e03a807ad1a03ac532ff5a2cee5d86884440c7f7671"
+checksum = "a92793da1a46a5f2a02a6f4c46c6496b28c43638adea8306fcb0caa1634f24e5"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -2277,9 +2277,9 @@ dependencies = [
 
 [[package]]
 name = "clap_lex"
-version = "0.7.6"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1d728cc89cf3aee9ff92b05e62b19ee65a02b5702cff7d5a377e32c6ae29d8d"
+checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cmake"
@@ -2332,7 +2332,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2879,7 +2879,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d162beedaa69905488a8da94f5ac3edb4dd4788b732fadb7bd120b2625c1976"
 dependencies = [
  "data-encoding",
- "syn 2.0.112",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -2943,7 +2943,7 @@ dependencies = [
  "near-sdk",
  "serde_with",
  "strum 0.27.2",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2958,7 +2958,7 @@ dependencies = [
  "p256",
  "serde_with",
  "strum 0.27.2",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2991,7 +2991,7 @@ source = "git+https://github.com/near/intents.git?tag=defuse%2Fv0.4.2#6dad94cf8a
 dependencies = [
  "defuse-num-utils",
  "near-sdk",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3028,7 +3028,7 @@ dependencies = [
  "defuse-near-utils",
  "derive_more 2.1.1",
  "near-sdk",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3102,7 +3102,7 @@ dependencies = [
  "near-sdk",
  "serde_with",
  "strum 0.27.2",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3711,7 +3711,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5393,7 +5393,7 @@ dependencies = [
  "serde_qs",
  "solana-account-decoder",
  "solana-sdk",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -5662,9 +5662,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.29"
+version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 dependencies = [
  "serde_core",
 ]
@@ -6399,7 +6399,7 @@ checksum = "2ec642cfa4996ff9d4bc813abe2cb0ace9f42ffbdd3a5e1a551c3acfd1e7d3ce"
 dependencies = [
  "anyhow",
  "json_comments",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tracing",
 ]
 
@@ -6435,7 +6435,7 @@ dependencies = [
  "serde",
  "serde_json",
  "subtle",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -6503,7 +6503,7 @@ dependencies = [
  "serde_repr",
  "serde_yaml 0.9.34+deprecated",
  "strum 0.24.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -6542,7 +6542,7 @@ dependencies = [
  "smallvec",
  "smart-default",
  "strum 0.24.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tracing",
  "zstd",
 ]
@@ -6568,7 +6568,7 @@ dependencies = [
  "serde_repr",
  "serde_with",
  "sha2 0.10.9",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -6799,7 +6799,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7003,11 +7003,11 @@ dependencies = [
 
 [[package]]
 name = "num_enum"
-version = "0.7.5"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1207a7e20ad57b847bbddc6776b968420d38292bbfe2089accff5e19e82454c"
+checksum = "5d0bca838442ec211fa11de3a8b0e0e8f3a4522575b5c4c06ed722e005036f26"
 dependencies = [
- "num_enum_derive 0.7.5",
+ "num_enum_derive 0.7.6",
  "rustversion",
 ]
 
@@ -7025,11 +7025,11 @@ dependencies = [
 
 [[package]]
 name = "num_enum_derive"
-version = "0.7.5"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff32365de1b6743cb203b710788263c44a03de03802daf96092f2da4fe6ba4d7"
+checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 1.1.3",
+ "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
  "syn 2.0.112",
@@ -7353,7 +7353,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
  "visualsign",
  "visualsign-ethereum",
@@ -7417,7 +7417,7 @@ dependencies = [
  "serde",
  "serde_json",
  "subtle",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
  "url",
  "visualsign",
@@ -8207,7 +8207,7 @@ source = "git+https://github.com/tkhq/qos.git?rev=365ba7ed529bc5af617bcfb27502c3
 dependencies = [
  "rand 0.9.2",
  "sha2 0.10.9",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "vsss-rs",
 ]
 
@@ -8304,7 +8304,7 @@ dependencies = [
  "rustc-hash",
  "rustls 0.23.35",
  "socket2 0.6.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "web-time",
@@ -8328,7 +8328,7 @@ dependencies = [
  "rustls-pki-types",
  "rustls-platform-verifier",
  "slab",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tinyvec",
  "tracing",
  "web-time",
@@ -8345,7 +8345,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.1",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8970,7 +8970,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9050,7 +9050,7 @@ dependencies = [
  "security-framework 3.5.1",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9430,9 +9430,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.148"
+version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3084b546a1dd6289475996f182a22aba973866ea8e8b02c51d9f46b1336a22da"
+checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
  "indexmap 2.12.1",
  "itoa",
@@ -9826,7 +9826,7 @@ dependencies = [
  "spl-token-2022 8.0.1",
  "spl-token-group-interface 0.6.0",
  "spl-token-metadata-interface 0.7.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "zstd",
 ]
 
@@ -9981,7 +9981,7 @@ dependencies = [
  "ark-serialize 0.4.2",
  "bytemuck",
  "solana-define-syscall 2.3.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -10045,7 +10045,7 @@ dependencies = [
  "solana-transaction",
  "solana-transaction-error 2.2.1",
  "solana-udp-client",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
 ]
 
@@ -10162,7 +10162,7 @@ dependencies = [
  "solana-metrics",
  "solana-time-utils",
  "solana-transaction-error 2.2.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
 ]
 
@@ -10205,7 +10205,7 @@ dependencies = [
  "curve25519-dalek 4.1.3",
  "solana-define-syscall 2.3.0",
  "subtle",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -10219,7 +10219,7 @@ dependencies = [
  "curve25519-dalek 4.1.3",
  "solana-define-syscall 3.0.0",
  "subtle",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -10379,7 +10379,7 @@ dependencies = [
  "solana-pubkey 2.4.0",
  "solana-sdk-ids 2.2.1",
  "solana-system-interface 1.0.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -10796,7 +10796,7 @@ dependencies = [
  "solana-cluster-type",
  "solana-sha256-hasher 2.3.0",
  "solana-time-utils",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -10876,7 +10876,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b526398ade5dea37f1f147ce55dae49aa017a5d7326606359b0445ca8d946581"
 dependencies = [
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "solana-hash 2.3.0",
  "solana-packet",
  "solana-pubkey 2.4.0",
@@ -11066,7 +11066,7 @@ dependencies = [
  "solana-sysvar 2.3.0",
  "solana-sysvar-id 2.2.1",
  "solana-vote-interface",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "wasm-bindgen",
 ]
 
@@ -11231,7 +11231,7 @@ dependencies = [
  "solana-pubkey 2.4.0",
  "solana-rpc-client-types",
  "solana-signature 2.3.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.20.1",
@@ -11265,7 +11265,7 @@ dependencies = [
  "solana-streamer",
  "solana-tls-utils",
  "solana-transaction-error 2.2.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
 ]
 
@@ -11421,7 +11421,7 @@ dependencies = [
  "solana-signer 2.2.1",
  "solana-transaction-error 2.2.1",
  "solana-transaction-status-client-types",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -11438,7 +11438,7 @@ dependencies = [
  "solana-pubkey 2.4.0",
  "solana-rpc-client",
  "solana-sdk-ids 2.2.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -11464,7 +11464,7 @@ dependencies = [
  "solana-transaction-status-client-types",
  "solana-version",
  "spl-generic-token",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -11546,7 +11546,7 @@ dependencies = [
  "solana-transaction-context",
  "solana-transaction-error 2.2.1",
  "solana-validator-exit",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "wasm-bindgen",
 ]
 
@@ -11620,7 +11620,7 @@ dependencies = [
  "borsh 1.6.0",
  "libsecp256k1 0.6.0",
  "solana-define-syscall 2.3.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -11949,7 +11949,7 @@ dependencies = [
  "solana-tls-utils",
  "solana-transaction-error 2.2.1",
  "solana-transaction-metrics-tracker",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "x509-parser 0.14.0",
@@ -12174,7 +12174,7 @@ dependencies = [
  "solana-signer 2.2.1",
  "solana-transaction",
  "solana-transaction-error 2.2.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
 ]
 
@@ -12301,7 +12301,7 @@ dependencies = [
  "spl-token-2022 8.0.1",
  "spl-token-group-interface 0.6.0",
  "spl-token-metadata-interface 0.7.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -12324,7 +12324,7 @@ dependencies = [
  "solana-transaction",
  "solana-transaction-context",
  "solana-transaction-error 2.2.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -12339,7 +12339,7 @@ dependencies = [
  "solana-net-utils",
  "solana-streamer",
  "solana-transaction-error 2.2.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
 ]
 
@@ -12419,7 +12419,7 @@ dependencies = [
  "solana-signature 2.3.0",
  "solana-signer 2.2.1",
  "subtle",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "wasm-bindgen",
  "zeroize",
 ]
@@ -12456,7 +12456,7 @@ dependencies = [
  "solana-signature 3.1.0",
  "solana-signer 3.0.0",
  "subtle",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "wasm-bindgen",
  "zeroize",
 ]
@@ -12574,7 +12574,7 @@ dependencies = [
  "spl-associated-token-account-client",
  "spl-token 8.0.0",
  "spl-token-2022 8.0.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -12761,7 +12761,7 @@ dependencies = [
  "solana-program-option 2.2.1",
  "solana-pubkey 2.4.0",
  "solana-zk-sdk 2.3.13",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -12775,12 +12775,12 @@ dependencies = [
  "bytemuck_derive",
  "num-derive",
  "num-traits",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "solana-program-error 3.0.0",
  "solana-program-option 3.0.0",
  "solana-pubkey 3.0.0",
  "solana-zk-sdk 4.0.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -12808,7 +12808,7 @@ dependencies = [
  "solana-msg 2.2.1",
  "solana-program-error 2.2.2",
  "spl-program-error-derive 0.5.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -12819,11 +12819,11 @@ checksum = "9c4f6cf26cb6768110bf024bc7224326c720d711f7ad25d16f40f6cee40edb2d"
 dependencies = [
  "num-derive",
  "num-traits",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "solana-msg 3.0.0",
  "solana-program-error 3.0.0",
  "spl-program-error-derive 0.6.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -12874,7 +12874,7 @@ dependencies = [
  "bytemuck",
  "num-derive",
  "num-traits",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "serde",
  "serde_derive",
  "solana-program",
@@ -12883,7 +12883,7 @@ dependencies = [
  "solana-system-interface 1.0.0",
  "spl-pod 0.5.1",
  "spl-token-2022 9.0.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -12927,7 +12927,7 @@ dependencies = [
  "spl-pod 0.5.1",
  "spl-program-error 0.7.0",
  "spl-type-length-value 0.8.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -12939,7 +12939,7 @@ dependencies = [
  "bytemuck",
  "num-derive",
  "num-traits",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "solana-account-info 3.1.0",
  "solana-instruction 3.1.0",
  "solana-program-error 3.0.0",
@@ -12948,7 +12948,7 @@ dependencies = [
  "spl-pod 0.7.1",
  "spl-program-error 0.8.0",
  "spl-type-length-value 0.9.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -12961,7 +12961,7 @@ dependencies = [
  "bytemuck",
  "num-derive",
  "num-traits",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "solana-program",
  "thiserror 1.0.69",
 ]
@@ -12976,7 +12976,7 @@ dependencies = [
  "bytemuck",
  "num-derive",
  "num-traits",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "solana-account-info 2.3.0",
  "solana-cpi 2.2.1",
  "solana-decode-error",
@@ -12991,7 +12991,7 @@ dependencies = [
  "solana-rent 2.2.1",
  "solana-sdk-ids 2.2.1",
  "solana-sysvar 2.3.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13004,7 +13004,7 @@ dependencies = [
  "bytemuck",
  "num-derive",
  "num-traits",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "solana-program",
  "solana-security-txt",
  "solana-zk-sdk 2.3.13",
@@ -13032,7 +13032,7 @@ dependencies = [
  "bytemuck",
  "num-derive",
  "num-traits",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "solana-account-info 2.3.0",
  "solana-clock 2.2.2",
  "solana-cpi 2.2.1",
@@ -13063,7 +13063,7 @@ dependencies = [
  "spl-token-metadata-interface 0.7.0",
  "spl-transfer-hook-interface 0.10.0",
  "spl-type-length-value 0.8.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13076,7 +13076,7 @@ dependencies = [
  "bytemuck",
  "num-derive",
  "num-traits",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "solana-account-info 2.3.0",
  "solana-clock 2.2.2",
  "solana-cpi 2.2.1",
@@ -13107,7 +13107,7 @@ dependencies = [
  "spl-token-metadata-interface 0.7.0",
  "spl-transfer-hook-interface 0.10.0",
  "spl-type-length-value 0.8.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13120,7 +13120,7 @@ dependencies = [
  "bytemuck",
  "num-derive",
  "num-traits",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "solana-account-info 3.1.0",
  "solana-clock 3.0.0",
  "solana-cpi 3.1.0",
@@ -13148,7 +13148,7 @@ dependencies = [
  "spl-token-group-interface 0.7.1",
  "spl-token-metadata-interface 0.8.0",
  "spl-transfer-hook-interface 2.1.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13161,7 +13161,7 @@ dependencies = [
  "bytemuck",
  "num-derive",
  "num-traits",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "solana-account-info 3.1.0",
  "solana-instruction 3.1.0",
  "solana-program-error 3.0.0",
@@ -13176,7 +13176,7 @@ dependencies = [
  "spl-token-group-interface 0.7.1",
  "spl-token-metadata-interface 0.8.0",
  "spl-type-length-value 0.9.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13226,7 +13226,7 @@ dependencies = [
  "solana-program",
  "solana-zk-sdk 2.3.13",
  "spl-pod 0.5.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13246,7 +13246,7 @@ dependencies = [
  "solana-sdk-ids 2.2.1",
  "solana-zk-sdk 2.3.13",
  "spl-pod 0.5.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13266,7 +13266,7 @@ dependencies = [
  "solana-sdk-ids 2.2.1",
  "solana-zk-sdk 2.3.13",
  "spl-pod 0.5.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13286,7 +13286,7 @@ dependencies = [
  "solana-sdk-ids 3.1.0",
  "solana-zk-sdk 4.0.0",
  "spl-pod 0.7.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13308,7 +13308,7 @@ checksum = "fa27b9174bea869a7ebf31e0be6890bce90b1a4288bc2bbf24bd413f80ae3fde"
 dependencies = [
  "curve25519-dalek 4.1.3",
  "solana-zk-sdk 2.3.13",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13319,7 +13319,7 @@ checksum = "a0cd59fce3dc00f563c6fa364d67c3f200d278eae681f4dc250240afcfe044b1"
 dependencies = [
  "curve25519-dalek 4.1.3",
  "solana-zk-sdk 4.0.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13357,7 +13357,7 @@ dependencies = [
  "solana-pubkey 2.4.0",
  "spl-discriminator 0.4.1",
  "spl-pod 0.5.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13369,13 +13369,13 @@ dependencies = [
  "bytemuck",
  "num-derive",
  "num-traits",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "solana-instruction 3.1.0",
  "solana-program-error 3.0.0",
  "solana-pubkey 3.0.0",
  "spl-discriminator 0.5.1",
  "spl-pod 0.7.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13417,7 +13417,7 @@ dependencies = [
  "spl-discriminator 0.4.1",
  "spl-pod 0.5.1",
  "spl-type-length-value 0.8.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13436,7 +13436,7 @@ dependencies = [
  "spl-discriminator 0.5.1",
  "spl-pod 0.7.1",
  "spl-type-length-value 0.9.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13486,7 +13486,7 @@ dependencies = [
  "spl-program-error 0.7.0",
  "spl-tlv-account-resolution 0.10.0",
  "spl-type-length-value 0.8.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13512,7 +13512,7 @@ dependencies = [
  "spl-program-error 0.8.0",
  "spl-tlv-account-resolution 0.11.1",
  "spl-type-length-value 0.9.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13548,7 +13548,7 @@ dependencies = [
  "solana-program-error 2.2.2",
  "spl-discriminator 0.4.1",
  "spl-pod 0.5.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13560,13 +13560,13 @@ dependencies = [
  "bytemuck",
  "num-derive",
  "num-traits",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "solana-account-info 3.1.0",
  "solana-msg 3.0.0",
  "solana-program-error 3.0.0",
  "spl-discriminator 0.5.1",
  "spl-pod 0.7.1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -13585,7 +13585,6 @@ dependencies = [
  "cfg-if 1.0.4",
  "libc",
  "psm",
- "windows-sys 0.52.0",
  "windows-sys 0.59.0",
 ]
 
@@ -13998,6 +13997,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "syn"
+version = "3.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
 name = "syn-solidity"
 version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14108,7 +14118,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -14141,11 +14151,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.17"
+version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
+checksum = "09e52cb86a36cede5cb101bf8908837b3e4c6e5e59fe7fd85c23fb56200d189e"
 dependencies = [
- "thiserror-impl 2.0.17",
+ "thiserror-impl 2.0.21",
 ]
 
 [[package]]
@@ -14161,13 +14171,13 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.17"
+version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
+checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.112",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -14844,7 +14854,7 @@ dependencies = [
  "log",
  "rand 0.9.2",
  "sha1",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "utf-8",
 ]
 
@@ -14861,7 +14871,7 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -15095,7 +15105,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tracing",
 ]
 
@@ -15117,13 +15127,13 @@ dependencies = [
  "hex",
  "k256 0.12.0",
  "log",
- "num_enum 0.7.5",
+ "num_enum 0.7.6",
  "parser_cli_core",
  "phf 0.13.1",
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "visualsign",
 ]
 
@@ -15149,7 +15159,7 @@ dependencies = [
  "parser_cli_core",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tracing",
  "visualsign",
 ]
@@ -15184,7 +15194,7 @@ dependencies = [
  "spl-token 7.0.0",
  "spl-token-2022 10.0.0",
  "spl-token-2022-interface",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "visualsign",
@@ -15223,7 +15233,7 @@ dependencies = [
  "protobuf 3.7.2",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "visualsign",
 ]
 
@@ -15490,7 +15500,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -15847,7 +15857,7 @@ dependencies = [
  "reqwest 0.13.4",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
  "tower 0.5.2",
  "url",
@@ -15864,7 +15874,7 @@ dependencies = [
  "alloy-sol-types",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "x402-types",
 ]
 
@@ -15878,7 +15888,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solana-pubkey 4.0.0",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "tokio",
  "x402-types",
 ]
@@ -15897,7 +15907,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -15943,7 +15953,7 @@ dependencies = [
  "oid-registry 0.8.1",
  "ring",
  "rusticata-macros",
- "thiserror 2.0.17",
+ "thiserror 2.0.21",
  "time",
 ]
 
