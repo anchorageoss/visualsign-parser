@@ -14,6 +14,7 @@ members = [
   "parser/gateway",
   "parser/grpc-server",
   "parser/http-server",
+  "parser/nsm-probe",
   "visualsign",
   "chain_parsers/visualsign-ethereum",
   "chain_parsers/visualsign-near",
