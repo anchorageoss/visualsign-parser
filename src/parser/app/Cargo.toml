@@ -9,6 +9,7 @@ borsh = { version = "1.5.7", features = [
   "std",
 ], default-features = false }
 qos_core = { workspace = true }
+tvc-attestation = { path = "../../tvc-attestation" }
 qos_crypto = { workspace = true }
 qos_hex = { workspace = true }
 qos_p256 = { workspace = true }
@@ -52,7 +53,10 @@ diagnostics = [
     "visualsign-near?/diagnostics",
     "visualsign-solana?/diagnostics",
 ]
-vsock = ["qos_core/vm"]
+# In-enclave file paths (default ephemeral key: `/qos.ephemeral.key` instead
+# of `./local-enclave/qos.ephemeral.key`). QOS 0.12.1 dropped `qos_core/vm`,
+# which used to do this.
+vsock = ["tvc-attestation/enclave"]
 
 [lints]
 workspace = true

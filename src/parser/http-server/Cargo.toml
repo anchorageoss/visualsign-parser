@@ -15,14 +15,15 @@ solana = ["parser_app/solana"]
 sui = ["parser_app/sui"]
 tron = ["parser_app/tron"]
 unspecified = ["parser_app/unspecified"]
-# Switch qos_core constants (notably `EPHEMERAL_KEY_FILE`) to their in-enclave
-# paths (`/qos.ephemeral.key` instead of `./local-enclave/qos.ephemeral.key`).
+# Switch enclave file paths (`tvc_attestation::paths`, notably
+# `EPHEMERAL_KEY_FILE`) to their in-enclave locations (`/qos.ephemeral.key`
+# instead of `./local-enclave/qos.ephemeral.key`).
 # parser_http_server only ever runs as a TVC pivot, so this must be on for
 # production builds. Without it the pivot crashes at startup trying to read
 # the dev path, which surfaces as `Healthy / Desired Replicas: 0/N`. The
 # name mirrors parser_app's identically-named feature for consistency,
 # even though http-server doesn't speak vsock itself.
-vsock = ["qos_core/vm"]
+vsock = ["tvc-attestation/enclave"]
 
 [dependencies]
 # Internal - same parse logic + envelope shapes the gRPC server already uses.
@@ -34,11 +35,11 @@ generated = { path = "../../generated", features = ["tonic_types", "serde_derive
 host_primitives = { path = "../../host_primitives" }
 visualsign = { path = "../../visualsign" }
 
-# Crypto / hashing / manifest re-encoding for the boot-proof seam.
+# Enclave state (ephemeral key, manifest) and boot-proof encoding.
 qos_core = { workspace = true }
+tvc-attestation = { path = "../../tvc-attestation" }
 qos_hex = { workspace = true }
 qos_p256 = { workspace = true }
-borsh = { version = "1", features = ["std", "derive"], default-features = false }
 
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 # `precomputed-tables` is a k256 default: keeping it costs binary size but
@@ -62,6 +63,8 @@ mime = "0.3"
 clap = { version = "4.0", features = ["derive", "env"] }
 
 [dev-dependencies]
+# Round-trips the v1 boot-proof encoding in `boot_proof` tests.
+borsh = { version = "1", features = ["std", "derive"], default-features = false }
 turnkey_api_key_stamper = "0.10"
 hex = { workspace = true }
 
