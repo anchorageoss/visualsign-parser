@@ -206,16 +206,16 @@ impl NsmBootProof {
 }
 
 impl BootProofSource for NsmBootProof {
-    /// Must run inside `tokio::task::block_in_place` on the multi-threaded
-    /// runtime (as `handle_parse` does): it blocks on the cache, which is
-    /// a hit (re-reading the two input files) unless a refresh is due.
+    /// Serves the cache's latest verified doc without touching the enclave
+    /// files or waiting behind a refresh: the watcher keeps it fresh, so a
+    /// slow read or an in-flight NSM call never delays or fails a request.
     fn boot_proof(&self) -> Result<TurnkeyBootProof, BootProofError> {
         if self.drift.is_set() {
             return Err(AttestationError::Task(INPUT_DRIFT.to_string()).into());
         }
-        let handle = tokio::runtime::Handle::try_current()
-            .map_err(|e| AttestationError::Task(e.to_string()))?;
-        let (attestation, _) = handle.block_on(self.cache.get())?;
+        let attestation = self.cache.latest().ok_or_else(|| {
+            AttestationError::Task("no verified, unexpired attestation cached".to_string())
+        })?;
         Ok(TurnkeyBootProof {
             aws_attestation_doc_b64: base64::engine::general_purpose::STANDARD
                 .encode(&attestation.document),
