@@ -32,9 +32,6 @@ const TONIC_FEATURE_GATE: &str = "#[cfg(feature = \"tonic_types\")]";
 const BORSH_DERIVE: &str = "#[derive(borsh::BorshSerialize, borsh::BorshDeserialize)]";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Compile protoc from source so we get consistent versions
-    //std::env::set_var("PROTOC", protobuf_src::protoc());
-
     tonic_build::configure()
         .out_dir(GEN_DIR)
         // Force `BTreeMap` for every proto `map<.., ..>` field so iteration order
