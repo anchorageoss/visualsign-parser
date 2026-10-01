@@ -1,0 +1,77 @@
+# Dependabot version updates.
+#
+# Cooldown: a release must be at least 7 days old before Dependabot proposes it,
+# so a compromised or broken publish has time to be yanked before it reaches the
+# enclave build. Cooldown applies to version updates only; Dependabot security
+# updates (a repo setting, separate from this file) bypass it and open
+# immediately.
+#
+# Scope split with the daily deps routine:
+# - Dependabot: semver-compatible cargo bumps and GitHub Actions pins.
+# - Routine: cargo-audit triage, machete checks, and at most one major upgrade,
+#   chosen to converge on versions already in the tree rather than the newest
+#   release.
+#
+# `lockfile-only` is what keeps Dependabot to Cargo-compatible bumps. Dependabot
+# reads every x.y.z as major.minor.patch, so for 0.x crates it would label a
+# breaking 0.12 -> 0.13 as "minor" and an `update-types` filter would let it
+# through. With `lockfile-only` it only moves Cargo.lock within the existing
+# Cargo.toml requirements, which is exactly Cargo's own compatibility rule.
+#
+# Not covered on purpose:
+# - Git-sourced crates (tkhq/qos, near/intents, MystenLabs/sui, solana-parser):
+#   pinned by rev/tag and bumped deliberately, never automatically.
+# - Container base images: stagex images are pinned by `@sha256:` and must be
+#   re-hashed locally before a bump, which Dependabot can't do.
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directories:
+      - "/src"
+      - "/tools/tvc-deploy"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Lisbon"
+    versioning-strategy: lockfile-only
+    allow:
+      - dependency-type: "all"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      cargo-semver-compatible:
+        applies-to: version-updates
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "qos_*"
+      - dependency-name: "defuse-*"
+      - dependency-name: "solana_parser"
+      - dependency-name: "solana-parser-fuzz-core"
+      - dependency-name: "move-core-types"
+      - dependency-name: "move-bytecode-utils"
+      - dependency-name: "sui-*"
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Lisbon"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(ci)"
