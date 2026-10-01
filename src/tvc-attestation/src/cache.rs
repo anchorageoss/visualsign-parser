@@ -223,9 +223,9 @@ pub struct AttestationCache<A> {
     /// single-flight one refresh instead of racing duplicate NSM calls or
     /// storing an older doc over a newer one.
     current: AsyncMutex<Option<Arc<Attestation>>>,
-    /// `current`'s deadline, mirrored so [`Self::healthy`] never waits behind
-    /// an in-flight NSM call.
-    valid_until: Mutex<Option<Instant>>,
+    /// `current`, mirrored so [`Self::healthy`] and [`Self::latest`] never
+    /// wait behind an in-flight refresh.
+    latest: Mutex<Option<Arc<Attestation>>>,
     /// No near-expiry attempt before this instant (set after one returned the
     /// same leaf or failed). Only touched while `current` is locked.
     near_expiry_retry_after: Mutex<Option<Instant>>,
@@ -244,7 +244,7 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
             call_timeout: DEFAULT_CALL_TIMEOUT,
             nsm_in_flight: Arc::new(AtomicBool::new(false)),
             current: AsyncMutex::new(None),
-            valid_until: Mutex::new(None),
+            latest: Mutex::new(None),
             near_expiry_retry_after: Mutex::new(None),
             stats: Mutex::new(CacheStats::default()),
         }
@@ -278,8 +278,19 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
     /// Gate readiness on this: a replica whose first NSM call fails never
     /// reports healthy.
     pub fn healthy(&self) -> bool {
-        let until = *self.valid_until.lock().unwrap_or_else(|e| e.into_inner());
-        healthy_at(until, Instant::now())
+        self.latest().is_some()
+    }
+
+    /// The cached attestation if its chain is unexpired, without loading the
+    /// inputs, attesting, or waiting behind a refresh in progress. For
+    /// serving a doc on a request path while [`Self::spawn_watcher`] keeps
+    /// it fresh; [`Self::get`] is what refreshes it.
+    pub fn latest(&self) -> Option<Arc<Attestation>> {
+        let latest = self.latest.lock().unwrap_or_else(|e| e.into_inner());
+        latest
+            .as_ref()
+            .filter(|a| healthy_at(Some(a.valid_until), Instant::now()))
+            .map(Arc::clone)
     }
 
     /// The current attestation, re-attesting first if the inputs changed or
@@ -354,7 +365,7 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
                 }
                 self.set_retry_after(None);
                 let fresh = Arc::new(fresh);
-                self.set_valid_until(Some(fresh.valid_until));
+                self.set_latest(Some(Arc::clone(&fresh)));
                 *current = Some(Arc::clone(&fresh));
                 Ok((fresh, Some(reason)))
             }
@@ -371,7 +382,7 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
                 }
                 _ => {
                     *current = None;
-                    self.set_valid_until(None);
+                    self.set_latest(None);
                     self.set_retry_after(None);
                     Err(e)
                 }
@@ -433,8 +444,8 @@ impl<A: NsmProvider + Send + Sync + 'static> AttestationCache<A> {
             .unwrap_or_else(|e| e.into_inner()) = until;
     }
 
-    fn set_valid_until(&self, until: Option<Instant>) {
-        *self.valid_until.lock().unwrap_or_else(|e| e.into_inner()) = until;
+    fn set_latest(&self, latest: Option<Arc<Attestation>>) {
+        *self.latest.lock().unwrap_or_else(|e| e.into_inner()) = latest;
     }
 
     async fn bounded<T: Send + 'static>(
@@ -955,6 +966,62 @@ mod tests {
                 .last_error
                 .unwrap()
                 .contains("attestation certificate")
+        );
+    }
+
+    #[tokio::test]
+    async fn latest_follows_get() {
+        let nsm = FakeNsm::echo();
+        let (load, current) = loader(inputs(1, 1));
+        let cache = fake_cache(&nsm, load);
+        assert!(
+            cache.latest().is_none(),
+            "nothing before the first attestation"
+        );
+
+        let (first, _) = cache.get().await.unwrap();
+        assert!(Arc::ptr_eq(&cache.latest().unwrap(), &first));
+
+        nsm.set(Reply::Raw(b"broken".to_vec()));
+        *current.lock().unwrap() = inputs(2, 1);
+        cache.get().await.unwrap_err();
+        assert!(
+            cache.latest().is_none(),
+            "a doc for the old key is never served"
+        );
+    }
+
+    // The request path reads `latest` while the watcher refreshes: it must
+    // keep serving the valid doc rather than wait behind the cache lock.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn latest_does_not_wait_behind_a_refresh() {
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let nsm = FakeNsm::echo();
+        let (load, current) = loader(inputs(1, 1));
+        let cache = Arc::new(fake_cache(&nsm, load).with_call_timeout(Duration::from_secs(30)));
+        let (first, _) = cache.get().await.unwrap();
+
+        nsm.set(Reply::Hang(Arc::clone(&release)));
+        *current.lock().unwrap() = inputs(2, 1);
+        let refreshing = tokio::spawn({
+            let cache = Arc::clone(&cache);
+            async move { cache.get().await.map(|_| ()) }
+        });
+        wait_for(|| cache.nsm_in_flight.load(Ordering::Acquire)).await;
+
+        let served = cache.latest().expect("valid doc still served");
+        assert!(Arc::ptr_eq(&served, &first));
+
+        nsm.set(Reply::Echo {
+            not_after: T0 + THREE_HOURS,
+        });
+        tokio::task::spawn_blocking(move || release.wait())
+            .await
+            .unwrap();
+        refreshing.await.unwrap().unwrap();
+        assert!(
+            !Arc::ptr_eq(&cache.latest().unwrap(), &first),
+            "the refreshed doc replaces it"
         );
     }
 
