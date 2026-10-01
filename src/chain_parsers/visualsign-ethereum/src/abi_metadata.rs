@@ -6,7 +6,6 @@
 use crate::abi_registry::{AbiKind, AbiRegistry};
 use crate::embedded_abis::register_embedded_abi;
 use generated::parser::{Abi, ChainMetadata, chain_metadata};
-use k256::EncodedPoint;
 #[cfg(any(test, feature = "dev-signing"))]
 use k256::ecdsa::SigningKey;
 #[cfg(any(test, feature = "dev-signing"))]
@@ -403,10 +402,7 @@ fn validate_abi_signature(
     let pubkey_bytes = visualsign::encodings::decode_hex(public_key_hex)
         .map_err(|e| AbiSignatureError::Validation(format!("Invalid public key hex: {e}")))?;
 
-    let encoded_point = EncodedPoint::from_bytes(&pubkey_bytes)
-        .map_err(|e| AbiSignatureError::Validation(format!("Invalid public key point: {e}")))?;
-
-    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point)
+    let verifying_key = VerifyingKey::from_sec1_bytes(&pubkey_bytes)
         .map_err(|e| AbiSignatureError::Validation(format!("Invalid verifying key: {e}")))?;
 
     // 6. Verify pre-hashed signature (hash was computed in step 3)
@@ -421,7 +417,7 @@ fn validate_abi_signature(
     //    allowlist. An empty allowlist contains nothing, so this rejects every signed
     //    ABI (fail-closed).
     if let Some(allowlist) = allowlist {
-        let signer_pubkey = verifying_key.to_encoded_point(false);
+        let signer_pubkey = verifying_key.to_sec1_point(false);
         if !allowlist.contains(signer_pubkey.as_bytes()) {
             return Err(AbiSignatureError::Validation(
                 "signer not in allowlist".to_string(),
@@ -460,9 +456,9 @@ pub fn authorized_abi_signers() -> SignerAllowlist {
 
     #[cfg(any(test, feature = "dev-signing"))]
     {
-        if let Ok(sk) = SigningKey::from_bytes(&CLI_DEV_SIGNING_KEY_SEED) {
+        if let Ok(sk) = SigningKey::from_bytes((&CLI_DEV_SIGNING_KEY_SEED).into()) {
             let vk = VerifyingKey::from(&sk);
-            allow.insert(vk.to_encoded_point(false).as_bytes().to_vec());
+            allow.insert(vk.to_sec1_point(false).as_bytes().to_vec());
         }
     }
 
@@ -510,9 +506,8 @@ pub fn signer_allowlist_from_hex(entries: &[String]) -> Result<SignerAllowlist, 
 /// identical allowlist bytes.
 fn canonical_pubkey_from_hex(hex_str: &str) -> Option<Vec<u8>> {
     let bytes = visualsign::encodings::decode_hex(hex_str).ok()?;
-    let encoded_point = EncodedPoint::from_bytes(&bytes).ok()?;
-    let verifying_key = VerifyingKey::from_encoded_point(&encoded_point).ok()?;
-    Some(verifying_key.to_encoded_point(false).as_bytes().to_vec())
+    let verifying_key = VerifyingKey::from_sec1_bytes(&bytes).ok()?;
+    Some(verifying_key.to_sec1_point(false).as_bytes().to_vec())
 }
 
 /// Deterministic 32-byte secp256k1 seed used to sign ABI JSON in local dev tooling
@@ -547,7 +542,7 @@ pub fn sign_abi(
     chain_id: u64,
     signing_key_seed: &[u8; 32],
 ) -> Result<generated::parser::SignatureMetadata, String> {
-    let signing_key = SigningKey::from_bytes(signing_key_seed)
+    let signing_key = SigningKey::from_bytes(signing_key_seed.into())
         .map_err(|e| format!("invalid secp256k1 signing key seed: {e}"))?;
     let verifying_key = VerifyingKey::from(&signing_key);
 
@@ -561,7 +556,7 @@ pub fn sign_abi(
         .sign_prehash(&hash)
         .map_err(|e| format!("failed to sign ABI hash: {e}"))?;
     let signature_hex = hex::encode(signature.to_der().as_bytes());
-    let public_key_hex = hex::encode(verifying_key.to_encoded_point(false).as_bytes());
+    let public_key_hex = hex::encode(verifying_key.to_sec1_point(false).as_bytes());
 
     Ok(generated::parser::SignatureMetadata {
         value: signature_hex,
@@ -682,7 +677,7 @@ mod tests {
         chain_id: u64,
         seed: &[u8; 32],
     ) -> (String, String) {
-        let signing_key = SigningKey::from_bytes(seed).expect("valid key");
+        let signing_key = SigningKey::from_bytes(seed.into()).expect("valid key");
         let verifying_key = VerifyingKey::from(&signing_key);
 
         // Compute the shared domain-separated prehash.
@@ -698,7 +693,7 @@ mod tests {
         let signature_hex = hex::encode(signature_der.as_bytes());
 
         // Get public key (uncompressed format)
-        let public_key_hex = hex::encode(verifying_key.to_encoded_point(false).as_bytes());
+        let public_key_hex = hex::encode(verifying_key.to_sec1_point(false).as_bytes());
 
         (signature_hex, public_key_hex)
     }
@@ -728,9 +723,9 @@ mod tests {
     }
 
     fn pubkey_bytes_from_seed(seed: &[u8; 32]) -> Vec<u8> {
-        let signing_key = SigningKey::from_bytes(seed).expect("valid key");
+        let signing_key = SigningKey::from_bytes(seed.into()).expect("valid key");
         let verifying_key = VerifyingKey::from(&signing_key);
-        verifying_key.to_encoded_point(false).as_bytes().to_vec()
+        verifying_key.to_sec1_point(false).as_bytes().to_vec()
     }
 
     /// Allowlist authorizing the deterministic test signer (`create_test_signature`
@@ -1575,10 +1570,11 @@ mod tests {
     /// derives from the signature.
     #[test]
     fn signer_allowlist_from_hex_canonicalizes_compressed_keys() {
-        let signing_key = SigningKey::from_bytes(&CLI_DEV_SIGNING_KEY_SEED).expect("valid key");
+        let signing_key =
+            SigningKey::from_bytes((&CLI_DEV_SIGNING_KEY_SEED).into()).expect("valid key");
         let verifying_key = VerifyingKey::from(&signing_key);
-        let compressed = hex::encode(verifying_key.to_encoded_point(true).as_bytes());
-        let uncompressed = hex::encode(verifying_key.to_encoded_point(false).as_bytes());
+        let compressed = hex::encode(verifying_key.to_sec1_point(true).as_bytes());
+        let uncompressed = hex::encode(verifying_key.to_sec1_point(false).as_bytes());
 
         let allow = signer_allowlist_from_hex(&[format!("0x{compressed}"), uncompressed])
             .expect("both encodings must parse");
