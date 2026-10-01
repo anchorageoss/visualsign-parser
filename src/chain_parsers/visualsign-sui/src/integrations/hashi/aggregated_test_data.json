@@ -9,16 +9,15 @@
           "command_index": 2,
           "visualize_result_index": 0,
           "asserts": {
-            "Deposit Amount": "0.15409915",
-            "Deposit Amount (sats)": "15409915",
-            "hBTC Recipient": "0x9746979c122e2d6fdab7fa09fb7234f5a3043eab3fa2fe0a59b08e5c09553cc3",
-            "Bitcoin Network": "Bitcoin Signet",
-            "Bitcoin Transaction": "e9d9379417481e04cd2d7d37a505f9ce89fceaf39ee11f5435af7b1b4cfb2647",
-            "Bitcoin Output Index": "1",
-            "Sender": "0x9746979c122e2d6fdab7fa09fb7234f5a3043eab3fa2fe0a59b08e5c09553cc3",
+            "Signer": "0x9746979c122e2d6fdab7fa09fb7234f5a3043eab3fa2fe0a59b08e5c09553cc3",
+            "Amount (declared)": "0.15409915",
+            "Destination Network": "Sui Testnet",
+            "Recipient Address": "0x9746979c122e2d6fdab7fa09fb7234f5a3043eab3fa2fe0a59b08e5c09553cc3",
+            "Bitcoin Output": "e9d9379417481e04cd2d7d37a505f9ce89fceaf39ee11f5435af7b1b4cfb2647:1",
+            "Amount (sats)": "15409915",
+            "Source Network": "Bitcoin Signet",
             "Bridge Object": "0x22c0ce66ce09df2dc88a31bd320d4177b766518b9b88010368cfbdcd724528f8",
-            "Bridge Package": "0x8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e",
-            "Summary": "Request 0.15409915 hBTC for Bitcoin Signet transaction output e9d9379417481e04cd2d7d37a505f9ce89fceaf39ee11f5435af7b1b4cfb2647:1, declared as 0.15409915 BTC. The hBTC is minted to 0x9746979c122e2d6fdab7fa09fb7234f5a3043eab3fa2fe0a59b08e5c09553cc3 after the bridge verifies that output."
+            "Bridge Package": "0x8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e"
           }
         }
       }
@@ -33,15 +32,15 @@
           "command_index": 3,
           "visualize_result_index": 0,
           "asserts": {
-            "Bitcoin Recipient": "tb1p57gd244cdg4zjh57x265l6alts5c8620l4rk92wqpxj3pk0eaczsau385x",
-            "Bitcoin Network": "Bitcoin Signet",
+            "Signer": "0x88230c63ee63774991b7d04fa4c1d6d269f6451c69b13848383375735093c596",
+            "Amount": "0.24185763",
+            "Destination Network": "Bitcoin Signet",
+            "Recipient Address": "tb1p57gd244cdg4zjh57x265l6alts5c8620l4rk92wqpxj3pk0eaczsau385x",
+            "Bitcoin Miner Fee": "Deducted from the amount",
+            "Amount (sats)": "24185763",
+            "Source Network": "Sui Testnet",
             "Bridge Object": "0x22c0ce66ce09df2dc88a31bd320d4177b766518b9b88010368cfbdcd724528f8",
-            "Bridge Package": "0x8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e",
-            "Withdrawal Amount": "0.24185763",
-            "Withdrawal Amount (sats)": "24185763",
-            "Summary": "Request a withdrawal of 0.24185763 hBTC to tb1p57gd244cdg4zjh57x265l6alts5c8620l4rk92wqpxj3pk0eaczsau385x on Bitcoin Signet. The bridge sends the BTC minus the Bitcoin miner fee.",
-            "Network Fee": "The Bitcoin miner fee is subtracted from the withdrawal amount",
-            "Sender": "0x88230c63ee63774991b7d04fa4c1d6d269f6451c69b13848383375735093c596"
+            "Bridge Package": "0x8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e"
           }
         },
         "E7fvzD239zzTLnhTVsuXVKPKKkFUKSRvdR43oJ8Je8cD": {
@@ -49,15 +48,15 @@
           "command_index": 1,
           "visualize_result_index": 0,
           "asserts": {
-            "Bitcoin Recipient": "tb1qht7wmzjggxl9je0zw7fl42rjjqh9w4ka2lwv3u",
-            "Bitcoin Network": "Bitcoin Signet",
+            "Signer": "0xf0d3747db655ffce783ac44825f32285de12936f93194c9a904335513bd3a5bd",
+            "Amount": "0.1",
+            "Destination Network": "Bitcoin Signet",
+            "Recipient Address": "tb1qht7wmzjggxl9je0zw7fl42rjjqh9w4ka2lwv3u",
+            "Bitcoin Miner Fee": "Deducted from the amount",
+            "Amount (sats)": "10000000",
+            "Source Network": "Sui Testnet",
             "Bridge Object": "0x22c0ce66ce09df2dc88a31bd320d4177b766518b9b88010368cfbdcd724528f8",
-            "Bridge Package": "0x8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e",
-            "Withdrawal Amount": "0.1",
-            "Withdrawal Amount (sats)": "10000000",
-            "Summary": "Request a withdrawal of 0.1 hBTC to tb1qht7wmzjggxl9je0zw7fl42rjjqh9w4ka2lwv3u on Bitcoin Signet. The bridge sends the BTC minus the Bitcoin miner fee.",
-            "Network Fee": "The Bitcoin miner fee is subtracted from the withdrawal amount",
-            "Sender": "0xf0d3747db655ffce783ac44825f32285de12936f93194c9a904335513bd3a5bd"
+            "Bridge Package": "0x8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e"
           }
         },
         "8cxs733Zm4LYaVnJBMUptjvr3CXxp2ETwBGpfxnR7kcf": {
@@ -65,15 +64,15 @@
           "command_index": 5,
           "visualize_result_index": 0,
           "asserts": {
-            "Bitcoin Recipient": "tb1p4ctlhtn9k8qvlk90ukpresd5xx78mycevcdnw9hdgyuvxvf47dtq2epyfv",
-            "Bitcoin Network": "Bitcoin Signet",
+            "Signer": "0x1fc38f76bfc6739dc9ec278d95b1da4f761b6c8551f69e84795d8385bb6ee5c4",
+            "Amount": "1.43809724",
+            "Destination Network": "Bitcoin Signet",
+            "Recipient Address": "tb1p4ctlhtn9k8qvlk90ukpresd5xx78mycevcdnw9hdgyuvxvf47dtq2epyfv",
+            "Bitcoin Miner Fee": "Deducted from the amount",
+            "Amount (sats)": "143809724",
+            "Source Network": "Sui Testnet",
             "Bridge Object": "0x22c0ce66ce09df2dc88a31bd320d4177b766518b9b88010368cfbdcd724528f8",
-            "Bridge Package": "0x8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e",
-            "Withdrawal Amount": "1.43809724",
-            "Withdrawal Amount (sats)": "143809724",
-            "Summary": "Request a withdrawal of 1.43809724 hBTC to tb1p4ctlhtn9k8qvlk90ukpresd5xx78mycevcdnw9hdgyuvxvf47dtq2epyfv on Bitcoin Signet. The bridge sends the BTC minus the Bitcoin miner fee.",
-            "Network Fee": "The Bitcoin miner fee is subtracted from the withdrawal amount",
-            "Sender": "0x1fc38f76bfc6739dc9ec278d95b1da4f761b6c8551f69e84795d8385bb6ee5c4"
+            "Bridge Package": "0x8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e"
           }
         }
       }

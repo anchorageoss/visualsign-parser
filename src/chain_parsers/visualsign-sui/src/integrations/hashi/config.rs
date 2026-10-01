@@ -44,13 +44,21 @@ impl BitcoinNetwork {
             BitcoinNetwork::Signet => "Bitcoin Signet",
         }
     }
+}
 
-    /// Titles render verbatim as the operation name, so a test-network
-    /// operation must say so there rather than only in the expanded fields.
-    pub fn title_suffix(self) -> &'static str {
+/// Sui network a Hashi deployment lives on. The core `Network` row always reads
+/// "Sui Network", so the bridge preview names a test network itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuiNetwork {
+    Mainnet,
+    Testnet,
+}
+
+impl SuiNetwork {
+    pub fn display_name(self) -> &'static str {
         match self {
-            BitcoinNetwork::Mainnet => "",
-            BitcoinNetwork::Signet => " (Bitcoin Signet)",
+            SuiNetwork::Mainnet => "Sui",
+            SuiNetwork::Testnet => "Sui Testnet",
         }
     }
 }
@@ -60,19 +68,23 @@ impl BitcoinNetwork {
 ///
 /// A Sui package upgrade publishes a new `package_id`. Only the versions Hashi
 /// keeps enabled on-chain are configured, since a call to a disabled version
-/// aborts; an upgrade that disables the old version replaces `package_id` here
+/// aborts (`assert_version_enabled` in Hashi's
+/// `packages/hashi/sources/core/versioning.move`, at the commit `mod.rs` cites);
+/// an upgrade that disables the old version replaces `package_id` here
 /// and above. Move types keep the id of the package that first defined them,
 /// so `type_origin_id` stays the original id and `BTC` is always
 /// `<type_origin_id>::btc::BTC`.
 pub struct HashiDeployment {
     pub package_id: &'static str,
     pub type_origin_id: &'static str,
+    pub sui_network: SuiNetwork,
     pub bitcoin_network: BitcoinNetwork,
 }
 
 pub const DEPLOYMENTS: &[HashiDeployment] = &[HashiDeployment {
     package_id: "0x8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e",
     type_origin_id: "0xfcea10cadbb553c4874201584abf68771592678952efd957b2e82c010c7f4360",
+    sui_network: SuiNetwork::Testnet,
     bitcoin_network: BitcoinNetwork::Signet,
 }];
 

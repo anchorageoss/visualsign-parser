@@ -1,5 +1,6 @@
 use super::*;
 
+use super::config::SuiNetwork;
 use crate::core::SuiModuleResolver;
 use crate::utils::run_aggregated_fixture;
 
@@ -8,11 +9,15 @@ use move_bytecode_utils::module_cache::SyncModuleCache;
 use sui_json_rpc_types::{
     SuiTransactionBlockData, SuiTransactionBlockDataAPI, SuiTransactionBlockKind,
 };
+use sui_types::base_types::SequenceNumber;
 use sui_types::transaction::{
-    Argument, CallArg, Command, FundsWithdrawalArg, ProgrammableMoveCall, ProgrammableTransaction,
-    TransactionData, TransactionDataAPI, TransactionKind,
+    Argument, CallArg, Command, FundsWithdrawalArg, ObjectArg, ProgrammableMoveCall,
+    ProgrammableTransaction, SharedObjectMutability, TransactionData, TransactionDataAPI,
+    TransactionKind,
 };
+use visualsign::SignablePayload;
 use visualsign::test_utils::check_signable_payload_field;
+use visualsign::vsptrait::VisualSignOptions;
 
 const FIXTURE: &str = include_str!("aggregated_test_data.json");
 const HASHI_PACKAGE: &str = "0x8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e";
@@ -50,9 +55,11 @@ const FUNDS_WITHDRAWAL_INPUT: u16 = 3;
 // 2 SplitCoins(I3, [I5 amount]), 3 into_balance(NR(2,0)), 4 send_funds(I3, I6),
 // 5 request_withdrawal(I0 hashi, I1 clock, NR(3,0), I2 addr).
 const TOP_UP_WITHDRAWAL_DIGEST: &str = "8cxs733Zm4LYaVnJBMUptjvr3CXxp2ETwBGpfxnR7kcf";
+const TOP_UP_WITHDRAWAL_COMMAND: usize = 5;
 const TOP_UP_FUNDS_WITHDRAWAL_INPUT: usize = 4;
 const TOP_UP_HBTC_COIN_INPUT: u16 = 3;
 const TOP_UP_SPLIT_AMOUNT_INPUT: u16 = 5;
+const TOP_UP_CHANGE_RECIPIENT_INPUT: usize = 6;
 
 // Top-up inputs rebuilt as: 0 coin::redeem_funds<BTC>(I4), 1 into_balance(R0),
 // 2 request_withdrawal(I0 hashi, I1 clock, R1, I2 addr).
@@ -198,15 +205,29 @@ fn visualize(
     HashiVisualizer.visualize_tx_commands(&context)
 }
 
-fn preview_text(field: &AnnotatedPayloadField) -> (String, String) {
+fn card_headline(field: &AnnotatedPayloadField) -> (String, String, String) {
     let SignablePayloadField::PreviewLayout { preview_layout, .. } = &field.signable_payload_field
     else {
         panic!("expected a preview layout");
     };
+    let condensed = &preview_layout.condensed.as_ref().unwrap().fields;
+    let value_of = |label_prefix: &str| {
+        let row = condensed
+            .iter()
+            .map(|f| &f.signable_payload_field)
+            .find(|f| f.label().starts_with(label_prefix))
+            .unwrap_or_else(|| panic!("no collapsed {label_prefix:?} row"));
+        check_signable_payload_field(row, row.label()).1.remove(0)
+    };
     (
         preview_layout.title.as_ref().unwrap().text.clone(),
-        preview_layout.subtitle.as_ref().unwrap().text.clone(),
+        value_of("Amount"),
+        value_of("Recipient Address"),
     )
+}
+
+fn headline(title: &str, amount: &str, recipient: &str) -> (String, String, String) {
+    (title.to_string(), amount.to_string(), recipient.to_string())
 }
 
 fn field_values(field: &AnnotatedPayloadField, label: &str) -> Vec<String> {
@@ -215,11 +236,90 @@ fn field_values(field: &AnnotatedPayloadField, label: &str) -> Vec<String> {
     values
 }
 
-fn expected_withdrawal_preview() -> (String, String) {
-    (
-        "Hashi Withdraw 0.24185763 hBTC (Bitcoin Signet)".to_string(),
-        "To tb1p57gd244cdg4zjh57x265l6alts5c8620l4rk92wqpxj3pk0eaczsau385x".to_string(),
+const WITHDRAWAL_TITLE: &str = "Bridge hBTC from Sui Testnet to Bitcoin Signet via Hashi";
+const DEPOSIT_TITLE: &str = "Bridge BTC from Bitcoin Signet to Sui Testnet via Hashi";
+const DEPOSIT_SUBTITLE: &str =
+    "0.15409915 BTC to 0x9746979c122e2d6fdab7fa09fb7234f5a3043eab3fa2fe0a59b08e5c09553cc3";
+const WITHDRAWAL_SUBTITLE: &str =
+    "0.24185763 hBTC to tb1p57gd244cdg4zjh57x265l6alts5c8620l4rk92wqpxj3pk0eaczsau385x";
+const DEPOSIT_OUTPUT: &str = "e9d9379417481e04cd2d7d37a505f9ce89fceaf39ee11f5435af7b1b4cfb2647:1";
+
+fn expected_deposit_headline() -> (String, String, String) {
+    headline(
+        DEPOSIT_TITLE,
+        "0.15409915",
+        "0x9746979c122e2d6fdab7fa09fb7234f5a3043eab3fa2fe0a59b08e5c09553cc3",
     )
+}
+
+fn expected_withdrawal_headline() -> (String, String, String) {
+    headline(
+        WITHDRAWAL_TITLE,
+        "0.24185763",
+        "tb1p57gd244cdg4zjh57x265l6alts5c8620l4rk92wqpxj3pk0eaczsau385x",
+    )
+}
+
+fn layout_labels(field: &AnnotatedPayloadField) -> (Vec<String>, Vec<String>) {
+    let SignablePayloadField::PreviewLayout { preview_layout, .. } = &field.signable_payload_field
+    else {
+        panic!("expected a preview layout");
+    };
+    let labels = |list: &Option<visualsign::SignablePayloadFieldListLayout>| {
+        list.as_ref()
+            .unwrap()
+            .fields
+            .iter()
+            .map(|f| f.signable_payload_field.label().clone())
+            .collect()
+    };
+    (
+        labels(&preview_layout.condensed),
+        labels(&preview_layout.expanded),
+    )
+}
+
+fn payload_of(tx: &TransactionData) -> SignablePayload {
+    crate::utils::payload_from_b64(
+        &base64::engine::general_purpose::STANDARD.encode(bcs::to_bytes(tx).unwrap()),
+    )
+}
+
+fn top_level_labels(payload: &SignablePayload) -> Vec<String> {
+    payload
+        .fields
+        .iter()
+        .map(|field| field.label().clone())
+        .collect()
+}
+
+fn address_name(fields: &[SignablePayloadField], label: &str) -> Option<String> {
+    fields.iter().find_map(|field| match field {
+        SignablePayloadField::AddressV2 { common, address_v2 } if common.label == label => {
+            Some(address_v2.name.clone())
+        }
+        SignablePayloadField::PreviewLayout { preview_layout, .. } => {
+            [&preview_layout.condensed, &preview_layout.expanded]
+                .into_iter()
+                .flatten()
+                .find_map(|list| {
+                    let nested: Vec<SignablePayloadField> = list
+                        .fields
+                        .iter()
+                        .map(|f| f.signable_payload_field.clone())
+                        .collect();
+                    address_name(&nested, label)
+                })
+        }
+        _ => None,
+    })
+}
+
+fn deposit_to(recipient: Option<[u8; 32]>) -> TransactionData {
+    let mut tx = deposit_tx();
+    programmable(&mut tx).inputs[DERIVATION_PATH_INPUT] =
+        CallArg::Pure(bcs::to_bytes(&recipient).unwrap());
+    tx
 }
 
 fn expect_error(result: Result<Vec<AnnotatedPayloadField>, VisualSignError>, expected: &str) {
@@ -242,45 +342,27 @@ fn test_hashi_aggregated() {
 #[test]
 fn deposit_title_names_amount_and_recipient() {
     let fields = visualize(deposit_tx(), DEPOSIT_COMMAND).unwrap();
-    assert_eq!(
-        preview_text(&fields[0]),
-        (
-            "Hashi Deposit 0.15409915 BTC (Bitcoin Signet)".to_string(),
-            "To 0x9746979c122e2d6fdab7fa09fb7234f5a3043eab3fa2fe0a59b08e5c09553cc3".to_string()
-        )
-    );
+    assert_eq!(card_headline(&fields[0]), expected_deposit_headline());
 }
 
 #[test]
 fn withdrawal_title_names_amount_and_full_bitcoin_recipient() {
     let fields = visualize(withdrawal_tx(), WITHDRAWAL_COMMAND).unwrap();
-    assert_eq!(preview_text(&fields[0]), expected_withdrawal_preview());
+    assert_eq!(card_headline(&fields[0]), expected_withdrawal_headline());
 }
 
 #[test]
-fn deposit_without_derivation_path_warns_in_subtitle_and_summary() {
-    let mut tx = deposit_tx();
-    programmable(&mut tx).inputs[DERIVATION_PATH_INPUT] =
-        CallArg::Pure(bcs::to_bytes(&None::<[u8; 32]>).unwrap());
-
-    let fields = visualize(tx, DEPOSIT_COMMAND).unwrap();
+fn deposit_without_derivation_path_warns_in_the_title_and_recipient_row() {
+    let fields = visualize(deposit_to(None), DEPOSIT_COMMAND).unwrap();
     assert_eq!(
-        preview_text(&fields[0]),
-        (
-            "Hashi Deposit 0.15409915 BTC (Bitcoin Signet)".to_string(),
-            "Warning: no hBTC recipient".to_string()
+        card_headline(&fields[0]),
+        headline(
+            "Warning: Hashi deposit from Bitcoin Signet credits no one",
+            "0.15409915",
+            "None: no hBTC will be credited"
         )
     );
-    assert_eq!(
-        field_values(&fields[0], "hBTC Recipient"),
-        vec!["None: no hBTC will be credited".to_string()]
-    );
-    assert_eq!(
-        field_values(&fields[0], "Summary"),
-        vec![
-            "Warning: this deposit names no recipient. The Bitcoin Signet transaction output e9d9379417481e04cd2d7d37a505f9ce89fceaf39ee11f5435af7b1b4cfb2647:1, declared as 0.15409915 BTC, will not be credited to anyone.".to_string()
-        ]
-    );
+    assert_eq!(layout_labels(&fields[0]).0, DEPOSIT_KEY_ROWS);
 }
 
 #[test]
@@ -291,8 +373,8 @@ fn withdrawal_to_p2wpkh_encodes_bech32_v0() {
 
     let fields = visualize(tx, WITHDRAWAL_COMMAND).unwrap();
     assert_eq!(
-        field_values(&fields[0], "Bitcoin Recipient"),
-        vec!["tb1qw46h2at4w46h2at4w46h2at4w46h2at4qy2ul6".to_string()]
+        field_values(&fields[0], "Recipient Address"),
+        ["tb1qw46h2at4w46h2at4w46h2at4w46h2at4qy2ul6"; 2]
     );
 }
 
@@ -330,6 +412,12 @@ fn bitcoin_networks_have_distinct_prefixes_and_names() {
         ),
         ("tb", "Bitcoin Signet")
     );
+}
+
+#[test]
+fn sui_networks_are_named_like_anchorage_networks() {
+    assert_eq!(SuiNetwork::Mainnet.display_name(), "Sui");
+    assert_eq!(SuiNetwork::Testnet.display_name(), "Sui Testnet");
 }
 
 #[test]
@@ -584,11 +672,8 @@ fn withdrawal_balance_read_by_balance_value_before_the_withdrawal_renders() {
     );
 
     let fields = visualize(tx, WITHDRAWAL_COMMAND + 1).unwrap();
-    assert_eq!(preview_text(&fields[0]), expected_withdrawal_preview());
-    assert_eq!(
-        field_values(&fields[0], "Withdrawal Amount (sats)"),
-        vec!["24185763".to_string()]
-    );
+    assert_eq!(card_headline(&fields[0]), expected_withdrawal_headline());
+    assert_eq!(field_values(&fields[0], "Amount (sats)"), ["24185763"]);
 }
 
 #[test]
@@ -631,7 +716,7 @@ fn withdrawal_coin_read_by_coin_value_before_into_balance_renders() {
     );
 
     let fields = visualize(tx, WITHDRAWAL_COMMAND + 1).unwrap();
-    assert_eq!(preview_text(&fields[0]), expected_withdrawal_preview());
+    assert_eq!(card_headline(&fields[0]), expected_withdrawal_headline());
 }
 
 #[test]
@@ -650,7 +735,7 @@ fn withdrawal_split_amount_reused_by_value_before_the_split_renders() {
     );
 
     let fields = visualize(tx, WITHDRAWAL_COMMAND + 2).unwrap();
-    assert_eq!(preview_text(&fields[0]), expected_withdrawal_preview());
+    assert_eq!(card_headline(&fields[0]), expected_withdrawal_headline());
 }
 
 #[test]
@@ -665,11 +750,12 @@ fn withdrawal_address_modified_after_the_withdrawal_renders() {
     ));
 
     let fields = visualize(tx, WITHDRAWAL_COMMAND).unwrap();
-    assert_eq!(preview_text(&fields[0]), expected_withdrawal_preview());
+    assert_eq!(card_headline(&fields[0]), expected_withdrawal_headline());
 }
 
-#[test]
-fn batched_deposits_sharing_txid_amount_and_recipient_inputs_render() {
+/// The real deposit plus a second deposit of output 2 of the same Bitcoin
+/// transaction, reusing the first deposit's txid, amount and recipient inputs.
+fn batched_deposit_tx() -> TransactionData {
     let mut tx = deposit_tx();
     let second_vout = push_pure_input(&mut tx, bcs::to_bytes(&2u32).unwrap());
     let hashi = ObjectID::from_hex_literal(HASHI_PACKAGE).unwrap();
@@ -702,23 +788,20 @@ fn batched_deposits_sharing_txid_amount_and_recipient_inputs_render() {
         vec![],
         vec![hashi_input, result(DEPOSIT_COMMAND + 2), clock_input],
     ));
+    tx
+}
 
+#[test]
+fn batched_deposits_sharing_txid_amount_and_recipient_inputs_render() {
+    let tx = batched_deposit_tx();
     for (command, vout) in [(DEPOSIT_COMMAND, "1"), (DEPOSIT_COMMAND + 3, "2")] {
         let fields = visualize(tx.clone(), command).unwrap();
+        assert_eq!(card_headline(&fields[0]), expected_deposit_headline());
         assert_eq!(
-            preview_text(&fields[0]),
-            (
-                "Hashi Deposit 0.15409915 BTC (Bitcoin Signet)".to_string(),
-                "To 0x9746979c122e2d6fdab7fa09fb7234f5a3043eab3fa2fe0a59b08e5c09553cc3".to_string()
-            )
-        );
-        assert_eq!(
-            field_values(&fields[0], "Bitcoin Transaction"),
-            vec!["e9d9379417481e04cd2d7d37a505f9ce89fceaf39ee11f5435af7b1b4cfb2647".to_string()]
-        );
-        assert_eq!(
-            field_values(&fields[0], "Bitcoin Output Index"),
-            vec![vout.to_string()]
+            field_values(&fields[0], "Bitcoin Output"),
+            [format!(
+                "e9d9379417481e04cd2d7d37a505f9ce89fceaf39ee11f5435af7b1b4cfb2647:{vout}"
+            )]
         );
     }
 }
@@ -928,11 +1011,11 @@ fn withdrawal_split_from_a_coin_split_off_the_gas_coin_fails() {
     );
 }
 
-#[test]
-fn withdrawal_split_from_a_redeemed_coin_renders_the_split_amount() {
+fn split_from_redeemed_coin_tx(withdrawal: FundsWithdrawalArg) -> TransactionData {
     let mut tx = top_up_withdrawal_tx();
     let split_amount = push_pure_input(&mut tx, bcs::to_bytes(&100_000_000u64).unwrap());
     let pt = programmable(&mut tx);
+    pt.inputs[TOP_UP_FUNDS_WITHDRAWAL_INPUT] = CallArg::FundsWithdrawal(withdrawal);
     let redeemed = result(0);
     pt.commands = vec![
         pt.commands[0].clone(),
@@ -959,14 +1042,46 @@ fn withdrawal_split_from_a_redeemed_coin_renders_the_split_amount() {
             vec![redeemed, Argument::Input(6)],
         ),
     ];
+    tx
+}
 
-    let fields = visualize(tx, 3).unwrap();
+#[test]
+fn withdrawal_split_from_a_redeemed_coin_renders_the_split_amount() {
+    let fields = visualize(
+        split_from_redeemed_coin_tx(hbtc_from_sender(150_000_000)),
+        3,
+    )
+    .unwrap();
     assert_eq!(
-        preview_text(&fields[0]),
-        (
-            "Hashi Withdraw 1 hBTC (Bitcoin Signet)".to_string(),
-            "To tb1p4ctlhtn9k8qvlk90ukpresd5xx78mycevcdnw9hdgyuvxvf47dtq2epyfv".to_string()
+        card_headline(&fields[0]),
+        headline(
+            WITHDRAWAL_TITLE,
+            "1",
+            "tb1p4ctlhtn9k8qvlk90ukpresd5xx78mycevcdnw9hdgyuvxvf47dtq2epyfv"
         )
+    );
+}
+
+#[test]
+fn withdrawal_split_from_a_coin_redeemed_from_the_sponsor_fails() {
+    expect_error(
+        visualize(
+            split_from_redeemed_coin_tx(hbtc_from_sponsor(150_000_000)),
+            3,
+        ),
+        "Withdrawing from the sponsor's address balance is not supported",
+    );
+}
+
+#[test]
+fn top_up_withdrawal_funded_from_the_sponsor_fails() {
+    let mut tx = top_up_withdrawal_tx();
+    programmable(&mut tx).inputs[TOP_UP_FUNDS_WITHDRAWAL_INPUT] =
+        CallArg::FundsWithdrawal(hbtc_from_sponsor(150_000_000));
+
+    expect_error(
+        visualize(tx, TOP_UP_WITHDRAWAL_COMMAND),
+        "Withdrawing from the sponsor's address balance is not supported",
     );
 }
 
@@ -974,16 +1089,14 @@ fn withdrawal_split_from_a_redeemed_coin_renders_the_split_amount() {
 fn address_balance_withdrawal_shows_the_reserved_amount() {
     let fields = visualize(redeem_withdrawal_tx(), REDEEM_WITHDRAWAL_COMMAND).unwrap();
     assert_eq!(
-        preview_text(&fields[0]),
-        (
-            "Hashi Withdraw 0.1 hBTC (Bitcoin Signet)".to_string(),
-            "To tb1qht7wmzjggxl9je0zw7fl42rjjqh9w4ka2lwv3u".to_string()
+        card_headline(&fields[0]),
+        headline(
+            WITHDRAWAL_TITLE,
+            "0.1",
+            "tb1qht7wmzjggxl9je0zw7fl42rjjqh9w4ka2lwv3u"
         )
     );
-    assert_eq!(
-        field_values(&fields[0], "Withdrawal Amount (sats)"),
-        vec!["10000000".to_string()]
-    );
+    assert_eq!(field_values(&fields[0], "Amount (sats)"), ["10000000"]);
 }
 
 #[test]
@@ -1128,9 +1241,10 @@ fn address_balance_withdrawal_balance_skimmed_before_the_withdrawal_fails() {
 }
 
 #[test]
-fn title_suffix_is_empty_on_mainnet_and_names_signet() {
-    assert_eq!(BitcoinNetwork::Mainnet.title_suffix(), "");
-    assert_eq!(BitcoinNetwork::Signet.title_suffix(), " (Bitcoin Signet)");
+fn titles_name_both_networks_of_the_deployment() {
+    let deployment = deployment_for(&ObjectID::from_hex_literal(HASHI_PACKAGE).unwrap()).unwrap();
+    assert_eq!(withdrawal_title(deployment), WITHDRAWAL_TITLE);
+    assert_eq!(deposit_title(deployment), DEPOSIT_TITLE);
 }
 
 #[test]
@@ -1203,6 +1317,13 @@ fn hbtc_from_sender(amount: u64) -> FundsWithdrawalArg {
     )
 }
 
+fn hbtc_from_sponsor(amount: u64) -> FundsWithdrawalArg {
+    FundsWithdrawalArg::balance_from_sponsor(
+        amount,
+        sui_types::parse_sui_type_tag(&hbtc_type()).unwrap(),
+    )
+}
+
 #[test]
 fn withdrawal_of_a_redeemed_coin_shows_the_reserved_amount() {
     let fields = visualize(
@@ -1211,13 +1332,14 @@ fn withdrawal_of_a_redeemed_coin_shows_the_reserved_amount() {
     )
     .unwrap();
     assert_eq!(
-        preview_text(&fields[0]).0,
-        "Hashi Withdraw 0.25 hBTC (Bitcoin Signet)"
+        card_headline(&fields[0]),
+        headline(
+            WITHDRAWAL_TITLE,
+            "0.25",
+            "tb1p4ctlhtn9k8qvlk90ukpresd5xx78mycevcdnw9hdgyuvxvf47dtq2epyfv"
+        )
     );
-    assert_eq!(
-        field_values(&fields[0], "Withdrawal Amount (sats)"),
-        vec!["25000000".to_string()]
-    );
+    assert_eq!(field_values(&fields[0], "Amount (sats)"), ["25000000"]);
 }
 
 #[test]
@@ -1379,6 +1501,427 @@ fn full_payload_includes_the_hashi_preview() {
             "{label} missing from full payload for {digest}"
         );
     }
+}
+
+const WITHDRAWAL_KEY_ROWS: [&str; 4] = [
+    "Amount",
+    "Destination Network",
+    "Recipient Address",
+    "Bitcoin Miner Fee",
+];
+const DEPOSIT_KEY_ROWS: [&str; 3] = [
+    "Amount (declared)",
+    "Destination Network",
+    "Recipient Address",
+];
+const WITHDRAWAL_DETAIL_ROWS: [&str; 5] = [
+    "Signer",
+    "Amount (sats)",
+    "Source Network",
+    "Bridge Object",
+    "Bridge Package",
+];
+const DEPOSIT_DETAIL_ROWS: [&str; 6] = [
+    "Signer",
+    "Bitcoin Output",
+    "Amount (sats)",
+    "Source Network",
+    "Bridge Object",
+    "Bridge Package",
+];
+
+fn condensed_rows(field: &AnnotatedPayloadField) -> Vec<SignablePayloadField> {
+    let SignablePayloadField::PreviewLayout { preview_layout, .. } = &field.signable_payload_field
+    else {
+        panic!("expected a preview layout");
+    };
+    preview_layout
+        .condensed
+        .as_ref()
+        .unwrap()
+        .fields
+        .iter()
+        .map(|f| f.signable_payload_field.clone())
+        .collect()
+}
+
+#[test]
+fn single_actions_are_titled_with_the_bridge_intent_and_add_no_top_level_rows() {
+    for (tx, title, subtitle, card) in [
+        (
+            withdrawal_tx(),
+            WITHDRAWAL_TITLE,
+            WITHDRAWAL_SUBTITLE,
+            "Hashi Withdrawal",
+        ),
+        (
+            deposit_tx(),
+            DEPOSIT_TITLE,
+            DEPOSIT_SUBTITLE,
+            "Hashi Deposit",
+        ),
+    ] {
+        let payload = payload_of(&tx);
+        assert_eq!(payload.title, title);
+        assert_eq!(payload.subtitle.as_deref(), Some(subtitle));
+        assert_eq!(
+            top_level_labels(&payload),
+            ["Network", card, "Transaction Details"]
+        );
+    }
+}
+
+#[test]
+fn cards_show_key_rows_collapsed_and_every_row_expanded() {
+    let deposit = visualize(deposit_tx(), DEPOSIT_COMMAND).unwrap();
+    let withdrawal = visualize(withdrawal_tx(), WITHDRAWAL_COMMAND).unwrap();
+
+    assert_eq!(
+        layout_labels(&deposit[0]),
+        (
+            DEPOSIT_KEY_ROWS.map(String::from).to_vec(),
+            [&DEPOSIT_KEY_ROWS[..], &DEPOSIT_DETAIL_ROWS[..]]
+                .concat()
+                .into_iter()
+                .map(String::from)
+                .collect()
+        )
+    );
+    assert_eq!(
+        layout_labels(&withdrawal[0]),
+        (
+            WITHDRAWAL_KEY_ROWS.map(String::from).to_vec(),
+            [&WITHDRAWAL_KEY_ROWS[..], &WITHDRAWAL_DETAIL_ROWS[..]]
+                .concat()
+                .into_iter()
+                .map(String::from)
+                .collect()
+        )
+    );
+    assert_eq!(
+        field_values(&deposit[0], "Source Network"),
+        ["Bitcoin Signet"]
+    );
+    assert_eq!(
+        field_values(&deposit[0], "Bitcoin Output"),
+        [DEPOSIT_OUTPUT]
+    );
+    assert_eq!(
+        field_values(&withdrawal[0], "Source Network"),
+        ["Sui Testnet"]
+    );
+}
+
+#[test]
+fn card_takes_the_payload_title_and_has_no_subtitle() {
+    for (tx, command) in [
+        (deposit_tx(), DEPOSIT_COMMAND),
+        (deposit_to(None), DEPOSIT_COMMAND),
+        (withdrawal_tx(), WITHDRAWAL_COMMAND),
+    ] {
+        let payload = payload_of(&tx);
+        let card = visualize(tx, command).unwrap();
+        let SignablePayloadField::PreviewLayout { preview_layout, .. } =
+            &card[0].signable_payload_field
+        else {
+            panic!("expected a preview layout");
+        };
+        assert_eq!(preview_layout.title.as_ref().unwrap().text, payload.title);
+        assert!(preview_layout.subtitle.is_none());
+    }
+}
+
+#[test]
+fn bitcoin_recipient_is_plain_text_and_sui_recipient_is_an_address() {
+    let withdrawal = condensed_rows(&visualize(withdrawal_tx(), WITHDRAWAL_COMMAND).unwrap()[0]);
+    let deposit = condensed_rows(&visualize(deposit_tx(), DEPOSIT_COMMAND).unwrap()[0]);
+    let recipient = |rows: &[SignablePayloadField]| {
+        rows.iter()
+            .find(|f| f.label() == "Recipient Address")
+            .unwrap()
+            .clone()
+    };
+
+    assert!(matches!(
+        recipient(&withdrawal),
+        SignablePayloadField::TextV2 { .. }
+    ));
+    assert!(matches!(
+        recipient(&deposit),
+        SignablePayloadField::AddressV2 { .. }
+    ));
+}
+
+#[test]
+fn deposit_recipient_is_named_by_whether_it_is_the_signer() {
+    for (tx, name) in [
+        (deposit_tx(), "Signer's address"),
+        (deposit_to(Some([0x42; 32])), "Not the signer's address"),
+    ] {
+        let card = visualize(tx, DEPOSIT_COMMAND).unwrap();
+        assert_eq!(
+            address_name(&condensed_rows(&card[0]), "Recipient Address").as_deref(),
+            Some(name)
+        );
+    }
+}
+
+#[test]
+fn bridge_addresses_are_named_hashi() {
+    for payload in [payload_of(&deposit_tx()), payload_of(&withdrawal_tx())] {
+        assert_eq!(
+            address_name(&payload.fields, "Bridge Package").as_deref(),
+            Some("Hashi")
+        );
+        assert_eq!(
+            address_name(&payload.fields, "Bridge Object").as_deref(),
+            Some("Hashi bridge")
+        );
+    }
+}
+
+#[test]
+fn every_preview_shape_renders_in_the_anchorage_wallet() {
+    for tx in [
+        deposit_tx(),
+        deposit_to(None),
+        deposit_to(Some([0x42; 32])),
+        batched_deposit_tx(),
+        withdrawal_tx(),
+        redeem_withdrawal_tx(),
+        top_up_withdrawal_tx(),
+    ] {
+        payload_of(&tx)
+            .validate_anchorage_wallet_renderable()
+            .unwrap();
+    }
+}
+
+#[test]
+fn deposit_without_recipient_warns_in_the_payload_title() {
+    let payload = payload_of(&deposit_to(None));
+
+    assert_eq!(
+        payload.title,
+        "Warning: Hashi deposit from Bitcoin Signet credits no one"
+    );
+    assert_eq!(
+        payload.subtitle.as_deref(),
+        Some("0.15409915 BTC, no recipient")
+    );
+    assert_eq!(
+        top_level_labels(&payload),
+        ["Network", "Hashi Deposit", "Transaction Details"]
+    );
+}
+
+#[test]
+fn address_balance_and_top_up_withdrawals_get_the_bridge_intent() {
+    for (tx, subtitle) in [
+        (
+            redeem_withdrawal_tx(),
+            "0.1 hBTC to tb1qht7wmzjggxl9je0zw7fl42rjjqh9w4ka2lwv3u",
+        ),
+        (
+            top_up_withdrawal_tx(),
+            "1.43809724 hBTC to tb1p4ctlhtn9k8qvlk90ukpresd5xx78mycevcdnw9hdgyuvxvf47dtq2epyfv",
+        ),
+    ] {
+        let payload = payload_of(&tx);
+        assert_eq!(payload.title, WITHDRAWAL_TITLE);
+        assert_eq!(payload.subtitle.as_deref(), Some(subtitle));
+    }
+}
+
+#[test]
+fn batched_deposits_keep_the_generic_title_and_one_card_each() {
+    let payload = payload_of(&batched_deposit_tx());
+
+    assert_eq!(payload.title, "Programmable Transaction");
+    assert_eq!(payload.subtitle, None);
+    assert_eq!(
+        top_level_labels(&payload),
+        [
+            "Network",
+            "Hashi Deposit",
+            "Hashi Deposit",
+            "Transaction Details"
+        ]
+    );
+}
+
+#[test]
+fn withdrawal_sending_change_to_another_address_keeps_the_generic_title() {
+    let mut tx = top_up_withdrawal_tx();
+    programmable(&mut tx).inputs[TOP_UP_CHANGE_RECIPIENT_INPUT] =
+        CallArg::Pure(bcs::to_bytes(&[0x42u8; 32]).unwrap());
+
+    let payload = payload_of(&tx);
+
+    assert_eq!(payload.title, "Programmable Transaction");
+    assert_eq!(
+        top_level_labels(&payload),
+        ["Network", "Hashi Withdrawal", "Transaction Details"]
+    );
+}
+
+#[test]
+fn withdrawal_alongside_an_unrelated_call_keeps_the_generic_title() {
+    let mut tx = withdrawal_tx();
+    let unrelated_input = push_pure_input(&mut tx, bcs::to_bytes(&7u64).unwrap());
+    programmable(&mut tx)
+        .commands
+        .push(tamper_call("anything", vec![unrelated_input]));
+
+    let payload = payload_of(&tx);
+
+    assert_eq!(payload.title, "Programmable Transaction");
+}
+
+fn shared_coin_input(tx: &mut TransactionData) -> Argument {
+    let inputs = &mut programmable(tx).inputs;
+    inputs.push(CallArg::Object(ObjectArg::SharedObject {
+        id: ObjectID::from_single_byte(0x5c),
+        initial_shared_version: SequenceNumber::from_u64(1),
+        mutability: SharedObjectMutability::Mutable,
+    }));
+    Argument::Input(u16::try_from(inputs.len() - 1).unwrap())
+}
+
+fn push_input(tx: &mut TransactionData, input: CallArg) -> Argument {
+    let inputs = &mut programmable(tx).inputs;
+    inputs.push(input);
+    Argument::Input(u16::try_from(inputs.len() - 1).unwrap())
+}
+
+fn sui_from(amount: u64, sponsor: bool) -> FundsWithdrawalArg {
+    let sui = sui_types::parse_sui_type_tag("0x2::sui::SUI").unwrap();
+    if sponsor {
+        FundsWithdrawalArg::balance_from_sponsor(amount, sui)
+    } else {
+        FundsWithdrawalArg::balance_from_sender(amount, sui)
+    }
+}
+
+#[test]
+fn withdrawal_merging_into_a_coin_the_signer_does_not_own_keeps_the_generic_title() {
+    let mut into_shared = withdrawal_tx();
+    let shared = shared_coin_input(&mut into_shared);
+    for (mut tx, destination) in [(into_shared, shared), (withdrawal_tx(), Argument::GasCoin)] {
+        programmable(&mut tx).commands[0] =
+            Command::MergeCoins(destination, vec![Argument::Input(1)]);
+        assert_eq!(payload_of(&tx).title, "Programmable Transaction");
+    }
+}
+
+#[test]
+fn withdrawal_merging_into_a_coin_redeemed_in_the_transaction_keeps_the_bridge_title() {
+    let mut tx = top_up_withdrawal_tx();
+    let pt = programmable(&mut tx);
+    pt.commands[1] = Command::MergeCoins(result(0), vec![Argument::Input(TOP_UP_HBTC_COIN_INPUT)]);
+    pt.commands[2] =
+        Command::SplitCoins(result(0), vec![Argument::Input(TOP_UP_SPLIT_AMOUNT_INPUT)]);
+    move_call(&mut tx, 4).arguments[0] = result(0);
+
+    assert_eq!(payload_of(&tx).title, WITHDRAWAL_TITLE);
+}
+
+#[test]
+fn deposit_alongside_a_split_of_the_gas_coin_keeps_the_generic_title() {
+    let mut tx = deposit_tx();
+    let sender = tx.sender();
+    let to_sender = push_pure_input(&mut tx, bcs::to_bytes(&sender).unwrap());
+    let amount = push_pure_input(&mut tx, bcs::to_bytes(&1u64).unwrap());
+    let commands = &mut programmable(&mut tx).commands;
+    commands.push(Command::SplitCoins(Argument::GasCoin, vec![amount]));
+    commands.push(framework_call(
+        SUI_FRAMEWORK,
+        "coin",
+        "send_funds",
+        Some("0x2::sui::SUI"),
+        vec![Argument::NestedResult(3, 0), to_sender],
+    ));
+
+    assert_eq!(payload_of(&tx).title, "Programmable Transaction");
+}
+
+#[test]
+fn deposit_alongside_redeemed_funds_keeps_the_bridge_title_only_when_the_signer_pays() {
+    for (sponsor, title) in [(false, DEPOSIT_TITLE), (true, "Programmable Transaction")] {
+        let mut tx = deposit_tx();
+        let sender = tx.sender();
+        let to_sender = push_pure_input(&mut tx, bcs::to_bytes(&sender).unwrap());
+        let withdrawal = push_input(&mut tx, CallArg::FundsWithdrawal(sui_from(10, sponsor)));
+        let commands = &mut programmable(&mut tx).commands;
+        commands.push(framework_call(
+            SUI_FRAMEWORK,
+            "balance",
+            "redeem_funds",
+            Some("0x2::sui::SUI"),
+            vec![withdrawal],
+        ));
+        commands.push(framework_call(
+            SUI_FRAMEWORK,
+            "balance",
+            "send_funds",
+            Some("0x2::sui::SUI"),
+            vec![result(3), to_sender],
+        ));
+
+        assert_eq!(payload_of(&tx).title, title, "sponsor: {sponsor}");
+    }
+}
+
+#[test]
+fn withdrawal_alongside_other_commands_or_lookalike_calls_keeps_the_generic_title() {
+    let extras: [fn(Argument) -> Command; 3] = [
+        |_| Command::MakeMoveVec(None, vec![Argument::Input(SPLIT_AMOUNT_INPUT)]),
+        |recipient| {
+            framework_call(
+                0x42,
+                "coin",
+                "into_balance",
+                Some(&hbtc_type()),
+                vec![recipient],
+            )
+        },
+        |recipient| {
+            framework_call(
+                0x42,
+                "coin",
+                "send_funds",
+                Some(&hbtc_type()),
+                vec![Argument::Input(HBTC_COIN_INPUT), recipient],
+            )
+        },
+    ];
+    for extra in extras {
+        let mut tx = withdrawal_tx();
+        let sender = tx.sender();
+        let recipient = push_pure_input(&mut tx, bcs::to_bytes(&sender).unwrap());
+        programmable(&mut tx).commands.push(extra(recipient));
+        assert_eq!(payload_of(&tx).title, "Programmable Transaction");
+    }
+}
+
+#[test]
+fn caller_supplied_title_disables_the_bridge_intent() {
+    let payload = crate::transaction_string_to_visual_sign(
+        &encoded_fixture_tx("withdraw", "request_withdrawal", WITHDRAWAL_DIGEST),
+        VisualSignOptions {
+            transaction_name: Some("Caller Title".to_string()),
+            decode_transfers: true,
+            ..VisualSignOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(payload.title, "Caller Title");
+    assert_eq!(payload.subtitle, None);
+    assert_eq!(
+        top_level_labels(&payload),
+        ["Network", "Hashi Withdrawal", "Transaction Details"]
+    );
 }
 
 #[test]

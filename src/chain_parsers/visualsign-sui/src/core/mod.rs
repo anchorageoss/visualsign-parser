@@ -115,6 +115,14 @@ impl<'a> VisualizerContext<'a> {
     }
 }
 
+/// A visualizer's proposal for presenting the whole transaction; see
+/// [`CommandVisualizer::transaction_summary`].
+#[derive(Debug, Clone)]
+pub struct TransactionSummary {
+    pub title: String,
+    pub subtitle: Option<String>,
+}
+
 /// Trait for visualizing Sui transaction commands.
 pub trait CommandVisualizer {
     /// Visualizes a specific command in a transaction.
@@ -134,6 +142,15 @@ pub trait CommandVisualizer {
 
     /// The identifier for this visualizer.
     fn kind(&self) -> VisualizerKind;
+
+    /// Transaction-level title and subtitle for a recognized user action.
+    /// Adopted only when the caller supplied no `transaction_name`, no transfer
+    /// is rendered, and this command is the only one any visualizer renders, so
+    /// the visualizer must also vouch for every other command in the PTB before
+    /// proposing one.
+    fn transaction_summary(&self, _context: &VisualizerContext) -> Option<TransactionSummary> {
+        None
+    }
 
     /// Checks if this visualizer can handle the given command.
     fn can_handle(&self, context: &VisualizerContext) -> bool {
@@ -157,6 +174,8 @@ pub trait CommandVisualizer {
 pub struct VisualizeResult {
     pub field: Vec<AnnotatedPayloadField>,
     pub kind: VisualizerKind,
+    /// The handling visualizer's [`CommandVisualizer::transaction_summary`].
+    pub summary: Option<TransactionSummary>,
 }
 
 /// Tries multiple visualizers in order and returns the first successful visualization.
@@ -191,6 +210,7 @@ pub fn visualize_with_any(
                 .map(|field| VisualizeResult {
                     field,
                     kind: v.kind(),
+                    summary: v.transaction_summary(context),
                 }),
         )
     })
