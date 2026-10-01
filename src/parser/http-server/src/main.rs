@@ -8,8 +8,10 @@
 //! this binary is the public face.
 //!
 //! Routes:
-//! - `GET /health` - 200 OK for Turnkey's HTTP health check
-//!   (`healthCheckType: TVC_HEALTH_CHECK_TYPE_HTTP`).
+//! - `GET /health` - Turnkey's HTTP health check
+//!   (`healthCheckType: TVC_HEALTH_CHECK_TYPE_HTTP`): 200 when ready, 503
+//!   while `--boot-proof-source nsm` holds no verified, unexpired
+//!   attestation (so a replica whose NSM call fails never goes healthy).
 //! - `POST /visualsign/api/v1/parse` - Turnkey-envelope JSON in/out.
 //!   Mirrors `parser_gateway`'s v1 route exactly; the Turnkey wire
 //!   envelope types are reused from `host_primitives::turnkey` so the Go
@@ -33,6 +35,12 @@
 //!   compressed SEC1 pubkeys allowed to call the parse routes. No env
 //!   fallback (same rationale as the ABI-trust flags above). Absent means the
 //!   routes stay open (today's behavior).
+//! - `--boot-proof-source <static|nsm>` - required: `nsm` serves a verified
+//!   `/dev/nsm` attestation doc in each response's `bootProof`, cached and
+//!   re-attested by a watcher before its certificate chain expires; `static`
+//!   leaves the doc empty (local dev and CI, which have no `/dev/nsm`). No
+//!   default and no env fallback (same rationale as the ABI-trust flags
+//!   above).
 //!
 //! The ephemeral key is read from `tvc_attestation::paths::EPHEMERAL_KEY_FILE` (provisioned
 //! by QOS inside the enclave). No override flag - if a deployment ever needs
@@ -49,7 +57,7 @@ use axum::{
     routing::{get, post},
 };
 use base64::Engine as _;
-use boot_proof::{BootProofSource, StaticBootProof};
+use boot_proof::{BootProofSource, NsmBootProof, StaticBootProof};
 use clap::Parser;
 use generated::parser::{Chain, ChainMetadata, SignatureScheme};
 use host_primitives::turnkey::{
@@ -109,6 +117,21 @@ struct Args {
     /// ABI-trust flags above).
     #[arg(long)]
     allowed_stamp_pubkeys_hex: Option<String>,
+
+    /// Required: where each response's `bootProof` attestation document
+    /// comes from. `nsm` attests via the real `/dev/nsm` device (cached,
+    /// refreshed before expiry); `static` leaves it empty, for local dev and
+    /// CI. No default, so a deployment that forgets the flag refuses to
+    /// start instead of silently serving an unattested proof.
+    #[arg(long)]
+    boot_proof_source: BootProofSourceKind,
+}
+
+/// See `Args::boot_proof_source`.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum BootProofSourceKind {
+    Static,
+    Nsm,
 }
 
 #[derive(Clone)]
@@ -121,10 +144,14 @@ struct AppState {
 
 // Deliberate exception to the "every response carries bootProof" contract:
 // this is Turnkey's infra health check, polled frequently and expected to
-// stay a bare 200 with no body, not the signed-response envelope the parse
-// routes and their error fallbacks return.
-async fn health() -> StatusCode {
-    StatusCode::OK
+// stay a bare status with no body, not the signed-response envelope the
+// parse routes and their error fallbacks return.
+async fn health(State(state): State<AppState>) -> StatusCode {
+    if state.boot_proof.healthy() {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
 }
 
 // Handlers take raw bytes, never `Json<T>`. The X-Stamp signature is
@@ -353,10 +380,24 @@ fn handle_parse(
         }
     });
 
+    let boot_proof = match state.boot_proof.boot_proof() {
+        Ok(bp) => bp,
+        Err(e) => {
+            // Never fall back to an unattested proof under
+            // `--boot-proof-source nsm`. `e` is from our own enclave files and
+            // NSM, never request data, so it's safe to log.
+            eprintln!("boot proof unavailable: {e:?}");
+            return error_status(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "attestation unavailable".to_string(),
+            );
+        }
+    };
+
     (
         StatusCode::OK,
         Json(success_response(
-            state.boot_proof.boot_proof(),
+            boot_proof,
             TurnkeyPayload {
                 signable_payload: payload.parsed_payload,
                 metadata_digest: payload.metadata_digest,
@@ -415,12 +456,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tvc_attestation::paths::EPHEMERAL_KEY_FILE,
     );
 
-    let boot_proof = StaticBootProof::from_enclave_files(
-        &ephemeral_key,
-        args.enclave_app,
-        args.deployment_label,
-    )
-    .map_err(|e| format!("failed to build boot proof: {e:?}"))?;
+    let (boot_proof, watcher): (Arc<dyn BootProofSource + Send + Sync>, _) =
+        match args.boot_proof_source {
+            BootProofSourceKind::Static => (
+                Arc::new(
+                    StaticBootProof::from_enclave_files(
+                        &ephemeral_key,
+                        args.enclave_app,
+                        args.deployment_label,
+                    )
+                    .map_err(|e| format!("failed to build boot proof: {e:?}"))?,
+                ),
+                None,
+            ),
+            BootProofSourceKind::Nsm => {
+                let nsm = NsmBootProof::from_enclave_files(
+                    &ephemeral_key,
+                    args.enclave_app,
+                    args.deployment_label,
+                )
+                .map_err(|e| format!("failed to build NSM boot proof: {e:?}"))?;
+                // Attest before serving. A failure doesn't exit: /health
+                // stays 503 and the watcher keeps retrying.
+                match nsm.cache().get().await {
+                    Ok((a, _)) => eprintln!(
+                        "boot attestation ok; cert valid {}s (notAfter {}), nsm {}us",
+                        a.cert.remaining.as_secs(),
+                        a.cert.not_after_unix,
+                        a.nsm_latency.as_micros()
+                    ),
+                    Err(e) => eprintln!("boot attestation failed: {e}"),
+                }
+                let watcher = nsm.cache().spawn_watcher(boot_proof::WATCH_INTERVAL);
+                (Arc::new(nsm), Some(watcher))
+            }
+        };
 
     let allowlist = args
         .allowed_stamp_pubkeys_hex
@@ -439,7 +509,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = AppState {
         ephemeral_key: Arc::new(ephemeral_key),
-        boot_proof: Arc::new(boot_proof),
+        boot_proof,
         config,
         allowlist,
     };
@@ -463,9 +533,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
     eprintln!("parser_http_server listening on {addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    let serve = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal());
+    match watcher {
+        None => serve.await?,
+        Some(mut watcher) => tokio::select! {
+            served = serve => {
+                watcher.abort();
+                served?;
+            }
+            // The watcher only loops; if it ever exits, nothing refreshes the
+            // doc. Exit so the replica restarts rather than serve until the
+            // certificate expires and then go unhealthy for good.
+            exited = &mut watcher => {
+                return Err(format!("attestation watcher exited: {exited:?}").into());
+            }
+        },
+    }
     Ok(())
 }
 
@@ -540,6 +623,58 @@ mod tests {
             config: ParserConfig::accept_unsigned(),
             allowlist: None,
         }
+    }
+
+    /// A source with no attestation to give, as `NsmBootProof` is before its
+    /// first successful NSM call or after its doc expires.
+    struct UnattestedBootProof;
+
+    impl BootProofSource for UnattestedBootProof {
+        fn boot_proof(
+            &self,
+        ) -> Result<host_primitives::turnkey::TurnkeyBootProof, boot_proof::BootProofError>
+        {
+            Err(boot_proof::BootProofError::Attestation(
+                tvc_attestation::AttestationError::Nsm("no doc".to_string()),
+            ))
+        }
+
+        fn healthy(&self) -> bool {
+            false
+        }
+    }
+
+    fn unattested_app_state() -> AppState {
+        AppState {
+            boot_proof: Arc::new(UnattestedBootProof),
+            ..test_app_state()
+        }
+    }
+
+    #[tokio::test]
+    async fn health_tracks_the_boot_proof_source() {
+        assert_eq!(health(State(test_app_state())).await, StatusCode::OK);
+        assert_eq!(
+            health(State(unattested_app_state())).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    // A request that would otherwise succeed must fail with no attested
+    // proof, never succeed with an empty `awsAttestationDocB64`.
+    #[test]
+    fn successful_parse_without_attestation_is_503_with_redacted_boot_proof() {
+        let raw = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83","include_intermediate_output":false}}"#;
+        let headers = HeaderMap::new();
+
+        // Control: the same request succeeds with a static source.
+        let (status, _) = handle_parse(&test_app_state(), &headers, raw);
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, Json(resp)) = handle_parse(&unattested_app_state(), &headers, raw);
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(resp.error.is_some());
+        assert_redacted(&resp.boot_proof);
     }
 
     // Regression pin complementing the test above: passing `body: Bytes` here
@@ -649,7 +784,7 @@ mod tests {
             &manifest_path,
         )
         .expect("test manifest fixture should be readable");
-        let bp = source.boot_proof();
+        let bp = source.boot_proof().unwrap();
         assert_eq!(bp.ephemeral_public_key_hex, expected_hex);
         // Explicitly empty until attestation is wired up; never a fake.
         assert!(bp.aws_attestation_doc_b64.is_empty());
