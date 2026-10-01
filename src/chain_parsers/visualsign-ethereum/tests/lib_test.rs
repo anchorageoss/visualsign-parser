@@ -72,7 +72,7 @@ fn sign_abi_for_test(abi_json: &str, address: &alloy_primitives::Address) -> Sig
             },
             generated::parser::Metadata {
                 key: "public_key".to_string(),
-                value: hex::encode(verifying_key.to_sec1_point(false).as_bytes()),
+                value: hex::encode(verifying_key.to_encoded_point(false).as_bytes()),
             },
         ],
     }
@@ -87,7 +87,7 @@ fn test_abi_signer_allowlist() -> visualsign::signing::SignerAllowlist {
     let seed: [u8; 32] = [0x42u8; 32];
     let signing_key = k256::ecdsa::SigningKey::from_bytes((&seed).into()).expect("valid key");
     let verifying_key = k256::ecdsa::VerifyingKey::from(&signing_key);
-    let pubkey = verifying_key.to_sec1_point(false).as_bytes().to_vec();
+    let pubkey = verifying_key.to_encoded_point(false).as_bytes().to_vec();
     let mut allow = visualsign::signing::SignerAllowlist::new();
     allow.insert(pubkey);
     allow
