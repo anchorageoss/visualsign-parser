@@ -7,8 +7,8 @@
 //! none is given, approval uses the logged-in org operator key (`tvc login`).
 //!
 //! `deploy-pivot` runs the same digest gate / create / approve / poll / set-live
-//! flow for any pivot binary (path, args, health-check type, debug mode given
-//! as flags) -- e.g. throwaway diagnostic pivots.
+//! flow for any pivot binary (path, health-check type, debug mode given
+//! as flags; pivot args verbatim after `--`) -- e.g. throwaway diagnostic pivots.
 //!
 //! See `tvc-deploy --help` for the full subcommand list (invite/dismiss-invite,
 //! activity approve/reject, tag and policy CRUD -- all in `invite.rs`).
@@ -55,7 +55,7 @@ enum Command {
     GenOperatorKey(GenOperatorKeyArgs),
     /// Deploy parser_app: digest-gate, create, approve, poll healthy, set live
     Deploy(DeployArgs),
-    /// Deploy any pivot binary: same flow as `deploy`, pivot path/args/health given as flags
+    /// Deploy any pivot binary: same flow as `deploy`, pivot path/health as flags, pivot args after `--`
     DeployPivot(DeployPivotArgs),
     /// Run only the digest gate: extract /parser_app from the image and compare its sha256
     VerifyDigest(VerifyDigestArgs),
@@ -167,8 +167,9 @@ struct DeployPivotArgs {
     /// Expected sha256 of the image's pivot binary (64 hex chars)
     #[arg(long)]
     expected_digest: String,
-    /// One pivot argument; repeat for each (order kept)
-    #[arg(long = "pivot-arg", value_name = "ARG", allow_hyphen_values = true)]
+    /// Pivot arguments, verbatim and in order, after a literal `--`:
+    /// `deploy-pivot ... -- --accept-unsigned-abis --port 3000`
+    #[arg(last = true, value_name = "PIVOT_ARGS")]
     pivot_args: Vec<String>,
     #[arg(long, value_enum)]
     health_check: HealthCheck,
@@ -992,9 +993,8 @@ Deployment: deploy-123
             "grpc",
             "--port",
             "4000",
-            "--pivot-arg",
+            "--",
             "--host-port",
-            "--pivot-arg",
             "4000",
         ]);
         let cfg = pivot_config(&args);
@@ -1002,6 +1002,37 @@ Deployment: deploy-123
         assert_eq!(cfg["healthCheckType"], "TVC_HEALTH_CHECK_TYPE_GRPC");
         assert_eq!(cfg["healthCheckPort"], 4000);
         assert_eq!(cfg["pivotArgs"], serde_json::json!(["--host-port", "4000"]));
+    }
+
+    // Everything after `--` belongs to the pivot, including flags that would
+    // otherwise collide with deploy-pivot's own (`--port`).
+    #[test]
+    fn deploy_pivot_trailing_args_are_passed_through_verbatim() {
+        let args = deploy_pivot_args(&[
+            "--health-check",
+            "http",
+            "--",
+            "--accept-unsigned-abis",
+            "--port",
+            "4000",
+        ]);
+        assert_eq!(
+            args.port, 3000,
+            "a pivot's --port must not set deploy-pivot's"
+        );
+        assert_eq!(
+            pivot_config(&args)["pivotArgs"],
+            serde_json::json!(["--accept-unsigned-abis", "--port", "4000"])
+        );
+
+        let err = Cli::try_parse_from(deploy_pivot_argv(&[
+            "--health-check",
+            "http",
+            "--accept-unsigned-abis",
+        ]))
+        .map(|_| ())
+        .expect_err("pivot args need the `--` separator");
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 
     #[test]
