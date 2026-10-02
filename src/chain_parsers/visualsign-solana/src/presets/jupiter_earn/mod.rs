@@ -31,6 +31,9 @@ pub(crate) const JUPITER_EARN_PROGRAM_ID: &str = "jup3YeL8QhtSx1e253b2FDvsMNC87f
 
 const JUPITER_EARN_DISPLAY_NAME: &str = "Jupiter Lend Earn";
 
+// Product name used in payload titles; the subtitle and Program rows keep the on-chain program name.
+const JUPITER_LEND_TITLE_NAME: &str = "Jupiter Lend";
+
 const JUPITER_EARN_IDL_JSON: &str = include_str!("jupiter_earn.json");
 
 /// `withdraw(u64::MAX)` burns the whole fToken balance ("withdraw everything"). Verified on
@@ -512,23 +515,26 @@ impl UserAction {
         let asset = &self.asset;
         match self.kind {
             UserActionKind::Deposit { assets, .. } => format!(
-                "Deposit {} to {JUPITER_EARN_DISPLAY_NAME}",
+                "Supply {} to {JUPITER_LEND_TITLE_NAME}",
                 asset.amount(assets, Denomination::Asset).phrase()
             ),
             UserActionKind::Mint { shares, .. } => format!(
-                "Mint {} on {JUPITER_EARN_DISPLAY_NAME}",
+                "Mint {} on {JUPITER_LEND_TITLE_NAME}",
                 asset.amount(shares, Denomination::Receipt).phrase()
             ),
             UserActionKind::Withdraw { .. } if self.withdraws_all() => format!(
-                "Withdraw full {} position from {JUPITER_EARN_DISPLAY_NAME}",
-                asset.symbol(Denomination::Asset)
+                "Redeem full {} position via {JUPITER_LEND_TITLE_NAME}",
+                asset.symbol(Denomination::Receipt)
             ),
+            // `withdraw` is denominated in the underlying asset, so the receipt symbol is named
+            // without an amount and the decoded amount keeps its own denomination.
             UserActionKind::Withdraw { amount, .. } => format!(
-                "Withdraw {} from {JUPITER_EARN_DISPLAY_NAME}",
+                "Redeem {} for {} via {JUPITER_LEND_TITLE_NAME}",
+                asset.symbol(Denomination::Receipt),
                 asset.amount(amount, Denomination::Asset).phrase()
             ),
             UserActionKind::Redeem { shares, .. } => format!(
-                "Redeem {} from {JUPITER_EARN_DISPLAY_NAME}",
+                "Redeem {} via {JUPITER_LEND_TITLE_NAME}",
                 asset.amount(shares, Denomination::Receipt).phrase()
             ),
         }
