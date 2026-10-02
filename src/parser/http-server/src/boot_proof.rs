@@ -1,14 +1,17 @@
 //! Where a response's `bootProof` comes from.
 //!
-//! [`StaticBootProof`] provides a real ephemeral key and real manifest bytes
-//! with an empty attestation doc; a later NSM-backed implementation fills
-//! the attestation doc in.
+//! [`StaticBootProof`] carries a real ephemeral key and real manifest bytes
+//! but an empty attestation doc; [`NsmBootProof`] fills the doc in from a
+//! cached, verified `/dev/nsm` attestation (`tvc_attestation::cache`).
 
 use std::path::Path;
+use std::sync::Arc;
 
+use base64::Engine as _;
 use host_primitives::turnkey::TurnkeyBootProof;
 use qos_p256::P256Pair;
 use tvc_attestation::AttestationError;
+use tvc_attestation::cache::{AttestationCache, InputLoader, Inputs, load_inputs};
 use tvc_attestation::manifest::{BootProofManifest, boot_proof_manifest, read_manifest_envelope};
 use tvc_attestation::paths;
 
@@ -35,7 +38,15 @@ impl From<AttestationError> for BootProofError {
 }
 
 pub trait BootProofSource {
-    fn boot_proof(&self) -> TurnkeyBootProof;
+    /// The proof for a successful response. `Err` means no attested proof is
+    /// available right now; callers must fail the request rather than fall
+    /// back to an unattested one.
+    fn boot_proof(&self) -> Result<TurnkeyBootProof, BootProofError>;
+
+    /// Readiness for `GET /health`.
+    fn healthy(&self) -> bool {
+        true
+    }
 }
 
 pub struct StaticBootProof {
@@ -108,17 +119,122 @@ impl StaticBootProof {
 }
 
 impl BootProofSource for StaticBootProof {
-    fn boot_proof(&self) -> TurnkeyBootProof {
-        TurnkeyBootProof {
-            // Empty until an NSM-backed source lands; never faked, so a
-            // strict verifier rejects an unattested response outright.
+    fn boot_proof(&self) -> Result<TurnkeyBootProof, BootProofError> {
+        Ok(TurnkeyBootProof {
+            // Empty off-enclave; never faked, so a strict verifier rejects
+            // an unattested response outright. `NsmBootProof` fills it in.
             aws_attestation_doc_b64: String::new(),
             qos_manifest_b64: self.qos_manifest_b64.clone(),
             qos_manifest_envelope_b64: self.qos_manifest_envelope_b64.clone(),
             ephemeral_public_key_hex: self.ephemeral_public_key_hex.clone(),
             enclave_app: self.enclave_app.clone(),
             deployment_label: self.deployment_label.clone(),
+        })
+    }
+}
+
+/// How often the attestation watcher re-checks the inputs and expiry; what
+/// the 72h `nsm_probe` soak ran with.
+pub const WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// NSM-backed boot proof: the manifest and ephemeral key from startup, plus
+/// a verified attestation doc from [`AttestationCache`], refreshed by its
+/// watcher before the NSM certificate chain expires.
+///
+/// The doc commits to the manifest hash (`user_data`) and the ephemeral
+/// public key (`public_key`), with no nonce, so it isn't request-bound and
+/// one cached doc serves every response. Every doc is checked against the
+/// manifest (PCR0-3, PCR17) and our key before it's cached.
+///
+/// Both inputs are pinned to what this process loaded at startup: responses
+/// are signed with the startup key and carry the startup manifest bytes, so
+/// a doc attesting anything else would contradict the rest of the response.
+/// If either file changes underneath us, refreshes fail, the cached doc ages
+/// out, and [`Self::healthy`] goes false (fail closed) instead of attesting
+/// a key this process doesn't sign with.
+pub struct NsmBootProof {
+    base: StaticBootProof,
+    cache: Arc<AttestationCache<qos_nsm::Nsm>>,
+}
+
+impl NsmBootProof {
+    pub fn from_enclave_files(
+        ephemeral: &P256Pair,
+        enclave_app: String,
+        deployment_label: String,
+    ) -> Result<Self, BootProofError> {
+        let envelope = read_manifest_envelope(Path::new(paths::MANIFEST_FILE))?;
+        let BootProofManifest {
+            manifest_b64,
+            envelope_b64,
+        } = boot_proof_manifest(&envelope)?;
+        let pinned = PinnedInputs {
+            ephemeral_public_key: ephemeral.public_key().to_bytes(),
+            manifest_hash: envelope.manifest_hash().to_vec(),
+        };
+        let load: InputLoader = Arc::new(move || {
+            pinned.check(load_inputs(
+                paths::EPHEMERAL_KEY_FILE,
+                Path::new(paths::MANIFEST_FILE),
+            )?)
+        });
+        Ok(Self {
+            base: StaticBootProof::new(
+                ephemeral,
+                manifest_b64,
+                envelope_b64,
+                enclave_app,
+                deployment_label,
+            ),
+            cache: Arc::new(AttestationCache::new(Arc::new(qos_nsm::Nsm), load)),
+        })
+    }
+
+    /// For the startup attestation and `spawn_watcher`.
+    pub fn cache(&self) -> &Arc<AttestationCache<qos_nsm::Nsm>> {
+        &self.cache
+    }
+}
+
+impl BootProofSource for NsmBootProof {
+    /// Must run inside `tokio::task::block_in_place` on the multi-threaded
+    /// runtime (as `handle_parse` does): it blocks on the cache, which is
+    /// a hit (re-reading the two input files) unless a refresh is due.
+    fn boot_proof(&self) -> Result<TurnkeyBootProof, BootProofError> {
+        let handle = tokio::runtime::Handle::try_current()
+            .map_err(|e| AttestationError::Task(e.to_string()))?;
+        let (attestation, _) = handle.block_on(self.cache.get())?;
+        Ok(TurnkeyBootProof {
+            aws_attestation_doc_b64: base64::engine::general_purpose::STANDARD
+                .encode(&attestation.document),
+            ..self.base.boot_proof()?
+        })
+    }
+
+    fn healthy(&self) -> bool {
+        self.cache.healthy()
+    }
+}
+
+/// What this process signs with and serves; see [`NsmBootProof`].
+struct PinnedInputs {
+    ephemeral_public_key: Vec<u8>,
+    manifest_hash: Vec<u8>,
+}
+
+impl PinnedInputs {
+    fn check(&self, inputs: Inputs) -> Result<Inputs, AttestationError> {
+        if inputs.ephemeral_public_key != self.ephemeral_public_key {
+            return Err(AttestationError::EphemeralKey(
+                "changed since startup; this process still signs with the startup key".to_string(),
+            ));
         }
+        if inputs.manifest_hash != self.manifest_hash {
+            return Err(AttestationError::Manifest(
+                "changed since startup; this process still serves the startup manifest".to_string(),
+            ));
+        }
+        Ok(inputs)
     }
 }
 
@@ -152,7 +268,6 @@ fn read_boot_proof_manifest(path: &Path) -> Result<BootProofManifest, BootProofE
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 pub(crate) mod tests {
     use super::*;
-    use base64::Engine as _;
     use qos_core::protocol::services::boot::{
         Manifest, ManifestEnvelope, ManifestEnvelopeV2, ManifestSet, ManifestV2, ManifestVersion,
         Namespace, NitroConfig, PatchSet, PivotConfig, PivotConfigV2, RestartPolicy, ShareSet,
@@ -299,7 +414,8 @@ pub(crate) mod tests {
             &path,
         )
         .unwrap()
-        .boot_proof();
+        .boot_proof()
+        .unwrap();
         std::fs::remove_file(&path).unwrap();
 
         let envelope_bytes = engine.decode(proof.qos_manifest_envelope_b64).unwrap();
@@ -313,5 +429,33 @@ pub(crate) mod tests {
             manifest["pivot"]["args"],
             serde_json::json!(["--host-port", "3000"])
         );
+    }
+
+    fn inputs(key: &[u8], hash: &[u8]) -> Inputs {
+        Inputs {
+            ephemeral_public_key: key.to_vec(),
+            manifest_hash: hash.to_vec(),
+            pcrs: Default::default(),
+        }
+    }
+
+    // The doc must attest the key responses are signed with and the manifest
+    // they carry, so the loader refuses anything else rather than letting the
+    // cache attest it.
+    #[test]
+    fn pinned_inputs_accept_only_the_startup_key_and_manifest() {
+        let pinned = PinnedInputs {
+            ephemeral_public_key: vec![1; 4],
+            manifest_hash: vec![2; 4],
+        };
+        assert!(pinned.check(inputs(&[1; 4], &[2; 4])).is_ok());
+        assert!(matches!(
+            pinned.check(inputs(&[9; 4], &[2; 4])),
+            Err(AttestationError::EphemeralKey(_))
+        ));
+        assert!(matches!(
+            pinned.check(inputs(&[1; 4], &[9; 4])),
+            Err(AttestationError::Manifest(_))
+        ));
     }
 }
