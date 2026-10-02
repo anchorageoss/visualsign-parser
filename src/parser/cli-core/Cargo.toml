@@ -15,9 +15,7 @@ diagnostics = ["visualsign/diagnostics"]
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }
 hex = { workspace = true }
-serde = { version = "1", features = ["derive"], default-features = false }
 serde_json = "1"
-tracing = { workspace = true }
 
 generated   = { path = "../../generated" }
 visualsign  = { workspace = true }
