@@ -460,7 +460,7 @@ pub fn authorized_abi_signers() -> SignerAllowlist {
 
     #[cfg(any(test, feature = "dev-signing"))]
     {
-        if let Ok(sk) = SigningKey::from_bytes(&CLI_DEV_SIGNING_KEY_SEED) {
+        if let Ok(sk) = SigningKey::from_bytes((&CLI_DEV_SIGNING_KEY_SEED).into()) {
             let vk = VerifyingKey::from(&sk);
             allow.insert(vk.to_encoded_point(false).as_bytes().to_vec());
         }
@@ -547,7 +547,7 @@ pub fn sign_abi(
     chain_id: u64,
     signing_key_seed: &[u8; 32],
 ) -> Result<generated::parser::SignatureMetadata, String> {
-    let signing_key = SigningKey::from_bytes(signing_key_seed)
+    let signing_key = SigningKey::from_bytes(signing_key_seed.into())
         .map_err(|e| format!("invalid secp256k1 signing key seed: {e}"))?;
     let verifying_key = VerifyingKey::from(&signing_key);
 
@@ -682,7 +682,7 @@ mod tests {
         chain_id: u64,
         seed: &[u8; 32],
     ) -> (String, String) {
-        let signing_key = SigningKey::from_bytes(seed).expect("valid key");
+        let signing_key = SigningKey::from_bytes(seed.into()).expect("valid key");
         let verifying_key = VerifyingKey::from(&signing_key);
 
         // Compute the shared domain-separated prehash.
@@ -728,7 +728,7 @@ mod tests {
     }
 
     fn pubkey_bytes_from_seed(seed: &[u8; 32]) -> Vec<u8> {
-        let signing_key = SigningKey::from_bytes(seed).expect("valid key");
+        let signing_key = SigningKey::from_bytes(seed.into()).expect("valid key");
         let verifying_key = VerifyingKey::from(&signing_key);
         verifying_key.to_encoded_point(false).as_bytes().to_vec()
     }
@@ -1575,7 +1575,8 @@ mod tests {
     /// derives from the signature.
     #[test]
     fn signer_allowlist_from_hex_canonicalizes_compressed_keys() {
-        let signing_key = SigningKey::from_bytes(&CLI_DEV_SIGNING_KEY_SEED).expect("valid key");
+        let signing_key =
+            SigningKey::from_bytes((&CLI_DEV_SIGNING_KEY_SEED).into()).expect("valid key");
         let verifying_key = VerifyingKey::from(&signing_key);
         let compressed = hex::encode(verifying_key.to_encoded_point(true).as_bytes());
         let uncompressed = hex::encode(verifying_key.to_encoded_point(false).as_bytes());
