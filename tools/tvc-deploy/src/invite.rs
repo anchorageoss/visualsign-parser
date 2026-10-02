@@ -1312,10 +1312,29 @@ fn decode_intent(
 /// `--json` still has the full value.
 const GENERIC_MAX_STR: usize = 40;
 
+/// Substrings of (lowercased) intent field names whose values
+/// [`generic_intent_summary`] never prints: OTP/auth codes, OIDC and
+/// verification tokens, encrypted key/secret bundles, passwords, mnemonics.
+/// Checked against every `*Intent` field in the generated client; it
+/// over-matches a few harmless ones (e.g. `*TokenExpirationSeconds`) on
+/// purpose, since a summary losing a number is cheaper than printing a secret.
+const GENERIC_REDACTED_FIELDS: &[&str] = &[
+    "secret",
+    "password",
+    "mnemonic",
+    "encrypted",
+    "bundle",
+    "token",
+    "otpcode",
+    "authcode",
+    "codeverifier",
+];
+
 /// Summary for the intent types `decode_intent` has no arm for: the type name
 /// followed by the intent's top-level fields as `key=value`, so an approver
 /// never sees a bare `ACTIVITY_TYPE_*` with nothing about what it changes.
-/// Fields named like user/tag ids are resolved to display names; nested
+/// Fields named like user/tag ids are resolved to display names, secret-like
+/// fields ([`GENERIC_REDACTED_FIELDS`]) print as `<redacted>`, and nested
 /// objects are only counted. Empty fields are skipped.
 fn generic_intent_summary(
     activity_type: ActivityType,
@@ -1351,6 +1370,9 @@ fn render_generic_field(
 ) -> Option<String> {
     use serde_json::Value;
     let lower = key.to_ascii_lowercase();
+    if GENERIC_REDACTED_FIELDS.iter().any(|f| lower.contains(f)) {
+        return Some("<redacted>".to_string());
+    }
     let resolve = |id: &str| -> String {
         if lower.ends_with("userid") || lower.ends_with("userids") {
             names.user(id)
@@ -2754,6 +2776,13 @@ mod tests {
             render_generic_field("notes", &serde_json::json!(""), &names),
             None
         );
+        for key in ["otpCode", "encryptedBundle", "oidcToken", "codeVerifier"] {
+            assert_eq!(
+                render_generic_field(key, &serde_json::json!("hunter2"), &names),
+                Some("<redacted>".to_string()),
+                "{key}"
+            );
+        }
         assert_eq!(
             render_generic_field("selectors", &serde_json::json!([{"a": 1}]), &names),
             Some("[1 item(s)]".to_string())
