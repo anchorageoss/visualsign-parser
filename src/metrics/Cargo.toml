@@ -13,7 +13,6 @@ default = ["request"]
 request = []
 
 [dependencies]
-generated = { path = "../generated", features = ["tonic_types"] }
 tracing = "0.1"
 prometheus = { version = "0.13", default-features = false }
 axum = { version = "0.6.20", features = [
