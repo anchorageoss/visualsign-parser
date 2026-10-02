@@ -1411,7 +1411,7 @@ fn render_generic_field(
         ),
         Value::Array(items) => Some(format!("[{} item(s)]", items.len())),
         Value::Object(map) if map.is_empty() => None,
-        Value::Object(_) => Some("{..}".to_string()),
+        Value::Object(map) => Some(format!("{{{} field(s)}}", map.len())),
     }
 }
 
@@ -2797,6 +2797,10 @@ mod tests {
         assert_eq!(
             render_generic_field("selectors", &serde_json::json!([{"a": 1}]), &names),
             Some("[1 item(s)]".to_string())
+        );
+        assert_eq!(
+            render_generic_field("params", &serde_json::json!({"a": 1, "b": 2}), &names),
+            Some("{2 field(s)}".to_string())
         );
     }
 

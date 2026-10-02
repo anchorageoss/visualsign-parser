@@ -38,9 +38,11 @@ Before you approve anything:
   `sets root quorum to 2 of 3: <names>`, `deletes users: <name>`,
   `updates user <name> (email -> ...)`. Types without a dedicated summary
   show `ACTIVITY_TYPE_* (field=value; ...)`: the intent's top-level fields,
-  with secret-like fields (OTP codes, tokens, encrypted bundles) shown as `<redacted>`, long values cut to 40 characters and nested objects shown only as a
-  count. Use `$B view-activity --activity-id <id> --org <alias>` for one
-  activity's votes so far, and `--json` on either command for the full raw intent.
+  with secret-like fields (OTP codes, tokens, encrypted bundles) shown as
+  `<redacted>`, long values cut to 40 characters, and nested objects and lists
+  shown only by size (`{N field(s)}`, `[N item(s)]`). Use
+  `$B view-activity --activity-id <id> --org <alias>` for one activity's votes
+  so far, and `$B list-activities --json ...` for the full raw intent.
 
 ### Upgrading `turnkey_client`
 
