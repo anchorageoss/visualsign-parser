@@ -4,7 +4,7 @@
 //! decoded once, up front, into a `SolanaMetadata`; the transfer fields in the
 //! human-readable `SignablePayload` and the Borsh-friendly intermediate output
 //! are both projections of that one decode (see `parse_solana_metadata` and
-//! `build_intermediate_output` in `core/visualsign.rs`).
+//! `build_intermediate_output` in `intermediate.rs`).
 //!
 //! The delta between the `convert` and `convert_with_intermediate` groups is
 //! the marginal cost of projecting and Borsh-encoding the intermediate output
@@ -150,8 +150,8 @@ fn bench_decode(c: &mut Criterion) {
     group.finish();
 }
 
-/// Stages 2 and 3. The delta between the two groups is the re-parse cost that
-/// making the intermediate representation the single source of truth removes.
+/// Stages 2 and 3. The delta between the two groups is the marginal cost of
+/// projecting and Borsh-encoding the intermediate output from the shared decode.
 fn bench_convert(c: &mut Criterion) {
     for (group_name, with_intermediate) in [
         ("solana/convert", false),
