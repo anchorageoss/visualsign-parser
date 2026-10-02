@@ -32,6 +32,9 @@ use turnkey_client::TurnkeyP256ApiKey;
 use turnkey_client::{TurnkeyClient, TurnkeyClientError, TurnkeySecp256k1ApiKey};
 use xshell::{cmd, Shell};
 
+#[macro_use]
+mod generic_intents;
+
 const DEFAULT_API_BASE_URL: &str = "https://api.turnkey.com";
 const ENV_ORG_ID: &str = "TVC_ORG_ID";
 const ENV_API_BASE_URL: &str = "TVC_API_BASE_URL";
@@ -1103,11 +1106,13 @@ fn short_id(id: &str) -> &str {
 /// `ACTIVITY_TYPE_UPDATE_USER_TAG`. Explicitly handles the intent variants
 /// tvc-deploy itself creates, plus the org-admin ones seen coming from the
 /// dashboard or `tvc` (root quorum, user and API-key changes). Every other
-/// Turnkey activity type (200+: billing, wallets, webhooks, MFA, sub-orgs, ...)
-/// goes through [`generic_intent_summary`], which lists the intent's own
-/// fields, so a new or unfamiliar type is never shown as just its name.
-/// When Turnkey adds a new version of an intent (`...IntentV2`, `V3`), add an
-/// arm for it next to the existing version.
+/// Turnkey intent (billing, wallets, webhooks, MFA, sub-orgs, ...) is listed
+/// in `generic_intents.rs` and goes through [`generic_intent_summary`], which
+/// lists the intent's own fields, so an unfamiliar type is never shown as just
+/// its name. There is deliberately no `_` arm: a `turnkey_client` upgrade that
+/// adds an intent fails to compile here. Give a new version of a decoded
+/// intent (`...IntentV2`, `V3`) an arm next to the existing one; add anything
+/// else to `generic_intents.rs`.
 fn decode_intent(
     activity_type: ActivityType,
     intent: Option<&intent::Inner>,
@@ -1302,7 +1307,9 @@ fn decode_intent(
             i.invitation_id,
             names.user(&i.user_id)
         ),
-        Some(other) => generic_intent_summary(activity_type, other, names),
+        Some(other @ for_each_generic_intent!(generic_intent_pattern)) => {
+            generic_intent_summary(activity_type, other, names)
+        }
         None => activity_type.as_str_name().to_string(),
     }
 }
@@ -2131,6 +2138,10 @@ pub fn reject_activity(args: &ActivityIdArgs) -> Result<()> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use serde::de::{
+        self, DeserializeSeed, Deserializer, EnumAccess, IntoDeserializer, VariantAccess, Visitor,
+    };
+    use serde::Deserialize;
     use std::io::Write;
     use tempfile::NamedTempFile;
     use turnkey_client::generated::{DeleteUsersIntent, UpdateRootQuorumIntent, UpdateUserIntent};
@@ -2787,6 +2798,186 @@ mod tests {
             render_generic_field("selectors", &serde_json::json!([{"a": 1}]), &names),
             Some("[1 item(s)]".to_string())
         );
+    }
+
+    /// Captures the field names serde would expect for one `intent::Inner`
+    /// variant, by driving `Inner`'s derived `Deserialize` far enough to ask
+    /// for that variant's struct and then stopping. The generated intent
+    /// structs don't implement `Default`, so there's no value to serialize.
+    struct VariantFields<'a> {
+        variant: &'a str,
+        fields: &'a mut Option<&'static [&'static str]>,
+    }
+
+    struct StructFields<'a> {
+        fields: &'a mut Option<&'static [&'static str]>,
+    }
+
+    fn captured() -> de::value::Error {
+        de::Error::custom("captured")
+    }
+
+    impl<'de> Deserializer<'de> for VariantFields<'_> {
+        type Error = de::value::Error;
+
+        fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value, Self::Error> {
+            Err(captured())
+        }
+
+        fn deserialize_enum<V: Visitor<'de>>(
+            self,
+            _name: &'static str,
+            _variants: &'static [&'static str],
+            visitor: V,
+        ) -> Result<V::Value, Self::Error> {
+            visitor.visit_enum(self)
+        }
+
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+            bytes byte_buf option unit unit_struct newtype_struct seq tuple
+            tuple_struct map struct identifier ignored_any
+        }
+    }
+
+    impl<'de> EnumAccess<'de> for VariantFields<'_> {
+        type Error = de::value::Error;
+        type Variant = Self;
+
+        fn variant_seed<S: DeserializeSeed<'de>>(
+            self,
+            seed: S,
+        ) -> Result<(S::Value, Self), Self::Error> {
+            let variant = seed.deserialize(self.variant.into_deserializer())?;
+            Ok((variant, self))
+        }
+    }
+
+    impl<'de> VariantAccess<'de> for VariantFields<'_> {
+        type Error = de::value::Error;
+
+        fn unit_variant(self) -> Result<(), Self::Error> {
+            Err(captured())
+        }
+
+        fn newtype_variant_seed<S: DeserializeSeed<'de>>(
+            self,
+            seed: S,
+        ) -> Result<S::Value, Self::Error> {
+            seed.deserialize(StructFields {
+                fields: self.fields,
+            })
+        }
+
+        fn tuple_variant<V: Visitor<'de>>(self, _: usize, _: V) -> Result<V::Value, Self::Error> {
+            Err(captured())
+        }
+
+        fn struct_variant<V: Visitor<'de>>(
+            self,
+            _: &'static [&'static str],
+            _: V,
+        ) -> Result<V::Value, Self::Error> {
+            Err(captured())
+        }
+    }
+
+    impl<'de> Deserializer<'de> for StructFields<'_> {
+        type Error = de::value::Error;
+
+        fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value, Self::Error> {
+            Err(captured())
+        }
+
+        fn deserialize_struct<V: Visitor<'de>>(
+            self,
+            _name: &'static str,
+            fields: &'static [&'static str],
+            _visitor: V,
+        ) -> Result<V::Value, Self::Error> {
+            *self.fields = Some(fields);
+            Err(captured())
+        }
+
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+            bytes byte_buf option unit unit_struct newtype_struct seq tuple
+            tuple_struct map enum identifier ignored_any
+        }
+    }
+
+    /// Serialized (camelCase) field names of the `intent::Inner` variant
+    /// named `variant` (its Rust name, e.g. `DeletePolicyIntent`).
+    fn intent_fields(variant: &str) -> &'static [&'static str] {
+        let mut chars = variant.chars();
+        let serde_name: String = match chars.next() {
+            Some(first) => first.to_lowercase().chain(chars).collect(),
+            None => String::new(),
+        };
+        let mut fields = None;
+        let _ = intent::Inner::deserialize(VariantFields {
+            variant: &serde_name,
+            fields: &mut fields,
+        });
+        fields.unwrap_or_else(|| panic!("no struct fields captured for {variant}"))
+    }
+
+    macro_rules! generic_intent_names {
+        ($($variant:ident),* $(,)?) => {
+            &[$(stringify!($variant)),*]
+        };
+    }
+
+    const GENERIC_INTENT_SNAPSHOT: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/testdata/generic_intent_fields.txt"
+    );
+
+    /// Every field `generic_intent_summary` can print, and whether
+    /// `GENERIC_REDACTED_FIELDS` hides it. A `turnkey_client` upgrade that
+    /// adds a field to a generic intent fails here, so someone decides
+    /// whether the new field is safe to print before it ever is.
+    #[test]
+    fn generic_intent_field_snapshot() {
+        let variants: &[&str] = for_each_generic_intent!(generic_intent_names);
+        let mut lines = vec![];
+        for variant in variants {
+            for field in intent_fields(variant) {
+                let lower = field.to_ascii_lowercase();
+                let shown = if GENERIC_REDACTED_FIELDS.iter().any(|f| lower.contains(f)) {
+                    "redacted"
+                } else {
+                    "shown"
+                };
+                lines.push(format!("{variant}.{field} {shown}"));
+            }
+        }
+        lines.sort();
+        let actual = lines.join("\n") + "\n";
+
+        if std::env::var_os("UPDATE_INTENT_SNAPSHOT").is_some() {
+            std::fs::write(GENERIC_INTENT_SNAPSHOT, &actual).unwrap();
+            return;
+        }
+        let expected = std::fs::read_to_string(GENERIC_INTENT_SNAPSHOT).unwrap_or_default();
+        if expected != actual {
+            let added: Vec<&str> = actual
+                .lines()
+                .filter(|l| !expected.lines().any(|e| e == *l))
+                .collect();
+            let removed: Vec<&str> = expected
+                .lines()
+                .filter(|l| !actual.lines().any(|a| a == *l))
+                .collect();
+            panic!(
+                "generic intent fields changed (turnkey_client upgrade?).\n\
+                 added: {added:#?}\nremoved: {removed:#?}\n\
+                 Check every new `shown` field is safe to print (add a \
+                 GENERIC_REDACTED_FIELDS entry if not), then run \
+                 `UPDATE_INTENT_SNAPSHOT=1 cargo test generic_intent_field_snapshot` \
+                 and commit testdata/generic_intent_fields.txt."
+            );
+        }
     }
 
     #[test]

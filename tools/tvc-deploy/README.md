@@ -42,6 +42,30 @@ Before you approve anything:
   count. Use `$B view-activity --activity-id <id> --org <alias>` for one
   activity's votes so far, and `--json` on either command for the full raw intent.
 
+### Upgrading `turnkey_client`
+
+Activity summaries are guarded so a client upgrade can't silently change what
+approvers see:
+
+- `decode_intent` has no catch-all arm. A new intent type fails to compile with
+  "non-exhaustive patterns". Give it a dedicated arm in `src/invite.rs`
+  (always do this for a new version of an intent that already has one, e.g.
+  `CreatePolicyIntentV4`), or add it to `src/invite/generic_intents.rs` to use
+  the generic `field=value` summary. A removed type fails to compile until it's
+  dropped from that list. A type with both a dedicated arm and a list entry is
+  an unreachable pattern, which clippy rejects.
+- `testdata/generic_intent_fields.txt` lists every field the generic summary
+  can print, and whether it's `shown` or `redacted`. If an upgrade adds a
+  field, `generic_intent_field_snapshot` fails and lists the new lines. Check
+  that each new `shown` field is safe to print, and add a
+  `GENERIC_REDACTED_FIELDS` entry in `src/invite.rs` if it isn't. Then run:
+
+  ```
+  UPDATE_INTENT_SNAPSHOT=1 cargo test generic_intent_field_snapshot
+  ```
+
+  and commit the updated file with the upgrade.
+
 ## Inviting a batch of users
 
 To invite a whole team in one activity (and therefore one consensus approval, if
