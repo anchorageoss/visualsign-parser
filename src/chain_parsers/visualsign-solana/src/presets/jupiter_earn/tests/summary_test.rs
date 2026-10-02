@@ -104,10 +104,7 @@ fn test_single_deposit_gets_title_subtitle_and_rows() {
 
     let payload = payload_for(&[deposit], &payer);
 
-    assert_eq!(
-        payload.title,
-        "Supply 414.122446 USDC to Jupiter Lend"
-    );
+    assert_eq!(payload.title, "Supply 414.122446 USDC to Jupiter Lend");
     assert_eq!(payload.subtitle.as_deref(), Some(JUPITER_EARN_DISPLAY_NAME));
     // (`starts_with`: the diagnostics feature appends lint rows after these.)
     let labels = top_level_labels(&payload);
@@ -207,10 +204,7 @@ fn test_infrastructure_legs_keep_the_summary() {
 
     let payload = payload_for(&[compute_limit, compute_price, create_ata, deposit], &payer);
 
-    assert_eq!(
-        payload.title,
-        "Supply 414.122446 USDC to Jupiter Lend"
-    );
+    assert_eq!(payload.title, "Supply 414.122446 USDC to Jupiter Lend");
     assert_eq!(
         top_level_value(&payload, "From").unwrap(),
         payer.to_string()
@@ -248,10 +242,7 @@ fn test_uncapped_priority_fee_is_hoisted_as_a_maximum() {
 
     let payload = payload_for(&[compute_price, deposit], &payer);
 
-    assert_eq!(
-        payload.title,
-        "Supply 414.122446 USDC to Jupiter Lend"
-    );
+    assert_eq!(payload.title, "Supply 414.122446 USDC to Jupiter Lend");
     assert!(top_level_value(&payload, "Priority fee").is_none());
     let fee = payload
         .fields
@@ -271,10 +262,7 @@ fn test_summary_without_a_unit_price_has_no_fee_row() {
 
     let payload = payload_for(&[compute_limit, deposit], &payer);
 
-    assert_eq!(
-        payload.title,
-        "Supply 414.122446 USDC to Jupiter Lend"
-    );
+    assert_eq!(payload.title, "Supply 414.122446 USDC to Jupiter Lend");
     let labels = top_level_labels(&payload);
     assert!(
         !labels.iter().any(|l| l.contains("riority fee")),
@@ -469,10 +457,7 @@ fn test_v0_single_deposit_gets_summary() {
 
     let payload = payload_from_b64(&v0_transaction_b64(&[deposit], &payer, &[]));
 
-    assert_eq!(
-        payload.title,
-        "Supply 414.122446 USDC to Jupiter Lend"
-    );
+    assert_eq!(payload.title, "Supply 414.122446 USDC to Jupiter Lend");
     assert_eq!(payload.subtitle.as_deref(), Some(JUPITER_EARN_DISPLAY_NAME));
     let labels = top_level_labels(&payload);
     assert!(
@@ -591,11 +576,7 @@ fn test_each_user_action_family_proposes_a_summary() {
             vec![100_000_000u64, 95_000_000],
             "Supply 100 USDC to Jupiter Lend",
         ),
-        (
-            "mint",
-            vec![50_000_000],
-            "Mint 50 jlUSDC on Jupiter Lend",
-        ),
+        ("mint", vec![50_000_000], "Mint 50 jlUSDC on Jupiter Lend"),
         (
             "mint_with_max_assets",
             vec![50_000_000, 52_500_000],
