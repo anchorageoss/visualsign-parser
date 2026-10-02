@@ -3,6 +3,45 @@
 Standalone deploy + Turnkey org-management helper for `parser_app`. See `src/main.rs`
 for the full subcommand list (`--help` prints it too).
 
+## Auditing an org: members and pending operations
+
+To see who is in an org and what is waiting for approval, run these from this directory.
+`<alias>` is the org's name under `[orgs.*]` in `~/.config/turnkey/tvc.config.toml`
+(quote it if it contains spaces), or the org's UUID:
+
+```
+cargo build --release
+B=./target/release/tvc-deploy
+
+# Every user: id, display name, email
+$B list-users --org <alias>
+
+# Activities not yet finished, newest first
+$B list-activities --org <alias> \
+  --status consensus_needed,pending,created,authenticators_needed
+
+# Every invitation with its status (created/accepted/revoked)
+$B list-invitations --org <alias>
+```
+
+`CREATED_AT` in the activity table is a Unix timestamp. Use `date -u -d @<ts>` to
+convert it.
+
+Before you approve anything:
+
+- **Look for duplicates.** The same intent submitted twice (for example, two
+  `CREATE_INVITATIONS` for one person a few seconds apart, or two
+  `DELETE_INVITATION` for the same invitation id) shows up as two rows. Approve
+  one and reject the other.
+- **Read the summary before approving.** Each summary is decoded from the
+  activity's intent, with user and tag ids replaced by display names. For example:
+  `sets root quorum to 2 of 3: <names>`, `deletes users: <name>`,
+  `updates user <name> (email -> ...)`. Types without a dedicated summary
+  show `ACTIVITY_TYPE_* (field=value; ...)`: the intent's top-level fields,
+  with long values cut to 40 characters and nested objects shown only as a
+  count. Use `$B view-activity --activity-id <id> --org <alias>` for one
+  activity's votes so far, and `--json` on either command for the full raw intent.
+
 ## Inviting a batch of users
 
 To invite a whole team in one activity (and therefore one consensus approval, if
