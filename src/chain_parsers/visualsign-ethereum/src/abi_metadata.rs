@@ -1575,7 +1575,8 @@ mod tests {
     /// derives from the signature.
     #[test]
     fn signer_allowlist_from_hex_canonicalizes_compressed_keys() {
-        let signing_key = SigningKey::from_bytes((&CLI_DEV_SIGNING_KEY_SEED).into()).expect("valid key");
+        let signing_key =
+            SigningKey::from_bytes((&CLI_DEV_SIGNING_KEY_SEED).into()).expect("valid key");
         let verifying_key = VerifyingKey::from(&signing_key);
         let compressed = hex::encode(verifying_key.to_encoded_point(true).as_bytes());
         let uncompressed = hex::encode(verifying_key.to_encoded_point(false).as_bytes());
