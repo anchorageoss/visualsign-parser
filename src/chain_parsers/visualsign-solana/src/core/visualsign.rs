@@ -2,7 +2,8 @@ use crate::core::txtypes::{
     create_address_lookup_table_field, decode_v0_instructions, decode_v0_transfers,
 };
 use crate::core::{
-    create_accounts_advanced_preview_layout, decode_accounts, decode_v0_accounts, instructions,
+    TransactionSummary, create_accounts_advanced_preview_layout, decode_accounts,
+    decode_v0_accounts, instructions,
 };
 use crate::idl::IdlRegistry;
 use crate::idl::builtin_programs::{
@@ -357,10 +358,10 @@ fn extract_name_from_idl_json(idl_json: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(idl_json).ok()?;
 
     // Try "metadata.name" first (Anchor IDL format)
-    if let Some(metadata) = value.get("metadata") {
-        if let Some(name) = metadata.get("name").and_then(|n| n.as_str()) {
-            return Some(name.to_string());
-        }
+    if let Some(metadata) = value.get("metadata")
+        && let Some(name) = metadata.get("name").and_then(|n| n.as_str())
+    {
+        return Some(name.to_string());
     }
 
     // Try "name" field directly
@@ -635,15 +636,20 @@ fn convert_to_visual_sign_payload(
             .map(|e| e.signable_payload_field.clone()),
     );
 
+    #[cfg(feature = "diagnostics")]
+    let summary = decode_result.summary.clone();
+
     #[cfg(not(feature = "diagnostics"))]
-    {
-        let decoded_fields = instructions::decode_instructions(transaction, &idl_registry)?;
+    let summary = {
+        let decoded = instructions::decode_instructions(transaction, &idl_registry)?;
         fields.extend(
-            decoded_fields
+            decoded
+                .fields
                 .iter()
                 .map(|e| e.signable_payload_field.clone()),
         );
-    }
+        decoded.summary
+    };
 
     // Decode and sort accounts using the dedicated function
     let accounts = decode_accounts(message)?;
@@ -656,13 +662,49 @@ fn convert_to_visual_sign_payload(
     #[cfg(feature = "diagnostics")]
     append_diagnostics(&mut fields, &decode_result);
 
+    let (title, subtitle) = apply_transaction_summary(
+        &mut fields,
+        title,
+        summary,
+        message.account_keys.first(),
+        "Solana Transaction",
+    )?;
     Ok(SignablePayload::new(
         0,
-        title.unwrap_or_else(|| "Solana Transaction".to_string()),
-        None,
+        title,
+        subtitle,
         fields,
         "SolanaTx".to_string(),
     ))
+}
+
+/// Applies the adopted [`TransactionSummary`]: a caller-supplied title always wins; otherwise
+/// the summary names the transaction and a From row plus its rows are inserted after Network.
+fn apply_transaction_summary(
+    fields: &mut Vec<SignablePayloadField>,
+    caller_title: Option<String>,
+    summary: Option<TransactionSummary>,
+    fee_payer: Option<&Pubkey>,
+    default_title: &str,
+) -> Result<(String, Option<String>), VisualSignError> {
+    if let Some(title) = caller_title {
+        return Ok((title, None));
+    }
+    // Without a fee payer there is no From row to anchor the hoisted rows, so the whole
+    // summary is dropped rather than leaving a title the body does not back up.
+    let (Some(summary), Some(fee_payer)) = (summary, fee_payer) else {
+        return Ok((default_title.to_string(), None));
+    };
+    let mut rows = vec![instructions::create_from_field(fee_payer)?.signable_payload_field];
+    rows.extend(
+        summary
+            .fields
+            .iter()
+            .map(|f| f.signable_payload_field.clone()),
+    );
+    let after_network = fields.len().min(1);
+    fields.splice(after_network..after_network, rows);
+    Ok((summary.title, summary.subtitle))
 }
 
 /// Convert versioned Solana transaction to visual sign payload
@@ -754,11 +796,13 @@ fn convert_v0_to_visual_sign_payload(
         );
         fields.push(instruction_field.signable_payload_field.clone());
     }
+    #[cfg(feature = "diagnostics")]
+    let summary = v0_result.summary.clone();
 
     #[cfg(not(feature = "diagnostics"))]
-    match decode_v0_instructions(v0_message, &idl_registry) {
-        Ok(v0_fields) => {
-            for (index, instruction_field) in v0_fields.iter().enumerate() {
+    let summary = match decode_v0_instructions(v0_message, &idl_registry) {
+        Ok(decoded) => {
+            for (index, instruction_field) in decoded.fields.iter().enumerate() {
                 tracing::debug!(
                     "Handling instruction {} with visualizer {:?}",
                     index,
@@ -766,6 +810,7 @@ fn convert_v0_to_visual_sign_payload(
                 );
                 fields.push(instruction_field.signable_payload_field.clone());
             }
+            decoded.summary
         }
         Err(e) => {
             // Add a note about instruction decoding failure
@@ -778,8 +823,9 @@ fn convert_v0_to_visual_sign_payload(
                     text: format!("Instruction decoding failed: {e}"),
                 },
             });
+            None
         }
-    }
+    };
 
     // Process V0 transfer decoding using solana-parser
     if decode_transfers {
@@ -813,10 +859,17 @@ fn convert_v0_to_visual_sign_payload(
     #[cfg(feature = "diagnostics")]
     append_diagnostics(&mut fields, &v0_result);
 
+    let (title, subtitle) = apply_transaction_summary(
+        &mut fields,
+        title,
+        summary,
+        v0_message.account_keys.first(),
+        "Solana V0 Transaction",
+    )?;
     Ok(SignablePayload::new(
         0,
-        title.unwrap_or_else(|| "Solana V0 Transaction".to_string()),
-        None,
+        title,
+        subtitle,
         fields,
         "SolanaTx".to_string(),
     ))
@@ -831,6 +884,10 @@ mod tests {
     };
     use crate::test_utils::payload_from_b64;
     use crate::utils::create_transaction_with_empty_signatures;
+    use solana_sdk::compute_budget::ComputeBudgetInstruction;
+    use solana_sdk::instruction::{AccountMeta, Instruction};
+    use solana_sdk::message::Message;
+    use solana_system_interface::program as system_program;
 
     /// Test helper: run the converter and unwrap the `ConversionResult` to the
     /// `SignablePayload` these tests assert against. Intermediate output is
@@ -984,8 +1041,18 @@ mod tests {
         );
         assert!(
             decoded.instructions[0].parsed_instruction_data.is_none(),
-            "top-level System transfer has no IDL match (native decode path, not IDL)"
+            "top-level System transfer has no IDL match"
         );
+        let native = decoded.instructions[0]
+            .solana_json_parsed_data
+            .as_ref()
+            .expect("top-level System transfer is jsonParsed-decoded");
+        assert_eq!(native.program, "system");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&native.parsed_json).expect("parsed_json is JSON");
+        assert_eq!(parsed["type"], "transfer");
+        assert_eq!(parsed["info"]["lamports"], 1_000_000_000u64);
+        assert!(decoded.instructions[0].solana_json_parse_error.is_none());
         assert_eq!(
             decoded.instructions[0].registered_source,
             RegisteredSource::Native,
@@ -1015,6 +1082,78 @@ mod tests {
     /// decode the message, `build_intermediate_bytes` must degrade to `None`
     /// rather than panic or surface an error, so the converter still returns
     /// the `SignablePayload` and policy degrades to "no metadata".
+    /// End to end through the converter for the error path: a Compute Budget
+    /// instruction (`Native`, but not supported by Solana's jsonParsed decoder)
+    /// next to a System transfer. The emitted Borsh bytes must carry the error
+    /// on the first instruction and the decode on the second.
+    #[test]
+    fn intermediate_output_reports_unsupported_native_program() {
+        let payer = Pubkey::new_unique();
+        let destination = Pubkey::new_unique();
+        // System `Transfer`: u32 tag 2, then the u64 lamports.
+        let mut transfer_data = vec![0x02, 0x00, 0x00, 0x00];
+        transfer_data.extend_from_slice(&1001u64.to_le_bytes());
+        let transfer = Instruction::new_with_bytes(
+            system_program::id(),
+            &transfer_data,
+            vec![
+                AccountMeta::new(payer, true),
+                AccountMeta::new(destination, false),
+            ],
+        );
+        let transaction = SolanaTransaction::new_unsigned(Message::new(
+            &[
+                ComputeBudgetInstruction::set_compute_unit_price(5_000),
+                transfer,
+            ],
+            Some(&payer),
+        ));
+        let options = VisualSignOptions {
+            include_intermediate_output: true,
+            decode_transfers: true,
+            transaction_name: Some("Solana Transaction".to_string()),
+            ..VisualSignOptions::default()
+        };
+
+        let result = SolanaVisualSignConverter
+            .to_visual_sign_payload(SolanaTransactionWrapper::new_legacy(transaction), options)
+            .expect("conversion succeeds with intermediate output opted in");
+        let bytes = result
+            .intermediate_output
+            .as_ref()
+            .expect("intermediate_output should be emitted");
+        let decoded: SolanaIntermediateOutput =
+            borsh::from_slice(bytes).expect("emitted bytes decode into the published schema");
+
+        assert_eq!(decoded.instructions.len(), 2);
+
+        let compute_budget = &decoded.instructions[0];
+        assert_eq!(
+            compute_budget.program_key,
+            "ComputeBudget111111111111111111111111111111"
+        );
+        assert_eq!(compute_budget.registered_source, RegisteredSource::Native);
+        assert!(compute_budget.solana_json_parsed_data.is_none());
+        assert_eq!(
+            compute_budget.solana_json_parse_error.as_deref(),
+            Some("program not supported by Solana's jsonParsed decoder")
+        );
+
+        let transfer = &decoded.instructions[1];
+        assert!(transfer.solana_json_parse_error.is_none());
+        let json_parsed = transfer
+            .solana_json_parsed_data
+            .as_ref()
+            .expect("System transfer is decoded");
+        assert_eq!(json_parsed.program, "system");
+        assert_eq!(
+            json_parsed.parsed_json,
+            format!(
+                r#"{{"info":{{"destination":"{destination}","lamports":1001,"source":"{payer}"}},"type":"transfer"}}"#
+            )
+        );
+    }
+
     #[test]
     fn build_intermediate_bytes_returns_none_on_undecodable() {
         // `deadbeef` is not a valid Solana message; the best-effort extract
@@ -1262,13 +1401,12 @@ mod tests {
                 );
 
                 // Check first field is total count
-                if let Some(first_field) = expanded_fields.first() {
-                    if let SignablePayloadField::TextV2 { common, .. } =
+                if let Some(first_field) = expanded_fields.first()
+                    && let SignablePayloadField::TextV2 { common, .. } =
                         &first_field.signable_payload_field
-                    {
-                        assert_eq!(common.label, "Total Tables");
-                        assert_eq!(common.fallback_text, "2");
-                    }
+                {
+                    assert_eq!(common.label, "Total Tables");
+                    assert_eq!(common.fallback_text, "2");
                 }
 
                 println!(
@@ -2539,5 +2677,75 @@ mod tests {
         );
         let mappings = extract_idl_mappings(&options);
         assert_eq!(mappings.len(), 1);
+    }
+
+    fn network_row() -> SignablePayloadField {
+        SignablePayloadField::TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "Solana".to_string(),
+                label: "Network".to_string(),
+            },
+            text_v2: visualsign::SignablePayloadFieldTextV2 {
+                text: "Solana".to_string(),
+            },
+        }
+    }
+
+    fn sample_summary() -> TransactionSummary {
+        TransactionSummary {
+            title: "Do the thing".to_string(),
+            subtitle: Some("Program".to_string()),
+            fields: vec![
+                visualsign::field_builders::create_text_field("Amount", "1").expect("field"),
+            ],
+        }
+    }
+
+    /// Title and rows are one unit: with no fee payer to anchor the From row,
+    /// the summary is dropped entirely rather than titling a body it is not in.
+    #[test]
+    fn apply_transaction_summary_without_fee_payer_keeps_default_title() {
+        let mut fields = vec![network_row()];
+        let (title, subtitle) =
+            apply_transaction_summary(&mut fields, None, Some(sample_summary()), None, "Default")
+                .expect("apply");
+        assert_eq!(title, "Default");
+        assert_eq!(subtitle, None);
+        assert_eq!(fields.len(), 1, "no rows hoisted without a fee payer");
+    }
+
+    #[test]
+    fn apply_transaction_summary_inserts_rows_after_network() {
+        let payer = Pubkey::new_unique();
+        let mut fields = vec![network_row(), network_row()];
+        let (title, subtitle) = apply_transaction_summary(
+            &mut fields,
+            None,
+            Some(sample_summary()),
+            Some(&payer),
+            "Default",
+        )
+        .expect("apply");
+        assert_eq!(title, "Do the thing");
+        assert_eq!(subtitle.as_deref(), Some("Program"));
+        let labels: Vec<&str> = fields.iter().map(|f| f.label().as_str()).collect();
+        assert_eq!(labels, ["Network", "From", "Amount", "Network"]);
+    }
+
+    #[test]
+    fn apply_transaction_summary_caller_title_disables_it() {
+        let payer = Pubkey::new_unique();
+        let mut fields = vec![network_row()];
+        let (title, subtitle) = apply_transaction_summary(
+            &mut fields,
+            Some("Caller".to_string()),
+            Some(sample_summary()),
+            Some(&payer),
+            "Default",
+        )
+        .expect("apply");
+        assert_eq!(title, "Caller");
+        assert_eq!(subtitle, None);
+        assert_eq!(fields.len(), 1);
     }
 }

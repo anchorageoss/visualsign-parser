@@ -2,6 +2,7 @@
 name = "visualsign-tron"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 
 [features]
 default    = ["cli-plugin"]
@@ -15,11 +16,8 @@ chrono = "0.4"
 clap = { version = "4.0", features = ["derive"], optional = true }
 generated = { path = "../../generated", optional = true }
 hex = "0.4.3"
-log = "0.4"
 parser_cli_core = { path = "../../parser/cli-core", optional = true }
 protobuf = "3.4"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 thiserror = "2.0.12"
 visualsign = { workspace = true }
 

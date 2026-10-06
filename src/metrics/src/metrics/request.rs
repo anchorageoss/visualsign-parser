@@ -1,9 +1,9 @@
 //! useful metrics for requests
 use axum::http::Request as HttpRequest;
-use lazy_static::lazy_static;
 use prometheus::{Error, HistogramOpts, HistogramVec, IntGauge, Registry};
 use std::collections::HashSet;
 use std::env;
+use std::sync::LazyLock;
 
 const NAMESPACE: &str = "tk";
 const LATENCY_MS_BUCKETS: [f64; 10] = [
@@ -13,25 +13,41 @@ const DETAIL_LATENCY_MS_BUCKETS: [f64; 10] = [
     1.0, 5.0, 10.0, 20.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 5000.0,
 ];
 
-lazy_static! {
-    /// release version of host
-    pub static ref RELEASE: String = env::var("RELEASE").unwrap_or_else(|_| "unknown".to_string());
+/// release version of host
+pub static RELEASE: LazyLock<String> =
+    LazyLock::new(|| env::var("RELEASE").unwrap_or_else(|_| "unknown".to_string()));
 
-    /// request latency histogram
-    pub static ref REQUEST_HISTOGRAM: HistogramVec = HistogramVec::new(
-        HistogramOpts::new("enclave_latency_ms", "host-to-enclave request latency in milliseconds").buckets(LATENCY_MS_BUCKETS.to_vec()),
+/// request latency histogram
+pub static REQUEST_HISTOGRAM: LazyLock<HistogramVec> = LazyLock::new(|| {
+    HistogramVec::new(
+        HistogramOpts::new(
+            "enclave_latency_ms",
+            "host-to-enclave request latency in milliseconds",
+        )
+        .buckets(LATENCY_MS_BUCKETS.to_vec()),
         &["result", "method", "release"],
-    ).expect("metric can be created");
+    )
+    .expect("metric can be created")
+});
 
-    /// request latency details histogram
-    pub static ref REQUEST_DETAILS_HISTOGRAM: HistogramVec = HistogramVec::new(
-        HistogramOpts::new("enclave_latency_details_ms", "enclave host request lifecycle details in milliseconds").buckets(DETAIL_LATENCY_MS_BUCKETS.to_vec()),
+/// request latency details histogram
+pub static REQUEST_DETAILS_HISTOGRAM: LazyLock<HistogramVec> = LazyLock::new(|| {
+    HistogramVec::new(
+        HistogramOpts::new(
+            "enclave_latency_details_ms",
+            "enclave host request lifecycle details in milliseconds",
+        )
+        .buckets(DETAIL_LATENCY_MS_BUCKETS.to_vec()),
         &["result", "method", "stage", "release"],
-    ).expect("metric can be created");
+    )
+    .expect("metric can be created")
+});
 
-    /// gauge for waiting requests
-    pub static ref WAITING_REQUESTS_GUAGE: IntGauge = IntGauge::new("waiting_requests_gauge", "Waiting Requests Gauge").expect("metric can be created");
-}
+/// gauge for waiting requests
+pub static WAITING_REQUESTS_GUAGE: LazyLock<IntGauge> = LazyLock::new(|| {
+    IntGauge::new("waiting_requests_gauge", "Waiting Requests Gauge")
+        .expect("metric can be created")
+});
 
 /// returns a new Registry
 pub fn registry() -> Result<Registry, Error> {

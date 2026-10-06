@@ -68,56 +68,55 @@ impl<'a> HumanReadableFormatter<'a> {
                 }
 
                 // Condensed view (if present)
-                if let Some(condensed_layout) = &preview_layout.condensed {
-                    if !condensed_layout.fields.is_empty() {
-                        writeln!(writer, "{continuation}   📋 Condensed View:")?;
-                        for (i, nested_field) in condensed_layout.fields.iter().enumerate() {
-                            let is_last_nested = i == condensed_layout.fields.len() - 1;
-                            let nested_prefix = format!(
-                                "{}   {}",
-                                continuation,
-                                if is_last_nested { "└─" } else { "├─" }
-                            );
-                            let nested_continuation = format!(
-                                "{}   {}",
-                                continuation,
-                                if is_last_nested { "   " } else { "│  " }
-                            );
-                            self.format_field(
-                                &nested_field.signable_payload_field,
-                                writer,
-                                &nested_prefix,
-                                &nested_continuation,
-                            )?;
-                        }
+                if let Some(condensed_layout) = &preview_layout.condensed
+                    && !condensed_layout.fields.is_empty()
+                {
+                    writeln!(writer, "{continuation}   📋 Condensed View:")?;
+                    for (i, nested_field) in condensed_layout.fields.iter().enumerate() {
+                        let is_last_nested = i == condensed_layout.fields.len() - 1;
+                        let nested_prefix = format!(
+                            "{}   {}",
+                            continuation,
+                            if is_last_nested { "└─" } else { "├─" }
+                        );
+                        let nested_continuation = format!(
+                            "{}   {}",
+                            continuation,
+                            if is_last_nested { "   " } else { "│  " }
+                        );
+                        self.format_field(
+                            &nested_field.signable_payload_field,
+                            writer,
+                            &nested_prefix,
+                            &nested_continuation,
+                        )?;
                     }
                 }
 
                 // Expanded view (if present, only show if not condensed_only)
-                if !self.condensed_only {
-                    if let Some(expanded_layout) = &preview_layout.expanded {
-                        if !expanded_layout.fields.is_empty() {
-                            writeln!(writer, "{continuation}   📖 Expanded View:")?;
-                            for (i, nested_field) in expanded_layout.fields.iter().enumerate() {
-                                let is_last_nested = i == expanded_layout.fields.len() - 1;
-                                let nested_prefix = format!(
-                                    "{}   {}",
-                                    continuation,
-                                    if is_last_nested { "└─" } else { "├─" }
-                                );
-                                let nested_continuation = format!(
-                                    "{}   {}",
-                                    continuation,
-                                    if is_last_nested { "   " } else { "│  " }
-                                );
-                                self.format_field(
-                                    &nested_field.signable_payload_field,
-                                    writer,
-                                    &nested_prefix,
-                                    &nested_continuation,
-                                )?;
-                            }
-                        }
+                if !self.condensed_only
+                    && let Some(expanded_layout) = &preview_layout.expanded
+                    && !expanded_layout.fields.is_empty()
+                {
+                    writeln!(writer, "{continuation}   📖 Expanded View:")?;
+                    for (i, nested_field) in expanded_layout.fields.iter().enumerate() {
+                        let is_last_nested = i == expanded_layout.fields.len() - 1;
+                        let nested_prefix = format!(
+                            "{}   {}",
+                            continuation,
+                            if is_last_nested { "└─" } else { "├─" }
+                        );
+                        let nested_continuation = format!(
+                            "{}   {}",
+                            continuation,
+                            if is_last_nested { "   " } else { "│  " }
+                        );
+                        self.format_field(
+                            &nested_field.signable_payload_field,
+                            writer,
+                            &nested_prefix,
+                            &nested_continuation,
+                        )?;
                     }
                 }
             }

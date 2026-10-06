@@ -550,7 +550,7 @@ fn parse_update_operation(
             1 => AuthorityUpdateDetails::AddActions(payload.to_vec()),
             2 => AuthorityUpdateDetails::RemoveActionsByType(payload.to_vec()),
             3 => {
-                if payload.len() % 2 != 0 {
+                if !payload.len().is_multiple_of(2) {
                     return Err(SwigParseError::InvalidFormat(
                         "remove_actions_by_index payload must be even",
                     ));
@@ -823,24 +823,23 @@ fn describe_inner_instruction(
         return fallback();
     };
 
-    if let Some(instruction) = build_inner_instruction(program_id, accounts, data) {
-        if let Some(summary) = visualize_inner_instruction(instruction, parent_depth) {
-            return summary;
-        }
+    if let Some(instruction) = build_inner_instruction(program_id, accounts, data)
+        && let Some(summary) = visualize_inner_instruction(instruction, parent_depth)
+    {
+        return summary;
     }
 
     if program_id == &spl_token::ID {
-        if let Ok(ix) = TokenInstruction::unpack(data) {
-            if let Some(summary) = format_token_instruction_summary(ix, accounts) {
-                return summary;
-            }
-        }
-    } else if program_id == &system_program::ID {
-        if let Ok(SystemInstruction::Transfer { lamports }) =
-            bincode::deserialize::<SystemInstruction>(data)
+        if let Ok(ix) = TokenInstruction::unpack(data)
+            && let Some(summary) = format_token_instruction_summary(ix, accounts)
         {
-            return format_native_sol_transfer(accounts, lamports);
+            return summary;
         }
+    } else if program_id == &system_program::ID
+        && let Ok(SystemInstruction::Transfer { lamports }) =
+            bincode::deserialize::<SystemInstruction>(data)
+    {
+        return format_native_sol_transfer(accounts, lamports);
     }
 
     fallback()
@@ -2229,7 +2228,7 @@ fn decode_huffman_origin(
     const LEAF_NODE: u8 = 0;
     const BIT_MASKS: [u8; 8] = [0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01];
 
-    if tree_data.is_empty() || tree_data.len() % NODE_SIZE != 0 {
+    if tree_data.is_empty() || !tree_data.len().is_multiple_of(NODE_SIZE) {
         return Err(VisualSignError::DecodeError(
             "Invalid WebAuthn Huffman tree".to_string(),
         ));

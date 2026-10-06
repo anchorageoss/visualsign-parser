@@ -789,14 +789,14 @@ pub fn try_extract_from_chain_metadata(
         // and the signer is owed what was attempted. The parse it waits on is of
         // an already size-capped string, and no signature verification happens
         // for the unsigned case, so nothing expensive moves ahead of it.
-        if !provenance.verified() {
-            if let Some(curated) = tokens::seeded_decimals(asset_id) {
-                reject!(
-                    "{} would override a curated seed (proposed decimals {}, curated {curated})",
-                    provenance.override_subject(),
-                    parsed.decimals
-                );
-            }
+        if !provenance.verified()
+            && let Some(curated) = tokens::seeded_decimals(asset_id)
+        {
+            reject!(
+                "{} would override a curated seed (proposed decimals {}, curated {curated})",
+                provenance.override_subject(),
+                parsed.decimals
+            );
         }
 
         registry.by_asset_id.insert(

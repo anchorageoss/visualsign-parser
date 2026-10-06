@@ -2,6 +2,7 @@
 name = "visualsign"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 description = "Visualsign package defines the structures helper methods to create VisualSign payloads for Anchorage's Open Source VisualSign"
 # Inherit from root
 license.workspace = true
