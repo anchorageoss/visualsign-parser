@@ -1,0 +1,5 @@
+decode
+--chain
+near
+-t
+{"message":"Sign in to app.example.com","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","recipient":"app.example.com","callbackUrl":"https://app.example.com/done"}
