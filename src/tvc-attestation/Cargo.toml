@@ -2,6 +2,7 @@
 name = "tvc-attestation"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish = false
 description = "What a Turnkey Verifiable Cloud pivot needs to attest itself: QOS manifest + ephemeral key, NSM attestation verified against the AWS Nitro root, cached"
 
