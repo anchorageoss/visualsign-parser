@@ -890,9 +890,15 @@ fn message_to_visual_sign_payload(
             // Solana address, and base58 has no character that needs escaping.
             create_text_field("Signer", &envelope.signer_address)?.signable_payload_field,
         ],
-        "SolanaTx".to_string(),
+        MESSAGE_PAYLOAD_TYPE.to_string(),
     ))
 }
+
+/// `payload_type` for an off-chain message: what the signature covers is a
+/// message, not a transaction, whatever the message carries. Transactions keep
+/// `"SolanaTx"`. See "payload_type names the chain and what is signed" in
+/// CLAUDE.md.
+const MESSAGE_PAYLOAD_TYPE: &str = "SolanaMessage";
 
 /// Convert versioned Solana transaction to visual sign payload
 fn convert_versioned_to_visual_sign_payload(
@@ -3050,6 +3056,7 @@ mod solana_message_tests {
     fn message_renders_as_text() {
         let payload = render_message("Sign in to app.example.com");
         assert_eq!(payload.title, "Solana Message");
+        assert_eq!(payload.payload_type, "SolanaMessage");
         assert_eq!(message_text(&payload), "Sign in to app.example.com");
     }
 
