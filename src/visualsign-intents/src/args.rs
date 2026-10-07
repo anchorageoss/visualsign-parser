@@ -7,7 +7,11 @@ use super::NearIntentsError;
 /// The `execute_intents(signed: Vec<MultiPayload>)` argument object. NEAR
 /// serializes method args as a JSON object keyed by parameter name, so the raw
 /// args bytes are `{ "signed": [ ... ] }`.
+///
+/// Unknown argument keys are refused: the args are part of the transaction the
+/// signer approves, and the contract would ignore a key the render never shows.
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ExecuteIntentsArgs {
     signed: Vec<MultiPayload>,
 }
@@ -30,6 +34,16 @@ mod tests {
     #[test]
     fn rejects_non_json() {
         assert!(decode_args(b"not json").is_err());
+    }
+
+    #[test]
+    fn rejects_an_unknown_argument() {
+        let Err(NearIntentsError::InputNotJson(message)) =
+            decode_args(br#"{"signed":[],"memo":"hidden"}"#)
+        else {
+            panic!("expected a refusal for an unknown argument");
+        };
+        assert!(message.contains("memo"), "{message}");
     }
 
     #[test]
