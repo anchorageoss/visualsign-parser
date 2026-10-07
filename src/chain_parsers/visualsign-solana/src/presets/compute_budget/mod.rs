@@ -3,7 +3,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    resolve_program_display,
 };
 use borsh::de::BorshDeserialize;
 use config::ComputeBudgetConfig;
@@ -40,6 +41,15 @@ impl InstructionVisualizer for ComputeBudgetVisualizer {
     fn kind(&self) -> VisualizerKind {
         VisualizerKind::Payments("ComputeBudget")
     }
+
+    /// Every compute-budget instruction only prices or sizes the transaction.
+    fn is_infrastructure(&self, context: &VisualizerContext) -> bool {
+        ComputeBudgetInstruction::try_from_slice(context.data()).is_ok()
+    }
+
+    fn compute_budget(&self, context: &VisualizerContext) -> Option<ComputeBudgetInstruction> {
+        ComputeBudgetInstruction::try_from_slice(context.data()).ok()
+    }
 }
 
 fn format_compute_budget_instruction(instruction: &ComputeBudgetInstruction) -> String {
@@ -64,10 +74,7 @@ fn create_compute_budget_preview_layout(
     instruction: &ComputeBudgetInstruction,
     context: &VisualizerContext,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
-    let program_id_str = match context.program_id() {
-        ProgramRef::Resolved(pk) => pk.to_string(),
-        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
-    };
+    let program_id_str = resolve_program_display(context);
     let instruction_text = format_compute_budget_instruction(instruction);
 
     let condensed = SignablePayloadFieldListLayout {

@@ -10,7 +10,7 @@ All commands run from `src/`:
 make -C src build          # Build all workspace crates
 make -C src test           # Build all, then run all tests (integration tests need binaries)
 make -C src lint           # fmt-check, then cargo clippy --all-targets -- -D warnings
-make -C src fmt            # cargo fmt + rustfmt on Solana presets (plain `cargo fmt` misses them)
+make -C src fmt            # cargo fmt + rustfmt on Solana presets/integrations (plain `cargo fmt` misses them)
 make -C src fmt-check      # Same file set as fmt, check only
 make -C src generated      # Regenerate protobuf types (tonic_build), then fmt
 make -C src grpc-server    # Run the gRPC server locally
@@ -112,10 +112,10 @@ separate, unsigned-accepting path unaffected by either flag: unsigned IDLs are a
 accepted, and the `VISUALSIGN_SOL_IDL_SIGNERS` env var only allowlists signers for
 IDLs that *are* signed.
 
-The intended end state is for the flags to land in the TVC deployment manifest's
-`pivotArgs` (see `tools/tvc-deploy`), so a signer can verify which posture a deployment
-runs out of band; wiring `tools/tvc-deploy` to emit them has not landed yet and is
-tracked as a follow-up. Represented in code by `visualsign::signing::MetadataTrustPolicy`,
+The flags land in the TVC deployment manifest's `pivotArgs`, so a signer can verify
+which posture a deployment runs out of band: `tools/tvc-deploy deploy` emits them for
+`parser_app`, and `deploy-pivot` passes any pivot's flags (including
+`parser_http_server`'s) after `--`. Represented in code by `visualsign::signing::MetadataTrustPolicy`,
 threaded through `parser_app::config::ParserConfig` into
 `EthereumVisualSignConverter::with_policy`. `parser_grpc_server` currently hardcodes
 accept-unsigned (non-attested dev server); exposing the same flags there is a follow-up.
@@ -127,5 +127,5 @@ accept-unsigned (non-attested dev server); exposing the same flags there is a fo
 - **Bounded readers** — File loading capped at 10MB to prevent DoS
 - **Type-erased converters** — `VisualSignConverterAny` trait objects for polymorphic registry without generics overhead
 - **Feature gates for chains** — Ethereum/Solana gated, extensible to new chains
-- **Rust edition 2024** on nightly channel 1.88
+- **Rust edition 2024** on stable channel 1.94
 - **Unified hex/`0x` handling** — All hex inputs (raw transactions, signatures, public keys, addresses) decode through `visualsign::encodings`: `decode_hex` (strip + decode), `decode_hex_array::<N>` (strip + decode into a fixed-size `[u8; N]`, for fixed-width public keys and signatures), `strip_hex_prefix`, and `split_hex_prefix`. These accept an optional `0x`/`0X` prefix (case-insensitive). Do not hand-roll prefix stripping or fixed-length checks per chain. Where a prefix is mandatory (e.g. JSON-RPC quantities/data), use `split_hex_prefix` and turn `None` into an error. `decode_hex_array`'s error `Display` is a suffix fragment, so callers wrap it as `format!("Invalid {what} {e}")`. New chains and address parsers reuse these rather than introducing their own prefix rules.

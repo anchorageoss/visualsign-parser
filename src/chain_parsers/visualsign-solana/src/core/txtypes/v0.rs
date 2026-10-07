@@ -1,8 +1,10 @@
 #[cfg(feature = "diagnostics")]
 use crate::core::DecodeInstructionsResult;
+#[cfg(not(feature = "diagnostics"))]
+use crate::core::DecodedInstructions;
 use crate::core::{
-    InstructionVisualizer, SolanaAccount, VisualizerContext, available_visualizers,
-    visualize_with_any,
+    InstructionVisualizer, SolanaAccount, SummaryAccumulator, VisualizerContext,
+    available_visualizers, visualize_with_any,
 };
 use solana_sdk::transaction::VersionedTransaction;
 #[cfg(feature = "diagnostics")]
@@ -61,69 +63,68 @@ pub fn decode_v0_transfers(
         .solana_parsed_transaction
         .payload
         .as_ref()
+        && let Some(transaction_metadata) = payload.transaction_metadata.as_ref()
     {
-        if let Some(transaction_metadata) = payload.transaction_metadata.as_ref() {
-            // Add native SOL transfers
-            for (i, transfer) in transaction_metadata.transfers.iter().enumerate() {
-                let field = AnnotatedPayloadField {
-                    signable_payload_field: SignablePayloadField::TextV2 {
-                        common: SignablePayloadFieldCommon {
-                            fallback_text: format!(
-                                "Transfer {}: From {} To {} For {}",
-                                i + 1,
-                                transfer.from,
-                                transfer.to,
-                                transfer.amount
-                            ),
-                            label: format!("Transfer {}", i + 1),
-                        },
-                        text_v2: SignablePayloadFieldTextV2 {
-                            text: format!(
-                                "From: {}\nTo: {}\nAmount: {}",
-                                transfer.from, transfer.to, transfer.amount
-                            ),
-                        },
+        // Add native SOL transfers
+        for (i, transfer) in transaction_metadata.transfers.iter().enumerate() {
+            let field = AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!(
+                            "Transfer {}: From {} To {} For {}",
+                            i + 1,
+                            transfer.from,
+                            transfer.to,
+                            transfer.amount
+                        ),
+                        label: format!("Transfer {}", i + 1),
                     },
-                    static_annotation: None,
-                    dynamic_annotation: None,
-                };
-
-                fields.push(field);
-            }
-
-            // Add SPL token transfers
-            for (i, spl_transfer) in transaction_metadata.spl_transfers.iter().enumerate() {
-                let field = AnnotatedPayloadField {
-                    signable_payload_field: SignablePayloadField::TextV2 {
-                        common: SignablePayloadFieldCommon {
-                            fallback_text: format!(
-                                "SPL Transfer {}: From {} To {} For {}",
-                                i + 1,
-                                spl_transfer.from,
-                                spl_transfer.to,
-                                spl_transfer.amount
-                            ),
-                            label: format!("V0 SPL Transfer {}", i + 1),
-                        },
-                        text_v2: SignablePayloadFieldTextV2 {
-                            text: format!(
-                                "From: {}\nTo: {}\nOwner: {}\nAmount: {}\nMint: {:?}\nDecimals: {:?}\nFee: {:?}",
-                                spl_transfer.from,
-                                spl_transfer.to,
-                                spl_transfer.owner,
-                                spl_transfer.amount,
-                                spl_transfer.token_mint,
-                                spl_transfer.decimals,
-                                spl_transfer.fee
-                            ),
-                        },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!(
+                            "From: {}\nTo: {}\nAmount: {}",
+                            transfer.from, transfer.to, transfer.amount
+                        ),
                     },
-                    static_annotation: None,
-                    dynamic_annotation: None,
-                };
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            };
 
-                fields.push(field);
-            }
+            fields.push(field);
+        }
+
+        // Add SPL token transfers
+        for (i, spl_transfer) in transaction_metadata.spl_transfers.iter().enumerate() {
+            let field = AnnotatedPayloadField {
+                signable_payload_field: SignablePayloadField::TextV2 {
+                    common: SignablePayloadFieldCommon {
+                        fallback_text: format!(
+                            "SPL Transfer {}: From {} To {} For {}",
+                            i + 1,
+                            spl_transfer.from,
+                            spl_transfer.to,
+                            spl_transfer.amount
+                        ),
+                        label: format!("V0 SPL Transfer {}", i + 1),
+                    },
+                    text_v2: SignablePayloadFieldTextV2 {
+                        text: format!(
+                            "From: {}\nTo: {}\nOwner: {}\nAmount: {}\nMint: {:?}\nDecimals: {:?}\nFee: {:?}",
+                            spl_transfer.from,
+                            spl_transfer.to,
+                            spl_transfer.owner,
+                            spl_transfer.amount,
+                            spl_transfer.token_mint,
+                            spl_transfer.decimals,
+                            spl_transfer.fee
+                        ),
+                    },
+                },
+                static_annotation: None,
+                dynamic_annotation: None,
+            };
+
+            fields.push(field);
         }
     }
 
@@ -166,6 +167,7 @@ pub fn decode_v0_instructions(
             fields: Vec::new(),
             errors: Vec::new(),
             diagnostics,
+            summary: None,
         };
     }
 
@@ -180,6 +182,7 @@ pub fn decode_v0_instructions(
     // Visualization: process every instruction (no skipping)
     let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
     let mut errors: Vec<(usize, VisualSignError)> = Vec::new();
+    let mut summary = SummaryAccumulator::default();
 
     for (i, ci) in v0_message.instructions.iter().enumerate() {
         let sender = SolanaAccount {
@@ -191,14 +194,23 @@ pub fn decode_v0_instructions(
         let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry, i);
 
         match visualize_with_any(&visualizers_refs, &context) {
-            Some(Ok(viz_result)) => fields.push(viz_result.field),
-            Some(Err(e)) => errors.push((i, e)),
-            None => errors.push((
-                i,
-                VisualSignError::DecodeError(format!(
-                    "No visualizer available for instruction at index {i}"
-                )),
-            )),
+            Some(Ok(mut viz_result)) => {
+                summary.observe(&mut viz_result);
+                fields.push(viz_result.field);
+            }
+            Some(Err(e)) => {
+                summary.block();
+                errors.push((i, e));
+            }
+            None => {
+                summary.block();
+                errors.push((
+                    i,
+                    VisualSignError::DecodeError(format!(
+                        "No visualizer available for instruction at index {i}"
+                    )),
+                ));
+            }
         }
     }
 
@@ -206,6 +218,7 @@ pub fn decode_v0_instructions(
         fields,
         errors,
         diagnostics,
+        summary: summary.finish(),
     }
 }
 
@@ -216,7 +229,7 @@ pub fn decode_v0_instructions(
 pub fn decode_v0_instructions(
     v0_message: &solana_sdk::message::v0::Message,
     idl_registry: &crate::idl::IdlRegistry,
-) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+) -> Result<DecodedInstructions, VisualSignError> {
     let visualizers: Vec<Box<dyn InstructionVisualizer>> = available_visualizers();
     let visualizers_refs: Vec<&dyn InstructionVisualizer> =
         visualizers.iter().map(|v| v.as_ref()).collect::<Vec<_>>();
@@ -230,6 +243,7 @@ pub fn decode_v0_instructions(
     }
 
     let mut fields: Vec<AnnotatedPayloadField> = Vec::new();
+    let mut summary = SummaryAccumulator::default();
     for (i, ci) in v0_message.instructions.iter().enumerate() {
         let sender = SolanaAccount {
             account_key: account_keys[0].to_string(),
@@ -240,7 +254,10 @@ pub fn decode_v0_instructions(
         let context = VisualizerContext::new(&sender, ci, account_keys, idl_registry, i);
 
         match visualize_with_any(&visualizers_refs, &context) {
-            Some(Ok(viz_result)) => fields.push(viz_result.field),
+            Some(Ok(mut viz_result)) => {
+                summary.observe(&mut viz_result);
+                fields.push(viz_result.field);
+            }
             Some(Err(e)) => {
                 return Err(VisualSignError::DecodeError(format!(
                     "instruction {i}: {e}"
@@ -254,7 +271,10 @@ pub fn decode_v0_instructions(
         }
     }
 
-    Ok(fields)
+    Ok(DecodedInstructions {
+        fields,
+        summary: summary.finish(),
+    })
 }
 
 /// Create a rich address lookup table field with detailed information
@@ -470,7 +490,9 @@ mod off_tests {
             }],
         );
         let registry = crate::idl::IdlRegistry::new();
-        let fields = decode_v0_instructions(&msg, &registry).expect("OOB should not abort");
+        let fields = decode_v0_instructions(&msg, &registry)
+            .expect("OOB should not abort")
+            .fields;
         assert_eq!(fields.len(), 1);
     }
 }

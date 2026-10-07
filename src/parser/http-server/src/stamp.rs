@@ -199,11 +199,15 @@ pub fn verify(headers: &HeaderMap, body: &[u8], allowlist: &Allowlist) -> Result
             (Curve::P256, key.verify(body, &sig).is_ok())
         }
         SCHEME_SECP256K1 => {
-            use k256::ecdsa::{DerSignature, VerifyingKey, signature::Verifier};
+            use k256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
             let key = VerifyingKey::from_sec1_bytes(&pubkey)
                 .map_err(|e| StampError::Malformed(format!("k256 pubkey: {e}")))?;
-            let sig = DerSignature::from_bytes(&sig_der)
+            let sig = Signature::from_der(&sig_der)
                 .map_err(|e| StampError::Malformed(format!("k256 der: {e}")))?;
+            // k256 rejects high-S signatures while p256 accepts both, so a
+            // stamper that doesn't normalize S would fail about half the time.
+            // Malleability is moot here since stamps are replayable by design.
+            let sig = sig.normalize_s().unwrap_or(sig);
             (Curve::Secp256k1, key.verify(body, &sig).is_ok())
         }
         other => return Err(StampError::UnsupportedScheme(other.to_string())),
@@ -227,6 +231,7 @@ pub fn verify(headers: &HeaderMap, body: &[u8], allowlist: &Allowlist) -> Result
 mod tests {
     use super::*;
     use axum::http::{HeaderMap, HeaderValue};
+    use k256::ecdsa::Signature;
     use turnkey_api_key_stamper::{Stamp, TurnkeyP256ApiKey, TurnkeySecp256k1ApiKey};
 
     fn headers_for(key: &impl Stamp, body: &[u8]) -> HeaderMap {
@@ -326,6 +331,32 @@ mod tests {
         .unwrap();
         let body = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02"}}"#;
         verify(&headers_for(&key, body), body, &allowlist).unwrap();
+    }
+
+    #[test]
+    fn accepts_a_high_s_secp256k1_stamp() {
+        let key = TurnkeySecp256k1ApiKey::generate();
+        let allowlist = Allowlist::from_hex_list(&format!(
+            "secp256k1:{}",
+            hex::encode(key.compressed_public_key())
+        ))
+        .unwrap();
+        let body = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0x02"}}"#;
+
+        // The stamper emits low-S; flip it to the equivalent high-S form.
+        let stamp = key.stamp(body).unwrap();
+        let decoded = BASE64_URL_SAFE_NO_PAD.decode(&stamp.value).unwrap();
+        let mut json: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
+        let der = hex::decode(json["signature"].as_str().unwrap()).unwrap();
+        let low = Signature::from_der(&der).unwrap();
+        let high = Signature::from_scalars(low.r().to_bytes(), (-*low.s()).to_bytes()).unwrap();
+        assert!(high.normalize_s().is_some(), "fixture must be high-S");
+        json["signature"] = hex::encode(high.to_der().as_bytes()).into();
+
+        let mut headers = HeaderMap::new();
+        let value = BASE64_URL_SAFE_NO_PAD.encode(json.to_string());
+        headers.insert("X-Stamp", HeaderValue::from_str(&value).unwrap());
+        verify(&headers, body, &allowlist).unwrap();
     }
 
     #[test]

@@ -402,7 +402,7 @@ mod tests {
 
     // Simple hex decoder function to avoid dependency on hex crate
     fn decode_hex(s: &str) -> Result<Vec<u8>, &'static str> {
-        if s.len() % 2 != 0 {
+        if !s.len().is_multiple_of(2) {
             return Err("Hex string must have even length");
         }
 

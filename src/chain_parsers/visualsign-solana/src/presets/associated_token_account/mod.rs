@@ -3,7 +3,8 @@
 mod config;
 
 use crate::core::{
-    InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    AccountRef, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    resolve_program_display,
 };
 use config::AssociatedTokenAccountConfig;
 use spl_associated_token_account::instruction::AssociatedTokenAccountInstruction;
@@ -37,16 +38,31 @@ impl InstructionVisualizer for AssociatedTokenAccountVisualizer {
     fn kind(&self) -> VisualizerKind {
         VisualizerKind::Payments("AssociatedTokenAccount")
     }
+
+    /// Only the fee payer creating its own ATA is infrastructure: funder (account 0) and wallet
+    /// (account 2) must both be the fee payer. Creating for another wallet or with another
+    /// funder spends someone's lamports on a third party, and `RecoverNested` moves tokens.
+    fn is_infrastructure(&self, context: &VisualizerContext) -> bool {
+        let creates = matches!(
+            parse_ata_instruction(context.data()),
+            Ok(AssociatedTokenAccountInstruction::Create
+                | AssociatedTokenAccountInstruction::CreateIdempotent)
+        );
+        let is_fee_payer = |position: usize| {
+            matches!(
+                context.account(position),
+                Some(AccountRef::Resolved(key)) if key.to_string() == context.sender().account_key
+            )
+        };
+        creates && is_fee_payer(0) && is_fee_payer(2)
+    }
 }
 
 fn create_ata_preview_layout(
     ata_instruction: &AssociatedTokenAccountInstruction,
     context: &VisualizerContext,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
-    let program_id_str = match context.program_id() {
-        ProgramRef::Resolved(pk) => pk.to_string(),
-        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
-    };
+    let program_id_str = resolve_program_display(context);
     let instruction_text = format_ata_instruction(ata_instruction);
 
     let condensed = SignablePayloadFieldListLayout {

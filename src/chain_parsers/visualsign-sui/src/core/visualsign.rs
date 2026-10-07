@@ -92,29 +92,32 @@ fn convert_to_visual_sign_payload(
     )
     .map_err(|e| VisualSignError::ParseError(TransactionParseError::DecodeError(e.to_string())))?;
 
+    let transfers = if decode_transfers {
+        commands::decode_transfers(&block_data)?
+    } else {
+        Vec::new()
+    };
+    let decoded = decode_commands(&block_data)?;
+    // A rendered transfer is a second action the summary does not describe.
+    let summary = decoded.summary.filter(|_| transfers.is_empty());
+
     let mut fields: Vec<SignablePayloadField> = vec![get_tx_network()?.signable_payload_field];
-
-    if decode_transfers {
-        fields.extend(
-            commands::decode_transfers(&block_data)?
-                .iter()
-                .map(|e| e.signable_payload_field.clone()),
-        );
-    }
-
-    fields.extend(
-        decode_commands(&block_data)?
-            .iter()
-            .map(|e| e.signable_payload_field.clone()),
-    );
-
+    let (title, subtitle) = match (title, summary) {
+        (Some(caller_title), _) => (caller_title, None),
+        (None, Some(summary)) => (summary.title, summary.subtitle),
+        (None, None) => (
+            determine_transaction_type_string(&block_data).to_string(),
+            None,
+        ),
+    };
+    fields.extend(transfers.into_iter().map(|f| f.signable_payload_field));
+    fields.extend(decoded.fields.into_iter().map(|f| f.signable_payload_field));
     fields.push(get_tx_details(transaction, &block_data)?.signable_payload_field);
 
-    let title = title.unwrap_or_else(|| determine_transaction_type_string(&block_data).to_string());
     Ok(SignablePayload::new(
         0,
         title,
-        None,
+        subtitle,
         fields,
         "Sui".to_string(),
     ))

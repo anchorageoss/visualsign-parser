@@ -4,8 +4,9 @@ use std::{
     str::FromStr,
 };
 
+use tvc_attestation::paths::EPHEMERAL_KEY_FILE;
+
 use qos_core::{
-    EPHEMERAL_KEY_FILE,
     cli::EPHEMERAL_FILE_OPT,
     handles::EphemeralKeyHandle,
     parser::{GetParserForOptions, OptionsParser, Parser, Token},

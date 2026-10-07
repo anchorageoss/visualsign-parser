@@ -45,6 +45,8 @@ use visualsign::vsptrait::TransactionParseError;
 
 use crate::idl::IdlRegistry;
 
+mod native_instruction_data;
+
 /// Version of the `SolanaIntermediateOutput` Borsh schema. Bump on ANY change
 /// to the shape below. Mirrored decoders assert this value, so a bump makes a
 /// schema drift fail loudly instead of silently misparsing.
@@ -159,6 +161,7 @@ pub struct SolanaSimulatedInstruction {
     /// instruction data to produce `parsed` and does not return it.
     pub instruction_data_hex: String,
     pub registered_source: RegisteredSource,
+    /// IDL decode, or for RPC-parsed instructions, the discriminator recovered from `type`.
     pub parsed_instruction_data: Option<SolanaParsedInstructionDataIo>,
     /// The RPC's own jsonParsed decode, for the recognized programs it returns
     /// that way (System/Token and friends). `None` for partially-decoded
@@ -690,12 +693,15 @@ fn decode_inner_instructions(
                     });
                 }
                 UiParsedInstruction::Parsed(rpc_parsed) => {
-                    let parsed_json = canonicalize_value(&rpc_parsed.parsed).to_string();
+                    let parsed = canonicalize_value(&rpc_parsed.parsed);
+                    let parsed_json = parsed.to_string();
                     let program = rpc_parsed.program.clone();
                     let registered_source = crate::idl::builtin_programs::registered_source(
                         &rpc_parsed.program_id,
                         configs,
                     );
+                    let parsed_instruction_data =
+                        native_instruction_data::from_rpc_parsed(&rpc_parsed.program_id, &parsed);
 
                     simulated_instructions.push(SolanaSimulatedInstruction {
                         index: outer_index,
@@ -704,7 +710,7 @@ fn decode_inner_instructions(
                         accounts: Vec::new(),
                         instruction_data_hex: String::new(),
                         registered_source,
-                        parsed_instruction_data: None,
+                        parsed_instruction_data,
                         solana_rpc_parsed_data: Some(SolanaRpcParsedInstructionDataIo {
                             program,
                             parsed_json,
@@ -1239,7 +1245,13 @@ mod tests {
                 "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
             );
             assert_eq!(instructions[i].registered_source, RegisteredSource::Native);
-            assert!(instructions[i].parsed_instruction_data.is_none());
+            let parsed = instructions[i]
+                .parsed_instruction_data
+                .as_ref()
+                .expect("RPC-parsed Token transfer gets parsed_instruction_data");
+            assert_eq!(parsed.instruction_name, "transfer");
+            assert_eq!(parsed.discriminator, "03");
+            assert!(parsed.idl_source.is_empty());
             assert!(instructions[i].solana_rpc_parsed_data.is_some());
             assert!(instructions[i].idl_parse_error.is_none());
         }
@@ -1310,6 +1322,115 @@ mod tests {
         let recovered: SolanaIntermediateInstruction =
             borsh::from_slice(&bytes).expect("borsh deserializes");
         assert_eq!(io, recovered);
+    }
+
+    #[test]
+    fn rpc_parsed_inner_instructions_get_their_discriminator() {
+        let [
+            owner,
+            source,
+            destination,
+            pool,
+            mint,
+            receipt_mint,
+            receipt_account,
+            mint_authority,
+        ] = std::array::from_fn(|_| Pubkey::new_unique().to_string());
+        let liquidity = Pubkey::new_unique().to_string();
+        let token = spl_token::id().to_string();
+        let raw_json = serde_json::to_vec(&serde_json::json!({
+            "context": { "slot": 1 },
+            "value": {
+                "err": null,
+                "logs": [],
+                "innerInstructions": [{
+                    "index": 1,
+                    "instructions": [
+                        {
+                            "programId": liquidity,
+                            "accounts": [pool, destination],
+                            "data": "3Bxs",
+                            "stackHeight": 2
+                        },
+                        {
+                            "program": "spl-token",
+                            "programId": token,
+                            "parsed": {
+                                "type": "transferChecked",
+                                "info": {
+                                    "authority": owner,
+                                    "destination": destination,
+                                    "mint": mint,
+                                    "source": source,
+                                    "tokenAmount": {
+                                        "amount": "20000",
+                                        "decimals": 6,
+                                        "uiAmount": 0.02,
+                                        "uiAmountString": "0.02"
+                                    }
+                                }
+                            },
+                            "stackHeight": 2
+                        },
+                        {
+                            "program": "spl-token",
+                            "programId": token,
+                            "parsed": {
+                                "type": "mintTo",
+                                "info": {
+                                    "account": receipt_account,
+                                    "amount": "18827",
+                                    "mint": receipt_mint,
+                                    "mintAuthority": mint_authority
+                                }
+                            },
+                            "stackHeight": 2
+                        },
+                        {
+                            "program": "spl-associated-token-account",
+                            "programId": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+                            "parsed": {
+                                "type": "create",
+                                "info": { "wallet": owner, "mint": mint }
+                            },
+                            "stackHeight": 2
+                        }
+                    ]
+                }]
+            }
+        }))
+        .unwrap();
+
+        let (instructions, simulation_error) =
+            parse_and_decode_simulated_instructions(&raw_json, &IdlRegistry::new());
+        assert!(simulation_error.is_none());
+        assert_eq!(instructions.len(), 4);
+
+        assert!(instructions[0].parsed_instruction_data.is_none());
+        assert!(!instructions[0].instruction_data_hex.is_empty());
+
+        let transfer = instructions[1]
+            .parsed_instruction_data
+            .as_ref()
+            .expect("transferChecked is mapped");
+        assert_eq!(transfer.instruction_name, "transferChecked");
+        assert_eq!(transfer.discriminator, "0c");
+        let args: Value = serde_json::from_str(&transfer.program_call_args_json).unwrap();
+        assert_eq!(args["source"], source.as_str());
+        assert_eq!(args["tokenAmount"]["amount"], "20000");
+        assert!(instructions[1].instruction_data_hex.is_empty());
+        assert!(instructions[1].solana_rpc_parsed_data.is_some());
+
+        let mint_to = instructions[2]
+            .parsed_instruction_data
+            .as_ref()
+            .expect("mintTo is mapped");
+        assert_eq!(mint_to.instruction_name, "mintTo");
+        assert_eq!(mint_to.discriminator, "07");
+
+        // ATA `create` is unmapped: its encoding is ambiguous.
+        assert!(instructions[3].parsed_instruction_data.is_none());
+        assert!(instructions[3].solana_rpc_parsed_data.is_some());
     }
 
     #[test]

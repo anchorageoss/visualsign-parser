@@ -2,6 +2,7 @@
 name = "integration"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 publish = false
 
 [dependencies]
@@ -9,7 +10,6 @@ qos_core = { workspace = true, features = ["mock"] }
 qos_crypto = { workspace = true }
 qos_p256 = { workspace = true }
 qos_hex = { workspace = true }
-qos_nsm = { workspace = true, features = ["mock"] }
 qos_test_primitives = { workspace = true }
 
 parser_app = { path = "../parser/app" }
@@ -25,19 +25,9 @@ borsh = { version = "1.0", features = [
   "derive",
 ], default-features = false }
 tonic = "0.10"
-prost = { version = "0.12", default-features = false }
 rand = "0.9.1"
 futures = "0.3"
 serde_json = { version = "1.0", features = ["std"], default-features = false }
-serde = { version = "1", features = ["derive"], default-features = false }
-chrono = { version = "0.4", features = [
-  "std",
-  "clock",
-], default-features = false }
-bs58 = { version = "0.5.1", default-features = false }
-
-# for encoding and decoding txs
-base64 = "0.22.1"
 tracing-test = "0.2.5"
 
 hex = { workspace = true }
@@ -50,3 +40,8 @@ turnkey_api_key_stamper = "0.10"
 
 [lints]
 workspace = true
+
+[package.metadata.cargo-machete]
+# The suite spawns the built `parser_app` binary (`make test` builds it first);
+# not imported from Rust, so machete can't see it.
+ignored = ["parser_app"]

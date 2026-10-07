@@ -36,7 +36,7 @@ on:
       qos_version:
         description: "QOS version"
         required: false
-        default: "0.12.0"
+        default: "0.12.1"
       host_ip:
         description: "parser_app listen IP"
         required: false
@@ -115,7 +115,7 @@ jobs:
           IMAGE_URL: ${{ inputs.image_url || vars.TVC_TEST_IMAGE_URL }}
           EXPECTED_DIGEST: ${{ inputs.expected_digest || vars.TVC_TEST_EXPECTED_DIGEST }}
           OPERATOR_ID: ${{ inputs.operator_id || vars.TVC_TEST_OPERATOR_ID }}
-          QOS_VERSION: ${{ inputs.qos_version || '0.12.0' }}
+          QOS_VERSION: ${{ inputs.qos_version || '0.12.1' }}
           HOST_IP: ${{ inputs.host_ip || '0.0.0.0' }}
           HOST_PORT: ${{ inputs.host_port || '3000' }}
           ABI_SIGNER_PUBKEY: ${{ inputs.abi_signer_pubkey || '' }}

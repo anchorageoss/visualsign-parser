@@ -260,19 +260,19 @@ proptest! {
         inst_idx in any::<usize>(),
         arg_bytes in prop::collection::vec(any::<u8>(), 0..1300usize),
     ) {
-        if let Ok(idl) = decode_idl_data(&idl_json) {
-            if !idl.instructions.is_empty() {
-                let inst = &idl.instructions[inst_idx % idl.instructions.len()];
-                let expected_name = inst.name.clone();
-                if let Some(disc) = &inst.discriminator {
-                    let mut data = disc.clone();
-                    data.extend_from_slice(&arg_bytes);
-                    if let Ok(result) = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl) {
-                        prop_assert_eq!(&result.instruction_name, &expected_name,
-                            "discriminator must dispatch to the correct instruction");
-                    }
-                    // Err is acceptable — random arg bytes may be too short or malformed
+        if let Ok(idl) = decode_idl_data(&idl_json)
+            && !idl.instructions.is_empty()
+        {
+            let inst = &idl.instructions[inst_idx % idl.instructions.len()];
+            let expected_name = inst.name.clone();
+            if let Some(disc) = &inst.discriminator {
+                let mut data = disc.clone();
+                data.extend_from_slice(&arg_bytes);
+                if let Ok(result) = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl) {
+                    prop_assert_eq!(&result.instruction_name, &expected_name,
+                        "discriminator must dispatch to the correct instruction");
                 }
+                // Err is acceptable — random arg bytes may be too short or malformed
             }
         }
     }
@@ -403,16 +403,16 @@ proptest! {
         length_prefix in any::<u32>(),
         trailing in prop::collection::vec(any::<u8>(), 0..=8usize),
     ) {
-        if let Ok(idl) = decode_idl_data(&idl_json) {
-            if !idl.instructions.is_empty() {
-                // There is exactly one instruction in arb_vec_arg_idl_json
-                let inst = &idl.instructions[0];
-                if let Some(disc) = &inst.discriminator {
-                    let mut data = disc.clone();
-                    data.extend_from_slice(&length_prefix.to_le_bytes());
-                    data.extend_from_slice(&trailing);
-                    let _ = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
-                }
+        if let Ok(idl) = decode_idl_data(&idl_json)
+            && !idl.instructions.is_empty()
+        {
+            // There is exactly one instruction in arb_vec_arg_idl_json
+            let inst = &idl.instructions[0];
+            if let Some(disc) = &inst.discriminator {
+                let mut data = disc.clone();
+                data.extend_from_slice(&length_prefix.to_le_bytes());
+                data.extend_from_slice(&trailing);
+                let _ = parse_instruction_with_idl(&data, TEST_PROGRAM_ID, &idl);
             }
         }
     }
