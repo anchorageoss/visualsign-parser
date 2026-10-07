@@ -3,8 +3,8 @@
 mod config;
 
 use crate::core::{
-    AccountRef, InstructionVisualizer, ProgramRef, SolanaIntegrationConfig, VisualizerContext,
-    VisualizerKind,
+    AccountRef, InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
+    resolve_program_display,
 };
 use config::AssociatedTokenAccountConfig;
 use spl_associated_token_account::instruction::AssociatedTokenAccountInstruction;
@@ -62,10 +62,7 @@ fn create_ata_preview_layout(
     ata_instruction: &AssociatedTokenAccountInstruction,
     context: &VisualizerContext,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
-    let program_id_str = match context.program_id() {
-        ProgramRef::Resolved(pk) => pk.to_string(),
-        ProgramRef::Unresolved { raw_index } => format!("unresolved({raw_index})"),
-    };
+    let program_id_str = resolve_program_display(context);
     let instruction_text = format_ata_instruction(ata_instruction);
 
     let condensed = SignablePayloadFieldListLayout {
