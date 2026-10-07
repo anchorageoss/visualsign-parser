@@ -900,7 +900,7 @@ fn message_to_visual_sign_payload(
             rendered.title,
             None,
             fields,
-            "SolanaTx".to_string(),
+            MESSAGE_PAYLOAD_TYPE.to_string(),
         ));
     }
     Ok(SignablePayload::new(
@@ -3255,6 +3255,8 @@ mod solana_intents_message_tests {
         );
         assert_eq!(field_text(&payload, "Signing Address"), SIGNER);
         assert_eq!(field_text(&payload, "Signer"), "alice.near");
+        // What the signature covers is a message, whatever it carries.
+        assert_eq!(payload.payload_type, "SolanaMessage");
     }
 
     /// The signing address appears once, after the intents' own fields.
