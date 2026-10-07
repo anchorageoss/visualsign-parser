@@ -435,9 +435,12 @@ fn render_nep413_envelope(
     // field, for the same reason, as the intents and on-chain paths render.
     let mut fields = vec![
         create_text_field("Network", network.display_name())?.signable_payload_field,
+        // Escaped like the message and callback URL: `recipient` is free text
+        // the caller supplies, and an unescaped line break in it could forge a
+        // second field on the signer's screen.
         create_address_field(
             "NEP-413 Recipient",
-            &payload.recipient,
+            &charset_safe(&payload.recipient),
             None,
             None,
             None,
@@ -1625,19 +1628,36 @@ mod tests {
         }
     }
 
-    /// Message and callback URL are caller-supplied and reach a signer's
-    /// screen, so a character that could forge a line break or reorder the
-    /// rendering is marked rather than passed through.
+    /// Message, recipient and callback URL are caller-supplied and reach a
+    /// signer's screen, so a character that could forge a line break or
+    /// reorder the rendering is marked rather than passed through.
     #[test]
     fn nep413_envelope_text_is_charset_safe() {
         let payload = render_nep413(
             nep413_envelope(
                 "innocent\nTo: attacker.near",
-                "app.example.com",
+                "app.example.com\nNEP-413 Recipient: attacker.near",
                 Some("https://app.example.com/\u{202e}bc"),
             ),
             VisualSignOptions::default(),
         );
+        let recipient = payload
+            .fields
+            .iter()
+            .find_map(|f| match f {
+                SignablePayloadField::AddressV2 { common, address_v2 }
+                    if common.label == "NEP-413 Recipient" =>
+                {
+                    Some(address_v2.address.clone())
+                }
+                _ => None,
+            })
+            .expect("no recipient field");
+        assert_eq!(
+            recipient,
+            "app.example.com?NEP-413 Recipient: attacker.near"
+        );
+        payload.validate_charset().expect("charset");
         assert_eq!(
             labeled_text(&payload, "NEP-413 Message"),
             "innocent?To: attacker.near"
