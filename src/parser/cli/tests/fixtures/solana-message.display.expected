@@ -1,0 +1,26 @@
+SignablePayload {
+    fields: [
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "Sign in to app.example.com%0ANonce: 42",
+                label: "Message",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "Sign in to app.example.com%0ANonce: 42",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT",
+                label: "Signer",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT",
+            },
+        },
+    ],
+    payload_type: "SolanaTx",
+    subtitle: None,
+    title: "Solana Message",
+    version: "0",
+}

@@ -1,0 +1,5 @@
+decode
+--chain
+solana
+-t
+{"message":"Sign in to app.example.com\nNonce: 42","signerAddress":"BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT"}

@@ -86,39 +86,41 @@ fn append_diagnostics(
 pub enum SolanaTransactionWrapper {
     Legacy(SolanaTransaction),
     Versioned(VersionedTransaction),
-    /// An off-chain message, signed over its own bytes. Solana has no framing
-    /// standard of its own, so the signature covers the message string itself
-    /// rather than a digest of a re-serialization -- what renders here has to be
-    /// exactly what gets signed. The envelope also names the signing address,
-    /// which renders but is not part of the signed bytes.
+    /// An off-chain message under the raw-bytes `signMessage` convention that
+    /// Solana wallets use: the signature covers the message's UTF-8 bytes with
+    /// no header, so what renders here has to be exactly what gets signed. The
+    /// envelope also names the signing address, which renders but is not part
+    /// of the signed bytes.
+    ///
+    /// Solana's off-chain message standard (`solana-offchain-message`) prefixes
+    /// a header that starts with the `\xffsolana offchain` signing domain. Such a
+    /// message never reaches this variant: the envelope carries the message as
+    /// a JSON string, which decodes to valid UTF-8, and a `0xff` byte is not.
     Message(OffChainMessage),
-}
-
-/// Lift the text out of an off-chain message envelope. Solana adds no framing to
-/// a signed message, so the envelope exists only to tell a message apart from a
-/// transaction on a wire that carries both.
-///
-/// Unknown fields are refused rather than ignored: an envelope carrying
-/// something this build does not understand is not one it can claim to have
-/// rendered in full. A repeated field is refused the same way: a JSON object
-/// with the same key twice has no single value to render, so accepting
-/// whichever one a generic parser happened to keep would let a signer approve
-/// a message that was never the one shown.
-fn message_from_envelope(json: &str) -> Result<OffChainMessage, String> {
-    serde_json::from_str(json).map_err(|e| e.to_string())
 }
 
 /// An off-chain message envelope, after the fields are lifted out.
 ///
 /// `signer_address` names the key the signature will come from. The enclave
 /// compares the address against the key it is handed, so rendering the address
-/// is what lets a signer see which of their addresses signs.
+/// is what lets a signer see which of their addresses signs. It is checked to
+/// be a Solana address when the envelope is decoded.
 #[derive(Clone, Debug)]
 pub struct OffChainMessage {
     pub message: String,
     pub signer_address: String,
 }
 
+/// Decodes `{"message": ..., "signerAddress": ...}`. The envelope exists only to
+/// tell a message apart from a transaction on a wire that carries both.
+///
+/// Unknown fields are refused rather than ignored: an envelope carrying
+/// something this build does not understand is not one it can claim to have
+/// rendered in full. A repeated field is refused the same way: a JSON object
+/// with the same key twice has no single value to render, so accepting
+/// whichever one a generic parser happened to keep would let a signer approve
+/// a message that was never the one shown. A `signerAddress` that is not a
+/// Solana address is refused, since no key could sign as it.
 impl<'de> serde::Deserialize<'de> for OffChainMessage {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -157,12 +159,17 @@ impl<'de> serde::Deserialize<'de> for OffChainMessage {
                         }
                     }
                 }
+                let message = message
+                    .ok_or_else(|| serde::de::Error::custom("envelope has no message field"))?;
+                let signer_address = signer_address.ok_or_else(|| {
+                    serde::de::Error::custom("envelope has no signerAddress field")
+                })?;
+                Pubkey::from_str(&signer_address).map_err(|_| {
+                    serde::de::Error::custom("signerAddress is not a Solana address")
+                })?;
                 Ok(OffChainMessage {
-                    message: message
-                        .ok_or_else(|| serde::de::Error::custom("envelope has no message field"))?,
-                    signer_address: signer_address.ok_or_else(|| {
-                        serde::de::Error::custom("envelope has no signerAddress field")
-                    })?,
+                    message,
+                    signer_address,
                 })
             }
         }
@@ -173,23 +180,39 @@ impl<'de> serde::Deserialize<'de> for OffChainMessage {
 
 /// Escape what cannot render, rather than dropping it or collapsing it.
 ///
-/// The module-local `charset_safe` filters unrenderable characters out, which is
-/// safe for an argument preview but not for text a signer approves: dropping
-/// lets two different messages render identically. A single marker character
-/// fails the same way less obviously, because the marker is itself renderable:
-/// a literal `?` collides with anything marked down to `?`.
+/// `core::arg_rendering`'s `charset_safe` filters unrenderable characters out,
+/// which is safe for an argument preview but not for text a signer approves:
+/// dropping lets two different messages render identically. Replacing them with
+/// a single marker character fails the same way less obviously, because the
+/// marker is itself renderable: a literal `?` collides with anything replaced
+/// by `?`.
 ///
-/// Escaping is reversible, so distinct messages stay distinct. A literal
-/// backslash is escaped too, or a message carrying one could forge an escape
-/// for a character it does not contain.
+/// Escaping is reversible, so distinct messages stay distinct. The escape is
+/// percent-encoding of the character's UTF-8 bytes (`%0A` for a line feed), and
+/// a literal `%` is escaped too (`%25`), or a message carrying one could forge an
+/// escape for a character it does not contain.
+///
+/// The escape uses no backslash. `SignablePayload::validate_charset` refuses a
+/// payload whose JSON contains `\u`, `\t`, `\r`, `\b`, `\f` or `\/`, and a
+/// backslash in field text serializes as `\\`, so a backslash escape (or a
+/// literal backslash followed by one of those letters) would get the whole
+/// message refused. A literal backslash is therefore percent-encoded as well.
 fn charset_escaped(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
+    let mut utf8 = [0u8; 4];
     for c in text.chars() {
         match c {
-            '\\' => out.push_str(r"\\"),
+            '%' | '\\' => {
+                let byte = c as u32;
+                out.push_str(&format!("%{byte:02X}"));
+            }
             ' ' => out.push(' '),
             c if c.is_ascii_graphic() => out.push(c),
-            c => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
+            c => {
+                for b in c.encode_utf8(&mut utf8).bytes() {
+                    out.push_str(&format!("%{b:02X}"));
+                }
+            }
         }
     }
     out
@@ -203,7 +226,7 @@ impl Transaction for SolanaTransactionWrapper {
         // transaction decode failure.
         let trimmed = data.trim();
         if trimmed.starts_with('{') {
-            let envelope = message_from_envelope(trimmed).map_err(|e| {
+            let envelope = serde_json::from_str::<OffChainMessage>(trimmed).map_err(|e| {
                 TransactionParseError::DecodeError(format!(
                     "input is JSON but not a Solana message envelope: {e}"
                 ))
@@ -302,9 +325,9 @@ impl SolanaTransactionWrapper {
         }
     }
 
-    pub fn inner_message(&self) -> Option<&str> {
+    pub fn inner_message(&self) -> Option<&OffChainMessage> {
         match self {
-            Self::Message(envelope) => Some(&envelope.message),
+            Self::Message(envelope) => Some(envelope),
             Self::Legacy(_) | Self::Versioned(_) => None,
         }
     }
@@ -863,10 +886,9 @@ fn message_to_visual_sign_payload(
         vec![
             create_text_field("Message", &charset_escaped(&envelope.message))?
                 .signable_payload_field,
-            // Escaped like the message: an address is caller-supplied and reaches
-            // the same screen, so an unescaped separator could forge a field.
-            create_text_field("Signer", &charset_escaped(&envelope.signer_address))?
-                .signable_payload_field,
+            // Not escaped: decoding already refused anything that is not a base58
+            // Solana address, and base58 has no character that needs escaping.
+            create_text_field("Signer", &envelope.signer_address)?.signable_payload_field,
         ],
         "SolanaTx".to_string(),
     ))
@@ -2920,22 +2942,6 @@ mod tests {
 mod solana_message_tests {
     use super::*;
 
-    fn message_text(payload: &SignablePayload) -> String {
-        payload
-            .fields
-            .iter()
-            .find_map(|f| match f {
-                SignablePayloadField::TextV2 { common, text_v2 } if common.label == "Message" => {
-                    Some(text_v2.text.clone())
-                }
-                _ => None,
-            })
-            // A static message: CodeQL reads a panic as a log sink and treats
-            // anything derived from the rendered payload as tainted, a length
-            // included. The label this searches for is in the string already.
-            .expect("no field labelled Message")
-    }
-
     fn render(envelope: &str) -> SignablePayload {
         SolanaVisualSignConverter
             .to_visual_sign_payload(
@@ -2971,14 +2977,23 @@ mod solana_message_tests {
                 }
                 _ => None,
             })
+            // A static message: CodeQL reads a panic as a log sink and treats
+            // anything derived from the rendered payload as tainted, a length
+            // included, so the label is not interpolated.
             .expect("no field with the requested label")
+    }
+
+    fn message_text(payload: &SignablePayload) -> String {
+        field_text(payload, "Message")
     }
 
     #[test]
     fn message_envelope_decodes_as_a_message() {
         let tx = SolanaTransactionWrapper::from_string(&envelope("Sign in to app.example.com"))
             .expect("decode");
-        assert_eq!(tx.inner_message(), Some("Sign in to app.example.com"));
+        let envelope = tx.inner_message().expect("a message envelope");
+        assert_eq!(envelope.message, "Sign in to app.example.com");
+        assert_eq!(envelope.signer_address, SIGNER);
         assert_eq!(tx.transaction_type(), "Solana Message");
         assert!(tx.inner_legacy().is_none() && tx.inner_versioned().is_none());
     }
@@ -3001,9 +3016,9 @@ mod solana_message_tests {
     /// rendered in full, so it is refused rather than partially shown.
     #[test]
     fn unknown_envelope_fields_are_refused() {
-        let result = SolanaTransactionWrapper::from_string(
-            r#"{"message":"hi","signerAddress":"x","extra":1}"#,
-        );
+        let result = SolanaTransactionWrapper::from_string(&format!(
+            r#"{{"message":"hi","signerAddress":"{SIGNER}","extra":1}}"#
+        ));
         let Err(TransactionParseError::DecodeError(message)) = result else {
             panic!("expected a DecodeError for an unknown field");
         };
@@ -3019,9 +3034,9 @@ mod solana_message_tests {
     /// shown, so it is refused rather than silently resolved.
     #[test]
     fn duplicate_envelope_fields_are_refused() {
-        let result = SolanaTransactionWrapper::from_string(
-            r#"{"message":"A","message":"B","signerAddress":"x"}"#,
-        );
+        let result = SolanaTransactionWrapper::from_string(&format!(
+            r#"{{"message":"A","message":"B","signerAddress":"{SIGNER}"}}"#
+        ));
         let Err(TransactionParseError::DecodeError(message)) = result else {
             panic!("expected a DecodeError for a duplicate field");
         };
@@ -3039,14 +3054,14 @@ mod solana_message_tests {
     }
 
     /// The text is caller-supplied and reaches a signer's screen, so a character
-    /// that could forge a line break is marked.
+    /// that could forge a line break is escaped.
     #[test]
     fn message_text_escapes_what_cannot_render() {
         let payload = render_message(r"innocent\nTo: attacker.sol");
-        assert_eq!(message_text(&payload), r"innocent\u{a}To: attacker.sol");
+        assert_eq!(message_text(&payload), "innocent%0ATo: attacker.sol");
     }
 
-    /// Marking rather than deleting is what keeps two different messages from
+    /// Escaping rather than deleting is what keeps two different messages from
     /// rendering identically -- a signer comparing them has to be able to tell
     /// them apart.
     #[test]
@@ -3057,19 +3072,52 @@ mod solana_message_tests {
 
         // A single marker character cannot carry this. The marker is itself
         // renderable, so a message containing one literally would render the
-        // same as one whose separator was marked down to it.
+        // same as one whose separator was replaced by it.
         let literal_marker = message_text(&render_message("innocent?To: attacker.sol"));
         assert_ne!(with_break, literal_marker);
     }
 
-    /// A message carrying a literal backslash must not be able to produce the
-    /// same render as one carrying the character that backslash would escape.
+    /// A message carrying a literal `%` must not be able to produce the same
+    /// render as one carrying the character that escape stands for.
     #[test]
-    fn a_literal_backslash_cannot_forge_an_escape() {
-        let forged = message_text(&render_message(r"a\\u{a}b"));
+    fn a_literal_percent_cannot_forge_an_escape() {
+        let forged = message_text(&render_message("a%0Ab"));
         let real = message_text(&render_message(r"a\nb"));
-        assert_eq!(real, r"a\u{a}b");
+        assert_eq!(real, "a%0Ab");
+        assert_eq!(forged, "a%250Ab");
         assert_ne!(forged, real);
+    }
+
+    /// Non-ASCII text escapes byte by byte, so it stays reversible.
+    #[test]
+    fn non_ascii_escapes_as_utf8_bytes() {
+        // The envelope embeds the message as written, so this is the JSON
+        // escape for U+00E9.
+        let payload = render_message(r"caf\u00e9");
+        assert_eq!(message_text(&payload), "caf%C3%A9");
+    }
+
+    /// Every rendered message must survive the payload charset validation the
+    /// parser runs before returning a payload. The validator refuses JSON
+    /// containing backslash escapes such as `\u` or `\t`, so an escape that
+    /// used a backslash, or a literal backslash passed through, would get the
+    /// whole message refused rather than shown.
+    #[test]
+    fn rendered_messages_pass_charset_validation() {
+        for message in [
+            "plain text",
+            r"line\nbreak",
+            r"tab\there",
+            r"carriage\rreturn",
+            r"backslash \\u0041 and \\/ and \\t",
+            "50% off",
+            r"caf\u00e9 \u202e \ud83d\ude00",
+            r#"quote \" inside"#,
+        ] {
+            render_message(message)
+                .validate_charset()
+                .unwrap_or_else(|e| panic!("message {message:?} was refused: {e}"));
+        }
     }
 
     /// The signer address renders alongside the message. The enclave compares
@@ -3096,14 +3144,22 @@ mod solana_message_tests {
         );
     }
 
-    /// The address reaches the same screen as the message, so a character that
-    /// could forge a line break is marked there too.
+    /// The address reaches the same screen as the message. Anything that is not
+    /// a Solana address is refused at decode, so text posing as an address
+    /// (here, one that forges a second line) never reaches the screen.
     #[test]
-    fn the_signer_address_escapes_what_cannot_render() {
-        let payload = render(r#"{"message":"hi","signerAddress":"addr\nSigner: attacker.sol"}"#);
-        assert_eq!(
-            field_text(&payload, "Signer"),
-            r"addr\u{a}Signer: attacker.sol"
-        );
+    fn a_signer_that_is_not_an_address_is_refused() {
+        for bad in [r"addr\nSigner: attacker.sol", "x", ""] {
+            let result = SolanaTransactionWrapper::from_string(&format!(
+                r#"{{"message":"hi","signerAddress":"{bad}"}}"#
+            ));
+            let Err(TransactionParseError::DecodeError(message)) = result else {
+                panic!("expected a DecodeError for a non-address signer");
+            };
+            assert!(
+                message.contains("signerAddress"),
+                "the refusal must name the field: {message}"
+            );
+        }
     }
 }
