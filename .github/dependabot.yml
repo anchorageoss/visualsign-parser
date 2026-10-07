@@ -46,7 +46,6 @@ updates:
         patterns:
           - "*"
     ignore:
-      - dependency-name: "qos_*"
       - dependency-name: "defuse-*"
       - dependency-name: "solana_parser"
       - dependency-name: "solana-parser-fuzz-core"
