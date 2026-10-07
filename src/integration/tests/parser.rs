@@ -1248,7 +1248,7 @@ async fn parser_near_intent_envelope_e2e() {
                     "Type": "amount_v2"
                 }
             ],
-            "PayloadType": "NearTx",
+            "PayloadType": "NearMessage",
             "Title": "NEAR Intent: FT Withdraw",
             "Version": "0"
         });

@@ -74,7 +74,7 @@
       "Type": "amount_v2"
     }
   ],
-  "PayloadType": "NearTx",
+  "PayloadType": "NearMessage",
   "Title": "NEAR Intent: FT Withdraw",
   "Version": "0"
 }
