@@ -8,12 +8,9 @@ rust-version.workspace = true
 base64 = "0.22.1"
 borsh = { version = "1.5", features = ["derive"] }
 bs58 = "0.5.1"
-chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 clap = { version = "4.0", features = ["derive"], optional = true }
-ed25519-dalek = "2"
 generated = { path = "../../generated" }
 hex = "0.4.3"
-k256 = "0.13"
 parser_cli_core = { path = "../../parser/cli-core", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -25,8 +22,6 @@ visualsign-intents = { path = "../../visualsign-intents" }
 near-sdk = { workspace = true }
 
 defuse-core = { workspace = true }
-defuse-crypto = { workspace = true }
-defuse-deadline = { workspace = true }
 
 [dev-dependencies]
 visualsign-intents = { path = "../../visualsign-intents", features = ["test-support"] }
