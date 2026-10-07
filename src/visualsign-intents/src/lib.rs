@@ -287,6 +287,74 @@ mod tests {
         }
     }
 
+    /// Render the execute_intents args and return the labels plus the fields'
+    /// JSON, so an assertion holds whether diagnostics render as `Diagnostic` or
+    /// as the `Warning` text fallback.
+    fn render_execute_intents(args: &serde_json::Value) -> (Vec<String>, String) {
+        let bytes = serde_json::to_vec(args).unwrap();
+        let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+        let fields = try_decode_execute_intents(
+            &bytes,
+            &reg,
+            &VisualSignOptions::default(),
+            crate::network::SettlementNetwork::Mainnet,
+        )
+        .unwrap();
+        let labels = fields
+            .iter()
+            .filter_map(label_of)
+            .map(str::to_string)
+            .collect();
+        (labels, serde_json::to_string(&fields).unwrap())
+    }
+
+    /// A signed raw_ed25519 payload whose `DefusePayload` carries an undeclared
+    /// key does not render its intents: the key is part of what was signed but
+    /// would never show. The extraction diagnostic names it instead.
+    #[test]
+    fn execute_intents_withholds_a_payload_with_an_undeclared_key() {
+        let inner = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}],"memo":"hidden"}"#;
+        let (labels, json) = render_execute_intents(&serde_json::json!({"signed":[{
+            "standard": "raw_ed25519",
+            "payload": inner,
+            "public_key": "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN",
+            "signature": "ed25519:3vtbNQJHZfuV1s5DykzyjkbNLc583hnkrhTz57eDhd966iqzkor6Twgr4Loh2C195SCSEsiGfrd6KcxpjNq9ZbVj"
+        }]}));
+        assert!(
+            !labels.iter().any(|l| l == "Intent"),
+            "intents rendered: {labels:?}"
+        );
+        assert!(
+            json.contains("does not declare") && json.contains("memo"),
+            "{json}"
+        );
+    }
+
+    /// The same holds for a NEP-413-signed payload, whose intents ride inside
+    /// the envelope's `message` and have their own key set.
+    #[test]
+    fn execute_intents_withholds_nep413_intents_with_an_undeclared_key() {
+        let message = r#"{"signer_id":"alice.near","deadline":"2999-01-01T00:00:00Z","intents":[],"memo":"hidden"}"#;
+        let (labels, json) = render_execute_intents(&serde_json::json!({"signed":[{
+            "standard": "nep413",
+            "payload": {
+                "message": message,
+                "nonce": "XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=",
+                "recipient": "intents.near"
+            },
+            "public_key": "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN",
+            "signature": "ed25519:3vtbNQJHZfuV1s5DykzyjkbNLc583hnkrhTz57eDhd966iqzkor6Twgr4Loh2C195SCSEsiGfrd6KcxpjNq9ZbVj"
+        }]}));
+        assert!(
+            !labels.iter().any(|l| l == "Signer"),
+            "envelope rendered: {labels:?}"
+        );
+        assert!(
+            json.contains("does not declare") && json.contains("memo"),
+            "{json}"
+        );
+    }
+
     #[test]
     fn pipeline_decodes_and_renders_intent_section() {
         // Current-format inner payload (ISO-8601 deadline). The key/signature are
