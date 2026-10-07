@@ -111,10 +111,10 @@ separate, unsigned-accepting path unaffected by either flag: unsigned IDLs are a
 accepted, and the `VISUALSIGN_SOL_IDL_SIGNERS` env var only allowlists signers for
 IDLs that *are* signed.
 
-The intended end state is for the flags to land in the TVC deployment manifest's
-`pivotArgs` (see `tools/tvc-deploy`), so a signer can verify which posture a deployment
-runs out of band; wiring `tools/tvc-deploy` to emit them has not landed yet and is
-tracked as a follow-up. Represented in code by `visualsign::signing::MetadataTrustPolicy`,
+The flags land in the TVC deployment manifest's `pivotArgs`, so a signer can verify
+which posture a deployment runs out of band: `tools/tvc-deploy deploy` emits them for
+`parser_app`, and `deploy-pivot` passes any pivot's flags (including
+`parser_http_server`'s) after `--`. Represented in code by `visualsign::signing::MetadataTrustPolicy`,
 threaded through `parser_app::config::ParserConfig` into
 `EthereumVisualSignConverter::with_policy`. `parser_grpc_server` currently hardcodes
 accept-unsigned (non-attested dev server); exposing the same flags there is a follow-up.
