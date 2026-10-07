@@ -3274,6 +3274,26 @@ mod solana_intents_message_tests {
         render(INTENTS).validate_charset().expect("charset");
     }
 
+    /// A message that is intents but carries an undeclared key is refused
+    /// rather than shown as text: the extra key would be signed without being
+    /// shown, and falling back to the raw JSON would show a payload the parser
+    /// partly understood.
+    #[test]
+    fn intents_with_an_undeclared_key_are_refused() {
+        let mut intents: serde_json::Value = serde_json::from_str(INTENTS).expect("json");
+        intents["memo"] = json!("hidden");
+        let envelope =
+            json!({ "message": intents.to_string(), "signerAddress": SIGNER }).to_string();
+        let result = SolanaVisualSignConverter.to_visual_sign_payload(
+            SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+            VisualSignOptions::default(),
+        );
+        let Err(err) = result else {
+            panic!("expected a refusal for an undeclared intents key");
+        };
+        assert!(err.to_string().contains("\"memo\""), "{err}");
+    }
+
     /// A message that is not intents still renders as text with its signer.
     #[test]
     fn a_plain_message_still_renders_as_text() {

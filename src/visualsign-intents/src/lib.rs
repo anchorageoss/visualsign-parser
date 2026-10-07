@@ -18,6 +18,7 @@ pub mod network;
 /// resolving such an id is a property of intents rather than of any chain.
 pub const INTENTS_RECEIVER: &str = "intents.near";
 mod render;
+pub mod strict;
 mod token_signature;
 mod tokens;
 mod verify;
@@ -59,6 +60,13 @@ pub enum NearIntentsError {
     /// request.
     #[error("{0}")]
     NetworkMismatch(String),
+    /// The input decodes as a `DefusePayload` but carries a top-level key the
+    /// type does not declare. Kept distinct from [`Self::InputNotJson`]: a
+    /// caller that falls back to rendering a non-intents message as text must
+    /// not do so here, because this message is intents with something extra
+    /// that would be signed without being shown.
+    #[error("{0}")]
+    UndeclaredFields(String),
 }
 
 /// Translate a render-layer failure into this module's error.
@@ -210,6 +218,10 @@ pub struct RenderedEnvelope {
 ///
 /// This is the user-signing view: it reuses the envelope + per-intent rendering
 /// but skips signature verification (no signature exists at signing time).
+///
+/// Input that is not a `DefusePayload` is [`NearIntentsError::InputNotJson`];
+/// one that is, but carries an undeclared top-level key, is
+/// [`NearIntentsError::UndeclaredFields`] (see [`strict`]).
 pub fn try_render_single_intent(
     payload_json: &[u8],
     token_registry: &visualsign::registry::LayeredRegistry<NearTokenRegistry>,
@@ -219,6 +231,10 @@ pub fn try_render_single_intent(
     let payload: defuse_core::payload::DefusePayload<defuse_core::intents::DefuseIntents> =
         serde_json::from_slice(payload_json)
             .map_err(|e| NearIntentsError::InputNotJson(e.to_string()))?;
+    // The typed decode ignores keys it does not declare; a signer would approve
+    // them without seeing them.
+    strict::require_declared_keys(payload_json, strict::DEFUSE_PAYLOAD_KEYS)
+        .map_err(NearIntentsError::UndeclaredFields)?;
     let fields = render::render_single(&payload, token_registry, network).map_err(render_error)?;
     Ok(RenderedEnvelope {
         title: render::title_for_intents(&payload.intents),
@@ -391,6 +407,24 @@ mod tests {
         .err()
         .expect("malformed JSON should error");
         assert!(matches!(err, NearIntentsError::InputNotJson(_)));
+    }
+
+    /// A `DefusePayload` with an undeclared top-level key is refused with its
+    /// own error, so a caller that renders non-intents JSON as text cannot fall
+    /// back to that here and show the intents partly.
+    #[test]
+    fn single_intent_with_an_undeclared_key_is_refused() {
+        let payload = br#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[],"memo":"hidden"}"#;
+        let reg = LayeredRegistry::new(Arc::new(NearTokenRegistry::default()));
+        let Err(NearIntentsError::UndeclaredFields(message)) = try_render_single_intent(
+            payload,
+            &reg,
+            &VisualSignOptions::default(),
+            crate::network::SettlementNetwork::Mainnet,
+        ) else {
+            panic!("expected UndeclaredFields");
+        };
+        assert!(message.contains("\"memo\""), "{message}");
     }
 
     #[test]
