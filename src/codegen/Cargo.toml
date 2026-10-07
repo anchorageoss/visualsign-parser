@@ -7,7 +7,6 @@ publish = false
 
 [dependencies]
 tonic-build = { version = "0.10", features = ["cleanup-markdown"] }
-protobuf-src = { version = "1" }
 
 [lints]
 workspace = true

@@ -117,7 +117,7 @@
       "description": "system_program"
     }
   ],
-  "expected_title": "Withdraw 26.177479 JupUSD from Jupiter Lend Earn",
+  "expected_title": "Redeem JUICED for 26.177479 JupUSD via Jupiter Lend",
   "expected_fields": {
     "instruction": "withdraw",
     "discriminator": "b712469c946da122",
