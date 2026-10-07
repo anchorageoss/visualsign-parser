@@ -19,16 +19,19 @@
 # Cargo.toml requirements, which is exactly Cargo's own compatibility rule.
 #
 # Not covered on purpose:
-# - Git-sourced crates (tkhq/qos, near/intents, MystenLabs/sui, solana-parser):
-#   pinned by rev/tag and bumped deliberately, never automatically.
+# - Git-sourced crates in /src (tkhq/qos, near/intents, MystenLabs/sui,
+#   solana-parser): pinned by rev/tag and bumped deliberately, never
+#   automatically. `lockfile-only` already can't move a rev pin; the ignore list
+#   states the policy explicitly so it doesn't depend on that.
+# - /tools/tvc-deploy has its own block without that ignore list: its qos crates
+#   (`qos_p256`, `qos_hex`) come from crates.io, and a `qos_*` ignore there would
+#   freeze them.
 # - Container base images: stagex images are pinned by `@sha256:` and must be
 #   re-hashed locally before a bump, which Dependabot can't do.
 version: 2
 updates:
   - package-ecosystem: "cargo"
-    directories:
-      - "/src"
-      - "/tools/tvc-deploy"
+    directory: "/src"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -46,12 +49,34 @@ updates:
         patterns:
           - "*"
     ignore:
+      - dependency-name: "qos_*"
       - dependency-name: "defuse-*"
       - dependency-name: "solana_parser"
       - dependency-name: "solana-parser-fuzz-core"
       - dependency-name: "move-core-types"
       - dependency-name: "move-bytecode-utils"
       - dependency-name: "sui-*"
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: "cargo"
+    directory: "/tools/tvc-deploy"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Lisbon"
+    versioning-strategy: lockfile-only
+    allow:
+      - dependency-type: "all"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      cargo-tvc-deploy-semver-compatible:
+        applies-to: version-updates
+        patterns:
+          - "*"
     commit-message:
       prefix: "chore(deps)"
 
