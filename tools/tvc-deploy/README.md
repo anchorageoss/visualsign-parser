@@ -200,6 +200,43 @@ elsewhere first. Run this, record the digest, then deploy.
 No Turnkey auth needed, just Docker: it creates a container from the image,
 extracts `/parser_app`, sha256s it, and exits non-zero on a mismatch.
 
+### Deploying any other pivot
+
+`deploy` is specific to `/parser_app` (gRPC health, `--host-ip`/`--host-port`).
+`deploy-pivot` runs the same digest gate / create / approve / poll-healthy /
+set-live flow for any pivot binary, with the pivot's path and health check given
+as flags and its arguments passed verbatim after a literal `--`:
+
+```
+tvc-deploy deploy-pivot \
+  --app-id <app-id> \
+  --image-url "ghcr.io/anchorageoss/parser_http_server:<tag>@sha256:<image-digest>" \
+  --pivot-path /parser_http_server \
+  --expected-digest <sha256 of /parser_http_server> \
+  --health-check http \
+  --operator-id <operator-id> \
+  -- --accept-unsigned-abis --boot-proof-source nsm
+```
+
+- Everything after `--` becomes the manifest's `pivotArgs`, in order. A pivot
+  flag that collides with one of `deploy-pivot`'s own (e.g. `--port`) goes to the
+  pivot when it is after `--`. Without the separator it is rejected as an unknown
+  argument.
+- `--health-check` is `http` or `grpc`. It must match what the pivot serves:
+  `parser_http_server` is HTTP, while a bare `parser_app` is gRPC only and stalls
+  at `0/N` healthy under an HTTP probe. `--port` (default 3000) is both the
+  health-check port and the public ingress port.
+- `--qos-version` defaults to `0.12.1`. `--dangerous-debug-mode` deploys with
+  zeroed PCRs and readable enclave logs. The app must allow debug deployments,
+  and an attesting pivot such as `parser_http_server --boot-proof-source nsm`
+  never goes healthy in debug mode, because its doc can't bind to the manifest's
+  PCRs.
+- The operator approving the deployment must be in the app's manifest set, and
+  you must hold its key. `--operator-seed` (or `TVC_CI_OPERATOR_SEED`), or else
+  the logged-in org operator key, signs the approval. Approval fails with "not
+  part of manifest set" otherwise.
+- The pending-activity check and `--force` behave as for `deploy`.
+
 ## Pruning deployments
 
 Deployments accumulate: every `deploy` creates a new one, and old ones are not
