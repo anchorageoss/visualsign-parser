@@ -150,9 +150,14 @@ fn resolve_network(
 
 /// Payload version emitted for NEAR payloads.
 const PAYLOAD_VERSION: i64 = 0;
-/// Payload type tag emitted for NEAR payloads, matching the other chain
-/// crates' convention (`"SolanaTx"`, `"TronTx"`).
+/// `payload_type` for a NEAR transaction, matching the other chain crates'
+/// convention (`"SolanaTx"`, `"TronTx"`).
 const PAYLOAD_TYPE: &str = "NearTx";
+/// `payload_type` for an off-chain signature: a NEP-413 envelope or an intents
+/// payload signed directly. Decided by what the signature covers, not by what
+/// it carries, so intents rendered from either are still a message. See
+/// "payload_type names the chain and what is signed" in CLAUDE.md.
+const MESSAGE_PAYLOAD_TYPE: &str = "NearMessage";
 
 /// Converts a [`NearTransaction`] into a VisualSign [`SignablePayload`].
 #[derive(Debug, Clone)]
@@ -471,7 +476,7 @@ fn render_nep413_envelope(
             "NEAR Message".to_string(),
             None,
             fields,
-            PAYLOAD_TYPE.to_string(),
+            MESSAGE_PAYLOAD_TYPE.to_string(),
         )));
     };
 
@@ -495,7 +500,7 @@ fn render_nep413_envelope(
         rendered.title,
         None,
         fields,
-        PAYLOAD_TYPE.to_string(),
+        MESSAGE_PAYLOAD_TYPE.to_string(),
     )))
 }
 
@@ -546,7 +551,7 @@ fn render_intent_envelope(
         rendered.title,
         None,
         fields,
-        PAYLOAD_TYPE.to_string(),
+        MESSAGE_PAYLOAD_TYPE.to_string(),
     )))
 }
 
@@ -1404,6 +1409,37 @@ mod tests {
         payload.fields.iter().any(
             |f| matches!(f, SignablePayloadField::TextV2 { common, .. } if common.label == label),
         )
+    }
+
+    /// `payload_type` names what the signature covers: a transaction is
+    /// `NearTx`; a NEP-413 envelope and an intents payload signed directly are
+    /// messages, whatever they carry.
+    #[test]
+    fn payload_type_names_what_the_signature_covers() {
+        let convert = |tx| {
+            NearVisualSignConverter::new()
+                .to_visual_sign_payload(tx, VisualSignOptions::default())
+                .expect("convert")
+                .payload
+                .payload_type
+        };
+        let intents = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2100-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
+
+        assert_eq!(convert(near_tx(vec![transfer()])), "NearTx");
+        assert_eq!(
+            convert(NearTransaction::RawMessage(intents.to_string())),
+            "NearMessage"
+        );
+        let plain = render_nep413(
+            nep413_envelope("Sign in to app.example.com", "app.example.com", None),
+            VisualSignOptions::default(),
+        );
+        assert_eq!(plain.payload_type, "NearMessage");
+        let carrying_intents = render_nep413(
+            nep413_envelope(&nep413_intents_message("alice.near"), "intents.near", None),
+            VisualSignOptions::default(),
+        );
+        assert_eq!(carrying_intents.payload_type, "NearMessage");
     }
 
     /// A NEP-413 message carrying no intents renders its text, plus the
