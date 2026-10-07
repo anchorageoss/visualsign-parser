@@ -883,13 +883,23 @@ fn message_to_visual_sign_payload(
 ) -> Result<SignablePayload, VisualSignError> {
     // A message carrying NEAR Intents renders the intents. A signer approving a
     // token movement has to see the movement, not the JSON that encodes it.
+    //
+    // The envelope's address renders here too: it names the Solana key that
+    // will produce the signature, which the intents alone do not show. It is
+    // labelled "Signing Address" because the intents already render a "Signer"
+    // field, the payload's `signer_id`, which is a NEAR account rather than the
+    // key that signs.
     #[cfg(feature = "intents")]
     if let Some(rendered) = crate::intents::try_render(envelope.message.as_bytes(), options)? {
+        let mut fields = rendered.fields;
+        fields.push(
+            create_text_field("Signing Address", &envelope.signer_address)?.signable_payload_field,
+        );
         return Ok(SignablePayload::new(
             0,
             rendered.title,
             None,
-            rendered.fields,
+            fields,
             "SolanaTx".to_string(),
         ));
     }
@@ -3182,5 +3192,91 @@ mod solana_message_tests {
                 "the refusal must name the field: {message}"
             );
         }
+    }
+}
+
+#[cfg(all(test, feature = "intents"))]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod solana_intents_message_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The Solana key that signs. Base58, 32 bytes.
+    const SIGNER: &str = "BxrKzfvmQYjgFUzQwiNErgJabbrdqp6Ggci7h7q86naT";
+
+    /// A `DefusePayload` withdrawing 1 wNEAR, as a Solana wallet signs it under
+    /// `raw_ed25519`: the payload is the message itself.
+    const INTENTS: &str = r#"{"signer_id":"alice.near","verifying_contract":"intents.near","deadline":"2999-01-01T00:00:00Z","nonce":"XVoKfmScb3G+XqH9ke/fSlJ/3xO59sNhCxhpG821BH8=","intents":[{"intent":"ft_withdraw","token":"wrap.near","receiver_id":"bob.near","amount":"1000000000000000000000000"}]}"#;
+
+    fn render(message: &str) -> SignablePayload {
+        let envelope = json!({ "message": message, "signerAddress": SIGNER }).to_string();
+        SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope).expect("decode"),
+                VisualSignOptions::default(),
+            )
+            .expect("convert")
+            .payload
+    }
+
+    fn labels(payload: &SignablePayload) -> Vec<String> {
+        payload
+            .fields
+            .iter()
+            .map(|f| f.label().to_string())
+            .collect()
+    }
+
+    fn field_text(payload: &SignablePayload, label: &str) -> String {
+        payload
+            .fields
+            .iter()
+            .find_map(|f| match f {
+                SignablePayloadField::TextV2 { common, text_v2 } if common.label == label => {
+                    Some(text_v2.text.clone())
+                }
+                _ => None,
+            })
+            // A static message: CodeQL treats anything derived from the payload
+            // as tainted, so the label is not interpolated.
+            .expect("no field with the requested label")
+    }
+
+    /// A message carrying intents renders as intents, and the Solana key that
+    /// will sign still shows. The intents' own "Signer" is the payload's NEAR
+    /// account, so the signing key needs its own field to be visible at all.
+    #[test]
+    fn intents_message_shows_the_signing_address() {
+        let payload = render(INTENTS);
+        let labels = labels(&payload);
+        assert!(
+            labels.iter().any(|l| l == "Intent"),
+            "not rendered as intents: {labels:?}"
+        );
+        assert_eq!(field_text(&payload, "Signing Address"), SIGNER);
+        assert_eq!(field_text(&payload, "Signer"), "alice.near");
+    }
+
+    /// The signing address appears once, after the intents' own fields.
+    #[test]
+    fn signing_address_is_the_last_field_and_appears_once() {
+        let labels = labels(&render(INTENTS));
+        assert_eq!(labels.iter().filter(|l| *l == "Signing Address").count(), 1);
+        assert_eq!(labels.last().map(String::as_str), Some("Signing Address"));
+    }
+
+    /// The parser validates the payload's charset before returning it, so the
+    /// intents render must pass that check with the extra field in place.
+    #[test]
+    fn intents_message_passes_charset_validation() {
+        render(INTENTS).validate_charset().expect("charset");
+    }
+
+    /// A message that is not intents still renders as text with its signer.
+    #[test]
+    fn a_plain_message_still_renders_as_text() {
+        let payload = render("Sign in to app.example.com");
+        assert_eq!(payload.title, "Solana Message");
+        assert_eq!(field_text(&payload, "Signer"), SIGNER);
     }
 }
