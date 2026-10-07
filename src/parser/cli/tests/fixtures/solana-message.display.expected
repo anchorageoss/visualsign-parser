@@ -19,7 +19,7 @@ SignablePayload {
             },
         },
     ],
-    payload_type: "SolanaTx",
+    payload_type: "SolanaMessage",
     subtitle: None,
     title: "Solana Message",
     version: "0",
