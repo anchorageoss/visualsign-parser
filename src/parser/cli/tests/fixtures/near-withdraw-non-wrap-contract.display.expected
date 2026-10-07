@@ -1,0 +1,82 @@
+SignablePayload {
+    fields: [
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "NEAR Mainnet",
+                label: "Network",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "NEAR Mainnet",
+            },
+        },
+        AddressV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "alice.near",
+                label: "From",
+            },
+            address_v2: SignablePayloadFieldAddressV2 {
+                address: "alice.near",
+                name: "",
+                memo: None,
+                asset_label: "",
+                badge_text: None,
+            },
+        },
+        AddressV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "token.example.near",
+                label: "To",
+            },
+            address_v2: SignablePayloadFieldAddressV2 {
+                address: "token.example.near",
+                name: "",
+                memo: None,
+                asset_label: "",
+                badge_text: None,
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "near_withdraw",
+                label: "Method",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "near_withdraw",
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "7b22616d6f756e74223a2231303030303030303030303030303030303030303030303030227d",
+                label: "Raw Data",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "7b22616d6f756e74223a2231303030303030303030303030303030303030303030303030227d",
+            },
+        },
+        AmountV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0.000000000000000000000001 NEAR",
+                label: "Deposit",
+            },
+            amount_v2: SignablePayloadFieldAmountV2 {
+                amount: "0.000000000000000000000001",
+                abbreviation: Some(
+                    "NEAR",
+                ),
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "30 Tgas",
+                label: "Gas",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "30 Tgas",
+            },
+        },
+    ],
+    payload_type: "NearTx",
+    subtitle: None,
+    title: "Function Call",
+    version: "0",
+}
