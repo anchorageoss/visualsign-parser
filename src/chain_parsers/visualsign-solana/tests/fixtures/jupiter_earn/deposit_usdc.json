@@ -111,7 +111,7 @@
       "description": "system_program"
     }
   ],
-  "expected_title": "Deposit 414.122446 USDC to Jupiter Lend Earn",
+  "expected_title": "Supply 414.122446 USDC to Jupiter Lend",
   "expected_fields": {
     "instruction": "deposit",
     "discriminator": "f223c68952e1f2b6",

@@ -85,14 +85,14 @@ PCRs are cryptographic measurements taken at boot time:
 
 | PCR | Contents |
 |-----|----------|
-| PCR0 | Hash of the enclave image file |
-| PCR1 | Hash of the Linux kernel and boot ramfs |
-| PCR2 | Hash of the application binary |
+| PCR0 | Hash of the enclave image file (the QuorumOS EIF) |
+| PCR1 | Hash of the Linux kernel and bootstrap |
+| PCR2 | Hash of the application in the enclave image: QuorumOS's boot ramdisk |
 | PCR3 | Hash of the IAM role assigned to the parent instance |
-| PCR4 | Hash of the instance ID |
-| PCR8 | Hash of the enclave signing certificate |
+| PCR4 | Hash of the parent instance ID |
+| PCR8 | Hash of the enclave image signing certificate |
 
-By verifying PCR values, you can confirm the exact code running in the enclave.
+PCRs measure the QuorumOS runtime, not the parser. QuorumOS loads the parser binary after boot, and the attestation document binds it through the manifest: the document's `user_data` is the manifest hash, and the manifest names the parser binary's hash and arguments. Verifying the PCRs *and* the manifest confirms the exact code running in the enclave; see [Level 3 attestation](./attestation#level-3-manifest-verification).
 
 ## End-to-end security flow
 
@@ -130,16 +130,18 @@ The private key is generated inside the enclave and never leaves it.
 
 AWS Nitro signs an attestation document containing:
 - The enclave's public key
-- PCR measurements proving what code is running
-- A timestamp and nonce for freshness
+- PCR measurements of the QuorumOS runtime that booted
+- The manifest hash (`user_data`), which names the parser binary and its arguments
+- A timestamp (the parser doesn't request a nonce, so the document isn't bound to a request)
 
 ### 5. Verification
 
 The wallet verifies before displaying:
 
 1. **Certificate chain** — Validates the attestation document was signed by AWS
-2. **PCR values** — Confirms the expected parser code is running
-3. **Signature** — Verifies the parsed output was signed by the attested enclave
+2. **PCR values** — Confirms the expected QuorumOS runtime booted
+3. **Manifest** — Confirms the expected parser binary and arguments
+4. **Signature** — Verifies the parsed output was signed by the attested enclave
 
 Only after all checks pass does the wallet display the visualization.
 
@@ -159,7 +161,7 @@ Attestation documents use:
 
 - **Format**: CBOR-encoded COSE Sign1
 - **Certificate chain**: X.509 certificates rooted at AWS Nitro CA
-- **Freshness**: Timestamp and optional nonce
+- **Freshness**: A timestamp, but no nonce: the document isn't bound to a request, and one document serves many responses. See [Freshness](./attestation#freshness).
 
 ## Threat model
 
@@ -170,7 +172,7 @@ Attestation documents use:
 | **Malicious app displays fake transaction** | Wallet only trusts attested parser output |
 | **Man-in-the-middle modifies parsed output** | Signature verification detects tampering |
 | **Compromised host EC2 instance** | Enclave isolation prevents host access |
-| **Replay of old parsed transactions** | Attestation timestamp and nonce provide freshness |
+| **Replay of old parsed transactions** | The signed message covers `inputPayloadDigest`, the digest of the transaction you sent, so a response for any other transaction fails verification |
 
 ### Attacks outside scope
 

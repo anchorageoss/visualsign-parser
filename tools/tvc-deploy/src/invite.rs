@@ -32,6 +32,9 @@ use turnkey_client::TurnkeyP256ApiKey;
 use turnkey_client::{TurnkeyClient, TurnkeyClientError, TurnkeySecp256k1ApiKey};
 use xshell::{cmd, Shell};
 
+#[macro_use]
+mod generic_intents;
+
 const DEFAULT_API_BASE_URL: &str = "https://api.turnkey.com";
 const ENV_ORG_ID: &str = "TVC_ORG_ID";
 const ENV_API_BASE_URL: &str = "TVC_API_BASE_URL";
@@ -1085,6 +1088,13 @@ impl NameLookup {
             .cloned()
             .unwrap_or_else(|| format!("<unknown user {}>", short_id(id)))
     }
+
+    fn users(&self, ids: &[String]) -> String {
+        ids.iter()
+            .map(|id| self.user(id))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 fn short_id(id: &str) -> &str {
@@ -1094,10 +1104,15 @@ fn short_id(id: &str) -> &str {
 /// Human-readable one-line summary of an activity's intent, e.g. `updates
 /// tag 'protocols-solana' (adds Alice Example)` instead of just
 /// `ACTIVITY_TYPE_UPDATE_USER_TAG`. Explicitly handles the intent variants
-/// tvc-deploy itself creates or cares about; the other 100+ Turnkey activity
-/// types (billing, wallets, webhooks, MFA, Spark, sub-orgs, ...) fall back to
-/// the bare type name -- same as today's output, no maintenance burden for
-/// functionality this tool doesn't touch.
+/// tvc-deploy itself creates, plus the org-admin ones seen coming from the
+/// dashboard or `tvc` (root quorum, user and API-key changes). Every other
+/// Turnkey intent (billing, wallets, webhooks, MFA, sub-orgs, ...) is listed
+/// in `generic_intents.rs` and goes through [`generic_intent_summary`], which
+/// lists the intent's own fields, so an unfamiliar type is never shown as just
+/// its name. There is deliberately no `_` arm: a `turnkey_client` upgrade that
+/// adds an intent fails to compile here. Give a new version of a decoded
+/// intent (`...IntentV2`, `V3`) an arm next to the existing one; add anything
+/// else to `generic_intents.rs`.
 fn decode_intent(
     activity_type: ActivityType,
     intent: Option<&intent::Inner>,
@@ -1218,7 +1233,185 @@ fn decode_intent(
                 short_id(&i.fingerprint)
             )
         }
-        Some(_) | None => activity_type.as_str_name().to_string(),
+        Some(Inner::UpdateRootQuorumIntent(i)) => format!(
+            "sets root quorum to {} of {}: {}",
+            i.threshold,
+            i.user_ids.len(),
+            names.users(&i.user_ids)
+        ),
+        Some(Inner::DeleteUsersIntent(i)) => {
+            format!("deletes users: {}", names.users(&i.user_ids))
+        }
+        Some(Inner::UpdateUserIntent(i)) => {
+            let mut parts = vec![];
+            if let Some(name) = &i.user_name {
+                parts.push(format!("name -> '{name}'"));
+            }
+            if let Some(email) = &i.user_email {
+                parts.push(format!("email -> {email}"));
+            }
+            if let Some(phone) = &i.user_phone_number {
+                parts.push(format!("phone -> {phone}"));
+            }
+            if !i.user_tag_ids.is_empty() {
+                let tags: Vec<String> = i.user_tag_ids.iter().map(|id| names.tag(id)).collect();
+                parts.push(format!("tags -> {}", tags.join(", ")));
+            }
+            let user = names.user(&i.user_id);
+            if parts.is_empty() {
+                format!("updates user {user}")
+            } else {
+                format!("updates user {user} ({})", parts.join("; "))
+            }
+        }
+        Some(Inner::CreateApiKeysIntentV2(i)) => format!(
+            "creates API key(s) for {}: {}",
+            names.user(&i.user_id),
+            i.api_keys
+                .iter()
+                .map(|k| k.api_key_name.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Some(Inner::DeleteApiKeysIntent(i)) => format!(
+            "deletes {} API key(s) from {}: {}",
+            i.api_key_ids.len(),
+            names.user(&i.user_id),
+            i.api_key_ids
+                .iter()
+                .map(|id| short_id(id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Some(Inner::CreateTvcAppIntent(i)) => format!("creates app '{}'", i.name),
+        Some(Inner::UpdateOrganizationNameIntent(i)) => {
+            format!("renames org to '{}'", i.organization_name)
+        }
+        Some(Inner::CreatePolicyIntent(i)) => {
+            format!("creates policy '{}' ({:?})", i.policy_name, i.effect)
+        }
+        Some(Inner::CreatePolicyIntentV2(i)) => {
+            format!("creates policy '{}' ({:?})", i.policy_name, i.effect)
+        }
+        Some(Inner::CreateApiKeysIntent(i)) => format!(
+            "creates API key(s) for {}: {}",
+            names.user(&i.user_id),
+            i.api_keys
+                .iter()
+                .map(|k| k.api_key_name.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Some(Inner::AcceptInvitationIntent(i)) => format!(
+            "accepts invitation {} as user {}",
+            i.invitation_id,
+            names.user(&i.user_id)
+        ),
+        Some(other @ for_each_generic_intent!(generic_intent_pattern)) => {
+            generic_intent_summary(activity_type, other, names)
+        }
+        None => activity_type.as_str_name().to_string(),
+    }
+}
+
+/// Longest string field value shown verbatim by [`generic_intent_summary`];
+/// longer ones (public keys, attestations, policy bodies) are cut short --
+/// `--json` still has the full value.
+const GENERIC_MAX_STR: usize = 40;
+
+/// Substrings of (lowercased) intent field names whose values
+/// [`generic_intent_summary`] never prints: OTP/auth codes, OIDC and
+/// verification tokens, encrypted key/secret bundles, passwords, mnemonics.
+/// Checked against every `*Intent` field in the generated client; it
+/// over-matches a few harmless ones (e.g. `*TokenExpirationSeconds`) on
+/// purpose, since a summary losing a number is cheaper than printing a secret.
+const GENERIC_REDACTED_FIELDS: &[&str] = &[
+    "secret",
+    "password",
+    "mnemonic",
+    "encrypted",
+    "bundle",
+    "token",
+    "otpcode",
+    "authcode",
+    "codeverifier",
+];
+
+/// Summary for the intent types `decode_intent` has no arm for: the type name
+/// followed by the intent's top-level fields as `key=value`, so an approver
+/// never sees a bare `ACTIVITY_TYPE_*` with nothing about what it changes.
+/// Fields named like user/tag ids are resolved to display names, secret-like
+/// fields ([`GENERIC_REDACTED_FIELDS`]) print as `<redacted>`, and nested
+/// objects are only counted. Empty fields are skipped.
+fn generic_intent_summary(
+    activity_type: ActivityType,
+    intent: &intent::Inner,
+    names: &NameLookup,
+) -> String {
+    let type_name = activity_type.as_str_name();
+    // `Inner` is externally tagged: {"<variantName>": {<fields>}}.
+    let fields = match serde_json::to_value(intent) {
+        Ok(serde_json::Value::Object(outer)) => match outer.into_iter().next() {
+            Some((_, serde_json::Value::Object(fields))) => fields,
+            _ => return type_name.to_string(),
+        },
+        _ => return type_name.to_string(),
+    };
+    let parts: Vec<String> = fields
+        .iter()
+        .filter_map(|(key, value)| {
+            render_generic_field(key, value, names).map(|v| format!("{key}={v}"))
+        })
+        .collect();
+    if parts.is_empty() {
+        type_name.to_string()
+    } else {
+        format!("{type_name} ({})", parts.join("; "))
+    }
+}
+
+fn render_generic_field(
+    key: &str,
+    value: &serde_json::Value,
+    names: &NameLookup,
+) -> Option<String> {
+    use serde_json::Value;
+    let lower = key.to_ascii_lowercase();
+    if GENERIC_REDACTED_FIELDS.iter().any(|f| lower.contains(f)) {
+        return Some("<redacted>".to_string());
+    }
+    let resolve = |id: &str| -> String {
+        if lower.ends_with("userid") || lower.ends_with("userids") {
+            names.user(id)
+        } else if lower.ends_with("tagid") || lower.ends_with("tagids") {
+            names.tag(id)
+        } else if id.chars().count() > GENERIC_MAX_STR {
+            let head: String = id.chars().take(GENERIC_MAX_STR).collect();
+            format!("{head}...")
+        } else {
+            id.to_string()
+        }
+    };
+    match value {
+        Value::Null => None,
+        Value::String(s) if s.is_empty() => None,
+        Value::String(s) => Some(resolve(s)),
+        Value::Bool(b) => Some(b.to_string()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Array(items) if items.is_empty() => None,
+        Value::Array(items) if items.iter().all(|v| !v.is_object() && !v.is_array()) => Some(
+            items
+                .iter()
+                .map(|v| match v {
+                    Value::String(s) => resolve(s),
+                    other => other.to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        Value::Array(items) => Some(format!("[{} item(s)]", items.len())),
+        Value::Object(map) if map.is_empty() => None,
+        Value::Object(map) => Some(format!("{{{} field(s)}}", map.len())),
     }
 }
 
@@ -1945,8 +2138,13 @@ pub fn reject_activity(args: &ActivityIdArgs) -> Result<()> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use serde::de::{
+        self, DeserializeSeed, Deserializer, EnumAccess, IntoDeserializer, VariantAccess, Visitor,
+    };
+    use serde::Deserialize;
     use std::io::Write;
     use tempfile::NamedTempFile;
+    use turnkey_client::generated::{DeleteUsersIntent, UpdateRootQuorumIntent, UpdateUserIntent};
 
     fn invite_args(file: Option<&str>, user_name: Option<&str>, email: Option<&str>) -> InviteArgs {
         InviteArgs {
@@ -2510,6 +2708,44 @@ mod tests {
     }
 
     #[test]
+    fn decode_intent_update_root_quorum_shows_threshold_and_members() {
+        let intent = intent::Inner::UpdateRootQuorumIntent(UpdateRootQuorumIntent {
+            threshold: 2,
+            user_ids: vec!["user-1".to_string(), "gone".to_string()],
+        });
+        let summary = decode_intent(ActivityType::UpdateRootQuorum, Some(&intent), &test_names());
+        assert_eq!(
+            summary,
+            "sets root quorum to 2 of 2: Alice Example, <unknown user gone>"
+        );
+    }
+
+    #[test]
+    fn decode_intent_delete_users_resolves_names() {
+        let intent = intent::Inner::DeleteUsersIntent(DeleteUsersIntent {
+            user_ids: vec!["user-1".to_string()],
+        });
+        let summary = decode_intent(ActivityType::DeleteUsers, Some(&intent), &test_names());
+        assert_eq!(summary, "deletes users: Alice Example");
+    }
+
+    #[test]
+    fn decode_intent_update_user_lists_changed_fields() {
+        let intent = intent::Inner::UpdateUserIntent(UpdateUserIntent {
+            user_id: "user-1".to_string(),
+            user_name: None,
+            user_email: Some("alice@example.com".to_string()),
+            user_tag_ids: vec!["tag-1".to_string()],
+            user_phone_number: None,
+        });
+        let summary = decode_intent(ActivityType::UpdateUser, Some(&intent), &test_names());
+        assert_eq!(
+            summary,
+            "updates user Alice Example (email -> alice@example.com; tags -> protocols-solana)"
+        );
+    }
+
+    #[test]
     fn decode_intent_falls_back_to_placeholder_for_unresolvable_id() {
         let intent = intent::Inner::UpdateUserTagIntent(UpdateUserTagIntent {
             user_tag_id: "tag-1".to_string(),
@@ -2522,12 +2758,235 @@ mod tests {
     }
 
     #[test]
-    fn decode_intent_falls_back_to_type_name_for_unhandled_variant() {
+    fn decode_intent_unhandled_variant_lists_its_fields() {
         let intent =
             intent::Inner::DeletePolicyIntent(turnkey_client::generated::DeletePolicyIntent {
                 policy_id: "policy-1".to_string(),
             });
         let summary = decode_intent(ActivityType::DeletePolicy, Some(&intent), &test_names());
+        assert_eq!(summary, "ACTIVITY_TYPE_DELETE_POLICY (policyId=policy-1)");
+    }
+
+    #[test]
+    fn generic_field_resolves_ids_and_elides_long_values() {
+        let value = serde_json::json!("a".repeat(GENERIC_MAX_STR + 5));
+        let names = test_names();
+        assert_eq!(
+            render_generic_field("publicKey", &value, &names),
+            Some(format!("{}...", "a".repeat(GENERIC_MAX_STR)))
+        );
+        assert_eq!(
+            render_generic_field("userIds", &serde_json::json!(["user-1"]), &names),
+            Some("Alice Example".to_string())
+        );
+        assert_eq!(
+            render_generic_field("userTagId", &serde_json::json!("tag-1"), &names),
+            Some("protocols-solana".to_string())
+        );
+        assert_eq!(
+            render_generic_field("notes", &serde_json::json!(""), &names),
+            None
+        );
+        for key in ["otpCode", "encryptedBundle", "oidcToken", "codeVerifier"] {
+            assert_eq!(
+                render_generic_field(key, &serde_json::json!("hunter2"), &names),
+                Some("<redacted>".to_string()),
+                "{key}"
+            );
+        }
+        assert_eq!(
+            render_generic_field("selectors", &serde_json::json!([{"a": 1}]), &names),
+            Some("[1 item(s)]".to_string())
+        );
+        assert_eq!(
+            render_generic_field("params", &serde_json::json!({"a": 1, "b": 2}), &names),
+            Some("{2 field(s)}".to_string())
+        );
+    }
+
+    /// Captures the field names serde would expect for one `intent::Inner`
+    /// variant, by driving `Inner`'s derived `Deserialize` far enough to ask
+    /// for that variant's struct and then stopping. The generated intent
+    /// structs don't implement `Default`, so there's no value to serialize.
+    struct VariantFields<'a> {
+        variant: &'a str,
+        fields: &'a mut Option<&'static [&'static str]>,
+    }
+
+    struct StructFields<'a> {
+        fields: &'a mut Option<&'static [&'static str]>,
+    }
+
+    fn captured() -> de::value::Error {
+        de::Error::custom("captured")
+    }
+
+    impl<'de> Deserializer<'de> for VariantFields<'_> {
+        type Error = de::value::Error;
+
+        fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value, Self::Error> {
+            Err(captured())
+        }
+
+        fn deserialize_enum<V: Visitor<'de>>(
+            self,
+            _name: &'static str,
+            _variants: &'static [&'static str],
+            visitor: V,
+        ) -> Result<V::Value, Self::Error> {
+            visitor.visit_enum(self)
+        }
+
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+            bytes byte_buf option unit unit_struct newtype_struct seq tuple
+            tuple_struct map struct identifier ignored_any
+        }
+    }
+
+    impl<'de> EnumAccess<'de> for VariantFields<'_> {
+        type Error = de::value::Error;
+        type Variant = Self;
+
+        fn variant_seed<S: DeserializeSeed<'de>>(
+            self,
+            seed: S,
+        ) -> Result<(S::Value, Self), Self::Error> {
+            let variant = seed.deserialize(self.variant.into_deserializer())?;
+            Ok((variant, self))
+        }
+    }
+
+    impl<'de> VariantAccess<'de> for VariantFields<'_> {
+        type Error = de::value::Error;
+
+        fn unit_variant(self) -> Result<(), Self::Error> {
+            Err(captured())
+        }
+
+        fn newtype_variant_seed<S: DeserializeSeed<'de>>(
+            self,
+            seed: S,
+        ) -> Result<S::Value, Self::Error> {
+            seed.deserialize(StructFields {
+                fields: self.fields,
+            })
+        }
+
+        fn tuple_variant<V: Visitor<'de>>(self, _: usize, _: V) -> Result<V::Value, Self::Error> {
+            Err(captured())
+        }
+
+        fn struct_variant<V: Visitor<'de>>(
+            self,
+            _: &'static [&'static str],
+            _: V,
+        ) -> Result<V::Value, Self::Error> {
+            Err(captured())
+        }
+    }
+
+    impl<'de> Deserializer<'de> for StructFields<'_> {
+        type Error = de::value::Error;
+
+        fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value, Self::Error> {
+            Err(captured())
+        }
+
+        fn deserialize_struct<V: Visitor<'de>>(
+            self,
+            _name: &'static str,
+            fields: &'static [&'static str],
+            _visitor: V,
+        ) -> Result<V::Value, Self::Error> {
+            *self.fields = Some(fields);
+            Err(captured())
+        }
+
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+            bytes byte_buf option unit unit_struct newtype_struct seq tuple
+            tuple_struct map enum identifier ignored_any
+        }
+    }
+
+    /// Serialized (camelCase) field names of the `intent::Inner` variant
+    /// named `variant` (its Rust name, e.g. `DeletePolicyIntent`).
+    fn intent_fields(variant: &str) -> &'static [&'static str] {
+        let mut chars = variant.chars();
+        let serde_name: String = match chars.next() {
+            Some(first) => first.to_lowercase().chain(chars).collect(),
+            None => String::new(),
+        };
+        let mut fields = None;
+        let _ = intent::Inner::deserialize(VariantFields {
+            variant: &serde_name,
+            fields: &mut fields,
+        });
+        fields.unwrap_or_else(|| panic!("no struct fields captured for {variant}"))
+    }
+
+    macro_rules! generic_intent_names {
+        ($($variant:ident),* $(,)?) => {
+            &[$(stringify!($variant)),*]
+        };
+    }
+
+    const GENERIC_INTENT_SNAPSHOT: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/testdata/generic_intent_fields.txt"
+    );
+
+    /// Every field `generic_intent_summary` can print, and whether
+    /// `GENERIC_REDACTED_FIELDS` hides it. A `turnkey_client` upgrade that
+    /// adds a field to a generic intent fails here, so someone decides
+    /// whether the new field is safe to print before it ever is.
+    #[test]
+    fn generic_intent_field_snapshot() {
+        let variants: &[&str] = for_each_generic_intent!(generic_intent_names);
+        let mut lines = vec![];
+        for variant in variants {
+            for field in intent_fields(variant) {
+                let lower = field.to_ascii_lowercase();
+                let shown = if GENERIC_REDACTED_FIELDS.iter().any(|f| lower.contains(f)) {
+                    "redacted"
+                } else {
+                    "shown"
+                };
+                lines.push(format!("{variant}.{field} {shown}"));
+            }
+        }
+        lines.sort();
+        let actual = lines.join("\n") + "\n";
+
+        if std::env::var_os("UPDATE_INTENT_SNAPSHOT").is_some() {
+            std::fs::write(GENERIC_INTENT_SNAPSHOT, &actual).unwrap();
+            return;
+        }
+        let expected = std::fs::read_to_string(GENERIC_INTENT_SNAPSHOT).unwrap_or_default();
+        if expected != actual {
+            let added: Vec<&str> = actual
+                .lines()
+                .filter(|l| !expected.lines().any(|e| e == *l))
+                .collect();
+            let removed: Vec<&str> = expected
+                .lines()
+                .filter(|l| !actual.lines().any(|a| a == *l))
+                .collect();
+            panic!(
+                "generic intent fields changed (turnkey_client upgrade?).\n\
+                 added: {added:#?}\nremoved: {removed:#?}\n\
+                 Check every new `shown` field is safe to print (add a \
+                 GENERIC_REDACTED_FIELDS entry if not), then run \
+                 `UPDATE_INTENT_SNAPSHOT=1 cargo test generic_intent_field_snapshot` \
+                 and commit testdata/generic_intent_fields.txt."
+            );
+        }
+    }
+
+    #[test]
+    fn decode_intent_without_intent_is_bare_type_name() {
+        let summary = decode_intent(ActivityType::DeletePolicy, None, &test_names());
         assert_eq!(summary, ActivityType::DeletePolicy.as_str_name());
     }
 
