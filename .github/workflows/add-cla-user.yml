@@ -1,5 +1,12 @@
 name: add-cla-user
 
+# Usage (maintainers only), as a PR comment:
+#   /approve-cla <org>
+# e.g. `/approve-cla Anchorage` or `/approve-cla Distributed Lab`.
+# Adds the PR author to .cla-signed-users under the `# <org>` section
+# (case-insensitive; a header like `# Anchorage maintainers` matches
+# `Anchorage`), creating the section if it doesn't exist yet.
+
 on:
   issue_comment:
     types: [created]
@@ -16,50 +23,48 @@ concurrency:
   group: cla-signers-batch
   cancel-in-progress: false
 
+# Untrusted text (the comment body) only ever reaches shell through `env:`,
+# never through `${{ }}` inside `run:`, so a comment can't inject commands.
 jobs:
   add-user-to-cla-list:
     if: github.event.issue.pull_request
     runs-on: ubuntu-latest
     steps:
-      - name: Debug event
-        env:
-          COMMENT_BODY: ${{ github.event.comment.body }}
-        run: |
-          echo "Event type: ${{ github.event_name }}"
-          echo "Comment body: '$COMMENT_BODY'"
-          echo "Commenter: ${{ github.event.comment.user.login }}"
-          echo "Issue number: ${{ github.event.issue.number }}"
-          echo "Is PR: ${{ github.event.issue.pull_request != null }}"
-
-      - name: Check for command early
+      - name: Parse command
         id: command_check
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          # Trim leading/trailing whitespace without xargs (which chokes on quotes)
-          COMMENT_BODY="$(echo "$COMMENT_BODY" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-          echo "Trimmed comment: '$COMMENT_BODY'"
-
-          if [[ "$COMMENT_BODY" == "/approve-cla" ]]; then
-            echo "Command found, proceeding..."
-            echo "should_proceed=true" >> $GITHUB_OUTPUT
+          # First line only, leading/trailing whitespace trimmed.
+          FIRST_LINE="$(printf '%s\n' "$COMMENT_BODY" | head -n1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [[ "$FIRST_LINE" =~ ^/approve-cla([[:space:]]+(.*))?$ ]]; then
+            ORG="${BASH_REMATCH[2]}"
+            # Drop surrounding quotes if the maintainer quoted a multi-word org.
+            ORG="${ORG#\"}"; ORG="${ORG%\"}"
+            echo "should_proceed=true" >> "$GITHUB_OUTPUT"
+            # Only a validated org name is ever written to step outputs.
+            if [[ "$ORG" =~ ^[A-Za-z0-9][A-Za-z0-9\ ._\&-]{0,39}$ ]]; then
+              echo "org=$ORG" >> "$GITHUB_OUTPUT"
+              echo "org_valid=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "org_valid=false" >> "$GITHUB_OUTPUT"
+            fi
           else
-            echo "Command not found, skipping workflow"
-            echo "should_proceed=false" >> $GITHUB_OUTPUT
+            echo "Not an /approve-cla command, skipping"
+            echo "should_proceed=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Get PR details
         if: steps.command_check.outputs.should_proceed == 'true'
         id: pr
-        run: |
-          PR_NUMBER="${{ github.event.issue.number }}"
-          echo "Getting PR details for #${PR_NUMBER}"
-          PR_DATA=$(gh api repos/${{ github.repository }}/pulls/$PR_NUMBER)
-          AUTHOR=$(echo "$PR_DATA" | jq -r .user.login)
-          echo "PR Author: $AUTHOR"
-          echo "author=$AUTHOR" >> $GITHUB_OUTPUT
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          AUTHOR=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq .user.login)
+          echo "PR author: $AUTHOR"
+          echo "author=$AUTHOR" >> "$GITHUB_OUTPUT"
 
       - name: Checkout main branch
         if: steps.command_check.outputs.should_proceed == 'true'
@@ -71,105 +76,113 @@ jobs:
       - name: Check authorization
         if: steps.command_check.outputs.should_proceed == 'true'
         id: check
-        run: |
-          COMMENTER="${{ github.event.comment.user.login }}"
-
-          # Simple allowlist of maintainers because Running with PAT doesn't seem safe or necessary
-          AUTHORIZED_USERS=("vikstrous2" "prasanna-anchorage") 
-
-          echo "Checking if user '$COMMENTER' is authorized..."
-
-          if [[ " ${AUTHORIZED_USERS[*]} " =~ " ${COMMENTER} " ]]; then
-            echo "✅ User is in the authorized list. Proceeding."
-            echo "is_maintainer=true" >> $GITHUB_OUTPUT
-          else
-            echo "❌ User is not authorized."
-            echo "is_maintainer=false" >> $GITHUB_OUTPUT
-            gh pr comment ${{ github.event.issue.number }} --body "Sorry @$COMMENTER, you are not authorized to run this command. Only maintainers can approve CLA signatures."
-          fi
-
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          # Simple allowlist of maintainers because running with a PAT doesn't seem safe or necessary.
+          # Keep in sync with the maintainers team (@anchorageoss/maintainers) when it changes.
+          AUTHORIZED_USERS=("vikstrous2" "prasanna-anchorage")
+
+          if [[ " ${AUTHORIZED_USERS[*]} " == *" ${COMMENTER} "* ]]; then
+            echo "is_maintainer=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_maintainer=false" >> "$GITHUB_OUTPUT"
+            gh pr comment "$PR_NUMBER" --body "Sorry @$COMMENTER, you are not authorized to run this command. Only maintainers can approve CLA signatures."
+          fi
+
+      - name: Explain usage
+        if: steps.command_check.outputs.should_proceed == 'true' && steps.check.outputs.is_maintainer == 'true' && steps.command_check.outputs.org_valid != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          ORGS=$(grep -E '^# ' .cla-signed-users | sed 's/^# //' | grep -v -i 'contributor license agreement' | sed 's/^/- /' || true)
+          gh pr comment "$PR_NUMBER" --body "Usage: \`/approve-cla <org>\`, for example \`/approve-cla Anchorage\`. The org picks the section of \`.cla-signed-users\` the author goes under (letters, digits, spaces and \`._&-\`, up to 40 characters). Existing sections:
+          ${ORGS:-(none yet)}"
 
       - name: Add user to CLA file
-        if: steps.command_check.outputs.should_proceed == 'true' && steps.check.outputs.is_maintainer == 'true'
+        if: steps.command_check.outputs.should_proceed == 'true' && steps.check.outputs.is_maintainer == 'true' && steps.command_check.outputs.org_valid == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUTHOR_USERNAME: ${{ steps.pr.outputs.author }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          ORG: ${{ steps.command_check.outputs.org }}
+          PR_NUMBER: ${{ github.event.issue.number }}
         run: |
-          AUTHOR_USERNAME="${{ steps.pr.outputs.author }}"
-          COMMENTER="${{ github.event.comment.user.login }}"
           BATCH_BRANCH="cla-signers-batch"
 
-          echo "Adding ${AUTHOR_USERNAME} to .cla-signed-users"
+          [ -f .cla-signed-users ] || echo "# Contributor License Agreement Signers" > .cla-signed-users
 
-          # Check if user is already in the list on main branch.
-          # grep -Fxq: fixed-string whole-line match -- usernames like
-          # `dependabot[bot]` contain regex metacharacters that break `grep -w`.
+          # Exact-line match; `grep -w` would treat `-` as a word break and
+          # count `colton` as present because `colton-anchor` is.
           if grep -v '^#' .cla-signed-users | grep -Fxq "$AUTHOR_USERNAME"; then
-            echo "User is already in the list."
-            gh pr comment ${{ github.event.issue.number }} --body "ℹ️ @${AUTHOR_USERNAME} is already in the CLA signers list."
+            gh pr comment "$PR_NUMBER" --body "ℹ️ @${AUTHOR_USERNAME} is already in the CLA signers list."
             exit 0
           fi
 
-          # Configure git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Check if batch branch exists, if not create it from main
           if git ls-remote --exit-code --heads origin "$BATCH_BRANCH" > /dev/null 2>&1; then
-            echo "Batch branch exists, checking it out"
             git fetch origin "$BATCH_BRANCH"
             git checkout "$BATCH_BRANCH"
           else
-            echo "Creating new batch branch"
             git checkout -b "$BATCH_BRANCH"
           fi
 
-          # Check if user is already in the batch branch (fixed-string match).
           if grep -v '^#' .cla-signed-users | grep -Fxq "$AUTHOR_USERNAME"; then
-            echo "User is already in the batch branch."
-            gh pr comment ${{ github.event.issue.number }} --body "ℹ️ @${AUTHOR_USERNAME} is already pending approval in the CLA signers batch."
+            gh pr comment "$PR_NUMBER" --body "ℹ️ @${AUTHOR_USERNAME} is already pending approval in the CLA signers batch."
             exit 0
           fi
 
-          # Add user before the #bots section (preserves organization comments)
-          # Insert new user on the line before #bots
-          sed -i "/^#bots/i ${AUTHOR_USERNAME}" .cla-signed-users
+          # Insert the author at the end of the org's section, or start a new
+          # `# <org>` section at the end of the file. Other lines are untouched.
+          python3 - <<'PY'
+          import os
+          path, user, org = ".cla-signed-users", os.environ["AUTHOR_USERNAME"], os.environ["ORG"].strip()
+          lines = open(path).read().splitlines()
+          def is_header(l): return l.startswith("# ")
+          def matches(l):
+              name = l[2:].strip().lower()
+              return name == org.lower() or name.startswith(org.lower() + " ")
+          start = next((i for i, l in enumerate(lines) if is_header(l) and matches(l)), None)
+          if start is None:
+              while lines and not lines[-1].strip():
+                  lines.pop()
+              lines += ["", f"# {org}", user]
+          else:
+              end = next((j for j in range(start + 1, len(lines)) if is_header(lines[j])), len(lines))
+              last = max((j for j in range(start + 1, end) if lines[j].strip() and not lines[j].startswith("#")), default=start)
+              lines.insert(last + 1, user)
+          open(path, "w").write("\n".join(lines) + "\n")
+          PY
 
-          # Commit the change to batch branch
           git add .cla-signed-users
-          git commit -m "chore: Add @${AUTHOR_USERNAME} to CLA signers list
+          git commit -m "chore: Add @${AUTHOR_USERNAME} to CLA signers list (${ORG})
 
           Approved by: @${COMMENTER}
-          Related PR: #${{ github.event.issue.number }}"
+          Related PR: #${PR_NUMBER}"
           git push origin "$BATCH_BRANCH"
 
-          echo "✅ User added to CLA signers batch branch"
-
-          # Check if a PR already exists for the batch branch
           EXISTING_PR=$(gh pr list --head "$BATCH_BRANCH" --base main --json number --jq '.[0].number // empty')
-
           if [ -n "$EXISTING_PR" ]; then
-            echo "Updating existing batch PR #${EXISTING_PR}"
-            gh pr comment "$EXISTING_PR" --body "✅ Added @${AUTHOR_USERNAME} to the CLA signers batch (approved by @${COMMENTER} in PR #${{ github.event.issue.number }})"
-            gh pr comment ${{ github.event.issue.number }} --body "✅ @${AUTHOR_USERNAME} has been added to the CLA signers batch PR #${EXISTING_PR} by @${COMMENTER}. The CLA check will pass once the batch PR is merged."
+            gh pr comment "$EXISTING_PR" --body "✅ Added @${AUTHOR_USERNAME} under ${ORG} (approved by @${COMMENTER} in PR #${PR_NUMBER})"
+            gh pr comment "$PR_NUMBER" --body "✅ @${AUTHOR_USERNAME} has been added under ${ORG} to the CLA signers batch PR #${EXISTING_PR} by @${COMMENTER}. The CLA check will pass once the batch PR is merged."
           else
-            echo "Creating new batch PR"
-            # `gh pr create` prints the PR URL (…/pull/<n>); take the trailing
-            # number. The old `grep '#[0-9]+'` matched nothing on a URL.
+            # `gh pr create` prints the PR URL (…/pull/<n>); take the trailing number.
             NEW_PR=$(gh pr create \
               --title "chore: Add CLA signers batch" \
               --body "This PR adds new CLA signers in batch to comply with repository rules.
 
             Recent additions:
-            - @${AUTHOR_USERNAME} (approved by @${COMMENTER} in PR #${{ github.event.issue.number }})
+            - @${AUTHOR_USERNAME} under ${ORG} (approved by @${COMMENTER} in PR #${PR_NUMBER})
 
             This PR will be updated automatically as more users are approved." \
               --head "$BATCH_BRANCH" \
               --base main \
               --label "cla" \
               | grep -oE '[0-9]+$' | head -1)
-
-            echo "Created new batch PR #${NEW_PR}"
-            gh pr comment ${{ github.event.issue.number }} --body "✅ @${AUTHOR_USERNAME} has been added to a new CLA signers batch PR #${NEW_PR} by @${COMMENTER}. The CLA check will pass once the batch PR is merged."
+            gh pr comment "$PR_NUMBER" --body "✅ @${AUTHOR_USERNAME} has been added under ${ORG} to a new CLA signers batch PR #${NEW_PR} by @${COMMENTER}. The CLA check will pass once the batch PR is merged."
           fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
