@@ -130,7 +130,7 @@ impl VisualSignConverter<YourChainTransactionWrapper> for YourChainVisualSignCon
             format!("{} Transaction", transaction.transaction_type()),
             None, // subtitle
             fields,
-            "YourChainTx".to_string(), // payload_type
+            "YourChainTx".to_string(), // payload_type: <Chain>Tx for transactions, <Chain>Message for off-chain messages
         ))
     }
 }
