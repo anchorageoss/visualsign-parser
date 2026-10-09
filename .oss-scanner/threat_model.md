@@ -1,7 +1,7 @@
 # Threat model
 
 ## What this project does and where untrusted input enters
-- visualsign-parser converts raw blockchain transactions (Ethereum, Solana, Sui, Tron) into a deterministic
+- visualsign-parser converts raw blockchain transactions (Ethereum, Solana, Sui, Tron, NEAR) into a deterministic
   VisualSign JSON payload that a human reads before signing. It is a signing control: the rendered payload must
   faithfully describe the bytes that will be signed.
 - Untrusted input: the raw transaction (hex/base64) in every gRPC/CLI request, and caller-supplied decoding
