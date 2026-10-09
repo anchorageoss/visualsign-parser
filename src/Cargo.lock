@@ -14822,14 +14822,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "visualsign-near"
+name = "visualsign-intents"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
- "borsh 1.6.0",
  "bs58 0.5.1",
  "chrono",
- "clap",
  "defuse-core",
  "defuse-crypto",
  "defuse-deadline",
@@ -14837,15 +14834,33 @@ dependencies = [
  "generated",
  "hex",
  "k256",
- "near-crypto",
- "near-primitives",
  "near-sdk",
- "parser_cli_core",
  "serde",
  "serde_json",
+ "serde_yaml 0.9.34+deprecated",
  "thiserror 2.0.17",
  "tracing",
  "visualsign",
+]
+
+[[package]]
+name = "visualsign-near"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "borsh 1.6.0",
+ "clap",
+ "defuse-core",
+ "generated",
+ "hex",
+ "near-crypto",
+ "near-primitives",
+ "parser_cli_core",
+ "serde",
+ "serde_json",
+ "tracing",
+ "visualsign",
+ "visualsign-intents",
 ]
 
 [[package]]
