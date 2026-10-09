@@ -1,6 +1,6 @@
 ---
 name: solana-add-idl
-description: Add a new Solana program IDL-based visualizer preset. Fetches IDL on-chain or accepts user-provided IDL, then scaffolds config.rs, mod.rs, and registers the preset.
+description: One-time bootstrap for a new Solana program IDL-based visualizer preset. Fetches the IDL (on-chain or user-provided), dispatches a subagent to scaffold a structurally correct, generic decoder, and registers it via build.rs reflection — no edits to presets/mod.rs or any test file. Does not regenerate an existing preset. Semantic refinement (domain labels, token resolution) is a follow-up workflow.
 user-invocable: true
 ---
 
@@ -24,6 +24,33 @@ in the individual preset.
 
 - **Standard** (`/solana-add-idl`): gather inputs, dispatch one Sonnet subagent to scaffold the preset
 - **Compare** (`/solana-add-idl compare`): gather inputs, dispatch Sonnet and Opus subagents in parallel to separate temp dirs, then diff their outputs to surface capability gaps
+
+## Scope: what this skill produces and doesn't produce
+
+This skill scaffolds a **structurally correct, semantically generic** preset.
+
+What you get:
+
+- Binary instruction decoded against the IDL via `parse_instruction_with_idl`
+- Each on-chain account paired with its IDL-declared name
+- Each instruction argument shown as a `text` field with the raw decoded value
+- Auto-registered in `available_visualizers()` and `PRESET_IDLS` by `build.rs` reflection — no edits to `presets/mod.rs` or any test file
+- Crash-safety auto-covered by `tests/fuzz_idl_parsing.rs` (proptest, generative), `fuzz/fuzz_targets/` (cargo-fuzz, generative), and `tests/surfpool_fuzz.rs::surfpool_preset_idls` (reflective)
+
+What it deliberately does **not** produce:
+
+- Domain-specific labels — e.g. `"Swap 1.5 USDC for 0.001 SOL"` rather than `in_token=Pubkey(...), amount_in=1500000, ...`
+- Token metadata resolution (mint decimals, symbol lookups) — amounts render as raw integers
+- Per-instruction display logic — every instruction goes through the same generic path
+- Cross-instruction correlation (e.g. CPI inner-instruction handling)
+- Account-role disambiguation beyond IDL parameter names
+- Semantic correctness assertions in `tests/semantic_pipeline.rs` — those are program-specific and hand-written
+
+The skill's output is the equivalent of a typed-decoder dump: correct, but not yet wallet-readable.
+
+For a **fully semantic** preset to model after, read `src/chain_parsers/visualsign-solana/src/presets/jupiter_swap/mod.rs`. It hand-rolls a `JupiterSwapInstruction` enum, resolves token metadata via `get_token_info`, and formats each variant through `format_jupiter_swap_instruction` into a single human-readable line (e.g. `"Jupiter Swap: From 1.5 USDC To 0.001 SOL (slippage: 50bps)"`). That's the destination; this skill produces the starting point.
+
+Semantic refinement is intended as a separate workflow (planned: `solana-refine-idl-preset` skill). Until that exists, contributors who want wallet-readable output extend the generated `mod.rs` by hand using `jupiter_swap` as the reference. See **Step 8: What's next** at the end of this skill.
 
 ## Step 1: Gather Information
 
@@ -65,7 +92,7 @@ Present the diff to the user and summarize: what did Opus add or do differently?
 
 ## Step 3: Live-fuzz validation (surfpool)
 
-After the scaffolding subagent finishes and the PR is open, add the `surfpool` label to trigger the `surfpool_fuzz_all_idls.sh` CI job. This runs the `surfpool_fuzz` integration suite against every bundled IDL — including the new preset — using real mainnet transactions (32 proptest cases per IDL). It exercises the full parse pipeline with live tx data that synthetic unit tests can't replicate. If any IDL fails, CI adds a `surfpool-failure` label. The job only fires on non-fork PRs (secrets required for `HELIUS_API_KEY`).
+After the scaffolding subagent finishes and the PR is open, add the `surfpool` label to trigger `.github/workflows/surfpool-solana.yml`, which runs `cargo test -p visualsign-solana --test surfpool_fuzz -- --ignored --test-threads=1`. This includes `surfpool_preset_idls`, which auto-discovers the new preset's IDL via `PRESET_IDLS` (see Step D) and exercises it against a real mainnet fork with live tx data that synthetic unit tests can't replicate — no test-file edit needed for the new preset to be covered. If any IDL fails, CI adds a `surfpool-failure` label. The job only fires on non-fork PRs (secrets required for `HELIUS_API_KEY`).
 
 ```bash
 gh pr edit <PR_NUMBER> --add-label surfpool
@@ -221,7 +248,9 @@ for (key, value) in &parsed.program_call_args {
 ```
 
 For raw-data fields, pass `None` as the second arg of `create_raw_data_field`
-unless you already have a precomputed hex string to reuse.
+unless you already have a precomputed hex string to reuse. For a byte-blob arg
+that needs its own encoding beyond what `format_arg_value` gives you, add an
+`append_raw_data` helper — see `kamino_vault` or `drift` for the pattern.
 
 ### Required tests
 
@@ -244,20 +273,33 @@ mod tests {
             assert_eq!(len, 8, "instruction {} missing 8-byte discriminator", ix.name);
         }
     }
-
-    #[test]
-    fn test_unknown_discriminator_returns_error() { /* garbage 9-byte data returns error */ }
-
-    #[test]
-    fn test_short_data_returns_error() { /* 3-byte data returns error */ }
 }
 ```
 
-## Step D: Registration
+Crash-safety against unknown discriminators / short data does **not** need its
+own test here — it's already covered by `tests/fuzz_idl_parsing.rs` (proptest,
+generative) and `tests/surfpool_fuzz.rs::surfpool_preset_idls` (auto-iterates
+every preset IDL, see Step D). Do not duplicate those assertions in the
+preset's own test module.
+
+## Step D: Registration and test coverage
 
 No manual registration needed. `build.rs` auto-discovers `{PascalName}Visualizer`
 from any directory under `src/presets/` — do not edit `presets/mod.rs`, it is
-generated.
+generated. Because Step A saved an IDL JSON at `{snake_name}/{snake_name}.json`,
+`build.rs` also adds an entry to `pub const PRESET_IDLS: &[(&str, &str)]`, which
+`tests/surfpool_fuzz.rs::surfpool_preset_idls` iterates automatically against a
+`surfpool` mainnet fork (decode IDL → build synthetic tx from the first
+instruction's discriminator → convert → assert non-empty payload). No test-file
+edit needed for either mechanism.
+
+This only covers crash-safety, not semantic correctness — the auto-roundtrip
+asserts the converter doesn't crash, not that the displayed fields read
+correctly. If the preset needs CI-level semantic guarantees (specific label
+text, amount formatting, fixture-based snapshot expectations), add a
+hand-written test in `tests/semantic_pipeline.rs` modelled after the existing
+`RAYDIUM_IDL` / `ORCA_IDL` blocks. Otherwise, ship as-is — semantic refinement
+is a separate workflow (see Step 8, after this prompt).
 
 ## Step E: Code Quality
 
@@ -276,6 +318,14 @@ cargo test -p visualsign-solana
 cargo test -p visualsign-solana --features diagnostics
 make -C src test
 ```
+
+Confirm `PRESET_IDLS` picked up the new IDL:
+```bash
+cargo build -p visualsign-solana
+grep -- '"{snake_name}"' src/target/debug/build/visualsign-solana-*/out/preset_idls.rs
+```
+If the grep finds nothing, the IDL JSON is at the wrong path — `build.rs` looks
+for exactly `src/presets/{snake_name}/{snake_name}.json`.
 
 Both feature configurations must pass. Report any failures before marking done.
 ```
@@ -315,3 +365,21 @@ Per finding, name the specific step or template section affected (e.g. "Step C",
 ### Loop 2 — model compare
 
 Compare mode (above) regenerates with Sonnet and Opus into separate scratch dirs and diffs them to surface model capability gaps. Encode any general pattern Opus produces back into this skill so Sonnet reproduces it.
+
+## Step 8: What's next — semantic refinement (optional, follow-up)
+
+Your preset compiles, registers, and survives a roundtrip. A wallet user signing one of these transactions will, however, see raw arg names and integer values, not a recognizable summary. The skill's scope ends here. To make the preset wallet-readable, three options:
+
+1. **Ship as-is.** For low-traffic programs or where structural display is enough, this is acceptable — the new preset is strictly better than the `unknown_program` fallback.
+
+2. **Hand-extend the generated `mod.rs`**, modelled after `presets/jupiter_swap/mod.rs`. The patterns to copy:
+   - Replace the wildcard `"*": ["*"]` in `config.rs` with explicit instruction names so each instruction can be dispatched separately.
+   - Introduce a `{PascalName}Instruction` enum with one variant per IDL instruction you care about. See `JupiterSwapInstruction` for the shape (named fields like `in_token`, `out_token`, `slippage_bps`).
+   - Add a `parse_{snake_name}_instruction` helper that dispatches on the 8-byte discriminator and decodes args into the enum.
+   - Add a `format_{snake_name}_instruction` helper that turns the enum into a human string. Use `get_token_info` from `crate::utils` to resolve mint decimals and symbols for amount fields.
+   - Replace generic `create_text_field` calls with semantic ones — `create_amount_field` for token quantities, `create_address_field` for accounts you want clickable in the UI.
+   - Add a fixture test in `tests/semantic_pipeline.rs` asserting the formatted output for one or two real on-chain transactions.
+
+3. **Wait for `solana-refine-idl-preset`** — a planned follow-up skill that automates the structural-to-semantic transition. Tracked as future work; not yet available.
+
+Until option 3 exists, option 2 is the path. The structural decoder this skill produced is the scaffolding the semantic layer goes on top of, not a replacement for it.
