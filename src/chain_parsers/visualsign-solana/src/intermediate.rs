@@ -129,6 +129,9 @@ pub struct SolanaIntermediateInstruction {
     /// Why a `Native` instruction has no `parsed_instruction_data`: unsupported
     /// program, decoder rejection, or an unmapped decode. `None` otherwise.
     pub solana_json_parse_error: Option<String>,
+    /// Position in `accounts` of each `named_accounts` entry: the first account
+    /// with that key. Absent for lookup-table accounts (not in `accounts`).
+    pub named_account_indices: BTreeMap<String, u32>,
 }
 
 /// Where a program ID was recognized. Decodability is a separate question --
@@ -178,6 +181,9 @@ pub struct SolanaSimulatedInstruction {
     /// Why a `Native` instruction has no `parsed_instruction_data`, as on
     /// [`SolanaIntermediateInstruction`]. `None` otherwise.
     pub solana_json_parse_error: Option<String>,
+    /// Position in `accounts` of each `named_accounts` entry, as on
+    /// [`SolanaIntermediateInstruction`]. Empty when `accounts` is.
+    pub named_account_indices: BTreeMap<String, u32>,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -425,14 +431,42 @@ fn build_intermediate_instruction(
             .map(SolanaSingleAddressTableLookup::from)
             .collect(),
         registered_source,
-        parsed_instruction_data,
         idl_parse_error: value
             .idl_parse_error
             .as_ref()
             .map(SolanaIdlParseError::from),
+        named_account_indices: index_named_accounts(
+            parsed_instruction_data.as_ref(),
+            value
+                .accounts
+                .iter()
+                .map(|account| account.account_key.as_str()),
+        ),
         solana_json_parsed_data,
         solana_json_parse_error,
+        parsed_instruction_data,
     }
+}
+
+/// Maps each named account to the first position in `keys` holding its key.
+/// Solana dedups keys per message, so every position of one key has the same
+/// signer and writable flags; the first is as good as any.
+fn index_named_accounts<'a>(
+    parsed: Option<&SolanaParsedInstructionDataIo>,
+    keys: impl Iterator<Item = &'a str>,
+) -> BTreeMap<String, u32> {
+    let mut first_position: BTreeMap<&str, u32> = BTreeMap::new();
+    for (position, key) in keys.enumerate() {
+        if let Ok(position) = u32::try_from(position) {
+            first_position.entry(key).or_insert(position);
+        }
+    }
+    parsed
+        .map(|parsed| &parsed.named_accounts)
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, key)| Some((name.clone(), *first_position.get(key.as_str())?)))
+        .collect()
 }
 
 /// A `Native` top-level instruction's `jsonParsed` decode and, unless an IDL
@@ -782,6 +816,10 @@ fn decode_inner_instructions(
                         (parsed_instruction_data, None)
                     };
 
+                    let named_account_indices = index_named_accounts(
+                        parsed_instruction_data.as_ref(),
+                        accounts.iter().map(String::as_str),
+                    );
                     simulated_instructions.push(SolanaSimulatedInstruction {
                         index: outer_index,
                         stack_height: decoded.stack_height.unwrap_or(0),
@@ -793,6 +831,7 @@ fn decode_inner_instructions(
                         solana_rpc_parsed_data: None,
                         idl_parse_error,
                         solana_json_parse_error,
+                        named_account_indices,
                     });
                 }
                 UiParsedInstruction::Parsed(rpc_parsed) => {
@@ -839,6 +878,8 @@ fn decode_inner_instructions(
                         }),
                         idl_parse_error: None,
                         solana_json_parse_error,
+                        // The RPC returns no account list to index into.
+                        named_account_indices: BTreeMap::new(),
                     });
                 }
             }
@@ -1507,6 +1548,10 @@ mod tests {
         );
         assert!(io.idl_parse_error.is_none());
         assert_eq!(
+            io.named_account_indices,
+            BTreeMap::from([("destination".to_string(), 1), ("source".to_string(), 0)])
+        );
+        assert_eq!(
             io.solana_json_parsed_data,
             Some(SolanaJsonParsedInstructionDataIo {
                 program: "system".to_string(),
@@ -1843,6 +1888,35 @@ mod tests {
         );
     }
 
+    /// A key passed twice indexes its first position; a named account whose
+    /// key is not in the list (a lookup-table account) gets no index.
+    #[test]
+    fn named_accounts_index_the_first_position_of_their_key() {
+        let parsed = SolanaParsedInstructionDataIo {
+            instruction_name: "create".to_string(),
+            discriminator: "00".to_string(),
+            named_accounts: BTreeMap::from([
+                ("source".to_string(), "K".to_string()),
+                ("account".to_string(), "A".to_string()),
+                ("wallet".to_string(), "K".to_string()),
+                ("mint".to_string(), ADDRESS_TABLE_LOOKUP.to_string()),
+            ]),
+            program_call_args_json: "{}".to_string(),
+            idl_source: String::new(),
+            idl_hash: String::new(),
+        };
+        let indices = index_named_accounts(Some(&parsed), ["K", "A", "K"].into_iter());
+        assert_eq!(
+            indices,
+            BTreeMap::from([
+                ("account".to_string(), 1),
+                ("source".to_string(), 0),
+                ("wallet".to_string(), 0),
+            ])
+        );
+        assert!(index_named_accounts(None, ["K"].into_iter()).is_empty());
+    }
+
     /// Only values that differ between the two decodes are masked, so a static
     /// key or a data-encoded pubkey equal to a placeholder is left alone.
     #[test]
@@ -1925,6 +1999,11 @@ mod tests {
                 r#"{{"destination":"ADDRESS_TABLE_LOOKUP","lamports":1001,"source":"{payer}"}}"#
             )
         );
+        assert_eq!(
+            instruction.named_account_indices,
+            BTreeMap::from([("source".to_string(), 0)]),
+            "a lookup-table account is not in `accounts`, so it has no index"
+        );
         let json_parsed = instruction.solana_json_parsed_data.as_ref().unwrap();
         assert!(
             json_parsed.parsed_json.contains(ADDRESS_TABLE_LOOKUP),
@@ -1984,10 +2063,27 @@ mod tests {
             );
         }
 
+        for instruction in &output.instructions {
+            for (name, index) in &instruction.named_account_indices {
+                let key = &instruction.accounts[*index as usize].account_key;
+                let named = instruction
+                    .parsed_instruction_data
+                    .as_ref()
+                    .and_then(|parsed| parsed.named_accounts.get(name));
+                assert_eq!(named, Some(key), "{name} indexes its own key");
+            }
+        }
+
         let deposit = &output.instructions[2];
         assert_eq!(
             deposit.program_key,
             "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9"
+        );
+        assert_eq!(
+            deposit.parsed_instruction_data.is_some(),
+            !deposit.named_account_indices.is_empty(),
+            "an IDL decode names accounts, so it indexes them: {:?}",
+            deposit.parsed_instruction_data
         );
         assert_eq!(deposit.registered_source, RegisteredSource::Preset);
         assert!(deposit.solana_json_parsed_data.is_none());
@@ -2012,13 +2108,21 @@ mod tests {
             .collect();
         let account_refs: Vec<&str> = accounts.iter().map(String::as_str).collect();
 
-        let outer = build_intermediate_instruction(
+        let outer_instruction = build_intermediate_instruction(
             &static_instruction(&token.to_string(), &account_refs, &data),
             None,
             &BTreeMap::new(),
-        )
-        .parsed_instruction_data
-        .expect("outer decodes");
+        );
+        let expected_indices = BTreeMap::from([
+            ("authority".to_string(), 3),
+            ("destination".to_string(), 2),
+            ("mint".to_string(), 1),
+            ("source".to_string(), 0),
+        ]);
+        assert_eq!(outer_instruction.named_account_indices, expected_indices);
+        let outer = outer_instruction
+            .parsed_instruction_data
+            .expect("outer decodes");
 
         // The RPC-parsed form is the decoder's own output, as
         // simulateTransaction returns it.
@@ -2053,7 +2157,12 @@ mod tests {
         assert!(error.is_none());
         assert_eq!(inner.len(), 2);
         assert!(inner[0].solana_rpc_parsed_data.is_none());
+        assert_eq!(inner[0].named_account_indices, expected_indices);
         assert!(inner[1].solana_rpc_parsed_data.is_some());
+        assert!(
+            inner[1].named_account_indices.is_empty(),
+            "the RPC returns no account list to index into"
+        );
         for instruction in &inner {
             assert_eq!(instruction.registered_source, RegisteredSource::Native);
             assert!(instruction.solana_json_parse_error.is_none());
