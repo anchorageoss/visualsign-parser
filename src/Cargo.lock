@@ -14851,6 +14851,7 @@ dependencies = [
  "borsh 1.6.0",
  "clap",
  "defuse-core",
+ "defuse-nep413",
  "generated",
  "hex",
  "near-crypto",
