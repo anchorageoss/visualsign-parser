@@ -1,0 +1,85 @@
+SignablePayload {
+    fields: [
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "NEAR Mainnet",
+                label: "Network",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "NEAR Mainnet",
+            },
+        },
+        AddressV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "alice.near",
+                label: "From",
+            },
+            address_v2: SignablePayloadFieldAddressV2 {
+                address: "alice.near",
+                name: "",
+                memo: None,
+                asset_label: "",
+                badge_text: None,
+            },
+        },
+        AddressV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "wrap.near",
+                label: "To",
+            },
+            address_v2: SignablePayloadFieldAddressV2 {
+                address: "wrap.near",
+                name: "",
+                memo: None,
+                asset_label: "",
+                badge_text: None,
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "near_withdraw",
+                label: "Method",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "near_withdraw",
+            },
+        },
+        AmountV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "1 wNEAR",
+                label: "Amount",
+            },
+            amount_v2: SignablePayloadFieldAmountV2 {
+                amount: "1",
+                abbreviation: Some(
+                    "wNEAR",
+                ),
+            },
+        },
+        AmountV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0.000000000000000000000001 NEAR",
+                label: "Deposit",
+            },
+            amount_v2: SignablePayloadFieldAmountV2 {
+                amount: "0.000000000000000000000001",
+                abbreviation: Some(
+                    "NEAR",
+                ),
+            },
+        },
+        TextV2 {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "30 Tgas",
+                label: "Gas",
+            },
+            text_v2: SignablePayloadFieldTextV2 {
+                text: "30 Tgas",
+            },
+        },
+    ],
+    payload_type: "NearTx",
+    subtitle: None,
+    title: "Unwrap",
+    version: "0",
+}
