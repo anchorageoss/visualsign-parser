@@ -488,7 +488,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => eprintln!("boot attestation failed: {e}"),
                 }
                 let watcher = nsm.cache().spawn_watcher(boot_proof::WATCH_INTERVAL);
-                (Arc::new(nsm), Some(watcher))
+                let nsm = Arc::new(nsm);
+                (Arc::clone(&nsm) as _, Some((watcher, nsm)))
             }
         };
 
@@ -536,7 +537,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let serve = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal());
     match watcher {
         None => serve.await?,
-        Some(mut watcher) => tokio::select! {
+        Some((mut watcher, nsm)) => tokio::select! {
             served = serve => {
                 watcher.abort();
                 served?;
@@ -546,6 +547,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // certificate expires and then go unhealthy for good.
             exited = &mut watcher => {
                 return Err(format!("attestation watcher exited: {exited:?}").into());
+            }
+            // This process signs with its startup key, so it can't follow a
+            // rotated key or new manifest; restart picks them up.
+            () = nsm.input_drift() => {
+                watcher.abort();
+                return Err(format!("{}; exiting so the replica restarts", boot_proof::INPUT_DRIFT).into());
             }
         },
     }

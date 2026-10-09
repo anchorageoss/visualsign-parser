@@ -6,10 +6,12 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use base64::Engine as _;
 use host_primitives::turnkey::TurnkeyBootProof;
 use qos_p256::P256Pair;
+use tokio::sync::Notify;
 use tvc_attestation::AttestationError;
 use tvc_attestation::cache::{AttestationCache, InputLoader, Inputs, load_inputs};
 use tvc_attestation::manifest::{BootProofManifest, boot_proof_manifest, read_manifest_envelope};
@@ -149,12 +151,14 @@ pub const WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1
 /// Both inputs are pinned to what this process loaded at startup: responses
 /// are signed with the startup key and carry the startup manifest bytes, so
 /// a doc attesting anything else would contradict the rest of the response.
-/// If either file changes underneath us, refreshes fail, the cached doc ages
-/// out, and [`Self::healthy`] goes false (fail closed) instead of attesting
-/// a key this process doesn't sign with.
+/// If either file changes underneath us, the process can't follow: it would
+/// need the new key to sign with. So the first mismatch marks the source
+/// unhealthy and fails every request at once, and [`Self::input_drift`]
+/// resolves so `main` can exit and the replica restarts on the new inputs.
 pub struct NsmBootProof {
     base: StaticBootProof,
     cache: Arc<AttestationCache<qos_nsm::Nsm>>,
+    drift: Arc<InputDrift>,
 }
 
 impl NsmBootProof {
@@ -172,11 +176,9 @@ impl NsmBootProof {
             ephemeral_public_key: ephemeral.public_key().to_bytes(),
             manifest_hash: envelope.manifest_hash().to_vec(),
         };
-        let load: InputLoader = Arc::new(move || {
-            pinned.check(load_inputs(
-                paths::EPHEMERAL_KEY_FILE,
-                Path::new(paths::MANIFEST_FILE),
-            )?)
+        let drift = Arc::new(InputDrift::default());
+        let load = pinned_loader(pinned, Arc::clone(&drift), || {
+            load_inputs(paths::EPHEMERAL_KEY_FILE, Path::new(paths::MANIFEST_FILE))
         });
         Ok(Self {
             base: StaticBootProof::new(
@@ -187,6 +189,7 @@ impl NsmBootProof {
                 deployment_label,
             ),
             cache: Arc::new(AttestationCache::new(Arc::new(qos_nsm::Nsm), load)),
+            drift,
         })
     }
 
@@ -194,16 +197,25 @@ impl NsmBootProof {
     pub fn cache(&self) -> &Arc<AttestationCache<qos_nsm::Nsm>> {
         &self.cache
     }
+
+    /// Resolves once the enclave's key or manifest no longer matches what
+    /// this process loaded at startup. Never resolves otherwise.
+    pub async fn input_drift(&self) {
+        self.drift.wait().await;
+    }
 }
 
 impl BootProofSource for NsmBootProof {
-    /// Must run inside `tokio::task::block_in_place` on the multi-threaded
-    /// runtime (as `handle_parse` does): it blocks on the cache, which is
-    /// a hit (re-reading the two input files) unless a refresh is due.
+    /// Serves the cache's latest verified doc without touching the enclave
+    /// files or waiting behind a refresh: the watcher keeps it fresh, so a
+    /// slow read or an in-flight NSM call never delays or fails a request.
     fn boot_proof(&self) -> Result<TurnkeyBootProof, BootProofError> {
-        let handle = tokio::runtime::Handle::try_current()
-            .map_err(|e| AttestationError::Task(e.to_string()))?;
-        let (attestation, _) = handle.block_on(self.cache.get())?;
+        if self.drift.is_set() {
+            return Err(AttestationError::Task(INPUT_DRIFT.to_string()).into());
+        }
+        let attestation = self.cache.latest().ok_or_else(|| {
+            AttestationError::Task("no verified, unexpired attestation cached".to_string())
+        })?;
         Ok(TurnkeyBootProof {
             aws_attestation_doc_b64: base64::engine::general_purpose::STANDARD
                 .encode(&attestation.document),
@@ -212,8 +224,57 @@ impl BootProofSource for NsmBootProof {
     }
 
     fn healthy(&self) -> bool {
-        self.cache.healthy()
+        !self.drift.is_set() && self.cache.healthy()
     }
+}
+
+pub const INPUT_DRIFT: &str = "enclave ephemeral key or manifest changed since startup";
+
+/// Set, permanently, the first time the pin check fails. A failed pin check
+/// alone wouldn't do it: `AttestationCache::get` returns a loader error before
+/// it drops the cached doc, so `healthy()` would stay true until that doc's
+/// certificate expired, up to ~3h of a replica that's healthy but 503s every
+/// parse.
+#[derive(Default)]
+struct InputDrift {
+    set: AtomicBool,
+    notify: Notify,
+}
+
+impl InputDrift {
+    fn mark(&self) {
+        if !self.set.swap(true, Ordering::AcqRel) {
+            // `notify_one` keeps a permit if nobody is waiting yet, so a
+            // `wait` that starts later still returns.
+            self.notify.notify_one();
+        }
+    }
+
+    fn is_set(&self) -> bool {
+        self.set.load(Ordering::Acquire)
+    }
+
+    async fn wait(&self) {
+        while !self.is_set() {
+            self.notify.notified().await;
+        }
+    }
+}
+
+/// `load`, then the pin check. Only a pin mismatch marks drift: a load that
+/// fails outright (a transient read error) is the cache's to retry.
+fn pinned_loader(
+    pinned: PinnedInputs,
+    drift: Arc<InputDrift>,
+    load: impl Fn() -> Result<Inputs, AttestationError> + Send + Sync + 'static,
+) -> InputLoader {
+    Arc::new(move || {
+        let checked = pinned.check(load()?);
+        if checked.is_err() {
+            drift.mark();
+        }
+        checked
+    })
 }
 
 /// What this process signs with and serves; see [`NsmBootProof`].
@@ -457,5 +518,30 @@ pub(crate) mod tests {
             pinned.check(inputs(&[1; 4], &[9; 4])),
             Err(AttestationError::Manifest(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn pin_mismatch_marks_drift_but_a_failed_read_does_not() {
+        let pinned = || PinnedInputs {
+            ephemeral_public_key: vec![1; 4],
+            manifest_hash: vec![2; 4],
+        };
+
+        let drift = Arc::new(InputDrift::default());
+        let read_error = pinned_loader(pinned(), Arc::clone(&drift), || {
+            Err(AttestationError::EphemeralKey("transient".to_string()))
+        });
+        assert!(read_error().is_err());
+        assert!(!drift.is_set(), "a failed read is retried, not drift");
+
+        let rotated = pinned_loader(pinned(), Arc::clone(&drift), || {
+            Ok(inputs(&[9; 4], &[2; 4]))
+        });
+        assert!(matches!(rotated(), Err(AttestationError::EphemeralKey(_))));
+        assert!(drift.is_set());
+        // Marked before anyone waited: `wait` must still return.
+        tokio::time::timeout(std::time::Duration::from_secs(1), drift.wait())
+            .await
+            .expect("wait returns once drift is marked");
     }
 }
