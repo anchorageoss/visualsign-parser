@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn info_becomes_call_args() {
-        let parsed = super::super::canonicalize_value(&json!({
+        let parsed = visualsign::canonical_json::canonicalize(&json!({
             "type": "transferChecked",
             "info": {
                 "tokenAmount": { "uiAmountString": "0.02", "amount": "20000", "decimals": 6 },

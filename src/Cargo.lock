@@ -14890,6 +14890,7 @@ dependencies = [
  "base64 0.22.1",
  "bcs",
  "bech32",
+ "borsh 1.6.0",
  "hex",
  "move-bytecode-utils",
  "move-core-types",
