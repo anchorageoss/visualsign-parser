@@ -1,38 +1,50 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! Surfpool-backed integration tests for the Solana visual-sign parser.
+//! IDL discriminator fuzz, plus a small surfpool-backed check that the fork
+//! those tests start (in the lifecycle test below) actually serves real
+//! mainnet state.
 //!
-//! Tests are network-bound (start a `surfpool` mainnet fork; require the
-//! `surfpool` binary on `$PATH`) and are therefore `#[ignore]`. The roundtrip
-//! body and the `idl_tests!` macro live in `tests/common/mod.rs` so other test
-//! files (e.g. preset-specific surfpool tests) can reuse them.
+//! Most tests here (`idl_tests!` pairs, `surfpool_preset_idls`,
+//! `surfpool_idl_from_env`) are purely local: they decode an IDL, build a
+//! synthetic transaction from its first instruction's discriminator, and run
+//! it through the converter. No network access, no `surfpool` binary, not
+//! `#[ignore]` -- they run on every plain `cargo test -p visualsign-solana`.
 //!
-//! Run all surfpool tests:
+//! `surfpool_lifecycle` and `surfpool_program_executable` are the only tests
+//! that start a `surfpool` mainnet fork and require the `surfpool` binary on
+//! `$PATH`; both are `#[ignore]`. `surfpool_program_executable` is what
+//! actually asserts against fork-served state -- it fetches a well-known
+//! executable program account and checks its `executable`/`owner` fields, so
+//! a bad datasource (or a dead-fork regression) fails a real assertion,
+//! not "not-`--ignored`" text-only proof.
+//!
+//! Run the surfpool-backed tests:
 //!
 //! ```bash
 //! HELIUS_API_KEY=<key> cargo test \
 //!     --manifest-path src/Cargo.toml -p visualsign-solana \
-//!     --test surfpool_fuzz -- --ignored --test-threads=1
+//!     --test surfpool_fuzz -- --ignored
 //! ```
 //!
-//! Run a single IDL:
+//! Run a single IDL fuzz test (no `--ignored`, no fork):
 //!
 //! ```bash
-//! cargo test ... --test surfpool_fuzz surfpool_idl_jupiter -- --ignored
+//! cargo test --manifest-path src/Cargo.toml -p visualsign-solana \
+//!     --test surfpool_fuzz surfpool_idl_jupiter
 //! ```
 //!
 //! Adding a new IDL:
 //! - Upstream `solana_parser::solana::embedded_idls::*`: add a `use` import and
 //!   a `name => CONST` pair to the `idl_tests! { ... }` block below.
-//!   `idl_tests_cover_all_program_types` fails a plain, non-network `cargo
-//!   test` run if the resulting `NAMED_IDLS` list drifts from
+//!   `idl_tests_cover_all_program_types` fails a plain `cargo test` run if
+//!   the resulting `NAMED_IDLS` list drifts from
 //!   `solana_parser::ProgramType::all()`.
 //! - Vsp-local preset IDL (e.g. one added by the `solana-add-idl` skill):
 //!   drop a `.json` file anywhere directly under `src/presets/<name>/`.
 //!   `build.rs` discovers it and `surfpool_preset_idls` (below) iterates it
 //!   on every run -- no test-file edit required.
 //!
-//! To validate a candidate IDL before it's embedded upstream, set `IDL_FILE`
-//! to its path and run `surfpool_idl_from_env` (see below).
+//! To fuzz a candidate IDL before it's embedded upstream, set `IDL_FILE` to
+//! its path and run `surfpool_idl_from_env` (see below).
 
 mod common;
 
@@ -43,6 +55,7 @@ use solana_parser::solana::embedded_idls::{
     APE_PRO_IDL, CANDY_MACHINE_IDL, DRIFT_IDL, JUPITER_AGG_V6_IDL, JUPITER_IDL, JUPITER_LIMIT_IDL,
     KAMINO_IDL, LIFINITY_IDL, METEORA_IDL, OPENBOOK_IDL, ORCA_IDL, RAYDIUM_IDL, STABBLE_IDL,
 };
+use solana_sdk::pubkey::Pubkey;
 use solana_test_utils::{SurfpoolConfig, SurfpoolManager};
 
 /// Smoke test: start surfpool, verify the RPC responds, let `Drop` tear it down.
@@ -114,42 +127,69 @@ fn idl_tests_cover_all_program_types() {
     );
 }
 
-/// Validate a candidate IDL against a live mainnet fork before it's embedded
-/// upstream in `solana_parser::embedded_idls`. Skips gracefully when `IDL_FILE`
-/// is unset -- this is a manual pre-merge check, not part of the standard
-/// suite run by CI.
-#[tokio::test(flavor = "multi_thread")]
-#[ignore]
-async fn surfpool_idl_from_env() {
+/// Fuzz a candidate IDL before it's embedded upstream in
+/// `solana_parser::embedded_idls`. Skips gracefully when `IDL_FILE` is unset --
+/// this is a manual pre-merge check, not part of the standard suite run by CI.
+///
+/// Purely local, like `idl_discriminator_roundtrip` -- no fork involved.
+#[test]
+fn surfpool_idl_from_env() {
     let Some((idl_json, _idl)) = load_idl_from_env() else {
         eprintln!("IDL_FILE not set or invalid -- skipping surfpool_idl_from_env");
         return;
     };
-    common::run_idl_roundtrip("surfpool_idl_from_env", &idl_json).await;
+    common::idl_discriminator_roundtrip("surfpool_idl_from_env", &idl_json);
 }
 
 /// Auto-discovered preset IDLs: every `.json` file `build.rs` finds directly
-/// under a `src/presets/<name>/` directory is exercised here through the same
-/// roundtrip used by the named `idl_tests!` pairs above. The skill (and any
-/// future contributor) only needs to drop the JSON file -- this test picks it
-/// up without any code edit, regardless of filename. Empty when no presets
-/// ship an IDL JSON.
+/// under a `src/presets/<name>/` directory is fuzzed here through the same
+/// discriminator roundtrip used by the named `idl_tests!` pairs above. The
+/// skill (and any future contributor) only needs to drop the JSON file --
+/// this test picks it up without any code edit, regardless of filename. Empty
+/// when no presets ship an IDL JSON.
 ///
-/// Shares one `SurfpoolManager` across all preset IDLs to avoid paying the
-/// fork-startup cost N times when there are many presets.
+/// Purely local, like `idl_discriminator_roundtrip` -- no fork involved.
+#[test]
+fn surfpool_preset_idls() {
+    for (name, idl_json) in visualsign_solana::PRESET_IDLS {
+        common::idl_discriminator_roundtrip(&format!("preset_{name}"), idl_json);
+    }
+}
+
+/// Jupiter Aggregator V6 -- a real, executable mainnet program used to prove
+/// the fork in [`surfpool_program_executable`] serves live on-chain state.
+const JUPITER_AGG_V6_PROGRAM_ID: &str = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
+
+/// The BPF Loader Upgradeable program, which owns
+/// [`JUPITER_AGG_V6_PROGRAM_ID`]'s executable account on mainnet.
+const BPF_LOADER_UPGRADEABLE_PROGRAM_ID: &str = "BPFLoaderUpgradeab1e11111111111111111111111";
+
+/// The one test in this file whose assertion actually depends on the
+/// `surfpool` fork: fetches a well-known executable program account through
+/// it and checks `executable`/`owner`. Every `idl_tests!` pair above, plus
+/// `surfpool_preset_idls` and `surfpool_idl_from_env`, is a local
+/// discriminator fuzz that needs no fork at all -- this is the test that
+/// would fail if the fork stopped serving real mainnet state.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
-async fn surfpool_preset_idls() {
-    if visualsign_solana::PRESET_IDLS.is_empty() {
-        // Nothing to do: no preset has an embedded IDL JSON yet. Don't fail
-        // the test -- it'd be an unhelpful red whenever the upstream stack
-        // ships before the first preset IDL lands.
-        return;
-    }
-    let _manager = SurfpoolManager::start(SurfpoolConfig::default())
+async fn surfpool_program_executable() {
+    let manager = SurfpoolManager::start(SurfpoolConfig::default())
         .await
         .expect("surfpool should start");
-    for (name, idl_json) in visualsign_solana::PRESET_IDLS {
-        common::run_idl_roundtrip_inner(&format!("preset_{name}"), idl_json);
-    }
+
+    let program_id: Pubkey = JUPITER_AGG_V6_PROGRAM_ID
+        .parse()
+        .expect("hardcoded pubkey literal should parse");
+    let account = manager
+        .get_account(&program_id)
+        .await
+        .expect("get_account should succeed")
+        .expect("Jupiter Aggregator V6 should exist on the mainnet fork");
+
+    assert!(account.executable, "program account must be executable");
+    assert_eq!(
+        account.owner.to_string(),
+        BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+        "program account should be owned by the BPF Loader Upgradeable program"
+    );
 }
