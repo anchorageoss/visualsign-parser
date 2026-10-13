@@ -10,15 +10,58 @@ and a proxied zone.
 - `worker.js` -- 402 challenge, then facilitator `/verify`, forward, and
   `/settle` only on a 2xx. A payment that differs from the advertised
   requirements is rejected before the facilitator is called.
-- `buyer.mjs` -- paying client (the #304 `@x402/evm` exact flow). Set
-  `SOCKS_PROXY=host:port` if Cloudflare is not directly reachable. The wallet
-  key is read from `~/.config/visualsign/base-sepolia/wallet.key` and never
-  printed. It writes a request/response transcript to `TRANSCRIPT`.
-- `worker.test.js` -- `npm test`, with a mocked facilitator.
+- `buyer.mjs` -- paying client (the #304 `@x402/evm` exact flow). It writes a
+  request/response transcript to `TRANSCRIPT` (default `transcript.json`).
+- `worker.test.js` -- tests with a mocked facilitator.
+- `wrangler.toml` -- Worker name, entry point and `PRICE_ATOMIC`.
 
-Worker bindings: `PAY_TO` (required), `PRICE_ATOMIC` (default `1000`),
-`PARSER_BACKEND_URL` (unset serves a labelled stub instead of the parser),
-`BACKEND_BEARER` (secret, optional), `FACILITATOR_URL` (optional).
+## Run it
+
+Prerequisites: Node 20+, a Cloudflare account on any plan with a workers.dev
+subdomain, and a Base Sepolia wallet funded with test USDC
+(<https://faucet.circle.com>, pick Base Sepolia).
+
+```sh
+cd tools/cloudflare-x402-poc
+npm install
+npm test
+```
+
+Deploy the Worker. `PAY_TO` is the address that receives the payment:
+
+```sh
+npx wrangler login
+npx wrangler deploy --var PAY_TO:0xYourReceivingAddress
+```
+
+Wrangler prints the Worker URL. Check it:
+
+```sh
+curl https://vsp-x402-poc.<your-subdomain>.workers.dev/health
+```
+
+Put the buyer's 32-byte private key (hex) in
+`~/.config/visualsign/base-sepolia/wallet.key` with mode 600, or point
+`WALLET_KEY` at another file. The key is never printed. Then run the paid
+flow:
+
+```sh
+WORKER_URL=https://vsp-x402-poc.<your-subdomain>.workers.dev node buyer.mjs
+```
+
+Expected output: the buyer address and USDC balance, `unpaid status: 402`,
+`paid status: 200`, the settlement receipt, and a
+`https://sepolia.basescan.org/tx/...` link.
+
+## Worker bindings
+
+| Name | Required | Meaning |
+| --- | --- | --- |
+| `PAY_TO` | yes | receiving address |
+| `PRICE_ATOMIC` | no, default `1000` | price in USDC atomic units (1000 = 0.001 USDC) |
+| `PARSER_BACKEND_URL` | no | parser backend to forward to; unset serves a labelled stub |
+| `BACKEND_BEARER` | no | bearer token sent to the backend; set with `npx wrangler secret put BACKEND_BEARER` |
+| `FACILITATOR_URL` | no, default `https://x402.org/facilitator` | x402 facilitator |
 
 Not done: pointing the Worker at a real parser backend, and mapping the
 payment onto the payment marker.

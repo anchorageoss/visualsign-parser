@@ -1,37 +1,31 @@
 // x402 v2 buyer for the Cloudflare Worker PoC, Base Sepolia only.
 //
-// Reuses the #304 buyer flow (@x402/evm exact client). Transport goes through
-// an optional SOCKS5 proxy (SOCKS_PROXY=host:port) because Cloudflare is not
-// directly reachable from the dev box. The wallet key is read from disk and
-// never printed. A request/response transcript (no key material) is written
-// to TRANSCRIPT for posting.
+// Reuses the #304 buyer flow (@x402/evm exact client). The wallet key is read
+// from disk and never printed. A request/response transcript (no key
+// material) is written to TRANSCRIPT.
 
 import { readFile, writeFile } from "node:fs/promises";
-import { fetch as undiciFetch } from "undici";
-import { socksDispatcher } from "fetch-socks";
 import { createPublicClient, http, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia } from "viem/chains";
 import { x402Client, x402HTTPClient } from "@x402/core/client";
 import { registerExactEvmScheme } from "@x402/evm/exact/client";
 
-const WORKER_URL = process.env.WORKER_URL ?? "https://vsp-x402-poc.anchorage-sandbox.workers.dev";
+const WORKER_URL = process.env.WORKER_URL;
+if (!WORKER_URL) {
+  console.error("set WORKER_URL to the deployed Worker, e.g. https://vsp-x402-poc.<subdomain>.workers.dev");
+  process.exit(1);
+}
 const RPC_URL = process.env.RPC_URL ?? "https://sepolia.base.org";
 const WALLET_KEY_PATH =
   process.env.WALLET_KEY ?? `${process.env.HOME}/.config/visualsign/base-sepolia/wallet.key`;
 const TRANSCRIPT = process.env.TRANSCRIPT ?? "transcript.json";
 const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 
-let dispatcher;
-if (process.env.SOCKS_PROXY) {
-  const [host, port] = process.env.SOCKS_PROXY.split(":");
-  dispatcher = socksDispatcher({ type: 5, host, port: Number(port) });
-}
-
 const transcript = [];
 
 async function call(label, url, init) {
-  const res = await undiciFetch(url, { ...init, dispatcher });
+  const res = await fetch(url, init);
   const text = await res.text();
   transcript.push({
     label,
