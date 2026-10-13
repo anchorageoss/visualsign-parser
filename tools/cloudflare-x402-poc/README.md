@@ -59,9 +59,14 @@ Expected output: the buyer address and USDC balance, `unpaid status: 402`,
 | --- | --- | --- |
 | `PAY_TO` | yes | receiving address |
 | `PRICE_ATOMIC` | no, default `1000` | price in USDC atomic units (1000 = 0.001 USDC) |
-| `PARSER_BACKEND_URL` | no | parser backend to forward to; unset serves a labelled stub |
+| `PARSER_BACKEND_URL` | no | parser backend to forward to (its open `/visualsign/api/v1/parse` route); unset serves a labelled stub |
 | `BACKEND_BEARER` | no | bearer token sent to the backend; set with `npx wrangler secret put BACKEND_BEARER` |
 | `FACILITATOR_URL` | no, default `https://x402.org/facilitator` | x402 facilitator |
 
-Not done: pointing the Worker at a real parser backend, and mapping the
-payment onto the payment marker.
+The backend should be a `parser_gateway` + `parser_grpc_server` deployment with
+`GATEWAY_AUTH_BEARER_TOKEN` (or `_FILE`) set, so only the Worker can call its
+open `/v1` route. The Worker calls v1 because the backend's own v2 route is
+x402-gated and would ask the Worker to pay a second time.
+
+Not done: mapping the payment onto the payment marker, so the backend does not
+yet see proof of payment.

@@ -7,6 +7,7 @@
 const NETWORK = "eip155:84532";
 const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 const PARSE_PATH = "/visualsign/api/v2/parse";
+const BACKEND_PATH = "/visualsign/api/v1/parse";
 const MAX_BODY_BYTES = 1024 * 1024;
 const FACILITATOR_TIMEOUT_MS = 8000;
 
@@ -97,7 +98,9 @@ async function runParse(env, request, bodyText) {
   }
   const headers = { "content-type": "application/json" };
   if (env.BACKEND_BEARER) headers.authorization = `Bearer ${env.BACKEND_BEARER}`;
-  return fetch(`${env.PARSER_BACKEND_URL}${PARSE_PATH}`, {
+  // The backend's own v2 route is x402-gated; the Worker is the paywall, so it
+  // calls the open v1 route (protect the backend with a bearer token).
+  return fetch(`${env.PARSER_BACKEND_URL}${BACKEND_PATH}`, {
     method: "POST",
     headers,
     body: bodyText,
