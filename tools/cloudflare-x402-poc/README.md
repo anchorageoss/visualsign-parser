@@ -53,6 +53,29 @@ Expected output: the buyer address and USDC balance, `unpaid status: 402`,
 `paid status: 200`, the settlement receipt, and a
 `https://sepolia.basescan.org/tx/...` link.
 
+## Backend (Cloud Run)
+
+`backend/` builds `parser_grpc_server` + `parser_gateway` into one image for a
+non-attested dev backend (checked-in dev ephemeral key, mock boot proof).
+Assemble a context from the repo and deploy from source:
+
+```sh
+ctx=$(mktemp -d)
+git archive HEAD src | tar -x -C "$ctx"
+cp tools/cloudflare-x402-poc/backend/* "$ctx"/
+gcloud run deploy vsp-parser-poc --source "$ctx" --project <project> --region <region> \
+  --no-allow-unauthenticated --memory 1Gi --max-instances 2 \
+  --set-secrets=/secrets/bearer=vsp-poc-bearer:latest \
+  --set-env-vars=GATEWAY_AUTH_BEARER_FILE=/secrets/bearer
+```
+
+Create the `vsp-poc-bearer` secret first (a random token), and give the Cloud
+Run runtime account `roles/secretmanager.secretAccessor` on it. The same token
+goes into the Worker as `BACKEND_BEARER`. `terraform/` then makes the service
+publicly invokable with the org's `allUsersIngress/allowed` tag, the same
+pattern as protocols-research PR 40; `/v1` stays closed by the bearer token.
+It also records the service and secret (imported). State is local for now.
+
 ## Worker bindings
 
 | Name | Required | Meaning |
