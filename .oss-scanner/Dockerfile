@@ -2,8 +2,10 @@
 # The scanner builds this with the repository root as context, with network access; the audit that follows
 # has no network, so everything (crates, git dependencies) is fetched here.
 
-# Stage 1: the production parser_app, built exactly as images/parser_app/Containerfile builds it (same pinned
-# image, flags and /src layout), so its sha256 matches `make non-oci-docker-images`. Keep in sync with that file.
+# Stage 1: parser_app built with the same recipe as images/parser_app/Containerfile (same pinned image, flags and
+# /src layout), so its sha256 matches a local `make non-oci-docker-images`, which is also built without VERSION.
+# A released binary is built with a real VERSION (stagex.yml runs `make VERSION=...`) and embeds it, so its sha256
+# differs. Keep this stage in sync with that file (scripts/check-oss-scanner-dockerfile.sh enforces it).
 #
 # Why this is a copy and not `dockerfile: images/parser_app/Containerfile` in project.yaml: the scanner accepts any
 # path for `dockerfile:`, but it builds the whole file with no --target and treats the LAST stage as the image it
@@ -58,18 +60,18 @@ WORKDIR /src/src
 # Install the toolchain pinned by src/rust-toolchain.toml.
 RUN rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" --profile minimal -c clippy -c rustfmt
 
-# The release parser_app from stage 1: the binary whose sha256 a signer approves. Not the debug build below.
+# The release parser_app from stage 1: same recipe as images/parser_app/Containerfile, but built with VERSION=dev,
+# so its sha256 differs from the released binary a signer approves. Not the debug build below.
 COPY --from=release /rootfs/parser_app /opt/release/parser_app
 
 RUN cargo fetch --locked
 
 # Build every workspace target (integration tests need the binaries).
 # Mirrors `make build` / `make test` in src/Makefile; parser_cli is built apart from the rest so its dev-signing
-# features do not unify into the production binaries. `codegen` is skipped: it is the protobuf generator (vendors
-# protobuf-src) and its output in `generated` is checked in.
-RUN cargo build --workspace --exclude parser_cli --exclude codegen --all-targets \
+# features do not unify into the production binaries.
+RUN cargo build --workspace --exclude parser_cli --all-targets \
     && cargo build -p parser_cli --all-targets
 
 # Run the test suite so the image is known to work, but do not abort the build on test failures.
-RUN (cargo test --workspace --exclude parser_cli --exclude codegen --all-targets \
+RUN (cargo test --workspace --exclude parser_cli --all-targets \
      && cargo test -p parser_cli --all-targets) || echo "WARNING: tests reported failures"
