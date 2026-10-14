@@ -32,6 +32,13 @@ variable "service" {
   default = "vsp-parser-poc"
 }
 
+# Public key (SEC1 uncompressed P-256 hex, from keygen.mjs) the backend pins to
+# enforce proof of payment. Public, so a plain variable; empty disables it.
+variable "payment_marker_pubkey" {
+  type    = string
+  default = ""
+}
+
 variable "all_users_ingress_tag_value" {
   type    = string
   default = "tagValues/281480630181594"
@@ -100,6 +107,10 @@ resource "google_cloud_run_v2_service" "parser" {
       env {
         name  = "GATEWAY_AUTH_BEARER_FILE"
         value = "/secrets/bearer"
+      }
+      env {
+        name  = "PAYMENT_MARKER_PUBKEY"
+        value = var.payment_marker_pubkey
       }
 
       resources {

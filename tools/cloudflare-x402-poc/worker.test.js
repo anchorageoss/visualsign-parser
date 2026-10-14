@@ -96,3 +96,65 @@ test("backend failure -> 502 and no settle", async () => {
   assert.equal(res.status, 502);
   assert.ok(!calls.some((c) => c.endsWith("/settle")));
 });
+
+// Proof-of-payment mode: MARKER_SIGNING_JWK set, so settle happens first and
+// the backend receives a signed marker.
+async function markerEnv() {
+  const { privateKey } = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign"]);
+  const jwk = JSON.stringify(await crypto.subtle.exportKey("jwk", privateKey));
+  return { PAY_TO, PARSER_BACKEND_URL: "https://backend.example", MARKER_SIGNING_JWK: jwk };
+}
+
+const PARSE_BODY = JSON.stringify({ request: { chain: "CHAIN_ETHEREUM", unsigned_payload: "0x02" } });
+
+function paidReq(body = PARSE_BODY) {
+  return new Request("https://w.example/visualsign/api/v2/parse", {
+    method: "POST",
+    headers: { "PAYMENT-SIGNATURE": sigHeader() },
+    body,
+  });
+}
+
+function mockWithBackend(backendStatus) {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    calls.push({ url: u, headers: init?.headers });
+    if (u.endsWith("/verify")) return new Response(JSON.stringify({ isValid: true }));
+    if (u.endsWith("/settle")) {
+      return new Response(JSON.stringify({ success: true, transaction: "0xabc", payer: "0xpayer", network: "eip155:84532" }));
+    }
+    return new Response("{}", { status: backendStatus });
+  };
+  return calls;
+}
+
+test("marker mode settles before forwarding and sends a marker", async () => {
+  const calls = mockWithBackend(200);
+  const res = await worker.fetch(paidReq(), await markerEnv());
+  assert.equal(res.status, 200);
+  assert.deepEqual(
+    calls.map((c) => c.url.split("/").pop()),
+    ["verify", "settle", "parse"],
+  );
+  const marker = calls[2].headers["x-payment-marker"];
+  assert.ok(marker && marker.length > 100);
+  assert.ok(res.headers.get("PAYMENT-RESPONSE"));
+});
+
+test("marker mode: backend failure after settlement still returns the receipt", async () => {
+  mockWithBackend(500);
+  const res = await worker.fetch(paidReq(), await markerEnv());
+  assert.equal(res.status, 502);
+  assert.ok(res.headers.get("PAYMENT-RESPONSE"));
+});
+
+test("marker mode refuses a body it cannot bind before calling the facilitator", async () => {
+  const calls = mockWithBackend(200);
+  const withMetadata = JSON.stringify({
+    request: { chain: "CHAIN_ETHEREUM", unsigned_payload: "0x02", chain_metadata: { ethereum: {} } },
+  });
+  const res = await worker.fetch(paidReq(withMetadata), await markerEnv());
+  assert.equal(res.status, 400);
+  assert.equal(calls.length, 0);
+});

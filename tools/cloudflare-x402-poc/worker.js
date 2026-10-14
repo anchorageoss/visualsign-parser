@@ -3,6 +3,13 @@
 // Testnet only: the advertised network is hardcoded to Base Sepolia and the
 // worker refuses any payment that does not match the requirements it issued.
 // Flow mirrors parser_gateway: verify -> forward -> settle only on a 2xx.
+//
+// When MARKER_SIGNING_JWK is set the backend enforces proof of payment: the
+// Worker settles first, then signs a marker bound to the request and the
+// settlement (see marker.js) and sends it as X-Payment-Marker. A backend
+// failure after settlement therefore cannot be un-charged.
+
+import { CHAIN_NUMBERS, requestHash, sha256, signMarker } from "./marker.js";
 
 const NETWORK = "eip155:84532";
 const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
@@ -88,7 +95,20 @@ async function facilitator(env, path, body) {
   }
 }
 
-async function runParse(env, request, bodyText) {
+// The fields the marker binds. chain_metadata is unsupported (see marker.js).
+function markerRequest(bodyText) {
+  let req;
+  try {
+    req = JSON.parse(bodyText)?.request;
+  } catch {
+    return null;
+  }
+  const chain = CHAIN_NUMBERS[req?.chain];
+  if (!chain || typeof req.unsigned_payload !== "string" || req.chain_metadata != null) return null;
+  return { chain, unsignedPayload: req.unsigned_payload, includeIntermediate: req.include_intermediate_output === true };
+}
+
+async function runParse(env, request, bodyText, marker) {
   if (!env.PARSER_BACKEND_URL) {
     // No backend wired: prove the payment flow with a clearly-labelled stub.
     return new Response(
@@ -98,6 +118,7 @@ async function runParse(env, request, bodyText) {
   }
   const headers = { "content-type": "application/json" };
   if (env.BACKEND_BEARER) headers.authorization = `Bearer ${env.BACKEND_BEARER}`;
+  if (marker) headers["x-payment-marker"] = marker;
   // The backend's own v2 route is x402-gated; the Worker is the paywall, so it
   // calls the open v1 route (protect the backend with a bearer token).
   return fetch(`${env.PARSER_BACKEND_URL}${BACKEND_PATH}`, {
@@ -131,6 +152,12 @@ async function handleParse(request, env) {
     return json(413, { error: "body too large" });
   }
 
+  const signing = Boolean(env.MARKER_SIGNING_JWK);
+  const mreq = signing ? markerRequest(bodyText) : null;
+  if (signing && !mreq) {
+    return json(400, { error: "body must carry request.chain (Ethereum/Solana), request.unsigned_payload and no chain_metadata" });
+  }
+
   const fbody = { x402Version: 2, paymentPayload: payload, paymentRequirements: want };
 
   const verify = await facilitator(env, "/verify", fbody);
@@ -138,19 +165,48 @@ async function handleParse(request, env) {
     return paymentRequired(env, resourceUrl, `verify failed: ${verify.body.invalidReason ?? verify.status}`);
   }
 
-  const upstream = await runParse(env, request, bodyText);
-  if (upstream.status < 200 || upstream.status >= 300) {
-    // Not settled: an unserved request is never charged.
-    return json(502, { error: "backend failed; payment not settled", backendStatus: upstream.status });
+  if (!signing) {
+    const upstream = await runParse(env, request, bodyText);
+    if (upstream.status < 200 || upstream.status >= 300) {
+      // Not settled: an unserved request is never charged.
+      return json(502, { error: "backend failed; payment not settled", backendStatus: upstream.status });
+    }
+    const settle = await facilitator(env, "/settle", fbody);
+    if (settle.status !== 200 || settle.body.success !== true) {
+      return json(502, { error: "settlement failed", reason: settle.body.errorReason ?? settle.status });
+    }
+    const out = new Response(upstream.body, upstream);
+    out.headers.set("PAYMENT-RESPONSE", b64json(settle.body));
+    return out;
   }
 
   const settle = await facilitator(env, "/settle", fbody);
   if (settle.status !== 200 || settle.body.success !== true) {
     return json(502, { error: "settlement failed", reason: settle.body.errorReason ?? settle.status });
   }
-
+  const receipt = b64json(settle.body);
+  const marker = await signMarker(env.MARKER_SIGNING_JWK, {
+    requestHash: await requestHash(mreq.chain, mreq.unsignedPayload, mreq.includeIntermediate),
+    txid: settle.body.transaction,
+    payer: settle.body.payer ?? "",
+    payTo: want.payTo,
+    amount: want.amount,
+    mint: want.asset,
+    xPaymentHash: await sha256(Uint8Array.from(atob(sig), (c) => c.charCodeAt(0))),
+    network: NETWORK,
+    settledAtMs: Date.now(),
+  });
+  const upstream = await runParse(env, request, bodyText, marker);
+  if (upstream.status < 200 || upstream.status >= 300) {
+    // Already settled: hand back the receipt so the buyer can see the charge.
+    return json(
+      502,
+      { error: "backend failed after settlement", backendStatus: upstream.status },
+      { "PAYMENT-RESPONSE": receipt },
+    );
+  }
   const out = new Response(upstream.body, upstream);
-  out.headers.set("PAYMENT-RESPONSE", b64json(settle.body));
+  out.headers.set("PAYMENT-RESPONSE", receipt);
   return out;
 }
 
