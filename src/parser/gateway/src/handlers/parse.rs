@@ -2,7 +2,11 @@
 //! and /visualsign/api/v2/parse (x402-gated).
 
 use crate::state::AppState;
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+};
 use base64::Engine as _;
 use generated::parser::{
     Chain, ChainMetadata, ParseRequest, ParsedTransactionPayload, SignatureScheme,
@@ -15,6 +19,30 @@ use host_primitives::turnkey::{
 };
 use qos_crypto::sha_256;
 use std::time::Duration;
+
+/// Header carrying `base64(borsh(SignedVerifiedPaymentMarker))`, forwarded
+/// verbatim as `ParseRequest.payment_marker`. The caller is trusted to have
+/// settled the payment (the route sits behind the gateway bearer); the
+/// parser backend enforces the marker's signature and request binding when
+/// started with a pinned payment key.
+const PAYMENT_MARKER_HEADER: &str = "x-payment-marker";
+
+/// Longest base64 header accepted before decoding; `parser_app` caps the
+/// decoded marker at 8 KiB.
+const MAX_PAYMENT_MARKER_HEADER_BYTES: usize = 12 * 1024;
+
+/// Absent is an empty marker; present but undecodable is `Err`.
+fn payment_marker_from_headers(headers: &HeaderMap) -> Result<Vec<u8>, ()> {
+    let Some(value) = headers.get(PAYMENT_MARKER_HEADER) else {
+        return Ok(Vec::new());
+    };
+    if value.len() > MAX_PAYMENT_MARKER_HEADER_BYTES {
+        return Err(());
+    }
+    base64::engine::general_purpose::STANDARD
+        .decode(value.as_bytes())
+        .map_err(|_| ())
+}
 
 /// Stable mock used in every gateway response. The base64 sentinels decode to
 /// "TURNKEY_GATEWAY_MOCK_BOOT_PROOF" and "TURNKEY_GATEWAY_MOCK_QOS_MANIFEST*" --
@@ -74,6 +102,7 @@ pub async fn parse_handler(
         attestation,
         ..
     }): State<AppState>,
+    headers: HeaderMap,
     Json(wrapper): Json<TurnkeyRequestWrapper>,
 ) -> (StatusCode, Json<TurnkeyResponseWrapper>) {
     let chain = match Chain::from_str_name(&wrapper.request.chain) {
@@ -87,6 +116,13 @@ pub async fn parse_handler(
                 ))),
             );
         }
+    };
+
+    let Ok(payment_marker) = payment_marker_from_headers(&headers) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(error_response("invalid payment marker".to_string())),
+        );
     };
 
     let chain_metadata = wrapper.request.chain_metadata.map(ChainMetadata::from);
@@ -115,11 +151,7 @@ pub async fn parse_handler(
         chain,
         chain_metadata,
         include_intermediate_output: wrapper.request.include_intermediate_output,
-        // This gateway does not yet sign a VerifiedPaymentMarker (see
-        // host_primitives::payment_marker); every call site here forwards
-        // an empty marker, which parser_app accepts as long as payment
-        // enforcement is disabled.
-        payment_marker: vec![],
+        payment_marker,
     });
 
     let response = match tokio::time::timeout(PARSE_TIMEOUT, grpc_client.parse(request)).await {
@@ -128,6 +160,11 @@ pub async fn parse_handler(
             let (http_status, msg) = match e.code() {
                 tonic::Code::InvalidArgument => (StatusCode::BAD_REQUEST, e.message().to_string()),
                 tonic::Code::NotFound => (StatusCode::NOT_FOUND, e.message().to_string()),
+                // parser_app's payment-conditional rejections (missing
+                // marker, wrong request, wrong key, bad signature).
+                tonic::Code::FailedPrecondition => {
+                    (StatusCode::PAYMENT_REQUIRED, "payment required".to_string())
+                }
                 _ => {
                     eprintln!("gRPC error: {e}");
                     (
@@ -322,6 +359,22 @@ mod tests {
             unsigned_payload,
             b"some-metadata"
         ));
+    }
+
+    #[test]
+    fn payment_marker_header_decodes_absent_valid_and_invalid() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(payment_marker_from_headers(&headers), Ok(Vec::new()));
+
+        headers.insert(PAYMENT_MARKER_HEADER, "AQID".parse().unwrap());
+        assert_eq!(payment_marker_from_headers(&headers), Ok(vec![1, 2, 3]));
+
+        headers.insert(PAYMENT_MARKER_HEADER, "not base64 !!".parse().unwrap());
+        assert_eq!(payment_marker_from_headers(&headers), Err(()));
+
+        let oversized = "A".repeat(MAX_PAYMENT_MARKER_HEADER_BYTES + 1);
+        headers.insert(PAYMENT_MARKER_HEADER, oversized.parse().unwrap());
+        assert_eq!(payment_marker_from_headers(&headers), Err(()));
     }
 
     #[test]

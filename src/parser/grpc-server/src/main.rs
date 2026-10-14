@@ -59,11 +59,14 @@ impl ParserService for GrpcService {
 }
 
 const USAGE: &str = "usage: parser_grpc_server \
-     [--accept-unsigned-abis | --accept-signatures-from-pubkey <hex> ...]";
+     [--accept-unsigned-abis | --accept-signatures-from-pubkey <hex> ...] \
+     [--require-payment-marker-pubkey <hex>]";
 
-fn abi_trust_from_args() -> Result<MetadataTrustPolicy, String> {
+/// ABI trust posture plus the optional pinned payment-marker key.
+fn config_from_args() -> Result<(MetadataTrustPolicy, PaymentPolicy), String> {
     let mut accept_unsigned = false;
     let mut signer_pubkeys: Vec<String> = Vec::new();
+    let mut payment_pubkey: Option<String> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -80,6 +83,12 @@ fn abi_trust_from_args() -> Result<MetadataTrustPolicy, String> {
                 }
                 signer_pubkeys.push(key);
             }
+            "--require-payment-marker-pubkey" => {
+                let key = args
+                    .next()
+                    .ok_or("--require-payment-marker-pubkey needs a hex public key")?;
+                payment_pubkey = Some(key);
+            }
             other => {
                 if let Some(key) = other.strip_prefix("--accept-signatures-from-pubkey=") {
                     signer_pubkeys.push(key.to_string());
@@ -90,11 +99,17 @@ fn abi_trust_from_args() -> Result<MetadataTrustPolicy, String> {
         }
     }
 
-    if !accept_unsigned && signer_pubkeys.is_empty() {
-        return Ok(default_to_unsigned_dev_posture());
-    }
-
-    ParserConfig::abi_trust_from_options(accept_unsigned, &signer_pubkeys)
+    let abi_trust = if !accept_unsigned && signer_pubkeys.is_empty() {
+        default_to_unsigned_dev_posture()
+    } else {
+        ParserConfig::abi_trust_from_options(accept_unsigned, &signer_pubkeys)?
+    };
+    let payment_policy = match payment_pubkey {
+        Some(hex) => PaymentPolicy::from_hex(&hex)
+            .map_err(|e| format!("invalid --require-payment-marker-pubkey: {}", e.message))?,
+        None => PaymentPolicy::Disabled,
+    };
+    Ok((abi_trust, payment_policy))
 }
 
 /// This is the non-attested dev server, so an omitted posture defaults to
@@ -142,12 +157,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let abi_trust = abi_trust_from_args().map_err(|e| format!("invalid ABI trust config: {e}"))?;
+    let (abi_trust, payment_policy) =
+        config_from_args().map_err(|e| format!("invalid config: {e}"))?;
     println!("caller-supplied ABI trust: {abi_trust}");
+    println!("payment marker enforcement: {payment_policy:?}");
 
     let svc = GrpcService::new(
         &ephemeral_file,
-        ParserConfig::new(abi_trust, PaymentPolicy::Disabled),
+        ParserConfig::new(abi_trust, payment_policy),
     );
 
     let reflection_service = generated::tonic_reflection::server::Builder::configure()
