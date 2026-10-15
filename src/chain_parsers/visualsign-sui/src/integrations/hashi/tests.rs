@@ -566,7 +566,7 @@ fn bitcoin_networks_have_distinct_prefixes_and_names() {
 }
 
 #[test]
-fn sui_networks_are_named_like_anchorage_networks() {
+fn sui_network_display_names() {
     assert_eq!(SuiNetwork::Mainnet.display_name(), "Sui");
     assert_eq!(SuiNetwork::Testnet.display_name(), "Sui Testnet");
 }
@@ -1911,7 +1911,7 @@ fn bridge_addresses_are_named_hashi() {
 }
 
 #[test]
-fn every_preview_shape_renders_in_the_anchorage_wallet() {
+fn every_preview_shape_passes_the_wallet_render_check() {
     for tx in [
         deposit_tx(),
         deposit_to(None),
