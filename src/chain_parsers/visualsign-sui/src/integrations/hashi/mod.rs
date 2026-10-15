@@ -1,6 +1,7 @@
 //! Previews for calls into the [Hashi](https://github.com/MystenLabs/hashi) bridge.
-//! Hashi paths cited below are at its `testnet` branch,
-//! `7fad9d45309c1561fe6e4e78682d07b35076eca2`, which records its testnet deployment.
+//! Hashi paths cited below are at its `main` branch,
+//! `cb767e848644776a12c3334890ce6380be894898`, whose node operator runbook
+//! (`design/docs/node-operator-runbook.mdx`) records its testnet deployment.
 
 mod config;
 
