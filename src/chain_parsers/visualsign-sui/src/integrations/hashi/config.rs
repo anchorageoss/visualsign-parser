@@ -190,12 +190,20 @@ pub struct HashiDeployment {
     pub bitcoin_network: BitcoinNetwork,
 }
 
-pub const DEPLOYMENTS: &[HashiDeployment] = &[HashiDeployment {
-    package_id: "0x5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485",
-    type_origin_id: "0x5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485",
-    sui_network: SuiNetwork::Testnet,
-    bitcoin_network: BitcoinNetwork::Signet,
-}];
+pub const DEPLOYMENTS: &[HashiDeployment] = &[
+    HashiDeployment {
+        package_id: "0x5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485",
+        type_origin_id: "0x5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485",
+        sui_network: SuiNetwork::Testnet,
+        bitcoin_network: BitcoinNetwork::Signet,
+    },
+    HashiDeployment {
+        package_id: "0xd30fb3f8914efdbeb7b8e85fae1d65dc584b44a1281f66737b92bb9f03a59d06",
+        type_origin_id: "0xd30fb3f8914efdbeb7b8e85fae1d65dc584b44a1281f66737b92bb9f03a59d06",
+        sui_network: SuiNetwork::Mainnet,
+        bitcoin_network: BitcoinNetwork::Mainnet,
+    },
+];
 
 pub fn deployment_for(package: &ObjectID) -> Option<&'static HashiDeployment> {
     DEPLOYMENTS

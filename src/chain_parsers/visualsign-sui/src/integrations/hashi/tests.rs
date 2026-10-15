@@ -1602,13 +1602,53 @@ fn unconfigured_package_has_no_deployment() {
     assert!(deployment_for(&ObjectID::from_single_byte(0x42)).is_none());
 }
 
-/// Not a real deployment: stands in for a future mainnet entry in [`config::DEPLOYMENTS`].
-const MAINNET_STAND_IN: HashiDeployment = HashiDeployment {
-    package_id: "0xabababababababababababababababababababababababababababababababab",
-    type_origin_id: "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
-    sui_network: SuiNetwork::Mainnet,
-    bitcoin_network: BitcoinNetwork::Mainnet,
-};
+const MAINNET_PACKAGE: &str = "0xd30fb3f8914efdbeb7b8e85fae1d65dc584b44a1281f66737b92bb9f03a59d06";
+const MAINNET_HASHI_OBJECT: &str =
+    "0x8d110642d9b5133bd661cda4873edf135ab6b91ff6918601015880874b950e5d";
+const TESTNET_HASHI_OBJECT: &str =
+    "0x342e908043db6090558ed7766df95bfc3609881b2eac7edb5343dd5bb3ddd1bb";
+
+/// The same transaction against the mainnet deployment. Mainnet runs the same
+/// code as testnet, so only the package, the `Hashi` object and the `BTC` type
+/// differ.
+fn on_mainnet(mut tx: TransactionData) -> TransactionData {
+    let testnet = ObjectID::from_hex_literal(HASHI_PACKAGE).unwrap();
+    let mainnet = ObjectID::from_hex_literal(MAINNET_PACKAGE).unwrap();
+    let to_mainnet_type = |tag: &sui_types::TypeTag| {
+        sui_types::parse_sui_type_tag(
+            &tag.to_canonical_string(true)
+                .replace(&testnet.to_hex(), &mainnet.to_hex()),
+        )
+        .unwrap()
+    };
+    let pt = programmable(&mut tx);
+    for input in &mut pt.inputs {
+        match input {
+            CallArg::Object(ObjectArg::SharedObject { id, .. })
+                if *id == ObjectID::from_hex_literal(TESTNET_HASHI_OBJECT).unwrap() =>
+            {
+                *id = ObjectID::from_hex_literal(MAINNET_HASHI_OBJECT).unwrap();
+            }
+            CallArg::FundsWithdrawal(withdrawal) => {
+                let sui_types::transaction::WithdrawalTypeArg::Balance(tag) = &withdrawal.type_arg;
+                withdrawal.type_arg =
+                    sui_types::transaction::WithdrawalTypeArg::Balance(to_mainnet_type(tag));
+            }
+            _ => {}
+        }
+    }
+    for command in &mut pt.commands {
+        if let Command::MoveCall(call) = command {
+            if call.package == testnet {
+                call.package = mainnet;
+            }
+            for type_argument in &mut call.type_arguments {
+                *type_argument = to_mainnet_type(&type_argument.to_type_tag().unwrap()).into();
+            }
+        }
+    }
+    tx
+}
 
 fn hashi_can_handle(tx: TransactionData, command: usize) -> bool {
     let block_data = SuiTransactionBlockData::try_from_with_module_cache(
@@ -1657,54 +1697,56 @@ fn every_deployment_is_matched_in_the_form_can_handle_receives() {
 }
 
 #[test]
-fn a_mainnet_deployment_needs_only_a_deployments_entry() {
-    let config = Config::from_deployments(config::DEPLOYMENTS.iter().chain([&MAINNET_STAND_IN]));
-    let mainnet = ObjectID::from_hex_literal(MAINNET_STAND_IN.package_id)
-        .unwrap()
-        .to_hex_literal();
-    let testnet = ObjectID::from_hex_literal(HASHI_PACKAGE)
-        .unwrap()
-        .to_hex_literal();
-    for package in [&mainnet, &testnet] {
-        assert!(config.can_handle(package, "deposit", "deposit"));
-        assert!(config.can_handle(package, "withdraw", "request_withdrawal"));
-    }
-    assert!(!HASHI_CONFIG
-        .get_or_init(Config::new)
-        .can_handle(&mainnet, "deposit", "deposit"));
-
+fn mainnet_deposit_renders_the_hashi_preview() {
+    let fields = visualize(on_mainnet(deposit_tx()), DEPOSIT_COMMAND).unwrap();
     assert_eq!(
-        deposit_title(&MAINNET_STAND_IN),
-        "Bridge BTC from Bitcoin to Sui via Hashi"
-    );
-    assert_eq!(
-        withdrawal_title(&MAINNET_STAND_IN),
-        "Bridge hBTC from Sui to Bitcoin via Hashi"
-    );
-    assert_eq!(
-        hbtc_coin_type(&MAINNET_STAND_IN).unwrap(),
-        format!("{}::btc::BTC", MAINNET_STAND_IN.type_origin_id)
-    );
-
-    let withdrawal = Withdrawal {
-        amount_sats: 150_000,
-        bitcoin_address: encode_bitcoin_address(
-            &bcs::to_bytes(&vec![0x75u8; 20]).unwrap(),
-            MAINNET_STAND_IN.bitcoin_network,
+        card_headline(&fields[0]),
+        headline(
+            "Bridge BTC from Bitcoin to Sui via Hashi",
+            "0.00097291",
+            "0xd5a05ab3ae8731246fa0f3bb0d91725e4f13f778c864290c7553216a56e2e900"
         )
-        .unwrap(),
-    };
-    assert!(withdrawal.bitcoin_address.starts_with("bc1q"));
-    let preview = withdrawal_preview(&MAINNET_STAND_IN, &withdrawal).unwrap();
-    assert_eq!(
-        preview.summary.subtitle.as_deref(),
-        Some(format!("0.0015 hBTC to {}", withdrawal.bitcoin_address).as_str())
     );
-    // Key rows render in both the condensed and the expanded card.
-    let field = preview_field(preview, "Hashi Withdrawal", Vec::new());
+    assert_eq!(field_values(&fields[0], "Bridge Package"), [MAINNET_PACKAGE]);
+    assert_eq!(field_values(&fields[0], "Bridge Object"), [MAINNET_HASHI_OBJECT]);
+}
+
+#[test]
+fn mainnet_address_balance_withdrawal_renders_the_hashi_preview() {
+    let fields = visualize(on_mainnet(redeem_withdrawal_tx()), REDEEM_WITHDRAWAL_COMMAND).unwrap();
     assert_eq!(
-        field_values(&field, "Destination Network"),
-        ["Bitcoin", "Bitcoin"]
+        card_headline(&fields[0]),
+        headline(
+            "Bridge hBTC from Sui to Bitcoin via Hashi",
+            "0.0003",
+            "bc1q89kmd8ascuqm6fs5vam7psqwcyer4xaz2exah9"
+        )
+    );
+    assert_eq!(field_values(&fields[0], "Bridge Package"), [MAINNET_PACKAGE]);
+}
+
+#[test]
+fn mainnet_coin_funded_withdrawal_renders_the_hashi_preview() {
+    let fields = visualize(on_mainnet(withdrawal_tx()), WITHDRAWAL_COMMAND).unwrap();
+    assert_eq!(
+        card_headline(&fields[0]),
+        headline(
+            "Bridge hBTC from Sui to Bitcoin via Hashi",
+            "0.24185763",
+            "bc1q89kmd8ascuqm6fs5vam7psqwcyer4xaz2exah9"
+        )
+    );
+}
+
+#[test]
+fn testnet_hbtc_withdrawn_to_the_mainnet_package_fails() {
+    // The mainnet call with the testnet `BTC` type: the networks never mix.
+    let mut tx = on_mainnet(redeem_withdrawal_tx());
+    programmable(&mut tx).inputs[usize::from(FUNDS_WITHDRAWAL_INPUT)] =
+        CallArg::FundsWithdrawal(hbtc_from_sender(30_000));
+    expect_error(
+        visualize(tx, REDEEM_WITHDRAWAL_COMMAND),
+        &format!("Funds withdrawal is not denominated in {MAINNET_PACKAGE}::btc::BTC"),
     );
 }
 
