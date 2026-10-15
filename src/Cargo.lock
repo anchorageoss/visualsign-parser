@@ -14895,6 +14895,7 @@ dependencies = [
  "tokio",
  "tracing",
  "visualsign",
+ "visualsign-intents",
 ]
 
 [[package]]

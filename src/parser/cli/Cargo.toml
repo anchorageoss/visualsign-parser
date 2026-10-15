@@ -7,7 +7,9 @@ publish = false
 
 [features]
 default = ["solana", "ethereum", "near", "tron", "diagnostics"]
-solana = ["dep:visualsign-solana"]
+# `intents` matches parser_app: a Solana message carrying NEAR Intents renders
+# as the intents in both, so the CLI shows what the enclave app shows.
+solana = ["dep:visualsign-solana", "visualsign-solana/intents"]
 ethereum = ["dep:visualsign-ethereum", "visualsign-ethereum/dev-signing"]
 near = ["dep:visualsign-near", "visualsign-near/dev-signing"]
 tron = ["dep:visualsign-tron"]

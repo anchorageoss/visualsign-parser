@@ -58,6 +58,9 @@ test: build
 	@# visualsign-intents and so is out of reach of this crate's cfg(test).
 	cargo test -p visualsign-near --features dev-signing --lib
 	cargo test -p visualsign-solana --features diagnostics --lib
+	@# intents ON: the message path that renders a DefusePayload carried by a
+	@# Solana signature rather than a NEAR one.
+	cargo test -p visualsign-solana --features intents --lib
 
 # Solana preset sources, which `cargo fmt` cannot reach. `presets/mod.rs`
 # declares its submodules through `include!(concat!(env!("OUT_DIR"), ...))`, a
