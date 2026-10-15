@@ -1,6 +1,6 @@
 homepage: "https://github.com/anchorageoss/visualsign-parser"
 language: rust
-primary_contact: "CHANGE-ME@example.com"  # a committer's address linked to a Google account
+primary_contact: "prasanna@anchorlabs.com"
 main_repo: "https://github.com/anchorageoss/visualsign-parser"
 sanitizers:
   - address
