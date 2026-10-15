@@ -5,7 +5,7 @@ on:
     types: [opened, synchronize, reopened, labeled]
 
 env:
-  NIGHTLY_VERSION: nightly-2026-03-13
+  NIGHTLY_VERSION: nightly-2026-10-15
 
 jobs:
   fuzz:
