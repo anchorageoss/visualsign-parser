@@ -32,7 +32,6 @@ jobs:
       pull-requests: write
     env:
       HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
-      PROPTEST_CASES: 32
     steps:
       - name: git checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -86,9 +85,14 @@ jobs:
       - name: Run codegen
         run: make -C src generated
       - name: Run surfpool fuzz against all embedded IDLs
+        # Tests are gated by `#[ignore]` so they only run on `--ignored`.
+        # `--test-threads=1` serialises the surfpool spawns so each test owns
+        # its mainnet fork; otherwise 14 surfpools start simultaneously and
+        # contend for ports / RPC quota.
         id: surfpool
         continue-on-error: true
-        run: ./scripts/surfpool_fuzz_all_idls.sh
+        working-directory: src
+        run: cargo test -p visualsign-solana --test surfpool_fuzz -- --ignored --test-threads=1
       - name: Label PR on surfpool failure
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
