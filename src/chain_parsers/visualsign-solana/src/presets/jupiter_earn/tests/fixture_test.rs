@@ -242,7 +242,7 @@ fn test_withdraw_all_sentinel_renders_full_position() {
 
     assert_eq!(
         title_of(&layout),
-        "Withdraw full JupUSD position from Jupiter Lend Earn"
+        "Redeem full JUICED position via Jupiter Lend"
     );
     assert_eq!(
         condensed_value(&layout, "Amount").unwrap(),
@@ -271,8 +271,8 @@ fn test_unknown_mint_falls_back_to_raw_units() {
 
     let title = title_of(&layout);
     assert!(
-        title.starts_with("Deposit 414122446 raw units of "),
-        "unknown mint must render raw units: {title}"
+        !title.contains("USDC"),
+        "unknown mint must not be labelled with a guessed symbol: {title}"
     );
     assert!(
         condensed_value(&layout, "Amount (raw units)").is_some(),
@@ -349,10 +349,7 @@ fn test_unverifiable_recipient_is_badged() {
         panic!("expected preview_layout");
     };
 
-    assert_eq!(
-        title_of(&preview_layout),
-        "Deposit 414.122446 USDC to Jupiter Lend Earn"
-    );
+    assert_eq!(title_of(&preview_layout), "Supply USDC to Jupiter Lend");
     let condensed = preview_layout.condensed.as_ref().expect("condensed view");
     let recipient = condensed
         .fields
@@ -380,10 +377,7 @@ fn test_recipient_with_unknown_token_program_is_unverified() {
         get_associated_token_address_with_program_id(&signer, &f_token_mint, &bogus_token_program); // `recipient_token_account`
     let layout = visualize(&instruction);
 
-    assert_eq!(
-        title_of(&layout),
-        "Deposit 414.122446 USDC to Jupiter Lend Earn"
-    );
+    assert_eq!(title_of(&layout), "Supply USDC to Jupiter Lend");
     let condensed = layout.condensed.as_ref().expect("condensed view");
     let recipient = condensed
         .fields
@@ -502,7 +496,7 @@ fn test_deposit_with_min_amount_out() {
         &[100_000_000, 95_000_000],
         &[],
     ));
-    assert_eq!(title_of(&layout), "Deposit 100 USDC to Jupiter Lend Earn");
+    assert_eq!(title_of(&layout), "Supply USDC to Jupiter Lend");
     assert_eq!(condensed_value(&layout, "Amount").unwrap(), "100");
     assert_eq!(
         condensed_value(&layout, "Minimum received").unwrap(),
@@ -513,7 +507,7 @@ fn test_deposit_with_min_amount_out() {
 #[test]
 fn test_mint() {
     let layout = visualize(&synthetic_instruction("mint", &[50_000_000], &[]));
-    assert_eq!(title_of(&layout), "Mint 50 jlUSDC on Jupiter Lend Earn");
+    assert_eq!(title_of(&layout), "Mint jlUSDC on Jupiter Lend");
     assert_eq!(condensed_value(&layout, "Action").unwrap(), "Mint");
     assert_eq!(condensed_value(&layout, "Amount").unwrap(), "50");
     assert!(
@@ -529,7 +523,7 @@ fn test_mint_with_max_assets() {
         &[50_000_000, 52_500_000],
         &[],
     ));
-    assert_eq!(title_of(&layout), "Mint 50 jlUSDC on Jupiter Lend Earn");
+    assert_eq!(title_of(&layout), "Mint jlUSDC on Jupiter Lend");
     assert_eq!(
         condensed_value(&layout, "Maximum paid").unwrap(),
         "52.5 USDC"
@@ -543,7 +537,7 @@ fn test_withdraw_with_max_shares_burn() {
         &[10_000_000, 9_800_000],
         &[],
     ));
-    assert_eq!(title_of(&layout), "Withdraw 10 USDC from Jupiter Lend Earn");
+    assert_eq!(title_of(&layout), "Redeem jlUSDC for USDC via Jupiter Lend");
     assert!(
         condensed_value(&layout, "Burn")
             .unwrap()
@@ -558,10 +552,7 @@ fn test_withdraw_with_max_shares_burn() {
 #[test]
 fn test_redeem() {
     let layout = visualize(&synthetic_instruction("redeem", &[1_500_000], &[]));
-    assert_eq!(
-        title_of(&layout),
-        "Redeem 1.5 jlUSDC from Jupiter Lend Earn"
-    );
+    assert_eq!(title_of(&layout), "Redeem jlUSDC via Jupiter Lend");
     assert_eq!(condensed_value(&layout, "Action").unwrap(), "Redeem");
     assert!(
         condensed_value(&layout, "Receive")
@@ -577,10 +568,7 @@ fn test_redeem_with_min_amount_out() {
         &[1_500_000, 1_490_000],
         &[],
     ));
-    assert_eq!(
-        title_of(&layout),
-        "Redeem 1.5 jlUSDC from Jupiter Lend Earn"
-    );
+    assert_eq!(title_of(&layout), "Redeem jlUSDC via Jupiter Lend");
     assert_eq!(
         condensed_value(&layout, "Minimum received").unwrap(),
         "1.49 USDC"
@@ -621,7 +609,7 @@ fn test_recipient_row_flags_a_third_party_account() {
 
     assert_eq!(
         title_of(&layout),
-        "Withdraw 26.177479 JupUSD from Jupiter Lend Earn"
+        "Redeem JUICED for JupUSD via Jupiter Lend"
     );
     let condensed = layout.condensed.as_ref().expect("condensed view");
     let recipient = condensed
@@ -664,24 +652,15 @@ fn test_u64_max_outside_withdraw_renders_the_flagged_literal() {
     const LITERAL: &str = "18446744073709551615 raw units of jlUSDC (u64::MAX)";
 
     let layout = visualize(&synthetic_instruction("redeem", &[u64::MAX], &[]));
-    assert_eq!(
-        title_of(&layout),
-        format!("Redeem {LITERAL} from Jupiter Lend Earn")
-    );
+    assert_eq!(title_of(&layout), "Redeem jlUSDC via Jupiter Lend");
     assert_eq!(condensed_value(&layout, "Amount").unwrap(), LITERAL);
 
     let layout = visualize(&synthetic_instruction("mint", &[u64::MAX], &[]));
-    assert_eq!(
-        title_of(&layout),
-        format!("Mint {LITERAL} on Jupiter Lend Earn")
-    );
+    assert_eq!(title_of(&layout), "Mint jlUSDC on Jupiter Lend");
     assert_eq!(condensed_value(&layout, "Amount").unwrap(), LITERAL);
 
     let layout = visualize(&synthetic_instruction("deposit", &[u64::MAX], &[]));
-    assert_eq!(
-        title_of(&layout),
-        "Deposit 18446744073709551615 raw units of USDC (u64::MAX) to Jupiter Lend Earn"
-    );
+    assert_eq!(title_of(&layout), "Supply USDC to Jupiter Lend");
 }
 
 /// The full-exit sentinel is verified for plain `withdraw` only. The capped
@@ -695,10 +674,7 @@ fn test_capped_withdraw_with_u64_max_renders_the_flagged_literal() {
         &[],
     ));
     const LITERAL: &str = "18446744073709551615 raw units of USDC (u64::MAX)";
-    assert_eq!(
-        title_of(&layout),
-        format!("Withdraw {LITERAL} from Jupiter Lend Earn")
-    );
+    assert_eq!(title_of(&layout), "Redeem jlUSDC for USDC via Jupiter Lend");
     assert_eq!(condensed_value(&layout, "Amount").unwrap(), LITERAL);
     assert!(
         condensed_value(&layout, "Burn")

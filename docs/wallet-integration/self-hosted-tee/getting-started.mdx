@@ -1,14 +1,172 @@
 ---
 title: Self-Hosted TEE
-description: Deploy VisualSign in your own AWS Nitro Enclaves
+description: Run your own attested VisualSign parser on Turnkey Verifiable Cloud and verify it end to end
 ---
 
+You can run your own VisualSign parser as a [Turnkey Verifiable Cloud](https://docs.turnkey.com) (TVC) app. You own the app and the operator keys that approve its deployments, and you pick the parser image and its configuration. Turnkey runs the AWS Nitro Enclave and the QuorumOS (QOS) runtime underneath it.
+
+The binary to deploy is `parser_http_server`. It serves the same Turnkey HTTP+JSON envelope as the hosted service. Each successful response carries a `bootProof` with a real NSM attestation document, so any client can verify the response without trusting you, Turnkey's API, or the network in between.
+
 <Note>
-Detailed instructions are coming soon. Implementation details are evolving as we finalize the self-hosted deployment architecture.
+`parser_http_server` reads the manifest and ephemeral key that QOS provisions (`/qos.manifest`, `/qos.ephemeral.key`), so it runs as a QOS pivot. It does not run on a bare Nitro Enclave without QOS.
 </Note>
+
+## Prerequisites
+
+- A Turnkey organization, with the [`tvc` CLI](https://docs.turnkey.com) logged in (`tvc login`).
+- An operator key held locally (`~/.config/turnkey/orgs/<org-alias>/operator.json`, where `<org-alias>` is the org name `tvc login` saved). That key is what approves your deployments.
+- Docker, to pull the image and hash the binary inside it.
+- `tvc-deploy` from this repo. It isn't installed on your `PATH`: wherever this page runs `tvc-deploy`, run `cargo run --manifest-path tools/tvc-deploy/Cargo.toml --` from a checkout of this repo instead.
+- [visualsign-turnkeyclient](https://github.com/anchorageoss/visualsign-turnkeyclient), to verify the deployment.
+- A Turnkey API key for visualsign-turnkeyclient, stored as `~/.config/turnkey/keys/<api-key-name>.public` and `<api-key-name>.private` (the Turnkey CLI's key format). `tvc login` doesn't create these files, and visualsign-turnkeyclient refuses to run without them, even when your parse routes are open. Your organization ID is the `id` under your org in `~/.config/turnkey/tvc.config.toml`.
+
+## 1. Pick and pin the image
+
+Images are published to `ghcr.io/anchorageoss/parser_http_server`. Always reference one by tag *and* digest: a tag alone is mutable, and a bare digest is shown back as `:latest`.
+
+```bash
+IMAGE=ghcr.io/anchorageoss/parser_http_server:<tag>
+docker pull "$IMAGE"
+docker image inspect "$IMAGE" --format '{{index .RepoDigests 0}}'
+# -> ghcr.io/anchorageoss/parser_http_server@sha256:<image-digest>
+IMAGE_URL="ghcr.io/anchorageoss/parser_http_server:<tag>@sha256:<image-digest>"
+```
+
+Hash the pivot binary yourself. This is the value QOS measures, and the value a verifier will later find in the attested manifest:
+
+```bash
+c=$(docker create "$IMAGE_URL" /parser_http_server)
+docker cp "$c:/parser_http_server" ./parser_http_server && docker rm "$c"
+PIVOT_DIGEST=$(sha256sum parser_http_server | awk '{print $1}')
+```
+
+## 2. Create the app
+
+Generate a template with `tvc app init -o app.json` and set `name` and `manifestSetParams`. Make sure the manifest set contains only operators whose keys you hold. If it doesn't, nobody can approve a deployment and the app is stranded.
+
+The template's `newOperators` already holds the public key of your local `operator.json`, so for a first app you can keep it. To reuse an existing operator instead, list it by ID and clear `newOperators`:
+
+```json
+"manifestSetParams": {
+  "name": "<app-name>-manifest-set",
+  "threshold": 1,
+  "newOperators": [],
+  "existingOperatorIds": ["<your-operator-id>"]
+}
+```
+
+Leave `dangerousEnableDebugModeDeployments` false. Debug mode zeroes the PCRs, so an attesting parser can never go healthy in it.
+
+```bash
+tvc app create --config-file app.json --no-operator-reuse
+```
+
+`--no-operator-reuse` stops `tvc` from substituting the operator from your last `app create` (without it, `tvc` prints `Reusing operator ...` and uses that one). Check that the printed **Manifest Set Operator IDs** are the ones you expect. That ID is the `<your-operator-id>` you pass to `deploy-pivot` below, and `App ID` is the `<app-id>`.
+
+## 3. Deploy
+
+```bash
+tvc-deploy deploy-pivot \
+  --app-id <app-id> \
+  --image-url "$IMAGE_URL" \
+  --pivot-path /parser_http_server \
+  --expected-digest "$PIVOT_DIGEST" \
+  --health-check http \
+  --operator-id <your-operator-id> \
+  -- --accept-unsigned-abis --boot-proof-source nsm
+```
+
+`deploy-pivot` re-derives the binary digest from the image and refuses to continue on a mismatch. It then creates the deployment, approves it with your operator key, waits until it's healthy, and sets it live. Everything after `--` becomes the deployment's `pivotArgs`, and those are part of the manifest the attestation commits to:
+
+| Argument | Required | Effect |
+|---|---|---|
+| `--accept-unsigned-abis` or `--accept-signatures-from-pubkey <hex>` (repeatable) | Exactly one | The trust posture for caller-supplied Ethereum ABI mappings. `--accept-unsigned-abis` registers unsigned mappings. `--accept-signatures-from-pubkey` drops any mapping that isn't signed by one of the given secp256k1 keys. |
+| `--boot-proof-source nsm` | Yes | Attest via `/dev/nsm`. The only other value, `static`, leaves the attestation doc empty and is for local development. |
+| `--allowed-stamp-pubkeys-hex <csv>` | No | Comma-separated `[<curve>:]<compressed SEC1 hex>` keys (`p256` default, or `secp256k1`) that may call the parse routes. Every request must then carry a valid `X-Stamp` from one of them. Omit it to leave the routes open. |
+| `--port <port>` | No | Listen port, default 3000. If you change it, pass the same value as `deploy-pivot --port`. |
+| `--enclave-app <name>`, `--deployment-label <label>` | No | Labels echoed in each response's `bootProof.enclaveApp` and `bootProof.deploymentLabel` (defaults `visualsign-parser` and empty). They're informational: the response fields aren't signed, so check them in the manifest's args if they matter to you. |
+
+TVC has no environment-variable injection: `pivotArgs` is the parser's entire configuration, and anyone verifying the deployment can read it from the attested manifest.
+
+With `--boot-proof-source nsm`, `GET /health` returns 503 until the parser holds a verified, unexpired attestation. A replica whose NSM attestation fails never goes healthy, so "healthy" means each replica has attested successfully.
+
+`deploy-pivot` approves with `tvc deploy approve --dangerous-skip-interactive`, so it doesn't show you the manifest before signing. Step 4 is where you check what you approved.
+
+The app is served at `https://<publicDomain>`, where `publicDomain` comes from `tvc app list --message-format json`. For new apps it's `app-<app-id>.app.turnkey.cloud`, but older apps use `app-<app-id>.turnkey.cloud`, so read it rather than constructing it. The routes are `GET /health`, `POST /visualsign/api/v1/parse` and `POST /visualsign/api/v2/parse`. The parse routes take the Turnkey JSON envelope, not the gRPC messages in the API reference:
+
+```bash
+APP_URL=https://<publicDomain>
+curl -s -o /dev/null -w '%{http_code}\n' "$APP_URL/health"   # 200 once attested
+curl -s -X POST "$APP_URL/visualsign/api/v2/parse" -H 'content-type: application/json' \
+  -d '{"request":{"unsigned_payload":"<hex-or-base64-tx>","chain":"CHAIN_ETHEREUM"},"organization_id":"<org-id>"}'
+```
+
+A `curl` response proves nothing on its own; verify it as described in the next step.
+
+## 4. Verify the deployment end to end
+
+visualsign-turnkeyclient checks everything a wallet should check, in one command. Pin the PCRs (see [Expected values](#expected-values) below), and save the manifest so you can inspect it:
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tkhome \
+  -v "$HOME/.config/turnkey/keys:/tkhome/.config/turnkey/keys:ro" -v "$PWD:/out" \
+  ghcr.io/anchorageoss/visualsign-turnkeyclient:<tag>@sha256:<digest> \
+  verify \
+    --host "$APP_URL" \
+    --organization-id <org-id> --key-name <api-key-name> \
+    --chain CHAIN_ETHEREUM --unsigned-payload <hex-or-base64-tx> \
+    --pcrs "0:<pcr0>,1:<pcr1>,2:<pcr2>,3:<pcr3>" \
+    --save-qos-manifest /out/envelope.bin
+```
+
+`--key-name` stamps the request. The parser only checks the stamp if you set `--allowed-stamp-pubkeys-hex`, in which case the key must be on the list; the client needs the key files either way.
+
+<Warning>
+Always pass `--pcrs`. Without it, `verify` still exits 0 and prints `PCRs verified: 32 PCRs found`, but it hasn't compared them to anything. Take the PCR values from an independent source (see [Expected values](#expected-values)), never from `verify`'s own output or from the manifest's **Enclave** section: both come from the server you're checking.
+</Warning>
+
+A pass means all of the following held:
+
+1. `inputPayloadDigest` is the SHA-256 of the payload you sent, and the response's signed message is the hash of exactly the `signablePayload`, `inputPayloadDigest` and `metadataDigest` it returned, so the payload can't be swapped in transit.
+2. The attestation document (`bootProof.awsAttestationDocB64`) verifies against the AWS Nitro root CA, and PCR0-3 match your pinned values.
+3. The attestation's `public_key` is the key that signed the response.
+4. The manifest from `bootProof` hashes to the attestation's `user_data`. If a response carries no manifest at all, `verify` skips this check, which is why later runs should pin `--qos-manifest-hex`.
+5. The response signature verifies.
+
+Then confirm the manifest describes the deployment you intended:
+
+```bash
+docker run --rm -v "$PWD:/out" ghcr.io/anchorageoss/visualsign-turnkeyclient:<tag>@sha256:<digest> \
+  decode-manifest envelope --file /out/envelope.bin
+```
+
+Check that:
+
+- **Pivot Config / Binary Hash** equals the `$PIVOT_DIGEST` you computed in step 1. This ties the attestation to the exact binary.
+- **Args** are exactly the `pivotArgs` you deployed.
+- **DebugMode** is `false`.
+- **Manifest Set** lists only your operators. The human-readable output shows only the threshold and member count, so add `--json` and compare each `manifest.manifestSet.members[].pubKey` with the `public_key` in your `operator.json`.
+- **Hashes / Manifest** is the manifest hash. Record it: later runs can pin it with `verify --qos-manifest-hex <hash>`, which fails on any change to the deployment.
+
+Don't use `verify`'s JSON output for the binary check: its `pivotBinaryHash` field holds the manifest hash (`user_data`), not the binary's sha256. For the same reason, `verify --pivot-binary-hash-hex` is compared with `user_data`, so passing it your `$PIVOT_DIGEST` fails.
+
+### Expected values
+
+| Value | Where it comes from |
+|---|---|
+| PCR0, PCR1, PCR2 | The QOS enclave image TVC boots, selected by the deployment's QOS version (`deploy-pivot --qos-version`, default `0.12.1`). Reproduce them with `scripts/extract-nitro-pcrs.sh`; its default rev is the tkhq/qos commit behind the `v0.12.1` tags. If you deploy another QOS version, pass that version's commit with `--rev`. See [Generating PCRs from source](../hosted/getting-started#generating-pcrs-from-source). |
+| PCR3 | The IAM role of the TVC cluster your app runs in. It can't be derived from source; get it from Turnkey for your cluster. |
+| Pivot binary hash | The sha256 you computed in step 1. |
+| Manifest hash | Recorded from your first full verification. |
+
+For how each check works and how to implement them in your own verifier, see [Attestation Verification](./attestation).
+
+## Updating
+
+Every `deploy-pivot` creates a new deployment with a new manifest, so the manifest hash changes. The binary hash and PCRs change only if you change the image or TVC changes the QOS runtime. Re-run step 4 after each deploy and update the values you pin.
 
 ## Next steps
 
-- [Security Model](./security-model) — Understand the TEE threat model
-- [Attestation](./attestation) — Implement attestation verification
-- [gRPC API Reference](/api-reference) — Full API documentation
+- [Attestation Verification](./attestation) — What each check proves, and how to implement it
+- [Security Model](./security-model) — The TEE threat model
+- [API Reference](/api-reference) — Request and response formats

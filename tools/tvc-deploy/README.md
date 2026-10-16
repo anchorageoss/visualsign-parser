@@ -3,6 +3,71 @@
 Standalone deploy + Turnkey org-management helper for `parser_app`. See `src/main.rs`
 for the full subcommand list (`--help` prints it too).
 
+## Auditing an org: members and pending operations
+
+To see who is in an org and what is waiting for approval, run these from this directory.
+`<alias>` is the org's name under `[orgs.*]` in `~/.config/turnkey/tvc.config.toml`
+(quote it if it contains spaces), or the org's UUID:
+
+```
+cargo build --release
+B=./target/release/tvc-deploy
+
+# Every user: id, display name, email
+$B list-users --org <alias>
+
+# Activities not yet finished, newest first
+$B list-activities --org <alias> \
+  --status consensus_needed,pending,created,authenticators_needed
+
+# Every invitation with its status (created/accepted/revoked)
+$B list-invitations --org <alias>
+```
+
+`CREATED_AT` in the activity table is a Unix timestamp. Use `date -u -d @<ts>` to
+convert it.
+
+Before you approve anything:
+
+- **Look for duplicates.** The same intent submitted twice (for example, two
+  `CREATE_INVITATIONS` for one person a few seconds apart, or two
+  `DELETE_INVITATION` for the same invitation id) shows up as two rows. Approve
+  one and reject the other.
+- **Read the summary before approving.** Each summary is decoded from the
+  activity's intent, with user and tag ids replaced by display names. For example:
+  `sets root quorum to 2 of 3: <names>`, `deletes users: <name>`,
+  `updates user <name> (email -> ...)`. Types without a dedicated summary
+  show `ACTIVITY_TYPE_* (field=value; ...)`: the intent's top-level fields,
+  with secret-like fields (OTP codes, tokens, encrypted bundles) shown as
+  `<redacted>`, long values cut to 40 characters, and nested objects and lists
+  shown only by size (`{N field(s)}`, `[N item(s)]`). Use
+  `$B view-activity --activity-id <id> --org <alias>` for one activity's votes
+  so far, and `$B list-activities --json ...` for the full raw intent.
+
+### Upgrading `turnkey_client`
+
+Activity summaries are guarded so a client upgrade can't silently change what
+approvers see:
+
+- `decode_intent` has no catch-all arm. A new intent type fails to compile with
+  "non-exhaustive patterns". Give it a dedicated arm in `src/invite.rs`
+  (always do this for a new version of an intent that already has one, e.g.
+  `CreatePolicyIntentV4`), or add it to `src/invite/generic_intents.rs` to use
+  the generic `field=value` summary. A removed type fails to compile until it's
+  dropped from that list. A type with both a dedicated arm and a list entry is
+  an unreachable pattern, which clippy rejects.
+- `testdata/generic_intent_fields.txt` lists every field the generic summary
+  can print, and whether it's `shown` or `redacted`. If an upgrade adds a
+  field, `generic_intent_field_snapshot` fails and lists the new lines. Check
+  that each new `shown` field is safe to print, and add a
+  `GENERIC_REDACTED_FIELDS` entry in `src/invite.rs` if it isn't. Then run:
+
+  ```
+  UPDATE_INTENT_SNAPSHOT=1 cargo test generic_intent_field_snapshot
+  ```
+
+  and commit the updated file with the upgrade.
+
 ## Inviting a batch of users
 
 To invite a whole team in one activity (and therefore one consensus approval, if
@@ -199,6 +264,43 @@ elsewhere first. Run this, record the digest, then deploy.
 
 No Turnkey auth needed, just Docker: it creates a container from the image,
 extracts `/parser_app`, sha256s it, and exits non-zero on a mismatch.
+
+### Deploying any other pivot
+
+`deploy` is specific to `/parser_app` (gRPC health, `--host-ip`/`--host-port`).
+`deploy-pivot` runs the same digest gate / create / approve / poll-healthy /
+set-live flow for any pivot binary, with the pivot's path and health check given
+as flags and its arguments passed verbatim after a literal `--`:
+
+```
+tvc-deploy deploy-pivot \
+  --app-id <app-id> \
+  --image-url "ghcr.io/anchorageoss/parser_http_server:<tag>@sha256:<image-digest>" \
+  --pivot-path /parser_http_server \
+  --expected-digest <sha256 of /parser_http_server> \
+  --health-check http \
+  --operator-id <operator-id> \
+  -- --accept-unsigned-abis --boot-proof-source nsm
+```
+
+- Everything after `--` becomes the manifest's `pivotArgs`, in order. A pivot
+  flag that collides with one of `deploy-pivot`'s own (e.g. `--port`) goes to the
+  pivot when it is after `--`. Without the separator it is rejected as an unknown
+  argument.
+- `--health-check` is `http` or `grpc`. It must match what the pivot serves:
+  `parser_http_server` is HTTP, while a bare `parser_app` is gRPC only and stalls
+  at `0/N` healthy under an HTTP probe. `--port` (default 3000) is both the
+  health-check port and the public ingress port.
+- `--qos-version` defaults to `0.12.1`. `--dangerous-debug-mode` deploys with
+  zeroed PCRs and readable enclave logs. The app must allow debug deployments,
+  and an attesting pivot such as `parser_http_server --boot-proof-source nsm`
+  never goes healthy in debug mode, because its doc can't bind to the manifest's
+  PCRs.
+- The operator approving the deployment must be in the app's manifest set, and
+  you must hold its key. `--operator-seed` (or `TVC_CI_OPERATOR_SEED`), or else
+  the logged-in org operator key, signs the approval. Approval fails with "not
+  part of manifest set" otherwise.
+- The pending-activity check and `--force` behave as for `deploy`.
 
 ## Pruning deployments
 

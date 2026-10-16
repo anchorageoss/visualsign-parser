@@ -115,10 +115,12 @@ fn resolve_object(
                             Ok(CoinObject::UnknownObject(object_id.to_hex()))
                         }
                     },
-                    SuiCallArg::Pure(_) => Err(TransactionParseError::UnsupportedVersion(
-                        "Parsing Sui native transfer input expected `Object`".into(),
-                    )
-                    .into()),
+                    SuiCallArg::Pure(_) | SuiCallArg::FundsWithdrawal(_) => {
+                        Err(TransactionParseError::UnsupportedVersion(
+                            "Parsing Sui native transfer input expected `Object`".into(),
+                        )
+                        .into())
+                    }
                 };
             }
             SuiArgument::Result(command_index)

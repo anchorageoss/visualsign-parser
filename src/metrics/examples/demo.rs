@@ -1,18 +1,17 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use metrics::{
-    Collector, Server, lazy_static,
+    Collector, Server,
     prometheus::{Counter, Registry},
 };
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::LazyLock,
     thread,
     time::Duration,
 };
 
-lazy_static! {
-    pub static ref TEST_COUNT: Counter =
-        Counter::new("count", "Test Counter").expect("metric can be created");
-}
+pub static TEST_COUNT: LazyLock<Counter> =
+    LazyLock::new(|| Counter::new("count", "Test Counter").expect("metric can be created"));
 
 fn registry() -> Registry {
     let registry = Registry::new_custom(Some("test".to_string()), None).unwrap();

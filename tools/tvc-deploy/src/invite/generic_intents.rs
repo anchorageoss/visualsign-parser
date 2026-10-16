@@ -1,0 +1,156 @@
+//! The `intent::Inner` variants that `decode_intent` summarizes generically
+//! (via `generic_intent_summary`) rather than with a dedicated arm.
+//!
+//! `decode_intent` matches these by name instead of with a `_` wildcard, so
+//! its `match` stays exhaustive and a `turnkey_client` upgrade can't slip a
+//! new intent past it:
+//!
+//! - a new variant (e.g. `CreatePolicyIntentV4`) fails to compile with
+//!   "non-exhaustive patterns" until it gets a dedicated arm or is added here;
+//! - a removed or renamed variant fails to compile until it's dropped here;
+//! - a variant listed here that also has a dedicated arm is an unreachable
+//!   pattern, which `clippy -D warnings` rejects.
+//!
+//! The test module also snapshots every listed variant's fields -- see
+//! `generic_intent_field_snapshot` in `invite.rs`.
+
+/// Invokes `$callback! { Variant, ... }` with every generic variant name.
+macro_rules! for_each_generic_intent {
+    ($callback:ident) => {
+        $callback! {
+            ActivateBillingTierIntent,
+            CreateApiOnlyUsersIntent,
+            CreateAuthenticatorsIntent,
+            CreateAuthenticatorsIntentV2,
+            CreateFiatOnRampCredentialIntent,
+            CreateMfaPolicyIntent,
+            CreateOauth2CredentialIntent,
+            CreateOauthProvidersIntent,
+            CreateOauthProvidersIntentV2,
+            CreateOrganizationIntent,
+            CreateOrganizationIntentV2,
+            CreatePrivateKeyTagIntent,
+            CreatePrivateKeysIntent,
+            CreatePrivateKeysIntentV2,
+            CreateReadOnlySessionIntent,
+            CreateReadWriteSessionIntent,
+            CreateReadWriteSessionIntentV2,
+            CreateSessionProfileIntent,
+            CreateSmartContractInterfaceIntent,
+            CreateSubOrganizationIntent,
+            CreateSubOrganizationIntentV2,
+            CreateSubOrganizationIntentV3,
+            CreateSubOrganizationIntentV4,
+            CreateSubOrganizationIntentV5,
+            CreateSubOrganizationIntentV6,
+            CreateSubOrganizationIntentV7,
+            CreateSubOrganizationIntentV8,
+            CreateTvcOperatorIntent,
+            CreateTvcQuorumKeyIntent,
+            CreateUsersIntent,
+            CreateUsersIntentV2,
+            CreateUsersIntentV3,
+            CreateUsersIntentV4,
+            CreateWalletAccountsIntent,
+            CreateWalletIntent,
+            CreateWebhookEndpointIntent,
+            DeleteAuthenticatorsIntent,
+            DeleteFiatOnRampCredentialIntent,
+            DeleteMfaPolicyIntent,
+            DeleteOauth2CredentialIntent,
+            DeleteOauthProvidersIntent,
+            DeleteOrganizationIntent,
+            DeletePaymentMethodIntent,
+            DeletePoliciesIntent,
+            DeletePolicyIntent,
+            DeletePrivateKeyTagsIntent,
+            DeletePrivateKeysIntent,
+            DeleteSmartContractInterfaceIntent,
+            DeleteSubOrganizationIntent,
+            DeleteWalletAccountsIntent,
+            DeleteWalletsIntent,
+            DeleteWebhookEndpointIntent,
+            DisableAuthProxyIntent,
+            DisablePrivateKeyIntent,
+            EarnDeployWrapperIntent,
+            EarnDepositIntent,
+            EarnWithdrawIntent,
+            EmailAuthIntent,
+            EmailAuthIntentV2,
+            EmailAuthIntentV3,
+            EnableAuthProxyIntent,
+            EthSendRawTransactionIntent,
+            EthSendTransactionIntent,
+            EthSendTransactionIntentV2,
+            ExecuteSwapIntent,
+            ExportPrivateKeyIntent,
+            ExportWalletAccountIntent,
+            ExportWalletIntent,
+            ImportPrivateKeyIntent,
+            ImportWalletIntent,
+            InitFiatOnRampIntent,
+            InitImportPrivateKeyIntent,
+            InitImportWalletIntent,
+            InitOtpAuthIntent,
+            InitOtpAuthIntentV2,
+            InitOtpAuthIntentV3,
+            InitOtpIntent,
+            InitOtpIntentV2,
+            InitOtpIntentV3,
+            InitUserEmailRecoveryIntent,
+            InitUserEmailRecoveryIntentV2,
+            Oauth2AuthenticateIntent,
+            OauthIntent,
+            OauthLoginIntent,
+            OtpAuthIntent,
+            OtpLoginIntent,
+            OtpLoginIntentV2,
+            PostTvcQuorumKeyShareIntent,
+            ReEncryptTvcQuorumKeyShareIntent,
+            RecoverUserIntent,
+            RemoveIpAllowlistIntent,
+            RemoveOrganizationFeatureIntent,
+            RestoreTvcDeploymentIntent,
+            SetIpAllowlistIntent,
+            SetOrganizationFeatureIntent,
+            SetPaymentMethodIntent,
+            SetPaymentMethodIntentV2,
+            SignRawPayloadIntent,
+            SignRawPayloadIntentV2,
+            SignRawPayloadsIntent,
+            SignTransactionIntent,
+            SignTransactionIntentV2,
+            SolSendTransactionIntent,
+            SparkClaimTransferIntent,
+            SparkPrepareLightningReceiveIntent,
+            SparkPrepareTransferIntent,
+            SparkSignFrostIntent,
+            StampLoginIntent,
+            UpdateAllowedOriginsIntent,
+            UpdateAuthProxyConfigIntent,
+            UpdateFiatOnRampCredentialIntent,
+            UpdateMfaPolicyIntent,
+            UpdateOauth2CredentialIntent,
+            UpdatePolicyIntent,
+            UpdatePolicyIntentV2,
+            UpdatePrivateKeyTagIntent,
+            UpdateUserEmailIntent,
+            UpdateUserNameIntent,
+            UpdateUserPhoneNumberIntent,
+            UpdateWalletIntent,
+            UpdateWebhookEndpointIntent,
+            UpsertEarnClientFeeConfigIntent,
+            UpsertGasUsageConfigIntent,
+            UpsertSwapConfigIntent,
+            VerifyOtpIntent,
+            VerifyOtpIntentV2,
+        }
+    };
+}
+
+/// An or-pattern matching any generic variant: `(Inner::A(_) | Inner::B(_) | ...)`.
+macro_rules! generic_intent_pattern {
+    ($($variant:ident),* $(,)?) => {
+        ($(intent::Inner::$variant(_))|*)
+    };
+}

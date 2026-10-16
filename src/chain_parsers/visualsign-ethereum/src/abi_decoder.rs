@@ -119,11 +119,11 @@ impl AbiDecoder {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            // Function parameters are ABI-encoded as a tuple
+            // Calldata params are a tuple encoded without an outer offset word,
+            // so decode them as a sequence rather than a single value.
             let tuple_type = DynSolType::Tuple(param_types);
 
-            // Decode the tuple
-            let decoded = tuple_type.abi_decode(input_data).map_err(|e| {
+            let decoded = tuple_type.abi_decode_params(input_data).map_err(|e| {
                 format!(
                     "Failed to decode parameters: {}. Data length: {}, Data: 0x{}",
                     e,
@@ -284,5 +284,53 @@ mod tests {
             }
             _ => panic!("Expected PreviewLayout"),
         }
+    }
+
+    #[test]
+    fn test_visualize_dynamic_params_with_trailing_bytes() {
+        // Universal Router execute(bytes,bytes[],uint256) from a real mainnet
+        // WalletConnect tx. The calldata ends with 22 bytes of frontend tracking
+        // data after the ABI encoding.
+        const ABI: &str = r#"[{
+            "type": "function",
+            "name": "execute",
+            "inputs": [
+                {"name": "commands", "type": "bytes"},
+                {"name": "inputs", "type": "bytes[]"},
+                {"name": "deadline", "type": "uint256"}
+            ],
+            "outputs": [],
+            "stateMutability": "payable"
+        }]"#;
+        let calldata =
+            hex::decode(include_str!("../tests/fixtures/ur-execute-dynamic-args.calldata").trim())
+                .unwrap();
+        assert_eq!(calldata.len(), 1306);
+
+        let abi: JsonAbi = serde_json::from_str(ABI).unwrap();
+        let decoder = AbiDecoder::new(Arc::new(abi));
+        let field = decoder
+            .visualize(&calldata, 1, None)
+            .expect("Visualize failed");
+
+        let SignablePayloadField::PreviewLayout { preview_layout, .. } = field else {
+            panic!("Expected PreviewLayout");
+        };
+        let expanded = preview_layout
+            .expanded
+            .expect("Should have expanded fields");
+        let fields: Vec<(String, String)> = expanded
+            .fields
+            .iter()
+            .map(|f| match &f.signable_payload_field {
+                SignablePayloadField::TextV2 { common, text_v2 } => {
+                    (common.label.clone(), text_v2.text.clone())
+                }
+                other => panic!("Unexpected field {other:?}"),
+            })
+            .collect();
+        let labels: Vec<&str> = fields.iter().map(|(l, _)| l.as_str()).collect();
+        assert_eq!(labels, ["commands", "inputs", "deadline"]);
+        assert_eq!(fields[2].1, "1791295820");
     }
 }

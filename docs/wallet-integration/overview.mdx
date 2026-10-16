@@ -27,8 +27,8 @@ flowchart TD
 |---|---|---|---|---|
 | **Security model** | Attestation-verified TEE | Attestation-verified TEE | Trust your process | Trust your network |
 | **Parsing integrity proof** | Yes | Yes | No | No |
-| **Infrastructure** | Managed | You manage AWS Nitro | None | Container/process |
-| **Network dependency** | Yes (Turnkey API) | Yes (your enclave) | No | Yes (localhost/internal) |
+| **Infrastructure** | Managed | Your own TVC app (Turnkey runs the enclave) | None | Container/process |
+| **Network dependency** | Yes (Turnkey API) | Yes (your app's URL) | No | Yes (localhost/internal) |
 | **Latency** | Network round-trip | Network round-trip | In-process | Local network |
 | **Best for** | Production wallets | Enterprises with compliance requirements | Rust backends, CLI tools | Internal services, development |
 
@@ -54,17 +54,20 @@ Turnkey operates the VisualSign parser in AWS Nitro Enclaves. You send transacti
 
 ### Self-Hosted TEE
 
-Run the VisualSign parser in your own AWS Nitro Enclaves. You have full control over the infrastructure and can customize the deployment to your needs.
+Run your own VisualSign parser as a Turnkey Verifiable Cloud (TVC) app. You own the app and the operator keys that approve its deployments, and you choose the parser image and configuration. Turnkey runs the AWS Nitro Enclave and QuorumOS runtime underneath it. Every response carries an attestation that any client can verify end to end.
 
 **You handle:**
-- AWS Nitro Enclave infrastructure
-- Enclave deployment and updates
-- PCR allowlist management
-- Scaling and availability
+- Choosing, pinning and deploying the parser image
+- Approving deployments with your operator keys
+- PCR and manifest allowlist management
+- Verifying your deployment
+
+**Turnkey handles:**
+- Enclave infrastructure and the QuorumOS runtime
 
 **Best for:**
 - Organizations with strict compliance requirements
-- Use cases requiring air-gapped or private deployments
+- Control over the parser version and its configuration
 - Custom attestation verification workflows
 
 [Get started with Self-Hosted TEE →](./self-hosted-tee/getting-started)

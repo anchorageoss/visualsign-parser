@@ -1,0 +1,49 @@
+{
+  "explorer_tx_prefix": "https://testnet.suivision.xyz/txblock/",
+  "deposit": {
+    "deposit": {
+      "label": "Hashi Deposit",
+      "operations": {
+        "4WGVP4rYLHxHCoA9jFjFFCoomNMxmKAVnSJsdGhMUSBF": {
+          "data": "AAAGACAKPx+qC2U7/+qAePKGI492pj+vBEN8tOlQfiszTBJBrgAEBAAAAAAIC3wBAAAAAAAAIQHVoFqzrocxJG+g87sNkXJeTxP3eMhkKQx1UyFqVuLpAAEBNC6QgEPbYJBVjtd2bflb/DYJiBsurH7bU0PdW7Pd0bsBAAAAAAAAAAEBAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGAQAAAAAAAAAAAwBeC5nDH2kXQqzqXeTKG/U8OY1WOf7WUDpR/+gDXcaEhQR1dHhvB3V0eG9faWQAAgEAAAEBAABeC5nDH2kXQqzqXeTKG/U8OY1WOf7WUDpR/+gDXcaEhQR1dHhvBHV0eG8AAwIAAAECAAEDAABeC5nDH2kXQqzqXeTKG/U8OY1WOf7WUDpR/+gDXcaEhQdkZXBvc2l0B2RlcG9zaXQAAwEEAAIBAAEFANWgWrOuhzEkb6Dzuw2Rcl5PE/d4yGQpDHVTIWpW4ukAANWgWrOuhzEkb6Dzuw2Rcl5PE/d4yGQpDHVTIWpW4ukA6AMAAAAAAABw6HMAAAAAAAIB5QQAAAAAAAAB5gQAAAAAAAAAACBMeK2s8qL1rYDyftfVSqadOnjxymf9757PV1T1uLt3sKWYack=",
+          "command_index": 2,
+          "visualize_result_index": 0,
+          "asserts": {
+            "Signer": "0xd5a05ab3ae8731246fa0f3bb0d91725e4f13f778c864290c7553216a56e2e900",
+            "Amount (declared)": "0.00097291",
+            "Destination Network": "Sui Testnet",
+            "Recipient Address": "0xd5a05ab3ae8731246fa0f3bb0d91725e4f13f778c864290c7553216a56e2e900",
+            "Bitcoin Output": "ae41124c332b7e50e9b47c4304af3fa6768f2386f27880eaff3b650baa1f3f0a:4",
+            "Amount (sats)": "97291",
+            "Source Network": "Bitcoin Signet",
+            "Bridge Object": "0x342e908043db6090558ed7766df95bfc3609881b2eac7edb5343dd5bb3ddd1bb",
+            "Bridge Package": "0x5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485"
+          }
+        }
+      }
+    }
+  },
+  "withdraw": {
+    "request_withdrawal": {
+      "label": "Hashi Withdrawal",
+      "operations": {
+        "58XSeQkQffKNz1TJ4vJmNaeMvEm6N6LCN889YRi8yhhW": {
+          "data": "AAAEAQE0LpCAQ9tgkFWO13Zt+Vv8NgmIGy6sfttTQ91bs93RuwEAAAAAAAAAAQEBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYBAAAAAAAAAAAAFRQ5bbafsMcBvSYUZ3fgwA7BMjqbogIAMHUAAAAAAAAAB14LmcMfaRdCrOpd5Mob9Tw5jVY5/tZQOlH/6ANdxoSFA2J0YwNCVEMAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIHYmFsYW5jZQxyZWRlZW1fZnVuZHMBB14LmcMfaRdCrOpd5Mob9Tw5jVY5/tZQOlH/6ANdxoSFA2J0YwNCVEMAAQEDAABeC5nDH2kXQqzqXeTKG/U8OY1WOf7WUDpR/+gDXcaEhQh3aXRoZHJhdxJyZXF1ZXN0X3dpdGhkcmF3YWwABAEAAAEBAAMAAAAAAQIAXQICPNgBkMi8sEpppS+10lw9sHZjI3AcApChTw4xB6gBBx5Up8OaX9O0qZLI3uKeGpMthZf+uc74QdemKmIPnwNTaNc+AAAAACAj0w0hS8IQtjz+XlPnNalzYlDvYcceg9Pky+OwU1izQl0CAjzYAZDIvLBKaaUvtdJcPbB2YyNwHAKQoU8OMQeo6AMAAAAAAACIGIsAAAAAAAA=",
+          "command_index": 1,
+          "visualize_result_index": 0,
+          "asserts": {
+            "Signer": "0x5d02023cd80190c8bcb04a69a52fb5d25c3db0766323701c0290a14f0e3107a8",
+            "Amount": "0.0003",
+            "Destination Network": "Bitcoin Signet",
+            "Recipient Address": "tb1q89kmd8ascuqm6fs5vam7psqwcyer4xazqlawvk",
+            "Bitcoin Miner Fee": "Deducted from the amount",
+            "Amount (sats)": "30000",
+            "Source Network": "Sui Testnet",
+            "Bridge Object": "0x342e908043db6090558ed7766df95bfc3609881b2eac7edb5343dd5bb3ddd1bb",
+            "Bridge Package": "0x5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,333 +1,174 @@
 ---
 title: Attestation Verification
-description: Implement attestation verification for parser responses
+description: Verify that a parser response came from the expected code in a genuine AWS Nitro Enclave
 ---
 
-Before trusting any parsed transaction data, your wallet must verify the attestation to confirm it came from a genuine enclave running the expected code.
+Before trusting any parsed transaction, your wallet must verify that the response came from a genuine enclave running the expected code, and that nothing changed it on the way.
 
-For background on why verification matters and how the security model works, see [Security Model](./security-model).
+For background on why verification matters, see [Security Model](./security-model).
 
 ## Prerequisites
 
-- Understanding of the [TEE security model](./security-model)
-- Access to the [VisualSign Verifier Library](https://github.com/anchorageoss/awsnitroverifier) (recommended) or ability to implement verification from scratch
-- A PCR allowlist for the parser version you're integrating with
+- [visualsign-turnkeyclient](https://github.com/anchorageoss/visualsign-turnkeyclient), the reference verifier (recommended). It performs every check on this page. To build your own, its `verify/service.go` is the reference implementation, and [awsnitroverifier](https://github.com/anchorageoss/awsnitroverifier) handles the attestation document.
+- Expected values for the deployment you trust: PCR0-3, plus the pivot binary hash or manifest hash. See [Expected values](./getting-started#expected-values).
+
+## What a response carries
+
+A successful parse response has two parts that matter for verification:
+
+| Field | Contents |
+|---|---|
+| `response.parsedTransaction.payload` | `signablePayload` (the JSON your wallet renders), `inputPayloadDigest`, `metadataDigest`, and optionally `intermediateOutput` |
+| `response.parsedTransaction.signature` | `message`, `publicKey`, `scheme` and `signature`: the enclave's P-256 signature over the payload |
+| `bootProof.awsAttestationDocB64` | The AWS Nitro attestation document (COSE Sign1, CBOR), from the enclave's NSM device |
+| `bootProof.qosManifestB64`, `bootProof.qosManifestEnvelopeB64` | The QOS manifest the enclave booted with, and the envelope carrying its approvals |
+| `bootProof.ephemeralPublicKeyHex` | The enclave's ephemeral key, which signs responses |
+
+On a self-hosted `parser_http_server`, error responses carry a `bootProof` with every field empty. Treat any response without a verifiable proof as unverified.
 
 ## Verification levels
 
-Choose the level of verification appropriate for your security requirements:
+| Level | Verifies | Use case |
+|---|---|---|
+| Level 1 | Payload binding + signature | Development and testing |
+| Level 2 | Level 1 + attestation document + PCRs + key binding | Production |
+| Level 3 | Level 2 + manifest: the exact binary and configuration | High-security environments, and anyone running their own deployment |
 
-| Level | Verifies | Use Case |
-|-------|----------|----------|
-| Level 1 | Signature only | Development and testing |
-| Level 2 | Signature + PCRs | Production deployments |
-| Level 3 | Signature + PCRs + Manifest | High-security environments |
+## Level 1: Payload binding and signature
 
-## Level 1: Signature verification
+1. Check the digests against your request: `inputPayloadDigest` is the SHA-256 of the exact `unsigned_payload` string you sent, and `metadataDigest` is the SHA-256 of the Borsh-encoded chain metadata you sent (SHA-256 of empty input when you sent none). This ties the response to your transaction rather than someone else's.
+2. Recompute the signed message: the SHA-256 of the Borsh-encoded `ParsedTransactionPayload` (`signablePayload`, `inputPayloadDigest`, `metadataDigest`, plus `intermediateOutput` when present). It must equal `signature.message`. Without this check, an attacker on the transport could replace `signablePayload` and keep a valid signature over some other message.
+3. Verify `signature.signature`, a P-256 ECDSA signature over SHA-256 of the message bytes. `signature.publicKey` is 130 bytes: QOS's encryption key followed by its signing key, each a 65-byte uncompressed SEC1 point. Verify with the second 65 bytes.
 
-Verify the parser's P256 signature on the response.
+On its own, this proves only that *someone* holding that key signed the payload. Level 2 proves the key belongs to an attested enclave.
 
-```go
-// Extract from parser response
-signature := response.ParsedTransaction.Signature
-publicKey := signature.PublicKey
-message := signature.Message
-sig := signature.Signature
+## Level 2: Attestation document
 
-// Verify P256 ECDSA signature
-valid := verifyP256Signature(publicKey, message, sig)
-if !valid {
-    return errors.New("invalid signature")
-}
-```
+1. Decode `bootProof.awsAttestationDocB64` and verify its certificate chain against the AWS Nitro root CA.
+2. Compare PCR0-3 against your allowlist:
 
-## Level 2: Boot attestation
+   | PCR | Measures |
+   |---|---|
+   | PCR0 | The enclave image file (the QOS EIF) |
+   | PCR1 | The Linux kernel and bootstrap |
+   | PCR2 | The application in the enclave image: QOS's boot ramdisk, *not* the parser binary |
+   | PCR3 | The IAM role of the parent instance; TVC sets this per cluster |
 
-Verify the enclave boot measurements (PCRs) to confirm the expected code is running.
+3. Check that the document's `public_key` is the same signing key as `signature.publicKey`. The document may carry the 65-byte signing key alone or the same 130-byte form, so compare signing halves. This is what makes the signature attested: the enclave committed to the key at attestation time.
 
-```go
-// Parse attestation document
-doc, err := parseAttestationDocument(attestationBytes)
-if err != nil {
-    return err
-}
-
-// Check PCR values against allowlist
-expectedPCRs := map[int]string{
-    0: "abc123...", // Enclave image
-    1: "def456...", // Enclave boot
-    2: "ghi789...", // Application hash
-}
-
-for idx, expected := range expectedPCRs {
-    if doc.PCRs[idx] != expected {
-        return fmt.Errorf("PCR%d mismatch", idx)
-    }
-}
-```
+The parser binary isn't measured into any PCR. QOS loads it after boot and binds it through the manifest, which is what Level 3 checks.
 
 ## Level 3: Manifest verification
 
-Verify the exact application binary for complete supply chain verification.
+The attestation document's `user_data` is the hash of the QOS manifest the enclave booted with. That manifest names the parser binary (`pivot.hash`, its sha256), its arguments (`pivot.args`), whether debug mode is on, the expected PCRs, and the operators who approved it.
 
-```go
-// Get manifest from attestation
-manifest := doc.UserData.Manifest
+1. Decode `bootProof.qosManifestB64` and hash it the way QOS does for its schema version:
+   - **v2** (TVC writes this for new apps): the field carries QOS storage JSON, and the hash is QOS's canonical-JSON manifest hash.
+   - **v0/v1**: the field carries Borsh, and the hash is SHA-256 of those bytes.
 
-// Verify manifest signature
-manifestSig := manifest.Signature
-valid := verifyManifestSignature(manifestSig)
+   A field that starts with `{` is v2 JSON; anything else is Borsh. The hash must equal `user_data`.
+2. Check the manifest's contents against the deployment you trust:
+   - `pivot.hash` is the sha256 of the parser binary you expect.
+   - `pivot.args` are the arguments you expect, such as the ABI trust posture and `--boot-proof-source nsm`.
+   - Debug mode is off.
+   - The manifest set lists the operators you expect.
 
-// Check application hash
-appHash := sha256.Sum256(applicationBinary)
-if manifest.AppHash != appHash {
-    return errors.New("application hash mismatch")
-}
+   Alternatively, once you've done this once, pin the manifest hash itself. Any change to the deployment changes it.
+
+## Verifying with visualsign-turnkeyclient
+
+`verify` performs Levels 1 and 2, and the Level 3 hash check, in one call:
+
+```bash
+visualsign-turnkeyclient verify \
+  --host <parser-url> \
+  --organization-id <org-id> --key-name <api-key-name> \
+  --chain CHAIN_ETHEREUM --unsigned-payload <hex-or-base64-tx> \
+  --pcrs "0:<pcr0>,1:<pcr1>,2:<pcr2>,3:<pcr3>" \
+  --qos-manifest-hex <manifest-hash> \
+  --save-qos-manifest envelope.bin
 ```
 
-## Step-by-step implementation
+- `--pcrs` pins the PCRs. Without it, the PCRs are only reported, not checked, and `verify` still exits 0.
+- `--qos-manifest-hex` pins the manifest hash against `user_data`. Without it, the client checks that the returned manifest hashes to `user_data` and accepts any manifest that does. If the response carries no manifest, it skips that check entirely.
+- `--pivot-binary-hash-hex` is despite its name another way to pass the manifest hash: it's also compared with `user_data`, so the binary's sha256 fails it. Likewise, the `pivotBinaryHash` field in `verify`'s JSON output is the manifest hash.
+- `--save-qos-manifest` writes the envelope so you can inspect it:
 
-### Step 1: Extract attestation
-
-The parser includes attestation in its responses:
-
-```go
-type ParseResponse struct {
-    ParsedTransaction Transaction
-    Attestation      []byte // CBOR-encoded attestation document
-}
+```bash
+visualsign-turnkeyclient decode-manifest envelope --file envelope.bin
 ```
 
-### Step 2: Decode CBOR
+This prints the pivot binary hash, args, debug mode, PCRs, manifest set and manifest hash for the Level 3 content checks. The manifest set appears only as a threshold and member count; add `--json` to see each member's `pubKey`. turnkeyclient doesn't compare the binary hash, args or operators for you.
 
-AWS attestation documents use CBOR encoding:
+For the hosted service, `--host` is `https://api.turnkey.com`. For your own deployment, it's the app URL; see [Self-Hosted TEE](./getting-started#4-verify-the-deployment-end-to-end).
 
-```go
-import "github.com/fxamacker/cbor/v2"
+## Freshness
 
-var doc AttestationDocument
-err := cbor.Unmarshal(attestationBytes, &doc)
-```
+The attestation document isn't bound to a request: it has no nonce, and the same document serves many responses. Validate its certificate chain at the document's own timestamp, not your current clock. turnkeyclient skips the timestamp check entirely.
 
-### Step 3: Verify certificate chain
-
-The attestation includes an X.509 certificate chain signed by AWS:
-
-```go
-// Extract certificates
-certs := doc.Certificate
-chain := x509.NewCertPool()
-
-// Build chain
-for _, certDER := range certs {
-    cert, _ := x509.ParseCertificate(certDER)
-    chain.AddCert(cert)
-}
-
-// Verify against AWS root CA
-opts := x509.VerifyOptions{
-    Roots: awsNitroRootCA,
-    Intermediates: chain,
-}
-
-_, err := leafCert.Verify(opts)
-```
-
-### Step 4: Verify PCR values
-
-Check Platform Configuration Registers against your allowlist:
-
-```go
-type PCRs struct {
-    PCR0 []byte // Enclave image file
-    PCR1 []byte // Linux kernel and boot ramfs
-    PCR2 []byte // Application binary
-    PCR3 []byte // Parent instance ID
-    PCR4 []byte // Parent instance IP
-    PCR8 []byte // Enclave certificate
-}
-```
-
-Maintain an allowlist of valid PCR values:
-
-```yaml
-# pcr-allowlist.yaml
-production:
-  pcr0: "7fb5c55bc2ecbb68ed99a13d7122abfc0666b926a79d5379bc58b9445c84217f"
-  pcr1: "235c9e6050abf6b993c915505f3220e2a82b51a4b8b244d5e19e6c7b2d7e8b25"
-  pcr2: "0f0e3e8118b61c8c5b21f92e1e2e52e89d09a92c627d7f6cf42c135f5d5c7c82"
-```
-
-### Step 5: Extract public key
-
-Only extract the public key after successful attestation verification:
-
-```go
-// IMPORTANT: Only after successful attestation verification!
-if !verifyAttestation(doc) {
-    return errors.New("attestation verification failed")
-}
-
-// Now safe to use the public key
-publicKey := doc.PublicKey
-```
-
-## Complete example
-
-```go
-package verify
-
-import (
-    "crypto/ecdsa"
-    "crypto/sha256"
-    "crypto/x509"
-    "encoding/hex"
-    "fmt"
-
-    "github.com/fxamacker/cbor/v2"
-)
-
-func VerifyParserResponse(resp *ParseResponse) error {
-    // Step 1: Decode attestation
-    var doc AttestationDocument
-    if err := cbor.Unmarshal(resp.Attestation, &doc); err != nil {
-        return fmt.Errorf("decode attestation: %w", err)
-    }
-
-    // Step 2: Verify certificate chain
-    if err := verifyCertificateChain(doc.Certificate); err != nil {
-        return fmt.Errorf("verify cert chain: %w", err)
-    }
-
-    // Step 3: Check PCR values
-    if err := verifyPCRs(doc.PCRs); err != nil {
-        return fmt.Errorf("verify PCRs: %w", err)
-    }
-
-    // Step 4: Verify signature using attested public key
-    pubKey, err := parsePublicKey(doc.PublicKey)
-    if err != nil {
-        return fmt.Errorf("parse public key: %w", err)
-    }
-
-    // Step 5: Verify the transaction signature
-    hash := sha256.Sum256([]byte(resp.ParsedTransaction.Payload))
-    valid := ecdsa.VerifyASN1(pubKey, hash[:], resp.ParsedTransaction.Signature)
-    if !valid {
-        return fmt.Errorf("invalid transaction signature")
-    }
-
-    return nil
-}
-
-func verifyPCRs(pcrs map[int][]byte) error {
-    // Load allowlist
-    allowlist := loadPCRAllowlist()
-
-    // Check each PCR
-    for idx, expected := range allowlist {
-        actual := hex.EncodeToString(pcrs[idx])
-        if actual != expected {
-            return fmt.Errorf("PCR%d mismatch: got %s, want %s",
-                idx, actual, expected)
-        }
-    }
-
-    return nil
-}
-```
+On a self-hosted `parser_http_server` (`--boot-proof-source nsm`), the parser caches its document and re-attests before the chain expires. NSM's leaf certificate lasts about 3 hours and is reused across attestations, so a served document can be up to about 3 hours old. If your verifier enforces freshness, allow for that.
 
 ## PCR management
 
 ### Updating your allowlist
 
-When the deployed qos enclave runtime is updated, PCR values change. Follow this process:
+When the deployed QOS runtime changes, PCR0-2 change. Follow this process:
 
-1. Watch for deployment announcements that change the qos runtime rev (the rev whose EIF boots in the enclave, not the qos library rev parser_app links against — see [Generating PCRs from source](../hosted/getting-started#generating-pcrs-from-source) for the distinction).
-2. Reproduce the new PCR values: run `scripts/extract-nitro-pcrs.sh` with the updated deployment rev and confirm the script's output matches the values published with the release.
-3. Add new PCRs to your allowlist.
-4. Deploy to production.
-5. Remove old PCRs after migration completes.
+1. Watch for announcements of a new QOS runtime version. This is the version whose EIF boots in the enclave, not the qos library version the parser links against; see [Generating PCRs from source](../hosted/getting-started#generating-pcrs-from-source).
+2. Reproduce the new PCRs with `scripts/extract-nitro-pcrs.sh --rev <qos-commit>`, and confirm they match the published values.
+3. Add the new PCRs to your allowlist, and deploy.
+4. Remove the old PCRs once the migration completes.
+
+PCR3 changes when the app moves to a different TVC cluster, and it can't be reproduced from source. Take it from the cluster announcement.
+
+A new parser release changes the pivot binary hash and the manifest hash, but not the PCRs.
 
 ### Supporting multiple versions
 
-During migrations, support multiple PCR sets:
+During a migration, accept more than one PCR set:
 
 ```yaml
 # pcr-allowlist.yaml
 production:
-  # Current version
-  - pcr0: "7fb5c55bc..."
-    pcr1: "235c9e605..."
-    pcr2: "0f0e3e811..."
-  # Previous version (remove after migration)
-  - pcr0: "a1b2c3d4e..."
-    pcr1: "f5g6h7i8j..."
-    pcr2: "k9l0m1n2o..."
-```
-
-## Monitoring
-
-Track verification metrics in production:
-
-```go
-metrics.Counter("attestation.verification.success")
-metrics.Counter("attestation.verification.failure")
-metrics.Histogram("attestation.verification.duration")
-```
-
-Log verification attempts for auditing:
-
-```go
-log.Info("attestation_verified",
-    "pcr0", hex.EncodeToString(doc.PCRs[0]),
-    "pcr2", hex.EncodeToString(doc.PCRs[2]),
-    "timestamp", doc.Timestamp,
-    "nonce", doc.Nonce,
-)
+  - pcr0: "<current pcr0>"   # current QOS runtime
+    pcr1: "<current pcr1>"
+    pcr2: "<current pcr2>"
+    pcr3: "<current pcr3>"
+  - pcr0: "<previous pcr0>"  # remove after the migration
+    pcr1: "<previous pcr1>"
+    pcr2: "<previous pcr2>"
+    pcr3: "<previous pcr3>"
 ```
 
 ## Troubleshooting
 
 ### PCR mismatch
 
-- Parser was updated and your allowlist needs updating
-- You're connecting to a different environment (staging vs production)
-- Check the [parser releases](https://github.com/anchorageoss/visualsign-parser/releases) for current PCR values
+- The QOS runtime was updated, so PCR0-2 changed. Reproduce the new values.
+- The app moved to a different TVC cluster, so PCR3 changed.
+- The deployment runs in debug mode, which zeroes the PCRs. Never trust a debug-mode attestation.
 
-### Certificate chain invalid
+### Manifest hash mismatch
 
-- Check for clock skew on your system
-- Verify certificates haven't expired
-- Ensure network connectivity for CRL checks
+- The deployment changed. Every new deployment has a new manifest, even with the same binary.
+- The verifier hashed v2 JSON with the v0/v1 method, or the reverse. Check the field's first byte.
+
+### Public key mismatch
+
+- The signature and the attestation came from different keys. Treat the response as unverified.
 
 ### Signature verification failed
 
-- Confirm the message being verified matches what was signed
-- Check you're using the correct public key from the attestation
-- Verify the signature format (ASN.1 DER encoding)
-
-### Debug commands
-
-Check current PCR values on the enclave:
-
-```bash
-nitro-cli describe-enclave --enclave-id $EID
-```
-
-Verify an attestation document directly:
-
-```bash
-nitro-cli verify-attestation --document attestation.cbor
-```
+- The recomputed message doesn't match `signature.message`. The payload was modified, or the verifier's Borsh encoding is wrong. Include `intermediateOutput` if the response has one.
+- Confirm you verify over SHA-256 of the message bytes, using the key from the attestation.
 
 ## Next steps
 
-- [Security Model](./security-model) — Understanding the trust architecture
-- [Getting Started](./getting-started) — Deploy your own enclave
+- [Self-Hosted TEE](./getting-started) — Deploy and verify your own parser
+- [Security Model](./security-model) — The trust architecture
 
 ## Resources
 
-- [AWS Nitro Enclaves Documentation](https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave.html)
-- [CBOR RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html)
-- [VisualSign Verifier Library](https://github.com/anchorageoss/awsnitroverifier)
+- [visualsign-turnkeyclient](https://github.com/anchorageoss/visualsign-turnkeyclient)
+- [awsnitroverifier](https://github.com/anchorageoss/awsnitroverifier)
+- [AWS Nitro Enclaves: attestation](https://docs.aws.amazon.com/enclaves/latest/user/set-up-attestation.html)

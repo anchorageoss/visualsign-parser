@@ -58,6 +58,19 @@ jobs:
           fi
       - name: Run linters
         run: make -C src lint
+      # The Rust cache above doesn't cover ~/.cargo/bin, so cache the pinned
+      # binary separately instead of rebuilding it on every run.
+      - name: Cache cargo-machete binary
+        id: cache-cargo-machete
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ~/.cargo/bin/cargo-machete
+          key: ${{ runner.os }}-cargo-machete-0.9.2
+      - name: Install cargo-machete
+        if: steps.cache-cargo-machete.outputs.cache-hit != 'true'
+        run: cargo install cargo-machete --locked --version 0.9.2
+      - name: Check for unused dependencies
+        run: make -C src unused-deps
       - name: Run tests
         run: make -C src test
       - name: Check parser_app narrow feature builds

@@ -31,6 +31,9 @@ pub(crate) const JUPITER_EARN_PROGRAM_ID: &str = "jup3YeL8QhtSx1e253b2FDvsMNC87f
 
 const JUPITER_EARN_DISPLAY_NAME: &str = "Jupiter Lend Earn";
 
+// Product name used in payload titles; the subtitle and Program rows keep the on-chain program name.
+const JUPITER_LEND_TITLE_NAME: &str = "Jupiter Lend";
+
 const JUPITER_EARN_IDL_JSON: &str = include_str!("jupiter_earn.json");
 
 /// `withdraw(u64::MAX)` burns the whole fToken balance ("withdraw everything"). Verified on
@@ -508,29 +511,26 @@ impl UserAction {
         )
     }
 
+    /// Names the assets but never the amount; the Amount row carries it.
     fn title(&self) -> String {
         let asset = &self.asset;
+        let receipt = asset.symbol(Denomination::Receipt);
         match self.kind {
-            UserActionKind::Deposit { assets, .. } => format!(
-                "Deposit {} to {JUPITER_EARN_DISPLAY_NAME}",
-                asset.amount(assets, Denomination::Asset).phrase()
-            ),
-            UserActionKind::Mint { shares, .. } => format!(
-                "Mint {} on {JUPITER_EARN_DISPLAY_NAME}",
-                asset.amount(shares, Denomination::Receipt).phrase()
-            ),
-            UserActionKind::Withdraw { .. } if self.withdraws_all() => format!(
-                "Withdraw full {} position from {JUPITER_EARN_DISPLAY_NAME}",
+            UserActionKind::Deposit { .. } => format!(
+                "Supply {} to {JUPITER_LEND_TITLE_NAME}",
                 asset.symbol(Denomination::Asset)
             ),
-            UserActionKind::Withdraw { amount, .. } => format!(
-                "Withdraw {} from {JUPITER_EARN_DISPLAY_NAME}",
-                asset.amount(amount, Denomination::Asset).phrase()
+            UserActionKind::Mint { .. } => format!("Mint {receipt} on {JUPITER_LEND_TITLE_NAME}"),
+            UserActionKind::Withdraw { .. } if self.withdraws_all() => {
+                format!("Redeem full {receipt} position via {JUPITER_LEND_TITLE_NAME}")
+            }
+            UserActionKind::Withdraw { .. } => format!(
+                "Redeem {receipt} for {} via {JUPITER_LEND_TITLE_NAME}",
+                asset.symbol(Denomination::Asset)
             ),
-            UserActionKind::Redeem { shares, .. } => format!(
-                "Redeem {} from {JUPITER_EARN_DISPLAY_NAME}",
-                asset.amount(shares, Denomination::Receipt).phrase()
-            ),
+            UserActionKind::Redeem { .. } => {
+                format!("Redeem {receipt} via {JUPITER_LEND_TITLE_NAME}")
+            }
         }
     }
 

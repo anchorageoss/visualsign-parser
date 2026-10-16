@@ -2,6 +2,7 @@
 name = "visualsign-solana"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 
 [features]
 default    = ["cli-plugin"]
@@ -14,7 +15,7 @@ clap            = { version = "4.0", features = ["derive"], optional = true }
 parser_cli_core = { path = "../../parser/cli-core", optional = true }
 
 tracing = { workspace = true }
-solana_parser = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "594a910" }
+solana_parser = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "594a9101c5084e4536139201b8c4da72dad63543" }
 visualsign = { workspace = true }
 generated = { path = "../../generated" }
 serde_json = { workspace = true }
@@ -31,7 +32,6 @@ spl-associated-token-account = "6.0"
 spl-stake-pool = "2.0.2"
 solana-system-interface = "1.0"
 spl-token-2022 = "10.0.0"
-spl-token-2022-interface = "2.1.0"
 # IDL signature validation. Solana uses ed25519 (its native curve); see
 # `idl/signature.rs`. The Ethereum ABI path uses secp256k1 for its own curator
 # key. Both verify a curator signature, not the program's on-chain authority.
@@ -40,7 +40,7 @@ thiserror = "2.0.12"
 
 [dev-dependencies]
 parser_cli_core = { path = "../../parser/cli-core", features = ["test-utils"] }
-solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "594a910", features = ["proptest"] }
+solana-parser-fuzz-core = { git = "https://github.com/anchorageoss/solana-parser.git", rev = "594a9101c5084e4536139201b8c4da72dad63543", features = ["proptest"] }
 solana_test_utils = { path = "../../solana_test_utils" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

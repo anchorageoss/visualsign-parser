@@ -30,20 +30,67 @@ pub struct TurnkeyRequest {
 // caller that builds this envelope symmetrically to what parses it; no in-tree
 // consumer serializes a request today.
 
-/// Tagged representation of chain metadata for unambiguous JSON deserialization.
+/// Chain metadata as it arrives on the JSON wire, with the chain named explicitly.
 ///
 /// The generated `ChainMetadata` uses `serde(untagged)` on the inner oneof enum, which means
 /// serde tries Ethereum first. A Solana payload with only `networkId` would be silently
-/// decoded as `EthereumMetadata`. This wrapper uses an explicit `chain` discriminator.
+/// decoded as `EthereumMetadata`. This wrapper names the chain explicitly instead, in
+/// either of two shapes:
+///
+/// - the protojson oneof shape, `{"solana": {...}}`: what Turnkey's hosted gateway
+///   decodes, and so what visualsign-turnkeyclient sends. It serializes to this shape.
+/// - the internally tagged shape, `{"chain": "CHAIN_SOLANA", ...}`: this envelope's
+///   original shape, still accepted so existing callers keep working.
 #[derive(Deserialize, Serialize)]
-#[serde(tag = "chain", rename_all = "camelCase")]
+#[serde(from = "ChainMetadataWire", rename_all = "camelCase")]
 pub enum ChainMetadataInput {
+    Ethereum(EthereumMetadata),
+    Solana(SolanaMetadata),
+    Near(NearMetadata),
+}
+
+/// The accepted JSON shapes of [`ChainMetadataInput`]. Neither can be mistaken for the
+/// other: the oneof shape has exactly one key, the variant name, and no `chain` key.
+#[derive(Deserialize)]
+#[serde(
+    untagged,
+    expecting = r#"chain_metadata as {"ethereum"|"solana"|"near": {...}} or {"chain": "CHAIN_...", ...}"#
+)]
+enum ChainMetadataWire {
+    Oneof(OneofChainMetadata),
+    Tagged(TaggedChainMetadata),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum OneofChainMetadata {
+    Ethereum(EthereumMetadata),
+    Solana(SolanaMetadata),
+    Near(NearMetadata),
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "chain")]
+enum TaggedChainMetadata {
     #[serde(rename = "CHAIN_ETHEREUM")]
     Ethereum(EthereumMetadata),
     #[serde(rename = "CHAIN_SOLANA")]
     Solana(SolanaMetadata),
     #[serde(rename = "CHAIN_NEAR")]
     Near(NearMetadata),
+}
+
+impl From<ChainMetadataWire> for ChainMetadataInput {
+    fn from(wire: ChainMetadataWire) -> Self {
+        match wire {
+            ChainMetadataWire::Oneof(OneofChainMetadata::Ethereum(eth))
+            | ChainMetadataWire::Tagged(TaggedChainMetadata::Ethereum(eth)) => Self::Ethereum(eth),
+            ChainMetadataWire::Oneof(OneofChainMetadata::Solana(sol))
+            | ChainMetadataWire::Tagged(TaggedChainMetadata::Solana(sol)) => Self::Solana(sol),
+            ChainMetadataWire::Oneof(OneofChainMetadata::Near(near))
+            | ChainMetadataWire::Tagged(TaggedChainMetadata::Near(near)) => Self::Near(near),
+        }
+    }
 }
 
 impl From<ChainMetadataInput> for ChainMetadata {
@@ -248,6 +295,86 @@ mod tests {
         let json = r#"{"chain":"CHAIN_SOLANA","networkId":"solana-mainnet"}"#;
         let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
         assert!(matches!(parsed, ChainMetadataInput::Solana(_)));
+    }
+
+    /// Borsh bytes of the generated `ChainMetadata`: what parser_app hashes into
+    /// `metadata_digest`.
+    fn metadata_digest_bytes(json: &str) -> Vec<u8> {
+        let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
+        borsh::to_vec(&ChainMetadata::from(parsed)).unwrap()
+    }
+
+    #[test]
+    fn chain_metadata_input_oneof_and_tagged_shapes_hash_identically() {
+        // Turnkey's hosted gateway decodes chain_metadata with protojson and drops
+        // the tagged shape, so visualsign-turnkeyclient sends the oneof shape. Both
+        // must reach parser_app as the same ChainMetadata, or the client's
+        // recomputed metadata_digest will not match.
+        let cases = [
+            (
+                r#"{"solana":{"networkId":"SOLANA_MAINNET","simulatedTransactionResult":"eyJmb28iOiJiYXIifQ=="}}"#,
+                r#"{"chain":"CHAIN_SOLANA","networkId":"SOLANA_MAINNET","simulatedTransactionResult":"eyJmb28iOiJiYXIifQ=="}"#,
+            ),
+            (
+                r#"{"ethereum":{"networkId":"ETHEREUM_MAINNET","abiMappings":{"0xabc":{"value":"[]"}}}}"#,
+                r#"{"chain":"CHAIN_ETHEREUM","networkId":"ETHEREUM_MAINNET","abiMappings":{"0xabc":{"value":"[]"}}}"#,
+            ),
+            (
+                r#"{"near":{"networkId":"NEAR_TESTNET"}}"#,
+                r#"{"chain":"CHAIN_NEAR","networkId":"NEAR_TESTNET"}"#,
+            ),
+        ];
+        for (oneof, tagged) in cases {
+            let bytes = metadata_digest_bytes(oneof);
+            assert_eq!(bytes, metadata_digest_bytes(tagged), "{oneof} vs {tagged}");
+            assert_ne!(
+                bytes,
+                vec![0u8],
+                "{oneof} decoded to ChainMetadata {{ None }}"
+            );
+        }
+    }
+
+    #[test]
+    fn chain_metadata_input_oneof_solana_with_network_id_is_not_ethereum() {
+        let json = r#"{"solana":{"networkId":"SOLANA_MAINNET"}}"#;
+        let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
+        assert!(matches!(parsed, ChainMetadataInput::Solana(_)));
+    }
+
+    #[test]
+    fn chain_metadata_input_rejects_ambiguous_or_unknown_shapes() {
+        for json in [
+            r#"{"networkId":"SOLANA_MAINNET"}"#,
+            r#"{"solana":{},"ethereum":{}}"#,
+            r#"{"bitcoin":{}}"#,
+            r#"{"solana":null}"#,
+            r#"{"chain":"CHAIN_BITCOIN"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<ChainMetadataInput>(json).is_err(),
+                "{json} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn chain_metadata_input_serializes_to_oneof_shape() {
+        let json = r#"{"solana":{"networkId":"SOLANA_MAINNET"}}"#;
+        let parsed: ChainMetadataInput = serde_json::from_str(json).unwrap();
+        let value = serde_json::to_value(&parsed).unwrap();
+        assert_eq!(value["solana"]["networkId"], "SOLANA_MAINNET");
+        assert!(value.get("chain").is_none());
+    }
+
+    #[test]
+    fn request_wrapper_accepts_oneof_chain_metadata() {
+        let json = r#"{"request":{"unsigned_payload":"AA==","chain":"CHAIN_SOLANA","chain_metadata":{"solana":{"networkId":"SOLANA_MAINNET"}}}}"#;
+        let wrapper: TurnkeyRequestWrapper = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            wrapper.request.chain_metadata,
+            Some(ChainMetadataInput::Solana(_))
+        ));
     }
 
     #[test]

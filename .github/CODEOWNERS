@@ -1,0 +1,9 @@
+# Later rules take precedence over earlier ones.
+# An owner must have write access to the repo, or GitHub ignores the entry.
+
+* @prasanna-anchorage
+
+/src/visualsign/ @prasanna-anchorage @pepe-anchor
+/src/chain_parsers/visualsign-ethereum/ @prasanna-anchorage @pepe-anchor
+/src/chain_parsers/visualsign-solana/ @nathan-margosian-anchor @rituparna-mandal-anchor @keegan-rhodes-anchor @eric-cherba-anchor @prasanna-anchorage
+/src/chain_parsers/visualsign-near/ @shahan-khatchadourian-anchorage @prasanna-anchorage

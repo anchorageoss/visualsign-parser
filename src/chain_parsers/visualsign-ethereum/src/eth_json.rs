@@ -215,11 +215,7 @@ fn truncate_for_error(s: &str) -> String {
     if s.len() <= ERROR_PREVIEW_LEN {
         return s.to_string();
     }
-    let max = ERROR_PREVIEW_LEN.saturating_sub(3);
-    let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = s.floor_char_boundary(ERROR_PREVIEW_LEN.saturating_sub(3));
     format!("{}...", &s[..end])
 }
 
