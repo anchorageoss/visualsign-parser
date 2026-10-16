@@ -35,7 +35,7 @@ What you get:
 - Each on-chain account paired with its IDL-declared name
 - Each instruction argument shown as a `text` field with the raw decoded value
 - Auto-registered in `available_visualizers()` and `PRESET_IDLS` by `build.rs` reflection — no edits to `presets/mod.rs` or any test file
-- Crash-safety auto-covered by `tests/fuzz_idl_parsing.rs` (proptest, generative), `fuzz/fuzz_targets/` (cargo-fuzz, generative), and `tests/surfpool_fuzz.rs::surfpool_preset_idls` (reflective)
+- Crash-safety auto-covered by `tests/fuzz_idl_parsing.rs` (proptest, generative), `fuzz/fuzz_targets/` (cargo-fuzz, generative), and `tests/surfpool_fuzz.rs::preset_idls_roundtrip` (reflective, runs on every `cargo test`)
 
 What it deliberately does **not** produce:
 
@@ -90,9 +90,11 @@ diff -ru /tmp/solana-add-idl-compare/sonnet/ /tmp/solana-add-idl-compare/opus/
 
 Present the diff to the user and summarize: what did Opus add or do differently? Are any of those patterns general enough to encode in this skill's instructions?
 
-## Step 3: Live-fuzz validation (surfpool)
+## Step 3: Roundtrip and surfpool validation
 
-After the scaffolding subagent finishes and the PR is open, add the `surfpool` label to trigger `.github/workflows/surfpool-solana.yml`, which runs `cargo test -p visualsign-solana --test surfpool_fuzz -- --ignored --test-threads=1`. This includes `surfpool_preset_idls`, which auto-discovers the new preset's IDL via `PRESET_IDLS` (see Step D) and exercises it against a real mainnet fork with live tx data that synthetic unit tests can't replicate — no test-file edit needed for the new preset to be covered. If any IDL fails, CI adds a `surfpool-failure` label. The job only fires on non-fork PRs (secrets required for `HELIUS_API_KEY`).
+The new preset's IDL is covered by `preset_idls_roundtrip`, which auto-discovers it via `PRESET_IDLS` (see Step D) and runs offline on every `cargo test`, so the regular CI job already exercises it: no label or test-file edit needed. It builds a synthetic transaction from the IDL; it does not use live chain data.
+
+To also check the IDL against a surfpool mainnet fork, add the `surfpool` label to trigger `.github/workflows/surfpool-solana.yml`, which runs `cargo test -p visualsign-solana --test surfpool_fuzz -- --ignored --test-threads=1`. A failure fails the job and adds a `test:surfpool-failure` label. The job only fires on non-fork PRs (secrets required for `HELIUS_API_KEY`).
 
 ```bash
 gh pr edit <PR_NUMBER> --add-label surfpool
@@ -278,7 +280,7 @@ mod tests {
 
 Crash-safety against unknown discriminators / short data does **not** need its
 own test here — it's already covered by `tests/fuzz_idl_parsing.rs` (proptest,
-generative) and `tests/surfpool_fuzz.rs::surfpool_preset_idls` (auto-iterates
+generative) and `tests/surfpool_fuzz.rs::preset_idls_roundtrip` (auto-iterates
 every preset IDL, see Step D). Do not duplicate those assertions in the
 preset's own test module.
 
@@ -288,8 +290,8 @@ No manual registration needed. `build.rs` auto-discovers `{PascalName}Visualizer
 from any directory under `src/presets/` — do not edit `presets/mod.rs`, it is
 generated. Because Step A saved an IDL JSON at `{snake_name}/{snake_name}.json`,
 `build.rs` also adds an entry to `pub const PRESET_IDLS: &[(&str, &str)]`, which
-`tests/surfpool_fuzz.rs::surfpool_preset_idls` iterates automatically against a
-`surfpool` mainnet fork (decode IDL → build synthetic tx from the first
+`tests/surfpool_fuzz.rs::preset_idls_roundtrip` iterates automatically on every
+`cargo test` (decode IDL → build synthetic tx from the first
 instruction's discriminator → convert → assert non-empty payload). No test-file
 edit needed for either mechanism.
 

@@ -84,16 +84,16 @@ jobs:
           "${HOME}/.local/bin/surfpool" --version
       - name: Run codegen
         run: make -C src generated
-      - name: Run surfpool fuzz against all embedded IDLs
-        # Tests are gated by `#[ignore]` so they only run on `--ignored`.
-        # `--test-threads=1` serialises the surfpool spawns so each test owns
-        # its mainnet fork; otherwise 14 surfpools start simultaneously and
-        # contend for ports / RPC quota.
+      - name: Run surfpool-backed tests
+        # Only the fork-backed tests are `#[ignore]`; the IDL roundtrips run in
+        # the regular test job. `--test-threads=1` serialises surfpool spawns so
+        # each test owns its mainnet fork. A failure fails the job; the next
+        # step still labels the PR.
         id: surfpool
-        continue-on-error: true
         working-directory: src
         run: cargo test -p visualsign-solana --test surfpool_fuzz -- --ignored --test-threads=1
       - name: Label PR on surfpool failure
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
