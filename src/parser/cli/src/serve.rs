@@ -162,6 +162,9 @@ pub fn run(args: &ServeArgs) -> Result<(), String> {
 
     rt.block_on(async move {
         let addr = SocketAddr::new(args.host, args.port);
+        if let Some(warning) = non_loopback_warning(args.host) {
+            eprintln!("{warning}");
+        }
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .map_err(|e| format!("Failed to bind to {addr}: {e}"))?;
@@ -480,6 +483,17 @@ async fn handle_file(
     serde_json::to_value(&response)
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// Warning for a bind address other hosts can reach: the server has no auth or
+/// TLS and re-decodes the whole directory on every request.
+fn non_loopback_warning(host: IpAddr) -> Option<String> {
+    (!host.is_loopback()).then(|| {
+        format!(
+            "WARNING: binding {host}, which other hosts can reach. This server has no auth \
+             or TLS and serves every file under --dir; use it only on a trusted network."
+        )
+    })
 }
 
 /// Root paths the literal routes take, which the wildcard therefore never
@@ -852,6 +866,19 @@ mod tests {
         let entries = vec![entry("01.json", true)];
         let picked = pick_step(&entries, 0).unwrap();
         assert_eq!(picked.payload["Title"], "01.json");
+    }
+
+    #[test]
+    fn warns_only_for_non_loopback_binds() {
+        assert!(non_loopback_warning("127.0.0.1".parse().unwrap()).is_none());
+        assert!(non_loopback_warning("::1".parse().unwrap()).is_none());
+        for host in ["0.0.0.0", "192.168.1.20", "::"] {
+            let warning = non_loopback_warning(host.parse().unwrap());
+            assert!(
+                warning.as_deref().is_some_and(|w| w.contains(host)),
+                "{host}: {warning:?}"
+            );
+        }
     }
 
     #[test]
