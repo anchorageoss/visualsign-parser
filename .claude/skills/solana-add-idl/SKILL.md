@@ -92,7 +92,7 @@ Present the diff to the user and summarize: what did Opus add or do differently?
 
 ## Step 3: Live-fuzz validation (surfpool)
 
-After the scaffolding subagent finishes and the PR is open, add the `surfpool` label to trigger `.github/workflows/surfpool-solana.yml`, which runs `cargo test -p visualsign-solana --test surfpool_fuzz -- --ignored --test-threads=1`. This includes `surfpool_preset_idls`, which auto-discovers the new preset's IDL via `PRESET_IDLS` (see Step D) and exercises it against a real mainnet fork with live tx data that synthetic unit tests can't replicate — no test-file edit needed for the new preset to be covered. If any IDL fails, CI adds a `surfpool-failure` label. The job only fires on non-fork PRs (secrets required for `HELIUS_API_KEY`).
+After the scaffolding subagent finishes and the PR is open, add the `surfpool` label to trigger `.github/workflows/surfpool-solana.yml`, which runs `cargo test -p visualsign-solana --test surfpool_fuzz -- --ignored`. `surfpool_preset_idls` (a plain, local discriminator fuzz — it auto-discovers the new preset's IDL via `PRESET_IDLS`, see Step D — no fork, no test-file edit needed) already ran in the standard `cargo test` pass before this; the `--ignored` job additionally runs `surfpool_program_executable`, which starts a real mainnet fork and asserts against a live program account, proving the fork itself still serves real state. If any IDL fails, CI adds a `surfpool-failure` label. The job only fires on non-fork PRs (secrets required for `HELIUS_API_KEY`).
 
 ```bash
 gh pr edit <PR_NUMBER> --add-label surfpool
@@ -288,10 +288,10 @@ No manual registration needed. `build.rs` auto-discovers `{PascalName}Visualizer
 from any directory under `src/presets/` — do not edit `presets/mod.rs`, it is
 generated. Because Step A saved an IDL JSON at `{snake_name}/{snake_name}.json`,
 `build.rs` also adds an entry to `pub const PRESET_IDLS: &[(&str, &str)]`, which
-`tests/surfpool_fuzz.rs::surfpool_preset_idls` iterates automatically against a
-`surfpool` mainnet fork (decode IDL → build synthetic tx from the first
-instruction's discriminator → convert → assert non-empty payload). No test-file
-edit needed for either mechanism.
+`tests/surfpool_fuzz.rs::surfpool_preset_idls` iterates automatically — locally,
+no fork involved (decode IDL → build synthetic tx from the first instruction's
+discriminator → convert → assert non-empty payload). No test-file edit needed
+for either mechanism.
 
 This only covers crash-safety, not semantic correctness — the auto-roundtrip
 asserts the converter doesn't crash, not that the displayed fields read

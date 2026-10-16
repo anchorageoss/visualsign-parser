@@ -1,7 +1,9 @@
 use super::config::{SurfpoolConfig, redact_url_credentials};
 use anyhow::{Context, Result};
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature};
+use solana_sdk::{
+    account::Account, commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature,
+};
 use std::net::TcpListener;
 use std::process::{Child, Command};
 use std::sync::Arc;
@@ -164,6 +166,24 @@ impl SurfpoolManager {
             AIRDROP_POLL_INTERVAL,
         )
         .await
+    }
+
+    /// Fetch an account from the fork, or `None` if it doesn't exist.
+    ///
+    /// The blocking `RpcClient` call goes through `spawn_blocking`, matching
+    /// [`wait_ready`](Self::wait_ready) and [`airdrop`](Self::airdrop).
+    // `RpcClient` returns the SDK's large `ClientError` by value; we can't shrink it.
+    #[allow(clippy::result_large_err)]
+    pub async fn get_account(&self, pubkey: &Pubkey) -> Result<Option<Account>> {
+        let client = self.rpc_client();
+        let target = *pubkey;
+        let response = tokio::task::spawn_blocking(move || {
+            client.get_account_with_commitment(&target, CommitmentConfig::confirmed())
+        })
+        .await
+        .context("get_account task panicked")?
+        .context("Failed to fetch account")?;
+        Ok(response.value)
     }
 
     /// Find a free TCP port by binding to port 0.

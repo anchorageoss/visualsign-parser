@@ -12,7 +12,6 @@ use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::message::Message;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::transaction::Transaction as SolanaTransaction;
-use solana_test_utils::{SurfpoolConfig, SurfpoolManager};
 use visualsign::vsptrait::{Transaction, VisualSignConverter, VisualSignOptions};
 use visualsign::{
     AnnotatedPayloadField, SignablePayload, SignablePayloadField, SignablePayloadFieldPreviewLayout,
@@ -203,29 +202,15 @@ pub fn load_idl_from_env() -> Option<(String, solana_parser::solana::structs::Id
     }
 }
 
-// ── Surfpool roundtrip ────────────────────────────────────────────────────────
+// ── IDL discriminator fuzz ─────────────────────────────────────────────────────
 
-/// Per-IDL roundtrip: decode the IDL, build a synthetic transaction whose data
-/// starts with the first instruction's discriminator, run it through the
-/// visual-sign converter, and assert the payload is non-empty.
+/// Per-IDL discriminator fuzz: decode the IDL, build a synthetic transaction
+/// whose data starts with the first instruction's discriminator, run it
+/// through the visual-sign converter, and assert the payload is non-empty.
 ///
-/// Network-bound: starts a `surfpool` mainnet fork and requires the `surfpool`
-/// binary on `$PATH`. Callers are responsible for marking their tests with
-/// `#[ignore]`. Use the `idl_tests!` macro for the standard wrapper.
-///
-/// To loop over many IDLs without paying the surfpool startup cost per IDL,
-/// start one `SurfpoolManager` yourself and call `run_idl_roundtrip_inner`
-/// in the loop.
-pub async fn run_idl_roundtrip(idl_label: &str, idl_json: &str) {
-    let _manager = SurfpoolManager::start(SurfpoolConfig::default())
-        .await
-        .expect("surfpool should start");
-    run_idl_roundtrip_inner(idl_label, idl_json);
-}
-
-/// Body of `run_idl_roundtrip` minus the `SurfpoolManager` start. Use when
-/// running many IDLs in sequence under a single shared manager.
-pub fn run_idl_roundtrip_inner(idl_label: &str, idl_json: &str) {
+/// Purely local -- no network access and no `surfpool` binary required. Use
+/// the `idl_tests!` macro for the standard per-IDL wrapper.
+pub fn idl_discriminator_roundtrip(idl_label: &str, idl_json: &str) {
     // A red test names the IDL and the actual cause (decode rejection from a
     // malformed IDL, empty instruction list, or a missing discriminator).
     let (_idl, data) =
@@ -251,17 +236,20 @@ pub fn run_idl_roundtrip_inner(idl_label: &str, idl_json: &str) {
     );
 }
 
-/// Generate a `#[tokio::test] #[ignore]` per `name => idl` pair, each running
-/// `run_idl_roundtrip` against the given IDL string (works for both upstream
-/// `embedded_idls` consts and vsp-local IDL JSON via `include_str!`), plus a
-/// `const NAMED_IDLS: &[&str]` listing every `idl` expression from this same
-/// invocation.
+/// Generate a plain `#[test]` per `name => idl` pair, each running
+/// `idl_discriminator_roundtrip` against the given IDL string (works for both
+/// upstream `embedded_idls` consts and vsp-local IDL JSON via `include_str!`),
+/// plus a `const NAMED_IDLS: &[&str]` listing every `idl` expression from this
+/// same invocation.
 ///
 /// `NAMED_IDLS` exists so a completeness check (e.g. against
 /// `solana_parser::ProgramType::all()`) can assert against the IDLs this
 /// macro actually generated tests for, instead of a hand-typed list that
 /// could silently drift from it — deleting a pair here removes its test and
 /// its `NAMED_IDLS` entry atomically.
+///
+/// Not network-bound, so not `#[ignore]` -- this runs on every plain
+/// `cargo test -p visualsign-solana`.
 ///
 /// Any sibling test file can call this macro unqualified after `mod common;` —
 /// `#[macro_export]` puts it at the test binary's crate root, so neither
@@ -270,10 +258,9 @@ pub fn run_idl_roundtrip_inner(idl_label: &str, idl_json: &str) {
 macro_rules! idl_tests {
     ($($name:ident => $idl:expr),+ $(,)?) => {
         $(
-            #[tokio::test(flavor = "multi_thread")]
-            #[ignore]
-            async fn $name() {
-                $crate::common::run_idl_roundtrip(stringify!($name), $idl).await;
+            #[test]
+            fn $name() {
+                $crate::common::idl_discriminator_roundtrip(stringify!($name), $idl);
             }
         )+
 
