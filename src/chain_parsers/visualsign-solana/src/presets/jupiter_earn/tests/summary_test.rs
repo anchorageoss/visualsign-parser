@@ -104,7 +104,7 @@ fn test_single_deposit_gets_title_subtitle_and_rows() {
 
     let payload = payload_for(&[deposit], &payer);
 
-    assert_eq!(payload.title, "Supply 414.122446 USDC to Jupiter Lend");
+    assert_eq!(payload.title, "Supply USDC to Jupiter Lend");
     assert_eq!(payload.subtitle.as_deref(), Some(JUPITER_EARN_DISPLAY_NAME));
     // (`starts_with`: the diagnostics feature appends lint rows after these.)
     let labels = top_level_labels(&payload);
@@ -161,10 +161,7 @@ fn test_single_withdraw_gets_title_subtitle_and_rows() {
 
     let payload = payload_for(&[withdraw], &payer);
 
-    assert_eq!(
-        payload.title,
-        "Redeem JUICED for 26.177479 JupUSD via Jupiter Lend"
-    );
+    assert_eq!(payload.title, "Redeem JUICED for JupUSD via Jupiter Lend");
     assert_eq!(payload.subtitle.as_deref(), Some(JUPITER_EARN_DISPLAY_NAME));
     assert_eq!(
         top_level_value(&payload, "From").unwrap(),
@@ -204,7 +201,7 @@ fn test_infrastructure_legs_keep_the_summary() {
 
     let payload = payload_for(&[compute_limit, compute_price, create_ata, deposit], &payer);
 
-    assert_eq!(payload.title, "Supply 414.122446 USDC to Jupiter Lend");
+    assert_eq!(payload.title, "Supply USDC to Jupiter Lend");
     assert_eq!(
         top_level_value(&payload, "From").unwrap(),
         payer.to_string()
@@ -242,7 +239,7 @@ fn test_uncapped_priority_fee_is_hoisted_as_a_maximum() {
 
     let payload = payload_for(&[compute_price, deposit], &payer);
 
-    assert_eq!(payload.title, "Supply 414.122446 USDC to Jupiter Lend");
+    assert_eq!(payload.title, "Supply USDC to Jupiter Lend");
     assert!(top_level_value(&payload, "Priority fee").is_none());
     let fee = payload
         .fields
@@ -262,7 +259,7 @@ fn test_summary_without_a_unit_price_has_no_fee_row() {
 
     let payload = payload_for(&[compute_limit, deposit], &payer);
 
-    assert_eq!(payload.title, "Supply 414.122446 USDC to Jupiter Lend");
+    assert_eq!(payload.title, "Supply USDC to Jupiter Lend");
     let labels = top_level_labels(&payload);
     assert!(
         !labels.iter().any(|l| l.contains("riority fee")),
@@ -291,9 +288,7 @@ fn test_forged_token_program_keeps_default_title() {
     assert_no_summary(&payload, "Solana Transaction");
     let titles = preview_titles(&payload);
     assert!(
-        titles
-            .iter()
-            .any(|t| t == "Supply 414.122446 USDC to Jupiter Lend"),
+        titles.iter().any(|t| t == "Supply USDC to Jupiter Lend"),
         "instruction keeps its semantic view, got {titles:?}"
     );
 }
@@ -336,7 +331,7 @@ fn test_third_party_recipient_keeps_default_title() {
     assert!(
         titles
             .iter()
-            .any(|t| t == "Redeem JUICED for 26.177479 JupUSD via Jupiter Lend"),
+            .any(|t| t == "Redeem JUICED for JupUSD via Jupiter Lend"),
         "instruction keeps its semantic view, got {titles:?}"
     );
 }
@@ -420,10 +415,7 @@ fn test_relayed_deposit_keeps_default_title() {
 
     assert_no_summary(&payload, "Solana Transaction");
     // The per-instruction view still renders the action.
-    assert_eq!(
-        preview_titles(&payload)[0],
-        "Supply 414.122446 USDC to Jupiter Lend"
-    );
+    assert_eq!(preview_titles(&payload)[0], "Supply USDC to Jupiter Lend");
 }
 
 /// A caller-supplied `transaction_name` always wins over the summary.
@@ -457,7 +449,7 @@ fn test_v0_single_deposit_gets_summary() {
 
     let payload = payload_from_b64(&v0_transaction_b64(&[deposit], &payer, &[]));
 
-    assert_eq!(payload.title, "Supply 414.122446 USDC to Jupiter Lend");
+    assert_eq!(payload.title, "Supply USDC to Jupiter Lend");
     assert_eq!(payload.subtitle.as_deref(), Some(JUPITER_EARN_DISPLAY_NAME));
     let labels = top_level_labels(&payload);
     assert!(
@@ -543,9 +535,7 @@ fn test_v0_deposit_with_unverifiable_recipient_keeps_default_title() {
     assert_no_summary(&payload, "Solana V0 Transaction");
     let titles = preview_titles(&payload);
     assert!(
-        titles
-            .iter()
-            .any(|t| t == "Supply 414.122446 USDC to Jupiter Lend"),
+        titles.iter().any(|t| t == "Supply USDC to Jupiter Lend"),
         "instruction keeps its semantic view, got {titles:?}"
     );
 }
@@ -574,28 +564,24 @@ fn test_each_user_action_family_proposes_a_summary() {
         (
             "deposit_with_min_amount_out",
             vec![100_000_000u64, 95_000_000],
-            "Supply 100 USDC to Jupiter Lend",
+            "Supply USDC to Jupiter Lend",
         ),
-        ("mint", vec![50_000_000], "Mint 50 jlUSDC on Jupiter Lend"),
+        ("mint", vec![50_000_000], "Mint jlUSDC on Jupiter Lend"),
         (
             "mint_with_max_assets",
             vec![50_000_000, 52_500_000],
-            "Mint 50 jlUSDC on Jupiter Lend",
+            "Mint jlUSDC on Jupiter Lend",
         ),
         (
             "withdraw_with_max_shares_burn",
             vec![10_000_000, 9_800_000],
-            "Redeem jlUSDC for 10 USDC via Jupiter Lend",
+            "Redeem jlUSDC for USDC via Jupiter Lend",
         ),
-        (
-            "redeem",
-            vec![1_500_000],
-            "Redeem 1.5 jlUSDC via Jupiter Lend",
-        ),
+        ("redeem", vec![1_500_000], "Redeem jlUSDC via Jupiter Lend"),
         (
             "redeem_with_min_amount_out",
             vec![1_500_000, 1_490_000],
-            "Redeem 1.5 jlUSDC via Jupiter Lend",
+            "Redeem jlUSDC via Jupiter Lend",
         ),
     ] {
         let recipient = if name.starts_with("deposit") || name.starts_with("mint") {
@@ -655,8 +641,5 @@ fn test_intermediate_output_matches_human_view() {
         parsed.named_accounts.get("mint").map(String::as_str),
         Some("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
     );
-    assert_eq!(
-        result.payload.title,
-        "Supply 414.122446 USDC to Jupiter Lend"
-    );
+    assert_eq!(result.payload.title, "Supply USDC to Jupiter Lend");
 }

@@ -317,7 +317,7 @@ pub trait SolanaIntegrationConfig {
 /// [`InstructionVisualizer::transaction_summary`].
 #[derive(Debug, Clone)]
 pub struct TransactionSummary {
-    /// Payload title, e.g. "Supply 414.122446 USDC to Jupiter Lend".
+    /// Payload title, e.g. "Supply USDC to Jupiter Lend". Names assets, never amounts.
     pub title: String,
     /// Payload subtitle: the verified name of the program acted on.
     pub subtitle: Option<String>,

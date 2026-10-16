@@ -511,32 +511,26 @@ impl UserAction {
         )
     }
 
+    /// Names the assets but never the amount; the Amount row carries it.
     fn title(&self) -> String {
         let asset = &self.asset;
+        let receipt = asset.symbol(Denomination::Receipt);
         match self.kind {
-            UserActionKind::Deposit { assets, .. } => format!(
+            UserActionKind::Deposit { .. } => format!(
                 "Supply {} to {JUPITER_LEND_TITLE_NAME}",
-                asset.amount(assets, Denomination::Asset).phrase()
+                asset.symbol(Denomination::Asset)
             ),
-            UserActionKind::Mint { shares, .. } => format!(
-                "Mint {} on {JUPITER_LEND_TITLE_NAME}",
-                asset.amount(shares, Denomination::Receipt).phrase()
+            UserActionKind::Mint { .. } => format!("Mint {receipt} on {JUPITER_LEND_TITLE_NAME}"),
+            UserActionKind::Withdraw { .. } if self.withdraws_all() => {
+                format!("Redeem full {receipt} position via {JUPITER_LEND_TITLE_NAME}")
+            }
+            UserActionKind::Withdraw { .. } => format!(
+                "Redeem {receipt} for {} via {JUPITER_LEND_TITLE_NAME}",
+                asset.symbol(Denomination::Asset)
             ),
-            UserActionKind::Withdraw { .. } if self.withdraws_all() => format!(
-                "Redeem full {} position via {JUPITER_LEND_TITLE_NAME}",
-                asset.symbol(Denomination::Receipt)
-            ),
-            // `withdraw` is denominated in the underlying asset, so the receipt symbol is named
-            // without an amount and the decoded amount keeps its own denomination.
-            UserActionKind::Withdraw { amount, .. } => format!(
-                "Redeem {} for {} via {JUPITER_LEND_TITLE_NAME}",
-                asset.symbol(Denomination::Receipt),
-                asset.amount(amount, Denomination::Asset).phrase()
-            ),
-            UserActionKind::Redeem { shares, .. } => format!(
-                "Redeem {} via {JUPITER_LEND_TITLE_NAME}",
-                asset.amount(shares, Denomination::Receipt).phrase()
-            ),
+            UserActionKind::Redeem { .. } => {
+                format!("Redeem {receipt} via {JUPITER_LEND_TITLE_NAME}")
+            }
         }
     }
 
