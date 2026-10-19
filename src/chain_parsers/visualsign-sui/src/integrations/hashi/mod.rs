@@ -936,9 +936,10 @@ fn ensure_unmodified_before(
     }
 }
 
-/// `SplitCoins` amounts and `MakeMoveVec` elements are taken by value. The parser
-/// cannot see third-party Move signatures, so every other command argument,
-/// including those of any call outside `is_read_only_call`, may be `&mut`.
+/// `SplitCoins` amounts, `MakeMoveVec` elements and the `TransferObjects`
+/// recipient are taken by value. The parser cannot see third-party Move
+/// signatures, so every other command argument, including those of any call
+/// outside `is_read_only_call`, may be `&mut`.
 fn possibly_mutable_arguments(
     command: &SuiCommand,
     deployment: &HashiDeployment,
@@ -946,22 +947,30 @@ fn possibly_mutable_arguments(
     match command {
         SuiCommand::SplitCoins(coin, _) => vec![*coin],
         SuiCommand::MakeMoveVec(_, _) => Vec::new(),
+        SuiCommand::TransferObjects(objects, _) => objects.clone(),
         SuiCommand::MoveCall(call) if is_read_only_call(call, deployment) => Vec::new(),
         other => command_arguments(other),
     }
 }
 
-/// `coin::value` and `balance::value` borrow immutably, and Hashi's
-/// `utxo::utxo_id` and `utxo::utxo` take every argument by value
-/// (`packages/hashi/sources/btc/utxo.move`).
+/// `coin::value` and `balance::value` borrow immutably. `coin::from_balance`
+/// and `coin::send_funds` take every argument by value, as do Hashi's
+/// `utxo::utxo_id` and `utxo::utxo` (`packages/hashi/sources/btc/utxo.move`), so
+/// none of these can rewrite a value a later command reads. The framework
+/// signatures are in `sui-framework`'s `coin.move` and `balance.move`
+/// (mainnet-v1.68.1).
 fn is_read_only_call(call: &SuiProgrammableMoveCall, deployment: &HashiDeployment) -> bool {
-    let framework_value = call.package == ObjectID::from_single_byte(2)
+    let framework = call.package == ObjectID::from_single_byte(2);
+    let framework_value = framework
         && matches!(call.module.as_str(), "coin" | "balance")
         && call.function == "value";
+    let framework_by_value = framework
+        && call.module == "coin"
+        && matches!(call.function.as_str(), "from_balance" | "send_funds");
     let hashi_constructor = deployment.owns_package(&call.package)
         && call.module == "utxo"
         && matches!(call.function.as_str(), "utxo_id" | "utxo");
-    framework_value || hashi_constructor
+    framework_value || framework_by_value || hashi_constructor
 }
 
 fn command_arguments(command: &SuiCommand) -> Vec<SuiArgument> {

@@ -2395,3 +2395,62 @@ fn cancellation_request_id_modified_before_the_cancel_fails() {
     );
 }
 
+#[test]
+fn cancellations_refunded_to_one_shared_recipient_input_render() {
+    // `coin::send_funds` takes the recipient by value, so refunding several
+    // cancellations to the same input cannot change it between them.
+    let mut tx = cancel_tx(CANCEL_BATCH_DIGEST);
+    let shared = Argument::Input(REFUND_RECIPIENT_INPUT);
+    for refund in [5, 8] {
+        move_call(&mut tx, refund).arguments[1] = shared;
+    }
+    let signer = "0x07606cd05cc66b5696a382411656a4c797e3748d88821fc6f18785d1620a4444";
+    for command in [0, 3, 6] {
+        let fields = visualize(tx.clone(), command).unwrap();
+        assert_eq!(
+            field_values(&fields[0], "Refund Recipient"),
+            [signer; 2],
+            "command {command}"
+        );
+    }
+}
+
+#[test]
+fn cancellations_transferred_to_one_shared_recipient_input_render() {
+    // The `TransferObjects` recipient is taken by value as well.
+    let mut tx = cancel_tx(CANCEL_TRANSFER_DIGEST);
+    let second_request = push_pure_input(&mut tx, bcs::to_bytes(&[0x42u8; 32]).unwrap());
+    let mut second_cancel = move_call(&mut tx, CANCEL_COMMAND).clone();
+    second_cancel.arguments[1] = second_request;
+    let mut second_from_balance = move_call(&mut tx, FROM_BALANCE_COMMAND).clone();
+    second_from_balance.arguments[0] = result(REFUND_COMMAND + 1);
+    let commands = &mut programmable(&mut tx).commands;
+    commands.push(Command::MoveCall(Box::new(second_cancel)));
+    commands.push(Command::MoveCall(Box::new(second_from_balance)));
+    commands.push(Command::TransferObjects(
+        vec![result(REFUND_COMMAND + 2)],
+        Argument::Input(REFUND_RECIPIENT_INPUT),
+    ));
+
+    let signer = "0xd85a6b45f455c658224d664e75909fb89e63b2be1a14f46a28b5dfd16158e344";
+    for (command, request) in [
+        (
+            CANCEL_COMMAND,
+            "0xd77d19042e6b6db1ccda019809a219407fc8670ea6fbf5e3da9e663af9c4e79e".to_string(),
+        ),
+        (REFUND_COMMAND + 1, format!("0x{}", hex::encode([0x42u8; 32]))),
+    ] {
+        let fields = visualize(tx.clone(), command).unwrap();
+        assert_eq!(
+            field_values(&fields[0], "Withdrawal Request"),
+            [request.as_str(); 2],
+            "command {command}"
+        );
+        assert_eq!(
+            field_values(&fields[0], "Refund Recipient"),
+            [signer; 2],
+            "command {command}"
+        );
+    }
+}
+
