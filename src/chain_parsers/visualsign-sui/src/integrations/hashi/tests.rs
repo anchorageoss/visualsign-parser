@@ -48,6 +48,20 @@ const BITCOIN_ADDRESS_INPUT: u16 = 5;
 // Real address-balance withdrawal: 0 balance::redeem_funds<BTC>(I3 funds withdrawal),
 // 1 request_withdrawal(I0 hashi, I1 clock, R0, I2 addr).
 const REDEEM_WITHDRAWAL_DIGEST: &str = "58XSeQkQffKNz1TJ4vJmNaeMvEm6N6LCN889YRi8yhhW";
+
+// Real cancellations: 0 cancel_withdrawal(I0 hashi, I1 request id, I2 clock),
+// 1 coin::from_balance<BTC>(R0), 2 refund of R1 to I3.
+const CANCEL_COMMAND: usize = 0;
+const FROM_BALANCE_COMMAND: usize = 1;
+const REFUND_COMMAND: usize = 2;
+const REQUEST_ID_INPUT: usize = 1;
+const REFUND_RECIPIENT_INPUT: u16 = 3;
+/// Refund sent with `TransferObjects`.
+const CANCEL_TRANSFER_DIGEST: &str = "4ahHNd8LuyYPJ8CucP7y5Quf5RQv8Di2LbFg7fd6TU3d";
+/// Refund sent with `coin::send_funds`.
+const CANCEL_SEND_FUNDS_DIGEST: &str = "2W7pwd312DpS5mornpMj7pB8Ha6yQ33Wmx1dT2GkwpJN";
+/// Three cancellations, each refunded with `coin::send_funds`.
+const CANCEL_BATCH_DIGEST: &str = "2WCfwPwkgu2nDZDV8hJNZrSELNtyftgqzK1H1gCM8nsQ";
 const REDEEM_COMMAND: usize = 0;
 const REDEEM_WITHDRAWAL_COMMAND: usize = 1;
 const FUNDS_WITHDRAWAL_INPUT: u16 = 3;
@@ -355,6 +369,14 @@ fn card_headline(field: &AnnotatedPayloadField) -> (String, String, String) {
         value_of("Amount"),
         value_of("Recipient Address"),
     )
+}
+
+fn card_title(field: &AnnotatedPayloadField) -> String {
+    let SignablePayloadField::PreviewLayout { preview_layout, .. } = &field.signable_payload_field
+    else {
+        panic!("expected a preview layout");
+    };
+    preview_layout.title.as_ref().unwrap().text.clone()
 }
 
 fn headline(title: &str, amount: &str, recipient: &str) -> (String, String, String) {
@@ -1674,7 +1696,7 @@ fn calls_to_a_configured_package_are_handled_and_others_are_not() {
 
     let mut unsupported_function = withdrawal_tx();
     move_call(&mut unsupported_function, WITHDRAWAL_COMMAND).function =
-        "cancel_withdrawal".to_string();
+        "approve_request".to_string();
     assert!(!hashi_can_handle(unsupported_function, WITHDRAWAL_COMMAND));
 }
 
@@ -2204,3 +2226,172 @@ fn format_btc_trims_trailing_zeros() {
     assert_eq!(format_btc(150_000_000), "1.5");
     assert_eq!(format_btc(u64::MAX), "184467440737.09551615");
 }
+
+fn cancel_tx(digest: &str) -> TransactionData {
+    fixture_tx("withdraw", "cancel_withdrawal", digest)
+}
+
+const CANCEL_TITLE: &str = "Cancel hBTC withdrawal on Sui Testnet via Hashi";
+
+#[test]
+fn cancellation_refunded_with_send_funds_is_titled_with_the_refund() {
+    let payload = payload_of(&cancel_tx(CANCEL_SEND_FUNDS_DIGEST));
+    assert_eq!(payload.title, CANCEL_TITLE);
+    assert_eq!(
+        payload.subtitle.as_deref(),
+        Some("Refund hBTC to 0xbb5082e0b96b03414b8c5b20df82469a12522c60321393fd61d0efd0e785eeee")
+    );
+}
+
+#[test]
+fn cancellation_refunded_with_transfer_objects_also_renders_the_transfer() {
+    // The generic transfer preview renders the `TransferObjects` refund as a
+    // second card, so no single summary titles the payload.
+    let payload = payload_of(&cancel_tx(CANCEL_TRANSFER_DIGEST));
+    let labels: Vec<_> = payload.fields.iter().map(SignablePayloadField::label).collect();
+    assert_eq!(
+        labels,
+        [
+            "Network",
+            "Transfer Command",
+            "Hashi Withdrawal Cancellation",
+            "Transaction Details"
+        ]
+    );
+    assert_eq!(payload.title, "Programmable Transaction");
+}
+
+#[test]
+fn cancellation_names_the_request_and_a_refund_to_the_signer() {
+    let fields = visualize(cancel_tx(CANCEL_TRANSFER_DIGEST), CANCEL_COMMAND).unwrap();
+    assert_eq!(
+        field_values(&fields[0], "Withdrawal Request"),
+        ["0xd77d19042e6b6db1ccda019809a219407fc8670ea6fbf5e3da9e663af9c4e79e"; 2]
+    );
+    let SignablePayloadField::PreviewLayout { preview_layout, .. } =
+        &fields[0].signable_payload_field
+    else {
+        panic!("expected a preview layout");
+    };
+    let recipient = preview_layout.condensed.as_ref().unwrap().fields[1]
+        .signable_payload_field
+        .clone();
+    let SignablePayloadField::AddressV2 { address_v2, .. } = recipient else {
+        panic!("expected an address row, got {recipient:?}");
+    };
+    assert_eq!(address_v2.name, "Signer's address");
+}
+
+#[test]
+fn every_cancellation_in_a_batch_renders_its_own_card() {
+    let tx = cancel_tx(CANCEL_BATCH_DIGEST);
+    let signer = "0x07606cd05cc66b5696a382411656a4c797e3748d88821fc6f18785d1620a4444";
+    for (command, request) in [
+        (
+            0,
+            "0x50dbf2e4513fc233c0ffc449240eddfb10eb9efacf8dac6e4fce3e44ed6fc244",
+        ),
+        (
+            3,
+            "0x4465b28f25f3f9517b76cc289c83c0d717090e1673575d1c883e1ae53fcfffd8",
+        ),
+        (
+            6,
+            "0x649e4dc449f28a4a3fcd1f86934f7e4f631181cb5ea702e8c734e9f63d72679e",
+        ),
+    ] {
+        let fields = visualize(tx.clone(), command).unwrap();
+        assert_eq!(
+            card_title(&fields[0]),
+            CANCEL_TITLE,
+            "command {command}"
+        );
+        assert_eq!(
+            field_values(&fields[0], "Withdrawal Request"),
+            [request; 2],
+            "command {command}"
+        );
+        assert_eq!(
+            field_values(&fields[0], "Refund Recipient"),
+            [signer; 2],
+            "command {command}"
+        );
+    }
+    // Several actions: no single bridge summary for the whole transaction.
+    assert_eq!(payload_of(&tx).title, "Programmable Transaction");
+}
+
+#[test]
+fn mainnet_cancellation_renders_the_hashi_preview() {
+    let fields = visualize(on_mainnet(cancel_tx(CANCEL_TRANSFER_DIGEST)), CANCEL_COMMAND).unwrap();
+    assert_eq!(card_title(&fields[0]), "Cancel hBTC withdrawal on Sui via Hashi");
+    assert_eq!(field_values(&fields[0], "Bridge Package"), [MAINNET_PACKAGE]);
+    assert_eq!(field_values(&fields[0], "Bridge Object"), [MAINNET_HASHI_OBJECT]);
+    assert_eq!(field_values(&fields[0], "Network"), ["Sui"; 2]);
+}
+
+const UNSUPPORTED_REFUND: &str = "Cancelled withdrawal is not refunded through 0x2::coin::from_balance and then 0x2::coin::send_funds or TransferObjects";
+
+#[test]
+fn cancellation_refunded_by_another_route_fails() {
+    // The coin goes to a call the preview does not know.
+    let mut tx = cancel_tx(CANCEL_SEND_FUNDS_DIGEST);
+    programmable(&mut tx).commands[REFUND_COMMAND] = tamper_call(
+        "send_funds",
+        vec![result(FROM_BALANCE_COMMAND), Argument::Input(REFUND_RECIPIENT_INPUT)],
+    );
+    expect_error(visualize(tx, CANCEL_COMMAND), UNSUPPORTED_REFUND);
+
+    // The transfer also moves another object, which the preview would not show.
+    let mut tx = cancel_tx(CANCEL_TRANSFER_DIGEST);
+    programmable(&mut tx).commands[REFUND_COMMAND] = Command::TransferObjects(
+        vec![result(FROM_BALANCE_COMMAND), Argument::GasCoin],
+        Argument::Input(REFUND_RECIPIENT_INPUT),
+    );
+    expect_error(visualize(tx, CANCEL_COMMAND), UNSUPPORTED_REFUND);
+
+    // The refund is converted to a coin of another type.
+    let mut tx = cancel_tx(CANCEL_SEND_FUNDS_DIGEST);
+    move_call(&mut tx, FROM_BALANCE_COMMAND).type_arguments =
+        vec![sui_types::parse_sui_type_tag("0x2::sui::SUI").unwrap().into()];
+    expect_error(visualize(tx, CANCEL_COMMAND), UNSUPPORTED_REFUND);
+}
+
+#[test]
+fn cancellation_whose_refund_is_used_twice_fails() {
+    let mut tx = cancel_tx(CANCEL_SEND_FUNDS_DIGEST);
+    let recipient = Argument::Input(REFUND_RECIPIENT_INPUT);
+    programmable(&mut tx)
+        .commands
+        .push(Command::TransferObjects(vec![result(FROM_BALANCE_COMMAND)], recipient));
+    expect_error(
+        visualize(tx, CANCEL_COMMAND),
+        "The refund coin from command 1 must be used by exactly one later command",
+    );
+}
+
+#[test]
+fn cancellation_recipient_modified_before_the_refund_fails() {
+    let mut tx = cancel_tx(CANCEL_SEND_FUNDS_DIGEST);
+    insert_command(
+        &mut tx,
+        CANCEL_COMMAND,
+        tamper_call("touch", vec![Argument::Input(REFUND_RECIPIENT_INPUT)]),
+    );
+    expect_error(
+        visualize(tx, CANCEL_COMMAND + 1),
+        "`recipient` is passed to command 0, which may modify it before command 3 consumes it",
+    );
+}
+
+#[test]
+fn cancellation_request_id_modified_before_the_cancel_fails() {
+    let mut tx = cancel_tx(CANCEL_SEND_FUNDS_DIGEST);
+    let request = Argument::Input(u16::try_from(REQUEST_ID_INPUT).unwrap());
+    insert_command(&mut tx, CANCEL_COMMAND, tamper_call("touch", vec![request]));
+    expect_error(
+        visualize(tx, CANCEL_COMMAND + 1),
+        "`request_id` is passed to command 0, which may modify it before command 1 consumes it",
+    );
+}
+

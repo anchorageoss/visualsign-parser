@@ -12,6 +12,7 @@ const DEPOSIT_MODULE: &str = "deposit";
 const WITHDRAW_MODULE: &str = "withdraw";
 const DEPOSIT_FUNCTION: &str = "deposit";
 const REQUEST_WITHDRAWAL_FUNCTION: &str = "request_withdrawal";
+const CANCEL_WITHDRAWAL_FUNCTION: &str = "cancel_withdrawal";
 
 /// Hashi modules the preview supports. Every deployment in [`DEPLOYMENTS`]
 /// shares this layout, so it is declared once here rather than per package.
@@ -64,6 +65,7 @@ impl DepositFunctions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WithdrawFunctions {
     RequestWithdrawal,
+    CancelWithdrawal,
 }
 
 impl TryFrom<&str> for WithdrawFunctions {
@@ -72,6 +74,7 @@ impl TryFrom<&str> for WithdrawFunctions {
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
             REQUEST_WITHDRAWAL_FUNCTION => Ok(Self::RequestWithdrawal),
+            CANCEL_WITHDRAWAL_FUNCTION => Ok(Self::CancelWithdrawal),
             _ => Err(VisualSignError::DecodeError(format!(
                 "Unsupported function name: {value}"
             ))),
@@ -81,7 +84,7 @@ impl TryFrom<&str> for WithdrawFunctions {
 
 impl WithdrawFunctions {
     pub fn get_supported_functions() -> Vec<&'static str> {
-        vec![REQUEST_WITHDRAWAL_FUNCTION]
+        vec![REQUEST_WITHDRAWAL_FUNCTION, CANCEL_WITHDRAWAL_FUNCTION]
     }
 }
 
