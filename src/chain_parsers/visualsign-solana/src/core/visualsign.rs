@@ -3051,6 +3051,37 @@ mod solana_message_tests {
         assert!(tx.inner_legacy().is_none() && tx.inner_versioned().is_none());
     }
 
+    /// An off-chain message has no transaction for an intermediate output to
+    /// describe, so opting in must emit none, and must not change the payload:
+    /// a policy engine reading a blob here would treat a message as having
+    /// instructions.
+    #[test]
+    fn a_message_never_emits_intermediate_output() {
+        let options = VisualSignOptions {
+            include_intermediate_output: true,
+            decode_transfers: true,
+            ..VisualSignOptions::default()
+        };
+        let result = SolanaVisualSignConverter
+            .to_visual_sign_payload(
+                SolanaTransactionWrapper::from_string(&envelope("Sign in to app.example.com"))
+                    .expect("decode"),
+                options,
+            )
+            .expect("convert with intermediate output opted in");
+
+        assert!(
+            result.intermediate_output.is_none(),
+            "a message must not carry an intermediate output"
+        );
+        assert_eq!(
+            serde_json::to_string(&result.payload).expect("serialize"),
+            serde_json::to_string(&render_message("Sign in to app.example.com"))
+                .expect("serialize"),
+            "opting in must not change what a message renders"
+        );
+    }
+
     /// A transaction is base64 or hex and an envelope is JSON, so neither
     /// alphabet can produce the other. The transaction path must be untouched.
     #[test]
