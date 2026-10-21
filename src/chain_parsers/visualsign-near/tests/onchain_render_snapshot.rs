@@ -8,8 +8,11 @@
 //! (field labels, order and values) and every error string must stay
 //! byte-identical.
 //!
-//! Regenerate with `NEAR_SNAPSHOT_REGEN=1 cargo test -p visualsign-near --test
-//! onchain_render_snapshot` -- only when a render change is intended.
+//! The fixture was generated with near-primitives decoding, at commit
+//! `07e88ba7`. There is deliberately no regeneration path here: regenerating
+//! from this build would capture the local decoder's output and compare it
+//! against itself. If a render change is ever intended, regenerate only from a
+//! build that still decodes with near-primitives, and review the diff.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -587,12 +590,6 @@ fn onchain_render_matches_snapshot() {
             result: render(case),
         })
         .collect();
-
-    if std::env::var_os("NEAR_SNAPSHOT_REGEN").is_some() {
-        let json = serde_json::to_string_pretty(&entries).unwrap();
-        std::fs::write(SNAPSHOT_PATH, format!("{json}\n")).unwrap();
-        return;
-    }
 
     let expected: Vec<Entry> =
         serde_json::from_str(&std::fs::read_to_string(SNAPSHOT_PATH).unwrap()).unwrap();
