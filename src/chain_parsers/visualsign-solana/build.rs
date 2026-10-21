@@ -16,7 +16,8 @@ fn main() -> BuildResult<()> {
     // functionally compose instructions at the time of display too.
     //
     // `preset_visualizers_by_name` pairs each preset visualizer with its directory name so
-    // tests can join it against `PRESET_IDLS` (keyed by the same name).
+    // the `preset_conventions` gate can join it against `PRESET_IDLS` (keyed by the same
+    // name). Its cfg matches that module's in lib.rs.
     let code = format!(
         "pub fn available_visualizers() -> Vec<Box<dyn InstructionVisualizer>> {{
             vec![
@@ -24,7 +25,7 @@ fn main() -> BuildResult<()> {
             ]
         }}
 
-        #[cfg(test)]
+        #[cfg(all(test, feature = \"cli-plugin\", not(feature = \"diagnostics\")))]
         pub(crate) fn preset_visualizers_by_name() -> Vec<(&'static str, Box<dyn InstructionVisualizer>)> {{
             vec![
                 {}

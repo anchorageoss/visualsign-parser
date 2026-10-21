@@ -11,7 +11,10 @@ mod integrations;
 /// `ParsedTransactionPayload.intermediate_output`. Published so downstream
 /// consumers can `borsh::from_slice` into the same schema the parser produces.
 pub mod intermediate;
-#[cfg(test)]
+// Slow (~18s in debug), so it runs in only one `make test` pass: the default-feature,
+// diagnostics-off build that matches the production payload shape. Keep this cfg in
+// sync with `preset_visualizers_by_name` in build.rs.
+#[cfg(all(test, feature = "cli-plugin", not(feature = "diagnostics")))]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod preset_conventions;
 mod presets;
