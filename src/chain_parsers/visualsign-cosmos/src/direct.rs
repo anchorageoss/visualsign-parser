@@ -91,7 +91,11 @@ fn render_body_extras(body: &TxBody, out: &mut Out) -> Result<(), VisualSignErro
     {
         out.text(
             "Extension Option",
-            format!("{} (not fully decoded)", e.type_url),
+            format!(
+                "{} (not fully decoded) 0x{}",
+                e.type_url,
+                hex::encode(&e.value)
+            ),
         )?;
     }
     Ok(())

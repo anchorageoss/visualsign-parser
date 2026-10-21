@@ -394,6 +394,26 @@ fn ibc_v9_transfer_with_unmodelled_forwarding_is_refused() {
 }
 
 #[test]
+fn extension_option_value_is_shown() {
+    let mut body = tx_body(&[msg_send("a", "b", "1")]);
+    bytes_field(
+        1023,
+        &any("/example.ExtOpt", &[0xde, 0xad, 0xbe, 0xef]),
+        &mut body,
+    );
+    bytes_field(2047, &any("/example.NonCritical", &[0x01, 0x02]), &mut body);
+    let doc = hex::encode(sign_doc(&body, &auth_info(), "test-1", 1));
+    let p = convert(&doc).unwrap();
+    assert_eq!(
+        texts(&p, "Extension Option"),
+        [
+            "/example.ExtOpt (not fully decoded) 0xdeadbeef".to_string(),
+            "/example.NonCritical (not fully decoded) 0x0102".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn custom_transaction_name_becomes_the_title() {
     let mut o = options();
     o.transaction_name = Some("Pay".to_string());
