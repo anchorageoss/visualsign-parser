@@ -247,6 +247,18 @@ Resolve the existing activity (approve or reject it) and re-run, or pass
 `--force` to submit anyway. The check uses the active org by default; pass
 `--org <alias>` on `deploy` if the deployment's org differs from it.
 
+### Manifest check before approving
+
+`deploy`, `deploy-pivot` and `approve` approve with `--dangerous-skip-interactive`,
+which turns off tvc's own manifest review. Before signing, the helper reads the
+deployment back (`GetTvcDeployment`) and refuses unless its QOS manifest's
+`pivot.hash` equals `--expected-digest` (the digest the gate just verified),
+`pivot.debugMode` matches the requested mode, and the deployment was created
+from `--image-url`. A missing or unparseable field also refuses. The approval is
+then made over those exact manifest bytes (`tvc deploy approve --manifest ...
+--manifest-id ...`), not a second fetch. `approve` takes `--org` like the other
+API commands.
+
 ### Verifying the digest on its own
 
 `deploy` runs the digest gate itself, so a normal deploy needs nothing extra.

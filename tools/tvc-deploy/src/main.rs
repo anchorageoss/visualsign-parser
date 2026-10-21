@@ -72,7 +72,7 @@ enum Command {
     Deploy(DeployArgs),
     /// Deploy any pivot binary: same flow as `deploy`, pivot path/health as flags, pivot args after `--`
     DeployPivot(DeployPivotArgs),
-    /// Re-run the digest gate, then approve the manifest (prod operator step, run with the operator key)
+    /// Re-run the digest gate, check the deployment's manifest pins that digest, then approve exactly that manifest (prod operator step, run with the operator key)
     Approve(ApproveArgs),
     /// Poll the deployment to healthy, then set it live (prod promote step; needs no operator key)
     Promote(PromoteArgs),
@@ -257,6 +257,8 @@ struct InitiateSpec<'a> {
     expected_digest: &'a str,
     force: bool,
     org: Option<&'a str>,
+    /// Whether the manifest's pivot is expected to run in TVC debug mode.
+    debug_mode: bool,
     config: serde_json::Value,
 }
 
@@ -276,6 +278,8 @@ struct ApproveArgs {
     /// then to the logged-in org operator key, if omitted
     #[arg(long)]
     operator_seed: Option<PathBuf>,
+    #[command(flatten)]
+    org: invite::OrgArgs,
 }
 
 #[derive(clap::Args)]
@@ -375,7 +379,22 @@ fn write_secret_file(path: &Path, contents: &str) -> Result<()> {
 trait TvcOps {
     fn verify_image_digest(&self, image: &str, pivot_path: &str, expected: &str) -> Result<()>;
     fn create(&self, cfg_path: &Path) -> Result<String>;
-    fn approve(&self, deploy_id: &str, operator_id: &str, seed: Option<&Path>) -> Result<()>;
+    /// Read the deployment (and the QOS manifest an approval would sign) back
+    /// from Turnkey.
+    fn fetch_deployment(
+        &self,
+        org: Option<&str>,
+        deploy_id: &str,
+    ) -> Result<invite::DeploymentRecord>;
+    /// Approve the manifest at `manifest_path` (bytes already checked by
+    /// `check_deployment`), so tvc signs exactly what was checked.
+    fn approve(
+        &self,
+        manifest_path: &Path,
+        manifest_id: &str,
+        operator_id: &str,
+        seed: Option<&Path>,
+    ) -> Result<()>;
     fn poll_health(&self, app_id: &str, deploy_id: &str, timeout: Duration) -> Result<()>;
     fn set_live(&self, deploy_id: &str, timeout: Duration) -> Result<()>;
 }
@@ -395,13 +414,28 @@ impl TvcOps for RealTvc<'_> {
         parse_after(&created, "Deployment ID:")
             .with_context(|| format!("no deployment id in create output:\n{created}"))
     }
-    fn approve(&self, deploy_id: &str, operator_id: &str, seed: Option<&Path>) -> Result<()> {
+    fn fetch_deployment(
+        &self,
+        org: Option<&str>,
+        deploy_id: &str,
+    ) -> Result<invite::DeploymentRecord> {
+        invite::fetch_deployment(org, deploy_id)
+    }
+    fn approve(
+        &self,
+        manifest_path: &Path,
+        manifest_id: &str,
+        operator_id: &str,
+        seed: Option<&Path>,
+    ) -> Result<()> {
         let mut seed_args: Vec<OsString> = Vec::new();
         if let Some(p) = seed {
             seed_args.push("--operator-seed".into());
             seed_args.push(p.into());
         }
-        cmd!(self.sh, "tvc deploy approve --deploy-id {deploy_id} --operator-id {operator_id} {seed_args...} --dangerous-skip-interactive")
+        // --manifest (not --deploy-id): tvc would otherwise fetch the manifest
+        // again itself and sign whatever that second read returned.
+        cmd!(self.sh, "tvc deploy approve --manifest {manifest_path} --manifest-id {manifest_id} --operator-id {operator_id} {seed_args...} --dangerous-skip-interactive")
             .run()
             .context("tvc deploy approve")
     }
@@ -494,6 +528,7 @@ fn parser_app_spec<'a>(p: &InitiateParams<'a>) -> Result<InitiateSpec<'a>> {
         expected_digest: p.expected_digest,
         force: p.force,
         org: p.org,
+        debug_mode: false,
         config,
     })
 }
@@ -577,24 +612,116 @@ fn pivot_args(args: &DeployArgs) -> Vec<String> {
     )
 }
 
-/// Approve `deploy_id` as `operator_id` with the resolved seed, then ALWAYS
-/// remove an env-sourced seed temp file (cleanup=true) before propagating, so
-/// the operator seed never leaks on an approve failure.
+/// What a deployment must pin before an operator signs its manifest.
+struct ExpectedDeployment<'a> {
+    image_url: &'a str,
+    expected_digest: &'a str,
+    debug_mode: bool,
+}
+
+/// Refuse (fail closed) unless the deployment's QOS manifest pins the pivot
+/// hash the digest gate just verified, at the expected debug mode, for the
+/// image that was gated. `--dangerous-skip-interactive` turns off tvc's own
+/// manifest review, so this is the only check between the gate and the
+/// signature. `pivot.hash` is the sha256 of the pivot binary (qos_core
+/// `PivotConfig`, hex via `qos_hex::serde`), i.e. what `expectedPivotDigest` set.
+fn check_deployment(
+    deploy_id: &str,
+    rec: &invite::DeploymentRecord,
+    exp: &ExpectedDeployment<'_>,
+) -> Result<()> {
+    let manifest: serde_json::Value = serde_json::from_slice(&rec.manifest).with_context(|| {
+        format!("deployment {deploy_id}: manifest is not JSON; refusing to approve")
+    })?;
+    let pivot = manifest.get("pivot").with_context(|| {
+        format!("deployment {deploy_id}: manifest has no pivot; refusing to approve")
+    })?;
+    let hash = pivot
+        .get("hash")
+        .and_then(serde_json::Value::as_str)
+        .with_context(|| {
+            format!("deployment {deploy_id}: manifest has no pivot.hash; refusing to approve")
+        })?;
+    // qos_hex serializes bare lowercase hex but also parses a 0x prefix, so a
+    // manifest tvc would sign may carry either form.
+    let bare = hash
+        .strip_prefix("0x")
+        .or_else(|| hash.strip_prefix("0X"))
+        .unwrap_or(hash);
+    if !bare.eq_ignore_ascii_case(exp.expected_digest) {
+        bail!(
+            "MANIFEST DIGEST MISMATCH: deployment {deploy_id} pins pivot hash {hash}, \
+             expected {}; refusing to approve",
+            exp.expected_digest
+        );
+    }
+    let debug = pivot
+        .get("debugMode")
+        .and_then(serde_json::Value::as_bool)
+        .with_context(|| {
+            format!("deployment {deploy_id}: manifest has no pivot.debugMode; refusing to approve")
+        })?;
+    if debug != exp.debug_mode {
+        bail!(
+            "deployment {deploy_id}: manifest debugMode is {debug}, expected {}; refusing to approve",
+            exp.debug_mode
+        );
+    }
+    if rec.image_url != exp.image_url {
+        bail!(
+            "deployment {deploy_id} was created from image {:?}, not the gated {:?}; refusing to approve",
+            rec.image_url,
+            exp.image_url
+        );
+    }
+    let args = pivot
+        .get("args")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default();
+    println!(
+        "manifest check passed for {deploy_id}: pivot hash {hash}, qos {}, debugMode {debug}, args [{args}]",
+        rec.qos_version
+    );
+    Ok(())
+}
+
+/// Read `deploy_id` back, `check_deployment` it, and approve exactly the
+/// checked manifest bytes as `operator_id` with the resolved seed. ALWAYS
+/// removes an env-sourced seed temp file (cleanup=true) before propagating, so
+/// the operator seed never leaks on a refused check or an approve failure.
 fn approve_and_cleanup(
     ops: &impl TvcOps,
+    org: Option<&str>,
     deploy_id: &str,
     operator_id: &str,
+    expected: &ExpectedDeployment<'_>,
     seed: &Option<(PathBuf, bool)>,
 ) -> Result<()> {
-    if seed.is_none() {
-        // tvc approves with the logged-in org operator key (the local `tvc login` path).
-        println!("no operator seed provided; approving with the logged-in org operator key");
-    }
-    let result = ops.approve(
-        deploy_id,
-        operator_id,
-        seed.as_ref().map(|(p, _)| p.as_path()),
-    );
+    let result = (|| -> Result<()> {
+        let rec = ops.fetch_deployment(org, deploy_id)?;
+        check_deployment(deploy_id, &rec, expected)?;
+        if seed.is_none() {
+            // tvc approves with the logged-in org operator key (the local `tvc login` path).
+            println!("no operator seed provided; approving with the logged-in org operator key");
+        }
+        let manifest_path = temp_path("tvc-manifest", "json");
+        std::fs::write(&manifest_path, &rec.manifest)
+            .with_context(|| format!("write {}", manifest_path.display()))?;
+        let approved = ops.approve(
+            &manifest_path,
+            &rec.manifest_id,
+            operator_id,
+            seed.as_ref().map(|(p, _)| p.as_path()),
+        );
+        let _ = std::fs::remove_file(&manifest_path);
+        approved
+    })();
     if let Some((path, true)) = seed {
         let _ = std::fs::remove_file(path);
     }
@@ -622,7 +749,12 @@ fn run_deploy(
             return Err(e);
         }
     };
-    approve_and_cleanup(ops, &deploy_id, operator_id, &seed)?;
+    let expected = ExpectedDeployment {
+        image_url: spec.image_url,
+        expected_digest: spec.expected_digest,
+        debug_mode: spec.debug_mode,
+    };
+    approve_and_cleanup(ops, spec.org, &deploy_id, operator_id, &expected, &seed)?;
     println!("approved manifest for {deploy_id}");
     // TVC refuses to target a deployment with zero healthy replicas, so poll
     // to healthy BEFORE set-live. A fresh app auto-targets its first deploy.
@@ -651,6 +783,7 @@ fn deploy_pivot(ops: &impl TvcOps, args: &DeployPivotArgs) -> Result<()> {
         expected_digest: &args.expected_digest,
         force: args.force,
         org: args.org.as_deref(),
+        debug_mode: args.dangerous_debug_mode,
         config: pivot_config(args),
     };
     run_deploy(ops, &spec, &args.operator_id, args.operator_seed.as_deref())
@@ -677,7 +810,19 @@ fn approve(ops: &impl TvcOps, args: &ApproveArgs) -> Result<()> {
     // rather than trusting whatever `initiate` already claimed.
     ops.verify_image_digest(&args.image_url, "/parser_app", &args.expected_digest)?;
     let seed = resolve_seed_file(args.operator_seed.as_deref())?;
-    approve_and_cleanup(ops, &args.deploy_id, &args.operator_id, &seed)?;
+    let expected = ExpectedDeployment {
+        image_url: &args.image_url,
+        expected_digest: &args.expected_digest,
+        debug_mode: false,
+    };
+    approve_and_cleanup(
+        ops,
+        args.org.as_deref(),
+        &args.deploy_id,
+        &args.operator_id,
+        &expected,
+        &seed,
+    )?;
     println!("approved manifest for {}", args.deploy_id);
     Ok(())
 }
@@ -1064,9 +1209,57 @@ mod tests {
         assert!(Cli::try_parse_from(initiate_argv(&[])).is_err());
     }
 
+    /// A QOS manifest in qos_core's camelCase JSON shape (the bytes Turnkey
+    /// stores and `tvc deploy approve` parses), pinning `hash` at `debug`.
+    fn manifest_json(hash: &str, debug: bool) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "namespace": { "name": "app", "nonce": 1, "quorumKey": "04ab" },
+            "pivot": {
+                "hash": hash,
+                "restart": "Never",
+                "bridgeConfig": [],
+                "debugMode": debug,
+                "args": ["--host-ip", "0.0.0.0", "--host-port", "3000"],
+            },
+            "manifestSet": { "threshold": 1, "members": [] },
+            "shareSet": { "threshold": 1, "members": [] },
+            "enclave": { "pcr0": "00", "pcr1": "00", "pcr2": "00", "pcr3": "00",
+                         "awsRootCertificate": "00", "qosCommit": "c" },
+            "patchSet": { "threshold": 0, "members": [] },
+        }))
+        .unwrap()
+    }
+
+    fn record(image_url: &str, manifest: Vec<u8>) -> invite::DeploymentRecord {
+        invite::DeploymentRecord {
+            image_url: image_url.into(),
+            qos_version: "0.12.1".into(),
+            manifest_id: "manifest-1".into(),
+            manifest,
+        }
+    }
+
+    /// Records every TvcOps call. `fetch_deployment` returns `deployment`, or
+    /// by default a manifest pinning the `"a" * 64` digest the arg helpers use,
+    /// for image `img`, not in debug mode.
     #[derive(Default)]
     struct RecordingTvc {
         calls: RefCell<Vec<String>>,
+        deployment: Option<invite::DeploymentRecord>,
+    }
+    impl RecordingTvc {
+        fn serving(deployment: invite::DeploymentRecord) -> Self {
+            Self {
+                calls: RefCell::default(),
+                deployment: Some(deployment),
+            }
+        }
+        fn fetched(&self) -> invite::DeploymentRecord {
+            match &self.deployment {
+                Some(d) => record(&d.image_url, d.manifest.clone()),
+                None => record("img", manifest_json(&"a".repeat(64), false)),
+            }
+        }
     }
     impl TvcOps for RecordingTvc {
         fn verify_image_digest(
@@ -1084,8 +1277,29 @@ mod tests {
             self.calls.borrow_mut().push("create".into());
             Ok("deploy-123".into())
         }
-        fn approve(&self, deploy_id: &str, _operator_id: &str, _seed: Option<&Path>) -> Result<()> {
-            self.calls.borrow_mut().push(format!("approve:{deploy_id}"));
+        fn fetch_deployment(
+            &self,
+            _org: Option<&str>,
+            deploy_id: &str,
+        ) -> Result<invite::DeploymentRecord> {
+            self.calls.borrow_mut().push(format!("fetch:{deploy_id}"));
+            Ok(self.fetched())
+        }
+        fn approve(
+            &self,
+            manifest_path: &Path,
+            manifest_id: &str,
+            _operator_id: &str,
+            _seed: Option<&Path>,
+        ) -> Result<()> {
+            // The approval must be made over exactly the fetched-and-checked bytes.
+            assert_eq!(
+                std::fs::read(manifest_path).unwrap(),
+                self.fetched().manifest
+            );
+            self.calls
+                .borrow_mut()
+                .push(format!("approve:{manifest_id}"));
             Ok(())
         }
         fn poll_health(&self, _app: &str, deploy_id: &str, _t: Duration) -> Result<()> {
@@ -1125,7 +1339,8 @@ mod tests {
             vec![
                 "verify_image_digest:/parser_app",
                 "create",
-                "approve:deploy-123",
+                "fetch:deploy-123",
+                "approve:manifest-1",
                 "poll:deploy-123",
                 "set_live:deploy-123",
             ]
@@ -1170,7 +1385,11 @@ mod tests {
         approve(&ops, &args).unwrap();
         assert_eq!(
             *ops.calls.borrow(),
-            vec!["verify_image_digest:/parser_app", "approve:deploy-7"]
+            vec![
+                "verify_image_digest:/parser_app",
+                "fetch:deploy-7",
+                "approve:manifest-1"
+            ]
         );
     }
 
@@ -1199,7 +1418,7 @@ mod tests {
 
     #[test]
     fn deploy_pivot_gates_its_own_pivot_then_runs_the_full_flow() {
-        let ops = RecordingTvc::default();
+        let ops = RecordingTvc::serving(record("img", manifest_json(&"b".repeat(64), false)));
         let args = deploy_pivot_args(&[
             "--health-check",
             "http",
@@ -1213,7 +1432,8 @@ mod tests {
             vec![
                 "verify_image_digest:/nsm_probe",
                 "create",
-                "approve:deploy-123",
+                "fetch:deploy-123",
+                "approve:manifest-1",
                 "poll:deploy-123",
                 "set_live:deploy-123",
             ]
@@ -1241,6 +1461,135 @@ mod tests {
         assert!(ops.calls.borrow().is_empty());
     }
 
+    fn approve_args(digest: &str) -> ApproveArgs {
+        match Cli::parse_from([
+            "tvc-deploy",
+            "approve",
+            "--deploy-id",
+            "deploy-7",
+            "--operator-id",
+            "op",
+            "--image-url",
+            "img",
+            "--expected-digest",
+            digest,
+            "--operator-seed",
+            "/tmp/seed",
+        ])
+        .command
+        {
+            Command::Approve(args) => args,
+            _ => panic!("expected the approve subcommand"),
+        }
+    }
+
+    /// Run `approve` against `deployment` and assert it refused before
+    /// signing, with an error mentioning `needle`.
+    fn assert_approve_refused(deployment: invite::DeploymentRecord, needle: &str) {
+        let ops = RecordingTvc::serving(deployment);
+        let err = approve(&ops, &approve_args(&"a".repeat(64)))
+            .expect_err("approve must refuse")
+            .to_string();
+        assert!(err.contains(needle), "unexpected error: {err}");
+        assert!(
+            err.contains("refusing to approve"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(
+            *ops.calls.borrow(),
+            vec!["verify_image_digest:/parser_app", "fetch:deploy-7"],
+            "nothing may be approved after a refused manifest check"
+        );
+    }
+
+    #[test]
+    fn approve_refuses_a_manifest_pinning_another_digest() {
+        assert_approve_refused(
+            record("img", manifest_json(&"c".repeat(64), false)),
+            "MANIFEST DIGEST MISMATCH",
+        );
+    }
+
+    #[test]
+    fn approve_accepts_the_pinned_digest_in_any_hex_case() {
+        let ops = RecordingTvc::serving(record("img", manifest_json(&"A".repeat(64), false)));
+        approve(&ops, &approve_args(&"a".repeat(64))).unwrap();
+        assert_eq!(ops.calls.borrow().last().unwrap(), "approve:manifest-1");
+    }
+
+    #[test]
+    fn approve_accepts_a_0x_prefixed_pinned_digest() {
+        let hash = format!("0x{}", "a".repeat(64));
+        let ops = RecordingTvc::serving(record("img", manifest_json(&hash, false)));
+        approve(&ops, &approve_args(&"a".repeat(64))).unwrap();
+        assert_eq!(ops.calls.borrow().last().unwrap(), "approve:manifest-1");
+    }
+
+    #[test]
+    fn approve_refuses_a_manifest_without_pivot_hash() {
+        let mut m: serde_json::Value =
+            serde_json::from_slice(&manifest_json(&"a".repeat(64), false)).unwrap();
+        m["pivot"].as_object_mut().unwrap().remove("hash");
+        assert_approve_refused(
+            record("img", serde_json::to_vec(&m).unwrap()),
+            "no pivot.hash",
+        );
+    }
+
+    #[test]
+    fn approve_refuses_a_non_string_pivot_hash() {
+        let mut m: serde_json::Value =
+            serde_json::from_slice(&manifest_json(&"a".repeat(64), false)).unwrap();
+        m["pivot"]["hash"] = serde_json::json!([0xaa, 0xaa]);
+        assert_approve_refused(
+            record("img", serde_json::to_vec(&m).unwrap()),
+            "no pivot.hash",
+        );
+    }
+
+    #[test]
+    fn approve_refuses_an_unparseable_manifest() {
+        assert_approve_refused(record("img", b"not json".to_vec()), "not JSON");
+    }
+
+    #[test]
+    fn approve_refuses_a_debug_mode_manifest() {
+        assert_approve_refused(
+            record("img", manifest_json(&"a".repeat(64), true)),
+            "debugMode is true",
+        );
+    }
+
+    #[test]
+    fn approve_refuses_a_deployment_of_another_image() {
+        assert_approve_refused(
+            record("other-img", manifest_json(&"a".repeat(64), false)),
+            "other-img",
+        );
+    }
+
+    #[test]
+    fn deploy_cleans_env_seed_when_the_manifest_check_refuses() {
+        let _env = SEED_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let ops = RecordingTvc::serving(record("img", manifest_json(&"c".repeat(64), false)));
+        let args = deploy_args_forced(&["--accept-unsigned-abis"]);
+        let before = leftover_operator_seeds();
+        unsafe {
+            std::env::set_var("TVC_CI_OPERATOR_SEED", "00".repeat(32));
+        }
+        let result = deploy(&ops, &args);
+        unsafe {
+            std::env::remove_var("TVC_CI_OPERATOR_SEED");
+        }
+        assert!(result.is_err(), "a mismatched manifest must stop deploy");
+        assert!(!ops.calls.borrow().iter().any(|c| c.starts_with("approve")));
+        assert_eq!(
+            before,
+            leftover_operator_seeds(),
+            "env-sourced seed leaked on a refused manifest check"
+        );
+    }
+
     fn leftover_operator_seeds() -> usize {
         std::fs::read_dir(std::env::temp_dir())
             .map(|rd| {
@@ -1262,7 +1611,14 @@ mod tests {
             fn create(&self, _c: &Path) -> Result<String> {
                 Ok("deploy-1".into())
             }
-            fn approve(&self, _d: &str, _o: &str, seed: Option<&Path>) -> Result<()> {
+            fn fetch_deployment(
+                &self,
+                _org: Option<&str>,
+                _d: &str,
+            ) -> Result<invite::DeploymentRecord> {
+                Ok(record("img", manifest_json(&"a".repeat(64), false)))
+            }
+            fn approve(&self, _m: &Path, _id: &str, _o: &str, seed: Option<&Path>) -> Result<()> {
                 assert!(
                     seed.map(Path::exists).unwrap_or(false),
                     "seed must exist at approve"
@@ -1305,7 +1661,14 @@ mod tests {
             fn create(&self, _c: &Path) -> Result<String> {
                 panic!("create must not run when the gate fails")
             }
-            fn approve(&self, _d: &str, _o: &str, _s: Option<&Path>) -> Result<()> {
+            fn fetch_deployment(
+                &self,
+                _org: Option<&str>,
+                _d: &str,
+            ) -> Result<invite::DeploymentRecord> {
+                panic!("fetch_deployment must not run")
+            }
+            fn approve(&self, _m: &Path, _id: &str, _o: &str, _s: Option<&Path>) -> Result<()> {
                 panic!("approve must not run")
             }
             fn poll_health(&self, _a: &str, _d: &str, _t: Duration) -> Result<()> {

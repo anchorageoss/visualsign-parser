@@ -24,8 +24,8 @@ use turnkey_client::generated::{
     intent, result, Activity, ActivityStatus, ActivityType, ApproveActivityIntent,
     CreateInvitationsIntent, CreatePoliciesIntent, CreatePolicyIntentV3, CreateUserTagIntent,
     DeleteInvitationIntent, DeleteTvcDeploymentIntent, GetActivitiesRequest, GetActivityRequest,
-    GetOrganizationRequest, GetOrganizationResponse, GetPoliciesRequest, GetUsersRequest,
-    GetWhoamiRequest, InvitationParams, ListUserTagsRequest, RejectActivityIntent,
+    GetOrganizationRequest, GetOrganizationResponse, GetPoliciesRequest, GetTvcDeploymentRequest,
+    GetUsersRequest, GetWhoamiRequest, InvitationParams, ListUserTagsRequest, RejectActivityIntent,
     UpdateUserTagIntent,
 };
 use turnkey_client::TurnkeyP256ApiKey;
@@ -1568,6 +1568,47 @@ pub fn find_pending_deployments(org_override: Option<&str>, app_id: &str) -> Res
             .into_iter()
             .filter(|a| targets_app(a, app_id))
             .collect())
+    })?
+}
+
+/// A deployment as Turnkey stores it: what `tvc-deploy approve` checks before
+/// signing. `manifest` is the QOS manifest JSON byte-for-byte, so the approval
+/// can be made over exactly the bytes that were checked.
+pub struct DeploymentRecord {
+    pub image_url: String,
+    pub qos_version: String,
+    pub manifest_id: String,
+    pub manifest: Vec<u8>,
+}
+
+/// Read a deployment back via GetTvcDeployment -- the same call `tvc deploy
+/// approve --deploy-id` makes to load the manifest it signs.
+pub fn fetch_deployment(org_override: Option<&str>, deploy_id: &str) -> Result<DeploymentRecord> {
+    block_on(async {
+        let auth = resolve_auth(org_override)?;
+        let response = auth
+            .client
+            .get_tvc_deployment(GetTvcDeploymentRequest {
+                organization_id: auth.org_id.clone(),
+                deployment_id: deploy_id.to_string(),
+            })
+            .await
+            .map_err(|e| anyhow!("get_tvc_deployment failed: {e}"))?;
+        let deployment = response
+            .tvc_deployment
+            .ok_or_else(|| anyhow!("deployment not found: {deploy_id}"))?;
+        let manifest = deployment
+            .manifest
+            .ok_or_else(|| anyhow!("deployment {deploy_id} has no manifest"))?;
+        Ok(DeploymentRecord {
+            image_url: deployment
+                .pivot_container
+                .map(|c| c.container_url)
+                .unwrap_or_default(),
+            qos_version: deployment.qos_version,
+            manifest_id: manifest.id,
+            manifest: manifest.manifest,
+        })
     })?
 }
 

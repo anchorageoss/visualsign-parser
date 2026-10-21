@@ -54,7 +54,8 @@ Refactor the current monolithic `deploy()` into three composable subcommands. Th
 
 - **`approve --deploy-id --operator-id --image-url --expected-digest [--operator-seed]`**
   1. **Re-run `verify_image_digest`** so the approver independently confirms the image's `/parser_app` sha256 equals `--expected-digest` before signing.
-  2. `tvc deploy approve --deploy-id … --operator-id … [--operator-seed … | logged-in operator]`.
+  2. Read the deployment back (`GetTvcDeployment`) and refuse unless its QOS manifest's `pivot.hash` equals `--expected-digest`, `pivot.debugMode` is false, and the deployment's image is `--image-url`. Missing or unparseable fields refuse (fail closed). `--dangerous-skip-interactive` disables tvc's own manifest review, so this check is what ties the signature to the gated binary.
+  3. `tvc deploy approve --manifest <the checked bytes> --manifest-id … --operator-id … [--operator-seed … | logged-in operator]`, so tvc signs exactly the manifest that was checked rather than re-fetching it.
   Run locally by the human operator with their key (seed resolution unchanged: flag -> `TVC_CI_OPERATOR_SEED` -> logged-in operator).
 
 - **`promote --app-id --deploy-id`**
