@@ -14,6 +14,9 @@
 > <hex>`, repeatable), which lands in `pivotArgs`; and `TvcOps::verify_image_digest`
 > takes the pivot path so `deploy-pivot` shares the same flow. Snippets below are
 > kept as planned, with the posture added where its absence would break them.
+> The posture is a per-deployment choice: prod runs `--accept-unsigned-abis`
+> today, and signed-only is opted into per deployment later. Nothing defaults to
+> signed-only. `approve` prints the posture it is signing but does not enforce one.
 
 ## Global Constraints
 
@@ -787,7 +790,16 @@ on:
       qos_version: { description: "QOS version", required: false, default: "v2026.2.6" }
       host_ip: { description: "parser_app listen IP", required: false, default: "0.0.0.0" }
       host_port: { description: "parser_app listen port", required: false, default: "3000" }
-      abi_signer_pubkey: { description: "hex secp256k1 key whose signed ABI mappings the parser accepts (required ABI trust posture)", required: true }
+      abi_trust_posture:
+        description: "ABI trust posture for THIS deployment: accept-unsigned (current prod) or signed (needs abi_signer_pubkey). Defaults to accept-unsigned only because choice inputs need a default"
+        type: choice
+        required: true
+        options: [accept-unsigned, signed]
+        default: accept-unsigned
+      abi_signer_pubkey:
+        description: "signed only: hex secp256k1 signer key(s), space-separated; must be empty for accept-unsigned"
+        required: false
+        default: ""
 concurrency:
   group: release-${{ inputs.app_id }}
   cancel-in-progress: false
@@ -798,6 +810,39 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      # Fail fast, before the slow installs, on an inconsistent posture.
+      - name: Check ABI trust posture
+        env:
+          ABI_TRUST_POSTURE: ${{ inputs.abi_trust_posture }}
+          ABI_SIGNER_PUBKEY: ${{ inputs.abi_signer_pubkey }}
+        run: |
+          case "$ABI_TRUST_POSTURE" in
+            accept-unsigned)
+              if [ -n "$ABI_SIGNER_PUBKEY" ]; then
+                echo "::error::abi_signer_pubkey is set but abi_trust_posture is accept-unsigned; choose signed, or clear the key"
+                exit 1
+              fi
+              posture="--accept-unsigned-abis" ;;
+            signed)
+              if [ -z "$ABI_SIGNER_PUBKEY" ]; then
+                echo "::error::abi_trust_posture signed needs abi_signer_pubkey"
+                exit 1
+              fi
+              posture=""
+              for key in $ABI_SIGNER_PUBKEY; do
+                if ! [[ "$key" =~ ^(0[xX])?[0-9a-fA-F]+$ ]]; then
+                  echo "::error::abi_signer_pubkey entry is not hex: $key"
+                  exit 1
+                fi
+                posture="$posture --accept-signatures-from-pubkey $key"
+              done ;;
+            *)
+              echo "::error::unknown abi_trust_posture: $ABI_TRUST_POSTURE"
+              exit 1 ;;
+          esac
+          # Hex-only tokens, so word-splitting $POSTURE_ARGS later is safe.
+          echo "POSTURE_ARGS=$posture" >> "$GITHUB_ENV"
+          echo "ABI trust posture: $ABI_TRUST_POSTURE ($posture)" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
@@ -816,13 +861,13 @@ jobs:
           QOS_VERSION: ${{ inputs.qos_version }}
           HOST_IP: ${{ inputs.host_ip }}
           HOST_PORT: ${{ inputs.host_port }}
-          ABI_SIGNER_PUBKEY: ${{ inputs.abi_signer_pubkey }}
         run: |
+          # shellcheck disable=SC2086 # POSTURE_ARGS is validated hex-only tokens
           ./tools/tvc-deploy/target/release/tvc-deploy initiate \
             --app-id "$APP_ID" --image-url "$IMAGE_URL" \
             --expected-digest "$EXPECTED_DIGEST" --qos-version "$QOS_VERSION" \
             --host-ip "$HOST_IP" --host-port "$HOST_PORT" \
-            --accept-signatures-from-pubkey "$ABI_SIGNER_PUBKEY" | tee "$RUNNER_TEMP/initiate.out"
+            $POSTURE_ARGS | tee "$RUNNER_TEMP/initiate.out"
           echo "### Release initiated" >> "$GITHUB_STEP_SUMMARY"
           grep "created deployment" "$RUNNER_TEMP/initiate.out" >> "$GITHUB_STEP_SUMMARY" || true
           echo "Operator: approve with \`tvc-deploy approve --deploy-id <id> --operator-id <id> --image-url \"$IMAGE_URL\" --expected-digest \"$EXPECTED_DIGEST\"\` then run Promote." >> "$GITHUB_STEP_SUMMARY"

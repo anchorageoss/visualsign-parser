@@ -48,13 +48,13 @@ Refactor the current monolithic `deploy()` into three composable subcommands. Th
 
 - **`initiate --app-id --image-url --expected-digest (--accept-unsigned-abis | --accept-signatures-from-pubkey <hex>...) [--qos-version --host-ip --host-port]`**
   1. `validate_digest` + `verify_image_digest` (the existing image-derived digest gate).
-  2. Assemble the deploy config (gRPC health; the ABI trust posture goes into `pivotArgs`) and `tvc deploy create`. Exactly one posture is required, as for `deploy`; prod should use the signed-key posture.
+  2. Assemble the deploy config (gRPC health; the ABI trust posture goes into `pivotArgs`) and `tvc deploy create`. Exactly one posture is required, as for `deploy`, with no default: it is chosen per deployment (prod runs `--accept-unsigned-abis` today; signed-only comes later, deployment by deployment). The Release workflow takes it as an `abi_trust_posture` choice plus `abi_signer_pubkey` for `signed`, and refuses a key with `accept-unsigned` or `signed` without one.
   3. Parse and print the **deployment ID** (existing `parse_after "Deployment ID:"`).
   Requires only the Turnkey API key. No operator seed, no approve, no set-live.
 
 - **`approve --deploy-id --operator-id --image-url --expected-digest [--operator-seed]`**
   1. **Re-run `verify_image_digest`** so the approver independently confirms the image's `/parser_app` sha256 equals `--expected-digest` before signing.
-  2. Read the deployment back (`GetTvcDeployment`) and refuse unless its QOS manifest's `pivot.hash` equals `--expected-digest`, `pivot.debugMode` is false, and the deployment's image is `--image-url`. Missing or unparseable fields refuse (fail closed). `--dangerous-skip-interactive` disables tvc's own manifest review, so this check is what ties the signature to the gated binary.
+  2. Read the deployment back (`GetTvcDeployment`) and refuse unless its QOS manifest's `pivot.hash` equals `--expected-digest`, `pivot.debugMode` is false, and the deployment's image is `--image-url`. It prints the ABI trust posture read from `pivot.args` so the approver sees what they sign; the posture is not enforced at approve. Missing or unparseable fields refuse (fail closed). `--dangerous-skip-interactive` disables tvc's own manifest review, so this check is what ties the signature to the gated binary.
   3. `tvc deploy approve --manifest <the checked bytes> --manifest-id … --operator-id … [--operator-seed … | logged-in operator]`, so tvc signs exactly the manifest that was checked rather than re-fetching it.
   Run locally by the human operator with their key (seed resolution unchanged: flag -> `TVC_CI_OPERATOR_SEED` -> logged-in operator).
 

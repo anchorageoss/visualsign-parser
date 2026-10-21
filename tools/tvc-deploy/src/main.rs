@@ -674,21 +674,39 @@ fn check_deployment(
             exp.image_url
         );
     }
-    let args = pivot
+    let args: Vec<&str> = pivot
         .get("args")
         .and_then(serde_json::Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(serde_json::Value::as_str)
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
+        .map(|a| a.iter().filter_map(serde_json::Value::as_str).collect())
         .unwrap_or_default();
     println!(
-        "manifest check passed for {deploy_id}: pivot hash {hash}, qos {}, debugMode {debug}, args [{args}]",
-        rec.qos_version
+        "manifest check passed for {deploy_id}: pivot hash {hash}, qos {}, debugMode {debug}, args [{}]",
+        rec.qos_version,
+        args.join(" ")
+    );
+    // Shown, not enforced: the posture is chosen per deployment at initiate.
+    println!(
+        "ABI trust posture being approved: {}",
+        abi_trust_posture(&args)
     );
     Ok(())
+}
+
+/// Describe the parser_app ABI trust posture carried in a manifest's pivot
+/// args, so the approver sees which posture they are signing.
+fn abi_trust_posture(pivot_args: &[&str]) -> String {
+    let unsigned = pivot_args.contains(&"--accept-unsigned-abis");
+    let signers: Vec<&str> = pivot_args
+        .windows(2)
+        .filter(|w| w[0] == "--accept-signatures-from-pubkey")
+        .map(|w| w[1])
+        .collect();
+    match (unsigned, signers.is_empty()) {
+        (true, true) => "accept-unsigned (--accept-unsigned-abis)".to_string(),
+        (false, false) => format!("signed only, by {}", signers.join(", ")),
+        (false, true) => "none set (parser_app will refuse to start)".to_string(),
+        (true, false) => "BOTH postures set (parser_app will refuse to start)".to_string(),
+    }
 }
 
 /// Read `deploy_id` back, `check_deployment` it, and approve exactly the
@@ -1207,6 +1225,100 @@ mod tests {
     #[test]
     fn initiate_requires_a_posture_too() {
         assert!(Cli::try_parse_from(initiate_argv(&[])).is_err());
+    }
+
+    fn initiate_pivot_args(extra: &[&str]) -> serde_json::Value {
+        let args = initiate_args(extra);
+        parser_app_spec(&(&args).into()).unwrap().config["pivotArgs"].clone()
+    }
+
+    #[test]
+    fn initiate_accept_unsigned_posture_lands_in_pivot_args() {
+        assert_eq!(
+            initiate_pivot_args(&["--accept-unsigned-abis"]),
+            serde_json::json!([
+                "--host-ip",
+                "0.0.0.0",
+                "--host-port",
+                "3000",
+                "--accept-unsigned-abis"
+            ])
+        );
+    }
+
+    #[test]
+    fn initiate_signed_posture_lands_in_pivot_args_for_every_key() {
+        let (k1, k2) = (real_pubkey_hex(false), real_pubkey_hex(true));
+        assert_eq!(
+            initiate_pivot_args(&[
+                "--accept-signatures-from-pubkey",
+                &k1,
+                "--accept-signatures-from-pubkey",
+                &k2,
+            ]),
+            serde_json::json!([
+                "--host-ip",
+                "0.0.0.0",
+                "--host-port",
+                "3000",
+                "--accept-signatures-from-pubkey",
+                k1,
+                "--accept-signatures-from-pubkey",
+                k2
+            ])
+        );
+    }
+
+    #[test]
+    fn initiate_refuses_signed_posture_without_a_pubkey() {
+        assert!(Cli::try_parse_from(initiate_argv(&["--accept-signatures-from-pubkey"])).is_err());
+    }
+
+    #[test]
+    fn initiate_refuses_both_postures() {
+        let err = Cli::try_parse_from(initiate_argv(&[
+            "--accept-unsigned-abis",
+            "--accept-signatures-from-pubkey",
+            &real_pubkey_hex(true),
+        ]))
+        .map(|_| ())
+        .expect_err("both postures must not parse");
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn initiate_refuses_an_off_curve_signer_key() {
+        let args = initiate_args(&["--accept-signatures-from-pubkey", "04aa"]);
+        assert!(parser_app_spec(&(&args).into()).is_err());
+    }
+
+    #[test]
+    fn abi_trust_posture_names_what_the_manifest_carries() {
+        assert_eq!(
+            abi_trust_posture(&["--host-ip", "0.0.0.0", "--accept-unsigned-abis"]),
+            "accept-unsigned (--accept-unsigned-abis)"
+        );
+        assert_eq!(
+            abi_trust_posture(&[
+                "--accept-signatures-from-pubkey",
+                "04aa",
+                "--accept-signatures-from-pubkey",
+                "02bb"
+            ]),
+            "signed only, by 04aa, 02bb"
+        );
+        assert_eq!(
+            abi_trust_posture(&["--host-ip", "0.0.0.0"]),
+            "none set (parser_app will refuse to start)"
+        );
+        assert_eq!(
+            abi_trust_posture(&[
+                "--accept-unsigned-abis",
+                "--accept-signatures-from-pubkey",
+                "04aa"
+            ]),
+            "BOTH postures set (parser_app will refuse to start)"
+        );
     }
 
     /// A QOS manifest in qos_core's camelCase JSON shape (the bytes Turnkey
