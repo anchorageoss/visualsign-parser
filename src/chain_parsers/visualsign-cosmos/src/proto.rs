@@ -247,7 +247,9 @@ pub struct Height {
     pub revision_height: u64,
 }
 
-/// ibc/applications/transfer/v1/tx.proto `MsgTransfer` (fields 1 to 8).
+/// ibc/applications/transfer/v1/tx.proto `MsgTransfer` (fields 1 to 9; `token`
+/// is deprecated in favour of `tokens` from ibc-go v9; v9's `forwarding` is not
+/// modelled, so such a message is refused).
 #[derive(Clone, PartialEq, Message)]
 pub struct MsgTransfer {
     #[prost(string, tag = "1")]
@@ -266,6 +268,8 @@ pub struct MsgTransfer {
     pub timeout_timestamp: u64,
     #[prost(string, tag = "8")]
     pub memo: String,
+    #[prost(message, repeated, tag = "9")]
+    pub tokens: Vec<Coin>,
 }
 
 /// cosmwasm/wasm/v1/tx.proto `MsgExecuteContract`.

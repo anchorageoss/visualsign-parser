@@ -353,15 +353,44 @@ fn unrecognised_public_key_type_is_shown_not_hidden() {
 }
 
 #[test]
-fn known_message_with_extra_field_is_flagged() {
+fn known_message_with_extra_field_is_refused() {
     let mut body = msg_send_body("a", "b", "1");
     bytes_field(15, b"hidden", &mut body);
-    let p = convert(&doc_with(&[any("/cosmos.bank.v1beta1.MsgSend", &body)])).unwrap();
-    assert!(has(
-        &p,
-        "Message 1 / Undecoded Fields",
-        "present (not shown)"
-    ));
+    let err = convert(&doc_with(&[any("/cosmos.bank.v1beta1.MsgSend", &body)])).unwrap_err();
+    assert!(
+        format!("{err}").contains("not a canonical encoding"),
+        "{err}"
+    );
+}
+
+/// ibc-go v9 `MsgTransfer`: `repeated Coin tokens = 9`, deprecated `token` (3) unset.
+fn ibc_v9_transfer(extra: &[u8]) -> Vec<u8> {
+    let mut m = Vec::new();
+    bytes_field(1, b"transfer", &mut m);
+    bytes_field(2, b"channel-0", &mut m);
+    bytes_field(4, b"sender", &mut m);
+    bytes_field(5, b"receiver", &mut m);
+    bytes_field(9, &coin("100", "uatom"), &mut m);
+    bytes_field(9, &coin("7", "uosmo"), &mut m);
+    m.extend_from_slice(extra);
+    any("/ibc.applications.transfer.v1.MsgTransfer", &m)
+}
+
+#[test]
+fn ibc_v9_transfer_tokens_are_shown() {
+    let p = convert(&doc_with(&[ibc_v9_transfer(&[])])).unwrap();
+    assert_eq!(
+        texts(&p, "Message 1 / Amount"),
+        ["100 uatom".to_string(), "7 uosmo".to_string()]
+    );
+}
+
+#[test]
+fn ibc_v9_transfer_with_unmodelled_forwarding_is_refused() {
+    // ibc-go v9 `Forwarding forwarding = 10` changes where funds go.
+    let mut extra = Vec::new();
+    bytes_field(10, b"\x0a\x01x", &mut extra);
+    assert!(convert(&doc_with(&[ibc_v9_transfer(&extra)])).is_err());
 }
 
 #[test]

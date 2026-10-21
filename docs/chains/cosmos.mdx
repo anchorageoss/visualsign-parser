@@ -11,7 +11,7 @@ The Cosmos module decodes the bytes a Cosmos SDK signer is asked to sign and ren
 - **Input is the sign doc, not the broadcast transaction.** The signer approves the exact bytes it signs, so those are what is decoded.
 - **`SIGN_MODE_DIRECT`**: the protobuf `SignDoc { body_bytes, auth_info_bytes, chain_id, account_number }`, as hex (optional `0x` prefix) or base64. A broadcast `TxRaw` is not a `SignDoc` and is rejected.
 - **`SIGN_MODE_LEGACY_AMINO_JSON`**: the `StdSignDoc` JSON exactly as signed (keys sorted, no whitespace, Go string escaping). Input that is not byte-identical to that canonical form is rejected, so the document shown is the document signed.
-- **Fail closed**: in direct mode each layer (`SignDoc`, `TxBody`, `AuthInfo`) must re-encode to exactly its input bytes. A layer with fields the parser does not model is refused. Inside a message, an unmodelled field is reported as `Undecoded Fields`.
+- **Fail closed**: in direct mode each layer (`SignDoc`, `TxBody`, `AuthInfo`) must re-encode to exactly its input bytes. A layer with fields the parser does not model is refused. So is any modeled message carrying unmodeled fields (for example an ibc-go v9 `MsgTransfer` with `forwarding`), since those fields could move funds that would not be displayed. `MsgTransfer` renders both the deprecated `token` and the ibc-go v9 `tokens`.
 
 ### Dependencies
 The protobuf messages are hand-written `prost` structs. The crate does not depend on `cosmrs` or the Cosmos SDK protos.

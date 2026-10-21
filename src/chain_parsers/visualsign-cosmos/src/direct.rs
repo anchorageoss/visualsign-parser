@@ -2,8 +2,9 @@
 //!
 //! Every layer (`SignDoc`, `TxBody`, `AuthInfo`) must be the canonical
 //! encoding of the fields shown. A layer that carries fields this parser does
-//! not model is refused rather than shown incompletely. Inside a message, an
-//! unmodelled field is surfaced as an `Undecoded Fields` entry.
+//! not model is refused rather than shown incompletely. The same holds for
+//! every message: one carrying unmodelled fields is refused, since they could
+//! move funds that would not be displayed.
 
 use crate::out::{MAX_EXEC_DEPTH, Out, join, vote_option};
 use crate::proto::{self, Any, AuthInfo, Coin, SignDoc, TxBody, decode_exact};
@@ -212,34 +213,34 @@ fn render_pubkey(
     }
 }
 
-/// Decode a message body, noting whether it carried fields we do not show.
-fn decode_msg<M: prost::Message + Default>(any: &Any) -> Result<(M, bool), VisualSignError> {
-    match decode_exact::<M>(&any.value) {
-        Ok(m) => Ok((m, false)),
-        Err(Some(m)) => Ok((m, true)),
-        Err(None) => Err(VisualSignError::DecodeError(format!(
-            "{} does not parse",
-            any.type_url
-        ))),
-    }
+/// Decode a message body. A message that is not the canonical encoding of the
+/// fields this parser models (for example, a newer schema's extra fields) is
+/// refused: it may move funds that would not be shown.
+fn decode_msg<M: prost::Message + Default>(any: &Any) -> Result<M, VisualSignError> {
+    decode_exact::<M>(&any.value).map_err(|e| {
+        VisualSignError::DecodeError(match e {
+            None => format!("{} does not parse", any.type_url),
+            Some(_) => format!(
+                "{} is not a canonical encoding of the displayed fields",
+                any.type_url
+            ),
+        })
+    })
 }
 
 /// Render one message. `depth` counts enclosing `MsgExec`s.
 fn render_any(any: &Any, prefix: &str, depth: usize, out: &mut Out) -> Result<(), VisualSignError> {
     let p = |l: &str| join(prefix, l);
-    let mut undecoded = false;
     match any.type_url.as_str() {
         "/cosmos.bank.v1beta1.MsgSend" => {
-            let (m, u) = decode_msg::<proto::MsgSend>(any)?;
-            undecoded = u;
+            let m = decode_msg::<proto::MsgSend>(any)?;
             out.text(&p("Type"), "Send")?;
             out.address(&p("From"), &m.from_address)?;
             out.address(&p("To"), &m.to_address)?;
             out.coins(&p("Amount"), &coin_pairs(&m.amount))?;
         }
         "/cosmos.staking.v1beta1.MsgDelegate" | "/cosmos.staking.v1beta1.MsgUndelegate" => {
-            let (m, u) = decode_msg::<proto::MsgDelegate>(any)?;
-            undecoded = u;
+            let m = decode_msg::<proto::MsgDelegate>(any)?;
             let kind = if any.type_url.ends_with("MsgDelegate") {
                 "Delegate"
             } else {
@@ -251,8 +252,7 @@ fn render_any(any: &Any, prefix: &str, depth: usize, out: &mut Out) -> Result<()
             out.coins(&p("Amount"), &coin_pairs(m.amount.as_slice()))?;
         }
         "/cosmos.staking.v1beta1.MsgBeginRedelegate" => {
-            let (m, u) = decode_msg::<proto::MsgBeginRedelegate>(any)?;
-            undecoded = u;
+            let m = decode_msg::<proto::MsgBeginRedelegate>(any)?;
             out.text(&p("Type"), "Redelegate")?;
             out.address(&p("Delegator"), &m.delegator_address)?;
             out.address(&p("From Validator"), &m.validator_src_address)?;
@@ -260,15 +260,13 @@ fn render_any(any: &Any, prefix: &str, depth: usize, out: &mut Out) -> Result<()
             out.coins(&p("Amount"), &coin_pairs(m.amount.as_slice()))?;
         }
         "/cosmos.distribution.v1beta1.MsgWithdrawDelegatorReward" => {
-            let (m, u) = decode_msg::<proto::MsgWithdrawDelegatorReward>(any)?;
-            undecoded = u;
+            let m = decode_msg::<proto::MsgWithdrawDelegatorReward>(any)?;
             out.text(&p("Type"), "Withdraw Rewards")?;
             out.address(&p("Delegator"), &m.delegator_address)?;
             out.address(&p("Validator"), &m.validator_address)?;
         }
         "/cosmos.gov.v1beta1.MsgVote" | "/cosmos.gov.v1.MsgVote" => {
-            let (m, u) = decode_msg::<proto::MsgVote>(any)?;
-            undecoded = u;
+            let m = decode_msg::<proto::MsgVote>(any)?;
             out.text(&p("Type"), "Vote")?;
             out.text(&p("Proposal"), m.proposal_id.to_string())?;
             out.address(&p("Voter"), &m.voter)?;
@@ -281,8 +279,7 @@ fn render_any(any: &Any, prefix: &str, depth: usize, out: &mut Out) -> Result<()
             }
         }
         "/cosmos.authz.v1beta1.MsgExec" => {
-            let (m, u) = decode_msg::<proto::MsgExec>(any)?;
-            undecoded = u;
+            let m = decode_msg::<proto::MsgExec>(any)?;
             if depth >= MAX_EXEC_DEPTH {
                 return Err(VisualSignError::ConversionError(
                     "authz MsgExec nested too deep".to_string(),
@@ -300,12 +297,14 @@ fn render_any(any: &Any, prefix: &str, depth: usize, out: &mut Out) -> Result<()
             }
         }
         "/ibc.applications.transfer.v1.MsgTransfer" => {
-            let (m, u) = decode_msg::<proto::MsgTransfer>(any)?;
-            undecoded = u;
+            let m = decode_msg::<proto::MsgTransfer>(any)?;
             out.text(&p("Type"), "IBC Transfer")?;
             out.address(&p("Sender"), &m.sender)?;
             out.address(&p("Receiver"), &m.receiver)?;
-            out.coins(&p("Amount"), &coin_pairs(m.token.as_slice()))?;
+            // ibc-go v9 moved the amount to `tokens`; older chains use `token`.
+            let mut tokens = coin_pairs(m.token.as_slice());
+            tokens.extend(coin_pairs(&m.tokens));
+            out.coins(&p("Amount"), &tokens)?;
             out.text(
                 &p("Channel"),
                 format!("{} / {}", m.source_port, m.source_channel),
@@ -327,8 +326,7 @@ fn render_any(any: &Any, prefix: &str, depth: usize, out: &mut Out) -> Result<()
             }
         }
         "/cosmwasm.wasm.v1.MsgExecuteContract" => {
-            let (m, u) = decode_msg::<proto::MsgExecuteContract>(any)?;
-            undecoded = u;
+            let m = decode_msg::<proto::MsgExecuteContract>(any)?;
             out.text(&p("Type"), "Wasm Execute")?;
             out.address(&p("Sender"), &m.sender)?;
             out.address(&p("Contract"), &m.contract)?;
@@ -346,9 +344,6 @@ fn render_any(any: &Any, prefix: &str, depth: usize, out: &mut Out) -> Result<()
             out.text(&p("Type"), format!("{other} (not fully decoded)"))?;
             out.text(&p("Value"), format!("0x{}", hex::encode(&any.value)))?;
         }
-    }
-    if undecoded {
-        out.text(&p("Undecoded Fields"), "present (not shown)")?;
     }
     Ok(())
 }
