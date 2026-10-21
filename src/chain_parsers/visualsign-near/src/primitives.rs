@@ -3,11 +3,17 @@
 //! These mirror `near-primitives` 0.35.1 and `near-crypto` 0.35.1 byte for
 //! byte -- field order, enum discriminants, and every hand-written
 //! `BorshDeserialize` impl -- so that an input decodes here exactly when it
-//! decodes upstream, with the same error message when it does not. Depending
-//! on `near-primitives` itself would pull native C code (`zstd-sys`, and
-//! `secp256k1-sys` through `near-crypto`) into every embedder for what is
-//! only a decoder. `tests/primitives_differential.rs` checks the equivalence
-//! against the upstream crates, which remain dev-dependencies.
+//! decodes upstream, with the same error message when it does not.
+//! `near-primitives` 0.35.1 makes `zstd` mandatory, so depending on it linked
+//! `zstd-sys` (native C) into every embedder for what is only a decoder.
+//! `tests/primitives_differential.rs` and `tests/primitives_semantic.rs` check
+//! the equivalence against the upstream crates, which are dev-dependencies
+//! only.
+//!
+//! This does not remove `near-crypto` or `secp256k1-sys` 0.8 from the build:
+//! both still arrive through `near-sdk`'s `non-contract-usage` feature, which
+//! near-sdk 5.27 requires to compile on a non-wasm target and which the
+//! `defuse-*` intents crates use.
 //!
 //! Account ids, token amounts and gas reuse `near-sdk`'s re-exports of
 //! `near-account-id`, `near-token` and `near-gas` -- the same crates

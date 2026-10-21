@@ -29,8 +29,10 @@ defuse-deadline = { workspace = true }
 
 [dev-dependencies]
 # Differential-test oracles for the local wire types in src/primitives.rs.
-# Never a normal dependency: near-primitives pulls zstd-sys and near-crypto
-# pulls secp256k1-sys (native C).
+# near-primitives must never be a normal dependency: it makes zstd (zstd-sys,
+# native C) mandatory. near-crypto (and secp256k1-sys 0.8) is still in the
+# normal tree, via near-sdk's `non-contract-usage` feature; listing it here only
+# makes it available to the tests.
 near-crypto = "0.35.1"
 near-primitives = "0.35.1"
 parser_cli_core = { path = "../../parser/cli-core", features = ["test-utils"] }
