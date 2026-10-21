@@ -1,6 +1,6 @@
 use super::*;
 
-use super::config::{DEPLOYMENTS, SuiNetwork};
+use super::config::DEPLOYMENTS;
 use crate::SuiVisualSignConverter;
 use crate::core::{SuiModuleResolver, SuiTransactionWrapper};
 use crate::intermediate::SuiIntermediateOutput;
@@ -12,66 +12,45 @@ use sui_json_rpc_types::{
     SuiTransactionBlockData, SuiTransactionBlockDataAPI, SuiTransactionBlockKind,
 };
 use sui_types::transaction::{
-    Argument, CallArg, Command, ObjectArg, ProgrammableMoveCall, ProgrammableTransaction,
-    TransactionData, TransactionDataAPI, TransactionKind, WithdrawFrom, WithdrawalTypeArg,
+    Argument, CallArg, Command, ProgrammableMoveCall, ProgrammableTransaction, TransactionData,
+    TransactionDataAPI, TransactionKind,
 };
-use visualsign::SignablePayload;
 use visualsign::test_utils::check_signable_payload_field;
 use visualsign::vsptrait::{VisualSignConverter, VisualSignOptions};
 
 const FIXTURE: &str = include_str!("aggregated_test_data.json");
+const REJECTED: &str = include_str!("rejected_test_data.json");
 
-const SIGNER: &str = "0xa718613f515e74d6aa5facb07363640b2267d5cf5b2b466b954452b6e4357b65";
-const TESTNET_USDC: &str =
-    "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC";
 const OTHER_ADDRESS: [u8; 32] = [0x77; 32];
 
-// Real open-deposit-and-borrow PTB: 0 view::get_both_exchange_rate, 1 init_position,
-// 2 option::some(NR(1,1)), 3 balance::redeem_funds<SUI>(I14), 4 balance::zero<USDC>,
-// 5 structs::positive(I6 col), 6 structs::positive(I7 debt), 7 operate(.., R5, R6, ..),
-// 8 option::destroy_some(NR(7,2)), 9 send_funds<SUI>(NR(7,0), I11),
-// 10 send_funds<USDC>(NR(7,1), I12), 11 position::share(NR(1,0)),
-// 12 TransferObjects([R8], I13).
-const OPEN_BORROW_DIGEST: &str = "2mFygtTthoZZ5Z65rkNVNwY1ojRd7G2Yv1sFT4x8K61L";
+// Real mainnet open-deposit-and-borrow PTB: 0 view::quote, 1 init_position,
+// 2 option::some(NR(1,1)), 3 balance::redeem_funds<SUI>(I12), 4 balance::zero<USDC>,
+// 5 structs::positive(I3 col), 6 structs::positive(I4 debt), 7 operate(.., R5, R6, ..),
+// 8 option::destroy_some(NR(7,2)), 9 balance::send_funds<SUI>(NR(7,0), I9),
+// 10 balance::send_funds<USDC>(NR(7,1), I10), 11 position::share(NR(1,0)),
+// 12 TransferObjects([R8], I11).
+const OPEN_BORROW_DIGEST: &str = "2avMUdAzFBRMBD4WisprLqj2pNs5XgbVBuMmUTRWV8Q8";
+const ZERO_USDC_COMMAND: usize = 4;
 const COL_AMOUNT_COMMAND: usize = 5;
 const DEBT_AMOUNT_COMMAND: usize = 6;
 const OPERATE_COMMAND: usize = 7;
 const DESTROY_SOME_COMMAND: usize = 8;
 const DEBT_SEND_COMMAND: usize = 10;
 const CAP_TRANSFER_COMMAND: usize = 12;
-const DEBT_AMOUNT_INPUT: u16 = 7;
-const DEBT_RECIPIENT_INPUT: usize = 12;
-const CAP_RECIPIENT_INPUT: usize = 13;
+const DEBT_AMOUNT_INPUT: u16 = 4;
+const DEBT_RECIPIENT_INPUT: u16 = 10;
+const CAP_RECIPIENT_INPUT: usize = 11;
 
-// Real open-deposit PTB, the same layout with a `none` debt amount and
-// `send_funds<SUI>` to I10, `send_funds<USDC>` to I11 and the cap to I12.
-const OPEN_DEPOSIT_DIGEST: &str = "A57eyYUASDKtX8V4xUDc2am9nijrBXMSUibuFZrSVX8t";
-const OPEN_DEPOSIT_DEBT_RECIPIENT_INPUT: usize = 11;
+// Real mainnet repayment funded from owned coins, with no cap passed:
+// .. 10 operate, 11 option::destroy_none(NR(10,2)), 12 balance::join<SUI>(R0, NR(10,0)),
+// 13 coin::from_balance<SUI>(R0), 14 TransferObjects([R13], I9),
+// 15 coin::from_balance<USDC>(NR(10,1)), 16 TransferObjects([R15], I10).
+const REPAY_DIGEST: &str = "22yRPaDKGhjaQRbpTYXJifK2pacFav1znMZ98ZpVrj8K";
+const REPAY_OPERATE_COMMAND: usize = 10;
+const REPAY_FROM_BALANCE_COMMAND: usize = 13;
+const REPAY_SUI_RECIPIENT_INPUT: usize = 9;
 
-// Real withdraw-all PTB on an existing position: operate is command 6.
-const WITHDRAW_ALL_DIGEST: &str = "D8TG8ESNHykaka3tmthDBnrgTJaescSStea7o8TUp7Ui";
-const WITHDRAW_ALL_OPERATE_COMMAND: usize = 6;
-
-const CLOSE_DIGEST: &str = "HVC9Z7a9YsRaDjiinUvYMGTCFeCWHjPsbHasZx3r1khk";
-
-// Real lending deposit: 0 balance::redeem_funds<USDC>(I7), 1 deposit(.., R0, I4 min_shares, I5),
-// 2 send_funds<FToken<USDC>>(R1, I6).
-const LEND_DEPOSIT_DIGEST: &str = "C4TXLrbyhQB8mmy25o1iUC9syg9hHMyB3Uh1kt9xi7rV";
-const LENDING_COMMAND: usize = 1;
-const LEND_FUNDS_WITHDRAWAL_INPUT: usize = 7;
-
-// Real lending withdrawal: 0 redeem_funds<FToken<USDC>>(I8), 1 withdraw(.., I4 assets, R0, I5),
-// 2 send_funds<USDC>(NR(1,0), I6), 3 send_funds<FToken<USDC>>(NR(1,1), I7).
-const LEND_WITHDRAW_DIGEST: &str = "BA3RzuwbFjJeufx8h7NtfPjjniXWhbT5S7KKHuc6gJh4";
-const UNUSED_SHARES_RECIPIENT_INPUT: usize = 7;
-
-const LEND_REDEEM_DIGEST: &str = "HNn2xw45QyQrxyDSKZTAzrfhtAkibu5oDABkTP5xeinv";
-
-fn fixture_tx(section: &str, function: &str, digest: &str) -> TransactionData {
-    let fixture: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
-    let data = fixture[section][function]["operations"][digest]["data"]
-        .as_str()
-        .unwrap();
+fn decode(data: &str) -> TransactionData {
     bcs::from_bytes(
         &base64::engine::general_purpose::STANDARD
             .decode(data)
@@ -80,12 +59,17 @@ fn fixture_tx(section: &str, function: &str, digest: &str) -> TransactionData {
     .unwrap()
 }
 
-fn open_borrow_tx() -> TransactionData {
-    fixture_tx("vaults", "operate", OPEN_BORROW_DIGEST)
+fn fixture_tx(digest: &str) -> TransactionData {
+    let fixture: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    decode(
+        fixture["vaults"]["operate"]["operations"][digest]["data"]
+            .as_str()
+            .unwrap(),
+    )
 }
 
-fn lend_deposit_tx() -> TransactionData {
-    fixture_tx("lending", "deposit", LEND_DEPOSIT_DIGEST)
+fn open_borrow_tx() -> TransactionData {
+    fixture_tx(OPEN_BORROW_DIGEST)
 }
 
 fn programmable(tx: &mut TransactionData) -> &mut ProgrammableTransaction {
@@ -143,51 +127,16 @@ fn insert_command(tx: &mut TransactionData, index: usize, command: Command) {
     pt.commands.insert(index, command);
 }
 
-/// Rewrites every type argument, funds withdrawal type and package id that
-/// mentions `from` to mention `to` instead.
-fn replace_everywhere(mut tx: TransactionData, from: &str, to: &str) -> TransactionData {
-    let replace = |tag: &sui_types::TypeTag| {
-        sui_types::parse_sui_type_tag(&tag.to_canonical_string(true).replace(from, to)).unwrap()
-    };
-    let pt = programmable(&mut tx);
-    for input in &mut pt.inputs {
-        if let CallArg::FundsWithdrawal(withdrawal) = input {
-            let WithdrawalTypeArg::Balance(tag) = &withdrawal.type_arg;
-            withdrawal.type_arg = WithdrawalTypeArg::Balance(replace(tag));
-        }
-    }
-    for command in &mut pt.commands {
-        if let Command::MoveCall(call) = command {
-            if call.package.to_hex() == from {
-                call.package = ObjectID::from_hex_literal(&format!("0x{to}")).unwrap();
-            }
-            for type_argument in &mut call.type_arguments {
-                *type_argument = replace(&type_argument.to_type_tag().unwrap()).into();
-            }
-        }
-    }
-    tx
-}
-
-/// The same transaction against the mainnet packages.
-fn on_mainnet(tx: TransactionData) -> TransactionData {
-    let [mainnet, testnet] = DEPLOYMENTS else {
-        panic!("expected a mainnet and a testnet deployment");
-    };
-    let hex = |literal: &str| ObjectID::from_hex_literal(literal).unwrap().to_hex();
-    [
-        (testnet.vaults_package, mainnet.vaults_package),
-        (testnet.lending_package, mainnet.lending_package),
-        (testnet.oracle_package, mainnet.oracle_package),
-    ]
-    .into_iter()
-    .fold(tx, |tx, (from, to)| {
-        replace_everywhere(tx, &hex(from), &hex(to))
-    })
-}
-
 fn set_pure_input(tx: &mut TransactionData, index: usize, bytes: Vec<u8>) {
     programmable(tx).inputs[index] = CallArg::Pure(bytes);
+}
+
+fn set_amount(tx: &mut TransactionData, command: usize, function: &str) {
+    let call = move_call(tx, command);
+    call.function = function.parse().unwrap();
+    if function == "max" || function == "none" {
+        call.arguments.clear();
+    }
 }
 
 fn visualize(
@@ -212,26 +161,26 @@ fn card(tx: TransactionData, command_index: usize) -> AnnotatedPayloadField {
     visualize(tx, command_index).unwrap().remove(0)
 }
 
-fn card_title(field: &AnnotatedPayloadField) -> String {
-    let SignablePayloadField::PreviewLayout { preview_layout, .. } = &field.signable_payload_field
-    else {
-        panic!("expected a preview layout");
-    };
-    preview_layout.title.as_ref().unwrap().text.clone()
-}
-
-fn condensed_labels(field: &AnnotatedPayloadField) -> Vec<String> {
+fn preview_layout(field: &AnnotatedPayloadField) -> &SignablePayloadFieldPreviewLayout {
     let SignablePayloadField::PreviewLayout { preview_layout, .. } = &field.signable_payload_field
     else {
         panic!("expected a preview layout");
     };
     preview_layout
+}
+
+fn card_title(field: &AnnotatedPayloadField) -> String {
+    preview_layout(field).title.as_ref().unwrap().text.clone()
+}
+
+fn condensed_labels(field: &AnnotatedPayloadField) -> Vec<String> {
+    preview_layout(field)
         .condensed
         .as_ref()
         .unwrap()
         .fields
         .iter()
-        .map(|f| f.signable_payload_field.label().clone())
+        .map(|field| field.signable_payload_field.label().clone())
         .collect()
 }
 
@@ -247,17 +196,13 @@ fn field_value(field: &AnnotatedPayloadField, label: &str) -> String {
 }
 
 fn address_name(field: &AnnotatedPayloadField, label: &str) -> String {
-    let SignablePayloadField::PreviewLayout { preview_layout, .. } = &field.signable_payload_field
-    else {
-        panic!("expected a preview layout");
-    };
-    preview_layout
+    preview_layout(field)
         .condensed
         .as_ref()
         .unwrap()
         .fields
         .iter()
-        .find_map(|f| match &f.signable_payload_field {
+        .find_map(|field| match &field.signable_payload_field {
             SignablePayloadField::AddressV2 { common, address_v2 } if common.label == label => {
                 Some(address_v2.name.clone())
             }
@@ -266,10 +211,8 @@ fn address_name(field: &AnnotatedPayloadField, label: &str) -> String {
         .unwrap_or_else(|| panic!("no {label:?} address row"))
 }
 
-fn payload_of(tx: &TransactionData) -> SignablePayload {
-    crate::utils::payload_from_b64(
-        &base64::engine::general_purpose::STANDARD.encode(bcs::to_bytes(tx).unwrap()),
-    )
+fn other_address() -> String {
+    SuiAddress::from_bytes(OTHER_ADDRESS).unwrap().to_string()
 }
 
 fn expect_error(result: Result<Vec<AnnotatedPayloadField>, VisualSignError>, expected: &str) {
@@ -284,117 +227,113 @@ fn expect_error(result: Result<Vec<AnnotatedPayloadField>, VisualSignError>, exp
     }
 }
 
-fn set_amount(tx: &mut TransactionData, command: usize, function: &str) {
-    let call = move_call(tx, command);
-    call.function = function.parse().unwrap();
-    if function == "max" || function == "none" {
-        call.arguments.clear();
-    }
-}
-
 #[test]
 fn test_fluid_aggregated() {
     run_aggregated_fixture(FIXTURE, Box::new(FluidVisualizer));
 }
 
 #[test]
+fn fixture_titles_name_each_change() {
+    for (digest, command, title) in [
+        (
+            OPEN_BORROW_DIGEST,
+            OPERATE_COMMAND,
+            "Deposit 0.9 SUI collateral and borrow 0.3555 USDC on Fluid",
+        ),
+        (
+            "9EbDd7nTDteLJ8CKEsmNkdY6EcAtvr9xP5pVs6z2hY2U",
+            6,
+            "Borrow 0.1 USDC on Fluid",
+        ),
+        (REPAY_DIGEST, REPAY_OPERATE_COMMAND, "Repay 0.05 USDC on Fluid"),
+        (
+            "BfLC6C9fdLPfwpUNNBD4u9RWsniPM4K4hKREg9t8yU3y",
+            8,
+            "Repay all USDC debt on Fluid",
+        ),
+        (
+            "GAd991E2QHe1efuU44vbXo4uoSbmEN5WhKoQ63dcpxcm",
+            8,
+            "Withdraw 0.1 SUI collateral on Fluid",
+        ),
+        (
+            "6PxtgEk85iArTFWgYrfugS7UuFQA6uM5CqTdv9nFw6Nh",
+            8,
+            "Withdraw all SUI collateral and repay all USDC debt on Fluid",
+        ),
+    ] {
+        assert_eq!(card_title(&card(fixture_tx(digest), command)), title);
+    }
+}
+
+#[test]
+fn deposit_without_a_cap_shows_no_position_owner() {
+    let field = card(fixture_tx("EJk1pMgkJpGHTjdAU2Nx8tcKo1JBp6tHDB6x3roQBC4V"), 7);
+    assert_eq!(
+        condensed_labels(&field),
+        vec!["Collateral Deposit", "Position", "Network"]
+    );
+}
+
+#[test]
 fn every_fixture_emits_intermediate_output_listing_each_command() {
     let fixture: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
-    let mut checked = 0;
-    for (section, function) in [
-        ("vaults", "operate"),
-        ("vaults", "close_position"),
-        ("lending", "deposit"),
-        ("lending", "withdraw"),
-        ("lending", "redeem"),
-    ] {
-        for digest in fixture[section][function]["operations"].as_object().unwrap().keys() {
-            let tx = fixture_tx(section, function, digest);
-            let TransactionKind::ProgrammableTransaction(pt) = tx.kind() else {
-                panic!("expected a programmable transaction");
-            };
-            let commands = pt.commands.len();
-            let options = VisualSignOptions {
-                include_intermediate_output: true,
-                ..VisualSignOptions::default()
-            };
-            let bytes = SuiVisualSignConverter
-                .to_visual_sign_payload(SuiTransactionWrapper::new(tx), options)
-                .unwrap()
-                .intermediate_output
-                .unwrap_or_else(|| panic!("no intermediate output for {digest}"));
-            let output: SuiIntermediateOutput = borsh::from_slice(&bytes).unwrap();
-            assert_eq!(output.commands.len(), commands, "{digest}");
-            assert!(
-                output
-                    .commands
-                    .iter()
-                    .any(|command| command.module_name == "user" && command.function == function),
-                "{digest} lists no user::{function} call"
-            );
-            checked += 1;
-        }
+    let operations = fixture["vaults"]["operate"]["operations"]
+        .as_object()
+        .unwrap();
+    for digest in operations.keys() {
+        let tx = fixture_tx(digest);
+        let TransactionKind::ProgrammableTransaction(pt) = tx.kind() else {
+            panic!("expected a programmable transaction");
+        };
+        let commands = pt.commands.len();
+        let options = VisualSignOptions {
+            include_intermediate_output: true,
+            ..VisualSignOptions::default()
+        };
+        let bytes = SuiVisualSignConverter
+            .to_visual_sign_payload(SuiTransactionWrapper::new(tx), options)
+            .unwrap()
+            .intermediate_output
+            .unwrap_or_else(|| panic!("no intermediate output for {digest}"));
+        let output: SuiIntermediateOutput = borsh::from_slice(&bytes).unwrap();
+        assert_eq!(output.commands.len(), commands, "{digest}");
+        assert!(
+            output
+                .commands
+                .iter()
+                .any(|command| command.module_name == "user" && command.function == "operate"),
+            "{digest} lists no user::operate call"
+        );
     }
-    assert_eq!(checked, 11);
+    assert_eq!(operations.len(), 10);
 }
 
 #[test]
 fn every_deployment_package_is_handled_in_the_form_it_is_called_with() {
     let config = Config::new();
     for deployment in DEPLOYMENTS {
-        for (package, functions) in [
-            (deployment.vaults_package, vec!["operate", "close_position"]),
-            (
-                deployment.lending_package,
-                vec!["deposit", "withdraw", "redeem"],
-            ),
-        ] {
-            let id = ObjectID::from_hex_literal(package).unwrap();
-            assert_eq!(id.to_hex_literal(), package);
-            for function in functions {
-                assert!(config.can_handle(&id.to_hex_literal(), "user", function));
-            }
-            assert!(!config.can_handle(&id.to_hex_literal(), "user", "init_position"));
-            assert_eq!(deployment_for(&id).unwrap().sui_network, deployment.sui_network);
+        let id = ObjectID::from_hex_literal(deployment.vaults_package).unwrap();
+        assert_eq!(id.to_hex_literal(), deployment.vaults_package);
+        assert!(config.can_handle(&id.to_hex_literal(), "user", "operate"));
+        for function in ["init_position", "close_position", "liquidate"] {
+            assert!(!config.can_handle(&id.to_hex_literal(), "user", function));
         }
+        assert!(deployment_for(&id).is_some());
     }
 }
 
 #[test]
-fn mainnet_lending_package_is_the_published_id() {
-    let mainnet = &DEPLOYMENTS[0];
-    assert_eq!(mainnet.sui_network, SuiNetwork::Mainnet);
-    assert_eq!(
-        ObjectID::from_hex_literal(mainnet.lending_package).unwrap(),
-        ObjectID::from_hex_literal(
-            "0x00207c696eaa1b80e6e001cb0739dff0a554b5561265008d33ca9b071fd1d202"
-        )
-        .unwrap()
+fn leverage_through_a_flash_loan_fails() {
+    let rejected: serde_json::Value = serde_json::from_str(REJECTED).unwrap();
+    let leverage = &rejected["leverage"];
+    expect_error(
+        visualize(
+            decode(leverage["data"].as_str().unwrap()),
+            usize::try_from(leverage["command_index"].as_u64().unwrap()).unwrap(),
+        ),
+        "Argument `col_amount` is not a transaction input",
     );
-}
-
-#[test]
-fn vault_cards_are_titled_with_each_change() {
-    for (digest, command, title) in [
-        (
-            OPEN_DEPOSIT_DIGEST,
-            OPERATE_COMMAND,
-            "Deposit 0.5 SUI collateral on Fluid (Sui Testnet)",
-        ),
-        (
-            OPEN_BORROW_DIGEST,
-            OPERATE_COMMAND,
-            "Deposit 1 SUI collateral and borrow 0.1 USDC on Fluid (Sui Testnet)",
-        ),
-        (
-            WITHDRAW_ALL_DIGEST,
-            WITHDRAW_ALL_OPERATE_COMMAND,
-            "Withdraw all SUI collateral on Fluid (Sui Testnet)",
-        ),
-    ] {
-        let field = card(fixture_tx("vaults", "operate", digest), command);
-        assert_eq!(card_title(&field), title);
-    }
 }
 
 #[test]
@@ -404,42 +343,12 @@ fn repayment_is_a_negative_debt_amount() {
     set_amount(&mut tx, DEBT_AMOUNT_COMMAND, "negative");
 
     let field = card(tx, OPERATE_COMMAND);
-    assert_eq!(card_title(&field), "Repay 0.1 USDC on Fluid (Sui Testnet)");
-    assert_eq!(field_value(&field, "Repayment"), "0.1");
-    // Repaying pays nothing out, and unused USDC goes back to the signer.
+    assert_eq!(card_title(&field), "Repay 0.3555 USDC on Fluid");
+    assert_eq!(field_value(&field, "Repayment"), "0.3555");
     assert_eq!(
         condensed_labels(&field),
         vec!["Repayment", "Position", "Position Owner", "Network"]
     );
-}
-
-#[test]
-fn max_debt_amount_repays_all_debt() {
-    let mut tx = open_borrow_tx();
-    set_amount(&mut tx, COL_AMOUNT_COMMAND, "none");
-    set_amount(&mut tx, DEBT_AMOUNT_COMMAND, "max");
-
-    let field = card(tx, OPERATE_COMMAND);
-    assert_eq!(
-        card_title(&field),
-        "Repay all USDC debt on Fluid (Sui Testnet)"
-    );
-    assert_eq!(field_value(&field, "Repayment"), "All USDC debt");
-}
-
-#[test]
-fn partial_collateral_withdrawal_shows_where_it_goes() {
-    let mut tx = open_borrow_tx();
-    set_amount(&mut tx, COL_AMOUNT_COMMAND, "negative");
-    set_amount(&mut tx, DEBT_AMOUNT_COMMAND, "none");
-
-    let field = card(tx, OPERATE_COMMAND);
-    assert_eq!(
-        card_title(&field),
-        "Withdraw 1 SUI collateral on Fluid (Sui Testnet)"
-    );
-    assert_eq!(field_value(&field, "Collateral Withdrawal"), "1");
-    assert_eq!(field_value(&field, "SUI Recipient"), SIGNER);
 }
 
 #[test]
@@ -449,10 +358,7 @@ fn zero_amounts_build_none() {
     set_pure_input(&mut tx, usize::from(DEBT_AMOUNT_INPUT), zero);
 
     let field = card(tx, OPERATE_COMMAND);
-    assert_eq!(
-        card_title(&field),
-        "Deposit 1 SUI collateral on Fluid (Sui Testnet)"
-    );
+    assert_eq!(card_title(&field), "Deposit 0.9 SUI collateral on Fluid");
 }
 
 #[test]
@@ -469,14 +375,16 @@ fn operate_without_any_change_fails() {
 
 #[test]
 fn unused_coin_sent_to_someone_else_is_shown() {
-    let mut tx = fixture_tx("vaults", "operate", OPEN_DEPOSIT_DIGEST);
+    let mut tx = open_borrow_tx();
+    set_amount(&mut tx, DEBT_AMOUNT_COMMAND, "none");
     set_pure_input(
         &mut tx,
-        OPEN_DEPOSIT_DEBT_RECIPIENT_INPUT,
+        usize::from(DEBT_RECIPIENT_INPUT),
         OTHER_ADDRESS.to_vec(),
     );
 
     let field = card(tx, OPERATE_COMMAND);
+    assert_eq!(field_value(&field, "USDC Recipient"), other_address());
     assert_eq!(
         address_name(&field, "USDC Recipient"),
         "Not the signer's address"
@@ -486,17 +394,16 @@ fn unused_coin_sent_to_someone_else_is_shown() {
 #[test]
 fn borrowed_coin_and_position_owner_name_their_recipients() {
     let mut tx = open_borrow_tx();
-    set_pure_input(&mut tx, DEBT_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
+    set_pure_input(
+        &mut tx,
+        usize::from(DEBT_RECIPIENT_INPUT),
+        OTHER_ADDRESS.to_vec(),
+    );
     set_pure_input(&mut tx, CAP_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
 
     let field = card(tx, OPERATE_COMMAND);
-    let other = SuiAddress::from_bytes(OTHER_ADDRESS).unwrap().to_string();
-    assert_eq!(field_value(&field, "USDC Recipient"), other);
-    assert_eq!(
-        address_name(&field, "USDC Recipient"),
-        "Not the signer's address"
-    );
-    assert_eq!(field_value(&field, "Position Owner"), other);
+    assert_eq!(field_value(&field, "USDC Recipient"), other_address());
+    assert_eq!(field_value(&field, "Position Owner"), other_address());
     assert_eq!(
         address_name(&field, "Position Owner"),
         "Not the signer's address"
@@ -504,109 +411,64 @@ fn borrowed_coin_and_position_owner_name_their_recipients() {
 }
 
 #[test]
-fn unknown_coins_are_shown_in_base_units_with_their_type() {
-    let usdc = ObjectID::from_hex_literal(TESTNET_USDC.split("::").next().unwrap())
-        .unwrap()
-        .to_hex();
-    let tx = replace_everywhere(open_borrow_tx(), &usdc, &ObjectID::from_single_byte(0x42).to_hex());
+fn coin_joined_into_another_balance_follows_that_balance() {
+    let mut tx = fixture_tx(REPAY_DIGEST);
+    set_pure_input(&mut tx, REPAY_SUI_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
 
-    let field = card(tx, OPERATE_COMMAND);
+    let field = card(tx, REPAY_OPERATE_COMMAND);
+    assert_eq!(field_value(&field, "SUI Recipient"), other_address());
     assert_eq!(
-        card_title(&field),
-        "Deposit 1 SUI collateral and borrow 100000 base units of 0x42::usdc::USDC on Fluid (Sui Testnet)"
-    );
-}
-
-#[test]
-fn mainnet_calls_render_on_sui() {
-    for (tx, command, title) in [
-        (
-            on_mainnet(open_borrow_tx()),
-            OPERATE_COMMAND,
-            "Deposit 1 SUI collateral and borrow 0.1 USDC on Fluid",
-        ),
-        (
-            on_mainnet(fixture_tx("vaults", "close_position", CLOSE_DIGEST)),
-            0,
-            "Close vault position on Fluid",
-        ),
-        (
-            on_mainnet(lend_deposit_tx()),
-            LENDING_COMMAND,
-            "Lend 10 USDC on Fluid",
-        ),
-        (
-            on_mainnet(fixture_tx("lending", "withdraw", LEND_WITHDRAW_DIGEST)),
-            LENDING_COMMAND,
-            "Withdraw 5 USDC from lending on Fluid",
-        ),
-        (
-            on_mainnet(fixture_tx("lending", "redeem", LEND_REDEEM_DIGEST)),
-            LENDING_COMMAND,
-            "Withdraw SUI from lending on Fluid",
-        ),
-    ] {
-        let field = card(tx, command);
-        assert_eq!(card_title(&field), title);
-        assert_eq!(field_value(&field, "Network"), "Sui");
-    }
-}
-
-#[test]
-fn lending_payload_is_titled_with_the_action() {
-    let payload = payload_of(&lend_deposit_tx());
-    assert_eq!(payload.title, "Lend 10 USDC on Fluid (Sui Testnet)");
-    assert_eq!(
-        payload.subtitle.as_deref(),
-        Some(format!("fTokens to {SIGNER}").as_str())
-    );
-}
-
-#[test]
-fn vault_payload_keeps_the_generic_title_while_the_cap_transfer_renders() {
-    // The position owner cap goes back through `TransferObjects`, which the
-    // generic transfer preview renders as a second card.
-    let payload = payload_of(&open_borrow_tx());
-    assert_eq!(payload.title, "Programmable Transaction");
-}
-
-#[test]
-fn lending_payload_with_an_unrelated_command_keeps_the_generic_title() {
-    let mut tx = lend_deposit_tx();
-    insert_command(&mut tx, 0, tamper_call(vec![]));
-
-    let payload = payload_of(&tx);
-    assert_eq!(payload.title, "Programmable Transaction");
-}
-
-#[test]
-fn unused_shares_sent_to_someone_else_are_shown() {
-    let mut tx = fixture_tx("lending", "withdraw", LEND_WITHDRAW_DIGEST);
-    let real = card(tx.clone(), LENDING_COMMAND);
-    assert!(
-        condensed_labels(&real)
-            .iter()
-            .all(|label| label != "Unused fToken Recipient")
-    );
-
-    set_pure_input(&mut tx, UNUSED_SHARES_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
-    let field = card(tx, LENDING_COMMAND);
-    assert_eq!(
-        address_name(&field, "Unused fToken Recipient"),
+        address_name(&field, "SUI Recipient"),
         "Not the signer's address"
     );
 }
 
 #[test]
-fn borrowed_coin_not_sent_with_send_funds_fails() {
+fn joined_balance_used_again_after_it_is_sent_fails() {
+    let mut tx = fixture_tx(REPAY_DIGEST);
+    insert_command(
+        &mut tx,
+        REPAY_FROM_BALANCE_COMMAND + 1,
+        tamper_call(vec![Argument::Result(0)]),
+    );
+
+    expect_error(
+        visualize(tx, REPAY_OPERATE_COMMAND),
+        &format!(
+            "The collateral balance from command {REPAY_OPERATE_COMMAND} must be used by exactly one later command"
+        ),
+    );
+}
+
+#[test]
+fn unknown_coins_are_shown_in_base_units_with_their_type() {
     let mut tx = open_borrow_tx();
-    programmable(&mut tx).commands[DEBT_SEND_COMMAND] =
-        tamper_call(vec![Argument::NestedResult(7, 1), Argument::Input(12)]);
+    let other = sui_types::parse_sui_type_tag("0x42::usdc::USDC").unwrap();
+    for index in [ZERO_USDC_COMMAND, OPERATE_COMMAND, DEBT_SEND_COMMAND] {
+        let call = move_call(&mut tx, index);
+        let last = call.type_arguments.len() - 1;
+        call.type_arguments[last] = other.clone().into();
+    }
+
+    let field = card(tx, OPERATE_COMMAND);
+    assert_eq!(
+        card_title(&field),
+        "Deposit 0.9 SUI collateral and borrow 355500 base units of 0x42::usdc::USDC on Fluid"
+    );
+}
+
+#[test]
+fn borrowed_coin_not_sent_to_an_address_fails() {
+    let mut tx = open_borrow_tx();
+    programmable(&mut tx).commands[DEBT_SEND_COMMAND] = tamper_call(vec![
+        Argument::NestedResult(7, 1),
+        Argument::Input(DEBT_RECIPIENT_INPUT),
+    ]);
 
     expect_error(
         visualize(tx, OPERATE_COMMAND),
         &format!(
-            "The debt balance from command {OPERATE_COMMAND} is not sent with 0x2::balance::send_funds<{TESTNET_USDC}>"
+            "The debt balance from command {OPERATE_COMMAND} is not sent to an address through 0x2::balance or 0x2::coin"
         ),
     );
 }
@@ -616,7 +478,7 @@ fn borrowed_coin_used_twice_fails() {
     let mut tx = open_borrow_tx();
     insert_command(
         &mut tx,
-        DEBT_SEND_COMMAND,
+        DEBT_SEND_COMMAND + 1,
         tamper_call(vec![Argument::NestedResult(7, 1)]),
     );
 
@@ -624,6 +486,20 @@ fn borrowed_coin_used_twice_fails() {
         visualize(tx, OPERATE_COMMAND),
         &format!(
             "The debt balance from command {OPERATE_COMMAND} must be used by exactly one later command"
+        ),
+    );
+}
+
+#[test]
+fn borrowed_coin_sent_as_another_coin_type_fails() {
+    let mut tx = open_borrow_tx();
+    move_call(&mut tx, DEBT_SEND_COMMAND).type_arguments[0] =
+        sui_types::parse_sui_type_tag("0x2::sui::SUI").unwrap().into();
+
+    expect_error(
+        visualize(tx, OPERATE_COMMAND),
+        &format!(
+            "The debt balance from command {OPERATE_COMMAND} is not sent to an address through 0x2::balance or 0x2::coin"
         ),
     );
 }
@@ -658,12 +534,12 @@ fn amount_input_modified_before_its_constructor_fails() {
 }
 
 #[test]
-fn recipient_modified_before_send_funds_fails() {
+fn recipient_modified_before_it_is_paid_fails() {
     let mut tx = open_borrow_tx();
     insert_command(
         &mut tx,
         DESTROY_SOME_COMMAND,
-        tamper_call(vec![Argument::Input(12)]),
+        tamper_call(vec![Argument::Input(DEBT_RECIPIENT_INPUT)]),
     );
 
     expect_error(
@@ -676,68 +552,21 @@ fn recipient_modified_before_send_funds_fails() {
 }
 
 #[test]
-fn cap_transferred_with_another_object_fails() {
+fn cap_not_transferred_fails() {
     let mut tx = open_borrow_tx();
-    let Command::TransferObjects(objects, _) =
-        &mut programmable(&mut tx).commands[CAP_TRANSFER_COMMAND]
-    else {
-        panic!("expected the cap transfer");
-    };
-    objects.push(Argument::GasCoin);
+    programmable(&mut tx).commands[CAP_TRANSFER_COMMAND] = tamper_call(vec![Argument::Result(8)]);
 
     expect_error(
         visualize(tx, OPERATE_COMMAND),
-        "The position owner cap is not returned through 0x1::option::destroy_some and TransferObjects",
-    );
-}
-
-#[test]
-fn lending_deposit_from_the_sponsor_fails() {
-    let mut tx = lend_deposit_tx();
-    let CallArg::FundsWithdrawal(withdrawal) =
-        &mut programmable(&mut tx).inputs[LEND_FUNDS_WITHDRAWAL_INPUT]
-    else {
-        panic!("expected the funds withdrawal");
-    };
-    withdrawal.withdraw_from = WithdrawFrom::Sponsor;
-
-    expect_error(
-        visualize(tx, LENDING_COMMAND),
-        &format!(
-            "`assets` is not a 0x2::balance::redeem_funds<{TESTNET_USDC}> of the signer's address balance"
-        ),
-    );
-}
-
-#[test]
-fn lending_deposit_from_a_coin_object_fails() {
-    let mut tx = lend_deposit_tx();
-    let pt = programmable(&mut tx);
-    pt.inputs.push(CallArg::Object(ObjectArg::ImmOrOwnedObject((
-        ObjectID::from_single_byte(0x55),
-        sui_types::base_types::SequenceNumber::from_u64(1),
-        sui_types::digests::ObjectDigest::new([0x55; 32]),
-    ))));
-    let coin = Argument::Input(u16::try_from(pt.inputs.len() - 1).unwrap());
-    let call = move_call(&mut tx, 0);
-    call.module = "coin".parse().unwrap();
-    call.function = "into_balance".parse().unwrap();
-    call.arguments = vec![coin];
-
-    expect_error(
-        visualize(tx, LENDING_COMMAND),
-        &format!(
-            "`assets` is not a 0x2::balance::redeem_funds<{TESTNET_USDC}> of the signer's address balance"
-        ),
+        "The position owner cap is not returned through 0x1::option::destroy_some and TransferObjects, or 0x1::option::destroy_none",
     );
 }
 
 #[test]
 fn format_units_trims_trailing_zeros() {
-    assert_eq!(format_units(500_000_000, 9), "0.5");
-    assert_eq!(format_units(100_000, 6), "0.1");
-    assert_eq!(format_units(19_999_998, 6), "19.999998");
-    assert_eq!(format_units(10_000_000, 6), "10");
+    assert_eq!(format_units(900_000_000, 9), "0.9");
+    assert_eq!(format_units(355_500, 6), "0.3555");
+    assert_eq!(format_units(3_000_000_000, 9), "3");
     assert_eq!(format_units(1, 9), "0.000000001");
     assert_eq!(format_units(0, 8), "0");
 }

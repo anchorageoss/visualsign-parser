@@ -1,6 +1,4 @@
-//! Dataflow checks over a PTB's commands: which command produced a value,
-//! which single command consumes it, and whether any command in between may
-//! have modified it.
+//! Dataflow checks over a PTB's commands.
 
 use crate::core::VisualizerContext;
 use crate::utils::pure_bcs_bytes;
@@ -25,8 +23,6 @@ pub(super) fn is_call(
         && call.function == function
 }
 
-/// True when `actual` and `expected` name the same Move type, however each
-/// spells its addresses.
 pub(super) fn type_matches(actual: &str, expected: &str) -> bool {
     match (
         sui_types::parse_sui_type_tag(actual),
@@ -70,8 +66,7 @@ pub(super) fn input_at<'a>(
         .ok_or_else(|| missing(format!("Input for `{name}` not found")))
 }
 
-/// Decodes an address input, whether the RPC view typed it as `address` or
-/// left it as raw BCS bytes.
+/// Accepts an address input the RPC view typed as `address` or left as raw BCS.
 pub(super) fn pure_address(input: &SuiCallArg) -> Result<SuiAddress, VisualSignError> {
     if let SuiCallArg::Pure(value) = input
         && value.value_type() == Some(TypeTag::Address)
@@ -106,15 +101,13 @@ pub(super) fn refers_to(argument: SuiArgument, value: SuiArgument) -> bool {
     }
 }
 
-/// The value at output `slot` of command `producer`.
 pub(super) fn output(producer: usize, slot: u16) -> Result<SuiArgument, VisualSignError> {
     u16::try_from(producer)
         .map(|producer| SuiArgument::NestedResult(producer, slot))
         .map_err(|_| missing(format!("Command index {producer} is out of range")))
 }
 
-/// Resolves `argument` to the earlier command that produced it. A reference to
-/// the consumer itself or a later command is malformed and rejected.
+/// A reference to the consumer itself or a later command is rejected.
 pub(super) fn producing_command<'a>(
     context: &'a VisualizerContext,
     consumer: usize,
@@ -136,36 +129,39 @@ pub(super) fn producing_command<'a>(
         .ok_or_else(|| missing(format!("`{name}` refers to missing command {index}")))
 }
 
-/// The one command after `producer` that uses `value`. A value used twice, or
-/// never, is rejected: the preview could not say where it ends up.
+pub(super) fn uses_after<'a>(
+    context: &'a VisualizerContext,
+    after: usize,
+    value: SuiArgument,
+) -> Vec<(usize, &'a SuiCommand)> {
+    context
+        .commands()
+        .iter()
+        .enumerate()
+        .skip(after + 1)
+        .filter(|(_, command)| {
+            command_arguments(command)
+                .into_iter()
+                .any(|argument| refers_to(argument, value))
+        })
+        .collect()
+}
+
 pub(super) fn only_consumer<'a>(
     context: &'a VisualizerContext,
     producer: usize,
     value: SuiArgument,
     name: &str,
 ) -> Result<(usize, &'a SuiCommand), VisualSignError> {
-    let mut consumers = context
-        .commands()
-        .iter()
-        .enumerate()
-        .skip(producer + 1)
-        .filter(|(_, command)| {
-            command_arguments(command)
-                .into_iter()
-                .any(|argument| refers_to(argument, value))
-        });
-    match (consumers.next(), consumers.next()) {
-        (Some(consumer), None) => Ok(consumer),
+    match uses_after(context, producer, value).as_slice() {
+        [consumer] => Ok(*consumer),
         _ => Err(missing(format!(
             "The {name} from command {producer} must be used by exactly one later command"
         ))),
     }
 }
 
-/// Any command can take a pure input or a result by `&mut` and hand a rewritten
-/// value to later commands, so a decoded value is only what executes when no
-/// command before its consumer may have modified it. A use after the consumer
-/// cannot change what the consumer already received.
+/// A decoded value is what executes only if no earlier command could take it by `&mut`.
 pub(super) fn ensure_unmodified_before(
     context: &VisualizerContext,
     value: SuiArgument,
@@ -190,10 +186,7 @@ pub(super) fn ensure_unmodified_before(
     }
 }
 
-/// `SplitCoins` amounts, `MakeMoveVec` elements and the objects and recipient
-/// of `TransferObjects` are taken by value. The parser cannot see third-party
-/// Move signatures, so every other command argument, including those of any
-/// call `takes_by_value` does not vouch for, may be `&mut`.
+/// Third-party Move signatures aren't visible, so any call `takes_by_value` doesn't vouch for may take `&mut`.
 fn possibly_mutable_arguments(
     command: &SuiCommand,
     takes_by_value: &impl Fn(&SuiProgrammableMoveCall) -> bool,
