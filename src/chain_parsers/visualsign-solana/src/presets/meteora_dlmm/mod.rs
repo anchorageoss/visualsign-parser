@@ -11,9 +11,7 @@ use crate::core::{
     VisualizerKind,
 };
 use config::MeteoraDlmmConfig;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData, decode_idl_data};
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -52,8 +50,9 @@ impl InstructionVisualizer for MeteoraDlmmVisualizer {
         let idl = get_meteora_dlmm_idl()
             .ok_or_else(|| VisualSignError::DecodeError("Meteora DLMM IDL not available".into()))?;
 
-        let parsed = parse_instruction_with_idl(data, METEORA_DLMM_PROGRAM_ID, idl)
-            .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
+        let parsed =
+            crate::idl::compiled_in::parse_preset_instruction(data, METEORA_DLMM_PROGRAM_ID, idl)
+                .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
 
         let named_accounts = build_named_accounts(idl, data, &view.accounts);
 
@@ -206,6 +205,7 @@ fn format_arg_value(value: &serde_json::Value) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use solana_parser::parse_instruction_with_idl;
     use std::collections::BTreeMap;
 
     #[test]

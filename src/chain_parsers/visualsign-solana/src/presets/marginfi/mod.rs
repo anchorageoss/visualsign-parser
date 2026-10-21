@@ -7,9 +7,7 @@ use crate::core::{
     VisualizerKind, format_arg_value,
 };
 use config::MarginfiConfig;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData, decode_idl_data};
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use visualsign::errors::VisualSignError;
@@ -108,7 +106,7 @@ fn parse_marginfi_instruction(
     }
 
     let idl = get_marginfi_idl().ok_or("Marginfi IDL not available")?;
-    let parsed = parse_instruction_with_idl(data, MARGINFI_PROGRAM_ID, idl)?;
+    let parsed = crate::idl::compiled_in::parse_preset_instruction(data, MARGINFI_PROGRAM_ID, idl)?;
 
     let (named_accounts, extra_accounts) = build_named_accounts(data, idl, accounts);
 

@@ -4,6 +4,7 @@
 //! with the solana_parser library for instruction decoding.
 
 pub mod builtin_programs;
+pub(crate) mod compiled_in;
 pub mod signature;
 
 use crate::idl::builtin_programs::{canonical_name, is_trusted_program};

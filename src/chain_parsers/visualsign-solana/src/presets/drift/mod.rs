@@ -6,9 +6,7 @@ use crate::core::{
     InstructionVisualizer, SolanaIntegrationConfig, VisualizerContext, VisualizerKind,
 };
 use config::DriftConfig;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData, decode_idl_data};
 use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
@@ -98,7 +96,7 @@ fn parse_drift_instruction(
     }
 
     let idl = get_drift_idl().ok_or("Drift IDL not available")?;
-    let parsed = parse_instruction_with_idl(data, DRIFT_PROGRAM_ID, idl)?;
+    let parsed = crate::idl::compiled_in::parse_preset_instruction(data, DRIFT_PROGRAM_ID, idl)?;
 
     let named_accounts = build_named_accounts(data, idl, accounts);
 
