@@ -41,6 +41,22 @@ fn format_dyn_sol_value(value: &DynSolValue) -> String {
             format!("({})", formatted.join(", "))
         }
         DynSolValue::Function(func) => format!("0x{}", hex::encode(func.0)),
+        // EIP-712 struct: render like a tuple, with field names where known.
+        DynSolValue::CustomStruct {
+            name,
+            prop_names,
+            tuple,
+        } => {
+            let formatted: Vec<String> = tuple
+                .iter()
+                .enumerate()
+                .map(|(i, v)| match prop_names.get(i) {
+                    Some(prop) => format!("{prop}: {}", format_dyn_sol_value(v)),
+                    None => format_dyn_sol_value(v),
+                })
+                .collect();
+            format!("{name}({})", formatted.join(", "))
+        }
     }
 }
 
@@ -332,5 +348,30 @@ mod tests {
         let labels: Vec<&str> = fields.iter().map(|(l, _)| l.as_str()).collect();
         assert_eq!(labels, ["commands", "inputs", "deadline"]);
         assert_eq!(fields[2].1, "1791295820");
+    }
+
+    #[test]
+    fn formats_custom_struct_with_field_names() {
+        let value = DynSolValue::CustomStruct {
+            name: "Person".to_string(),
+            prop_names: vec!["name".to_string(), "age".to_string()],
+            tuple: vec![
+                DynSolValue::String("Cow".to_string()),
+                DynSolValue::Uint(U256::from(7u8), 8),
+            ],
+        };
+        assert_eq!(format_dyn_sol_value(&value), "Person(name: Cow, age: 7)");
+
+        // Nested in an array, and a struct with more values than names: every
+        // value is still shown.
+        let nested = DynSolValue::Array(vec![DynSolValue::CustomStruct {
+            name: "P".to_string(),
+            prop_names: vec!["x".to_string()],
+            tuple: vec![
+                DynSolValue::Bool(true),
+                DynSolValue::Uint(U256::from(2u8), 8),
+            ],
+        }]);
+        assert_eq!(format_dyn_sol_value(&nested), "[P(x: true, 2)]");
     }
 }
