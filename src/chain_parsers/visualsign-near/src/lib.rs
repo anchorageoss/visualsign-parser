@@ -10,6 +10,7 @@ pub mod convert;
 pub mod fmt;
 pub mod networks;
 pub mod presets;
+pub mod primitives;
 pub mod tx;
 
 #[cfg(feature = "cli-plugin")]
