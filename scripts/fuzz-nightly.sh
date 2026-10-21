@@ -5,8 +5,8 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 FUZZ_DIR=src/chain_parsers/visualsign-solana/fuzz
-PIN_FILES=(.github/workflows/fuzz-solana.yml "$FUZZ_DIR/rust-toolchain.toml")
-current() { sed -n 's/^channel = "\(nightly-[0-9-]*\)"/\1/p' "$FUZZ_DIR/rust-toolchain.toml"; }
+PIN_FILE=$FUZZ_DIR/rust-toolchain.toml
+current() { sed -n 's/^channel = "\(nightly-[0-9-]*\)"/\1/p' "$PIN_FILE"; }
 
 check_needed() {
     local out
@@ -22,19 +22,41 @@ check_needed() {
     return 1
 }
 
+# Build and briefly fuzz every target on one nightly; nonzero if any step fails.
+validate() {
+    local nightly=$1 targets t
+    (
+        cd "$FUZZ_DIR" || exit 1
+        cargo "+$nightly" fuzz build || exit 1
+        targets=$(cargo "+$nightly" fuzz list) || exit 1
+        for t in $targets; do
+            cargo "+$nightly" fuzz run "$t" -- -max_total_time=20 || exit 1
+        done
+    )
+}
+
 bump() {
-    local cur new="" candidate back
+    local cur candidate back tried=0
     cur=$(current)
+    # Newest first; the pin moves only to a nightly that passed validate, so a rerun
+    # never finds an unvalidated pin already in place.
     for back in 0 1 2 3 4 5 6; do
         candidate="nightly-$(date -u -d "$back days ago" +%F)"
-        if rustup toolchain install "$candidate" --profile minimal >/dev/null 2>&1; then new=$candidate; break; fi
+        [[ $candidate > $cur ]] || break
+        rustup toolchain install "$candidate" --profile minimal >/dev/null 2>&1 || continue
+        tried=$((tried + 1))
+        if validate "$candidate"; then
+            sed -i "s/$cur/$candidate/" "$PIN_FILE"
+            echo "bumped $cur -> $candidate"
+            return 0
+        fi
+        echo "warning: $candidate did not build or fuzz cleanly; trying an older nightly" >&2
     done
-    [[ -n $new ]] || { echo "error: no nightly installable from the last week" >&2; return 1; }
-    [[ $new > $cur ]] || { echo "already on $cur"; return 0; }
-    sed -i "s/$cur/$new/" "${PIN_FILES[@]}"
-    (cd "$FUZZ_DIR" && cargo "+$new" fuzz build \
-        && for t in $(cargo "+$new" fuzz list); do cargo "+$new" fuzz run "$t" -- -max_total_time=20; done)
-    echo "bumped $cur -> $new"
+    if ((tried > 0)); then
+        echo "error: no nightly newer than $cur built and fuzzed cleanly" >&2
+        return 1
+    fi
+    echo "already on $cur"
 }
 
 case "${1:-}" in
