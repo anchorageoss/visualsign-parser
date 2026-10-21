@@ -23,7 +23,7 @@
 - Rust: workspace lints deny `unwrap_used`/`expect_used`/`panic`, forbid `unsafe`; test modules add `#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`. Use inline format strings. Place `use` at the top of the module/test module. Every Rust task ends green on `cargo clippy --all-targets -- -D warnings` and `cargo fmt`.
 - ASCII only in helper/script output (`>=` not `≥`, `->` not `→`).
 - Go: `gofmt`, `go vet ./...`, `go test ./...` all clean.
-- CI separation of duties: Release and Promote workflows carry only the Turnkey API key (`TVC_ORG_ID`/`TVC_API_KEY_PUBLIC`/`TVC_API_KEY_PRIVATE`). The operator/quorum seed is NEVER referenced in a workflow.
+- CI separation of duties: TVC Release and Promote workflows carry only the Turnkey API key (`TVC_ORG_ID`/`TVC_API_KEY_PUBLIC`/`TVC_API_KEY_PRIVATE`). The operator/quorum seed is NEVER referenced in a workflow.
 - `tvc` CLI pinned `--version 0.7.0 --locked` in all workflows.
 - Smoke exit codes unchanged: 0 = pass/skip, 1 = up-but-failed, 2 = harness could not run the client.
 - Prod placeholder values in workflows use `vars.TVC_PROD_*` / `secrets.TVC_PROD_*`; do not hardcode prod ids.
@@ -771,14 +771,14 @@ git commit -m "ci(tools): rename TVC Deploy -> TVC Deploy (Dev)
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
 
-### Task 8: Release workflow (prod, initiate-only)
+### Task 8: TVC Release workflow (prod, initiate-only)
 
-**Files:** Create `.github/workflows/release.yml`
+**Files:** Create `.github/workflows/tvc-release.yml`
 
 - [ ] **Step 1: Create the workflow**
 
 ```yaml
-name: Release
+name: TVC Release
 # Manually-triggered PROD deploy INITIATE: digest gate + tvc deploy create.
 # Holds only the Turnkey API key; a human operator approves out-of-band.
 on:
@@ -876,9 +876,9 @@ jobs:
 - [ ] **Step 2: Validate YAML + commit**
 
 ```bash
-python3 -c "import yaml;yaml.safe_load(open('.github/workflows/release.yml'));print('ok')"
-git add .github/workflows/release.yml
-git commit -m "ci(tools): Release workflow (prod initiate-only)
+python3 -c "import yaml;yaml.safe_load(open('.github/workflows/tvc-release.yml'));print('ok')"
+git add .github/workflows/tvc-release.yml
+git commit -m "ci(tools): TVC Release workflow (prod initiate-only)
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
@@ -897,7 +897,7 @@ on:
   workflow_dispatch:
     inputs:
       app_id: { description: "Prod TVC app id", required: true }
-      deploy_id: { description: "Approved deployment id from the Release run", required: true }
+      deploy_id: { description: "Approved deployment id from the TVC Release run", required: true }
       expected_digest: { description: "Pivot binary sha256 deployed (pins the smoke)", required: true }
       turnkey_client_version: { description: "turnkey-client image tag", required: false, default: "latest" }
 concurrency:

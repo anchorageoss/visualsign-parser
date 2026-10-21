@@ -84,13 +84,13 @@ The existing `verify` flags do **not** pin this: `--qos-manifest-hex` / `--pivot
 ## Component 4 — workflows (`.github/workflows`)
 
 - **TVC Deploy (Dev)** — existing `tvc-deploy.yml`, renamed (name, and filename to `tvc-deploy-dev.yml`). Behavior unchanged; auto-drives dev via the composed `deploy`.
-- **Release** (`release.yml`, prod, `workflow_dispatch`) — inputs: `app_id`, `image_url`, `expected_digest`, `qos_version`, `host_ip`, `host_port`. Steps: install `tvc` (pinned), build helper, run `tvc-deploy initiate …`, surface the deploy ID in the job summary. Auth: prod `TVC_ORG_ID` / `TVC_API_KEY_*` only — **no operator seed**.
+- **TVC Release** (`tvc-release.yml`, prod, `workflow_dispatch`) — inputs: `app_id`, `image_url`, `expected_digest`, `qos_version`, `host_ip`, `host_port`. Steps: install `tvc` (pinned), build helper, run `tvc-deploy initiate …`, surface the deploy ID in the job summary. Auth: prod `TVC_ORG_ID` / `TVC_API_KEY_*` only — **no operator seed**.
 - **Promote** (`promote.yml`, prod, `workflow_dispatch`) — inputs: `app_id`, `deploy_id`, `expected_digest`, `turnkey_client_version`. Steps: `tvc-deploy promote …`, then `smoke.sh --canonical --expected-pivot-hash <expected_digest> …` against the prod endpoint. Auth: prod API key only. Concurrency-guarded so two promotes can't race.
 - **Operator approval** (out-of-band, runbook-documented) — operator pulls the **prod** operator seed from 1Password (its own item, distinct from `Turnkey VSP Dev Deployment Operator Key`), confirms the deploy ID from the Release run, and runs `tvc-deploy approve …` (re-verifies the digest, then signs).
 
 ## Separation of duties / secrets
 
-- CI (Release + Promote) holds the prod Turnkey **API key** — can create / status / set-live, **cannot** approve a manifest.
+- CI (TVC Release + Promote) holds the prod Turnkey **API key** — can create / status / set-live, **cannot** approve a manifest.
 - The **quorum/operator key** never enters CI; it lives in 1Password and is used only by the human approver on their machine.
 
 ## Error handling & idempotency
