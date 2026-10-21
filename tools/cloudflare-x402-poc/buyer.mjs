@@ -2,9 +2,11 @@
 //
 // Reuses the #304 buyer flow (@x402/evm exact client). The wallet key is read
 // from disk and never printed. A request/response transcript (no key
-// material) is written to TRANSCRIPT.
+// material) is written to TRANSCRIPT, mode 0600, with the PAYMENT-SIGNATURE
+// header redacted: it is a live EIP-3009 authorization until settled or
+// expired.
 
-import { readFile, writeFile } from "node:fs/promises";
+import { chmod, readFile, writeFile } from "node:fs/promises";
 import { createPublicClient, http, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia } from "viem/chains";
@@ -24,12 +26,18 @@ const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 
 const transcript = [];
 
+function redactHeaders(headers = {}) {
+  return Object.fromEntries(
+    Object.entries(headers).map(([k, v]) => [k, k.toLowerCase() === "payment-signature" ? "<redacted>" : v]),
+  );
+}
+
 async function call(label, url, init) {
   const res = await fetch(url, init);
   const text = await res.text();
   transcript.push({
     label,
-    request: { method: init.method, url, headers: init.headers, body: init.body },
+    request: { method: init.method, url, headers: redactHeaders(init.headers), body: init.body },
     response: {
       status: res.status,
       headers: Object.fromEntries(res.headers.entries()),
@@ -93,6 +101,8 @@ if (receipt) {
   if (decoded.transaction) console.log("explorer     :", `https://sepolia.basescan.org/tx/${decoded.transaction}`);
 }
 
-await writeFile(TRANSCRIPT, JSON.stringify(transcript, null, 2));
+await writeFile(TRANSCRIPT, JSON.stringify(transcript, null, 2), { mode: 0o600 });
+// `mode` only applies when the file is created; tighten an existing one too.
+await chmod(TRANSCRIPT, 0o600);
 console.log("transcript   :", TRANSCRIPT);
 process.exit(second.res.status === 200 ? 0 : 1);

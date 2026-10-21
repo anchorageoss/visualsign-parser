@@ -158,3 +158,94 @@ test("marker mode refuses a body it cannot bind before calling the facilitator",
   assert.equal(res.status, 400);
   assert.equal(calls.length, 0);
 });
+
+test("oversized declared body -> 413 before the facilitator is called", async () => {
+  const calls = mockFacilitator();
+  const res = await worker.fetch(
+    new Request("https://w.example/visualsign/api/v2/parse", {
+      method: "POST",
+      headers: { "PAYMENT-SIGNATURE": sigHeader(), "content-length": String(2 * 1024 * 1024) },
+      body: "{}",
+    }),
+    env,
+  );
+  assert.equal(res.status, 413);
+  assert.equal(calls.length, 0);
+});
+
+test("oversized streamed body -> 413, stream cancelled", async () => {
+  const calls = mockFacilitator();
+  let pulled = 0;
+  let cancelled = false;
+  const chunk = new Uint8Array(256 * 1024);
+  const body = new ReadableStream({
+    pull(controller) {
+      pulled += 1;
+      controller.enqueue(chunk);
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const res = await worker.fetch(
+    new Request("https://w.example/visualsign/api/v2/parse", {
+      method: "POST",
+      headers: { "PAYMENT-SIGNATURE": sigHeader() },
+      body,
+      duplex: "half",
+    }),
+    env,
+  );
+  assert.equal(res.status, 413);
+  assert.ok(cancelled);
+  assert.ok(pulled <= 6, `read ${pulled} chunks`);
+  assert.equal(calls.length, 0);
+});
+
+function mockUnreachable(stage) {
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    calls.push(u);
+    if (u.endsWith(`/${stage}`)) throw new DOMException("timed out", "TimeoutError");
+    if (u.endsWith("/verify")) return new Response(JSON.stringify({ isValid: true }));
+    if (u.endsWith("/settle")) return new Response(JSON.stringify({ success: true, transaction: "0xabc" }));
+    return new Response("{}", { status: 200 });
+  };
+  return calls;
+}
+
+test("verify timeout -> 503, no settle", async () => {
+  const calls = mockUnreachable("verify");
+  const res = await worker.fetch(req({ "PAYMENT-SIGNATURE": sigHeader() }), env);
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).reason, "timeout");
+  assert.ok(!calls.some((c) => c.endsWith("/settle")));
+});
+
+test("settle timeout -> 502 with settlement outcome unknown", async () => {
+  mockUnreachable("settle");
+  const res = await worker.fetch(req({ "PAYMENT-SIGNATURE": sigHeader() }), env);
+  assert.equal(res.status, 502);
+  assert.equal((await res.json()).settlement, "unknown");
+});
+
+test("marker mode: settle timeout -> 502 unknown, backend not called", async () => {
+  const calls = mockUnreachable("settle");
+  const res = await worker.fetch(paidReq(), await markerEnv());
+  assert.equal(res.status, 502);
+  assert.equal((await res.json()).settlement, "unknown");
+  assert.ok(!calls.some((c) => c.includes("backend.example")));
+});
+
+test("marker mode: unreachable backend after settlement still returns the receipt", async () => {
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.endsWith("/verify")) return new Response(JSON.stringify({ isValid: true }));
+    if (u.endsWith("/settle")) return new Response(JSON.stringify({ success: true, transaction: "0xabc", payer: "0xp" }));
+    throw new TypeError("fetch failed");
+  };
+  const res = await worker.fetch(paidReq(), await markerEnv());
+  assert.equal(res.status, 502);
+  assert.ok(res.headers.get("PAYMENT-RESPONSE"));
+});

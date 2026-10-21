@@ -79,20 +79,81 @@ function acceptedMatches(accepted, want) {
   );
 }
 
+// A transport failure (DNS, connect, timeout) returns `unreachable` set and
+// status 0 instead of throwing, so callers can tell "the facilitator said no"
+// from "we never got an answer".
 async function facilitator(env, path, body) {
   const base = env.FACILITATOR_URL ?? "https://x402.org/facilitator";
-  const res = await fetch(`${base}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(FACILITATOR_TIMEOUT_MS),
-  });
-  const text = await res.text();
+  let res;
+  let text;
+  try {
+    res = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(FACILITATOR_TIMEOUT_MS),
+    });
+    text = await res.text();
+  } catch (e) {
+    return { status: 0, unreachable: e?.name === "TimeoutError" ? "timeout" : "unreachable", body: {} };
+  }
   try {
     return { status: res.status, body: JSON.parse(text) };
   } catch {
     return { status: res.status, body: { raw: text.slice(0, 200) } };
   }
+}
+
+// Settlement either failed (the facilitator answered no) or its outcome is
+// unknown (no answer). An unknown settle may still land on-chain. Retrying
+// with the same PAYMENT-SIGNATURE cannot charge twice: the requirements set no
+// `assetTransferMethod`, so @x402/evm pays with EIP-3009
+// transferWithAuthorization, and USDC marks the authorization nonce used; a
+// replay is refused (`invalid_exact_evm_nonce_already_used`) instead of
+// settling again. The buyer resolves an unknown outcome by reading
+// `authorizationState(payer, nonce)` on the USDC contract.
+function settleError(settle, headers = {}) {
+  if (settle.unreachable) {
+    return json(
+      502,
+      { error: "settlement outcome unknown", settlement: "unknown", reason: settle.unreachable },
+      headers,
+    );
+  }
+  return json(
+    502,
+    { error: "settlement failed", settlement: "failed", reason: settle.body.errorReason ?? settle.status },
+    headers,
+  );
+}
+
+// Reads at most `max` bytes of the body, cancelling the stream once the limit
+// is crossed, so an oversized body is never buffered whole. Returns null when
+// the body is too large.
+async function readBodyCapped(request, max) {
+  const declared = Number(request.headers.get("content-length"));
+  if (declared > max) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
 }
 
 // The fields the marker binds. chain_metadata is unsupported (see marker.js).
@@ -121,11 +182,16 @@ async function runParse(env, request, bodyText, marker) {
   if (marker) headers["x-payment-marker"] = marker;
   // The backend's own v2 route is x402-gated; the Worker is the paywall, so it
   // calls the open v1 route (protect the backend with a bearer token).
-  return fetch(`${env.PARSER_BACKEND_URL}${BACKEND_PATH}`, {
-    method: "POST",
-    headers,
-    body: bodyText,
-  });
+  try {
+    return await fetch(`${env.PARSER_BACKEND_URL}${BACKEND_PATH}`, {
+      method: "POST",
+      headers,
+      body: bodyText,
+    });
+  } catch {
+    // Unreachable backend: treated like a 5xx (no settle, or receipt returned).
+    return new Response(null, { status: 502 });
+  }
 }
 
 async function handleParse(request, env) {
@@ -147,8 +213,8 @@ async function handleParse(request, env) {
     return paymentRequired(env, resourceUrl, "payment does not match requirements");
   }
 
-  const bodyText = await request.text();
-  if (enc.encode(bodyText).length > MAX_BODY_BYTES) {
+  const bodyText = await readBodyCapped(request, MAX_BODY_BYTES);
+  if (bodyText === null) {
     return json(413, { error: "body too large" });
   }
 
@@ -161,6 +227,10 @@ async function handleParse(request, env) {
   const fbody = { x402Version: 2, paymentPayload: payload, paymentRequirements: want };
 
   const verify = await facilitator(env, "/verify", fbody);
+  if (verify.unreachable) {
+    // Nothing verified, nothing settled: safe for the buyer to retry.
+    return json(503, { error: "facilitator unavailable", stage: "verify", reason: verify.unreachable });
+  }
   if (verify.status !== 200 || verify.body.isValid !== true) {
     return paymentRequired(env, resourceUrl, `verify failed: ${verify.body.invalidReason ?? verify.status}`);
   }
@@ -172,18 +242,14 @@ async function handleParse(request, env) {
       return json(502, { error: "backend failed; payment not settled", backendStatus: upstream.status });
     }
     const settle = await facilitator(env, "/settle", fbody);
-    if (settle.status !== 200 || settle.body.success !== true) {
-      return json(502, { error: "settlement failed", reason: settle.body.errorReason ?? settle.status });
-    }
+    if (settle.status !== 200 || settle.body.success !== true) return settleError(settle);
     const out = new Response(upstream.body, upstream);
     out.headers.set("PAYMENT-RESPONSE", b64json(settle.body));
     return out;
   }
 
   const settle = await facilitator(env, "/settle", fbody);
-  if (settle.status !== 200 || settle.body.success !== true) {
-    return json(502, { error: "settlement failed", reason: settle.body.errorReason ?? settle.status });
-  }
+  if (settle.status !== 200 || settle.body.success !== true) return settleError(settle);
   const receipt = b64json(settle.body);
   const marker = await signMarker(env.MARKER_SIGNING_JWK, {
     requestHash: await requestHash(mreq.chain, mreq.unsignedPayload, mreq.includeIntermediate),
