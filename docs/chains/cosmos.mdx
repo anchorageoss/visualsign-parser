@@ -1,0 +1,56 @@
+---
+title: Cosmos
+description: Cosmos SDK sign docs in direct (protobuf) and Amino JSON modes
+---
+
+The Cosmos module decodes the bytes a Cosmos SDK signer is asked to sign and renders them as a VisualSign payload. It works for any Cosmos SDK chain; the chain is identified by the `chain_id` inside the sign doc, so there is no network flag or chain metadata.
+
+## Architecture overview
+
+### Transaction model
+- **Input is the sign doc, not the broadcast transaction.** The signer approves the exact bytes it signs, so those are what is decoded.
+- **`SIGN_MODE_DIRECT`**: the protobuf `SignDoc { body_bytes, auth_info_bytes, chain_id, account_number }`, as hex (optional `0x` prefix) or base64. A broadcast `TxRaw` is not a `SignDoc` and is rejected.
+- **`SIGN_MODE_LEGACY_AMINO_JSON`**: the `StdSignDoc` JSON exactly as signed (keys sorted, no whitespace, Go string escaping). Input that is not byte-identical to that canonical form is rejected, so the document shown is the document signed.
+- **Fail closed**: in direct mode each layer (`SignDoc`, `TxBody`, `AuthInfo`) must re-encode to exactly its input bytes. A layer with fields the parser does not model is refused. Inside a message, an unmodelled field is reported as `Undecoded Fields`.
+
+### Dependencies
+The protobuf messages are hand-written `prost` structs. The crate does not depend on `cosmrs` or the Cosmos SDK protos.
+
+## Supported messages
+
+| Message | Direct type URL | Amino type | Fields surfaced |
+|---|---|---|---|
+| Bank send | `/cosmos.bank.v1beta1.MsgSend` | `cosmos-sdk/MsgSend` | From, To, Amount |
+| Delegate / Undelegate | `/cosmos.staking.v1beta1.MsgDelegate`, `MsgUndelegate` | `cosmos-sdk/MsgDelegate`, `MsgUndelegate` | Delegator, Validator, Amount |
+| Redelegate | `/cosmos.staking.v1beta1.MsgBeginRedelegate` | `cosmos-sdk/MsgBeginRedelegate` | Delegator, From Validator, To Validator, Amount |
+| Withdraw rewards | `/cosmos.distribution.v1beta1.MsgWithdrawDelegatorReward` | `cosmos-sdk/MsgWithdrawDelegationReward` | Delegator, Validator |
+| Gov vote | `/cosmos.gov.v1beta1.MsgVote`, `/cosmos.gov.v1.MsgVote` | `cosmos-sdk/MsgVote`, `cosmos-sdk/v1/MsgVote` | Proposal, Voter, Option, Metadata |
+| Authz exec | `/cosmos.authz.v1beta1.MsgExec` | `cosmos-sdk/MsgExec` | Grantee and each inner message |
+| IBC transfer | `/ibc.applications.transfer.v1.MsgTransfer` | `cosmos-sdk/MsgTransfer` | Sender, Receiver, Amount, Channel, timeouts, Memo |
+| Wasm execute | `/cosmwasm.wasm.v1.MsgExecuteContract` | `wasm/MsgExecuteContract` | Sender, Contract, contract-defined JSON message, Funds |
+
+Authz `MsgExec` is decoded recursively up to three levels deep; deeper nesting is refused. Any other message renders as `Type: <type_url> (not fully decoded)` plus its raw `Value`.
+
+Each sign doc also shows `Chain ID`, `Account Number`, `Memo`, timeouts, `Fee`, `Gas Limit`, fee payer and granter, and for every signer the public key, sign mode and sequence. Public keys are recognised for secp256k1, ML-DSA-65 (`/cosmos.crypto.mldsa65.PubKey`, shown as its length and SHA-256), and legacy Amino multisig (threshold and members). Any other key type is shown by its type URL.
+
+## Visualization strategy
+
+- **Amounts stay in the base denomination** (`1000000 uatom`). Cosmos denoms carry no fixed decimals, and IBC denoms (`ibc/...`) cannot be resolved without chain state, so no conversion is guessed.
+- **Contract messages are shown, not explained.** The contract interprets its JSON message, so the parser shows it verbatim and labels it contract-defined.
+- **Unknown content is visible.** Unknown message types, extension options, key types and unrecognised Amino fields are shown rather than dropped.
+
+## Using parser_cli
+
+```bash
+cargo run --bin parser_cli -- decode \
+  --chain cosmos \
+  --output human \
+  -t 0a93010a90010a1c2f636f736d6f732e62616e6b2e763162657461312e4d736753656e6412700a2d636f736d6f7331706b707472653766646b6c366766727a6c65736a6a766878686c63337234676d6d6b38727336122d636f736d6f7331717970717870713971637273737a673270767871367273307a716733797963356c7a763778751a100a0575636f736d12073132333435363712650a4e0a460a1f2f636f736d6f732e63727970746f2e736563703235366b312e5075624b657912230a21034f04181eeba35391b858633a765c4a0c189697b40d216354d50890d350c7029012040a02080112130a0d0a0575636f736d12043230303010c09a0c1a0c73696d642d74657374696e672001
+```
+
+This is the CosmJS `proto-signing` test vector for a faucet `MsgSend`. For Amino JSON, pass the canonical JSON text as the `-t` value.
+
+## Implementation details
+
+Source code available at:
+- [Cosmos Parser](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-cosmos)

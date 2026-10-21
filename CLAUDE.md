@@ -48,7 +48,7 @@ Raw tx bytes → ChainPlugin (CLI) or gRPC request
 ### Workspace Layout (src/)
 
 - **`visualsign`** — Core library: `SignablePayload` types, field builders, `Transaction`/`VisualSignConverter` traits, `DeterministicOrdering` trait, error types
-- **`chain_parsers/visualsign-{ethereum,solana,sui,tron,unspecified}`** — Per-chain converter crates. Ethereum and Solana are feature-gated (both on by default)
+- **`chain_parsers/visualsign-{cosmos,ethereum,solana,sui,tron,unspecified}`** — Per-chain converter crates. Ethereum and Solana are feature-gated (both on by default)
 - **`parser/cli`** — CLI binary with `ChainPlugin` trait for per-chain args/metadata/registration
 - **`parser/app`** — Enclave/VM binary using vsock + protobuf IPC (links qos_* modules)
 - **`parser/grpc-server`** — tonic gRPC server wrapping parser_app

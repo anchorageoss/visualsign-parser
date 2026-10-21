@@ -7173,6 +7173,7 @@ dependencies = [
  "tokio",
  "tvc-attestation",
  "visualsign",
+ "visualsign-cosmos",
  "visualsign-ethereum",
  "visualsign-near",
  "visualsign-solana",
@@ -7197,6 +7198,7 @@ dependencies = [
  "tracing-log 0.2.0",
  "tracing-subscriber",
  "visualsign",
+ "visualsign-cosmos",
  "visualsign-ethereum",
  "visualsign-near",
  "visualsign-solana",
@@ -14920,6 +14922,21 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.17",
  "tracing",
+]
+
+[[package]]
+name = "visualsign-cosmos"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "clap",
+ "generated",
+ "hex",
+ "parser_cli_core",
+ "prost 0.12.6",
+ "serde_json",
+ "sha2 0.10.9",
+ "visualsign",
 ]
 
 [[package]]

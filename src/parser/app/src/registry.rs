@@ -46,6 +46,11 @@ pub fn create_registry(
         visualsign::registry::Chain::Near,
         visualsign_near::NearVisualSignConverter::new(),
     );
+    #[cfg(feature = "cosmos")]
+    registry.register::<visualsign_cosmos::CosmosTransaction, _>(
+        visualsign::registry::Chain::Cosmos,
+        visualsign_cosmos::CosmosVisualSignConverter,
+    );
     #[cfg(feature = "unspecified")]
     registry.register::<visualsign_unspecified::UnspecifiedTransactionWrapper, _>(
         visualsign::registry::Chain::Unspecified,

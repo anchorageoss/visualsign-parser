@@ -3,6 +3,11 @@
       - any-glob-to-any-file:
           - 'src/chain_parsers/visualsign-near/**'
 
+"chain:cosmos":
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/chain_parsers/visualsign-cosmos/**'
+
 "chain:solana":
   - changed-files:
       - any-glob-to-any-file:

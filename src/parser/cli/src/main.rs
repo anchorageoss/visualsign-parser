@@ -49,6 +49,10 @@ pub(crate) struct ChainArgs {
     #[cfg(feature = "tron")]
     #[command(flatten)]
     pub(crate) tron: visualsign_tron::TronArgs,
+
+    #[cfg(feature = "cosmos")]
+    #[command(flatten)]
+    pub(crate) cosmos: visualsign_cosmos::CosmosArgs,
 }
 
 impl ChainArgs {
@@ -71,6 +75,10 @@ impl ChainArgs {
         #[cfg(feature = "tron")]
         plugins.push(Box::new(visualsign_tron::TronPlugin::new(
             self.tron.clone(),
+        )));
+        #[cfg(feature = "cosmos")]
+        plugins.push(Box::new(visualsign_cosmos::CosmosPlugin::new(
+            self.cosmos.clone(),
         )));
         plugins
     }
