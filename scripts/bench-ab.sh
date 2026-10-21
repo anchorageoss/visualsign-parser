@@ -38,7 +38,7 @@ run_criterion() {
   local side=$1
   local args=(--save-baseline "$side" --noplot)
   [ -n "$filter" ] && args+=("$filter")
-  (cd "$root/src" && cargo bench --workspace --exclude parser_cli --benches -- "${args[@]}") \
+  (cd "$root/src" && cargo bench --workspace --exclude parser_cli --bench '*' -- "${args[@]}") \
     >"$out/criterion-$side.log" 2>&1
 }
 
