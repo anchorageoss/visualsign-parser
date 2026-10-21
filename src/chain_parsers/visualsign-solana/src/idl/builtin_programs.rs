@@ -277,110 +277,88 @@ pub fn is_reserved_canonical_name(name: &str) -> bool {
 
 /// The IDL-backed in-crate presets' Anchor IDL JSON, keyed by program ID
 /// included here so that decode path can use these idls.
-fn preset_idl_configs()
--> &'static std::collections::BTreeMap<String, solana_parser::CustomIdlConfig> {
-    use solana_parser::{CustomIdl, CustomIdlConfig};
-
-    static PRESET_IDL_CONFIGS: OnceLock<std::collections::BTreeMap<String, CustomIdlConfig>> =
-        OnceLock::new();
-    PRESET_IDL_CONFIGS.get_or_init(|| {
-        const ENTRIES: &[(&str, &str)] = &[
-            (
-                "DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH",
-                include_str!("../presets/dflow_aggregator/dflow_aggregator.json"),
-            ),
-            (
-                "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH",
-                include_str!("../presets/drift/drift.json"),
-            ),
-            (
-                "ExponentnaRg3CQbW6dqQNZKXp7gtZ9DGMp1cwC4HAS7",
-                include_str!("../presets/exponent_finance/exponent_finance.json"),
-            ),
-            (
-                "jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi",
-                include_str!("../presets/jupiter_borrow/jupiter_borrow.json"),
-            ),
-            (
-                "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9",
-                include_str!("../presets/jupiter_earn/jupiter_earn.json"),
-            ),
-            (
-                "PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu",
-                include_str!("../presets/jupiter_perps/jupiter_perps.json"),
-            ),
-            (
-                "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
-                include_str!("../presets/jupiter_swap/jupiter_agg_v6.json"),
-            ),
-            (
-                "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",
-                include_str!("../presets/kamino_borrow/kamino_borrow.json"),
-            ),
-            (
-                "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr",
-                include_str!("../presets/kamino_farms/kamino_farms.json"),
-            ),
-            (
-                "LiMoM9rMhrdYrfzUCxQppvxCSG1FcrUK9G8uLq4A1GF",
-                include_str!("../presets/kamino_limit/kamino_limit.json"),
-            ),
-            (
-                "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd",
-                include_str!("../presets/kamino_vault/kamino_vault.json"),
-            ),
-            (
-                "VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg",
-                include_str!("../presets/metadao_conditional_vault/metadao_conditional_vault.json"),
-            ),
-            (
-                "FUTARELBfJfQ8RDGhg1wdhddq1odMAJUePHFuBYfUxKq",
-                include_str!("../presets/metadao_futarchy/metadao_futarchy.json"),
-            ),
-            (
-                "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG",
-                include_str!("../presets/meteora_damm_v2/meteora_damm_v2.json"),
-            ),
-            (
-                "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
-                include_str!("../presets/meteora_dlmm/meteora_dlmm.json"),
-            ),
-            (
-                "BUNDDh4P5XviMm1f3gCvnq2qKx6TGosAGnoUK12e7cXU",
-                include_str!("../presets/neutral_trade/neutral_trade.json"),
-            ),
-            (
-                "onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe",
-                include_str!("../presets/onre_app/onre_app.json"),
-            ),
-            (
-                "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
-                include_str!("../presets/orca_whirlpool/orca_whirlpool.json"),
-            ),
-            (
-                "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf",
-                include_str!("../presets/squads_multisig/squads_multisig_program.json"),
-            ),
-        ];
-
-        ENTRIES
-            .iter()
-            .map(|(program_id, json)| {
-                (
-                    (*program_id).to_string(),
-                    CustomIdlConfig {
-                        idl: CustomIdl::Json((*json).to_string()),
-                        override_builtin: true,
-                    },
-                )
-            })
-            .collect()
-    })
-}
+const PRESET_IDL_JSONS: &[(&str, &str)] = &[
+    (
+        "DF1ow4tspfHX9JwWJsAb9epbkA8hmpSEAtxXy1V27QBH",
+        include_str!("../presets/dflow_aggregator/dflow_aggregator.json"),
+    ),
+    (
+        "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH",
+        include_str!("../presets/drift/drift.json"),
+    ),
+    (
+        "ExponentnaRg3CQbW6dqQNZKXp7gtZ9DGMp1cwC4HAS7",
+        include_str!("../presets/exponent_finance/exponent_finance.json"),
+    ),
+    (
+        "jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi",
+        include_str!("../presets/jupiter_borrow/jupiter_borrow.json"),
+    ),
+    (
+        "jup3YeL8QhtSx1e253b2FDvsMNC87fDrgQZivbrndc9",
+        include_str!("../presets/jupiter_earn/jupiter_earn.json"),
+    ),
+    (
+        "PERPHjGBqRHArX4DySjwM6UJHiR3sWAatqfdBS2qQJu",
+        include_str!("../presets/jupiter_perps/jupiter_perps.json"),
+    ),
+    (
+        "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+        include_str!("../presets/jupiter_swap/jupiter_agg_v6.json"),
+    ),
+    (
+        "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD",
+        include_str!("../presets/kamino_borrow/kamino_borrow.json"),
+    ),
+    (
+        "FarmsPZpWu9i7Kky8tPN37rs2TpmMrAZrC7S7vJa91Hr",
+        include_str!("../presets/kamino_farms/kamino_farms.json"),
+    ),
+    (
+        "LiMoM9rMhrdYrfzUCxQppvxCSG1FcrUK9G8uLq4A1GF",
+        include_str!("../presets/kamino_limit/kamino_limit.json"),
+    ),
+    (
+        "KvauGMspG5k6rtzrqqn7WNn3oZdyKqLKwK2XWQ8FLjd",
+        include_str!("../presets/kamino_vault/kamino_vault.json"),
+    ),
+    (
+        "VLTX1ishMBbcX3rdBWGssxawAo1Q2X2qxYFYqiGodVg",
+        include_str!("../presets/metadao_conditional_vault/metadao_conditional_vault.json"),
+    ),
+    (
+        "FUTARELBfJfQ8RDGhg1wdhddq1odMAJUePHFuBYfUxKq",
+        include_str!("../presets/metadao_futarchy/metadao_futarchy.json"),
+    ),
+    (
+        "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG",
+        include_str!("../presets/meteora_damm_v2/meteora_damm_v2.json"),
+    ),
+    (
+        "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+        include_str!("../presets/meteora_dlmm/meteora_dlmm.json"),
+    ),
+    (
+        "BUNDDh4P5XviMm1f3gCvnq2qKx6TGosAGnoUK12e7cXU",
+        include_str!("../presets/neutral_trade/neutral_trade.json"),
+    ),
+    (
+        "onreuGhHHgVzMWSkj2oQDLDtvvGvoepBPkqyaubFcwe",
+        include_str!("../presets/onre_app/onre_app.json"),
+    ),
+    (
+        "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+        include_str!("../presets/orca_whirlpool/orca_whirlpool.json"),
+    ),
+    (
+        "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf",
+        include_str!("../presets/squads_multisig/squads_multisig_program.json"),
+    ),
+];
 
 /// The presets' `IdlRecord`s, parsed and serialized once per process.
 ///
-/// [`preset_idl_configs`] holds raw JSON; turning it into records means a
+/// [`PRESET_IDL_JSONS`] holds raw JSON; turning it into records means a
 /// parse plus a re-serialize for the hash JSON on every entry. That cost is
 /// identical on every request -- the presets are compiled in and never vary --
 /// so it is paid once here instead of per request inside
@@ -396,12 +374,12 @@ pub fn preset_idl_records()
     static PRESET_IDL_RECORDS: OnceLock<std::collections::BTreeMap<String, IdlRecord>> =
         OnceLock::new();
     PRESET_IDL_RECORDS.get_or_init(|| {
-        preset_idl_configs()
+        // Built straight from the compiled-in JSON, so the process holds one
+        // heap copy of each IDL's JSON (in its record) rather than two.
+        PRESET_IDL_JSONS
             .iter()
-            .filter_map(|(program_id, config)| {
-                let solana_parser::CustomIdl::Json(json) = &config.idl else {
-                    return None;
-                };
+            .filter_map(|(program_id, json)| {
+                let program_id = (*program_id).to_string();
                 // A preset that fails to parse is dropped rather than fataled:
                 // it degrades to `Unregistered` at decode time, which is the
                 // same outcome as not shipping the IDL at all.
@@ -416,7 +394,7 @@ pub fn preset_idl_records()
                         ),
                         program_type: None,
                         custom_idl: Some(idl),
-                        custom_idl_json: Some(json.clone()),
+                        custom_idl_json: Some((*json).to_string()),
                         override_builtin: true,
                         is_preset: true,
                     },

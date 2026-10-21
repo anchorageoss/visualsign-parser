@@ -83,6 +83,10 @@ criterion = { version = "0.5", default-features = false, features = ["cargo_benc
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [[bench]]
+name = "idl_cache"
+harness = false
+
+[[bench]]
 name = "solana_stages"
 harness = false
 
