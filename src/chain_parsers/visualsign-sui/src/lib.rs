@@ -8,6 +8,10 @@
 
 mod core;
 mod integrations;
+/// Structured Sui decode emitted as the conversion's intermediate output.
+/// Published so consumers can `borsh::from_slice` into the same schema the
+/// parser produces.
+pub mod intermediate;
 mod presets;
 mod utils;
 

@@ -1,6 +1,8 @@
 //! Previews for calls into the [Hashi](https://github.com/MystenLabs/hashi) bridge.
-//! Hashi paths cited below are at its `testnet` branch,
-//! `7fad9d45309c1561fe6e4e78682d07b35076eca2`, which records its testnet deployment.
+//! Hashi paths cited below are at its `main` branch,
+//! `cb767e848644776a12c3334890ce6380be894898`, whose node operator runbook
+//! (`design/docs/node-operator-runbook.mdx`) records its testnet and mainnet
+//! deployments.
 
 mod config;
 
@@ -67,6 +69,9 @@ impl CommandVisualizer for HashiVisualizer {
                 WithdrawFunctions::RequestWithdrawal => {
                     Self::handle_request_withdrawal(context, pwc, deployment)
                 }
+                WithdrawFunctions::CancelWithdrawal => {
+                    Self::handle_cancel_withdrawal(context, pwc, deployment)
+                }
             },
         }
     }
@@ -84,6 +89,20 @@ impl CommandVisualizer for HashiVisualizer {
             return None;
         };
         let deployment = deployment_for(&pwc.package)?;
+        if pwc.module == "withdraw"
+            && matches!(
+                pwc.function.as_str().try_into(),
+                Ok(WithdrawFunctions::CancelWithdrawal)
+            )
+        {
+            return resolve_cancellation(context, pwc, deployment)
+                .ok()
+                .filter(|cancellation| is_only_this_cancellation(context, cancellation))
+                .and_then(|cancellation| {
+                    cancellation_preview(context, deployment, &cancellation).ok()
+                })
+                .map(|preview| preview.summary);
+        }
         if !only_funds_this_call(context, deployment) {
             return None;
         }
@@ -330,7 +349,193 @@ fn resolve_withdrawal(
     })
 }
 
+/// One cancelled withdrawal and where its refund goes, traced from the
+/// `Balance<BTC>` that `withdraw::cancel_withdrawal` returns. The refunded
+/// amount is the one stored in the request on chain; the transaction does not
+/// state it.
+struct Cancellation {
+    request_id: String,
+    refund_recipient: String,
+    /// The `coin::from_balance` and refund commands, in that order.
+    refund_commands: [usize; 2],
+}
+
+/// Follows the refund the way Hashi's builders send it: the balance into
+/// `coin::from_balance<BTC>`, then the coin to one recipient through
+/// `coin::send_funds<BTC>` or `TransferObjects`. Any other route is refused, so
+/// the preview never shows a recipient the refund might not reach.
+fn resolve_cancellation(
+    context: &VisualizerContext,
+    pwc: &SuiProgrammableMoveCall,
+    deployment: &HashiDeployment,
+) -> Result<Cancellation, VisualSignError> {
+    let cancel = context.command_index();
+    let request_argument = argument_at(&pwc.arguments, 1, "request_id")?;
+    ensure_unmodified_before(context, deployment, request_argument, cancel, "request_id")?;
+    let request_id = pure_address(input_at(context, request_argument, "request_id")?)?;
+
+    let hbtc = hbtc_coin_type(deployment)?;
+    let is_framework_call = |call: &SuiProgrammableMoveCall, function: &str| {
+        call.package == ObjectID::from_single_byte(2)
+            && call.module == "coin"
+            && call.function == function
+            && matches!(call.type_arguments.as_slice(), [coin_type] if coin_type_matches(coin_type, &hbtc))
+    };
+
+    let (from_balance, command) = only_consumer(context, cancel, "refund balance")?;
+    match command {
+        SuiCommand::MoveCall(call)
+            if is_framework_call(call, "from_balance")
+                && matches!(call.arguments.as_slice(), [balance] if refers_to(*balance, result_of(cancel)?)) => {}
+        _ => return Err(unsupported_refund()),
+    }
+
+    let (refund, command) = only_consumer(context, from_balance, "refund coin")?;
+    let coin = result_of(from_balance)?;
+    let recipient_argument = match command {
+        SuiCommand::MoveCall(call)
+            if is_framework_call(call, "send_funds")
+                && matches!(call.arguments.as_slice(), [sent, _] if refers_to(*sent, coin)) =>
+        {
+            call.arguments[1]
+        }
+        SuiCommand::TransferObjects(objects, recipient)
+            if matches!(objects.as_slice(), [sent] if refers_to(*sent, coin)) =>
+        {
+            *recipient
+        }
+        _ => return Err(unsupported_refund()),
+    };
+    ensure_unmodified_before(context, deployment, recipient_argument, refund, "recipient")?;
+    let refund_recipient = pure_address(input_at(context, recipient_argument, "recipient")?)?;
+
+    Ok(Cancellation {
+        request_id: request_id.to_string(),
+        refund_recipient: refund_recipient.to_string(),
+        refund_commands: [from_balance, refund],
+    })
+}
+
+fn unsupported_refund() -> VisualSignError {
+    VisualSignError::MissingData(
+        "Cancelled withdrawal is not refunded through 0x2::coin::from_balance and then 0x2::coin::send_funds or TransferObjects"
+            .into(),
+    )
+}
+
+fn result_of(command: usize) -> Result<SuiArgument, VisualSignError> {
+    u16::try_from(command)
+        .map(SuiArgument::Result)
+        .map_err(|_| VisualSignError::MissingData(format!("Command index {command} is out of range")))
+}
+
+/// The one later command that uses the result of `producer`. A balance or coin
+/// used twice, or not at all, cannot be followed to a single recipient.
+fn only_consumer<'a>(
+    context: &'a VisualizerContext,
+    producer: usize,
+    name: &str,
+) -> Result<(usize, &'a SuiCommand), VisualSignError> {
+    let value = result_of(producer)?;
+    let mut consumers = context
+        .commands()
+        .iter()
+        .enumerate()
+        .skip(producer + 1)
+        .filter(|(_, command)| {
+            command_arguments(command)
+                .into_iter()
+                .any(|argument| refers_to(argument, value))
+        });
+    match (consumers.next(), consumers.next()) {
+        (Some(consumer), None) => Ok(consumer),
+        _ => Err(VisualSignError::MissingData(format!(
+            "The {name} from command {producer} must be used by exactly one later command"
+        ))),
+    }
+}
+
+/// True when the transaction is this cancellation and nothing else.
+fn is_only_this_cancellation(context: &VisualizerContext, cancellation: &Cancellation) -> bool {
+    let [from_balance, refund] = cancellation.refund_commands;
+    (0..context.commands().len())
+        .all(|index| [context.command_index(), from_balance, refund].contains(&index))
+}
+
+/// An untyped `address` pure input, or one the RPC conversion typed as
+/// `address` (it types a `TransferObjects` recipient that way).
+fn pure_address(input: &SuiCallArg) -> Result<SuiAddress, VisualSignError> {
+    if let SuiCallArg::Pure(value) = input
+        && value.value_type() == Some(TypeTag::Address)
+    {
+        return match value.value().to_json_value() {
+            serde_json::Value::String(address) => address
+                .parse::<SuiAddress>()
+                .map_err(|e| VisualSignError::DecodeError(format!("Invalid address: {e}"))),
+            _ => Err(VisualSignError::DecodeError(
+                "Typed address input is not a string".into(),
+            )),
+        };
+    }
+    bcs::from_bytes::<SuiAddress>(&pure_bcs_bytes(input)?)
+        .map_err(|e| VisualSignError::DecodeError(format!("Invalid address: {e}")))
+}
+
+fn cancellation_title(deployment: &HashiDeployment) -> String {
+    format!(
+        "Cancel {HBTC_SYMBOL} withdrawal on {} via {HASHI_DISPLAY_NAME}",
+        deployment.sui_network.display_name()
+    )
+}
+
+/// The cancellation counterpart of [`withdrawal_preview`]. It names the request
+/// and where the refund goes; the refunded amount is not in the transaction.
+fn cancellation_preview(
+    context: &VisualizerContext,
+    deployment: &HashiDeployment,
+    cancellation: &Cancellation,
+) -> Result<BridgePreview, VisualSignError> {
+    Ok(BridgePreview {
+        summary: TransactionSummary {
+            title: cancellation_title(deployment),
+            subtitle: Some(format!(
+                "Refund {HBTC_SYMBOL} to {}",
+                cancellation.refund_recipient
+            )),
+        },
+        key_rows: vec![
+            create_text_field("Withdrawal Request", &cancellation.request_id)?,
+            create_address_field(
+                "Refund Recipient",
+                &cancellation.refund_recipient,
+                Some(recipient_name(context, &cancellation.refund_recipient)),
+                None,
+                None,
+                None,
+            )?,
+            create_text_field("Network", deployment.sui_network.display_name())?,
+        ],
+    })
+}
+
 impl HashiVisualizer {
+    fn handle_cancel_withdrawal(
+        context: &VisualizerContext,
+        pwc: &SuiProgrammableMoveCall,
+        deployment: &HashiDeployment,
+    ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+        let hashi_object = get_object_value(&pwc.arguments, context.inputs(), 0)?;
+        let cancellation = resolve_cancellation(context, pwc, deployment)?;
+        let details = std::iter::once(signer_field(context)?)
+            .chain(bridge_fields(&hashi_object, &pwc.package)?)
+            .collect();
+        Ok(vec![preview_field(
+            cancellation_preview(context, deployment, &cancellation)?,
+            "Hashi Withdrawal Cancellation",
+            details,
+        )])
+    }
+
     fn handle_deposit(
         context: &VisualizerContext,
         pwc: &SuiProgrammableMoveCall,
@@ -389,6 +594,17 @@ fn detail_fields(
     Ok(vec![
         create_amount_field("Amount (sats)", &amount_sats.to_string(), SATS_UNIT)?,
         create_text_field("Source Network", source_network)?,
+    ]
+    .into_iter()
+    .chain(bridge_fields(hashi_object, package)?)
+    .collect())
+}
+
+fn bridge_fields(
+    hashi_object: &ObjectID,
+    package: &ObjectID,
+) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    Ok(vec![
         // Move typing makes argument 0 of a configured package's call that package's
         // one shared `Hashi`, created in `init` (`packages/hashi/sources/hashi.move`).
         create_address_field(
@@ -720,9 +936,10 @@ fn ensure_unmodified_before(
     }
 }
 
-/// `SplitCoins` amounts and `MakeMoveVec` elements are taken by value. The parser
-/// cannot see third-party Move signatures, so every other command argument,
-/// including those of any call outside `is_read_only_call`, may be `&mut`.
+/// `SplitCoins` amounts, `MakeMoveVec` elements and the `TransferObjects`
+/// recipient are taken by value. The parser cannot see third-party Move
+/// signatures, so every other command argument, including those of any call
+/// outside `is_read_only_call`, may be `&mut`.
 fn possibly_mutable_arguments(
     command: &SuiCommand,
     deployment: &HashiDeployment,
@@ -730,22 +947,30 @@ fn possibly_mutable_arguments(
     match command {
         SuiCommand::SplitCoins(coin, _) => vec![*coin],
         SuiCommand::MakeMoveVec(_, _) => Vec::new(),
+        SuiCommand::TransferObjects(objects, _) => objects.clone(),
         SuiCommand::MoveCall(call) if is_read_only_call(call, deployment) => Vec::new(),
         other => command_arguments(other),
     }
 }
 
-/// `coin::value` and `balance::value` borrow immutably, and Hashi's
-/// `utxo::utxo_id` and `utxo::utxo` take every argument by value
-/// (`packages/hashi/sources/btc/utxo.move`).
+/// `coin::value` and `balance::value` borrow immutably. `coin::from_balance`
+/// and `coin::send_funds` take every argument by value, as do Hashi's
+/// `utxo::utxo_id` and `utxo::utxo` (`packages/hashi/sources/btc/utxo.move`), so
+/// none of these can rewrite a value a later command reads. The framework
+/// signatures are in `sui-framework`'s `coin.move` and `balance.move`
+/// (mainnet-v1.68.1).
 fn is_read_only_call(call: &SuiProgrammableMoveCall, deployment: &HashiDeployment) -> bool {
-    let framework_value = call.package == ObjectID::from_single_byte(2)
+    let framework = call.package == ObjectID::from_single_byte(2);
+    let framework_value = framework
         && matches!(call.module.as_str(), "coin" | "balance")
         && call.function == "value";
+    let framework_by_value = framework
+        && call.module == "coin"
+        && matches!(call.function.as_str(), "from_balance" | "send_funds");
     let hashi_constructor = deployment.owns_package(&call.package)
         && call.module == "utxo"
         && matches!(call.function.as_str(), "utxo_id" | "utxo");
-    framework_value || hashi_constructor
+    framework_value || framework_by_value || hashi_constructor
 }
 
 fn command_arguments(command: &SuiCommand) -> Vec<SuiArgument> {

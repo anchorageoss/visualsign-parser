@@ -1039,9 +1039,18 @@ mod tests {
             1,
             "static decode is unaffected by the simulation result"
         );
+        let mapped = decoded.instructions[0]
+            .parsed_instruction_data
+            .as_ref()
+            .expect("top-level System transfer is decoded natively");
+        assert_eq!(mapped.discriminator, "02000000");
+        let args: serde_json::Value =
+            serde_json::from_str(&mapped.program_call_args_json).expect("args are JSON");
+        assert_eq!(args["lamports"], 1_000_000_000u64);
+        assert_eq!(args["source"], mapped.named_accounts["source"]);
         assert!(
-            decoded.instructions[0].parsed_instruction_data.is_none(),
-            "top-level System transfer has no IDL match"
+            mapped.idl_source.is_empty(),
+            "no IDL: built from the jsonParsed decode"
         );
         let native = decoded.instructions[0]
             .solana_json_parsed_data
@@ -1070,11 +1079,28 @@ mod tests {
             RegisteredSource::Native,
             "System Program call is trusted even though it has no IDL entry to match"
         );
+        assert!(
+            decoded.simulated_instructions[0]
+                .parsed_instruction_data
+                .is_none()
+        );
+        assert_eq!(
+            decoded.simulated_instructions[0]
+                .solana_json_parse_error
+                .as_deref(),
+            Some("System instruction key mismatch"),
+            "a native call the decoder rejects (no accounts) is marked, not left silent"
+        );
         assert_eq!(decoded.simulated_instructions[1].index, 0);
         assert_eq!(
             decoded.simulated_instructions[1].registered_source,
             RegisteredSource::Unregistered,
             "unknown program call must be flagged unregistered"
+        );
+        assert!(
+            decoded.simulated_instructions[1]
+                .solana_json_parse_error
+                .is_none()
         );
     }
 
@@ -1082,12 +1108,10 @@ mod tests {
     /// decode the message, `build_intermediate_bytes` must degrade to `None`
     /// rather than panic or surface an error, so the converter still returns
     /// the `SignablePayload` and policy degrades to "no metadata".
-    /// End to end through the converter for the error path: a Compute Budget
-    /// instruction (`Native`, but not supported by Solana's jsonParsed decoder)
-    /// next to a System transfer. The emitted Borsh bytes must carry the error
-    /// on the first instruction and the decode on the second.
+    /// End to end: a Compute Budget instruction (decoded by the parser's own
+    /// decoder) next to a System transfer, both with `parsed_instruction_data`.
     #[test]
-    fn intermediate_output_reports_unsupported_native_program() {
+    fn intermediate_output_decodes_every_native_instruction() {
         let payer = Pubkey::new_unique();
         let destination = Pubkey::new_unique();
         // System `Transfer`: u32 tag 2, then the u64 lamports.
@@ -1133,14 +1157,37 @@ mod tests {
             "ComputeBudget111111111111111111111111111111"
         );
         assert_eq!(compute_budget.registered_source, RegisteredSource::Native);
-        assert!(compute_budget.solana_json_parsed_data.is_none());
-        assert_eq!(
-            compute_budget.solana_json_parse_error.as_deref(),
-            Some("program not supported by Solana's jsonParsed decoder")
-        );
+        assert!(compute_budget.solana_json_parse_error.is_none());
+        let json_parsed = compute_budget
+            .solana_json_parsed_data
+            .as_ref()
+            .expect("decoded by the parser's own decoder");
+        assert_eq!(json_parsed.program, "compute-budget");
+        let mapped = compute_budget
+            .parsed_instruction_data
+            .as_ref()
+            .expect("Compute Budget is mapped");
+        assert_eq!(mapped.instruction_name, "setComputeUnitPrice");
+        assert_eq!(mapped.discriminator, "03");
+        assert!(mapped.named_accounts.is_empty());
+        assert_eq!(mapped.program_call_args_json, r#"{"microLamports":5000}"#);
 
         let transfer = &decoded.instructions[1];
         assert!(transfer.solana_json_parse_error.is_none());
+        let mapped = transfer
+            .parsed_instruction_data
+            .as_ref()
+            .expect("System transfer is mapped");
+        assert_eq!(mapped.discriminator, "02000000");
+        assert_eq!(mapped.named_accounts["source"], payer.to_string());
+        assert_eq!(
+            mapped.named_accounts["destination"],
+            destination.to_string()
+        );
+        assert_eq!(
+            mapped.program_call_args_json,
+            format!(r#"{{"destination":"{destination}","lamports":1001,"source":"{payer}"}}"#)
+        );
         let json_parsed = transfer
             .solana_json_parsed_data
             .as_ref()

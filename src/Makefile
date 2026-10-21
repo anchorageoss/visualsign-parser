@@ -47,14 +47,14 @@ test: build
 	@# we build all the workspace targets.
 	make build
 	@# diagnostics OFF: production payload shape (parser_app, integration, others).
-	cargo test --workspace --exclude parser_cli --all-targets
-	cargo test -p visualsign-solana --no-default-features --lib
+	cargo test --no-fail-fast --workspace --exclude parser_cli --all-targets
+	cargo test --no-fail-fast -p visualsign-solana --no-default-features --lib
 	@# diagnostics ON: parser_cli + lib tests gated behind the feature.
-	cargo test -p parser_cli --all-targets
-	cargo test -p visualsign --features diagnostics --lib
-	cargo test -p parser_cli_core --features diagnostics --lib
-	cargo test -p visualsign-near --features diagnostics --lib
-	cargo test -p visualsign-solana --features diagnostics --lib
+	cargo test --no-fail-fast -p parser_cli --all-targets
+	cargo test --no-fail-fast -p visualsign --features diagnostics --lib
+	cargo test --no-fail-fast -p parser_cli_core --features diagnostics --lib
+	cargo test --no-fail-fast -p visualsign-near --features diagnostics --lib
+	cargo test --no-fail-fast -p visualsign-solana --features diagnostics --lib
 
 # Solana preset sources, which `cargo fmt` cannot reach. `presets/mod.rs`
 # declares its submodules through `include!(concat!(env!("OUT_DIR"), ...))`, a
