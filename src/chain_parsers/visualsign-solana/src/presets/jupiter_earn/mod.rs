@@ -10,9 +10,7 @@ use crate::core::{
 };
 use crate::utils::{TokenInfo, format_token_amount, lookup_token, truncate_address};
 use config::JupiterEarnConfig;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData, decode_idl_data};
 use solana_sdk::pubkey::Pubkey;
 use spl_associated_token_account::get_associated_token_address_with_program_id;
 use std::collections::BTreeMap;
@@ -153,7 +151,8 @@ fn parse_jupiter_earn_instruction(
     }
 
     let idl = get_jupiter_earn_idl().ok_or("Jupiter Lend Earn IDL not available")?;
-    let parsed = parse_instruction_with_idl(data, JUPITER_EARN_PROGRAM_ID, idl)?;
+    let parsed =
+        crate::idl::compiled_in::parse_preset_instruction(data, JUPITER_EARN_PROGRAM_ID, idl)?;
 
     let (named_accounts, accounts_complete) = build_named_accounts(data, idl, accounts);
 

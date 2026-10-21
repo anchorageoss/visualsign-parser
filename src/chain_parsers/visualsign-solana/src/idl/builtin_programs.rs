@@ -356,52 +356,64 @@ const PRESET_IDL_JSONS: &[(&str, &str)] = &[
     ),
 ];
 
-/// The presets' `IdlRecord`s, parsed and serialized once per process.
+/// The compiled-in IDL JSON for a preset program, if it has one.
+pub(crate) fn preset_idl_json(program_id: &str) -> Option<&'static str> {
+    PRESET_IDL_JSONS
+        .iter()
+        .rev()
+        .find(|(id, _)| *id == program_id)
+        .map(|(_, json)| *json)
+}
+
+/// One preset's `IdlRecord`, parsed and hashed the first time that program is
+/// looked up, then kept for the life of the process.
 ///
-/// [`PRESET_IDL_JSONS`] holds raw JSON; turning it into records means a
-/// parse plus a re-serialize for the hash JSON on every entry. That cost is
-/// identical on every request -- the presets are compiled in and never vary --
-/// so it is paid once here instead of per request inside
-/// `construct_idl_records_map`.
+/// The presets are compiled in and never vary, so the parse and the hash are
+/// the same on every request. Each record is built only when its program is
+/// first resolved, so a process pays for the presets it actually sees. A
+/// preset that fails to parse resolves to `None`: it degrades to
+/// `Unregistered` at decode time, the same as not shipping the IDL at all.
 ///
-/// Callers layer their own records over this (see
-/// [`crate::intermediate::lookup_idl_record`]) rather than merging into it, so
-/// the map is never cloned.
-pub fn preset_idl_records()
--> &'static std::collections::BTreeMap<String, solana_parser::solana::structs::IdlRecord> {
+/// Callers layer their own records over these (see
+/// [`crate::intermediate::lookup_idl_record`]) rather than merging into them.
+pub fn preset_idl_record(
+    program_id: &str,
+) -> Option<&'static solana_parser::solana::structs::IdlRecord> {
     use solana_parser::solana::structs::IdlRecord;
 
-    static PRESET_IDL_RECORDS: OnceLock<std::collections::BTreeMap<String, IdlRecord>> =
+    type Slot = (&'static str, OnceLock<Option<IdlRecord>>);
+    static PRESET_IDL_RECORDS: OnceLock<std::collections::BTreeMap<&'static str, Slot>> =
         OnceLock::new();
-    PRESET_IDL_RECORDS.get_or_init(|| {
-        // Built straight from the compiled-in JSON, so the process holds one
-        // heap copy of each IDL's JSON (in its record) rather than two.
-        PRESET_IDL_JSONS
-            .iter()
-            .filter_map(|(program_id, json)| {
-                let program_id = (*program_id).to_string();
-                // A preset that fails to parse is dropped rather than fataled:
-                // it degrades to `Unregistered` at decode time, which is the
-                // same outcome as not shipping the IDL at all.
-                let idl = solana_parser::decode_idl_data(json).ok()?;
-                Some((
-                    program_id.clone(),
-                    IdlRecord {
-                        program_id: program_id.clone(),
-                        program_name: format!(
-                            "Preset Program {}",
-                            &program_id[..8.min(program_id.len())]
-                        ),
-                        program_type: None,
-                        custom_idl: Some(idl),
-                        custom_idl_json: Some((*json).to_string()),
-                        override_builtin: true,
-                        is_preset: true,
-                    },
-                ))
+    let (json, record) = PRESET_IDL_RECORDS
+        .get_or_init(|| {
+            PRESET_IDL_JSONS
+                .iter()
+                .map(|(program_id, json)| (*program_id, (*json, OnceLock::new())))
+                .collect()
+        })
+        .get(program_id)?;
+    record
+        .get_or_init(|| {
+            let idl = solana_parser::decode_idl_data(json).ok()?;
+            Some(IdlRecord {
+                program_id: program_id.to_string(),
+                program_name: format!("Preset Program {}", &program_id[..8.min(program_id.len())]),
+                program_type: None,
+                custom_idl: Some(idl),
+                // Only the hash is kept: the JSON stays in the binary (see
+                // [`preset_idl_json`]) instead of on the heap.
+                custom_idl_json: None,
+                custom_idl_hash: Some(solana_parser::compute_idl_hash(json)),
+                override_builtin: true,
+                is_preset: true,
             })
-            .collect()
-    })
+        })
+        .as_ref()
+}
+
+/// Program IDs that have a compiled-in preset IDL.
+pub fn preset_idl_program_ids() -> impl Iterator<Item = &'static str> {
+    PRESET_IDL_JSONS.iter().map(|(program_id, _)| *program_id)
 }
 
 #[cfg(test)]

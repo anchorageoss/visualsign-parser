@@ -7,9 +7,7 @@ use crate::core::{
     VisualizerKind,
 };
 use config::DflowAggregatorConfig;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData, decode_idl_data};
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use visualsign::errors::VisualSignError;
@@ -106,7 +104,8 @@ fn parse_dflow_aggregator_instruction(
     }
 
     let idl = get_dflow_aggregator_idl().ok_or("DFlow Aggregator IDL not available")?;
-    let parsed = parse_instruction_with_idl(data, DFLOW_AGGREGATOR_PROGRAM_ID, idl)?;
+    let parsed =
+        crate::idl::compiled_in::parse_preset_instruction(data, DFLOW_AGGREGATOR_PROGRAM_ID, idl)?;
 
     let (named_accounts, extra_accounts) = build_named_accounts(data, idl, accounts);
 
@@ -308,6 +307,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use solana_parser::IdlSource;
+    use solana_parser::parse_instruction_with_idl;
     use solana_sdk::pubkey::Pubkey;
 
     fn field_label_value(field: &AnnotatedPayloadField) -> (String, String) {

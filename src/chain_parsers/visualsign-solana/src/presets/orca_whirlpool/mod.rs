@@ -7,9 +7,7 @@ use crate::core::{
     VisualizerKind,
 };
 use config::OrcaWhirlpoolConfig;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData, decode_idl_data};
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
 use visualsign::{
@@ -108,7 +106,7 @@ fn parse_orca_whirlpool_instruction(
     }
 
     let idl = load_orca_whirlpool_idl()?;
-    parse_instruction_with_idl(data, ORCA_WHIRLPOOL_PROGRAM_ID, idl)
+    crate::idl::compiled_in::parse_preset_instruction(data, ORCA_WHIRLPOOL_PROGRAM_ID, idl)
         .map_err(|e| VisualSignError::DecodeError(e.to_string()))
 }
 

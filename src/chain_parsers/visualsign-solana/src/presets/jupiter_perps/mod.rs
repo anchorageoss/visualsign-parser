@@ -7,9 +7,7 @@ use crate::core::{
     VisualizerKind,
 };
 use config::JupiterPerpsConfig;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData, decode_idl_data};
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use visualsign::errors::VisualSignError;
@@ -103,7 +101,8 @@ fn parse_jupiter_perps_instruction(
     }
 
     let idl = get_jupiter_perps_idl().ok_or("Jupiter Perpetuals IDL not available")?;
-    let parsed = parse_instruction_with_idl(data, JUPITER_PERPS_PROGRAM_ID, idl)?;
+    let parsed =
+        crate::idl::compiled_in::parse_preset_instruction(data, JUPITER_PERPS_PROGRAM_ID, idl)?;
 
     let named_accounts = build_named_accounts(data, idl, accounts);
 

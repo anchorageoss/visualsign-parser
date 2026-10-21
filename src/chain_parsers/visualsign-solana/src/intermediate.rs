@@ -29,8 +29,8 @@ use std::str::FromStr;
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde_json::Value;
 use solana_parser::solana::idl_parser::{
-    compute_idl_hash, construct_idl_records_map, create_accounts_map,
-    find_instruction_by_discriminator, parse_data_into_args, resolve_idl_for_record,
+    construct_idl_records_map, create_accounts_map, find_instruction_by_discriminator_ref,
+    parse_data_into_args, resolve_idl_ref,
 };
 use solana_parser::solana::structs::{
     self as parser, AccountAddress, Idl, IdlField, IdlInstruction, IdlParseError, IdlSource,
@@ -862,7 +862,7 @@ fn lookup_idl_record<'a>(
     if let Some(record) = caller_records.get(program_id) {
         return Some(record);
     }
-    if let Some(record) = crate::idl::builtin_programs::preset_idl_records().get(program_id) {
+    if let Some(record) = crate::idl::builtin_programs::preset_idl_record(program_id) {
         return Some(record);
     }
     builtin_idl_records().get(program_id)
@@ -924,16 +924,23 @@ fn build_idl_record_map(
         |program_id: &String| wanted.as_ref().is_none_or(|keys| keys.contains(program_id));
 
     let mut records = std::collections::HashMap::new();
-    let layers = [
-        builtin_idl_records(),
-        crate::idl::builtin_programs::preset_idl_records(),
-        caller_records,
-    ];
-    for layer in layers {
-        for (program_id, record) in layer {
-            if is_wanted(program_id) {
-                records.insert(program_id.clone(), record.clone());
-            }
+    for (program_id, record) in builtin_idl_records() {
+        if is_wanted(program_id) {
+            records.insert(program_id.clone(), record.clone());
+        }
+    }
+    let preset_ids: Vec<&str> = match wanted.as_ref() {
+        Some(keys) => keys.iter().map(String::as_str).collect(),
+        None => crate::idl::builtin_programs::preset_idl_program_ids().collect(),
+    };
+    for program_id in preset_ids {
+        if let Some(record) = crate::idl::builtin_programs::preset_idl_record(program_id) {
+            records.insert(program_id.to_string(), record.clone());
+        }
+    }
+    for (program_id, record) in caller_records {
+        if is_wanted(program_id) {
+            records.insert(program_id.clone(), record.clone());
         }
     }
     records
@@ -994,9 +1001,13 @@ struct IdlEvents {
 fn parse_anchor_event_cpi(
     event_data: &[u8],
     idl: &Idl,
-    idl_json: &str,
+    idl_json: Option<&str>,
+    idl_hash: &str,
     idl_source: &IdlSource,
 ) -> Result<SolanaParsedInstructionDataIo, SolanaIdlParseError> {
+    let idl_json = idl_json.ok_or_else(|| {
+        SolanaIdlParseError::IdlResolutionError("IDL JSON is not available".to_string())
+    })?;
     let events: IdlEvents = serde_json::from_str(idl_json).map_err(|e| {
         SolanaIdlParseError::IdlResolutionError(format!("IDL events are malformed: {e}"))
     })?;
@@ -1046,8 +1057,24 @@ fn parse_anchor_event_cpi(
         named_accounts: BTreeMap::new(),
         program_call_args_json: canonical_args_json(&args),
         idl_source: idl_source_string(idl_source),
-        idl_hash: compute_idl_hash(idl_json),
+        idl_hash: idl_hash.to_string(),
     })
+}
+
+/// The raw JSON of the IDL a record resolved to, for the `events` that
+/// `solana_parser::Idl` drops. Preset records don't keep their JSON on the
+/// heap, so theirs comes from the binary; built-in IDLs are embedded too.
+fn resolved_idl_json<'a>(
+    idl_record: &'a solana_parser::solana::structs::IdlRecord,
+    idl_source: &IdlSource,
+) -> Option<&'a str> {
+    match idl_source {
+        IdlSource::BuiltIn(program_type) => Some(program_type.idl_json()),
+        _ => idl_record
+            .custom_idl_json
+            .as_deref()
+            .or_else(|| crate::idl::builtin_programs::preset_idl_json(&idl_record.program_id)),
+    }
 }
 
 /// IDL-decodes one `PartiallyDecoded` instruction's raw data, using the exact same
@@ -1068,7 +1095,7 @@ fn parse_partially_decoded_instruction_idl(
     let Some(idl_record) = lookup_idl_record(program_id, caller_records) else {
         return (None, None);
     };
-    let (idl, idl_json, idl_source) = match resolve_idl_for_record(idl_record, program_id) {
+    let (idl, idl_hash, idl_source) = match resolve_idl_ref(idl_record, program_id) {
         Ok(v) => v,
         Err(e) => {
             return (
@@ -1088,7 +1115,7 @@ fn parse_partially_decoded_instruction_idl(
             )),
         );
     };
-    let instruction = match find_instruction_by_discriminator(&data, idl.instructions.clone()) {
+    let instruction = match find_instruction_by_discriminator_ref(&data, &idl.instructions) {
         Ok(v) => v,
         Err(e) => {
             // Anchor event CPIs match no `instructions` entry; decode against `events`.
@@ -1098,19 +1125,25 @@ fn parse_partially_decoded_instruction_idl(
                     Some(SolanaIdlParseError::DiscriminatorNotFound(e.to_string())),
                 );
             };
-            return match parse_anchor_event_cpi(event_data, &idl, &idl_json, &idl_source) {
+            return match parse_anchor_event_cpi(
+                event_data,
+                idl,
+                resolved_idl_json(idl_record, &idl_source),
+                &idl_hash,
+                &idl_source,
+            ) {
                 Ok(parsed) => (Some(parsed), None),
                 Err(err) => (None, Some(err)),
             };
         }
     };
-    let program_call_args = match parse_data_into_args(&data, &instruction, &idl) {
+    let program_call_args = match parse_data_into_args(&data, instruction, idl) {
         Ok(v) => v,
         Err(e) => {
             return (
                 None,
                 Some(SolanaIdlParseError::DataParseError {
-                    instruction_name: instruction.name,
+                    instruction_name: instruction.name.clone(),
                     error: e.to_string(),
                 }),
             );
@@ -1130,13 +1163,13 @@ fn parse_partially_decoded_instruction_idl(
             })
         })
         .collect();
-    let named_accounts = match create_accounts_map(&account_addresses, &instruction) {
+    let named_accounts = match create_accounts_map(&account_addresses, instruction) {
         Ok(v) => v,
         Err(e) => {
             return (
                 None,
                 Some(SolanaIdlParseError::AccountsMapError {
-                    instruction_name: instruction.name,
+                    instruction_name: instruction.name.clone(),
                     error: e.to_string(),
                 }),
             );
@@ -1156,12 +1189,12 @@ fn parse_partially_decoded_instruction_idl(
 
     (
         Some(SolanaParsedInstructionDataIo {
-            instruction_name: instruction.name,
+            instruction_name: instruction.name.clone(),
             discriminator: hex::encode(discriminator),
             named_accounts: named_accounts.into_iter().collect(),
             program_call_args_json: canonical_args_json(&program_call_args),
             idl_source: idl_source_string(&idl_source),
-            idl_hash: compute_idl_hash(&idl_json),
+            idl_hash: idl_hash.into_owned(),
         }),
         None,
     )
@@ -1727,6 +1760,7 @@ mod tests {
             program_type: None,
             custom_idl: Some(serde_json::from_str(idl_json).unwrap()),
             custom_idl_json: Some(idl_json.to_string()),
+            custom_idl_hash: None,
             override_builtin: true,
             is_preset: false,
         };

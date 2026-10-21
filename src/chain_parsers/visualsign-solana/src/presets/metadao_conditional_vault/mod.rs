@@ -7,9 +7,7 @@ use crate::core::{
     VisualizerKind,
 };
 use config::MetadaoConditionalVaultConfig;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData};
 use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
@@ -44,10 +42,14 @@ impl InstructionVisualizer for MetadaoConditionalVaultVisualizer {
         }
 
         let idl = load_idl()?;
-        let parsed = parse_instruction_with_idl(data, METADAO_CONDITIONAL_VAULT_PROGRAM_ID, &idl)
-            .map_err(|e| VisualSignError::DecodeError(format!("IDL parse failed: {e}")))?;
+        let parsed = crate::idl::compiled_in::parse_preset_instruction(
+            data,
+            METADAO_CONDITIONAL_VAULT_PROGRAM_ID,
+            idl,
+        )
+        .map_err(|e| VisualSignError::DecodeError(format!("IDL parse failed: {e}")))?;
 
-        let named_accounts = build_named_accounts(&idl, data, &view.accounts);
+        let named_accounts = build_named_accounts(idl, data, &view.accounts);
 
         build_visualization(context, &view.program_id, data, &parsed, &named_accounts)
     }
@@ -61,8 +63,8 @@ impl InstructionVisualizer for MetadaoConditionalVaultVisualizer {
     }
 }
 
-fn load_idl() -> Result<Idl, VisualSignError> {
-    decode_idl_data(IDL_JSON)
+fn load_idl() -> Result<&'static Idl, VisualSignError> {
+    crate::idl::compiled_in::compiled_in_idl(IDL_JSON)
         .map_err(|e| VisualSignError::DecodeError(format!("Failed to decode bundled IDL: {e}")))
 }
 
@@ -168,6 +170,7 @@ fn build_visualization(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use solana_parser::parse_instruction_with_idl;
     use solana_sdk::pubkey::Pubkey;
 
     fn dummy_account_strings(count: usize) -> Vec<String> {
@@ -207,7 +210,7 @@ mod tests {
     fn test_unknown_discriminator_returns_error() {
         let idl = load_idl().expect("IDL must load");
         let bogus = [0xFFu8; 9];
-        let result = parse_instruction_with_idl(&bogus, METADAO_CONDITIONAL_VAULT_PROGRAM_ID, &idl);
+        let result = parse_instruction_with_idl(&bogus, METADAO_CONDITIONAL_VAULT_PROGRAM_ID, idl);
         assert!(
             result.is_err(),
             "unknown discriminator should fail to parse"
@@ -218,7 +221,7 @@ mod tests {
     fn test_short_data_returns_error() {
         let idl = load_idl().expect("IDL must load");
         let short = [0x01u8, 0x02, 0x03];
-        let result = parse_instruction_with_idl(&short, METADAO_CONDITIONAL_VAULT_PROGRAM_ID, &idl);
+        let result = parse_instruction_with_idl(&short, METADAO_CONDITIONAL_VAULT_PROGRAM_ID, idl);
         assert!(result.is_err(), "data shorter than 8 bytes should error");
     }
 
@@ -239,7 +242,7 @@ mod tests {
         data.extend_from_slice(&amount.to_le_bytes());
 
         let accounts = dummy_account_strings(split_tokens.accounts.len());
-        let named = build_named_accounts(&idl, &data, &accounts);
+        let named = build_named_accounts(idl, &data, &accounts);
 
         assert_eq!(
             named.len(),

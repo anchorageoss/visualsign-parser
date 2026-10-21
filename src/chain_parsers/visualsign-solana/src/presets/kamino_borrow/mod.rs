@@ -7,9 +7,7 @@ use crate::core::{
     VisualizerKind,
 };
 use config::KaminoBorrowConfig;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData};
 use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
@@ -86,8 +84,8 @@ impl InstructionVisualizer for KaminoBorrowVisualizer {
     }
 }
 
-fn get_kamino_borrow_idl() -> Option<Idl> {
-    decode_idl_data(KAMINO_BORROW_IDL_JSON).ok()
+fn get_kamino_borrow_idl() -> Option<&'static Idl> {
+    crate::idl::compiled_in::compiled_in_idl(KAMINO_BORROW_IDL_JSON).ok()
 }
 
 fn parse_kamino_borrow_instruction(
@@ -99,9 +97,10 @@ fn parse_kamino_borrow_instruction(
     }
 
     let idl = get_kamino_borrow_idl().ok_or("Kamino Borrow IDL not available")?;
-    let parsed = parse_instruction_with_idl(data, KAMINO_BORROW_PROGRAM_ID, &idl)?;
+    let parsed =
+        crate::idl::compiled_in::parse_preset_instruction(data, KAMINO_BORROW_PROGRAM_ID, idl)?;
 
-    let named_accounts = build_named_accounts(data, &idl, accounts);
+    let named_accounts = build_named_accounts(data, idl, accounts);
 
     Ok(KaminoBorrowParsedInstruction {
         parsed,

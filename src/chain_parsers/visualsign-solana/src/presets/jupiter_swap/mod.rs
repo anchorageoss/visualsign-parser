@@ -8,7 +8,7 @@ use crate::core::{
 };
 use crate::utils::{SwapTokenInfo, get_token_info};
 use config::JupiterSwapConfig;
-use solana_parser::{Idl, decode_idl_data, parse_instruction_with_idl};
+use solana_parser::Idl;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{
     create_amount_field, create_number_field, create_raw_data_field, create_text_field,
@@ -110,8 +110,8 @@ impl InstructionVisualizer for JupiterSwapVisualizer {
 /// crate parses a full transaction (see `decode_v0_transfers`).
 pub(crate) const JUPITER_IDL_JSON: &str = include_str!("jupiter_agg_v6.json");
 
-fn get_jupiter_idl() -> Option<Idl> {
-    decode_idl_data(JUPITER_IDL_JSON).ok()
+fn get_jupiter_idl() -> Option<&'static Idl> {
+    crate::idl::compiled_in::compiled_in_idl(JUPITER_IDL_JSON).ok()
 }
 
 /// Helper to extract u64 argument from parsed IDL args
@@ -132,7 +132,7 @@ fn parse_jupiter_instruction_with_idl(
     let idl = get_jupiter_idl().ok_or("Jupiter IDL not available")?;
 
     // Parse using solana_parser
-    let parsed = parse_instruction_with_idl(data, JUPITER_PROGRAM_ID, &idl)?;
+    let parsed = crate::idl::compiled_in::parse_preset_instruction(data, JUPITER_PROGRAM_ID, idl)?;
 
     // Extract instruction type and arguments
     match parsed.instruction_name.as_str() {

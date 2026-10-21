@@ -7,9 +7,7 @@ use crate::core::{
     VisualizerKind,
 };
 use config::KaminoLimitConfig;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData, decode_idl_data};
 use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
@@ -116,7 +114,7 @@ fn parse_kamino_limit_instruction(
         VisualSignError::DecodeError("failed to load Kamino Limit Orders IDL".into())
     })?;
 
-    parse_instruction_with_idl(data, KAMINO_LIMIT_PROGRAM_ID, idl)
+    crate::idl::compiled_in::parse_preset_instruction(data, KAMINO_LIMIT_PROGRAM_ID, idl)
         .map_err(|e| VisualSignError::DecodeError(e.to_string()))
 }
 

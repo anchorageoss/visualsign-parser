@@ -8,9 +8,7 @@ use crate::core::{
 };
 use config::SquadsMultisigConfig;
 use solana_parser::solana::structs::SolanaAccount;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData, decode_idl_data};
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::pubkey::Pubkey;
 use std::collections::BTreeMap;
@@ -226,7 +224,8 @@ fn parse_squads_instruction(
     }
 
     let idl = get_squads_idl().ok_or("Squads Multisig IDL not available")?;
-    let parsed = parse_instruction_with_idl(data, SQUADS_MULTISIG_PROGRAM_ID, idl)?;
+    let parsed =
+        crate::idl::compiled_in::parse_preset_instruction(data, SQUADS_MULTISIG_PROGRAM_ID, idl)?;
 
     let named_accounts = build_named_accounts(data, idl, accounts);
 

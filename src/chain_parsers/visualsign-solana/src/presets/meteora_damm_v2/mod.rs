@@ -9,9 +9,7 @@ use crate::core::{
     VisualizerKind,
 };
 use config::MeteoraDammV2Config;
-use solana_parser::{
-    Idl, SolanaParsedInstructionData, decode_idl_data, parse_instruction_with_idl,
-};
+use solana_parser::{Idl, SolanaParsedInstructionData};
 use std::collections::BTreeMap;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_raw_data_field, create_text_field};
@@ -105,9 +103,9 @@ impl InstructionVisualizer for MeteoraDammV2Visualizer {
     }
 }
 
-fn load_idl() -> Result<Idl, Box<dyn std::error::Error>> {
+fn load_idl() -> Result<&'static Idl, Box<dyn std::error::Error>> {
     let json = include_str!("meteora_damm_v2.json");
-    decode_idl_data(json)
+    Ok(crate::idl::compiled_in::compiled_in_idl(json)?)
 }
 
 fn parse_meteora_damm_v2_instruction(
@@ -119,7 +117,8 @@ fn parse_meteora_damm_v2_instruction(
     }
 
     let idl = load_idl()?;
-    let parsed = parse_instruction_with_idl(data, METEORA_DAMM_V2_PROGRAM_ID, &idl)?;
+    let parsed =
+        crate::idl::compiled_in::parse_preset_instruction(data, METEORA_DAMM_V2_PROGRAM_ID, idl)?;
 
     let mut named_accounts = BTreeMap::new();
     if let Some(idl_instruction) = idl.instructions.iter().find(|inst| {
