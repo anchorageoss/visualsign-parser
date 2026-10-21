@@ -16,7 +16,7 @@ use crate::utils::{
     get_tx_type_arg, truncate_address,
 };
 
-use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand, SuiProgrammableMoveCall};
+use crate::types::{SuiArgument, SuiCallArg, SuiCommand, SuiProgrammableMoveCall};
 
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,

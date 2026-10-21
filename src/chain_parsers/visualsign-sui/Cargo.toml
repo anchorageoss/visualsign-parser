@@ -16,12 +16,9 @@ hex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-move-core-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "move-core-types" }
-move-bytecode-utils = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "move-bytecode-utils" }
-
-sui-json = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "sui-json" }
-sui-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "sui-types" }
-sui-json-rpc-types = { git = "https://github.com/MystenLabs/sui", tag = "mainnet-v1.68.1", package = "sui-json-rpc-types" }
+# Pure-Rust Sui BCS types (no fastcrypto, blst, ring, secp256k1 or zstd).
+# `hash` adds Blake2b-256 for Move package digests.
+sui-sdk-types = { version = "0.4.0", default-features = false, features = ["serde", "hash"] }
 
 visualsign = { workspace = true }
 

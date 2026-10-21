@@ -8,17 +8,13 @@
 //!   `pure_bcs_bytes`, which also rejects typed values because their JSON form
 //!   differs from the BCS encoding.
 //! - Supported types implement `FromLeBytes` (`bool`, `u8`, `u16`, `u32`, `u64`, `u128`).
-//! - JSON arrays of bytes are converted to little-endian values; type-tagged values are decoded
-//!   via `SuiJsonValue::to_move_value` when available.
+//! - JSON arrays of bytes are converted to little-endian values; type-tagged values are read
+//!   from their JSON form (a decimal or `0x` hex string, or a JSON number or bool).
 //! - `u256` is not supported; consider splitting into two `u128` or adding explicit support.
 //! - Errors include precise messages to aid debugging when fixtures or indices go out of sync.
 
-use move_core_types::annotated_value::MoveTypeLayout;
-use move_core_types::language_storage::TypeTag;
-use move_core_types::runtime_value::MoveValue;
+use crate::types::{SuiCallArg, SuiPureValue, TypeTag};
 use std::convert::{TryFrom, TryInto};
-use sui_json::SuiJsonValue;
-use sui_json_rpc_types::{SuiCallArg, SuiPureValue};
 use visualsign::errors::VisualSignError;
 
 // TODO: Consider `u256` support and fallback options
@@ -85,6 +81,54 @@ pub trait FromLeBytes: Sized {
     fn from_move_value(value: &SuiPureValue) -> Result<Self, VisualSignError>;
 }
 
+/// The JSON of a pure value typed as `expected`, or the error `decode_number`
+/// has always returned for a missing or different type.
+fn typed_json(
+    value: &SuiPureValue,
+    expected: &TypeTag,
+    name: &str,
+) -> Result<serde_json::Value, VisualSignError> {
+    let Some(value_type) = value.value_type() else {
+        return Err(VisualSignError::DecodeError(
+            "Failed to get value type".into(),
+        ));
+    };
+
+    if &value_type != expected {
+        return Err(VisualSignError::DecodeError(format!(
+            "Expected {name} value type"
+        )));
+    }
+
+    Ok(value.value().to_json_value())
+}
+
+/// Reads an unsigned integer the way `SuiJsonValue::to_move_value` does: a
+/// decimal or `0x` hex string, or (for `u8`, `u16` and `u32` only) a JSON number.
+fn json_to_unsigned<T>(json: &serde_json::Value, accept_number: bool) -> Result<T, VisualSignError>
+where
+    T: TryFrom<u128>,
+{
+    let wide: u128 = match json {
+        serde_json::Value::Number(n) if accept_number => n
+            .as_u64()
+            .map(u128::from)
+            .ok_or_else(|| VisualSignError::DecodeError(format!("Invalid number: {n}")))?,
+        serde_json::Value::String(s) => match s.strip_prefix("0x") {
+            Some(hex_digits) => u128::from_str_radix(hex_digits, 16),
+            None => s.parse::<u128>(),
+        }
+        .map_err(|e| VisualSignError::DecodeError(format!("Invalid number {s:?}: {e}")))?,
+        other => {
+            return Err(VisualSignError::DecodeError(format!(
+                "Unexpected JSON for a number: {other}"
+            )));
+        }
+    };
+    T::try_from(wide)
+        .map_err(|_| VisualSignError::DecodeError(format!("Number out of range: {wide}")))
+}
+
 impl FromLeBytes for bool {
     fn from_le_bytes(bytes: &[u8]) -> Result<Self, String> {
         if bytes.is_empty() {
@@ -99,24 +143,8 @@ impl FromLeBytes for bool {
     }
 
     fn from_move_value(value: &SuiPureValue) -> Result<Self, VisualSignError> {
-        let Some(value_type) = value.value_type() else {
-            return Err(VisualSignError::DecodeError(
-                "Failed to get value type".into(),
-            ));
-        };
-
-        if value_type != TypeTag::Bool {
-            return Err(VisualSignError::DecodeError(
-                "Expected bool value type".into(),
-            ));
-        }
-
-        let move_value =
-            SuiJsonValue::to_move_value(&value.value().to_json_value(), &MoveTypeLayout::Bool)
-                .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
-
-        match move_value {
-            MoveValue::Bool(value) => Ok(value),
+        match typed_json(value, &TypeTag::Bool, "bool")? {
+            serde_json::Value::Bool(value) => Ok(value),
             _ => Err(VisualSignError::DecodeError(
                 "Expected bool value type".to_string(),
             )),
@@ -124,177 +152,69 @@ impl FromLeBytes for bool {
     }
 }
 
-impl FromLeBytes for u8 {
-    fn from_le_bytes(bytes: &[u8]) -> Result<Self, String> {
-        Ok(u8::from_le_bytes(
-            bytes
-                .try_into()
-                .map_err(|e| format!("Invalid u8 value: {e}"))?,
-        ))
-    }
+macro_rules! impl_from_le_bytes {
+    ($($ty:ty => $tag:ident, $accept_number:expr;)*) => {
+        $(
+            impl FromLeBytes for $ty {
+                fn from_le_bytes(bytes: &[u8]) -> Result<Self, String> {
+                    Ok(<$ty>::from_le_bytes(bytes.try_into().map_err(|e| {
+                        format!(concat!("Invalid ", stringify!($ty), " value: {}"), e)
+                    })?))
+                }
 
-    fn from_move_value(value: &SuiPureValue) -> Result<Self, VisualSignError> {
-        let Some(value_type) = value.value_type() else {
-            return Err(VisualSignError::DecodeError(
-                "Failed to get value type".into(),
-            ));
-        };
-
-        if value_type != TypeTag::U8 {
-            return Err(VisualSignError::DecodeError(
-                "Expected u8 value type".into(),
-            ));
-        }
-
-        let move_value =
-            SuiJsonValue::to_move_value(&value.value().to_json_value(), &MoveTypeLayout::U8)
-                .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
-
-        match move_value {
-            MoveValue::U8(value) => Ok(value),
-            _ => Err(VisualSignError::DecodeError(
-                "Expected u8 value type".to_string(),
-            )),
-        }
-    }
+                fn from_move_value(value: &SuiPureValue) -> Result<Self, VisualSignError> {
+                    let json = typed_json(value, &TypeTag::$tag, stringify!($ty))?;
+                    json_to_unsigned(&json, $accept_number)
+                }
+            }
+        )*
+    };
 }
 
-impl FromLeBytes for u16 {
-    fn from_le_bytes(bytes: &[u8]) -> Result<Self, String> {
-        Ok(u16::from_le_bytes(
-            bytes
-                .try_into()
-                .map_err(|e| format!("Invalid u16 value: {e}"))?,
-        ))
-    }
-
-    fn from_move_value(value: &SuiPureValue) -> Result<Self, VisualSignError> {
-        let Some(value_type) = value.value_type() else {
-            return Err(VisualSignError::DecodeError(
-                "Failed to get value type".into(),
-            ));
-        };
-
-        if value_type != TypeTag::U16 {
-            return Err(VisualSignError::DecodeError(
-                "Expected u16 value type".into(),
-            ));
-        }
-
-        let move_value =
-            SuiJsonValue::to_move_value(&value.value().to_json_value(), &MoveTypeLayout::U16)
-                .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
-
-        match move_value {
-            MoveValue::U16(value) => Ok(value),
-            _ => Err(VisualSignError::DecodeError(
-                "Expected u16 value type".to_string(),
-            )),
-        }
-    }
+impl_from_le_bytes! {
+    u8 => U8, true;
+    u16 => U16, true;
+    u32 => U32, true;
+    u64 => U64, false;
+    u128 => U128, false;
 }
 
-impl FromLeBytes for u32 {
-    fn from_le_bytes(bytes: &[u8]) -> Result<Self, String> {
-        Ok(u32::from_le_bytes(
-            bytes
-                .try_into()
-                .map_err(|e| format!("Invalid u32 value: {e}"))?,
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::SuiJsonValue;
+
+    fn typed(tag: TypeTag, json: serde_json::Value) -> SuiCallArg {
+        SuiCallArg::Pure(SuiPureValue::new(Some(tag), SuiJsonValue::new(json)))
+    }
+
+    fn untyped(bytes: &[u8]) -> SuiCallArg {
+        SuiCallArg::Pure(SuiPureValue::new(
+            None,
+            SuiJsonValue::new(serde_json::Value::from(bytes.to_vec())),
         ))
     }
 
-    fn from_move_value(value: &SuiPureValue) -> Result<Self, VisualSignError> {
-        let Some(value_type) = value.value_type() else {
-            return Err(VisualSignError::DecodeError(
-                "Failed to get value type".into(),
-            ));
-        };
-
-        if value_type != TypeTag::U32 {
-            return Err(VisualSignError::DecodeError(
-                "Expected u32 value type".into(),
-            ));
-        }
-
-        let move_value =
-            SuiJsonValue::to_move_value(&value.value().to_json_value(), &MoveTypeLayout::U32)
-                .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
-
-        match move_value {
-            MoveValue::U32(value) => Ok(value),
-            _ => Err(VisualSignError::DecodeError(
-                "Expected u32 value type".to_string(),
-            )),
-        }
-    }
-}
-
-impl FromLeBytes for u64 {
-    fn from_le_bytes(bytes: &[u8]) -> Result<Self, String> {
-        Ok(u64::from_le_bytes(
-            bytes
-                .try_into()
-                .map_err(|e| format!("Invalid u64 value: {e}"))?,
-        ))
+    #[test]
+    fn decodes_untyped_little_endian_bytes() {
+        assert_eq!(
+            decode_number::<u64>(&untyped(&1000u64.to_le_bytes())).unwrap(),
+            1000
+        );
+        assert!(decode_number::<u64>(&untyped(&[1, 2])).is_err());
+        assert!(decode_number::<bool>(&untyped(&[1])).unwrap());
     }
 
-    fn from_move_value(value: &SuiPureValue) -> Result<Self, VisualSignError> {
-        let Some(value_type) = value.value_type() else {
-            return Err(VisualSignError::DecodeError(
-                "Failed to get value type".into(),
-            ));
-        };
-
-        if value_type != TypeTag::U64 {
-            return Err(VisualSignError::DecodeError(
-                "Expected u64 value type".into(),
-            ));
-        }
-
-        let move_value =
-            SuiJsonValue::to_move_value(&value.value().to_json_value(), &MoveTypeLayout::U64)
-                .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
-
-        match move_value {
-            MoveValue::U64(value) => Ok(value),
-            _ => Err(VisualSignError::DecodeError(
-                "Expected u64 value type".to_string(),
-            )),
-        }
-    }
-}
-
-impl FromLeBytes for u128 {
-    fn from_le_bytes(bytes: &[u8]) -> Result<Self, String> {
-        Ok(u128::from_le_bytes(
-            bytes
-                .try_into()
-                .map_err(|e| format!("Invalid u128 value: {e}"))?,
-        ))
-    }
-
-    fn from_move_value(value: &SuiPureValue) -> Result<Self, VisualSignError> {
-        let Some(value_type) = value.value_type() else {
-            return Err(VisualSignError::DecodeError(
-                "Failed to get value type".into(),
-            ));
-        };
-
-        if value_type != TypeTag::U128 {
-            return Err(VisualSignError::DecodeError(
-                "Expected u128 value type".into(),
-            ));
-        }
-
-        let move_value =
-            SuiJsonValue::to_move_value(&value.value().to_json_value(), &MoveTypeLayout::U128)
-                .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
-
-        match move_value {
-            MoveValue::U128(value) => Ok(value),
-            _ => Err(VisualSignError::DecodeError(
-                "Expected u128 value type".to_string(),
-            )),
-        }
+    #[test]
+    fn decodes_typed_u64_string() {
+        assert_eq!(
+            decode_number::<u64>(&typed(TypeTag::U64, "1000".into())).unwrap(),
+            1000
+        );
+        // A typed u64 whose bytes did not fit stays a byte array and is rejected.
+        assert!(decode_number::<u64>(&typed(TypeTag::U64, serde_json::json!([1, 2]))).is_err());
+        // The declared type must match the requested one.
+        assert!(decode_number::<u32>(&typed(TypeTag::U64, "1000".into())).is_err());
+        assert!(pure_bcs_bytes(&typed(TypeTag::U64, "1000".into())).is_err());
     }
 }

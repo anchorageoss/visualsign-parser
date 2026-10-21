@@ -2,24 +2,20 @@
 //!
 //! - `chain_config`: declarative macros for package/module/function layouts and typed getters.
 //! - `commands`: walks transaction commands and dispatches to available visualizers.
-//! - `helper`: chain resolution utilities (module cache adapters, etc.).
 //! - `transaction`: raw decoding and helpers for titles/network/details.
 //! - `visualsign`: public API surface for converting to `VisualSign` payloads.
 
 mod chain_config;
 mod commands;
-mod helper;
 mod transaction;
 mod visualsign;
 
 use std::collections::BTreeMap;
 
-use sui_json_rpc_types::{SuiCallArg, SuiCommand};
-use sui_types::base_types::SuiAddress;
+use crate::types::{SuiAddress, SuiCallArg, SuiCommand};
 
 use ::visualsign::AnnotatedPayloadField;
 use ::visualsign::errors::VisualSignError;
-pub use helper::SuiModuleResolver;
 pub use visualsign::{
     SuiTransactionWrapper, SuiVisualSignConverter, transaction_string_to_visual_sign,
     transaction_to_visual_sign,

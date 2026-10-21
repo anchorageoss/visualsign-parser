@@ -3,16 +3,36 @@ use base64::Engine;
 use visualsign::encodings::SupportedEncodings;
 use visualsign::vsptrait::TransactionParseError;
 
-use sui_json_rpc_types::{
-    SuiTransactionBlockData, SuiTransactionBlockDataAPI, SuiTransactionBlockKind,
-};
-use sui_types::transaction::{SenderSignedData, TransactionData};
+use serde::Deserialize;
+use sui_sdk_types::{Transaction, UserSignature};
+
+use crate::types::{SuiTransactionBlockData, SuiTransactionBlockKind};
+
+/// BCS layout of Sui's `SenderSignedData`: exactly one transaction, wrapped in
+/// the `(TransactionData, V0, Sui)` intent and followed by its signatures.
+/// Signatures are parsed (not verified) so a malformed envelope is rejected as
+/// it was by `sui_types`.
+#[derive(Deserialize)]
+struct SenderSignedTransaction {
+    intent: (u8, u8, u8),
+    transaction: Transaction,
+    #[allow(dead_code)]
+    tx_signatures: Vec<UserSignature>,
+}
+
+fn decode_sender_signed_data(bytes: &[u8]) -> Option<Transaction> {
+    let signed: Vec<SenderSignedTransaction> = bcs::from_bytes(bytes).ok()?;
+    match <[SenderSignedTransaction; 1]>::try_from(signed) {
+        Ok([only]) if only.intent == (0, 0, 0) => Some(only.transaction),
+        _ => None,
+    }
+}
 
 /// Decode a transaction from string format
 pub fn decode_transaction(
     raw_transaction: &str,
     encodings: SupportedEncodings,
-) -> Result<TransactionData, TransactionParseError> {
+) -> Result<Transaction, TransactionParseError> {
     if raw_transaction.is_empty() {
         return Err(TransactionParseError::DecodeError(
             "Transaction is empty".into(),
@@ -27,11 +47,11 @@ pub fn decode_transaction(
             .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?,
     };
 
-    if let Ok(sender_signed_data) = bcs::from_bytes::<SenderSignedData>(&bytes) {
-        return Ok(sender_signed_data.transaction_data().clone());
+    if let Some(transaction) = decode_sender_signed_data(&bytes) {
+        return Ok(transaction);
     }
 
-    if let Ok(transaction_data) = bcs::from_bytes::<TransactionData>(&bytes) {
+    if let Ok(transaction_data) = bcs::from_bytes::<Transaction>(&bytes) {
         return Ok(transaction_data);
     }
 
@@ -45,15 +65,15 @@ pub fn decode_transaction(
 pub fn determine_transaction_type_string(tx_data: &SuiTransactionBlockData) -> &'static str {
     match &tx_data.transaction() {
         SuiTransactionBlockKind::ProgrammableTransaction(_) => "Programmable Transaction",
-        SuiTransactionBlockKind::ChangeEpoch(_) => "Change Epoch",
-        SuiTransactionBlockKind::Genesis(_) => "Genesis",
-        SuiTransactionBlockKind::ConsensusCommitPrologue(_) => "Consensus Commit",
-        SuiTransactionBlockKind::AuthenticatorStateUpdate(_) => "Authenticator State Update",
-        SuiTransactionBlockKind::RandomnessStateUpdate(_) => "Randomness State Update",
-        SuiTransactionBlockKind::EndOfEpochTransaction(_) => "End of Epoch Transaction",
-        SuiTransactionBlockKind::ConsensusCommitPrologueV2(_) => "Consensus Commit Prologue V2",
-        SuiTransactionBlockKind::ConsensusCommitPrologueV3(_) => "Consensus Commit Prologue V3",
-        SuiTransactionBlockKind::ConsensusCommitPrologueV4(_) => "Consensus Commit Prologue V4",
+        SuiTransactionBlockKind::ChangeEpoch => "Change Epoch",
+        SuiTransactionBlockKind::Genesis => "Genesis",
+        SuiTransactionBlockKind::ConsensusCommitPrologue => "Consensus Commit",
+        SuiTransactionBlockKind::AuthenticatorStateUpdate => "Authenticator State Update",
+        SuiTransactionBlockKind::RandomnessStateUpdate => "Randomness State Update",
+        SuiTransactionBlockKind::EndOfEpochTransaction => "End of Epoch Transaction",
+        SuiTransactionBlockKind::ConsensusCommitPrologueV2 => "Consensus Commit Prologue V2",
+        SuiTransactionBlockKind::ConsensusCommitPrologueV3 => "Consensus Commit Prologue V3",
+        SuiTransactionBlockKind::ConsensusCommitPrologueV4 => "Consensus Commit Prologue V4",
         SuiTransactionBlockKind::ProgrammableSystemTransaction(_) => {
             "Programmable System Transaction"
         }

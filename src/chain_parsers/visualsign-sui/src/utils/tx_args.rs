@@ -1,5 +1,5 @@
-use sui_json_rpc_types::{SuiArgument, SuiCallArg};
-use sui_types::base_types::ObjectID;
+use crate::types::ObjectID;
+use crate::types::{SuiArgument, SuiCallArg};
 use visualsign::errors::VisualSignError;
 
 /// Gets the index from the Sui arguments array (expects a single argument).
@@ -113,8 +113,8 @@ pub fn get_object_value(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use sui_json_rpc_types::SuiObjectArg;
-    use sui_types::base_types::{ObjectID, SequenceNumber};
+    use crate::types::SuiObjectArg;
+    use crate::types::{ObjectID, SequenceNumber};
 
     fn shared_object_input(object_id: ObjectID) -> SuiCallArg {
         SuiCallArg::Object(SuiObjectArg::SharedObject {
@@ -178,7 +178,7 @@ mod tests {
     /// on-chain execution used the unrelated output of a prior command.
     #[test]
     fn get_object_value_distinguishes_result_from_input() {
-        let benign_object = ObjectID::random();
+        let benign_object = ObjectID::new([0x5a; 32]);
         let inputs = vec![shared_object_input(benign_object)];
 
         // `Input(0)` resolves to `sui_inputs[0]` -- the benign object.

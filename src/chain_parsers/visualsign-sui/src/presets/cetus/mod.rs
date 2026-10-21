@@ -12,7 +12,7 @@ use config::{
 use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, VisualizerKind};
 use crate::utils::{SuiCoin, get_object_value, get_tx_type_arg, truncate_address};
 
-use sui_json_rpc_types::{SuiCommand, SuiProgrammableMoveCall};
+use crate::types::{SuiCommand, SuiProgrammableMoveCall};
 
 use crate::presets::cetus::config::{
     PoolScriptOpenPositionWithLiquidityWithAllIndexes, PoolScriptV3Functions,
