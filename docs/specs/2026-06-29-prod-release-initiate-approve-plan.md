@@ -8,6 +8,13 @@
 
 **Tech Stack:** Go (urfave/cli v3, near/borsh-go) in visualsign-turnkeyclient; Rust 2024 (xshell, anyhow, lexopt, serde_json, qos_p256) in visualsign-parser `tools/tvc-deploy`; Bash + jq for `scripts/smoke.sh`; GitHub Actions YAML.
 
+> **As shipped:** the helper takes clap args (not a flag map) and builds the
+> parser_app config in `parser_app_spec`; `initiate`/`deploy` require exactly one
+> ABI trust posture (`--accept-unsigned-abis` or `--accept-signatures-from-pubkey
+> <hex>`, repeatable), which lands in `pivotArgs`; and `TvcOps::verify_image_digest`
+> takes the pivot path so `deploy-pivot` shares the same flow. Snippets below are
+> kept as planned, with the posture added where its absence would break them.
+
 ## Global Constraints
 
 - Rust: workspace lints deny `unwrap_used`/`expect_used`/`panic`, forbid `unsafe`; test modules add `#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`. Use inline format strings. Place `use` at the top of the module/test module. Every Rust task ends green on `cargo clippy --all-targets -- -D warnings` and `cargo fmt`.
@@ -200,7 +207,7 @@ This refactor preserves dev behavior while making the orchestration unit-testabl
 
 **Interfaces:**
 - Produces:
-  - `fn build_deploy_config(app_id, qos, image, host_ip, host_port: u16, digest: &str) -> serde_json::Value`
+  - `fn build_deploy_config(app_id, qos, image, host_ip, host_port: u16, digest: &str, abi_posture: &[String]) -> serde_json::Value` (`abi_posture` is the parser_app trust flags, e.g. `["--accept-signatures-from-pubkey", "<hex>"]`, appended to `pivotArgs`)
   - `trait TvcOps { fn verify_image_digest(&self, image: &str, expected: &str) -> Result<()>; fn create(&self, cfg_path: &Path) -> Result<String>; fn approve(&self, deploy_id: &str, operator_id: &str, seed: Option<&Path>) -> Result<()>; fn poll_health(&self, app_id: &str, deploy_id: &str, timeout: Duration) -> Result<()>; fn set_live(&self, deploy_id: &str, timeout: Duration) -> Result<()>; }`
   - `struct RealTvc<'a> { sh: &'a Shell }` implementing `TvcOps` by moving the existing `cmd!` calls into the trait methods.
   - `fn do_deploy(ops: &impl TvcOps, flags, ...) -> Result<()>` composing initiate -> approve -> promote (the existing dev behavior).
@@ -247,8 +254,13 @@ mod tests {
 
     #[test]
     fn config_has_grpc_health_and_digest() {
-        let cfg = build_deploy_config("app", "v1", "img", "0.0.0.0", 3000, "deadbeef");
+        let posture = ["--accept-unsigned-abis".to_string()];
+        let cfg = build_deploy_config("app", "v1", "img", "0.0.0.0", 3000, "deadbeef", &posture);
         assert_eq!(cfg["healthCheckType"], "TVC_HEALTH_CHECK_TYPE_GRPC");
+        assert_eq!(
+            cfg["pivotArgs"],
+            serde_json::json!(["--host-ip", "0.0.0.0", "--host-port", "3000", "--accept-unsigned-abis"])
+        );
         assert_eq!(cfg["expectedPivotDigest"], "deadbeef");
         assert_eq!(cfg["pivotPath"], "/parser_app");
         assert_eq!(cfg["healthCheckPort"], 3000);
@@ -296,13 +308,21 @@ fn build_deploy_config(
     host_ip: &str,
     host_port: u16,
     digest: &str,
+    abi_posture: &[String],
 ) -> serde_json::Value {
+    let mut pivot_args = vec![
+        "--host-ip".to_string(),
+        host_ip.to_string(),
+        "--host-port".to_string(),
+        host_port.to_string(),
+    ];
+    pivot_args.extend_from_slice(abi_posture);
     serde_json::json!({
         "appId": app_id,
         "qosVersion": qos,
         "pivotContainerImageUrl": image,
         "pivotPath": "/parser_app",
-        "pivotArgs": ["--host-ip", host_ip, "--host-port", host_port.to_string()],
+        "pivotArgs": pivot_args,
         "expectedPivotDigest": digest,
         "debugMode": false,
         "healthCheckType": "TVC_HEALTH_CHECK_TYPE_GRPC",
@@ -449,9 +469,18 @@ fn initiate(ops: &impl TvcOps, flags: &HashMap<String, String>) -> Result<String
         Some(s) => s.parse().with_context(|| format!("invalid --host-port: {s}"))?,
         None => 3000,
     };
+    // Exactly one ABI trust posture is required, as for `deploy`.
+    let abi_posture = match (
+        flags.get("accept-unsigned-abis"),
+        flags.get("accept-signatures-from-pubkey"),
+    ) {
+        (Some(_), None) => vec!["--accept-unsigned-abis".to_string()],
+        (None, Some(key)) => vec!["--accept-signatures-from-pubkey".to_string(), key.clone()],
+        _ => bail!("pass exactly one of --accept-unsigned-abis / --accept-signatures-from-pubkey"),
+    };
     validate_digest(digest)?;
     ops.verify_image_digest(image, digest)?;
-    let cfg = build_deploy_config(app_id, qos, image, host_ip, host_port, digest);
+    let cfg = build_deploy_config(app_id, qos, image, host_ip, host_port, digest, &abi_posture);
     let cfg_path = temp_path("tvc-deploy", "json");
     std::fs::write(&cfg_path, serde_json::to_vec_pretty(&cfg)?)
         .with_context(|| format!("write {}", cfg_path.display()))?;
@@ -626,6 +655,9 @@ printf '%s' '{"signablePayload":"ok","valid":true,"attestationValid":true,"signa
 EOF
 chmod +x "$TMP/client"
 
+# smoke.sh exits at its org check before calling the client, so give it one.
+export VSP_SMOKE_ORG=test-org
+
 # Default dev run: includes --dev-path, no --expected-pivot-hash.
 TURNKEY_CLIENT="$TMP/client" "$SMOKE" >/dev/null 2>&1
 grep -qx -- "--dev-path" "$ARGFILE" || { echo "FAIL: default should pass --dev-path"; fails=$((fails+1)); }
@@ -672,7 +704,8 @@ Build the verify args before the run:
 ```bash
 verify_args=(verify --host "$HOST" --organization-id "$ORG" --key-name "$KEY" \
   --unsigned-payload "$PAYLOAD" --chain CHAIN_SOLANA)
-[ "$CANONICAL" -eq 1 ] || verify_args+=(--dev-path)
+# Keep --target's path args (--dev-path for dev, none for prod); --canonical drops them.
+[ "$CANONICAL" -eq 1 ] || verify_args+=(${PATH_ARGS[@]+"${PATH_ARGS[@]}"})
 [ -n "$EXPECTED_PIVOT_HASH" ] && verify_args+=(--expected-pivot-hash "$EXPECTED_PIVOT_HASH")
 ```
 
@@ -754,6 +787,7 @@ on:
       qos_version: { description: "QOS version", required: false, default: "v2026.2.6" }
       host_ip: { description: "parser_app listen IP", required: false, default: "0.0.0.0" }
       host_port: { description: "parser_app listen port", required: false, default: "3000" }
+      abi_signer_pubkey: { description: "hex secp256k1 key whose signed ABI mappings the parser accepts (required ABI trust posture)", required: true }
 concurrency:
   group: release-${{ inputs.app_id }}
   cancel-in-progress: false
@@ -782,11 +816,13 @@ jobs:
           QOS_VERSION: ${{ inputs.qos_version }}
           HOST_IP: ${{ inputs.host_ip }}
           HOST_PORT: ${{ inputs.host_port }}
+          ABI_SIGNER_PUBKEY: ${{ inputs.abi_signer_pubkey }}
         run: |
           ./tools/tvc-deploy/target/release/tvc-deploy initiate \
             --app-id "$APP_ID" --image-url "$IMAGE_URL" \
             --expected-digest "$EXPECTED_DIGEST" --qos-version "$QOS_VERSION" \
-            --host-ip "$HOST_IP" --host-port "$HOST_PORT" | tee "$RUNNER_TEMP/initiate.out"
+            --host-ip "$HOST_IP" --host-port "$HOST_PORT" \
+            --accept-signatures-from-pubkey "$ABI_SIGNER_PUBKEY" | tee "$RUNNER_TEMP/initiate.out"
           echo "### Release initiated" >> "$GITHUB_STEP_SUMMARY"
           grep "created deployment" "$RUNNER_TEMP/initiate.out" >> "$GITHUB_STEP_SUMMARY" || true
           echo "Operator: approve with \`tvc-deploy approve --deploy-id <id> --operator-id <id> --image-url \"$IMAGE_URL\" --expected-digest \"$EXPECTED_DIGEST\"\` then run Promote." >> "$GITHUB_STEP_SUMMARY"

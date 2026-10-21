@@ -46,9 +46,9 @@ Release (CI, prod API key)         Operator (human, quorum key)        Promote (
 
 Refactor the current monolithic `deploy()` into three composable subcommands. The existing digest-gate, config-assembly, and polling logic is **extracted, not duplicated**.
 
-- **`initiate --app-id --image-url --expected-digest [--qos-version --host-ip --host-port]`**
+- **`initiate --app-id --image-url --expected-digest (--accept-unsigned-abis | --accept-signatures-from-pubkey <hex>...) [--qos-version --host-ip --host-port]`**
   1. `validate_digest` + `verify_image_digest` (the existing image-derived digest gate).
-  2. Assemble the deploy config (gRPC health) and `tvc deploy create`.
+  2. Assemble the deploy config (gRPC health; the ABI trust posture goes into `pivotArgs`) and `tvc deploy create`. Exactly one posture is required, as for `deploy`; prod should use the signed-key posture.
   3. Parse and print the **deployment ID** (existing `parse_after "Deployment ID:"`).
   Requires only the Turnkey API key. No operator seed, no approve, no set-live.
 

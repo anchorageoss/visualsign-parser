@@ -609,10 +609,19 @@ fn run_deploy(
     operator_id: &str,
     operator_seed: Option<&Path>,
 ) -> Result<()> {
-    let deploy_id = run_initiate(ops, spec)?;
-    // Resolve the seed only after initiate succeeds, so a digest-gate or
-    // create failure never leaves an env-sourced seed temp file on disk.
+    // Materialize the seed before creating anything, so a seed failure can't
+    // leave an unapproved deployment behind; if initiate then fails, remove an
+    // env-sourced seed temp file before propagating.
     let seed = resolve_seed_file(operator_seed)?;
+    let deploy_id = match run_initiate(ops, spec) {
+        Ok(id) => id,
+        Err(e) => {
+            if let Some((path, true)) = &seed {
+                let _ = std::fs::remove_file(path);
+            }
+            return Err(e);
+        }
+    };
     approve_and_cleanup(ops, &deploy_id, operator_id, &seed)?;
     println!("approved manifest for {deploy_id}");
     // TVC refuses to target a deployment with zero healthy replicas, so poll
@@ -1286,7 +1295,7 @@ mod tests {
     }
 
     #[test]
-    fn deploy_does_not_write_seed_when_initiate_fails() {
+    fn deploy_removes_env_seed_when_initiate_fails() {
         let _env = SEED_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         struct FailingGate;
         impl TvcOps for FailingGate {
@@ -1319,7 +1328,7 @@ mod tests {
         assert_eq!(
             before,
             leftover_operator_seeds(),
-            "seed must not be written when initiate fails"
+            "env-sourced seed leaked on initiate failure"
         );
     }
 
