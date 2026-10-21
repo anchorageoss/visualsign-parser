@@ -56,3 +56,11 @@ vsock = ["tvc-attestation/enclave"]
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "parse_stages"
+harness = false
+required-features = ["ethereum", "solana"]
