@@ -90,7 +90,7 @@ pub struct FluidDeployment {
 
 pub const DEPLOYMENTS: &[FluidDeployment] = &[FluidDeployment {
     sui_network: SuiNetwork::Mainnet,
-    vaults_package: "0xf0f5a9c105384d5b79e212a9c9d3adfa5d030ef4c0cf9e22fa48674f9ad3652a",
+    vaults_package: "0x2e39b917ac7e580fb015308843144eb335625c4784f92847fbb09236e055f19f",
 }];
 
 pub fn deployment_for(package: &ObjectID) -> Option<&'static FluidDeployment> {

@@ -19,7 +19,13 @@ use visualsign::test_utils::check_signable_payload_field;
 use visualsign::vsptrait::{VisualSignConverter, VisualSignOptions};
 
 const FIXTURE: &str = include_str!("aggregated_test_data.json");
+const PREVIOUS_DEPLOYMENT: &str = include_str!("previous_deployment_test_data.json");
 const EDGE_CASES: &str = include_str!("edge_case_test_data.json");
+
+// Real transactions against Fluid's previous vaults package, whose `operate` takes the
+// same arguments; `repoint` sends them to the current package.
+const PREVIOUS_VAULTS_PACKAGE: &str =
+    "0xf0f5a9c105384d5b79e212a9c9d3adfa5d030ef4c0cf9e22fa48674f9ad3652a";
 
 const OTHER_ADDRESS: [u8; 32] = [0x77; 32];
 
@@ -72,13 +78,57 @@ fn decode(data: &str) -> TransactionData {
     .unwrap()
 }
 
+fn repoint(mut tx: TransactionData) -> TransactionData {
+    let previous = ObjectID::from_hex_literal(PREVIOUS_VAULTS_PACKAGE).unwrap();
+    let current = ObjectID::from_hex_literal(DEPLOYMENTS[0].vaults_package).unwrap();
+    for command in &mut programmable(&mut tx).commands {
+        if let Command::MoveCall(call) = command {
+            if call.package == previous {
+                call.package = current;
+            }
+            for type_argument in &mut call.type_arguments {
+                let tag = type_argument
+                    .to_type_tag()
+                    .unwrap()
+                    .to_canonical_string(true)
+                    .replace(&previous.to_hex(), &current.to_hex());
+                *type_argument = sui_types::parse_sui_type_tag(&tag).unwrap().into();
+            }
+        }
+    }
+    tx
+}
+
+fn operations(fixture: &str) -> serde_json::Map<String, serde_json::Value> {
+    let fixture: serde_json::Value = serde_json::from_str(fixture).unwrap();
+    fixture["vaults"]["operate"]["operations"]
+        .as_object()
+        .unwrap()
+        .clone()
+}
+
 fn fixture_tx(digest: &str) -> TransactionData {
-    let fixture: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
-    decode(
-        fixture["vaults"]["operate"]["operations"][digest]["data"]
-            .as_str()
-            .unwrap(),
-    )
+    let operation = operations(FIXTURE)
+        .remove(digest)
+        .or_else(|| operations(PREVIOUS_DEPLOYMENT).remove(digest))
+        .unwrap();
+    repoint(decode(operation["data"].as_str().unwrap()))
+}
+
+/// The previous deployment's fixture, pointed at the current package.
+fn repointed_previous_deployment() -> String {
+    let mut fixture: serde_json::Value = serde_json::from_str(PREVIOUS_DEPLOYMENT).unwrap();
+    let operations = fixture["vaults"]["operate"]["operations"]
+        .as_object_mut()
+        .unwrap();
+    for operation in operations.values_mut() {
+        let tx = repoint(decode(operation["data"].as_str().unwrap()));
+        operation["data"] = base64::engine::general_purpose::STANDARD
+            .encode(bcs::to_bytes(&tx).unwrap())
+            .into();
+        operation["asserts"]["Vaults Package"] = DEPLOYMENTS[0].vaults_package.into();
+    }
+    fixture.to_string()
 }
 
 fn open_borrow_tx() -> TransactionData {
@@ -262,6 +312,11 @@ fn test_fluid_aggregated() {
 }
 
 #[test]
+fn test_fluid_previous_deployment_aggregated() {
+    run_aggregated_fixture(&repointed_previous_deployment(), Box::new(FluidVisualizer));
+}
+
+#[test]
 fn fixture_titles_name_each_change() {
     for (digest, command, title) in [
         (
@@ -306,11 +361,11 @@ fn deposit_without_a_cap_shows_no_position_owner() {
 
 #[test]
 fn every_fixture_emits_intermediate_output_listing_each_command() {
-    let fixture: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
-    let operations = fixture["vaults"]["operate"]["operations"]
-        .as_object()
-        .unwrap();
-    for digest in operations.keys() {
+    let digests: Vec<String> = [FIXTURE, PREVIOUS_DEPLOYMENT]
+        .into_iter()
+        .flat_map(|fixture| operations(fixture).keys().cloned().collect::<Vec<_>>())
+        .collect();
+    for digest in &digests {
         let tx = fixture_tx(digest);
         let TransactionKind::ProgrammableTransaction(pt) = tx.kind() else {
             panic!("expected a programmable transaction");
@@ -335,7 +390,7 @@ fn every_fixture_emits_intermediate_output_listing_each_command() {
             "{digest} lists no user::operate call"
         );
     }
-    assert_eq!(operations.len(), 12);
+    assert_eq!(digests.len(), 14);
 }
 
 #[test]
@@ -356,7 +411,7 @@ fn visualize_edge_case(name: &str) -> Result<Vec<AnnotatedPayloadField>, VisualS
     let edge_cases: serde_json::Value = serde_json::from_str(EDGE_CASES).unwrap();
     let entry = &edge_cases[name];
     visualize(
-        decode(entry["data"].as_str().unwrap()),
+        repoint(decode(entry["data"].as_str().unwrap())),
         usize::try_from(entry["command_index"].as_u64().unwrap()).unwrap(),
     )
 }
