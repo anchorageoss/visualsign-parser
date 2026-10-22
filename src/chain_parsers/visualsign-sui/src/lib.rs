@@ -25,3 +25,7 @@ pub use sui_sdk_types;
 
 #[allow(unused_imports)]
 pub(crate) use utils::truncate_address;
+
+#[cfg(test)]
+#[path = "../tests/oracle/mod.rs"]
+mod differential_oracle;

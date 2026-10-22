@@ -209,6 +209,7 @@ impl FromStr for ObjectID {
 pub struct SequenceNumber(u64);
 
 impl SequenceNumber {
+    #[cfg(test)]
     #[must_use]
     pub const fn new() -> Self {
         Self(0)
@@ -219,6 +220,7 @@ impl SequenceNumber {
         Self(value)
     }
 
+    #[cfg(test)]
     #[must_use]
     pub const fn value(self) -> u64 {
         self.0
@@ -230,11 +232,7 @@ impl SequenceNumber {
 pub struct ObjectDigest([u8; LENGTH]);
 
 impl ObjectDigest {
-    #[must_use]
-    pub const fn new(bytes: [u8; LENGTH]) -> Self {
-        Self(bytes)
-    }
-
+    #[cfg(test)]
     #[must_use]
     pub const fn inner(&self) -> &[u8; LENGTH] {
         &self.0

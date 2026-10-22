@@ -10,8 +10,8 @@
 use std::fmt::{self, Display, Formatter};
 
 use sui_sdk_types::{
-    Argument, Command, Input, Mutability, ProgrammableTransaction, Transaction, TransactionKind,
-    TypeTag, WithdrawFrom,
+    Argument, Command, EndOfEpochTransactionKind, Input, Mutability, ProgrammableTransaction,
+    Transaction, TransactionExpiration, TransactionKind, TypeTag, WithdrawFrom,
 };
 
 use super::base::{ObjectDigest, ObjectID, SequenceNumber, SuiAddress};
@@ -59,6 +59,18 @@ impl TryFrom<&Transaction> for SuiTransactionBlockData {
     type Error = ConversionError;
 
     fn try_from(transaction: &Transaction) -> Result<Self, Self::Error> {
+        // The preview cannot describe newer expiry constraints. Keep the
+        // pre-migration acceptance boundary instead of silently omitting them.
+        match &transaction.expiration {
+            TransactionExpiration::None
+            | TransactionExpiration::Epoch(_)
+            | TransactionExpiration::ValidDuring { .. } => {}
+            _ => {
+                return Err(ConversionError(
+                    "Unsupported transaction expiration".to_string(),
+                ));
+            }
+        }
         Ok(Self {
             transaction: SuiTransactionBlockKind::try_from(&transaction.kind)?,
             sender: transaction.sender.into(),
@@ -93,7 +105,6 @@ pub enum SuiTransactionBlockKind {
     ConsensusCommitPrologueV2,
     ConsensusCommitPrologueV3,
     ConsensusCommitPrologueV4,
-    ProgrammableSystemTransaction(SuiProgrammableTransactionBlock),
 }
 
 impl TryFrom<&TransactionKind> for SuiTransactionBlockKind {
@@ -101,18 +112,40 @@ impl TryFrom<&TransactionKind> for SuiTransactionBlockKind {
 
     fn try_from(kind: &TransactionKind) -> Result<Self, Self::Error> {
         Ok(match kind {
-            TransactionKind::ProgrammableTransaction(ptb) => {
+            TransactionKind::ProgrammableTransaction(ptb)
+            | TransactionKind::ProgrammableSystemTransaction(ptb) => {
                 Self::ProgrammableTransaction(SuiProgrammableTransactionBlock::try_from(ptb)?)
-            }
-            TransactionKind::ProgrammableSystemTransaction(ptb) => {
-                Self::ProgrammableSystemTransaction(SuiProgrammableTransactionBlock::try_from(ptb)?)
             }
             TransactionKind::ChangeEpoch(_) => Self::ChangeEpoch,
             TransactionKind::Genesis(_) => Self::Genesis,
             TransactionKind::ConsensusCommitPrologue(_) => Self::ConsensusCommitPrologue,
             TransactionKind::AuthenticatorStateUpdate(_) => Self::AuthenticatorStateUpdate,
             TransactionKind::RandomnessStateUpdate(_) => Self::RandomnessStateUpdate,
-            TransactionKind::EndOfEpoch(_) => Self::EndOfEpochTransaction,
+            TransactionKind::EndOfEpoch(kinds) => {
+                for kind in kinds {
+                    match kind {
+                        EndOfEpochTransactionKind::ChangeEpoch(_)
+                        | EndOfEpochTransactionKind::AuthenticatorStateCreate
+                        | EndOfEpochTransactionKind::AuthenticatorStateExpire(_)
+                        | EndOfEpochTransactionKind::RandomnessStateCreate
+                        | EndOfEpochTransactionKind::DenyListStateCreate
+                        | EndOfEpochTransactionKind::BridgeStateCreate { .. }
+                        | EndOfEpochTransactionKind::BridgeCommitteeInit { .. }
+                        | EndOfEpochTransactionKind::StoreExecutionTimeObservations(_)
+                        | EndOfEpochTransactionKind::AccumulatorRootCreate
+                        | EndOfEpochTransactionKind::CoinRegistryCreate
+                        | EndOfEpochTransactionKind::DisplayRegistryCreate
+                        | EndOfEpochTransactionKind::AddressAliasStateCreate
+                        | EndOfEpochTransactionKind::WriteAccumulatorStorageCost { .. } => {}
+                        _ => {
+                            return Err(ConversionError(
+                                "Unsupported end-of-epoch kind".to_string(),
+                            ));
+                        }
+                    }
+                }
+                Self::EndOfEpochTransaction
+            }
             TransactionKind::ConsensusCommitPrologueV2(_) => Self::ConsensusCommitPrologueV2,
             TransactionKind::ConsensusCommitPrologueV3(_) => Self::ConsensusCommitPrologueV3,
             TransactionKind::ConsensusCommitPrologueV4(_) => Self::ConsensusCommitPrologueV4,
@@ -219,12 +252,6 @@ impl SuiCallArg {
                 withdraw_from: match withdrawal.source() {
                     WithdrawFrom::Sender => SuiWithdrawFrom::Sender,
                     WithdrawFrom::Sponsor => SuiWithdrawFrom::Sponsor,
-                    WithdrawFrom::SenderAllowance { funder, allowance } => {
-                        SuiWithdrawFrom::SenderAllowance {
-                            funder: funder.into(),
-                            allowance: allowance.into(),
-                        }
-                    }
                     _ => {
                         return Err(ConversionError(
                             "Unsupported funds withdrawal source".to_string(),
@@ -266,6 +293,7 @@ pub struct SuiPureValue {
 }
 
 impl SuiPureValue {
+    #[cfg(test)]
     #[must_use]
     pub fn new(value_type: Option<TypeTag>, value: SuiJsonValue) -> Self {
         Self { value_type, value }
@@ -349,10 +377,6 @@ pub enum SuiWithdrawalTypeArg {
 pub enum SuiWithdrawFrom {
     Sender,
     Sponsor,
-    SenderAllowance {
-        funder: SuiAddress,
-        allowance: SuiAddress,
-    },
 }
 
 /// A PTB command. Package bytes of `Publish` and `Upgrade` are dropped.
@@ -564,6 +588,108 @@ mod tests {
             ],
             commands,
         }
+    }
+
+    #[test]
+    fn programmable_system_transaction_uses_programmable_view() {
+        let normal = TransactionKind::ProgrammableTransaction(ptb(vec![
+            split(vec![Argument::Input(0)]),
+            transfer(Argument::Input(1)),
+        ]));
+        let system = TransactionKind::ProgrammableSystemTransaction(ptb(vec![
+            split(vec![Argument::Input(0)]),
+            transfer(Argument::Input(1)),
+        ]));
+        assert_eq!(
+            SuiTransactionBlockKind::try_from(&system).unwrap(),
+            SuiTransactionBlockKind::try_from(&normal).unwrap(),
+            "system PTBs must keep the same commands, typed inputs and transfer view"
+        );
+    }
+
+    #[test]
+    fn programmable_system_transfer_renders_the_same_preview_fields() {
+        let fixtures: Vec<String> =
+            serde_json::from_str(include_str!("../../tests/oracle/decode_fixtures.json")).unwrap();
+        let bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &fixtures[0])
+                .unwrap();
+        let transaction: Transaction = bcs::from_bytes(&bytes).unwrap();
+        let TransactionKind::ProgrammableTransaction(ptb) = transaction.kind.clone() else {
+            panic!("native transfer fixture must be programmable");
+        };
+        let mut system = transaction.clone();
+        system.kind = TransactionKind::ProgrammableSystemTransaction(ptb);
+        for decode_transfers in [false, true] {
+            let options = visualsign::vsptrait::VisualSignOptions {
+                decode_transfers,
+                ..Default::default()
+            };
+            let mut normal_preview =
+                crate::transaction_to_visual_sign(transaction.clone(), options.clone()).unwrap();
+            let mut system_preview =
+                crate::transaction_to_visual_sign(system.clone(), options).unwrap();
+            // Transaction Details contains the deliberately different raw kind
+            // byte. Every displayed command/transfer field must still match.
+            assert_eq!(
+                normal_preview.fields.last().unwrap().label(),
+                "Transaction Details"
+            );
+            assert_eq!(
+                system_preview.fields.last().unwrap().label(),
+                "Transaction Details"
+            );
+            normal_preview.fields.pop();
+            system_preview.fields.pop();
+            assert_eq!(
+                serde_json::to_value(system_preview).unwrap(),
+                serde_json::to_value(normal_preview).unwrap(),
+            );
+        }
+    }
+
+    fn assert_unsupported_fixture(name: &str) {
+        let fixtures: std::collections::BTreeMap<String, String> = serde_json::from_str(
+            include_str!("../../tests/fixtures/unsupported-sdk-transactions.json"),
+        )
+        .unwrap();
+        let encoded = &fixtures[name];
+        let bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded).unwrap();
+        let transaction: Transaction = bcs::from_bytes(&bytes).unwrap();
+        assert!(
+            SuiTransactionBlockData::try_from(&transaction).is_err(),
+            "{name}"
+        );
+        for decode_transfers in [false, true] {
+            let result = crate::transaction_string_to_visual_sign(
+                encoded,
+                visualsign::vsptrait::VisualSignOptions {
+                    decode_transfers,
+                    include_intermediate_output: true,
+                    ..Default::default()
+                },
+            );
+            assert!(
+                result.is_err(),
+                "{name}: no preview or intermediate output is safe yet"
+            );
+        }
+    }
+
+    #[test]
+    fn validity_expiration_is_rejected() {
+        assert_unsupported_fixture("validity");
+    }
+
+    #[test]
+    fn sender_allowance_withdrawal_is_rejected() {
+        assert_unsupported_fixture("sender_allowance");
+    }
+
+    #[test]
+    fn forwarding_address_registry_create_is_rejected() {
+        assert_unsupported_fixture("forwarding_address_registry_create");
     }
 
     #[test]

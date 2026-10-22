@@ -4,23 +4,21 @@
 //! cryptography backends) and converted into the view in [`block`], which keeps
 //! the `sui_json_rpc_types` shapes the presets match on.
 
-// The view keeps the accessors and constructors of the types it replaces; some
-// are only used by tests.
-#![allow(dead_code, unused_imports)]
-
 mod base;
 mod block;
 mod display;
 mod json;
 
-pub use base::{AddressParseError, ObjectDigest, ObjectID, SequenceNumber, SuiAddress};
+#[cfg(test)]
+pub use base::SequenceNumber;
+pub use base::{ObjectID, SuiAddress};
 pub use block::{
-    ConversionError, SuiArgument, SuiCallArg, SuiCommand, SuiFundsWithdrawalArg, SuiGasData,
-    SuiObjectArg, SuiProgrammableMoveCall, SuiProgrammableTransactionBlock, SuiPureValue,
+    SuiArgument, SuiCallArg, SuiCommand, SuiObjectArg, SuiProgrammableMoveCall, SuiPureValue,
     SuiReservation, SuiTransactionBlockData, SuiTransactionBlockKind, SuiWithdrawFrom,
     SuiWithdrawalTypeArg,
 };
 pub use display::{type_tag_to_canonical_string, type_tag_to_string};
+#[cfg(test)]
 pub use json::SuiJsonValue;
 pub use sui_sdk_types::TypeTag;
 
