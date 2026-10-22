@@ -5188,15 +5188,12 @@
             "Type": "text_v2"
           },
           {
-            "Diagnostic": {
-              "Domain": "near-intents",
-              "Level": "warn",
-              "Message": "signature verification failed",
-              "Rule": "signature"
+            "FallbackText": "signature: signature verification failed",
+            "Label": "Warning",
+            "TextV2": {
+              "Text": "signature: signature verification failed"
             },
-            "FallbackText": "warn: signature verification failed",
-            "Label": "signature",
-            "Type": "diagnostic"
+            "Type": "text_v2"
           },
           {
             "FallbackText": "alice.near",

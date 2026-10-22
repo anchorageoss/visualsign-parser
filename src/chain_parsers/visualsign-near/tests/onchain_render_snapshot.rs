@@ -3,16 +3,29 @@
 //! Inputs are built with `near-primitives` (a dev-dependency) so they are
 //! exactly the bytes a real NEAR client would produce. Each is rendered through
 //! the public string entry point and compared with
-//! `tests/fixtures/onchain_render_snapshot.json`, which was captured from the
-//! parser while it still decoded with `near-primitives`. The rendered payload
+//! feature-specific snapshots in `tests/fixtures/`, captured from the parser
+//! while it still decoded with `near-primitives`. The rendered payload
 //! (field labels, order and values) and every error string must stay
 //! byte-identical.
 //!
-//! The fixture was generated with near-primitives decoding, at commit
-//! `07e88ba7`. There is deliberately no regeneration path here: regenerating
-//! from this build would capture the local decoder's output and compare it
-//! against itself. If a render change is ever intended, regenerate only from a
-//! build that still decodes with near-primitives, and review the diff.
+//! Both fixtures were generated with near-primitives decoding at pre-port commit
+//! `97e4269d9f2d8ff918a75518c4022e2a40a0c6bd`, using its original generator:
+//!
+//! ```text
+//! NEAR_SNAPSHOT_REGEN=1 cargo test -p visualsign-near --locked --test onchain_render_snapshot
+//! NEAR_SNAPSHOT_REGEN=1 cargo test -p visualsign-near --locked --features diagnostics --test onchain_render_snapshot
+//! ```
+//!
+//! Run these only at that commit, copying the generated fixture aside between
+//! runs. Store the first as `onchain_render_snapshot.json` (diagnostics off)
+//! and the second as `onchain_render_snapshot_diagnostics.json` (diagnostics
+//! on). The intents signature warning intentionally renders differently for
+//! each feature setting, so both independent outputs are pinned.
+//!
+//! There is deliberately no regeneration path here: regenerating from this
+//! build would capture the local decoder's output and compare it against
+//! itself. If a render change is ever intended, regenerate only from a build
+//! that still decodes with near-primitives, and review the diff.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -42,9 +55,16 @@ use serde::{Deserialize, Serialize};
 use visualsign::vsptrait::{DeveloperConfig, VisualSignConverterFromString, VisualSignOptions};
 use visualsign_near::NearVisualSignConverter;
 
+#[cfg(not(feature = "diagnostics"))]
 const SNAPSHOT_PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/onchain_render_snapshot.json"
+);
+
+#[cfg(feature = "diagnostics")]
+const SNAPSHOT_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/onchain_render_snapshot_diagnostics.json"
 );
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
