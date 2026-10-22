@@ -206,6 +206,30 @@ fn framework_call(module: &str, function: &str, type_arg: &str, args: Vec<Argume
     )
 }
 
+/// Inserts `SplitCoins(GasCoin, [amount])` at `index` and returns the new coin.
+fn insert_gas_split(tx: &mut TransactionData, index: usize, amount: u64) -> Argument {
+    let amount = push_pure_input(tx, bcs::to_bytes(&amount).unwrap());
+    insert_command(tx, index, Command::SplitCoins(Argument::GasCoin, vec![amount]));
+    Argument::NestedResult(u16::try_from(index).unwrap(), 0)
+}
+
+fn result(index: usize) -> Argument {
+    Argument::Result(u16::try_from(index).unwrap())
+}
+
+const SUI: &str = "0x2::sui::SUI";
+const ONE_SUI: u64 = 1_000_000_000;
+
+/// After the real open-and-borrow's operate (command 7): a 1 SUI gas split with 5 SUI
+/// merged in, as a balance at the returned command. Five commands are inserted from 8.
+fn insert_one_plus_five_sui_balance(tx: &mut TransactionData) -> usize {
+    let one = insert_gas_split(tx, 8, ONE_SUI);
+    let five = insert_gas_split(tx, 9, 5 * ONE_SUI);
+    insert_command(tx, 10, Command::MergeCoins(one, vec![five]));
+    insert_command(tx, 11, framework_call("coin", "into_balance", SUI, vec![one]));
+    11
+}
+
 fn set_pure_input(tx: &mut TransactionData, index: usize, bytes: Vec<u8>) {
     programmable(tx).inputs[index] = CallArg::Pure(bytes);
 }
@@ -490,6 +514,111 @@ fn funds_joined_into_an_output_are_shown() {
     assert_eq!(
         field_value(&field, "SUI Recipient Also Receives"),
         "2 SUI split from the gas coin"
+    );
+}
+
+#[test]
+fn balance_with_funds_added_before_the_output_joins_it_shows_every_addition() {
+    let mut tx = open_borrow_tx();
+    let small = insert_gas_split(&mut tx, 8, ONE_SUI / 10);
+    insert_command(&mut tx, 9, framework_call("coin", "into_balance", SUI, vec![small]));
+    let large = insert_gas_split(&mut tx, 10, 5 * ONE_SUI);
+    insert_command(&mut tx, 11, framework_call("coin", "into_balance", SUI, vec![large]));
+    insert_command(&mut tx, 12, framework_call("balance", "join", SUI, vec![result(9), result(11)]));
+    insert_command(
+        &mut tx,
+        13,
+        framework_call("balance", "join", SUI, vec![result(9), Argument::NestedResult(7, 0)]),
+    );
+    move_call(&mut tx, 15).arguments[0] = result(9);
+    set_pure_input(&mut tx, COL_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
+
+    let field = card(tx, OPERATE_COMMAND);
+    assert_eq!(
+        field_value(&field, "SUI Recipient Also Receives"),
+        "0.1 SUI split from the gas coin plus 5 SUI split from the gas coin"
+    );
+}
+
+#[test]
+fn merged_coin_joined_into_the_output_shows_the_merge() {
+    let mut tx = open_borrow_tx();
+    let balance = insert_one_plus_five_sui_balance(&mut tx);
+    insert_command(
+        &mut tx,
+        balance + 1,
+        framework_call("balance", "join", SUI, vec![Argument::NestedResult(7, 0), result(balance)]),
+    );
+    set_pure_input(&mut tx, COL_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
+
+    let field = card(tx, OPERATE_COMMAND);
+    assert_eq!(
+        field_value(&field, "SUI Recipient Also Receives"),
+        "1 SUI split from the gas coin plus 5 SUI split from the gas coin"
+    );
+}
+
+#[test]
+fn merged_coin_sent_with_the_cap_shows_the_merge() {
+    let mut tx = open_borrow_tx();
+    let one = insert_gas_split(&mut tx, CAP_TRANSFER_COMMAND, ONE_SUI);
+    let five = insert_gas_split(&mut tx, CAP_TRANSFER_COMMAND + 1, 5 * ONE_SUI);
+    insert_command(&mut tx, CAP_TRANSFER_COMMAND + 2, Command::MergeCoins(one, vec![five]));
+    let Command::TransferObjects(objects, _) =
+        &mut programmable(&mut tx).commands[CAP_TRANSFER_COMMAND + 3]
+    else {
+        panic!("expected the cap transfer");
+    };
+    objects.push(one);
+    set_pure_input(&mut tx, CAP_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
+
+    let field = card(tx, OPERATE_COMMAND);
+    assert_eq!(
+        field_value(&field, "Position Owner Also Receives"),
+        "1 SUI split from the gas coin plus 5 SUI split from the gas coin"
+    );
+}
+
+#[test]
+fn coin_changed_by_an_unknown_call_shows_no_amount() {
+    let mut tx = open_borrow_tx();
+    let one = insert_gas_split(&mut tx, CAP_TRANSFER_COMMAND, ONE_SUI);
+    insert_command(&mut tx, CAP_TRANSFER_COMMAND + 1, tamper_call(vec![one]));
+    let Command::TransferObjects(objects, _) =
+        &mut programmable(&mut tx).commands[CAP_TRANSFER_COMMAND + 2]
+    else {
+        panic!("expected the cap transfer");
+    };
+    objects.push(one);
+    set_pure_input(&mut tx, CAP_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
+
+    let field = card(tx, OPERATE_COMMAND);
+    assert_eq!(
+        field_value(&field, "Position Owner Also Receives"),
+        "1 SUI split from the gas coin, changed by later commands (amount not in transaction)"
+    );
+}
+
+#[test]
+fn coin_both_split_and_merged_shows_no_amount() {
+    let mut tx = open_borrow_tx();
+    let one = insert_gas_split(&mut tx, CAP_TRANSFER_COMMAND, ONE_SUI);
+    let five = insert_gas_split(&mut tx, CAP_TRANSFER_COMMAND + 1, 5 * ONE_SUI);
+    insert_command(&mut tx, CAP_TRANSFER_COMMAND + 2, Command::MergeCoins(one, vec![five]));
+    let amount = push_pure_input(&mut tx, bcs::to_bytes(&ONE_SUI).unwrap());
+    insert_command(&mut tx, CAP_TRANSFER_COMMAND + 3, Command::SplitCoins(one, vec![amount]));
+    let Command::TransferObjects(objects, _) =
+        &mut programmable(&mut tx).commands[CAP_TRANSFER_COMMAND + 4]
+    else {
+        panic!("expected the cap transfer");
+    };
+    objects.push(one);
+    set_pure_input(&mut tx, CAP_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
+
+    let field = card(tx, OPERATE_COMMAND);
+    assert_eq!(
+        field_value(&field, "Position Owner Also Receives"),
+        "1 SUI split from the gas coin, changed by later commands (amount not in transaction)"
     );
 }
 

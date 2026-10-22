@@ -532,23 +532,21 @@ fn describe_balance(
     else {
         return Some(unknown());
     };
-    let touched = uses_after(context, index, balance)
-        .first()
-        .is_some_and(|(first, _)| *first != consumer);
-    let rest = if touched { "what remains of " } else { "" };
-    let description = match (call.module.as_str(), call.function.as_str()) {
+    let changes = find_changes(context, balance, index, consumer, Some(coin), depth);
+    let base = match (call.module.as_str(), call.function.as_str()) {
         ("balance", "zero") if call.package == ObjectID::from_single_byte(SUI_FRAMEWORK) => {
-            if !touched {
-                return None;
-            }
-            format!("other {symbol} ({AMOUNT_NOT_IN_TRANSACTION})")
+            return match changes {
+                Changes::Unchanged | Changes::Reduced => None,
+                Changes::Added(added) => Some(added.join(" plus ")),
+                Changes::Unknown => Some(unknown()),
+            };
         }
         ("coin", "into_balance") if call.package == ObjectID::from_single_byte(SUI_FRAMEWORK) => {
             let source = argument_at(&call.arguments, 0, "coin").ok()?;
-            format!("{rest}{}", describe_coin(context, source, index, Some(coin), depth + 1))
+            describe_coin(context, source, index, Some(coin), depth + 1)
         }
         ("balance", "redeem_funds") if call.package == ObjectID::from_single_byte(SUI_FRAMEWORK) => {
-            format!("{rest}{}", describe_redeemed(context, call, coin))
+            describe_redeemed(context, call, coin)
         }
         ("balance", "split") if call.package == ObjectID::from_single_byte(SUI_FRAMEWORK) => {
             let amount = call
@@ -556,15 +554,97 @@ fn describe_balance(
                 .get(1)
                 .and_then(|amount| decode_pure_amount(context, *amount, index));
             match amount {
-                Some(amount) => format!("{rest}{} split from another balance", coin.display(amount)),
+                Some(amount) => format!("{} split from another balance", coin.display(amount)),
                 None => unknown(),
             }
         }
         (module, function) => format!(
-            "{rest}{symbol} returned by {module}::{function} at command {index} ({AMOUNT_NOT_IN_TRANSACTION})"
+            "{symbol} returned by {module}::{function} at command {index} ({AMOUNT_NOT_IN_TRANSACTION})"
         ),
     };
-    Some(description)
+    Some(changes.qualify(base))
+}
+
+/// How a coin or balance changed between the command that made it and `consumer`.
+enum Changes {
+    Unchanged,
+    Reduced,
+    Added(Vec<String>),
+    Unknown,
+}
+
+impl Changes {
+    fn qualify(self, base: String) -> String {
+        match self {
+            Changes::Unchanged => base,
+            Changes::Reduced => format!("what remains of {base}"),
+            Changes::Added(added) => std::iter::once(base)
+                .chain(added)
+                .collect::<Vec<_>>()
+                .join(" plus "),
+            Changes::Unknown => {
+                format!("{base}, changed by later commands ({AMOUNT_NOT_IN_TRANSACTION})")
+            }
+        }
+    }
+}
+
+/// A mix of reductions and additions, or any other command, leaves the amount unknown.
+fn find_changes(
+    context: &VisualizerContext,
+    value: SuiArgument,
+    producer: usize,
+    consumer: usize,
+    coin: Option<&Coin>,
+    depth: usize,
+) -> Changes {
+    let mut reduced = false;
+    let mut added = Vec::new();
+    for (index, command) in uses_after(context, producer, value) {
+        if index >= consumer {
+            break;
+        }
+        match command {
+            SuiCommand::SplitCoins(source, _) if refers_to(*source, value) => reduced = true,
+            SuiCommand::MergeCoins(target, others) if refers_to(*target, value) => {
+                added.extend(
+                    others
+                        .iter()
+                        .map(|other| describe_coin(context, *other, index, coin, depth + 1)),
+                );
+            }
+            SuiCommand::MoveCall(call)
+                if call.package == ObjectID::from_single_byte(SUI_FRAMEWORK)
+                    && matches!(call.module.as_str(), "coin" | "balance")
+                    && call
+                        .arguments
+                        .first()
+                        .is_some_and(|first| refers_to(*first, value)) =>
+            {
+                match (call.module.as_str(), call.function.as_str(), call.arguments.get(1)) {
+                    (_, "value", _) => {}
+                    (_, "split", _) => reduced = true,
+                    ("balance", "join", Some(other)) => match coin {
+                        Some(coin) => {
+                            added.extend(describe_balance(context, *other, index, coin, depth + 1));
+                        }
+                        None => return Changes::Unknown,
+                    },
+                    ("coin", "join", Some(other)) => {
+                        added.push(describe_coin(context, *other, index, coin, depth + 1));
+                    }
+                    _ => return Changes::Unknown,
+                }
+            }
+            _ => return Changes::Unknown,
+        }
+    }
+    match (reduced, added.is_empty()) {
+        (false, true) => Changes::Unchanged,
+        (true, true) => Changes::Reduced,
+        (false, false) => Changes::Added(added),
+        (true, false) => Changes::Unknown,
+    }
 }
 
 fn describe_coin(
@@ -585,7 +665,12 @@ fn describe_coin(
             let Ok((index, producer)) = producing_command(context, consumer, object, "object") else {
                 return format!("an object ({AMOUNT_NOT_IN_TRANSACTION})");
             };
-            match producer {
+            let changes_coin = match producer {
+                SuiCommand::SplitCoins(SuiArgument::GasCoin, _) => Some(&sui),
+                _ => coin,
+            };
+            let changes = find_changes(context, object, index, consumer, changes_coin, depth);
+            let base = match producer {
                 SuiCommand::SplitCoins(source, amounts) => {
                     let amount = result_slot(object)
                         .and_then(|(_, slot)| amounts.get(usize::from(slot)))
@@ -635,7 +720,8 @@ fn describe_coin(
                     }
                 }
                 _ => format!("an object from command {index}"),
-            }
+            };
+            changes.qualify(base)
         }
     }
 }
