@@ -13,12 +13,19 @@ mod integrations;
 /// parser produces.
 pub mod intermediate;
 mod presets;
+mod types;
 mod utils;
 
 pub use core::{
-    SuiModuleResolver, SuiTransactionWrapper, SuiVisualSignConverter, VisualizeResult,
+    SuiTransactionWrapper, SuiVisualSignConverter, VisualizeResult,
     transaction_string_to_visual_sign, transaction_to_visual_sign,
 };
+/// The `sui-sdk-types` crate whose `Transaction` the public API takes.
+pub use sui_sdk_types;
 
 #[allow(unused_imports)]
 pub(crate) use utils::truncate_address;
+
+#[cfg(test)]
+#[path = "../tests/oracle/mod.rs"]
+mod differential_oracle;

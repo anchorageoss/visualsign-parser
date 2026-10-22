@@ -2,15 +2,13 @@ use super::*;
 
 use super::config::DEPLOYMENTS;
 use crate::SuiVisualSignConverter;
-use crate::core::{SuiModuleResolver, SuiTransactionWrapper};
+use crate::core::SuiTransactionWrapper;
+use crate::types::{SuiTransactionBlockData, SuiTransactionBlockKind};
 use crate::intermediate::SuiIntermediateOutput;
 use crate::utils::run_aggregated_fixture;
 
 use base64::Engine;
-use move_bytecode_utils::module_cache::SyncModuleCache;
-use sui_json_rpc_types::{
-    SuiTransactionBlockData, SuiTransactionBlockDataAPI, SuiTransactionBlockKind,
-};
+use sui_types::base_types::ObjectID;
 use sui_types::transaction::{
     Argument, CallArg, Command, ProgrammableMoveCall, ProgrammableTransaction, TransactionData,
     TransactionDataAPI, TransactionKind,
@@ -57,6 +55,12 @@ fn decode(data: &str) -> TransactionData {
             .unwrap(),
     )
     .unwrap()
+}
+
+// Historical types remain test-only builders. Decode their real/tampered BCS
+// through the SDK before exercising the production view and converter.
+fn sdk_transaction(tx: &TransactionData) -> sui_sdk_types::Transaction {
+    bcs::from_bytes(&bcs::to_bytes(tx).unwrap()).unwrap()
 }
 
 fn fixture_tx(digest: &str) -> TransactionData {
@@ -140,14 +144,11 @@ fn set_amount(tx: &mut TransactionData, command: usize, function: &str) {
 }
 
 fn visualize(
-    tx: TransactionData,
+    tx: &TransactionData,
     command_index: usize,
 ) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
-    let block_data = SuiTransactionBlockData::try_from_with_module_cache(
-        tx,
-        &SyncModuleCache::new(SuiModuleResolver),
-    )
-    .unwrap();
+    let transaction = sdk_transaction(tx);
+    let block_data = SuiTransactionBlockData::try_from(&transaction).unwrap();
     let SuiTransactionBlockKind::ProgrammableTransaction(pt) = block_data.transaction() else {
         panic!("expected a programmable transaction");
     };
@@ -157,7 +158,7 @@ fn visualize(
     FluidVisualizer.visualize_tx_commands(&context)
 }
 
-fn card(tx: TransactionData, command_index: usize) -> AnnotatedPayloadField {
+fn card(tx: &TransactionData, command_index: usize) -> AnnotatedPayloadField {
     visualize(tx, command_index).unwrap().remove(0)
 }
 
@@ -262,13 +263,13 @@ fn fixture_titles_name_each_change() {
             "Withdraw all SUI collateral and repay all USDC debt on Fluid",
         ),
     ] {
-        assert_eq!(card_title(&card(fixture_tx(digest), command)), title);
+        assert_eq!(card_title(&card(&fixture_tx(digest), command)), title);
     }
 }
 
 #[test]
 fn deposit_without_a_cap_shows_no_position_owner() {
-    let field = card(fixture_tx("EJk1pMgkJpGHTjdAU2Nx8tcKo1JBp6tHDB6x3roQBC4V"), 7);
+    let field = card(&fixture_tx("EJk1pMgkJpGHTjdAU2Nx8tcKo1JBp6tHDB6x3roQBC4V"), 7);
     assert_eq!(
         condensed_labels(&field),
         vec!["Collateral Deposit", "Position", "Network"]
@@ -292,7 +293,7 @@ fn every_fixture_emits_intermediate_output_listing_each_command() {
             ..VisualSignOptions::default()
         };
         let bytes = SuiVisualSignConverter
-            .to_visual_sign_payload(SuiTransactionWrapper::new(tx), options)
+            .to_visual_sign_payload(SuiTransactionWrapper::new(sdk_transaction(&tx)), options)
             .unwrap()
             .intermediate_output
             .unwrap_or_else(|| panic!("no intermediate output for {digest}"));
@@ -313,7 +314,7 @@ fn every_fixture_emits_intermediate_output_listing_each_command() {
 fn every_deployment_package_is_handled_in_the_form_it_is_called_with() {
     let config = Config::new();
     for deployment in DEPLOYMENTS {
-        let id = ObjectID::from_hex_literal(deployment.vaults_package).unwrap();
+        let id = crate::types::ObjectID::from_hex_literal(deployment.vaults_package).unwrap();
         assert_eq!(id.to_hex_literal(), deployment.vaults_package);
         assert!(config.can_handle(&id.to_hex_literal(), "user", "operate"));
         for function in ["init_position", "close_position", "liquidate"] {
@@ -329,7 +330,7 @@ fn leverage_through_a_flash_loan_fails() {
     let leverage = &rejected["leverage"];
     expect_error(
         visualize(
-            decode(leverage["data"].as_str().unwrap()),
+            &decode(leverage["data"].as_str().unwrap()),
             usize::try_from(leverage["command_index"].as_u64().unwrap()).unwrap(),
         ),
         "Argument `col_amount` is not a transaction input",
@@ -342,7 +343,7 @@ fn repayment_is_a_negative_debt_amount() {
     set_amount(&mut tx, COL_AMOUNT_COMMAND, "none");
     set_amount(&mut tx, DEBT_AMOUNT_COMMAND, "negative");
 
-    let field = card(tx, OPERATE_COMMAND);
+    let field = card(&tx, OPERATE_COMMAND);
     assert_eq!(card_title(&field), "Repay 0.3555 USDC on Fluid");
     assert_eq!(field_value(&field, "Repayment"), "0.3555");
     assert_eq!(
@@ -357,7 +358,7 @@ fn zero_amounts_build_none() {
     let zero = bcs::to_bytes(&0_u64).unwrap();
     set_pure_input(&mut tx, usize::from(DEBT_AMOUNT_INPUT), zero);
 
-    let field = card(tx, OPERATE_COMMAND);
+    let field = card(&tx, OPERATE_COMMAND);
     assert_eq!(card_title(&field), "Deposit 0.9 SUI collateral on Fluid");
 }
 
@@ -368,7 +369,7 @@ fn operate_without_any_change_fails() {
     set_amount(&mut tx, DEBT_AMOUNT_COMMAND, "none");
 
     expect_error(
-        visualize(tx, OPERATE_COMMAND),
+        visualize(&tx, OPERATE_COMMAND),
         "Fluid operate with neither a collateral nor a debt change aborts",
     );
 }
@@ -383,7 +384,7 @@ fn unused_coin_sent_to_someone_else_is_shown() {
         OTHER_ADDRESS.to_vec(),
     );
 
-    let field = card(tx, OPERATE_COMMAND);
+    let field = card(&tx, OPERATE_COMMAND);
     assert_eq!(field_value(&field, "USDC Recipient"), other_address());
     assert_eq!(
         address_name(&field, "USDC Recipient"),
@@ -401,7 +402,7 @@ fn borrowed_coin_and_position_owner_name_their_recipients() {
     );
     set_pure_input(&mut tx, CAP_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
 
-    let field = card(tx, OPERATE_COMMAND);
+    let field = card(&tx, OPERATE_COMMAND);
     assert_eq!(field_value(&field, "USDC Recipient"), other_address());
     assert_eq!(field_value(&field, "Position Owner"), other_address());
     assert_eq!(
@@ -415,7 +416,7 @@ fn coin_joined_into_another_balance_follows_that_balance() {
     let mut tx = fixture_tx(REPAY_DIGEST);
     set_pure_input(&mut tx, REPAY_SUI_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
 
-    let field = card(tx, REPAY_OPERATE_COMMAND);
+    let field = card(&tx, REPAY_OPERATE_COMMAND);
     assert_eq!(field_value(&field, "SUI Recipient"), other_address());
     assert_eq!(
         address_name(&field, "SUI Recipient"),
@@ -433,7 +434,7 @@ fn joined_balance_used_again_after_it_is_sent_fails() {
     );
 
     expect_error(
-        visualize(tx, REPAY_OPERATE_COMMAND),
+        visualize(&tx, REPAY_OPERATE_COMMAND),
         &format!(
             "The collateral balance from command {REPAY_OPERATE_COMMAND} must be used by exactly one later command"
         ),
@@ -450,7 +451,7 @@ fn unknown_coins_are_shown_in_base_units_with_their_type() {
         call.type_arguments[last] = other.clone().into();
     }
 
-    let field = card(tx, OPERATE_COMMAND);
+    let field = card(&tx, OPERATE_COMMAND);
     assert_eq!(
         card_title(&field),
         "Deposit 0.9 SUI collateral and borrow 355500 base units of 0x42::usdc::USDC on Fluid"
@@ -466,7 +467,7 @@ fn borrowed_coin_not_sent_to_an_address_fails() {
     ]);
 
     expect_error(
-        visualize(tx, OPERATE_COMMAND),
+        visualize(&tx, OPERATE_COMMAND),
         &format!(
             "The debt balance from command {OPERATE_COMMAND} is not sent to an address through 0x2::balance or 0x2::coin"
         ),
@@ -483,7 +484,7 @@ fn borrowed_coin_used_twice_fails() {
     );
 
     expect_error(
-        visualize(tx, OPERATE_COMMAND),
+        visualize(&tx, OPERATE_COMMAND),
         &format!(
             "The debt balance from command {OPERATE_COMMAND} must be used by exactly one later command"
         ),
@@ -497,7 +498,7 @@ fn borrowed_coin_sent_as_another_coin_type_fails() {
         sui_types::parse_sui_type_tag("0x2::sui::SUI").unwrap().into();
 
     expect_error(
-        visualize(tx, OPERATE_COMMAND),
+        visualize(&tx, OPERATE_COMMAND),
         &format!(
             "The debt balance from command {OPERATE_COMMAND} is not sent to an address through 0x2::balance or 0x2::coin"
         ),
@@ -510,7 +511,7 @@ fn amount_built_outside_fluid_fails() {
     move_call(&mut tx, DEBT_AMOUNT_COMMAND).package = ObjectID::from_single_byte(0x42);
 
     expect_error(
-        visualize(tx, OPERATE_COMMAND),
+        visualize(&tx, OPERATE_COMMAND),
         "`debt_amount` is not built by Fluid's structs::{none, positive, negative, max}",
     );
 }
@@ -525,7 +526,7 @@ fn amount_input_modified_before_its_constructor_fails() {
     );
 
     expect_error(
-        visualize(tx, OPERATE_COMMAND + 1),
+        visualize(&tx, OPERATE_COMMAND + 1),
         &format!(
             "`debt_amount` is passed to command {DEBT_AMOUNT_COMMAND}, which may modify it before command {} consumes it",
             DEBT_AMOUNT_COMMAND + 1
@@ -543,7 +544,7 @@ fn recipient_modified_before_it_is_paid_fails() {
     );
 
     expect_error(
-        visualize(tx, OPERATE_COMMAND),
+        visualize(&tx, OPERATE_COMMAND),
         &format!(
             "`recipient` is passed to command {DESTROY_SOME_COMMAND}, which may modify it before command {} consumes it",
             DEBT_SEND_COMMAND + 1
@@ -557,7 +558,7 @@ fn cap_not_transferred_fails() {
     programmable(&mut tx).commands[CAP_TRANSFER_COMMAND] = tamper_call(vec![Argument::Result(8)]);
 
     expect_error(
-        visualize(tx, OPERATE_COMMAND),
+        visualize(&tx, OPERATE_COMMAND),
         "The position owner cap is not returned through 0x1::option::destroy_some and TransferObjects, or 0x1::option::destroy_none",
     );
 }
@@ -569,4 +570,28 @@ fn format_units_trims_trailing_zeros() {
     assert_eq!(format_units(3_000_000_000, 9), "3");
     assert_eq!(format_units(1, 9), "0.000000001");
     assert_eq!(format_units(0, 8), "0");
+}
+
+#[test]
+fn type_matching_preserves_canonical_coin_identity() {
+    let padded_sui = format!("0x{}2::sui::SUI", "0".repeat(63));
+    for (actual, expected) in [
+        ("0x2::sui::SUI", padded_sui.as_str()),
+        ("vector<0x2::sui::SUI>", "vector<0x0002::sui::SUI>"),
+        ("u64", "u64"),
+    ] {
+        assert!(type_matches(actual, expected));
+        assert_eq!(
+            sui_types::parse_sui_type_tag(actual).unwrap(),
+            sui_types::parse_sui_type_tag(expected).unwrap(),
+        );
+    }
+    for (actual, expected) in [
+        ("0x2::sui::SUI", "0x42::sui::SUI"),
+        ("0x2::sui::SUI", "0x2::sui::OTHER"),
+        ("vector<u64>", "vector<u8>"),
+        ("not a type", "not a type"),
+    ] {
+        assert!(!type_matches(actual, expected));
+    }
 }

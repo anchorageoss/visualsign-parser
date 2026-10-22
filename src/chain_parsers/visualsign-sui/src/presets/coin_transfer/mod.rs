@@ -2,10 +2,10 @@ use crate::core::{CommandVisualizer, SuiIntegrationConfig, VisualizerContext, Vi
 use crate::truncate_address;
 use crate::utils::{CoinObject, decode_number, parse_numeric_argument, parse_result_command_index};
 
-use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand, SuiObjectArg};
-use sui_types::base_types::SuiAddress;
+use crate::types::{SuiArgument, SuiCallArg, SuiCommand, SuiObjectArg};
+use crate::types::SuiAddress;
 
-use sui_types::gas_coin::MIST_PER_SUI;
+use crate::types::MIST_PER_SUI;
 use visualsign::errors::{TransactionParseError, VisualSignError};
 use visualsign::field_builders::{create_address_field, create_amount_field, create_text_field};
 use visualsign::{
@@ -280,7 +280,7 @@ mod tests {
     use super::{MAX_RESOLVE_OBJECT_DEPTH, resolve_object};
     use crate::utils::payload_from_b64;
 
-    use sui_json_rpc_types::{SuiArgument, SuiCallArg, SuiCommand};
+    use crate::types::{SuiArgument, SuiCallArg, SuiCommand};
 
     use visualsign::SignablePayloadField;
     use visualsign::errors::VisualSignError;

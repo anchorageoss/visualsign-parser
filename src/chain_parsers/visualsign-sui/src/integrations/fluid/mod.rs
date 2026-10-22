@@ -18,8 +18,7 @@ use crate::core::{
 };
 use crate::utils::decode_number;
 
-use sui_json_rpc_types::{SuiArgument, SuiCommand, SuiProgrammableMoveCall};
-use sui_types::base_types::{ObjectID, SuiAddress};
+use crate::types::{ObjectID, SuiAddress, SuiArgument, SuiCommand, SuiProgrammableMoveCall};
 
 use visualsign::{
     AnnotatedPayloadField, SignablePayloadField, SignablePayloadFieldCommon,
