@@ -18,7 +18,9 @@ use crate::core::{
 };
 use crate::utils::decode_number;
 
-use sui_json_rpc_types::{SuiArgument, SuiCommand, SuiProgrammableMoveCall};
+use sui_json_rpc_types::{
+    SuiArgument, SuiCallArg, SuiCommand, SuiProgrammableMoveCall, SuiReservation, SuiWithdrawFrom,
+};
 use sui_types::base_types::{ObjectID, SuiAddress};
 
 use visualsign::{
@@ -103,6 +105,16 @@ impl Coin {
                 .iter()
                 .find(|known| type_matches(coin_type, known.coin_type)),
         })
+    }
+
+    fn sui() -> Self {
+        let coin_type = "0x2::sui::SUI";
+        Self {
+            coin_type: coin_type.to_string(),
+            known: KNOWN_COINS
+                .iter()
+                .find(|known| type_matches(coin_type, known.coin_type)),
+        }
     }
 
     fn symbol(&self) -> String {
@@ -276,13 +288,14 @@ fn takes_by_value(call: &SuiProgrammableMoveCall, deployment: &FluidDeployment) 
                 | "into_balance"
                 | "destroy_zero"
         );
+    let transfer = is_call(call, SUI_FRAMEWORK, "transfer", "public_transfer");
     let option = call.package == ObjectID::from_single_byte(STDLIB)
         && call.module == "option"
         && matches!(
             call.function.as_str(),
             "some" | "none" | "destroy_some" | "destroy_none"
         );
-    framework || option || is_amount_constructor(call, deployment)
+    framework || transfer || option || is_amount_constructor(call, deployment)
 }
 
 fn resolve_operate_amount(
@@ -330,51 +343,58 @@ fn resolve_operate_amount(
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Destination {
-    Address(SuiAddress),
+    /// `also` lists other funds or objects that reach the recipient with this output.
+    Address {
+        recipient: SuiAddress,
+        also: Vec<String>,
+    },
     /// `destroy_zero` aborts unless the balance is empty.
     Destroyed,
 }
 
-/// Follows a `Balance<T>` through `balance::join` and `coin::from_balance` to a
-/// `send_funds`, `TransferObjects` or `destroy_zero`; any other route is rejected.
+/// A `TransferObjects` command and the traced object in it.
+type TransferClaim = (usize, SuiArgument);
+
+/// Follows a `Balance<T>` to its recipient, noting any other funds joined in along the way.
 fn trace_funds(
     context: &VisualizerContext,
     deployment: &FluidDeployment,
     producer: usize,
     slot: u16,
-    coin_type: &str,
+    coin: &Coin,
     name: &str,
-) -> Result<Destination, VisualSignError> {
+) -> Result<(Destination, Option<TransferClaim>), VisualSignError> {
     let unsupported = || {
         missing(format!(
-            "The {name} from command {producer} is not sent to an address through 0x2::balance or 0x2::coin"
+            "The {name} from command {producer} is not sent to an address through 0x2::balance, 0x2::coin or 0x2::transfer"
         ))
     };
+    let used_once = || {
+        missing(format!(
+            "The {name} from command {producer} must be used by exactly one later command"
+        ))
+    };
+    let coin_type = coin.coin_type.as_str();
     let mut value = output(producer, slot)?;
     let mut after = producer;
     let mut is_coin = false;
+    let mut also = Vec::new();
     loop {
-        // A `balance::join` into `value` only adds to it.
-        let uses = uses_after(context, after, value);
-        let next = uses.into_iter().find(|(_, command)| {
-            !matches!(command, SuiCommand::MoveCall(call)
-                if is_call(call, SUI_FRAMEWORK, "balance", "join")
-                    && call.arguments.first().is_some_and(|first| refers_to(*first, value)))
-        });
-        let Some((index, command)) = next else {
-            return Err(unsupported());
+        let Some((index, command)) =
+            find_next_move(context, after, value, is_coin, coin, &mut also)?
+        else {
+            return Err(used_once());
         };
-        if !uses_after(context, index, value).is_empty() {
-            return Err(missing(format!(
-                "The {name} from command {producer} must be used by exactly one later command"
-            )));
-        }
         let first_is_value = |call: &SuiProgrammableMoveCall| {
             call.arguments
                 .first()
                 .is_some_and(|first| refers_to(*first, value))
+        };
+        let send = |arguments: &[SuiArgument], at: usize, also: Vec<String>| {
+            resolve_recipient(context, deployment, arguments, at, index)
+                .map(|recipient| Destination::Address { recipient, also })
         };
         match command {
             SuiCommand::MoveCall(call)
@@ -383,15 +403,15 @@ fn trace_funds(
                     && first_type_argument_is(call, coin_type)
                     && first_is_value(call) =>
             {
-                return resolve_recipient(context, deployment, &call.arguments, 1, index).map(Destination::Address);
+                return Ok((send(&call.arguments, 1, also)?, None));
             }
             SuiCommand::MoveCall(call)
                 if is_coin
-                    && is_call(call, SUI_FRAMEWORK, "coin", "send_funds")
-                    && first_type_argument_is(call, coin_type)
+                    && (is_call(call, SUI_FRAMEWORK, "coin", "send_funds")
+                        || is_call(call, SUI_FRAMEWORK, "transfer", "public_transfer"))
                     && first_is_value(call) =>
             {
-                return resolve_recipient(context, deployment, &call.arguments, 1, index).map(Destination::Address);
+                return Ok((send(&call.arguments, 1, also)?, None));
             }
             SuiCommand::MoveCall(call)
                 if !is_coin
@@ -399,7 +419,7 @@ fn trace_funds(
                     && first_type_argument_is(call, coin_type)
                     && first_is_value(call) =>
             {
-                return Ok(Destination::Destroyed);
+                return Ok((Destination::Destroyed, None));
             }
             SuiCommand::MoveCall(call)
                 if !is_coin
@@ -424,17 +444,229 @@ fn trace_funds(
                 if result_slot(into).is_none() {
                     return Err(unsupported());
                 }
+                if !is_untouched_zero(context, into, index, coin_type) {
+                    also.extend(describe_balance(context, into, index, coin, 0));
+                }
                 value = into;
                 after = index;
             }
             SuiCommand::TransferObjects(objects, to)
                 if is_coin && objects.iter().any(|object| refers_to(*object, value)) =>
             {
-                return resolve_recipient(context, deployment, &[*to], 0, index).map(Destination::Address);
+                return Ok((send(&[*to], 0, also)?, Some((index, value))));
             }
             _ => return Err(unsupported()),
         }
     }
+}
+
+/// `None` when `value` moves more or less than once.
+fn find_next_move<'a>(
+    context: &'a VisualizerContext,
+    after: usize,
+    value: SuiArgument,
+    is_coin: bool,
+    coin: &Coin,
+    also: &mut Vec<String>,
+) -> Result<Option<(usize, &'a SuiCommand)>, VisualSignError> {
+    let mut moves = Vec::new();
+    for (index, command) in uses_after(context, after, value) {
+        match command {
+            SuiCommand::MoveCall(call)
+                if !is_coin
+                    && is_call(call, SUI_FRAMEWORK, "balance", "join")
+                    && call
+                        .arguments
+                        .first()
+                        .is_some_and(|first| refers_to(*first, value)) =>
+            {
+                let other = argument_at(&call.arguments, 1, "balance")?;
+                also.extend(describe_balance(context, other, index, coin, 0));
+            }
+            _ => moves.push((index, command)),
+        }
+    }
+    Ok(match moves.as_slice() {
+        [only] => Some(*only),
+        _ => None,
+    })
+}
+
+/// True when `target` is a `balance::zero<T>` no command used before `join_index`.
+fn is_untouched_zero(
+    context: &VisualizerContext,
+    target: SuiArgument,
+    join_index: usize,
+    coin_type: &str,
+) -> bool {
+    let Ok((zero_index, SuiCommand::MoveCall(zero))) =
+        producing_command(context, join_index, target, "balance")
+    else {
+        return false;
+    };
+    is_call(zero, SUI_FRAMEWORK, "balance", "zero")
+        && first_type_argument_is(zero, coin_type)
+        && uses_after(context, zero_index, target)
+            .first()
+            .is_some_and(|(first, _)| *first == join_index)
+}
+
+const DESCRIBE_DEPTH: usize = 8;
+const AMOUNT_NOT_IN_TRANSACTION: &str = "amount not in transaction";
+
+/// `None` for an untouched `balance::zero`, which adds nothing.
+fn describe_balance(
+    context: &VisualizerContext,
+    balance: SuiArgument,
+    consumer: usize,
+    coin: &Coin,
+    depth: usize,
+) -> Option<String> {
+    let symbol = coin.symbol();
+    let unknown = || format!("other {symbol} ({AMOUNT_NOT_IN_TRANSACTION})");
+    if depth > DESCRIBE_DEPTH {
+        return Some(unknown());
+    }
+    let Ok((index, SuiCommand::MoveCall(call))) =
+        producing_command(context, consumer, balance, "balance")
+    else {
+        return Some(unknown());
+    };
+    let touched = uses_after(context, index, balance)
+        .first()
+        .is_some_and(|(first, _)| *first != consumer);
+    let rest = if touched { "what remains of " } else { "" };
+    let description = match (call.module.as_str(), call.function.as_str()) {
+        ("balance", "zero") if call.package == ObjectID::from_single_byte(SUI_FRAMEWORK) => {
+            if !touched {
+                return None;
+            }
+            format!("other {symbol} ({AMOUNT_NOT_IN_TRANSACTION})")
+        }
+        ("coin", "into_balance") if call.package == ObjectID::from_single_byte(SUI_FRAMEWORK) => {
+            let source = argument_at(&call.arguments, 0, "coin").ok()?;
+            format!("{rest}{}", describe_coin(context, source, index, Some(coin), depth + 1))
+        }
+        ("balance", "redeem_funds") if call.package == ObjectID::from_single_byte(SUI_FRAMEWORK) => {
+            format!("{rest}{}", describe_redeemed(context, call, coin))
+        }
+        ("balance", "split") if call.package == ObjectID::from_single_byte(SUI_FRAMEWORK) => {
+            let amount = call
+                .arguments
+                .get(1)
+                .and_then(|amount| decode_pure_amount(context, *amount, index));
+            match amount {
+                Some(amount) => format!("{rest}{} split from another balance", coin.display(amount)),
+                None => unknown(),
+            }
+        }
+        (module, function) => format!(
+            "{rest}{symbol} returned by {module}::{function} at command {index} ({AMOUNT_NOT_IN_TRANSACTION})"
+        ),
+    };
+    Some(description)
+}
+
+fn describe_coin(
+    context: &VisualizerContext,
+    object: SuiArgument,
+    consumer: usize,
+    coin: Option<&Coin>,
+    depth: usize,
+) -> String {
+    let sui = Coin::sui();
+    match object {
+        SuiArgument::GasCoin => "the gas coin's whole balance".to_string(),
+        SuiArgument::Input(_) => match input_at(context, object, "object").ok().and_then(SuiCallArg::object) {
+            Some(id) => format!("object {id} ({AMOUNT_NOT_IN_TRANSACTION})"),
+            None => format!("an input ({AMOUNT_NOT_IN_TRANSACTION})"),
+        },
+        SuiArgument::Result(_) | SuiArgument::NestedResult(_, _) => {
+            let Ok((index, producer)) = producing_command(context, consumer, object, "object") else {
+                return format!("an object ({AMOUNT_NOT_IN_TRANSACTION})");
+            };
+            match producer {
+                SuiCommand::SplitCoins(source, amounts) => {
+                    let amount = result_slot(object)
+                        .and_then(|(_, slot)| amounts.get(usize::from(slot)))
+                        .and_then(|amount| decode_pure_amount(context, *amount, index));
+                    let (from, source_coin) = match source {
+                        SuiArgument::GasCoin => ("the gas coin".to_string(), Some(&sui)),
+                        SuiArgument::Input(_) => (
+                            input_at(context, *source, "coin")
+                                .ok()
+                                .and_then(SuiCallArg::object)
+                                .map_or_else(|| "a coin".to_string(), |id| format!("coin {id}")),
+                            coin,
+                        ),
+                        _ => ("another coin".to_string(), coin),
+                    };
+                    match (amount, source_coin) {
+                        (Some(amount), Some(source_coin)) => {
+                            format!("{} split from {from}", source_coin.display(amount))
+                        }
+                        (Some(amount), None) => format!("{amount} base units split from {from}"),
+                        (None, _) => format!("a coin split from {from} ({AMOUNT_NOT_IN_TRANSACTION})"),
+                    }
+                }
+                SuiCommand::MoveCall(call) if depth <= DESCRIBE_DEPTH => {
+                    match (call.module.as_str(), call.function.as_str()) {
+                        ("coin", "from_balance") if call.package == ObjectID::from_single_byte(SUI_FRAMEWORK) => {
+                            let balance_coin = Coin::from_type_argument(call, 0).ok();
+                            let balance_coin = balance_coin.as_ref().or(coin);
+                            match (call.arguments.first(), balance_coin) {
+                                (Some(balance), Some(balance_coin)) => {
+                                    describe_balance(context, *balance, index, balance_coin, depth + 1)
+                                        .unwrap_or_else(|| "an empty coin".to_string())
+                                }
+                                _ => format!("a coin ({AMOUNT_NOT_IN_TRANSACTION})"),
+                            }
+                        }
+                        ("coin", "redeem_funds") if call.package == ObjectID::from_single_byte(SUI_FRAMEWORK) => {
+                            let redeemed = Coin::from_type_argument(call, 0).ok();
+                            match redeemed.as_ref().or(coin) {
+                                Some(redeemed) => describe_redeemed(context, call, redeemed),
+                                None => format!("a coin from an address balance ({AMOUNT_NOT_IN_TRANSACTION})"),
+                            }
+                        }
+                        (module, function) => format!(
+                            "an object returned by {module}::{function} at command {index}"
+                        ),
+                    }
+                }
+                _ => format!("an object from command {index}"),
+            }
+        }
+    }
+}
+
+/// The reserved amount of a `redeem_funds`, which withdraws exactly that much.
+fn describe_redeemed(context: &VisualizerContext, call: &SuiProgrammableMoveCall, coin: &Coin) -> String {
+    let withdrawal = call
+        .arguments
+        .first()
+        .and_then(|argument| input_at(context, *argument, "withdrawal").ok());
+    match withdrawal {
+        Some(SuiCallArg::FundsWithdrawal(withdrawal)) => {
+            let SuiReservation::MaxAmountU64(amount) = withdrawal.reservation;
+            let owner = match withdrawal.withdraw_from {
+                SuiWithdrawFrom::Sender => "the signer's",
+                SuiWithdrawFrom::Sponsor => "the sponsor's",
+            };
+            format!("{} from {owner} address balance", coin.display(amount))
+        }
+        _ => format!("{} from an address balance ({AMOUNT_NOT_IN_TRANSACTION})", coin.symbol()),
+    }
+}
+
+/// A pure `u64` input no command before `consumer` could have modified.
+fn decode_pure_amount(context: &VisualizerContext, argument: SuiArgument, consumer: usize) -> Option<u64> {
+    ensure_unmodified_before(context, argument, consumer, "amount", |call| {
+        call.package == ObjectID::from_single_byte(SUI_FRAMEWORK)
+            && matches!(call.module.as_str(), "coin" | "balance")
+    })
+    .ok()?;
+    decode_number::<u64>(input_at(context, argument, "amount").ok()?).ok()
 }
 
 fn resolve_recipient(
@@ -452,20 +684,23 @@ fn resolve_recipient(
 }
 
 /// Whoever holds the position owner cap can withdraw the collateral and borrow against it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum CapDestination {
     NotPassed,
-    Address(SuiAddress),
+    Address {
+        recipient: SuiAddress,
+        also: Vec<String>,
+    },
 }
 
 fn trace_cap(
     context: &VisualizerContext,
     deployment: &FluidDeployment,
     operate_index: usize,
-) -> Result<CapDestination, VisualSignError> {
+) -> Result<(CapDestination, Option<TransferClaim>), VisualSignError> {
     let unsupported = || {
         missing(
-            "The position owner cap is not returned through 0x1::option::destroy_some and TransferObjects, or 0x1::option::destroy_none",
+            "The position owner cap is not returned through 0x1::option::destroy_some and a transfer, or 0x1::option::destroy_none",
         )
     };
     let option = output(operate_index, OPERATE_CAP_OUTPUT)?;
@@ -482,7 +717,7 @@ fn trace_cap(
         return Err(unsupported());
     }
     if is_call(unwrap, STDLIB, "option", "destroy_none") {
-        return Ok(CapDestination::NotPassed);
+        return Ok((CapDestination::NotPassed, None));
     }
     if !is_call(unwrap, STDLIB, "option", "destroy_some") {
         return Err(unsupported());
@@ -490,10 +725,47 @@ fn trace_cap(
     let cap = output(unwrap_index, 0)?;
     let (transfer_index, transfer) =
         only_consumer(context, unwrap_index, cap, "position owner cap")?;
-    let SuiCommand::TransferObjects(_, to) = transfer else {
-        return Err(unsupported());
+    let (arguments, at, claim) = match transfer {
+        SuiCommand::TransferObjects(_, to) => (vec![*to], 0, Some((transfer_index, cap))),
+        SuiCommand::MoveCall(call)
+            if is_call(call, SUI_FRAMEWORK, "transfer", "public_transfer")
+                && call
+                    .arguments
+                    .first()
+                    .is_some_and(|first| refers_to(*first, cap)) =>
+        {
+            (call.arguments.clone(), 1, None)
+        }
+        _ => return Err(unsupported()),
     };
-    resolve_recipient(context, deployment, &[*to], 0, transfer_index).map(CapDestination::Address)
+    let recipient = resolve_recipient(context, deployment, &arguments, at, transfer_index)?;
+    Ok((
+        CapDestination::Address {
+            recipient,
+            also: Vec::new(),
+        },
+        claim,
+    ))
+}
+
+/// The objects in a claimed `TransferObjects` that no trace of this `operate` reached.
+fn describe_untraced_objects(
+    context: &VisualizerContext,
+    claims: &[TransferClaim],
+    index: usize,
+) -> Vec<String> {
+    let Some(SuiCommand::TransferObjects(objects, _)) = context.commands().get(index) else {
+        return Vec::new();
+    };
+    objects
+        .iter()
+        .filter(|object| {
+            !claims
+                .iter()
+                .any(|(claimed, value)| *claimed == index && refers_to(**object, *value))
+        })
+        .map(|object| describe_coin(context, *object, index, None, 0))
+        .collect()
 }
 
 enum Position {
@@ -576,18 +848,48 @@ fn resolve_operate<'a>(
             deployment,
             operate_index,
             side.output_slot(),
-            &coin.coin_type,
+            coin,
             side.balance_name(),
         )
     };
+    let (mut col_destination, col_claim) = destination(Side::Collateral, &collateral)?;
+    let (mut debt_destination, debt_claim) = destination(Side::Debt, &debt)?;
+    let (mut cap, cap_claim) = trace_cap(context, deployment, operate_index)?;
+    // A shared `TransferObjects` is listed once, on the first output that claims it.
+    let claims: Vec<TransferClaim> = [col_claim, debt_claim, cap_claim]
+        .into_iter()
+        .flatten()
+        .collect();
+    let mut listed = Vec::new();
+    for (claim, also) in [
+        (col_claim, match &mut col_destination {
+            Destination::Address { also, .. } => Some(also),
+            Destination::Destroyed => None,
+        }),
+        (debt_claim, match &mut debt_destination {
+            Destination::Address { also, .. } => Some(also),
+            Destination::Destroyed => None,
+        }),
+        (cap_claim, match &mut cap {
+            CapDestination::Address { also, .. } => Some(also),
+            CapDestination::NotPassed => None,
+        }),
+    ] {
+        if let (Some((index, _)), Some(also)) = (claim, also)
+            && !listed.contains(&index)
+        {
+            listed.push(index);
+            also.extend(describe_untraced_objects(context, &claims, index));
+        }
+    }
     Ok(Operate {
         deployment,
         package: pwc.package,
         market: object_argument(context, pwc, OPERATE_MARKET_ARG, "market")?,
         position: resolve_position(context, pwc, deployment)?,
-        col_destination: destination(Side::Collateral, &collateral)?,
-        debt_destination: destination(Side::Debt, &debt)?,
-        cap: trace_cap(context, deployment, operate_index)?,
+        col_destination,
+        debt_destination,
+        cap,
         collateral,
         debt,
         col_amount,
@@ -596,19 +898,19 @@ fn resolve_operate<'a>(
 }
 
 impl Operate<'_> {
-    fn sides(&self) -> [(Side, OperateAmount, &Coin, Destination); 2] {
+    fn sides(&self) -> [(Side, OperateAmount, &Coin, &Destination); 2] {
         [
             (
                 Side::Collateral,
                 self.col_amount,
                 &self.collateral,
-                self.col_destination,
+                &self.col_destination,
             ),
             (
                 Side::Debt,
                 self.debt_amount,
                 &self.debt,
-                self.debt_destination,
+                &self.debt_destination,
             ),
         ]
     }
@@ -650,18 +952,17 @@ fn preview_field(
     });
     // Outputs also return any supplied coin `operate` didn't use.
     for (side, amount, coin, destination) in operation.sides() {
-        if let Destination::Address(address) = destination
-            && (side.pays_out(amount) || address != *context.sender())
+        if let Destination::Address { recipient, also } = destination
+            && (side.pays_out(amount) || recipient != context.sender())
         {
-            key_rows.push(recipient_field(
-                context,
-                &format!("{} Recipient", coin.symbol()),
-                address,
-            )?);
+            let label = format!("{} Recipient", coin.symbol());
+            key_rows.push(recipient_field(context, &label, *recipient)?);
+            key_rows.extend(create_also_field(context, &label, *recipient, also)?);
         }
     }
-    if let CapDestination::Address(address) = operation.cap {
-        key_rows.push(recipient_field(context, "Position Owner", address)?);
+    if let CapDestination::Address { recipient, also } = &operation.cap {
+        key_rows.push(recipient_field(context, "Position Owner", *recipient)?);
+        key_rows.extend(create_also_field(context, "Position Owner", *recipient, also)?);
     }
     key_rows.push(create_text_field(
         "Network",
@@ -725,6 +1026,19 @@ fn lowercase_first(text: &str) -> String {
     chars.next().map_or_else(String::new, |first| {
         first.to_lowercase().chain(chars).collect()
     })
+}
+
+/// Shown only when the funds leave the signer.
+fn create_also_field(
+    context: &VisualizerContext,
+    label: &str,
+    recipient: SuiAddress,
+    also: &[String],
+) -> Result<Option<AnnotatedPayloadField>, VisualSignError> {
+    if also.is_empty() || recipient == *context.sender() {
+        return Ok(None);
+    }
+    create_text_field(&format!("{label} Also Receives"), &also.join("; ")).map(Some)
 }
 
 fn recipient_field(

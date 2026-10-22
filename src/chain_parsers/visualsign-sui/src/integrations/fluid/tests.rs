@@ -19,7 +19,7 @@ use visualsign::test_utils::check_signable_payload_field;
 use visualsign::vsptrait::{VisualSignConverter, VisualSignOptions};
 
 const FIXTURE: &str = include_str!("aggregated_test_data.json");
-const REJECTED: &str = include_str!("rejected_test_data.json");
+const EDGE_CASES: &str = include_str!("edge_case_test_data.json");
 
 const OTHER_ADDRESS: [u8; 32] = [0x77; 32];
 
@@ -38,6 +38,7 @@ const DESTROY_SOME_COMMAND: usize = 8;
 const DEBT_SEND_COMMAND: usize = 10;
 const CAP_TRANSFER_COMMAND: usize = 12;
 const DEBT_AMOUNT_INPUT: u16 = 4;
+const COL_RECIPIENT_INPUT: usize = 9;
 const DEBT_RECIPIENT_INPUT: u16 = 10;
 const CAP_RECIPIENT_INPUT: usize = 11;
 
@@ -49,6 +50,18 @@ const REPAY_DIGEST: &str = "22yRPaDKGhjaQRbpTYXJifK2pacFav1znMZ98ZpVrj8K";
 const REPAY_OPERATE_COMMAND: usize = 10;
 const REPAY_FROM_BALANCE_COMMAND: usize = 13;
 const REPAY_SUI_RECIPIENT_INPUT: usize = 9;
+
+// Real mainnet deposit paid from a gas-coin split: 1 coin::into_balance, 4 balance::split(R1)
+// funds operate 9, then 11 balance::join(R1, NR(9,0)), 14 coin::from_balance(R1),
+// 15 TransferObjects([R14], I13).
+const REMAINDER_DEPOSIT_DIGEST: &str = "D8Kp7gyZfJuTD2CHBZohYeuk2Q14wKFB4ufYGWw3gnwd";
+const REMAINDER_OPERATE_COMMAND: usize = 9;
+const REMAINDER_RECIPIENT_INPUT: usize = 13;
+
+// Real mainnet transaction with two operates (9 and 21) whose caps go out together in
+// 26 TransferObjects([R10, R22], I12).
+const TWO_OPERATES_DIGEST: &str = "G45Hd39QdH44PBNNPeKZu1J7DQf7syDcAsDmYWLynHEJ";
+const TWO_OPERATES_CAP_RECIPIENT_INPUT: usize = 12;
 
 fn decode(data: &str) -> TransactionData {
     bcs::from_bytes(
@@ -125,6 +138,22 @@ fn insert_command(tx: &mut TransactionData, index: usize, command: Command) {
         }
     }
     pt.commands.insert(index, command);
+}
+
+fn push_pure_input(tx: &mut TransactionData, bytes: Vec<u8>) -> Argument {
+    let inputs = &mut programmable(tx).inputs;
+    inputs.push(CallArg::Pure(bytes));
+    Argument::Input(u16::try_from(inputs.len() - 1).unwrap())
+}
+
+fn framework_call(module: &str, function: &str, type_arg: &str, args: Vec<Argument>) -> Command {
+    Command::move_call(
+        ObjectID::from_single_byte(2),
+        module.parse().unwrap(),
+        function.parse().unwrap(),
+        vec![sui_types::parse_sui_type_tag(type_arg).unwrap()],
+        args,
+    )
 }
 
 fn set_pure_input(tx: &mut TransactionData, index: usize, bytes: Vec<u8>) {
@@ -306,7 +335,7 @@ fn every_fixture_emits_intermediate_output_listing_each_command() {
             "{digest} lists no user::operate call"
         );
     }
-    assert_eq!(operations.len(), 10);
+    assert_eq!(operations.len(), 12);
 }
 
 #[test]
@@ -323,17 +352,150 @@ fn every_deployment_package_is_handled_in_the_form_it_is_called_with() {
     }
 }
 
+fn visualize_edge_case(name: &str) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    let edge_cases: serde_json::Value = serde_json::from_str(EDGE_CASES).unwrap();
+    let entry = &edge_cases[name];
+    visualize(
+        decode(entry["data"].as_str().unwrap()),
+        usize::try_from(entry["command_index"].as_u64().unwrap()).unwrap(),
+    )
+}
+
 #[test]
 fn leverage_through_a_flash_loan_fails() {
-    let rejected: serde_json::Value = serde_json::from_str(REJECTED).unwrap();
-    let leverage = &rejected["leverage"];
     expect_error(
-        visualize(
-            decode(leverage["data"].as_str().unwrap()),
-            usize::try_from(leverage["command_index"].as_u64().unwrap()).unwrap(),
-        ),
+        visualize_edge_case("leverage"),
         "Argument `col_amount` is not a transaction input",
     );
+}
+
+#[test]
+fn other_funds_joined_into_an_output_sent_elsewhere_are_shown() {
+    let field = visualize_edge_case("mixed_join").unwrap().remove(0);
+    assert_eq!(card_title(&field), "Repay 0.05 USDC on Fluid");
+    assert_eq!(field_value(&field, "SUI Recipient"), other_address());
+    assert_eq!(
+        field_value(&field, "SUI Recipient Also Receives"),
+        "5 SUI split from the gas coin"
+    );
+}
+
+#[test]
+fn payment_remainder_joined_into_an_output_sent_elsewhere_is_shown() {
+    let mut tx = fixture_tx(REMAINDER_DEPOSIT_DIGEST);
+    set_pure_input(&mut tx, REMAINDER_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
+
+    let field = card(tx, REMAINDER_OPERATE_COMMAND);
+    assert_eq!(
+        field_value(&field, "SUI Recipient Also Receives"),
+        "what remains of 0.1 SUI split from the gas coin"
+    );
+}
+
+#[test]
+fn payment_remainder_returned_to_the_signer_adds_no_row() {
+    let field = card(fixture_tx(REMAINDER_DEPOSIT_DIGEST), REMAINDER_OPERATE_COMMAND);
+    assert!(
+        condensed_labels(&field)
+            .iter()
+            .all(|label| !label.ends_with("Also Receives"))
+    );
+}
+
+#[test]
+fn funds_joined_into_an_output_are_shown() {
+    let mut tx = open_borrow_tx();
+    let amount = push_pure_input(&mut tx, bcs::to_bytes(&2_000_000_000_u64).unwrap());
+    let split = DESTROY_SOME_COMMAND;
+    insert_command(
+        &mut tx,
+        split,
+        Command::SplitCoins(Argument::GasCoin, vec![amount]),
+    );
+    insert_command(
+        &mut tx,
+        split + 1,
+        framework_call("coin", "into_balance", "0x2::sui::SUI", vec![Argument::NestedResult(
+            u16::try_from(split).unwrap(),
+            0,
+        )]),
+    );
+    insert_command(
+        &mut tx,
+        split + 2,
+        framework_call("balance", "join", "0x2::sui::SUI", vec![
+            Argument::NestedResult(7, 0),
+            Argument::Result(u16::try_from(split + 1).unwrap()),
+        ]),
+    );
+    set_pure_input(&mut tx, COL_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
+
+    let field = card(tx, OPERATE_COMMAND);
+    assert_eq!(field_value(&field, "SUI Recipient"), other_address());
+    assert_eq!(
+        field_value(&field, "SUI Recipient Also Receives"),
+        "2 SUI split from the gas coin"
+    );
+}
+
+#[test]
+fn both_operates_in_one_transaction_render() {
+    for command in [9, 21] {
+        let field = card(fixture_tx(TWO_OPERATES_DIGEST), command);
+        assert_eq!(card_title(&field), "Deposit 0.3 SUI collateral on Fluid");
+    }
+}
+
+#[test]
+fn caps_sent_together_to_someone_else_are_shown() {
+    let mut tx = fixture_tx(TWO_OPERATES_DIGEST);
+    set_pure_input(&mut tx, TWO_OPERATES_CAP_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
+
+    let field = card(tx, 9);
+    assert_eq!(field_value(&field, "Position Owner"), other_address());
+    assert_eq!(
+        field_value(&field, "Position Owner Also Receives"),
+        "an object returned by option::destroy_some at command 22"
+    );
+}
+
+#[test]
+fn object_sent_with_the_cap_is_shown_only_when_it_leaves_the_signer() {
+    let mut tx = open_borrow_tx();
+    let Command::TransferObjects(objects, _) =
+        &mut programmable(&mut tx).commands[CAP_TRANSFER_COMMAND]
+    else {
+        panic!("expected the cap transfer");
+    };
+    objects.push(Argument::GasCoin);
+    let to_signer = card(tx.clone(), OPERATE_COMMAND);
+    assert!(
+        condensed_labels(&to_signer)
+            .iter()
+            .all(|label| !label.ends_with("Also Receives"))
+    );
+
+    set_pure_input(&mut tx, CAP_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
+    let to_other = card(tx, OPERATE_COMMAND);
+    assert_eq!(
+        field_value(&to_other, "Position Owner Also Receives"),
+        "the gas coin's whole balance"
+    );
+}
+
+#[test]
+fn cap_sent_with_public_transfer_is_followed() {
+    let mut tx = open_borrow_tx();
+    programmable(&mut tx).commands[CAP_TRANSFER_COMMAND] = framework_call(
+        "transfer",
+        "public_transfer",
+        &format!("{}::position::PositionOwnerCap", DEPLOYMENTS[0].vaults_package),
+        vec![Argument::Result(8), Argument::Input(11)],
+    );
+    set_pure_input(&mut tx, CAP_RECIPIENT_INPUT, OTHER_ADDRESS.to_vec());
+
+    let field = card(tx, OPERATE_COMMAND);
+    assert_eq!(field_value(&field, "Position Owner"), other_address());
 }
 
 #[test]
@@ -468,7 +630,7 @@ fn borrowed_coin_not_sent_to_an_address_fails() {
     expect_error(
         visualize(tx, OPERATE_COMMAND),
         &format!(
-            "The debt balance from command {OPERATE_COMMAND} is not sent to an address through 0x2::balance or 0x2::coin"
+            "The debt balance from command {OPERATE_COMMAND} is not sent to an address through 0x2::balance, 0x2::coin or 0x2::transfer"
         ),
     );
 }
@@ -499,7 +661,7 @@ fn borrowed_coin_sent_as_another_coin_type_fails() {
     expect_error(
         visualize(tx, OPERATE_COMMAND),
         &format!(
-            "The debt balance from command {OPERATE_COMMAND} is not sent to an address through 0x2::balance or 0x2::coin"
+            "The debt balance from command {OPERATE_COMMAND} is not sent to an address through 0x2::balance, 0x2::coin or 0x2::transfer"
         ),
     );
 }
@@ -558,7 +720,7 @@ fn cap_not_transferred_fails() {
 
     expect_error(
         visualize(tx, OPERATE_COMMAND),
-        "The position owner cap is not returned through 0x1::option::destroy_some and TransferObjects, or 0x1::option::destroy_none",
+        "The position owner cap is not returned through 0x1::option::destroy_some and a transfer, or 0x1::option::destroy_none",
     );
 }
 
