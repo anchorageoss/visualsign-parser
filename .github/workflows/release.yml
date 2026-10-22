@@ -22,7 +22,7 @@ jobs:
     # GitHub, so we gate on the actual checked-out ref to prevent feature
     # branches from minting tags/releases against non-main commits.
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
       actions: write

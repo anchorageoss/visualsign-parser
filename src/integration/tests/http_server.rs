@@ -8,9 +8,10 @@ use qos_p256::P256Pair;
 use qos_test_primitives::PathWrapper;
 use turnkey_api_key_stamper::{Stamp, TurnkeyP256ApiKey};
 
-// Same Ethereum signed legacy transaction used by
+// Same unsigned Ethereum legacy transaction used by
 // `integration::tests::parser_ethereum_native_transfer_e2e`.
-const ETH_TX_HEX: &str = "0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83";
+const ETH_TX_HEX: &str =
+    "0xec808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a764000080018080";
 
 // Same Solana transfer message used by
 // `visualsign_solana::core::visualsign::tests::intermediate_output_emitted_for_known_transfer`

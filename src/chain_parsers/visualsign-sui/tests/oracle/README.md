@@ -9,7 +9,9 @@ revision as the parser before PR #576. Cargo.lock retains its existing yanked
 The corpus contains 58 named operations from the existing Cetus, Suilend,
 Momentum and Hashi fixtures, plus the two existing decoder cases copied into
 `decode_fixtures.json`: **60 cases, 40 distinct transaction encodings**. The
-count assertion prevents unnoticed deletion of existing coverage.
+count assertion prevents unnoticed deletion of existing coverage. An additional
+independent test covers the 10 Fluid cases added on upstream main while this
+migration was under review, for 70 named protocol/decoder cases in total.
 
 For each case the test compares the SDK-backed view against the upstream
 `SuiTransactionBlockData::try_from_with_module_cache` with the same empty module
