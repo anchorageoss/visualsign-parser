@@ -21,11 +21,10 @@ use std::collections::BTreeMap;
 
 const BIPS_COMMIT: &str = "c0c5aea41e6a334d34db4ca87ae53bbfd7f268d1";
 
-/// BIP-370 invalid vectors the parser currently accepts: v0 PSBTs that carry
-/// PSBTv2-only keys. BIP-370 says these must be rejected; rust-bitcoin 0.32
-/// keeps the keys as unknown entries and the parser renders the PSBT.
-/// Finding on #577; `v0_psbt_with_v2_only_keys_is_rejected` pins the fix.
-const KNOWN_ACCEPTED_INVALID: &[&str] = &[
+/// BIP-370 invalid vectors that are v0 PSBTs carrying PSBTv2-only keys.
+/// rust-bitcoin 0.32 keeps those keys as unknown entries, so the parser must
+/// reject them itself (fixed on #577 at 945c48af).
+const V0_WITH_V2_ONLY_KEYS: &[&str] = &[
     "PSBTv0 but with PSBT_GLOBAL_TX_VERSION.",
     "PSBTv0 but with PSBT_GLOBAL_FALLBACK_LOCKTIME.",
     "PSBTv0 but with PSBT_GLOBAL_INPUT_COUNT.",
@@ -39,11 +38,6 @@ const KNOWN_ACCEPTED_INVALID: &[&str] = &[
     "PSBTv0 but with PSBT_OUT_AMOUNT.",
     "PSBTv0 but with PSBT_OUT_SCRIPT.",
 ];
-
-/// Valid vectors the parser currently rejects. BIP-174's "PSBT with 0 inputs"
-/// is refused as "outputs exceed inputs" instead of rendering with an unknown
-/// fee. Finding on #577; `zero_input_psbt_parses` pins the fix.
-const KNOWN_REJECTED_VALID: &[&str] = &["PSBT with 0 inputs"];
 
 #[derive(Deserialize)]
 struct Source {
@@ -101,48 +95,41 @@ fn fixture_is_the_pinned_bip_text() {
 #[test]
 fn invalid_vectors_are_rejected() {
     let doc = load();
-    let mut accepted = Vec::new();
-    let mut known = 0;
-    for v in doc.vectors.iter().filter(|v| v.status == "invalid") {
-        if render_no_panic(&v.psbt_base64, Network::Bitcoin).is_ok() {
-            if v.bip == "bip-0370" && KNOWN_ACCEPTED_INVALID.contains(&v.case.as_str()) {
-                known += 1;
-            } else {
-                accepted.push(format!("{}: {}", v.bip, v.case));
-            }
-        }
-    }
+    let accepted: Vec<String> = doc
+        .vectors
+        .iter()
+        .filter(|v| v.status == "invalid")
+        .filter(|v| render_no_panic(&v.psbt_base64, Network::Bitcoin).is_ok())
+        .map(|v| format!("{}: {}", v.bip, v.case))
+        .collect();
     assert!(
         accepted.is_empty(),
         "invalid vectors accepted:\n{}",
         accepted.join("\n")
     );
-    assert_eq!(
-        known,
-        KNOWN_ACCEPTED_INVALID.len(),
-        "a known-accepted invalid vector is now rejected: remove it from KNOWN_ACCEPTED_INVALID"
-    );
 }
 
+/// Regression for the #577 finding: v0 PSBTs with PSBTv2-only keys.
 #[test]
-#[ignore = "finding on #577: v0 PSBTs with PSBTv2-only keys are accepted (BIP-370 says invalid)"]
 fn v0_psbt_with_v2_only_keys_is_rejected() {
     let doc = load();
+    let mut seen = 0;
     for v in doc
         .vectors
         .iter()
-        .filter(|v| v.bip == "bip-0370" && KNOWN_ACCEPTED_INVALID.contains(&v.case.as_str()))
+        .filter(|v| v.bip == "bip-0370" && V0_WITH_V2_ONLY_KEYS.contains(&v.case.as_str()))
     {
-        assert!(
-            render_no_panic(&v.psbt_base64, Network::Bitcoin).is_err(),
-            "{} accepted",
-            v.case
-        );
+        seen += 1;
+        let err = render_no_panic(&v.psbt_base64, Network::Bitcoin)
+            .expect_err(&format!("{} accepted", v.case));
+        assert!(err.contains("PSBTv2-only fields"), "{}: {err}", v.case);
     }
+    assert_eq!(seen, V0_WITH_V2_ONLY_KEYS.len());
 }
 
+/// Regression for the #577 finding: BIP-174 "PSBT with 0 inputs" was refused
+/// as "outputs exceed inputs".
 #[test]
-#[ignore = "finding on #577: BIP-174 'PSBT with 0 inputs' is rejected as 'outputs exceed inputs'"]
 fn zero_input_psbt_parses() {
     let doc = load();
     let v = doc
@@ -179,7 +166,6 @@ fn valid_vectors_match_rust_bitcoin() {
     let doc = load();
     let mut checked_fee = 0;
     let mut rejected = Vec::new();
-    let mut known = 0;
     for v in doc
         .vectors
         .iter()
@@ -188,11 +174,6 @@ fn valid_vectors_match_rust_bitcoin() {
         let ctx = format!("{}: {}", v.bip, v.case);
         let rendered = match render_no_panic(&v.psbt_base64, Network::Bitcoin) {
             Ok(r) => r,
-            Err(e) if KNOWN_REJECTED_VALID.contains(&v.case.as_str()) => {
-                let _ = e;
-                known += 1;
-                continue;
-            }
             Err(e) => {
                 rejected.push(format!("{ctx}: {e}"));
                 continue;
@@ -218,9 +199,8 @@ fn valid_vectors_match_rust_bitcoin() {
                     "{ctx}: output {i} script"
                 );
             }
-            let meta = &psbt.outputs[i];
-            let derives = !meta.bip32_derivation.is_empty() || !meta.tap_key_origins.is_empty();
-            assert_eq!(got.claims_change, derives, "{ctx}: output {i} change claim");
+            // Derivation metadata alone must never be shown as change.
+            assert!(!got.claims_change, "{ctx}: output {i} shown as change");
         }
 
         assert_eq!(rendered.inputs.len(), tx.input.len(), "{ctx}");
@@ -238,6 +218,11 @@ fn valid_vectors_match_rust_bitcoin() {
         }
 
         match psbt.fee() {
+            // rust-bitcoin reports 0 for a PSBT with no inputs and no outputs;
+            // with no inputs there is nothing to vouch for, so #577 shows unknown.
+            _ if tx.input.is_empty() => {
+                assert_eq!(rendered.fee, RenderedFee::Unknown, "{ctx}: fee")
+            }
             Ok(fee) => {
                 checked_fee += 1;
                 assert_eq!(rendered.fee.sat(), Some(fee.to_sat()), "{ctx}: fee");
@@ -261,11 +246,6 @@ fn valid_vectors_match_rust_bitcoin() {
         rejected.is_empty(),
         "valid vectors rejected:\n{}",
         rejected.join("\n")
-    );
-    assert_eq!(
-        known,
-        KNOWN_REJECTED_VALID.len(),
-        "a known-rejected valid vector now parses: remove it from KNOWN_REJECTED_VALID"
     );
     assert!(checked_fee > 0, "no vector had full UTXO data");
 }

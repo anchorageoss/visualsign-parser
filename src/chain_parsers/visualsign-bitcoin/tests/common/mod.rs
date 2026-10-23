@@ -21,6 +21,8 @@ pub struct RenderedOutput {
     pub address: Option<String>,
     pub script_hex: Option<String>,
     pub amount_sat: u64,
+    /// A `Change` field is shown. #577 no longer infers change from
+    /// derivation metadata, so validation asserts this is always false.
     pub claims_change: bool,
 }
 
@@ -103,9 +105,13 @@ pub fn render(psbt: &str, network: Network) -> Result<Rendered, String> {
             let text = fallback(field);
             fee = Some(if field["Type"] == "amount_v2" {
                 RenderedFee::Verified(btc_to_sat(text))
-            } else if let Some((_, reason)) = text.split_once("(unverified: ") {
+            } else if let Some(rest) = text.strip_prefix("unknown (claimed ") {
+                // "unknown (claimed X BTC; unverified: reason)"
+                let (_, reason) = rest
+                    .split_once("; unverified: ")
+                    .unwrap_or_else(|| panic!("unexpected fee text {text:?}"));
                 RenderedFee::Unverified {
-                    sat: btc_to_sat(text),
+                    sat: btc_to_sat(rest),
                     reason: reason.trim_end_matches(')').to_string(),
                 }
             } else {

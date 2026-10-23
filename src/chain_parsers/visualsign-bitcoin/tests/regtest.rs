@@ -12,8 +12,8 @@
 //! The test starts its own `bitcoind -regtest` in a temporary data directory,
 //! funds a descriptor wallet with one UTXO of every address type, and has Core
 //! build PSBTs with `walletcreatefundedpsbt`. For each PSBT the parser's
-//! rendering must match Core's own `decodepsbt` (recipients, amounts, fee,
-//! change claims), and the honest PSBTs are then signed, finalized and accepted
+//! rendering must match Core's own `decodepsbt` (recipients, amounts, fee;
+//! no output shown as change), and the honest PSBTs are then signed, finalized and accepted
 //! by `testmempoolaccept`, so the fixtures are real, valid transactions. The
 //! adversarial cases tamper with Core-built PSBTs the way an attacker
 //! controlling the coordinator could, and check the parser refuses or flags
@@ -30,8 +30,6 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
-
-const CHANGE_TEXT: &str = "claims change (unverified by parser)";
 
 struct Node {
     cli: PathBuf,
@@ -188,13 +186,8 @@ fn assert_matches_core(node: &Node, name: &str, psbt: &str) -> Rendered {
                 "{name}: output {i} script"
             ),
         }
-        let meta = &core["outputs"][i];
-        let derives =
-            meta.get("bip32_derivs").is_some() || meta.get("taproot_bip32_derivs").is_some();
-        assert_eq!(
-            got.claims_change, derives,
-            "{name}: output {i} change claim"
-        );
+        // Derivation metadata alone must never be shown as change.
+        assert!(!got.claims_change, "{name}: output {i} shown as change");
     }
 
     let inputs = core["inputs"].as_array().unwrap();
@@ -404,10 +397,6 @@ fn regtest_core_psbts_match_parser() {
     for (name, inputs) in &cases {
         let psbt = create_psbt(&node, inputs, &outputs);
         let rendered = assert_matches_core(&node, name, &psbt);
-        assert!(
-            rendered.outputs.iter().any(|o| o.claims_change),
-            "{name}: Core's change output is not marked as claimed change"
-        );
         let signed = sign_and_accept(&node, name, &psbt, "ALL");
         assert_matches_core(&node, &format!("{name} (signed)"), &signed);
         eprintln!(
@@ -474,8 +463,8 @@ fn adversarial(node: &Node, outputs: &Value, utxos: &[Funded], extra_v0: &Funded
     eprintln!("ok: witness_utxo/non_witness_utxo disagreement refused");
 
     // Fake change: put alice's change derivation on bob's recipient output.
-    // The parser cannot verify ownership, so it must show the claim as
-    // unverified, and only as a claim.
+    // The parser cannot verify ownership, so derivation metadata must not make
+    // any output look like change.
     let mut p = decode(&base);
     let change = p
         .outputs
@@ -492,8 +481,8 @@ fn adversarial(node: &Node, outputs: &Value, utxos: &[Funded], extra_v0: &Funded
     let tampered = encode(&p);
     let r = render_no_panic(&tampered, Network::Regtest).unwrap();
     assert!(
-        r.outputs[recipient].claims_change,
-        "fake change claim not shown"
+        r.outputs.iter().all(|o| !o.claims_change),
+        "derivation metadata shown as change"
     );
     let payload =
         visualsign::vsptrait::VisualSignConverterFromString::to_visual_sign_payload_from_string(
@@ -505,9 +494,8 @@ fn adversarial(node: &Node, outputs: &Value, utxos: &[Funded], extra_v0: &Funded
         .payload
         .to_json()
         .unwrap();
-    assert!(payload.contains(CHANGE_TEXT));
-    assert!(!payload.to_lowercase().contains("verified change"));
-    eprintln!("ok: fake change shown as an unverified claim");
+    assert!(!payload.to_lowercase().contains("change"), "{payload}");
+    eprintln!("ok: fake change derivation not shown as change");
 
     // Taproot-only spend with a lying witness_utxo amount. #577 shows this fee
     // as verified because a BIP-341 ALL/DEFAULT signature commits to every
@@ -566,26 +554,31 @@ fn adversarial(node: &Node, outputs: &Value, utxos: &[Funded], extra_v0: &Funded
         "ok: taproot lying witness_utxo: fee shown verified but sighash binds the real amount"
     );
 
-    // Non-default sighash, signed by Core: the fee no longer binds all inputs
-    // and outputs, so it must be flagged.
+    // NONE and SINGLE do not commit to every displayed output (and legacy
+    // SINGLE past the last output signs a constant): refused. Signed by Core so
+    // the sighash type comes from a real wallet, not a hand-edited PSBT.
     for (kind, utxo, sighash) in [
         ("bech32", extra_v0, "SINGLE|ANYONECANPAY"),
+        ("bech32", extra_v0, "SINGLE"),
         ("bech32m", &utxos[3], "NONE"),
+        ("legacy", &utxos[0], "NONE"),
     ] {
-        let psbt = create_psbt(node, &[utxo], outputs);
-        let signed = node.rpc(
-            Some("alice"),
-            &["walletprocesspsbt", &psbt, "true", sighash, "true", "false"],
-        );
-        let signed = signed["psbt"].as_str().unwrap();
-        let p = decode(signed);
+        let signed = core_sign_with(node, utxo, outputs, sighash);
+        let err = render_no_panic(&signed, Network::Regtest)
+            .expect_err(&format!("{kind} {sighash}: rendered"));
         assert!(
-            p.inputs[0]
-                .sighash_type
-                .is_some_and(|t| t != PsbtSighashType::from_u32(1)),
-            "Core did not record sighash {sighash}"
+            err.contains("unsupported sighash"),
+            "{kind} {sighash}: {err}"
         );
-        let r = render_no_panic(signed, Network::Regtest).unwrap();
+        eprintln!("ok: {kind} {sighash} refused: {err}");
+    }
+
+    // ALL|ANYONECANPAY still commits to every output but lets other inputs
+    // change: rendered, with the sighash shown and the fee unverified.
+    for (kind, utxo) in [("bech32", extra_v0), ("bech32m", &utxos[3])] {
+        let sighash = "ALL|ANYONECANPAY";
+        let signed = core_sign_with(node, utxo, outputs, sighash);
+        let r = render_no_panic(&signed, Network::Regtest).unwrap();
         assert!(
             r.inputs[0].sighash.is_some(),
             "{kind} {sighash}: no sighash warning"
@@ -597,4 +590,23 @@ fn adversarial(node: &Node, outputs: &Value, utxos: &[Funded], extra_v0: &Funded
         );
         eprintln!("ok: {kind} {sighash} -> {:?}", r.inputs[0].sighash);
     }
+}
+
+/// Have Core sign a fresh PSBT spending `utxo` with `sighash`, and check that
+/// it recorded the non-default sighash type.
+fn core_sign_with(node: &Node, utxo: &Funded, outputs: &Value, sighash: &str) -> String {
+    let psbt = create_psbt(node, &[utxo], outputs);
+    let signed = node.rpc(
+        Some("alice"),
+        &["walletprocesspsbt", &psbt, "true", sighash, "true", "false"],
+    );
+    let signed = signed["psbt"].as_str().unwrap().to_string();
+    let p = decode(&signed);
+    assert!(
+        p.inputs[0]
+            .sighash_type
+            .is_some_and(|t| t != PsbtSighashType::from_u32(1)),
+        "Core did not record sighash {sighash}"
+    );
+    signed
 }
