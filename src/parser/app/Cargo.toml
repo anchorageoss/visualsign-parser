@@ -25,6 +25,7 @@ visualsign-solana = { path = "../../chain_parsers/visualsign-solana", optional =
 visualsign-sui = { path = "../../chain_parsers/visualsign-sui", optional = true }
 visualsign-tron = { path = "../../chain_parsers/visualsign-tron", optional = true }
 visualsign-unspecified = { path = "../../chain_parsers/visualsign-unspecified", optional = true }
+visualsign-zcash = { path = "../../chain_parsers/visualsign-zcash", optional = true }
 
 serde_json = "1"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
@@ -37,13 +38,14 @@ thiserror = "2.0.12"
 # binary, and `cargo build --workspace --exclude parser_cli` (see Makefile)
 # relies on diagnostics being OFF for parser_app/integration to keep the
 # production payload shape. Opt in explicitly with `--features diagnostics`.
-default = ["ethereum", "near", "solana", "sui", "tron", "unspecified"]
+default = ["ethereum", "near", "solana", "sui", "tron", "unspecified", "zcash"]
 ethereum = ["dep:visualsign-ethereum"]
 near = ["dep:visualsign-near"]
 solana = ["dep:visualsign-solana"]
 sui = ["dep:visualsign-sui"]
 tron = ["dep:visualsign-tron"]
 unspecified = ["dep:visualsign-unspecified"]
+zcash = ["dep:visualsign-zcash"]
 diagnostics = [
     "visualsign/diagnostics",
     "visualsign-near?/diagnostics",

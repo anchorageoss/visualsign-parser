@@ -24,7 +24,7 @@ PARSER_APP_CHAINS := $(sort $(patsubst visualsign-%,%,$(notdir $(wildcard chain_
 # derived from chain_parsers/* -- parser_cli only wires up chains that have a
 # ChainPlugin registered (see parser/cli/src/), which sui and unspecified
 # don't yet, so a subset is the actual rule and a literal list says so.
-PARSER_CLI_CHAINS := ethereum near solana tron
+PARSER_CLI_CHAINS := ethereum near solana tron zcash
 
 .PHONY: all
 all: generated

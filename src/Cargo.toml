@@ -21,6 +21,7 @@ members = [
   "chain_parsers/visualsign-sui",
   "chain_parsers/visualsign-tron",
   "chain_parsers/visualsign-unspecified",
+  "chain_parsers/visualsign-zcash",
   "solana_test_utils",
   "tools/idl-meta",
 ]

@@ -105,7 +105,8 @@
               },
               "chains/sui",
               "chains/tron",
-              "chains/near"
+              "chains/near",
+              "chains/zcash"
             ]
           },
           {

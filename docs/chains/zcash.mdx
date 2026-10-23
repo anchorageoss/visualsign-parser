@@ -1,0 +1,51 @@
+---
+title: Zcash
+description: Keyless rendering of Zcash PCZTs across the transparent, Sapling, Orchard and Ironwood pools
+---
+
+The Zcash module renders a PCZT (Partially Created Zcash Transaction) into a VisualSign payload. A coordinating wallet builds the PCZT and makes the proofs; a signer reviews it and adds spend authorizations. The parser holds no keys, so it shows what can be checked from the PCZT alone and labels the rest.
+
+## Input
+
+- **Encoding**: PCZT bytes as hex (optional `0x`) or base64. Both the v1 and v2 PCZT encodings are accepted.
+- **Resource limits**: up to 4 MiB of PCZT bytes and 64 total Sapling outputs plus Orchard and Ironwood actions. Zero-value padding counts toward the same shared limit. The parser checks the count immediately after deserialization, before canonical re-encoding, sighashes, commitment checks, note recovery, or rendering. Note checks and recovery require cryptographic work per output; the separate count budget keeps that work bounded while allowing batch payments with dozens of recipients. These are parser resource policies, independent of Zcash consensus limits; they do not guarantee a fixed execution time.
+- **Canonical bytes only**: re-encoding the parsed PCZT under its own version must reproduce the input exactly, so trailing data and non-canonical encodings are refused.
+- **Declared network (unsigned)**: taken from the PCZT's coin type (133 mainnet, 1 testnet). Neither the coin type nor the network-specific address prefixes are authenticated by a sighash. Confirm the network independently; there is no caller network pin. There are no Zcash-specific CLI flags.
+
+## What is checked without a key
+
+- **Outputs**: each shielded output's recipient, value and `rseed` must reproduce its note commitment, which the ZIP-244 sighash commits to. Redacted outputs and nonzero outputs whose ciphertext cannot be recovered from their note fields are refused. This prevents displaying an undetectable note as a payment.
+- **Memos**: recovered from each output's own note fields. The sender-side ephemeral secret derives from `rseed`, so no viewing key is needed. Non-ASCII text memos are shown as their UTF-8 bytes in hex.
+- **Value balance**: per pool, the value spent is the committed value balance plus the outputs. Spend values stated in the PCZT must add up to the same total.
+- **User addresses**: a `user_address` on an output must decode for the PCZT's network and contain the output's receiver. A Unified Address expiry height must be at least the transaction expiry height, and an address with a height limit requires a nonzero transaction expiry. Address expiry times are displayed as Unix seconds and are not checked because the parser has no clock. TEX recipients are refused when any shielded pool spends a nonzero amount.
+- **Fee**: transparent in minus transparent out plus the shielded value balances, compared with the ZIP-317 conventional fee. The ZIP-244 sighashes commit to transparent input amounts. Transparent signers must use their per-input digest.
+- **Sighashes**: the ZIP-244 shielded digest and one digest per transparent input are returned. The transparent digests use the signer's `ALL_ONLY` policy: `NONE`, `SINGLE`, and `ANYONECANPAY` are refused. A signing wallet must use the digest for the input it signs.
+
+## What needs a key, and is marked
+
+Without a viewing key the parser cannot tell which spends belong to the signer or which outputs are change. Spends are shown as per-pool totals with "spend ownership unverified (parser has no viewing key)". Every output is listed, including change, and a `Change` field says change is unverified. A transparent output carrying a BIP 32 derivation is badged as claimed change, also unverified.
+
+Zero-value outputs whose memo is empty or does not decrypt are padding (ZIP 326 same-address outputs carry random ciphertexts) and are counted in `Padding outputs`.
+
+## Pools
+
+| Pool | Fields |
+|---|---|
+| Transparent | Inputs (address, type, amount, per-input SIGHASH_ALL digest), outputs |
+| Sapling | Outputs, memo, spent total, proof generation key presence |
+| Orchard | Outputs, memo, spent total |
+| Ironwood (NU6.3, v6 transactions) | Same handling as Orchard |
+
+## Using parser_cli
+
+```bash
+cargo run --bin parser_cli -- decode --chain zcash -t @path/to/pczt.hex
+```
+
+## Dependencies
+
+The crate pins the librustzcash pre-release line (`pczt =0.10.0-pre.2`, `zcash_primitives =0.31.0-pre.2`, `zcash_keys =0.17.0-pre.2`, `orchard =0.16.0`, `sapling-crypto =0.9.0`). This is the line with v6 transactions, the Ironwood pool and the v2 PCZT encoding. No circuit or prover features are enabled.
+
+## Hash validation
+
+The test suite pins 10 upstream ZIP-244 v5 known-answer vectors and 18 independent candidate v6/Ironwood vectors from [zcash-test-vectors PR #130](https://github.com/zcash/zcash-test-vectors/pull/130) at commit `5eb4b7eba44485b18bfffd6bf6928343b485540f`. The v6 vectors are from an open, unmerged proposal. They check raw-transaction txid, auth digest, and shielded sighash; they do not independently validate PCZT extraction or rendered field mapping. The PCZT-to-field comparison is an integration mapping test using the same signer implementation.

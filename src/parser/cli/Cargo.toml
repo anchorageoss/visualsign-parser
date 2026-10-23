@@ -6,11 +6,12 @@ rust-version.workspace = true
 publish = false
 
 [features]
-default = ["solana", "ethereum", "near", "tron", "diagnostics"]
+default = ["solana", "ethereum", "near", "tron", "zcash", "diagnostics"]
 solana = ["dep:visualsign-solana"]
 ethereum = ["dep:visualsign-ethereum", "visualsign-ethereum/dev-signing"]
 near = ["dep:visualsign-near", "visualsign-near/dev-signing"]
 tron = ["dep:visualsign-tron"]
+zcash = ["dep:visualsign-zcash"]
 diagnostics = [
     "visualsign/diagnostics",
     "parser_cli_core/diagnostics",
@@ -27,6 +28,7 @@ visualsign-ethereum = { path = "../../chain_parsers/visualsign-ethereum", option
 visualsign-near     = { path = "../../chain_parsers/visualsign-near",     optional = true }
 visualsign-solana   = { path = "../../chain_parsers/visualsign-solana",   optional = true }
 visualsign-tron     = { path = "../../chain_parsers/visualsign-tron",     optional = true }
+visualsign-zcash    = { path = "../../chain_parsers/visualsign-zcash",    optional = true }
 
 tracing = { workspace = true }
 tracing-log = "0.2.0"

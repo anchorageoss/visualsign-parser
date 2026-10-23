@@ -9,13 +9,14 @@ publish = false
 # Chain visualizers compiled into the binary. Mirrors parser_app's default
 # set; trim with `--no-default-features --features solana` (or any subset)
 # to shrink the image and attestation surface for chain-specific deploys.
-default = ["ethereum", "near", "solana", "sui", "tron", "unspecified"]
+default = ["ethereum", "near", "solana", "sui", "tron", "unspecified", "zcash"]
 ethereum = ["parser_app/ethereum"]
 near = ["parser_app/near"]
 solana = ["parser_app/solana"]
 sui = ["parser_app/sui"]
 tron = ["parser_app/tron"]
 unspecified = ["parser_app/unspecified"]
+zcash = ["parser_app/zcash"]
 # Switch enclave file paths (`tvc_attestation::paths`, notably
 # `EPHEMERAL_KEY_FILE`) to their in-enclave locations (`/qos.ephemeral.key`
 # instead of `./local-enclave/qos.ephemeral.key`).
