@@ -2,7 +2,7 @@
 //! `ceil(unit_price * unit_limit / 1_000_000)` lamports on the requested limit.
 
 use crate::utils::format_token_amount;
-use solana_sdk::compute_budget::ComputeBudgetInstruction;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use visualsign::AnnotatedPayloadField;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::create_amount_field;

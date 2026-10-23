@@ -15,8 +15,8 @@ This README contains only SPL Token-specific notes and examples.
 ## SPL Token Program Details
 
 - **Program ID**: `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`
-- **Crate**: `spl-token = "7.0.0"`
-- **Instruction Enum**: `spl_token::instruction::TokenInstruction`
+- **Crate**: `spl-token-interface = "3.0.0"`
+- **Instruction Enum**: `spl_token_interface::instruction::TokenInstruction`
 
 ## Covered Instructions
 

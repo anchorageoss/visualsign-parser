@@ -1,9 +1,9 @@
 {
-  "description": "Token 2022 TransferChecked instruction - transferring tokens with decimals check (UNSUPPORTED - should fail)",
+  "description": "Token 2022 TransferChecked instruction - transferring tokens with decimals check",
   "source": "https://solscan.io/tx/pDxnsJ8RAucAfGKD54D9khP1GShcUQehyqAEhwbdogbxsD3UGdH2iFpyV2FXHDjV84WSvdXhrWYfW6vfjwy1vSe",
   "signature": "pDxnsJ8RAucAfGKD54D9khP1GShcUQehyqAEhwbdogbxsD3UGdH2iFpyV2FXHDjV84WSvdXhrWYfW6vfjwy1vSe",
   "cluster": "mainnet-beta",
-  "full_transaction_note": "This is a test fixture for Token 2022 TransferChecked instruction from a real mainnet transaction. Amount: 50,000,000 tokens (50000000000000000 raw units, 9 decimals). This instruction is NOT YET SUPPORTED and should fail parsing with an appropriate error message.",
+  "full_transaction_note": "This is a test fixture for Token 2022 TransferChecked instruction from a real mainnet transaction. Amount: 50,000,000 tokens (50000000000000000 raw units, 9 decimals).",
   "instruction_index": 0,
   "instruction_data": "g6x5zqCAw5JB2",
   "program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
@@ -33,6 +33,13 @@
       "description": "Authority (multisig)"
     }
   ],
-  "expected_error": "unknown discriminator"
+  "expected_fields": {
+    "amount": "50000000",
+    "raw_amount": "50000000000000000",
+    "decimals": "9",
+    "mint": "pc3gLpoZCe79SZAbABtes2fiWAaiTJuTk9NsNxR2ZSj",
+    "source": "FzHhqxHPNXrzoNRwVmDRcNprTcx5YAdLyuRNC5FYthi8",
+    "destination": "BE5Mi1nnQzxpuRWUUvWjEjsjB7sHGPNhS7TDM9PAR56j",
+    "owner/delegate": "J46G7r1XKDyyw1sFzh8EPPf4nCxewBxudJNLojGnPLVS"
+  }
 }
-
