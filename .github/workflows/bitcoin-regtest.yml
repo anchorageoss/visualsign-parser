@@ -1,0 +1,53 @@
+name: "Bitcoin PSBT: regtest"
+
+# Validates the Bitcoin PSBT parser against a live Bitcoin Core node, like the
+# Solana surfpool lane does against a mainnet fork. Runs on PRs carrying the
+# `test:bitcoin-regtest` label, or by hand. The offline half (BIP vectors and
+# replayed mainnet transactions) runs in the normal `make test`.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regtest:
+    if: |
+      github.event_name == 'workflow_dispatch'
+      ||
+      (github.event.action == 'labeled' && github.event.label.name == 'test:bitcoin-regtest')
+      ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'test:bitcoin-regtest'))
+    runs-on: ubuntu-latest-4-cores
+    timeout-minutes: 45
+    steps:
+      - name: git checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
+        with:
+          cache: false
+      - name: Cache Rust dependencies
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            src/target/
+          key: ${{ runner.os }}-cargo-bitcoin-regtest-${{ hashFiles('src/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bitcoin-regtest-
+      - name: Install Bitcoin Core
+        run: scripts/install-bitcoind.sh
+      - name: Offline vectors (BIP-174/370/371, mainnet replays)
+        working-directory: src
+        run: cargo test --locked -p visualsign-bitcoin --test vectors_test --test mainnet_test
+      - name: Regtest lane
+        working-directory: src
+        run: |
+          BITCOIND="$(command -v bitcoind)" BITCOIN_CLI="$(command -v bitcoin-cli)" \
+            cargo test --locked -p visualsign-bitcoin --test regtest -- --ignored --nocapture
