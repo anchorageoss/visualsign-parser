@@ -24,11 +24,12 @@ pub fn format_arg_value(value: &serde_json::Value) -> String {
 
 /// Marker substituted for any character that cannot be rendered.
 ///
-/// Substituting rather than deleting keeps distinct inputs distinct: silently
-/// dropping characters made `a"b` and `ab` render identically, so two different
-/// on-chain values could display as the same string. It also makes the loss
-/// visible to whoever reads the field, instead of silently presenting a
-/// truncated value as if it were complete.
+/// Substituting rather than deleting keeps the length and position of every
+/// elided character: silently dropping characters made `a"b` and `ab` render
+/// identically, so two different on-chain values could display as the same
+/// string. The rendering is still lossy, since every forbidden character (and a
+/// literal `?`) maps to the same marker, but the loss is visible to whoever
+/// reads the field instead of a truncated value looking complete.
 const ELIDED: char = '?';
 
 /// Render `text` as characters that are safe to place in a `SignablePayload`
@@ -125,8 +126,8 @@ mod tests {
         assert_eq!(format_arg_value(&json!("a\tb\rc")), "a?b?c");
     }
 
-    /// Deleting unsafe characters let distinct values collapse onto the same
-    /// rendering. Substituting a marker keeps them distinct.
+    /// Deleting unsafe characters let `a"b` collapse onto `ab`. Substituting a
+    /// marker keeps those two apart.
     #[test]
     fn test_distinct_values_do_not_collapse() {
         let quoted = format_arg_value(&json!("a\"b"));
