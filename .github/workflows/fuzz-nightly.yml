@@ -1,0 +1,49 @@
+name: Fuzz Nightly
+
+# The fuzz crate needs a nightly toolchain only because cargo-fuzz builds with -Zsanitizer=address.
+# Weekly: (1) check stable still cannot build the fuzz targets, so the nightly pin is still needed;
+# (2) try the newest nightly and open or update a PR that moves the pin if it builds and fuzzes cleanly.
+# Opening the PR needs "Allow GitHub Actions to create and approve pull requests" in the repo settings.
+# A PR created with GITHUB_TOKEN does not start other workflows, so run `Fuzz Testing: Solana` on it by hand.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nightly-still-needed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: rustup toolchain install stable --profile minimal
+      - run: cargo install cargo-fuzz --locked
+      - run: scripts/fuzz-nightly.sh check-needed
+
+  bump-nightly:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: cargo install cargo-fuzz --locked
+      - run: scripts/fuzz-nightly.sh bump
+      - name: Open or update the bump PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git diff --quiet && exit 0
+          new=$(sed -n 's/^channel = "\(nightly-[0-9-]*\)"/\1/p' src/chain_parsers/visualsign-solana/fuzz/rust-toolchain.toml)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c bot/fuzz-nightly-bump
+          git commit -am "ci(fuzz): bump the fuzz nightly to $new"
+          git push --force origin bot/fuzz-nightly-bump
+          if [ -z "$(gh pr list --head bot/fuzz-nightly-bump --json number --jq '.[0].number')" ]; then
+            gh pr create --base main --head bot/fuzz-nightly-bump --title "ci(fuzz): bump the fuzz nightly to $new" \
+              --body "Weekly bump. \`scripts/fuzz-nightly.sh bump\` built both fuzz targets and fuzzed each for 20s on $new. Run \`Fuzz Testing: Solana\` on this PR before merging."
+          fi
