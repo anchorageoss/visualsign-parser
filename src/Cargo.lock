@@ -1452,6 +1452,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32637268377fc7b10a8c6d51de3e7fba1ce5dd371a96e342b34e6078db558e7f"
 
 [[package]]
+name = "bellman"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "973b16549796a1274a63e00159a03250e66e8263e2ac6344b1c9fdfe9b7a8325"
+dependencies = [
+ "bitvec 1.0.1",
+ "blake2s_simd",
+ "byteorder",
+ "ff 0.14.0",
+ "group 0.14.0",
+ "rand_core 0.10.1",
+ "subtle",
+]
+
+[[package]]
 name = "bellpepper"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4493,6 +4508,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "groth16"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bb1e0bde2dbacd81474ae216c5dd4901307bd1c75fd26ed49590e88048c8442"
+dependencies = [
+ "bellman",
+ "byteorder",
+ "ff 0.14.0",
+ "group 0.14.0",
+ "pairing 0.24.0",
+ "rand_core 0.10.1",
+]
+
+[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4573,6 +4602,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "halo2_gadgets"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8862c7f2d99964760016516103fcc621352e77a505b22b0fc25140f09e4b8bb0"
+dependencies = [
+ "arrayvec",
+ "bitvec 1.0.1",
+ "ff 0.14.0",
+ "group 0.14.0",
+ "halo2_poseidon",
+ "halo2_proofs",
+ "pasta_curves 0.6.1",
+ "rand 0.10.3",
+ "sinsemilla",
+ "subtle",
+ "uint",
+]
+
+[[package]]
+name = "halo2_legacy_pdqsort"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
+
+[[package]]
 name = "halo2_poseidon"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4582,6 +4636,24 @@ dependencies = [
  "ff 0.14.0",
  "group 0.14.0",
  "pasta_curves 0.6.1",
+]
+
+[[package]]
+name = "halo2_proofs"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5af2a9457f494f862cd07b81c2e98a19f50b06a2057b7569450d7c26b167d1c"
+dependencies = [
+ "blake2b_simd",
+ "ff 0.14.0",
+ "group 0.14.0",
+ "halo2_legacy_pdqsort",
+ "indexmap 2.12.1",
+ "maybe-rayon",
+ "pasta_curves 0.6.1",
+ "rand 0.10.3",
+ "rand_core 0.10.1",
+ "tracing",
 ]
 
 [[package]]
@@ -5940,6 +6012,15 @@ name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
+
+[[package]]
+name = "maybe-rayon"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ea1f30cedd69f0a2954655f7188c6a834246d2bcf1e315e2ac40c4b24dc9519"
+dependencies = [
+ "cfg-if 1.0.4",
+]
 
 [[package]]
 name = "memchr"
@@ -7375,7 +7456,9 @@ dependencies = [
  "fpe",
  "getset",
  "group 0.14.0",
+ "halo2_gadgets",
  "halo2_poseidon",
+ "halo2_proofs",
  "hex",
  "incrementalmerkletree",
  "lazy_static",
@@ -7388,6 +7471,7 @@ dependencies = [
  "serde",
  "sinsemilla",
  "subtle",
+ "tracing",
  "visibility",
  "zcash_note_encryption",
  "zcash_spec",
@@ -8723,6 +8807,7 @@ version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65c9fb96cbc91e3478eaae79a69fcd3f1ae4ad052e471fe6732fff548984b4af"
 dependencies = [
+ "getrandom 0.4.3",
  "rand_core 0.10.1",
 ]
 
@@ -9471,6 +9556,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a2cbdcfeef20006adf72699cd466f21fe349674277cc05d3fc9b7302db7b182"
 dependencies = [
  "aes 0.9.3",
+ "bellman",
  "bitvec 1.0.1",
  "blake2b_simd",
  "blake2s_simd",
@@ -9480,6 +9566,7 @@ dependencies = [
  "ff 0.14.0",
  "fpe",
  "getset",
+ "groth16",
  "group 0.14.0",
  "hex",
  "incrementalmerkletree",
@@ -9490,6 +9577,7 @@ dependencies = [
  "rand_core 0.10.1",
  "redjubjub",
  "subtle",
+ "tracing",
  "zcash_note_encryption",
  "zcash_spec",
  "zeroize",
@@ -15738,7 +15826,9 @@ dependencies = [
  "rand_core 0.10.1",
  "sapling-crypto",
  "secp256k1 0.33.1",
+ "serde",
  "serde_json",
+ "sha2 0.10.9",
  "visualsign",
  "zcash_keys",
  "zcash_note_encryption",

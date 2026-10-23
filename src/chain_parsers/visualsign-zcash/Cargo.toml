@@ -34,13 +34,17 @@ zcash_transparent = { version = "=0.11.0-pre.2", default-features = false, featu
 workspace = true
 
 [dev-dependencies]
-# Fixture generation (ignored test) and the ZIP-244 known-answer test only.
+# Fixture generation (ignored test), the known-answer tests and the
+# validation lane (proving and extraction in tests/regtest.rs).
 getrandom = { version = "=0.4.3", features = ["sys_rng"] }
 hex = { workspace = true }
 incrementalmerkletree = { version = "=0.9.0", default-features = false }
-pczt = { version = "=0.10.0-pre.2", default-features = false, features = ["std", "orchard", "sapling", "transparent", "signer", "io-finalizer", "zcp-builder"] }
+pczt = { version = "=0.10.0-pre.2", default-features = false, features = ["std", "orchard", "sapling", "transparent", "signer", "io-finalizer", "zcp-builder", "prover", "spend-finalizer", "tx-extractor"] }
 rand_core = { version = "=0.10.1", default-features = false }
 secp256k1 = { version = "=0.33.1", default-features = false, features = ["std"] }
-zcash_primitives = { version = "=0.31.0-pre.2", default-features = false, features = ["std", "transparent-inputs"] }
+zcash_primitives = { version = "=0.31.0-pre.2", default-features = false, features = ["std", "transparent-inputs", "non-standard-fees"] }
+zcash_protocol = { version = "=0.11.0-pre.1", default-features = false, features = ["std", "local-consensus"] }
 zcash_transparent = { version = "=0.11.0-pre.2", default-features = false, features = ["std", "transparent-inputs"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = "0.10"

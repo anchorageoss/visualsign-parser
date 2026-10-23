@@ -1,0 +1,19 @@
+[
+    ["From https://github.com/zcash/zcash-test-vectors/blob/master/zcash_test_vectors/transparent/zip_0320.py"],
+    ["t_addr, p2pkh_bytes, tex_addr, account, child_index"],
+    ["t1V9mnyk5Z5cTNMCkLbaDwSskgJZucTLdgW", "7bb83570b8fae146e03c5331a020b1e0892f631d", "tex10wur2u9clts5dcpu2vc6qg93uzyj7cca2xm732", 0, 0],
+    ["t1LZdE42PAt1wREUv1YMYRFwJDPHPW8toLL", "1d81e86791c72d292f906e7c039a729e4b1ff7fc", "tex1rkq7seu3cukjjtusde7q8xnjne93laluyvdxu7", 0, 1],
+    ["t1M5AgJw56FNFRBNGtzAGX4AHfQh7ZCxd4w", "231839e305c0a02ed681406faf222585f6623904", "tex1yvvrncc9czsza45pgph67g39shmxywgyvsypwn", 0, 2],
+    ["t1bh6KjXccz6Ed45vFc3GeqoxWbwPxe8w2n", "c3755398b8b77f633fca7ccbda900831478979c9", "tex1cd648x9ckalkx0720n9a4yqgx9rcj7wfvjcq63", 1, 0],
+    ["t1WvCtHojWHSHBdDtCFgorUN1TzUFV8sCth", "8f17950e22b08886ac4832e22e24f2e8f3cb6b21", "tex13ute2r3zkzygdtzgxt3zuf8jareuk6ep7qd8ty", 1, 1],
+    ["t1U2MF7f81qrXkWouT3Xt4hLDAMjC9LniTK", "6f58adaf02bb48e6b398a442a2b294589e041620", "tex1dav2mtczhdywdvuc53p29v55tz0qg93qvfjp46", 1, 2],
+    ["t1awMYfhispKsnJPHn7jgUxNnVW1DTpTJx9", "bb2fbb540f0f7e434636680eaea2eefe375a7591", "tex1hvhmk4q0palyx33kdq82aghwlcm45av3ezlrzn", 2, 0],
+    ["t1Kgn7v5a2rKkxC24LoXNyHRn4q4Gs3KEEF", "13e41e47448122cad13c5c7f5bd31c77639a9f99", "tex1z0jpu36ysy3v45fut3l4h5cuwa3e48uea95pc6", 2, 1],
+    ["t1c1ixUTuStCzo19qPg89U9XFYmWDLru9mt", "c6fb64d8757e5c85b230a3358711697ae6540b44", "tex1cmakfkr40ewgtv3s5v6cwytf0tn9gz6y9j5z8e", 2, 2],
+    ["t1WBxR5jNWgg4Cqeot3FvNkBb9ztYyjVELp", "871a089d446268aa7ac03d2a6f60ae70808f3974", "tex1sudq382yvf5257kq854x7c9wwzqg7wt5h2c24u", 3, 0],
+    ["t1VEuDXP1QocoNaxrq4gZArTqqKCZdrwjG7", "7cb07c31b58040ac7cc12bfaaa138cfbefb38457", "tex10jc8cvd4spq2clxp90a25yuvl0hm8pzheuufxw", 3, 1],
+    ["t1PXVM8oR6qVrVjtcnU1iNmH2CfvZyBai8u", "3e02e08b5965fce9c20ce6de6f9407674d01ba02", "tex18cpwpz6evh7wnssvum0xl9q8vaxsrwsz83vght", 3, 2],
+    ["t1M3p1MgJCgjq4FMogS84kVvuszJbxPnpSM", "22d68debb3928da4046370d25ed2bbe8d5e985d0", "tex1yttgm6anj2x6gprrwrf9a54mar27npws73jwdy", 4, 0],
+    ["t1aqnebXhA45WpgQHLiXTPU1Kk6rp8vVDDr", "ba2230b41fdc81714328231f40ab73feb52645a4", "tex1hg3rpdqlmjqhzsegyv05p2mnl66jv3dykth955", 4, 1],
+    ["t1UG6FVxexmJRFXG4gvEmSF9HSTwHMFaSDT", "71f1fc6fd69370f23611536b3b64e7df1cebef69", "tex1w8clcm7kjdc0yds32d4nke88muwwhmmfunhkhd", 4, 2]
+]

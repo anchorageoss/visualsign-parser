@@ -159,6 +159,12 @@ pub struct Spec {
     pub transparent_out: Vec<u64>,
     /// Pool for the change output (value computed to balance with ZIP-317).
     pub change: Option<ChangePool>,
+    /// Recipient of the Orchard and Ironwood sends, instead of the foreign key.
+    pub orchard_to: Option<orchard::Address>,
+    /// Recipient of the Sapling sends, instead of the foreign key.
+    pub sapling_to: Option<sapling_crypto::PaymentAddress>,
+    /// Pad the Orchard bundle to at least this many actions.
+    pub orchard_pad_to: Option<u8>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -209,7 +215,10 @@ fn builder_for(spec: &Spec, change_value: u64) -> Builder<Network, ()> {
             sapling_anchor: s_anchor,
             orchard_anchor: o_anchor,
             ironwood_anchor: i_anchor,
-            orchard_padding: BundlePadding::DEFAULT,
+            orchard_padding: BundlePadding {
+                bundle_required: false,
+                pad_to_minimum: spec.orchard_pad_to,
+            },
             ironwood_padding: BundlePadding::DEFAULT,
         },
     );
@@ -228,7 +237,7 @@ fn builder_for(spec: &Spec, change_value: u64) -> Builder<Network, ()> {
         let coin = zcash_transparent::bundle::TxOut::new(zat(v), taddr.script().into());
         b.add_transparent_p2pkh_input(tpk, utxo, coin).unwrap();
     }
-    let to = foreign_orchard_address();
+    let to = spec.orchard_to.unwrap_or_else(foreign_orchard_address);
     let ovk = Some(fvk.to_ovk(Scope::External));
     for (v, m) in &spec.orchard_out {
         b.add_orchard_output::<zip317::FeeRule>(ovk.clone(), to, zat(*v), memo(m))
@@ -241,7 +250,7 @@ fn builder_for(spec: &Spec, change_value: u64) -> Builder<Network, ()> {
     for (v, m) in &spec.sapling_out {
         b.add_sapling_output::<zip317::FeeRule>(
             Some(dfvk.to_ovk(Scope::External)),
-            foreign_sapling_address(),
+            spec.sapling_to.unwrap_or_else(foreign_sapling_address),
             zat(*v),
             memo(m),
         )

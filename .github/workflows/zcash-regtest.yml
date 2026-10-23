@@ -1,0 +1,54 @@
+name: "Zcash PCZT: regtest"
+
+# Validates the Zcash PCZT parser against a live Zebra node on regtest, like
+# the Bitcoin and Solana lanes do. Runs on PRs carrying the
+# `test:zcash-regtest` label, or by hand. The offline half (construction and
+# viewing-key ground truth, spec vectors, mainnet replays) runs in the normal
+# `make test`.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regtest:
+    if: |
+      github.event_name == 'workflow_dispatch'
+      ||
+      (github.event.action == 'labeled' && github.event.label.name == 'test:zcash-regtest')
+      ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'test:zcash-regtest'))
+    runs-on: ubuntu-latest-4-cores
+    timeout-minutes: 60
+    steps:
+      - name: git checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@fb51252c7ba57d633bc668f941da052e410add48 # v1.13.0
+        with:
+          cache: false
+      - name: Cache Rust dependencies
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            src/target/
+          key: ${{ runner.os }}-cargo-zcash-regtest-${{ hashFiles('src/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-zcash-regtest-
+      - name: Install zebrad and the Sapling parameters
+        run: echo "ZCASH_BIN=$(scripts/install-zebrad.sh | tail -1)" >> "$GITHUB_ENV"
+      - name: Offline layers (construction and viewing keys, spec vectors, mainnet replays)
+        working-directory: src
+        run: cargo test --locked -p visualsign-zcash --test ground_truth_test --test spec_vectors_test --test mainnet_test
+      - name: Regtest lane
+        working-directory: src
+        run: |
+          ZEBRAD="$ZCASH_BIN/zebrad" ZCASH_PARAMS="$ZCASH_BIN" \
+            cargo test --locked --release -p visualsign-zcash --test regtest -- --ignored --nocapture
