@@ -1,0 +1,22 @@
+name: OSS Scanner Dockerfile
+
+# Stage 1 of .oss-scanner/Dockerfile is a copy of the images/parser_app/Containerfile build stage, so the scan
+# image carries a release parser_app with the same sha256 as the production build. Fail if the two drift.
+
+on:
+  pull_request:
+    paths:
+      - ".oss-scanner/Dockerfile"
+      - "images/parser_app/Containerfile"
+      - "scripts/check-oss-scanner-dockerfile.sh"
+      - ".github/workflows/oss-scanner-dockerfile.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  stage-1-matches-containerfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: scripts/check-oss-scanner-dockerfile.sh
