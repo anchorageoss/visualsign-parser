@@ -285,8 +285,8 @@ fn test_burn_checked_real_transaction() {
 }
 
 #[test]
-fn test_transfer_checked_unsupported() {
-    test_real_transaction("transfer_checked", "TransferChecked (Unsupported)");
+fn test_transfer_checked_real_transaction() {
+    test_real_transaction("transfer_checked", "TransferChecked");
 }
 
 #[test]

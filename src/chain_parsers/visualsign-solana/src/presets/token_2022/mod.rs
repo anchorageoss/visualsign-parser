@@ -8,6 +8,7 @@ use crate::core::{
 };
 use crate::utils::format_token_amount;
 use config::Token2022Config;
+use spl_token_2022::extension::transfer_fee::instruction::TransferFeeInstruction;
 use spl_token_2022::instruction::TokenInstruction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_number_field, create_raw_data_field, create_text_field};
@@ -25,6 +26,7 @@ const PAUSABLE_RESUME_DISCRIMINATOR: u8 = 2;
 
 // Standard Token instruction discriminators
 const SET_AUTHORITY_DISCRIMINATOR: u8 = 6;
+const TRANSFER_FEE_EXTENSION_DISCRIMINATOR: u8 = 26;
 
 // Maximum decimals we are willing to honor on attacker-controlled
 // `MintToChecked` / `BurnChecked` payloads. Real-world tokens cap out around
@@ -61,12 +63,16 @@ impl InstructionVisualizer for Token2022Visualizer {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Parse the Token 2022 instruction
-        let token_2022_instruction = parse_token_2022_instruction(context.data(), &accounts)
-            .map_err(|e| VisualSignError::DecodeError(e.to_string()))?;
-
-        // Generate proper preview layout
-        create_token_2022_preview_layout(&token_2022_instruction, context)
+        // Instructions this preset does not decode (extensions such as
+        // confidential transfers, checked transfers carrying transfer-hook or
+        // multisig accounts, malformed data) degrade to a raw layout titled
+        // "Token 2022 (unparsed)" instead of failing the whole transaction.
+        match parse_token_2022_instruction(context.data(), &accounts) {
+            Ok(token_2022_instruction) => {
+                create_token_2022_preview_layout(&token_2022_instruction, context)
+            }
+            Err(reason) => create_unparsed_preview_layout(&reason, context),
+        }
     }
 
     fn get_config(&self) -> Option<&dyn SolanaIntegrationConfig> {
@@ -79,6 +85,52 @@ impl InstructionVisualizer for Token2022Visualizer {
 }
 
 enum Token2022Instruction {
+    /// Deprecated in Token-2022 (no mint or decimals), still decodable.
+    Transfer {
+        amount: u64,
+        source: String,
+        destination: String,
+        authority: String,
+        signers: Vec<String>,
+    },
+    /// `TransferChecked`, or `TransferCheckedWithFee` with `fee`.
+    TransferChecked {
+        amount: u64,
+        decimals: u8,
+        fee: Option<u64>,
+        source: String,
+        mint: String,
+        destination: String,
+        authority: String,
+    },
+    Approve {
+        amount: u64,
+        decimals: Option<u8>,
+        source: String,
+        mint: Option<String>,
+        delegate: String,
+        owner: String,
+        signers: Vec<String>,
+    },
+    Revoke {
+        source: String,
+        owner: String,
+        signers: Vec<String>,
+    },
+    MintTo {
+        amount: u64,
+        mint: String,
+        account: String,
+        mint_authority: String,
+        signers: Vec<String>,
+    },
+    Burn {
+        amount: u64,
+        account: String,
+        mint: String,
+        authority: String,
+        signers: Vec<String>,
+    },
     MintToChecked {
         amount: u64,
         decimals: u8,
@@ -199,9 +251,87 @@ fn parse_token_2022_instruction(
         });
     }
 
+    if data.first() == Some(&TRANSFER_FEE_EXTENSION_DISCRIMINATOR) {
+        return match TransferFeeInstruction::unpack(&data[1..]) {
+            Ok(TransferFeeInstruction::TransferCheckedWithFee {
+                amount,
+                decimals,
+                fee,
+            }) => checked_transfer(amount, decimals, Some(fee), accounts),
+            _ => Err("Unsupported Token 2022 transfer fee instruction".to_string()),
+        };
+    }
+
     // Try to parse as standard TokenInstruction first
     if let Ok(sdk_instruction) = TokenInstruction::unpack(data) {
+        #[allow(deprecated)]
         match sdk_instruction {
+            TokenInstruction::Transfer { amount } => {
+                let [source, destination, authority] = required(accounts, "transfer")?;
+                return Ok(Token2022Instruction::Transfer {
+                    amount,
+                    source,
+                    destination,
+                    authority,
+                    signers: accounts[3..].to_vec(),
+                });
+            }
+            TokenInstruction::TransferChecked { amount, decimals } => {
+                return checked_transfer(amount, decimals, None, accounts);
+            }
+            TokenInstruction::Approve { amount } => {
+                let [source, delegate, owner] = required(accounts, "approve")?;
+                return Ok(Token2022Instruction::Approve {
+                    amount,
+                    decimals: None,
+                    source,
+                    mint: None,
+                    delegate,
+                    owner,
+                    signers: accounts[3..].to_vec(),
+                });
+            }
+            TokenInstruction::ApproveChecked { amount, decimals } => {
+                check_decimals("approveChecked", decimals)?;
+                let [source, mint, delegate, owner] = required(accounts, "approveChecked")?;
+                return Ok(Token2022Instruction::Approve {
+                    amount,
+                    decimals: Some(decimals),
+                    source,
+                    mint: Some(mint),
+                    delegate,
+                    owner,
+                    signers: accounts[4..].to_vec(),
+                });
+            }
+            TokenInstruction::Revoke => {
+                let [source, owner] = required(accounts, "revoke")?;
+                return Ok(Token2022Instruction::Revoke {
+                    source,
+                    owner,
+                    signers: accounts[2..].to_vec(),
+                });
+            }
+            TokenInstruction::MintTo { amount } => {
+                let [mint, account, mint_authority] = required(accounts, "mintTo")?;
+                return Ok(Token2022Instruction::MintTo {
+                    amount,
+                    mint,
+                    account,
+                    mint_authority,
+                    signers: accounts[3..].to_vec(),
+                });
+            }
+            TokenInstruction::Burn { amount } => {
+                let [account, mint, authority] = required(accounts, "burn")?;
+                return Ok(Token2022Instruction::Burn {
+                    amount,
+                    account,
+                    mint,
+                    authority,
+                    signers: accounts[3..].to_vec(),
+                });
+            }
             TokenInstruction::MintToChecked { amount, decimals } => {
                 if accounts.len() < 3 {
                     return Err("Invalid mintToChecked: insufficient accounts".to_string());
@@ -295,6 +425,76 @@ fn parse_token_2022_instruction(
     ))
 }
 
+/// The first `N` accounts, or an error naming the instruction.
+fn required<const N: usize>(accounts: &[String], name: &str) -> Result<[String; N], String> {
+    accounts
+        .get(..N)
+        .and_then(|a| <[String; N]>::try_from(a.to_vec()).ok())
+        .ok_or_else(|| format!("Invalid {name}: insufficient accounts"))
+}
+
+fn check_decimals(name: &str, decimals: u8) -> Result<(), String> {
+    if decimals > MAX_TOKEN_DECIMALS {
+        return Err(format!(
+            "Invalid {name}: decimals {decimals} exceeds maximum supported value {MAX_TOKEN_DECIMALS}"
+        ));
+    }
+    Ok(())
+}
+
+/// `TransferChecked` / `TransferCheckedWithFee`: source, mint, destination,
+/// authority. Further accounts are either multisig signers or the extra
+/// accounts of a transfer hook, which run another program's code; the
+/// instruction alone cannot tell them apart, so they are not decoded.
+fn checked_transfer(
+    amount: u64,
+    decimals: u8,
+    fee: Option<u64>,
+    accounts: &[String],
+) -> Result<Token2022Instruction, String> {
+    check_decimals("transferChecked", decimals)?;
+    let [source, mint, destination, authority] = required(accounts, "transferChecked")?;
+    if accounts.len() > 4 {
+        return Err(format!(
+            "transferChecked with {} extra accounts (transfer hook or multisig signers) is not decoded",
+            accounts.len() - 4
+        ));
+    }
+    Ok(Token2022Instruction::TransferChecked {
+        amount,
+        decimals,
+        fee,
+        source,
+        mint,
+        destination,
+        authority,
+    })
+}
+
+/// Raw layout for an instruction this preset does not decode.
+fn create_unparsed_preview_layout(
+    reason: &str,
+    context: &VisualizerContext,
+) -> Result<AnnotatedPayloadField, VisualSignError> {
+    let title = "Token 2022 (unparsed)".to_string();
+    let condensed = vec![create_text_field("Instruction", &title)?];
+    let expanded = vec![
+        create_text_field("Instruction", &title)?,
+        create_text_field("Reason", reason)?,
+        create_text_field("Program ID", &resolve_program_display(context))?,
+        create_raw_data_field(context.data(), None)?,
+    ];
+    preview_field(title, condensed, expanded, context)
+}
+
+fn signer_fields(signers: &[String]) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
+    signers
+        .iter()
+        .enumerate()
+        .map(|(i, s)| create_text_field(&format!("Multisig Signer {}", i + 1), s))
+        .collect()
+}
+
 // Check if the instruction is a Pause instruction
 fn is_pause_instruction(data: &[u8]) -> bool {
     !data.is_empty()
@@ -344,7 +544,184 @@ fn create_token_2022_preview_layout(
     parsed: &Token2022Instruction,
     context: &VisualizerContext,
 ) -> Result<AnnotatedPayloadField, VisualSignError> {
+    let program = resolve_program_display(context);
     let (title, condensed_fields, expanded_fields) = match parsed {
+        Token2022Instruction::Transfer {
+            amount,
+            source,
+            destination,
+            authority,
+            signers,
+        } => {
+            let title = format!("Transfer: {amount} base units");
+            let condensed = vec![
+                create_text_field("Action", "Transfer")?,
+                create_number_field("Raw Amount", &amount.to_string(), "")?,
+            ];
+            let mut expanded = vec![
+                create_text_field("Instruction", "Transfer")?,
+                create_number_field("Raw Amount", &amount.to_string(), "")?,
+                create_text_field("Decimals", "not in instruction (deprecated Transfer)")?,
+                create_text_field("Source", source)?,
+                create_text_field("Destination", destination)?,
+                create_text_field("Owner/Delegate", authority)?,
+            ];
+            expanded.extend(signer_fields(signers)?);
+            expanded.push(create_text_field("Program ID", &program)?);
+            expanded.push(create_raw_data_field(context.data(), None)?);
+            (title, condensed, expanded)
+        }
+        Token2022Instruction::TransferChecked {
+            amount,
+            decimals,
+            fee,
+            source,
+            mint,
+            destination,
+            authority,
+        } => {
+            let formatted = format_token_amount(*amount, *decimals);
+            let name = if fee.is_some() {
+                "Transfer Checked With Fee"
+            } else {
+                "Transfer Checked"
+            };
+            let title = format!("{name}: {formatted} tokens");
+            let condensed = vec![
+                create_text_field("Action", name)?,
+                create_text_field("Amount", &formatted)?,
+                create_text_field("Destination", destination)?,
+            ];
+            let mut expanded = vec![
+                create_text_field("Instruction", name)?,
+                create_text_field("Amount", &formatted)?,
+                create_number_field("Raw Amount", &amount.to_string(), "")?,
+                create_number_field("Decimals", &decimals.to_string(), "")?,
+            ];
+            if let Some(fee) = fee {
+                expanded.push(create_text_field(
+                    "Fee",
+                    &format_token_amount(*fee, *decimals),
+                )?);
+            }
+            expanded.extend([
+                create_text_field("Mint", mint)?,
+                create_text_field("Source", source)?,
+                create_text_field("Destination", destination)?,
+                create_text_field("Owner/Delegate", authority)?,
+                create_text_field("Program ID", &program)?,
+                create_raw_data_field(context.data(), None)?,
+            ]);
+            (title, condensed, expanded)
+        }
+        Token2022Instruction::Approve {
+            amount,
+            decimals,
+            source,
+            mint,
+            delegate,
+            owner,
+            signers,
+        } => {
+            let shown = match decimals {
+                Some(d) => format_token_amount(*amount, *d),
+                None => format!("{amount} base units"),
+            };
+            let name = if decimals.is_some() {
+                "Approve Checked"
+            } else {
+                "Approve"
+            };
+            let title = format!("{name}: {shown}");
+            let condensed = vec![
+                create_text_field("Action", name)?,
+                create_text_field("Amount", &shown)?,
+                create_text_field("Delegate", delegate)?,
+            ];
+            let mut expanded = vec![
+                create_text_field("Instruction", name)?,
+                create_text_field("Amount", &shown)?,
+                create_number_field("Raw Amount", &amount.to_string(), "")?,
+            ];
+            if let (Some(d), Some(m)) = (decimals, mint) {
+                expanded.push(create_number_field("Decimals", &d.to_string(), "")?);
+                expanded.push(create_text_field("Mint", m)?);
+            }
+            expanded.extend([
+                create_text_field("Source", source)?,
+                create_text_field("Delegate", delegate)?,
+                create_text_field("Owner", owner)?,
+            ]);
+            expanded.extend(signer_fields(signers)?);
+            expanded.push(create_text_field("Program ID", &program)?);
+            expanded.push(create_raw_data_field(context.data(), None)?);
+            (title, condensed, expanded)
+        }
+        Token2022Instruction::Revoke {
+            source,
+            owner,
+            signers,
+        } => {
+            let title = "Revoke Delegate".to_string();
+            let condensed = vec![create_text_field("Action", "Revoke")?];
+            let mut expanded = vec![
+                create_text_field("Instruction", "Revoke")?,
+                create_text_field("Source", source)?,
+                create_text_field("Owner", owner)?,
+            ];
+            expanded.extend(signer_fields(signers)?);
+            expanded.push(create_text_field("Program ID", &program)?);
+            expanded.push(create_raw_data_field(context.data(), None)?);
+            (title, condensed, expanded)
+        }
+        Token2022Instruction::MintTo {
+            amount,
+            mint,
+            account,
+            mint_authority,
+            signers,
+        } => {
+            let title = format!("Mint To: {amount} base units");
+            let condensed = vec![
+                create_text_field("Action", "Mint To")?,
+                create_number_field("Raw Amount", &amount.to_string(), "")?,
+            ];
+            let mut expanded = vec![
+                create_text_field("Instruction", "Mint To")?,
+                create_number_field("Raw Amount", &amount.to_string(), "")?,
+                create_text_field("Mint", mint)?,
+                create_text_field("Destination Account", account)?,
+                create_text_field("Mint Authority", mint_authority)?,
+            ];
+            expanded.extend(signer_fields(signers)?);
+            expanded.push(create_text_field("Program ID", &program)?);
+            expanded.push(create_raw_data_field(context.data(), None)?);
+            (title, condensed, expanded)
+        }
+        Token2022Instruction::Burn {
+            amount,
+            account,
+            mint,
+            authority,
+            signers,
+        } => {
+            let title = format!("Burn: {amount} base units");
+            let condensed = vec![
+                create_text_field("Action", "Burn")?,
+                create_number_field("Raw Amount", &amount.to_string(), "")?,
+            ];
+            let mut expanded = vec![
+                create_text_field("Instruction", "Burn")?,
+                create_number_field("Raw Amount", &amount.to_string(), "")?,
+                create_text_field("Token Account", account)?,
+                create_text_field("Mint", mint)?,
+                create_text_field("Authority", authority)?,
+            ];
+            expanded.extend(signer_fields(signers)?);
+            expanded.push(create_text_field("Program ID", &program)?);
+            expanded.push(create_raw_data_field(context.data(), None)?);
+            (title, condensed, expanded)
+        }
         Token2022Instruction::MintToChecked {
             amount,
             decimals,
@@ -532,6 +909,15 @@ fn create_token_2022_preview_layout(
         }
     };
 
+    preview_field(title, condensed_fields, expanded_fields, context)
+}
+
+fn preview_field(
+    title: String,
+    condensed_fields: Vec<AnnotatedPayloadField>,
+    expanded_fields: Vec<AnnotatedPayloadField>,
+    context: &VisualizerContext,
+) -> Result<AnnotatedPayloadField, VisualSignError> {
     let preview_layout = SignablePayloadFieldPreviewLayout {
         title: Some(SignablePayloadFieldTextV2 {
             text: title.clone(),
@@ -643,6 +1029,159 @@ mod tests {
             if let Err(msg) = parse_token_2022_instruction(&data, &accounts) {
                 panic!("decimals={decimals} should parse, got Err({msg})");
             }
+        }
+    }
+
+    fn amount_decimals(tag: u8, amount: u64, decimals: u8) -> Vec<u8> {
+        let mut data = vec![tag];
+        data.extend_from_slice(&amount.to_le_bytes());
+        data.push(decimals);
+        data
+    }
+
+    /// Visualize `data` with `n` accounts and return the preview title and
+    /// expanded rows as `label: text`.
+    fn visualize(data: Vec<u8>, accounts: &[Pubkey]) -> (String, Vec<String>) {
+        let mut keys = vec![Pubkey::new_from_array(spl_token_2022::id().to_bytes())];
+        keys.extend_from_slice(accounts);
+        let compiled = solana_sdk::instruction::CompiledInstruction {
+            program_id_index: 0,
+            accounts: (1..=accounts.len() as u8).collect(),
+            data,
+        };
+        let sender = solana_parser::solana::structs::SolanaAccount {
+            account_key: accounts[0].to_string(),
+            signer: false,
+            writable: false,
+        };
+        let idl = crate::idl::IdlRegistry::new();
+        let context = VisualizerContext::new(&sender, &compiled, &keys, &idl, 0);
+        let field = Token2022Visualizer.visualize_tx_commands(&context).unwrap();
+        let SignablePayloadField::PreviewLayout { preview_layout, .. } =
+            field.signable_payload_field
+        else {
+            panic!("expected PreviewLayout");
+        };
+        let rows = preview_layout
+            .expanded
+            .unwrap()
+            .fields
+            .iter()
+            .map(|f| {
+                let f = &f.signable_payload_field;
+                format!("{}: {}", f.label(), f.fallback_text())
+            })
+            .collect();
+        (preview_layout.title.unwrap().text, rows)
+    }
+
+    fn keys(n: u8) -> Vec<Pubkey> {
+        (1..=n).map(|i| Pubkey::new_from_array([i; 32])).collect()
+    }
+
+    #[test]
+    fn transfer_checked_shows_mint_amount_decimals_source_destination() {
+        let k = keys(4);
+        let (title, rows) = visualize(amount_decimals(12, 1_500_000, 6), &k);
+        assert_eq!(title, "Transfer Checked: 1.5 tokens");
+        for row in [
+            "Instruction: Transfer Checked".to_string(),
+            "Amount: 1.5".to_string(),
+            "Raw Amount: 1500000".to_string(),
+            "Decimals: 6".to_string(),
+            format!("Source: {}", k[0]),
+            format!("Mint: {}", k[1]),
+            format!("Destination: {}", k[2]),
+            format!("Owner/Delegate: {}", k[3]),
+        ] {
+            assert!(rows.contains(&row), "{row} missing in {rows:#?}");
+        }
+    }
+
+    #[test]
+    fn transfer_checked_with_fee_shows_fee() {
+        let k = keys(4);
+        let mut data = vec![26, 1];
+        data.extend_from_slice(&2_000_000u64.to_le_bytes());
+        data.push(6);
+        data.extend_from_slice(&10_000u64.to_le_bytes());
+        let (title, rows) = visualize(data, &k);
+        assert_eq!(title, "Transfer Checked With Fee: 2 tokens");
+        assert!(rows.contains(&"Fee: 0.01".to_string()), "{rows:#?}");
+        assert!(
+            rows.contains(&format!("Destination: {}", k[2])),
+            "{rows:#?}"
+        );
+    }
+
+    #[test]
+    fn approve_checked_and_revoke() {
+        let k = keys(4);
+        let (title, rows) = visualize(amount_decimals(13, 5_000_000, 6), &k);
+        assert_eq!(title, "Approve Checked: 5");
+        for row in [
+            format!("Source: {}", k[0]),
+            format!("Mint: {}", k[1]),
+            format!("Delegate: {}", k[2]),
+            format!("Owner: {}", k[3]),
+        ] {
+            assert!(rows.contains(&row), "{row} missing in {rows:#?}");
+        }
+        let (title, rows) = visualize(vec![5], &k[..2]);
+        assert_eq!(title, "Revoke Delegate");
+        assert!(rows.contains(&format!("Owner: {}", k[1])), "{rows:#?}");
+    }
+
+    #[test]
+    fn deprecated_transfer_and_multisig_signers() {
+        // Transfer with a multisig owner and two signer accounts.
+        let k = keys(5);
+        let mut data = vec![3];
+        data.extend_from_slice(&42u64.to_le_bytes());
+        let (title, rows) = visualize(data, &k);
+        assert_eq!(title, "Transfer: 42 base units");
+        assert!(
+            rows.contains(&format!("Destination: {}", k[1])),
+            "{rows:#?}"
+        );
+        assert!(
+            rows.contains(&format!("Multisig Signer 1: {}", k[3])),
+            "{rows:#?}"
+        );
+        assert!(
+            rows.contains(&format!("Multisig Signer 2: {}", k[4])),
+            "{rows:#?}"
+        );
+    }
+
+    #[test]
+    fn mint_to_and_burn() {
+        let k = keys(3);
+        let mut data = vec![7];
+        data.extend_from_slice(&9u64.to_le_bytes());
+        assert_eq!(visualize(data, &k).0, "Mint To: 9 base units");
+        let mut data = vec![8];
+        data.extend_from_slice(&9u64.to_le_bytes());
+        assert_eq!(visualize(data, &k).0, "Burn: 9 base units");
+    }
+
+    #[test]
+    fn transfer_checked_with_extra_accounts_is_unparsed() {
+        // A transfer hook's extra accounts (or multisig signers) follow the
+        // authority; they cannot be told apart, so nothing is decoded.
+        let (title, rows) = visualize(amount_decimals(12, 1, 0), &keys(6));
+        assert_eq!(title, "Token 2022 (unparsed)");
+        assert!(
+            rows.iter().any(|r| r.contains("2 extra accounts")),
+            "{rows:#?}"
+        );
+    }
+
+    #[test]
+    fn confidential_transfer_and_unknown_are_unparsed() {
+        // 27 = ConfidentialTransferExtension, 0xfe = no such instruction.
+        for data in [vec![27, 7, 0, 0], vec![0xfe]] {
+            assert_eq!(visualize(data, &keys(4)).0, "Token 2022 (unparsed)");
         }
     }
 }
