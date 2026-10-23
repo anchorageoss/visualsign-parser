@@ -48,6 +48,11 @@ jupiter-swap-api-client = "0.2.0"
 base64 = "0.22.1"
 proptest = "1"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "idl_cache"
+harness = false
 
 [lints]
 workspace = true

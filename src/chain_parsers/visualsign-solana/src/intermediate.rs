@@ -895,28 +895,46 @@ fn caller_idl_records(
     )
 }
 
-/// The full `IdlRecord` map for one request: builtins and presets from their
+/// The `IdlRecord` map for one request: builtins and presets from their
 /// process-wide caches, caller-supplied IDLs layered on top.
 ///
 /// `solana_parser::parse_transaction_with_idl_records` takes the map by value,
-/// so the static path has to materialize one. The saving over passing configs
-/// is the parse-and-re-serialize of every preset IDL, which
-/// `construct_idl_records_map` would otherwise redo on every request.
+/// so the static path has to materialize one. It only ever looks a record up
+/// by an instruction's program id, and program ids are always static account
+/// keys, so when the message decodes only the records for its static keys are
+/// cloned. Cloning every cached record (each with its parsed `Idl` and IDL
+/// JSON) and dropping them again was most of the per-request cost of the
+/// intermediate output. If the message doesn't decode here, every record is
+/// passed, as before.
 ///
 /// Precedence matches [`lookup_idl_record`]: caller, then preset, then builtin.
 #[allow(clippy::disallowed_types)]
 fn build_idl_record_map(
     caller_records: &BTreeMap<String, solana_parser::solana::structs::IdlRecord>,
+    message: Option<&VersionedMessage>,
 ) -> std::collections::HashMap<String, solana_parser::solana::structs::IdlRecord> {
-    let mut records: std::collections::HashMap<_, _> = builtin_idl_records()
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    for (program_id, record) in crate::idl::builtin_programs::preset_idl_records() {
-        records.insert(program_id.clone(), record.clone());
-    }
-    for (program_id, record) in caller_records {
-        records.insert(program_id.clone(), record.clone());
+    let wanted: Option<std::collections::BTreeSet<String>> = message.map(|message| {
+        message
+            .static_account_keys()
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    });
+    let is_wanted =
+        |program_id: &String| wanted.as_ref().is_none_or(|keys| keys.contains(program_id));
+
+    let mut records = std::collections::HashMap::new();
+    let layers = [
+        builtin_idl_records(),
+        crate::idl::builtin_programs::preset_idl_records(),
+        caller_records,
+    ];
+    for layer in layers {
+        for (program_id, record) in layer {
+            if is_wanted(program_id) {
+                records.insert(program_id.clone(), record.clone());
+            }
+        }
     }
     records
 }
@@ -1230,10 +1248,11 @@ pub(crate) fn extract_solana_intermediate_output(
         ))
     })?;
 
+    let message = versioned_message(raw_message_hex, full_transaction);
     let response = parse_transaction_with_idl_records(
         raw_message_hex.to_string(),
         full_transaction,
-        build_idl_record_map(&caller_records),
+        build_idl_record_map(&caller_records, message.as_ref()),
     )
     .map_err(|e| {
         VisualSignError::ParseError(TransactionParseError::DecodeError(format!(
@@ -1252,7 +1271,6 @@ pub(crate) fn extract_solana_intermediate_output(
             ))
         })?;
 
-    let message = versioned_message(raw_message_hex, full_transaction);
     Ok(build_intermediate_output(
         metadata,
         message.as_ref(),
