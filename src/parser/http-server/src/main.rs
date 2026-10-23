@@ -18,8 +18,8 @@
 //!   visualsign-turnkey-client (and any HTTP-only client) keeps working
 //!   byte-for-byte.
 //! - `POST /visualsign/api/v2/parse` - same payload, gated by the same
-//!   X-Stamp check as v1 when `--allowed-stamp-pubkeys-hex` is set; a later
-//!   PR adds payment enforcement here.
+//!   X-Stamp check as v1 when `--allowed-stamp-pubkeys-hex` is set. Both
+//!   routes enforce payment when `--require-payment-marker-pubkey` is set.
 //!
 //! Configuration (CLI args; env vars listed are clap fallbacks):
 //! - `--port <u16>` / `HTTP_PORT` (default 3000) - Turnkey TVC public ingress.
@@ -35,6 +35,13 @@
 //!   compressed SEC1 pubkeys allowed to call the parse routes. No env
 //!   fallback (same rationale as the ABI-trust flags above). Absent means the
 //!   routes stay open (today's behavior).
+//! - `--require-payment-marker-pubkey <hex>` - optional: require every parse
+//!   request to carry an `X-Payment-Marker` header (base64 of
+//!   `borsh(SignedVerifiedPaymentMarker)`) signed by this SEC1-uncompressed
+//!   P256 key and bound to the request (see
+//!   `host_primitives::payment_marker`). Absent means payment is not
+//!   enforced. A missing or unverifiable marker is a 402. Like the flags
+//!   above, no env fallback, so the pinned key lands in `pivotArgs`.
 //! - `--boot-proof-source <static|nsm>` - required: `nsm` serves a verified
 //!   `/dev/nsm` attestation doc in each response's `bootProof`, cached and
 //!   re-attested by a watcher before its certificate chain expires; `static`
@@ -117,6 +124,13 @@ struct Args {
     /// ABI-trust flags above).
     #[arg(long)]
     allowed_stamp_pubkeys_hex: Option<String>,
+
+    /// Optional: pin the gateway's P256 signing public key (SEC1 uncompressed
+    /// hex) and refuse any parse request whose `X-Payment-Marker` header is
+    /// missing or does not verify against it. Absent leaves payment
+    /// unenforced. No env fallback, for the same reason as the flags above.
+    #[arg(long)]
+    require_payment_marker_pubkey: Option<String>,
 
     /// Required: where each response's `bootProof` attestation document
     /// comes from. `nsm` attests via the real `/dev/nsm` device (cached,
@@ -266,6 +280,29 @@ fn error_status(status: StatusCode, msg: String) -> (StatusCode, Json<TurnkeyRes
     )
 }
 
+/// Header carrying `base64(borsh(SignedVerifiedPaymentMarker))`.
+const PAYMENT_MARKER_HEADER: &str = "x-payment-marker";
+
+/// Longest base64 header accepted before decoding. `parser_app` caps the
+/// decoded marker at 8 KiB; 4/3 of that plus slack bounds the work an
+/// unauthenticated caller can make a rejected request cost.
+const MAX_PAYMENT_MARKER_HEADER_BYTES: usize = 12 * 1024;
+
+/// Decode the marker header. Absent is an empty marker (which `parser_app`
+/// accepts only when payment is not required); present but undecodable is
+/// `Err`.
+fn payment_marker_from_headers(headers: &HeaderMap) -> Result<Vec<u8>, ()> {
+    let Some(value) = headers.get(PAYMENT_MARKER_HEADER) else {
+        return Ok(Vec::new());
+    };
+    if value.len() > MAX_PAYMENT_MARKER_HEADER_BYTES {
+        return Err(());
+    }
+    base64::engine::general_purpose::STANDARD
+        .decode(value.as_bytes())
+        .map_err(|_| ())
+}
+
 fn handle_parse(
     state: &AppState,
     headers: &HeaderMap,
@@ -314,15 +351,20 @@ fn handle_parse(
         return error_status(StatusCode::BAD_REQUEST, "unknown chain".to_string());
     };
 
+    let Ok(payment_marker) = payment_marker_from_headers(headers) else {
+        eprintln!("rejected request: undecodable {PAYMENT_MARKER_HEADER}");
+        return error_status(
+            StatusCode::BAD_REQUEST,
+            "invalid payment marker".to_string(),
+        );
+    };
+
     let proto_req = generated::parser::ParseRequest {
         unsigned_payload: wrapper.request.unsigned_payload,
         chain,
         chain_metadata: wrapper.request.chain_metadata.map(ChainMetadata::from),
         include_intermediate_output: wrapper.request.include_intermediate_output,
-        // Payment enforcement isn't wired up on this binary yet (see the doc
-        // comment at the top of this file); the state's PaymentPolicy is always
-        // Disabled, so an empty marker is a no-op regardless of route version.
-        payment_marker: Vec::new(),
+        payment_marker,
     };
 
     let proto_resp = match parse(&proto_req, &state.ephemeral_key, &state.config) {
@@ -343,6 +385,13 @@ fn handle_parse(
                 generated::google::rpc::Code::InvalidArgument => {
                     eprintln!("parse failed: code={:?}", e.code);
                     (StatusCode::BAD_REQUEST, "invalid request".to_string())
+                }
+                // `parser_app` maps every payment-conditional rejection
+                // (missing marker, wrong request, wrong key, bad signature)
+                // to FailedPrecondition. Nothing else produces that code.
+                generated::google::rpc::Code::FailedPrecondition => {
+                    eprintln!("parse failed: code={:?}", e.code);
+                    (StatusCode::PAYMENT_REQUIRED, "payment required".to_string())
                 }
                 _ => {
                     eprintln!("parse failed: {} ({:?})", e.message, e.code);
@@ -442,9 +491,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .map_err(|e| format!("invalid ABI trust config: {e}"))?;
     eprintln!("caller-supplied ABI trust: {abi_trust}");
-    // Payment enforcement is a later PR's scope on this binary (see module docs);
-    // Disabled matches every other binary until one wires PaymentPolicy::Required.
-    let config = ParserConfig::new(abi_trust, PaymentPolicy::Disabled);
+    let payment_policy = match args.require_payment_marker_pubkey.as_deref() {
+        Some(pubkey_hex) => PaymentPolicy::from_hex(pubkey_hex)
+            .map_err(|e| format!("invalid --require-payment-marker-pubkey: {}", e.message))?,
+        None => PaymentPolicy::Disabled,
+    };
+    eprintln!(
+        "payment marker enforcement: {}",
+        if matches!(payment_policy, PaymentPolicy::Disabled) {
+            "disabled"
+        } else {
+            "required"
+        }
+    );
+    let config = ParserConfig::new(abi_trust, payment_policy);
 
     let handle = EphemeralKeyHandle::new(tvc_attestation::paths::EPHEMERAL_KEY_FILE.to_string());
     let ephemeral_key = handle
@@ -582,6 +642,12 @@ async fn shutdown_signal() {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use borsh::BorshSerialize as _;
+    use host_primitives::payment_marker::{
+        PaymentDetails, SignedVerifiedPaymentMarker, VPM_VERSION, VerifiedPaymentMarker,
+        request_hash,
+    };
+    use qos_p256::sign::P256SignPair;
 
     #[test]
     fn envelope_is_parsed_from_raw_bytes_not_reserialized() {
@@ -675,6 +741,102 @@ mod tests {
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert!(resp.error.is_some());
         assert_redacted(&resp.boot_proof);
+    }
+
+    const ETH_TX: &str = "0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83";
+
+    fn eth_request_body() -> Vec<u8> {
+        format!(
+            r#"{{"request":{{"chain":"CHAIN_ETHEREUM","unsigned_payload":"{ETH_TX}","include_intermediate_output":false}}}}"#
+        )
+        .into_bytes()
+    }
+
+    /// State that requires a marker signed by the returned key pair.
+    fn payment_required_state() -> (AppState, P256SignPair) {
+        let pair = P256SignPair::generate();
+        let pubkey_hex = qos_hex::encode(&pair.public_key().to_bytes());
+        let state = AppState {
+            config: ParserConfig::new(
+                ParserConfig::abi_trust_from_options(true, &[]).unwrap(),
+                PaymentPolicy::from_hex(&pubkey_hex).unwrap(),
+            ),
+            ..test_app_state()
+        };
+        (state, pair)
+    }
+
+    /// Base64 `X-Payment-Marker` value signed by `pair`, bound to `payload`.
+    fn marker_header(pair: &P256SignPair, payload: &str) -> String {
+        let vpm = VerifiedPaymentMarker {
+            version: VPM_VERSION,
+            request_hash: request_hash(Chain::Ethereum as i32, payload, &[], false),
+            details: PaymentDetails::X402Direct {
+                txid: "0xabc".into(),
+                payer: "0xpayer".into(),
+                pay_to: "0xpayee".into(),
+                amount: "1000".into(),
+                mint: "0xusdc".into(),
+                x_payment_hash: [0u8; 32],
+                network: "eip155:84532".into(),
+            },
+            settled_at_ms: 1,
+            gateway_pubkey_hex: qos_hex::encode(&pair.public_key().to_bytes()),
+        };
+        let signature = pair.sign(&vpm.signing_digest().unwrap()).unwrap();
+        let signed = SignedVerifiedPaymentMarker { vpm, signature };
+        let mut bytes = Vec::new();
+        signed.serialize(&mut bytes).unwrap();
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    fn headers_with_marker(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            PAYMENT_MARKER_HEADER,
+            axum::http::HeaderValue::from_str(value).unwrap(),
+        );
+        headers
+    }
+
+    #[test]
+    fn payment_required_rejects_a_request_with_no_marker() {
+        let (state, _) = payment_required_state();
+        let (status, _) = handle_parse(&state, &HeaderMap::new(), &eth_request_body());
+        assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
+    }
+
+    #[test]
+    fn payment_required_accepts_a_marker_signed_by_the_pinned_key() {
+        let (state, pair) = payment_required_state();
+        let headers = headers_with_marker(&marker_header(&pair, ETH_TX));
+        let (status, _) = handle_parse(&state, &headers, &eth_request_body());
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[test]
+    fn payment_required_rejects_a_marker_signed_by_another_key() {
+        let (state, _) = payment_required_state();
+        let attacker = P256SignPair::generate();
+        let headers = headers_with_marker(&marker_header(&attacker, ETH_TX));
+        let (status, _) = handle_parse(&state, &headers, &eth_request_body());
+        assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
+    }
+
+    #[test]
+    fn payment_required_rejects_a_marker_replayed_on_a_different_request() {
+        let (state, pair) = payment_required_state();
+        // Valid marker, but bound to a different unsigned_payload.
+        let headers = headers_with_marker(&marker_header(&pair, "0x02"));
+        let (status, _) = handle_parse(&state, &headers, &eth_request_body());
+        assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
+    }
+
+    #[test]
+    fn undecodable_marker_header_is_a_400_even_when_payment_is_disabled() {
+        let headers = headers_with_marker("not base64 !!");
+        let (status, _) = handle_parse(&test_app_state(), &headers, &eth_request_body());
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     // Regression pin complementing the test above: passing `body: Bytes` here
