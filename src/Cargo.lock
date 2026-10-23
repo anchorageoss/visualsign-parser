@@ -15020,6 +15020,8 @@ dependencies = [
  "generated",
  "hex",
  "parser_cli_core",
+ "serde",
+ "serde_json",
  "thiserror 2.0.17",
  "visualsign",
 ]
