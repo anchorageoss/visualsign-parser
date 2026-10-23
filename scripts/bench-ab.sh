@@ -47,7 +47,8 @@ count_instructions() {
   local side=$1 mode=$2
   shift 2
   valgrind --tool=cachegrind --cache-sim=no --cachegrind-out-file=/dev/null \
-    --log-file="$out/cachegrind-$side-$mode.log" "$root/src/target/release/parser_cli" "$@" >/dev/null 2>&1
+    --log-file="$out/cachegrind-$side-$mode.log" "$root/src/target/release/parser_cli" "$@" >/dev/null 2>&1 ||
+    { echo "parser_cli failed under valgrind ($side $mode)" >&2; return 1; }
   grep -oE 'I[[:space:]]+refs:[[:space:]]+[0-9,]+' "$out/cachegrind-$side-$mode.log" | grep -oE '[0-9,]+$' | tr -d ,
 }
 
@@ -62,9 +63,11 @@ run_side() {
   if command -v valgrind >/dev/null && [ -f "$root/$fixture" ]; then
     (cd "$root/src" && cargo build --release -p parser_cli) >"$out/build-cli-$side.log" 2>&1
     mapfile -t cli_args <"$root/$fixture"
-    echo "$side render $(cd "$out" && count_instructions "$side" render "${cli_args[@]}")" >>"$out/instructions"
-    echo "$side intermediate $(cd "$out" && count_instructions "$side" intermediate "${cli_args[@]}" --with-intermediate)" \
-      >>"$out/instructions"
+    # Standalone assignments so a failed run aborts instead of recording a count.
+    local render intermediate
+    render=$(cd "$out" && count_instructions "$side" render "${cli_args[@]}")
+    intermediate=$(cd "$out" && count_instructions "$side" intermediate "${cli_args[@]}" --with-intermediate)
+    printf '%s render %s\n%s intermediate %s\n' "$side" "$render" "$side" "$intermediate" >>"$out/instructions"
   fi
 }
 
