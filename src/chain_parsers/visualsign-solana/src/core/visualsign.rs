@@ -2437,6 +2437,53 @@ mod tests {
         assert_eq!(mappings.len(), 1, "unsigned IDL should be accepted");
     }
 
+    /// A caller-supplied IDL whose `array` size makes solana_parser's
+    /// allocation budget (`size * size_of::<Value>()`) overflow usize must not
+    /// panic the parser. Unsigned IDLs are accepted for any non-trusted
+    /// program, so this input is request-controlled.
+    #[test]
+    fn test_caller_idl_with_overflowing_array_size_does_not_panic() {
+        let program_id = Pubkey::new_unique();
+        let fee_payer = Pubkey::new_unique();
+        let size = usize::MAX / std::mem::size_of::<serde_json::Value>() + 2;
+        let idl_json = format!(
+            r#"{{"instructions":[{{"name":"x","discriminator":[1],"accounts":[],"args":[{{"name":"a","type":{{"array":["u8",{size}]}}}}]}}],"types":[]}}"#
+        );
+        let options = make_options_with_idl_mapping(
+            &program_id.to_string(),
+            generated::parser::Idl {
+                value: idl_json,
+                idl_type: None,
+                idl_version: None,
+                signature: None,
+                program_name: Some("Custom".to_string()),
+            },
+        );
+        assert_eq!(extract_idl_mappings(&options).len(), 1);
+
+        let message = Message {
+            header: solana_sdk::message::MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 1,
+            },
+            account_keys: vec![fee_payer, program_id],
+            recent_blockhash: solana_sdk::hash::Hash::new_unique(),
+            instructions: vec![solana_sdk::instruction::CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0],
+                data: vec![1],
+            }],
+        };
+        let transaction = SolanaTransaction {
+            signatures: vec![solana_sdk::signature::Signature::default()],
+            message,
+        };
+
+        // Ok or Err are both fine; reaching this line is the assertion.
+        let _ = to_payload(SolanaTransactionWrapper::Legacy(transaction), options);
+    }
+
     /// IDL mappings with an invalid program_id (not parseable as a base58
     /// Solana `Pubkey`) are dropped. Free defence in depth matching the
     /// Ethereum ABI path's address validation.
