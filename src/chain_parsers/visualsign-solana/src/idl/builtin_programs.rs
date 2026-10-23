@@ -417,6 +417,7 @@ pub fn preset_idl_records()
                         program_type: None,
                         custom_idl: Some(idl),
                         custom_idl_json: Some(json.clone()),
+                        custom_idl_hash: None,
                         override_builtin: true,
                         is_preset: true,
                     },
