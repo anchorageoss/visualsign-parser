@@ -3350,7 +3350,7 @@ dependencies = [
 [[package]]
 name = "solana_parser"
 version = "0.1.0"
-source = "git+https://github.com/iqlusioninc/solana-parser.git?rev=f269037acaf697233048394e5ecae09320b442bf#f269037acaf697233048394e5ecae09320b442bf"
+source = "git+https://github.com/iqlusioninc/solana-parser.git?rev=563f7e03dcf5a34050156360ec6f678b839f7ca9#563f7e03dcf5a34050156360ec6f678b839f7ca9"
 dependencies = [
  "bincode",
  "bs58",
