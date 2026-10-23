@@ -13,6 +13,7 @@ use crate::idl::signature::{
     authorized_idl_signers, convert_proto_signature, validate_idl_signature,
 };
 use base64::{self, Engine};
+use solana_packet::PACKET_DATA_SIZE;
 use solana_sdk::{
     message::VersionedMessage,
     pubkey::Pubkey,
@@ -39,16 +40,27 @@ use crate::intermediate::extract_solana_intermediate_output;
 /// and are deserialized on the hot path, so we apply a tighter bound here.
 const MAX_IDL_JSON_BYTES: usize = 1_024 * 1_024;
 
+/// SIMD-0296 raises the transaction size cap to 4096 bytes, but only for the
+/// SIMD-0385 `v1` format. Between `PACKET_DATA_SIZE` and this, a leading 0x81
+/// can only be `v1` (a legacy payload starting with 0x81 carries at least 129
+/// signatures, 8256 bytes), so that window gets the `v1` error, not "too large".
+const V1_MAX_TRANSACTION_SIZE: usize = 4096;
+
+/// Longest encoding worth decoding: hex is two chars per byte plus an optional
+/// `0x`; base64 is shorter. Sized for `v1` so an over-packet `v1` payload is
+/// still classified, not refused blind.
+const MAX_ENCODED_TRANSACTION_LEN: usize = 2 * V1_MAX_TRANSACTION_SIZE + 2;
+
 /// Leading byte of a SIMD-0385 `v1` transaction (`0x80 | 1`).
 ///
 /// `v1` puts its `VersionByte` first and its signatures last, so unlike
 /// legacy/v0 this byte sits at offset 0 of the payload. Legacy and v0 both
 /// start with a compact-u16 *outer* signature count instead, and that count
 /// can also encode to a first byte of `0x81` (e.g. 129, 257, ... signatures,
-/// congruent to 1 mod 128) -- this parser enforces no size cap that would rule
-/// that out, so the byte alone is not a reliable marker. It only becomes
-/// unambiguous once both real decoders below have already failed to read the
-/// payload as legacy or versioned.
+/// congruent to 1 mod 128). Within a packet the byte is only consulted once
+/// both real decoders below have failed; past `PACKET_DATA_SIZE` and up to
+/// `V1_MAX_TRANSACTION_SIZE` it is unambiguous (129 signatures alone are 8256
+/// bytes), so the size gate names `v1` there instead of "too large".
 const TRANSACTION_V1_VERSION_BYTE: u8 = 0x80 | 1;
 
 /// Append decode errors as diagnostics and lint diagnostics to the output fields.
@@ -89,6 +101,17 @@ pub enum SolanaTransactionWrapper {
 
 impl Transaction for SolanaTransactionWrapper {
     fn from_string(data: &str) -> Result<Self, TransactionParseError> {
+        // Cheap bound on the encoded text, so an oversized blob is refused
+        // before base64/hex even allocates for it.
+        if data.len() > MAX_ENCODED_TRANSACTION_LEN {
+            return Err(TransactionParseError::InvalidFormat(format!(
+                "encoded transaction too large: {} chars (max: {MAX_ENCODED_TRANSACTION_LEN} \
+                 chars; a legacy/v0 packet is {PACKET_DATA_SIZE} bytes, a v1 transaction at most \
+                 {V1_MAX_TRANSACTION_SIZE})",
+                data.len()
+            )));
+        }
+
         // Detect if format is base64 or hex
         let format = visualsign::encodings::SupportedEncodings::detect(data);
 
@@ -99,6 +122,28 @@ impl Transaction for SolanaTransactionWrapper {
             SupportedEncodings::Hex => visualsign::encodings::decode_hex(data)
                 .map_err(|e| TransactionParseError::DecodeError(e.to_string()))?,
         };
+
+        // Nothing valid on-chain is larger than a packet, and every account index
+        // below expands ~50x, so refuse on length before either decoder runs.
+        // One exception in naming only: a v1 transaction may legitimately be up
+        // to V1_MAX_TRANSACTION_SIZE, and past a packet its 0x81 marker cannot be
+        // a legacy signature count, so it gets the accurate "v1 not supported".
+        if bytes.len() > PACKET_DATA_SIZE {
+            if bytes.len() <= V1_MAX_TRANSACTION_SIZE
+                && bytes.first() == Some(&TRANSACTION_V1_VERSION_BYTE)
+            {
+                return Err(TransactionParseError::UnsupportedVersion(format!(
+                    "Solana transaction format v1 (SIMD-0385) is not supported \
+                     (leading byte 0x81 matches the v1 version marker; {} bytes is over \
+                     the {PACKET_DATA_SIZE}-byte legacy/v0 packet limit)",
+                    bytes.len()
+                )));
+            }
+            return Err(TransactionParseError::InvalidFormat(format!(
+                "decoded transaction too large: {} bytes (max: {PACKET_DATA_SIZE} bytes)",
+                bytes.len()
+            )));
+        }
 
         // First try to decode as a VersionedTransaction.
         let versioned_err = match bincode::deserialize::<VersionedTransaction>(&bytes) {
@@ -391,6 +436,22 @@ impl VisualSignConverter<SolanaTransactionWrapper> for SolanaVisualSignConverter
         transaction_wrapper: SolanaTransactionWrapper,
         options: VisualSignOptions,
     ) -> Result<ConversionResult, VisualSignError> {
+        // Pre-decoded SDK types skip `from_string`, so bound the wire size here
+        // too, before anything is rendered (`serialized_size` only counts).
+        let wire_bytes = match &transaction_wrapper {
+            SolanaTransactionWrapper::Legacy(transaction) => bincode::serialized_size(transaction),
+            SolanaTransactionWrapper::Versioned(versioned_tx) => {
+                bincode::serialized_size(versioned_tx)
+            }
+        }
+        .map_err(|e| VisualSignError::ConversionError(e.to_string()))?;
+        if wire_bytes > PACKET_DATA_SIZE as u64 {
+            return Err(TransactionParseError::InvalidFormat(format!(
+                "transaction too large: {wire_bytes} bytes (max: {PACKET_DATA_SIZE} bytes)"
+            ))
+            .into());
+        }
+
         #[cfg(feature = "diagnostics")]
         let lint_config = visualsign::lint::LintConfig::default();
 
@@ -2027,8 +2088,8 @@ mod tests {
     /// `0x81` leading-byte check for `v1` only runs once both have failed, so
     /// it can never shadow a payload that is actually decodable. These tests
     /// pin that behavior: we reject anything neither decoder can read, we say
-    /// why, and a legacy/v0 payload that merely happens to start with `0x81`
-    /// (an outer compact-u16 signature count of 129, 257, ...) still decodes.
+    /// why, and a legacy payload that merely starts with `0x81` (129 outer
+    /// signatures) is refused for its size, never misread as `v1`.
     mod unsupported_versions {
         use super::*;
         use solana_sdk::hash::Hash;
@@ -2091,37 +2152,93 @@ mod tests {
 
         /// Sweeps `build_v1`'s signature/address/instruction-data-length knobs
         /// across the SIMD-0385 caps (and the 4096-byte size cap) and confirms
-        /// every resulting payload is rejected as `UnsupportedVersion`, not
-        /// decoded as legacy or versioned. The reason none of these ever
-        /// decode is arithmetic, not shape: the `0x81` leading byte forces
-        /// short_vec's outer signature count to be at least 129, which alone
-        /// needs at least 129 * 64 = 8256 signature bytes, far past the
-        /// 4096-byte `v1` cap, so this sweep is really a length check dressed
-        /// as a shape check. It still earns its keep as a regression guard
-        /// against `build_v1` emitting an over-cap payload for some knob
-        /// combination, or against the classification becoming
+        /// every resulting payload is rejected, never decoded as legacy or
+        /// versioned. Up to `PACKET_DATA_SIZE` the rejection names `v1` after
+        /// both decoders fail; between there and `V1_MAX_TRANSACTION_SIZE` the
+        /// size gate names `v1` itself; past 4096 it is "too large" for
+        /// everything. The reason none of these ever decode is
+        /// arithmetic, not shape: the `0x81` leading byte forces short_vec's
+        /// outer signature count to be at least 129, which alone needs
+        /// 129 * 64 = 8256 signature bytes, far past either cap. The sweep
+        /// still guards against `build_v1` emitting an over-cap payload for
+        /// some knob combination, or against the classification becoming
         /// shape-sensitive in a way that misfires for a subset of these.
         #[test]
         fn rejects_v1_across_the_whole_legal_envelope() {
-            let mut checked = 0;
+            let mut as_v1 = 0;
+            let mut as_v1_over_packet = 0;
+            let mut as_oversized = 0;
             for sigs in [1u8, 2, 3, 12] {
                 for addrs in [2u8, 3, 8, 64] {
-                    for data in [0u16, 12, 200, 1000, 3000] {
+                    for data in [0u16, 12, 200, 1000, 3000, 4000] {
                         let tx = build_v1(sigs, addrs, data);
-                        if tx.len() > 4096 {
-                            continue;
-                        }
                         let err = SolanaTransactionWrapper::from_string(&hex::encode(&tx))
                             .expect_err("v1 must not parse");
-                        assert!(
-                            matches!(err, TransactionParseError::UnsupportedVersion(_)),
-                            "sigs={sigs} addrs={addrs} data={data}: got {err:?}"
-                        );
-                        checked += 1;
+                        if tx.len() > V1_MAX_TRANSACTION_SIZE {
+                            assert!(
+                                matches!(err, TransactionParseError::InvalidFormat(_)),
+                                "sigs={sigs} addrs={addrs} data={data}: got {err:?}"
+                            );
+                            as_oversized += 1;
+                        } else {
+                            assert!(
+                                matches!(err, TransactionParseError::UnsupportedVersion(_)),
+                                "sigs={sigs} addrs={addrs} data={data}: got {err:?}"
+                            );
+                            assert!(err.to_string().contains("SIMD-0385"), "got {err}");
+                            if tx.len() > PACKET_DATA_SIZE {
+                                as_v1_over_packet += 1;
+                            } else {
+                                as_v1 += 1;
+                            }
+                        }
                     }
                 }
             }
-            assert!(checked > 50, "envelope sweep too small: {checked} cases");
+            assert!(as_v1 > 20, "too few v1 rejections: {as_v1} cases");
+            assert!(
+                as_v1_over_packet > 20,
+                "too few over-packet v1 rejections: {as_v1_over_packet} cases"
+            );
+            assert!(
+                as_oversized > 5,
+                "too few size rejections: {as_oversized} cases"
+            );
+        }
+
+        /// Reviewer's case on #567: a v1 transaction may legitimately exceed
+        /// a packet (up to 4096 bytes), so past `PACKET_DATA_SIZE` the size
+        /// gate must still name v1, not call it "too large".
+        #[test]
+        fn over_packet_v1_is_named_v1_not_too_large() {
+            let tx = build_v1(1, 3, 3000);
+            assert!(tx.len() > PACKET_DATA_SIZE && tx.len() <= V1_MAX_TRANSACTION_SIZE);
+            let err = SolanaTransactionWrapper::from_string(&hex::encode(&tx))
+                .expect_err("v1 must not parse");
+            assert!(
+                matches!(err, TransactionParseError::UnsupportedVersion(_)),
+                "expected UnsupportedVersion, got {err:?}"
+            );
+            assert!(err.to_string().contains("SIMD-0385"), "got {err}");
+        }
+
+        /// Past the v1 cap the marker no longer earns the v1 name: nothing
+        /// valid on-chain is that large in any format.
+        #[test]
+        fn a_v1_marker_past_the_v1_cap_is_too_large() {
+            let mut tx = build_v1(1, 3, 3000);
+            tx.extend(std::iter::repeat_n(
+                0xAB,
+                V1_MAX_TRANSACTION_SIZE + 1 - tx.len(),
+            ));
+            assert_eq!(tx.first(), Some(&TRANSACTION_V1_VERSION_BYTE));
+            let err = SolanaTransactionWrapper::from_string(&hex::encode(&tx))
+                .expect_err("must not parse");
+            assert!(
+                matches!(err, TransactionParseError::InvalidFormat(_)),
+                "expected the size error, got {err:?}"
+            );
+            assert!(err.to_string().contains("1232"), "got {err}");
         }
 
         /// A legacy/v0-framed envelope carrying a message version we do not
@@ -2170,11 +2287,11 @@ mod tests {
 
         /// A legacy transaction whose outer compact-u16 signature count happens
         /// to encode to a leading `0x81` byte (129 signatures, congruent to 1
-        /// mod 128) must still decode as legacy. The `v1` leading-byte check
-        /// only runs after both real decoders have failed, so it can never
-        /// shadow this payload the way it used to when the check ran first.
+        /// mod 128) is over 8 KiB, so the size gate refuses it before the `v1`
+        /// leading-byte check can misread it. The error names the packet
+        /// limit, not `v1`.
         #[test]
-        fn accepts_legacy_with_129_signatures_despite_leading_v1_marker_byte() {
+        fn refuses_legacy_with_129_signatures_for_size_not_as_v1() {
             let message = Message {
                 header: MessageHeader {
                     num_required_signatures: 1,
@@ -2200,9 +2317,13 @@ mod tests {
                 "sanity check: 129 outer signatures must encode to a leading 0x81 byte"
             );
 
-            let parsed = SolanaTransactionWrapper::from_string(&hex::encode(&bytes))
-                .expect("a real legacy transaction must still decode, not be misclassified as v1");
-            assert_eq!(parsed.transaction_type(), "Solana (Legacy)");
+            let err = SolanaTransactionWrapper::from_string(&hex::encode(&bytes))
+                .expect_err("129 signatures cannot fit in a packet");
+            assert!(
+                matches!(err, TransactionParseError::InvalidFormat(_)),
+                "expected the size error, got {err:?}"
+            );
+            assert!(err.to_string().contains("1232"), "got {err}");
         }
 
         /// The v1 marker check runs after both decoders, so guard that a real v0
@@ -2794,5 +2915,167 @@ mod tests {
         assert_eq!(title, "Caller");
         assert_eq!(subtitle, None);
         assert_eq!(fields.len(), 1);
+    }
+
+    /// The packet-size gate runs before either decoder, so an oversized
+    /// payload is refused on length alone and never expands into output.
+    mod packet_size_limit {
+        use super::*;
+        use solana_sdk::hash::Hash;
+        use solana_sdk::instruction::{AccountMeta, Instruction};
+        use solana_sdk::message::Message;
+        use solana_sdk::pubkey::Pubkey;
+
+        /// An unsigned legacy transaction with one instruction: the payer listed
+        /// `account_indexes` times and `data_len` bytes of data.
+        fn transaction(account_indexes: usize, data_len: usize) -> SolanaTransaction {
+            let payer = Pubkey::new_unique();
+            let program = Pubkey::new_unique();
+            let instruction = Instruction::new_with_bytes(
+                program,
+                &vec![0u8; data_len],
+                vec![AccountMeta::new(payer, true); account_indexes],
+            );
+            let message =
+                Message::new_with_blockhash(&[instruction], Some(&payer), &Hash::default());
+            SolanaTransaction::new_unsigned(message)
+        }
+
+        fn transaction_bytes(account_indexes: usize, data_len: usize) -> Vec<u8> {
+            bincode::serialize(&transaction(account_indexes, data_len)).expect("serialize")
+        }
+
+        /// Exactly `len` bytes, padded with account indexes or data bytes. A count
+        /// of 128 or more takes a second compact-u16 prefix byte, so one byte of
+        /// the padding goes there.
+        fn transaction_of_len(len: usize, grow_accounts: bool) -> Vec<u8> {
+            let base = transaction_bytes(0, 0).len();
+            let grow = len
+                .checked_sub(base)
+                .expect("len below the empty transaction");
+            let count = if grow >= 129 { grow - 1 } else { grow };
+            let bytes = if grow_accounts {
+                transaction_bytes(count, 0)
+            } else {
+                transaction_bytes(0, count)
+            };
+            assert_eq!(bytes.len(), len, "padding with {count} items");
+            bytes
+        }
+
+        fn b64(bytes: &[u8]) -> String {
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        }
+
+        /// These bytes are a well-formed transaction (the sibling test parses the
+        /// same shape one byte shorter), so getting the size error rather than a
+        /// decode result proves the gate ran before either decoder. Hex of 1233
+        /// bytes is exactly the string bound, so this is the byte check firing.
+        #[test]
+        fn rejects_payloads_over_packet_data_size_before_decode() {
+            let bytes = transaction_of_len(PACKET_DATA_SIZE + 1, false);
+            for encoded in [hex::encode(&bytes), b64(&bytes)] {
+                let err = SolanaTransactionWrapper::from_string(&encoded)
+                    .expect_err("1233 bytes must not parse");
+                assert!(
+                    matches!(err, TransactionParseError::InvalidFormat(_)),
+                    "expected InvalidFormat, got {err:?}"
+                );
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("1233 bytes") && msg.contains("1232"),
+                    "got {msg}"
+                );
+            }
+        }
+
+        #[test]
+        fn accepts_a_payload_of_exactly_packet_data_size() {
+            let bytes = transaction_of_len(PACKET_DATA_SIZE, false);
+            for encoded in [
+                hex::encode(&bytes),
+                format!("0x{}", hex::encode(&bytes)),
+                b64(&bytes),
+            ] {
+                let wrapper = SolanaTransactionWrapper::from_string(&encoded)
+                    .expect("a maximal legal packet parses");
+                assert!(wrapper.transaction_type().contains("Legacy"));
+            }
+        }
+
+        /// 64 KiB of zero bytes: no decoder could read this, and none gets the
+        /// chance -- the string is refused before base64/hex decoding.
+        #[test]
+        fn oversized_garbage_is_refused_on_length_alone() {
+            let err = SolanaTransactionWrapper::from_string(&hex::encode(vec![0u8; 65_536]))
+                .expect_err("must not parse");
+            assert!(matches!(err, TransactionParseError::InvalidFormat(_)));
+            let msg = err.to_string();
+            assert!(msg.contains("131072") && msg.contains("1232"), "got {msg}");
+        }
+
+        /// Pre-decoded SDK types never pass through `from_string`; the converter
+        /// refuses an oversized one before rendering anything.
+        #[test]
+        fn oversized_sdk_transaction_is_refused_before_rendering() {
+            let wrapper = SolanaTransactionWrapper::new_legacy(transaction(0, 4_000));
+            let err = SolanaVisualSignConverter
+                .to_visual_sign_payload(wrapper, VisualSignOptions::default())
+                .expect_err("4 KB transaction must not convert");
+            assert!(
+                matches!(
+                    err,
+                    VisualSignError::ParseError(TransactionParseError::InvalidFormat(_))
+                ),
+                "expected the size error, got {err:?}"
+            );
+            assert!(err.to_string().contains("1232"), "got {err}");
+
+            let wrapper = SolanaTransactionWrapper::new_legacy(transaction(0, 4_000));
+            let versioned = VersionedTransaction::from(match wrapper {
+                SolanaTransactionWrapper::Legacy(tx) => tx,
+                SolanaTransactionWrapper::Versioned(_) => unreachable!(),
+            });
+            let err = SolanaVisualSignConverter
+                .to_visual_sign_payload(
+                    SolanaTransactionWrapper::new_versioned(versioned),
+                    VisualSignOptions::default(),
+                )
+                .expect_err("4 KB versioned transaction must not convert");
+            assert!(err.to_string().contains("1232"), "got {err}");
+        }
+
+        /// The intermediate output of a legal packet that is nothing but account
+        /// indexes: each 1-byte index becomes a `SolanaAccount` (length prefix +
+        /// base58 key + two bools), so the blob is about 50x the input. Measured
+        /// at 51,244 bytes (41.6x) for a 1232-byte packet; the bounds leave room for
+        /// schema growth.
+        #[test]
+        fn intermediate_output_of_a_maximal_packet_is_bounded() {
+            let bytes = transaction_of_len(PACKET_DATA_SIZE, true);
+            let wrapper = SolanaTransactionWrapper::from_string(&hex::encode(&bytes))
+                .expect("a maximal legal packet parses");
+            let options = VisualSignOptions {
+                include_intermediate_output: true,
+                decode_transfers: true,
+                transaction_name: Some("Solana Transaction".to_string()),
+                ..VisualSignOptions::default()
+            };
+            let result = SolanaVisualSignConverter
+                .to_visual_sign_payload(wrapper, options)
+                .expect("conversion succeeds");
+            let blob = result
+                .intermediate_output
+                .as_ref()
+                .expect("intermediate output emitted");
+            let ratio = blob.len() as f64 / bytes.len() as f64;
+            eprintln!(
+                "packet of {} bytes -> {} intermediate bytes ({ratio:.1}x)",
+                bytes.len(),
+                blob.len()
+            );
+            assert!(ratio > 30.0, "expected ~50x amplification, got {ratio:.1}x");
+            assert!(blob.len() < 128 * 1024, "a legal packet stays bounded");
+        }
     }
 }

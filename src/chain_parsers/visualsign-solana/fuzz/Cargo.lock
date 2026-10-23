@@ -5644,6 +5644,7 @@ dependencies = [
  "hex",
  "parser_cli_core",
  "serde_json",
+ "solana-packet",
  "solana-program",
  "solana-rpc-client-types",
  "solana-sdk",

@@ -15094,6 +15094,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "solana-packet",
  "solana-parser-fuzz-core",
  "solana-program",
  "solana-rpc-client-types",
