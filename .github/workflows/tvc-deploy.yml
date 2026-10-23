@@ -89,11 +89,14 @@ jobs:
       - name: Install tvc CLI
         run: cargo install tvc --version 0.7.0 --locked
 
+      # Run from the crate dir so rustup picks its rust-toolchain.toml (1.94.0).
       - name: Test deploy helper
-        run: cargo test --manifest-path tools/tvc-deploy/Cargo.toml
+        working-directory: tools/tvc-deploy
+        run: cargo test
 
       - name: Build deploy helper
-        run: cargo build --release --manifest-path tools/tvc-deploy/Cargo.toml
+        working-directory: tools/tvc-deploy
+        run: cargo build --release
 
       - name: Write operator seed
         env:
