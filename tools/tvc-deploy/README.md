@@ -212,7 +212,8 @@ tvc-deploy create-policies --file templates/readonly-policy.json \
 
 ### Choosing the ABI trust posture
 
-Every `deploy` must pick exactly one of:
+Every `deploy` and `initiate` must pick exactly one of (there is no default; the
+posture is chosen per deployment, and prod runs `--accept-unsigned-abis` today):
 
 ```
 --accept-unsigned-abis                      # accept caller ABI mappings with no signature
@@ -246,6 +247,20 @@ approve or reject the existing one first (tvc-deploy approve-activity / reject-a
 Resolve the existing activity (approve or reject it) and re-run, or pass
 `--force` to submit anyway. The check uses the active org by default; pass
 `--org <alias>` on `deploy` if the deployment's org differs from it.
+
+### Manifest check before approving
+
+`deploy`, `deploy-pivot` and `approve` approve with `--dangerous-skip-interactive`,
+which turns off tvc's own manifest review. Before signing, the helper reads the
+deployment back (`GetTvcDeployment`) and refuses unless its QOS manifest's
+`pivot.hash` equals `--expected-digest` (the digest the gate just verified),
+`pivot.debugMode` matches the requested mode, and the deployment was created
+from `--image-url`. A missing or unparseable field also refuses. The approval is
+then made over those exact manifest bytes (`tvc deploy approve --manifest ...
+--manifest-id ...`), not a second fetch. `approve` takes `--org` like the other
+API commands. It also prints the ABI trust posture read from the manifest's pivot
+args (accept-unsigned, or the signer keys), so the approver sees which posture
+they are signing; the posture itself is not enforced at approve.
 
 ### Verifying the digest on its own
 
