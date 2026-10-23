@@ -1,0 +1,40 @@
+name: Embedded size
+
+# Reference/PoC: measures linked, stripped parser sizes for iOS and other
+# native targets (tools/embedded-size). Runs on demand or when a PR carries the
+# `test:embedded-size` label. Not a required check.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  size:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'test:embedded-size')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-ios }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - name: git checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install toolchains
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal --target ${{ matrix.target }}
+          rustup toolchain install nightly-2026-10-01 --profile minimal --component rust-src --target ${{ matrix.target }} || echo "nightly unavailable; skipping nightly rows"
+      - name: Measure
+        env:
+          NIGHTLY: nightly-2026-10-01
+        run: |
+          echo "## ${{ matrix.target }} (${{ matrix.os }})" >> "$GITHUB_STEP_SUMMARY"
+          tools/embedded-size/measure.sh ${{ matrix.target }} | tee -a "$GITHUB_STEP_SUMMARY"
