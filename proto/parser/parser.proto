@@ -168,6 +168,10 @@ message SolanaMetadata {
   // static-decode path (parse_transaction_with_idls) used for
   // unsigned_payload.
   optional string simulated_transaction_result = 5;
+  // Maximum total fee (base plus priority) the caller allows for this transaction, in
+  // lamports. Rendered as the top-level "Max Fee" row when present. The parser rejects the
+  // request when the fee the transaction commits to exceeds it, so the row is a true cap.
+  optional uint64 max_fee_lamports = 6;
 }
 
 message NearMetadata {

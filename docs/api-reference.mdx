@@ -72,6 +72,8 @@ message SolanaMetadata {
   optional string network_id = 2;       // Network identifier (e.g., "SOLANA_MAINNET", "SOLANA_DEVNET")
   optional Idl idl = 1;                 // Anchor IDL for decoding (single program)
   map<string, Idl> idl_mappings = 3;    // Map of program_id to IDL (multiple programs)
+  optional string simulated_transaction_result = 5; // Base64 simulateTransaction result, for inner (CPI) instructions
+  optional uint64 max_fee_lamports = 6; // Max total fee the caller allows, in lamports; "Max Fee" row, rejected when below the committed fee
 }
 ```
 
@@ -181,6 +183,26 @@ grpcurl -plaintext -d '{
         "idl_type": "SOLANA_IDL_TYPE_ANCHOR",
         "idl_version": "0.30.0"
       }
+    }
+  }
+}' localhost:44020 parser.ParserService/Parse
+```
+
+### Solana with a max fee
+
+```bash
+# Solana with the maximum total fee the caller allows, in lamports. The parser
+# renders it as a top-level "Max Fee" row right after the header rows and
+# rejects the request when the transaction commits to more: 5000 lamports per
+# signature, counting the ones precompile instructions verify, plus the compute
+# budget's priority fee. Over the HTTP gateway the same field is the camelCase
+# key `maxFeeLamports`.
+grpcurl -plaintext -d '{
+  "unsigned_payload": "AgAAAAAAAA...",
+  "chain": "CHAIN_SOLANA",
+  "chain_metadata": {
+    "solana": {
+      "max_fee_lamports": 5105000
     }
   }
 }' localhost:44020 parser.ParserService/Parse

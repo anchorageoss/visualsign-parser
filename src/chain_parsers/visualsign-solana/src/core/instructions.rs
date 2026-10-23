@@ -47,6 +47,11 @@ impl SummaryAccumulator {
         self.blocked = true;
     }
 
+    /// The compute-budget requests seen so far; they set the fee the transaction commits to.
+    pub fn priority_fee(&self) -> &PriorityFee {
+        &self.priority_fee
+    }
+
     /// A priority fee row that cannot be rendered fails closed: no summary.
     pub fn finish(mut self) -> Option<TransactionSummary> {
         if self.blocked || self.priority_fee.is_invalid() || self.proposals.len() != 1 {
@@ -65,6 +70,8 @@ impl SummaryAccumulator {
 pub struct DecodedInstructions {
     pub fields: Vec<AnnotatedPayloadField>,
     pub summary: Option<TransactionSummary>,
+    /// Compute-budget requests seen in the instructions; they set the committed fee.
+    pub priority_fee: PriorityFee,
 }
 
 /// Top-level "From" row naming the fee payer (`account_keys[0]`).
@@ -90,6 +97,8 @@ pub struct DecodeInstructionsResult {
     pub errors: Vec<(usize, VisualSignError)>,
     pub diagnostics: Vec<AnnotatedPayloadField>,
     pub summary: Option<TransactionSummary>,
+    /// Compute-budget requests seen in the instructions; they set the committed fee.
+    pub priority_fee: PriorityFee,
 }
 
 /// Visualizes all the instructions and related fields in a transaction/message.
@@ -130,6 +139,7 @@ pub fn decode_instructions(
             errors: Vec::new(),
             diagnostics,
             summary: None,
+            priority_fee: PriorityFee::default(),
         };
     }
 
@@ -177,6 +187,7 @@ pub fn decode_instructions(
         fields,
         errors,
         diagnostics,
+        priority_fee: summary.priority_fee().clone(),
         summary: summary.finish(),
     }
 }
@@ -235,6 +246,7 @@ pub fn decode_instructions(
 
     Ok(DecodedInstructions {
         fields,
+        priority_fee: summary.priority_fee().clone(),
         summary: summary.finish(),
     })
 }

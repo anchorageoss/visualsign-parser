@@ -277,6 +277,15 @@ pub struct SolanaMetadata {
     pub simulated_transaction_result: ::core::option::Option<
         ::prost::alloc::string::String,
     >,
+    /// Maximum total fee (base plus priority) the caller allows for this transaction, in
+    /// lamports. Rendered as the top-level "Max Fee" row when present. The parser rejects the
+    /// request when the fee the transaction commits to exceeds it, so the row is a true cap.
+    #[prost(uint64, optional, tag = "6")]
+    #[cfg_attr(
+        feature = "serde_derive",
+        serde(with = "crate::u64_or_string_serde", default)
+    )]
+    pub max_fee_lamports: ::core::option::Option<u64>,
 }
 #[cfg_attr(
     feature = "serde_derive",
