@@ -551,6 +551,207 @@ fn amino_send_and_authz_vote() {
 
 const AMINO_FEE: &str = r#""fee":{"amount":[],"gas":"1"}"#;
 
+fn historical_amino(ty: &str, value: serde_json::Value) -> String {
+    serde_json::json!({
+        "account_number": "1", "chain_id": "legacy", "fee": {"amount": [], "gas": "1"},
+        "memo": "", "msgs": [{"type": ty, "value": value}], "sequence": "0"
+    })
+    .to_string()
+}
+
+#[test]
+fn sdk_historical_bank_shapes_render_every_transfer() {
+    let old = historical_amino(
+        "cosmos-sdk/Send",
+        serde_json::json!({
+            "inputs": [{"address":"a","coins":[{"amount":"3","denom":"stake"}]},
+                       {"address":"b","coins":[{"amount":"4","denom":"stake"}]}],
+            "outputs": [{"address":"c","coins":[{"amount":"2","denom":"stake"}]},
+                        {"address":"d","coins":[{"amount":"5","denom":"stake"}]}]
+        }),
+    );
+    let p = convert(&old).unwrap();
+    assert!(has(&p, "Message 1 / Type", "Send"));
+    for (kind, n, address, amount) in [
+        ("Input", 1, "a", "3 stake"),
+        ("Input", 2, "b", "4 stake"),
+        ("Output", 1, "c", "2 stake"),
+        ("Output", 2, "d", "5 stake"),
+    ] {
+        assert!(has(
+            &p,
+            &format!("Message 1 / {kind} {n} / Address"),
+            address
+        ));
+        assert!(has(&p, &format!("Message 1 / {kind} {n} / Amount"), amount));
+    }
+    let later = historical_amino(
+        "cosmos-sdk/Send",
+        serde_json::json!({
+            "from_address":"a","to_address":"b","amount":[{"amount":"7","denom":"stake"}]
+        }),
+    );
+    let p = convert(&later).unwrap();
+    assert!(has(&p, "Message 1 / From", "a"));
+    assert!(has(&p, "Message 1 / Amount", "7 stake"));
+}
+
+#[test]
+fn sdk_historical_staking_values_and_shares_are_distinct() {
+    for (ty, addresses) in [
+        (
+            "cosmos-sdk/MsgDelegate",
+            serde_json::json!({"delegator_addr":"a","validator_addr":"v"}),
+        ),
+        (
+            "cosmos-sdk/MsgDelegate",
+            serde_json::json!({"delegator_address":"a","validator_address":"v"}),
+        ),
+    ] {
+        let mut v = addresses;
+        v["value"] = serde_json::json!({"amount":"9","denom":"stake"});
+        let p = convert(&historical_amino(ty, v)).unwrap();
+        assert!(has(&p, "Message 1 / Delegator", "a"));
+        assert!(has(&p, "Message 1 / Validator", "v"));
+        assert!(has(&p, "Message 1 / Amount", "9 stake"));
+    }
+    for (ty, v) in [
+        (
+            "cosmos-sdk/Undelegate",
+            serde_json::json!({"delegator_addr":"a","validator_addr":"v","shares_amount":"1.234567890123456789"}),
+        ),
+        (
+            "cosmos-sdk/MsgUndelegate",
+            serde_json::json!({"delegator_address":"a","validator_address":"v","shares_amount":"1.234567890123456789"}),
+        ),
+        (
+            "cosmos-sdk/BeginRedelegate",
+            serde_json::json!({"delegator_addr":"a","validator_src_addr":"v","validator_dst_addr":"w","shares_amount":"1.234567890123456789"}),
+        ),
+        (
+            "cosmos-sdk/MsgBeginRedelegate",
+            serde_json::json!({"delegator_address":"a","validator_src_address":"v","validator_dst_address":"w","shares_amount":"1.234567890123456789"}),
+        ),
+    ] {
+        let p = convert(&historical_amino(ty, v)).unwrap();
+        assert!(has(&p, "Message 1 / Delegator", "a"));
+        assert!(has(
+            &p,
+            "Message 1 / Delegation shares",
+            "1.234567890123456789"
+        ));
+        assert!(texts(&p, "Message 1 / Amount").is_empty());
+    }
+}
+
+#[test]
+fn sdk_colliding_historical_shapes_are_refused() {
+    for (ty, v) in [
+        (
+            "cosmos-sdk/Send",
+            serde_json::json!({"inputs":[],"outputs":[],"from_address":"a","to_address":"b","amount":[]}),
+        ),
+        (
+            "cosmos-sdk/MsgSend",
+            serde_json::json!({"inputs":[],"outputs":[]}),
+        ),
+        (
+            "cosmos-sdk/MsgDelegate",
+            serde_json::json!({"delegator_addr":"a","delegator_address":"b","validator_addr":"v","value":{"amount":"1","denom":"stake"}}),
+        ),
+        (
+            "cosmos-sdk/MsgDelegate",
+            serde_json::json!({"delegator_addr":"a","validator_address":"v","value":{"amount":"1","denom":"stake"}}),
+        ),
+        (
+            "cosmos-sdk/MsgDelegate",
+            serde_json::json!({"delegator_address":"a","validator_address":"v","value":{"amount":"1","denom":"stake"},"amount":{"amount":"1","denom":"stake"}}),
+        ),
+        (
+            "cosmos-sdk/MsgUndelegate",
+            serde_json::json!({"delegator_address":"a","validator_address":"v","shares_amount":"1.5","amount":{"amount":"1","denom":"stake"}}),
+        ),
+        (
+            "cosmos-sdk/Undelegate",
+            serde_json::json!({"delegator_address":"a","validator_address":"v","amount":{"amount":"1","denom":"stake"}}),
+        ),
+    ] {
+        assert!(convert(&historical_amino(ty, v)).is_err(), "accepted {ty}");
+    }
+}
+
+#[test]
+fn sdk_historical_shapes_require_the_documented_field_types() {
+    for (ty, v) in [
+        (
+            "cosmos-sdk/Send",
+            serde_json::json!({"inputs":[{"coins":[]}],"outputs":[{"address":"b","coins":[]}]}),
+        ),
+        (
+            "cosmos-sdk/Send",
+            serde_json::json!({"inputs":[{"address":"a","coins":{"amount":"1","denom":"stake"}}],"outputs":[{"address":"b","coins":[]}]}),
+        ),
+        (
+            "cosmos-sdk/Send",
+            serde_json::json!({"from_address":"a","to_address":"b","amount":{"amount":"1","denom":"stake"}}),
+        ),
+        (
+            "cosmos-sdk/MsgDelegate",
+            serde_json::json!({"delegator_address":"a","validator_address":"v","amount":[{"amount":"1","denom":"stake"}]}),
+        ),
+        (
+            "cosmos-sdk/MsgDelegate",
+            serde_json::json!({"delegator_address":"a","validator_address":"v","amount":null}),
+        ),
+    ] {
+        assert!(convert(&historical_amino(ty, v)).is_err(), "accepted {ty}");
+    }
+}
+
+#[test]
+fn sdk_historical_vote_options_and_versioned_metadata() {
+    for (input, label) in [
+        ("Yes", "Yes"),
+        ("Abstain", "Abstain"),
+        ("No", "No"),
+        ("NoWithVeto", "No with Veto"),
+        ("VOTE_OPTION_YES", "Yes"),
+        ("1", "Yes"),
+    ] {
+        let p = convert(&historical_amino(
+            "cosmos-sdk/MsgVote",
+            serde_json::json!({"option":input,"proposal_id":"42","voter":"a"}),
+        ))
+        .unwrap();
+        assert!(has(&p, "Message 1 / Option", label), "{input}");
+    }
+    for ty in ["cosmos-sdk/MsgVote", "cosmos-sdk/v1/MsgVote"] {
+        let p = convert(&historical_amino(
+            ty,
+            serde_json::json!({"option":1,"proposal_id":"42","voter":"a","metadata":"x"}),
+        ))
+        .unwrap();
+        if ty == "cosmos-sdk/MsgVote" {
+            assert!(has(&p, "Message 1 / Unrecognized Field metadata", "\"x\""));
+            assert!(texts(&p, "Message 1 / Metadata").is_empty());
+        } else {
+            assert!(has(&p, "Message 1 / Metadata", "x"));
+        }
+    }
+}
+
+#[test]
+fn sdk_direct_vote_metadata_is_only_understood_for_v1() {
+    let mut body = Vec::new();
+    uint_field(1, 42, &mut body);
+    bytes_field(2, b"a", &mut body);
+    uint_field(3, 1, &mut body);
+    bytes_field(4, b"metadata", &mut body);
+    assert!(convert(&doc_with(&[any("/cosmos.gov.v1beta1.MsgVote", &body)])).is_err());
+    let p = convert(&doc_with(&[any("/cosmos.gov.v1.MsgVote", &body)])).unwrap();
+    assert!(has(&p, "Message 1 / Metadata", "metadata"));
+}
+
 #[test]
 fn amino_non_canonical_is_refused() {
     let good = r#"{"account_number":"1","chain_id":"c","fee":{"amount":[],"gas":"1"},"memo":"","msgs":[{"type":"cosmos-sdk/MsgSend","value":{"amount":[],"from_address":"a","to_address":"b"}}],"sequence":"0"}"#;

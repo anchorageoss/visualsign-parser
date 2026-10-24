@@ -270,7 +270,17 @@ fn render_any(any: &Any, prefix: &str, depth: usize, out: &mut Out) -> Result<()
             out.address(&p("Validator"), &m.validator_address)?;
         }
         "/cosmos.gov.v1beta1.MsgVote" | "/cosmos.gov.v1.MsgVote" => {
-            let m = decode_msg::<proto::MsgVote>(any)?;
+            let m = if any.type_url == "/cosmos.gov.v1beta1.MsgVote" {
+                let legacy = decode_msg::<proto::MsgVoteLegacy>(any)?;
+                proto::MsgVote {
+                    proposal_id: legacy.proposal_id,
+                    voter: legacy.voter,
+                    option: legacy.option,
+                    metadata: String::new(),
+                }
+            } else {
+                decode_msg::<proto::MsgVote>(any)?
+            };
             out.text(&p("Type"), "Vote")?;
             out.text(&p("Proposal"), m.proposal_id.to_string())?;
             out.address(&p("Voter"), &m.voter)?;

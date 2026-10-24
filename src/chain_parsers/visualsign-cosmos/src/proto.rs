@@ -215,8 +215,18 @@ pub struct MsgWithdrawDelegatorReward {
     pub validator_address: String,
 }
 
-/// cosmos/gov/v1beta1/tx.proto and cosmos/gov/v1/tx.proto `MsgVote`
-/// (v1 adds `metadata = 4`).
+/// cosmos/gov/v1beta1/tx.proto `MsgVote`. Tag 4 is unknown in this version.
+#[derive(Clone, PartialEq, Message)]
+pub struct MsgVoteLegacy {
+    #[prost(uint64, tag = "1")]
+    pub proposal_id: u64,
+    #[prost(string, tag = "2")]
+    pub voter: String,
+    #[prost(int32, tag = "3")]
+    pub option: i32,
+}
+
+/// cosmos/gov/v1/tx.proto `MsgVote` (adds `metadata = 4`).
 #[derive(Clone, PartialEq, Message)]
 pub struct MsgVote {
     #[prost(uint64, tag = "1")]

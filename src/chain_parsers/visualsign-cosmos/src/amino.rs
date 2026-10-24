@@ -217,6 +217,13 @@ impl<'a> Obj<'a> {
         }
     }
 
+    fn coin_array(&mut self, k: &'static str) -> Result<CoinList, VisualSignError> {
+        if !matches!(self.map.get(k), Some(Value::Array(_))) {
+            return Err(malformed(format!("{k} is not a coin array")));
+        }
+        self.coins(k)
+    }
+
     /// Show keys that were never looked up.
     fn finish(self, prefix: &str, out: &mut Out) -> Result<(), VisualSignError> {
         let mut extra: Vec<(&String, &Value)> = self
@@ -250,6 +257,95 @@ fn coin(v: &Value) -> Result<(String, String), VisualSignError> {
     Ok(pair)
 }
 
+/// Require one complete historical shape, rejecting aliases from another era.
+/// Other fields remain visible through `Obj::finish`.
+fn shape(m: &Obj<'_>, alternatives: &[&[&str]]) -> Result<usize, VisualSignError> {
+    let selected: Vec<usize> = alternatives
+        .iter()
+        .enumerate()
+        .filter(|(_, keys)| keys.iter().any(|k| m.map.contains_key(*k)))
+        .map(|(i, _)| i)
+        .collect();
+    match selected.as_slice() {
+        [i] if alternatives[*i].iter().all(|k| m.map.contains_key(*k)) => Ok(*i),
+        _ => Err(malformed(
+            "incomplete or colliding historical message shapes",
+        )),
+    }
+}
+
+fn bank_participants(
+    m: &mut Obj<'_>,
+    key: &'static str,
+    prefix: &str,
+    kind: &str,
+    out: &mut Out,
+) -> Result<(), VisualSignError> {
+    let Some(Value::Array(entries)) = m.get(key) else {
+        return Err(malformed(format!("{key} is not an array")));
+    };
+    if entries.is_empty() {
+        return Err(malformed(format!("empty {key}")));
+    }
+    for (i, entry) in entries.iter().enumerate() {
+        let mut entry = Obj::new(entry, key)?;
+        shape(&entry, &[&["address", "coins"]])?;
+        let p = join(prefix, &format!("{kind} {}", i + 1));
+        out.address(&join(&p, "Address"), &entry.str("address")?)?;
+        out.coins(&join(&p, "Amount"), &entry.coin_array("coins")?.pairs())?;
+        entry.finish(&p, out)?;
+    }
+    Ok(())
+}
+
+fn staking_amount(
+    m: &mut Obj<'_>,
+    prefix: &str,
+    delegate: bool,
+    legacy_addresses: bool,
+    out: &mut Out,
+) -> Result<(), VisualSignError> {
+    let selected = shape(m, &[&["amount"], &["value"], &["shares_amount"]])?;
+    match selected {
+        0 if !legacy_addresses => {
+            let value = m
+                .get("amount")
+                .ok_or_else(|| malformed("missing staking amount"))?;
+            let (amount, denom) = coin(value)?;
+            out.coins(
+                &join(prefix, "Amount"),
+                &[(amount.as_str(), denom.as_str())],
+            )
+        }
+        1 if delegate => {
+            let value = m
+                .get("value")
+                .ok_or_else(|| malformed("missing staking value"))?;
+            let (amount, denom) = coin(value)?;
+            out.coins(
+                &join(prefix, "Amount"),
+                &[(amount.as_str(), denom.as_str())],
+            )
+        }
+        2 if !delegate => {
+            let shares = m.str("shares_amount")?;
+            let unsigned = shares.strip_prefix('-').unwrap_or(&shares);
+            let mut parts = unsigned.split('.');
+            let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
+            let valid = parts.next().is_some_and(digits)
+                && parts.next().is_none_or(digits)
+                && parts.next().is_none();
+            if !valid {
+                return Err(malformed("shares_amount is not a decimal string"));
+            }
+            out.text(&join(prefix, "Delegation shares"), shares)
+        }
+        _ => Err(malformed(
+            "staking amount does not match historical message type",
+        )),
+    }
+}
+
 fn render_msg(v: &Value, prefix: &str, depth: usize, out: &mut Out) -> Result<(), VisualSignError> {
     let mut msg = Obj::new(v, "message")?;
     let ty = msg.str("type")?;
@@ -260,31 +356,107 @@ fn render_msg(v: &Value, prefix: &str, depth: usize, out: &mut Out) -> Result<()
     let p = |l: &str| join(prefix, l);
     let mut m = Obj::new(value, "message value")?;
     match ty.as_str() {
-        "cosmos-sdk/MsgSend" => {
+        "cosmos-sdk/Send" | "cosmos-sdk/MsgSend" => {
             out.text(&p("Type"), "Send")?;
-            out.address(&p("From"), &m.str("from_address")?)?;
-            out.address(&p("To"), &m.str("to_address")?)?;
-            out.coins(&p("Amount"), &m.coins("amount")?.pairs())?;
+            match shape(
+                &m,
+                &[
+                    &["inputs", "outputs"],
+                    &["from_address", "to_address", "amount"],
+                ],
+            )? {
+                0 if ty == "cosmos-sdk/Send" => {
+                    bank_participants(&mut m, "inputs", prefix, "Input", out)?;
+                    bank_participants(&mut m, "outputs", prefix, "Output", out)?;
+                }
+                1 => {
+                    out.address(&p("From"), &m.str("from_address")?)?;
+                    out.address(&p("To"), &m.str("to_address")?)?;
+                    out.coins(&p("Amount"), &m.coin_array("amount")?.pairs())?;
+                }
+                _ => {
+                    return Err(malformed(
+                        "bank shape does not match historical message type",
+                    ));
+                }
+            }
         }
-        "cosmos-sdk/MsgDelegate" | "cosmos-sdk/MsgUndelegate" => {
-            out.text(
-                &p("Type"),
-                if ty.ends_with("MsgDelegate") {
-                    "Delegate"
+        "cosmos-sdk/MsgDelegate" | "cosmos-sdk/MsgUndelegate" | "cosmos-sdk/Undelegate" => {
+            let delegate = ty == "cosmos-sdk/MsgDelegate";
+            out.text(&p("Type"), if delegate { "Delegate" } else { "Undelegate" })?;
+            let old = shape(
+                &m,
+                &[
+                    &["delegator_addr", "validator_addr"],
+                    &["delegator_address", "validator_address"],
+                ],
+            )? == 0;
+            if !delegate && old != (ty == "cosmos-sdk/Undelegate") {
+                return Err(malformed(
+                    "staking addresses do not match historical message type",
+                ));
+            }
+            out.address(
+                &p("Delegator"),
+                &m.str(if old {
+                    "delegator_addr"
                 } else {
-                    "Undelegate"
-                },
+                    "delegator_address"
+                })?,
             )?;
-            out.address(&p("Delegator"), &m.str("delegator_address")?)?;
-            out.address(&p("Validator"), &m.str("validator_address")?)?;
-            out.coins(&p("Amount"), &m.coins("amount")?.pairs())?;
+            out.address(
+                &p("Validator"),
+                &m.str(if old {
+                    "validator_addr"
+                } else {
+                    "validator_address"
+                })?,
+            )?;
+            staking_amount(&mut m, prefix, delegate, old, out)?;
         }
-        "cosmos-sdk/MsgBeginRedelegate" => {
+        "cosmos-sdk/MsgBeginRedelegate" | "cosmos-sdk/BeginRedelegate" => {
             out.text(&p("Type"), "Redelegate")?;
-            out.address(&p("Delegator"), &m.str("delegator_address")?)?;
-            out.address(&p("From Validator"), &m.str("validator_src_address")?)?;
-            out.address(&p("To Validator"), &m.str("validator_dst_address")?)?;
-            out.coins(&p("Amount"), &m.coins("amount")?.pairs())?;
+            let old = shape(
+                &m,
+                &[
+                    &["delegator_addr", "validator_src_addr", "validator_dst_addr"],
+                    &[
+                        "delegator_address",
+                        "validator_src_address",
+                        "validator_dst_address",
+                    ],
+                ],
+            )? == 0;
+            if old != (ty == "cosmos-sdk/BeginRedelegate") {
+                return Err(malformed(
+                    "staking addresses do not match historical message type",
+                ));
+            }
+            out.address(
+                &p("Delegator"),
+                &m.str(if old {
+                    "delegator_addr"
+                } else {
+                    "delegator_address"
+                })?,
+            )?;
+            out.address(
+                &p("From Validator"),
+                &m.str(if old {
+                    "validator_src_addr"
+                } else {
+                    "validator_src_address"
+                })?,
+            )?;
+            out.address(
+                &p("To Validator"),
+                &m.str(if old {
+                    "validator_dst_addr"
+                } else {
+                    "validator_dst_address"
+                })?,
+            )?;
+            staking_amount(&mut m, prefix, false, old, out)?;
         }
         "cosmos-sdk/MsgWithdrawDelegationReward" => {
             out.text(&p("Type"), "Withdraw Rewards")?;
@@ -298,10 +470,10 @@ fn render_msg(v: &Value, prefix: &str, depth: usize, out: &mut Out) -> Result<()
             let option = match m.get("option") {
                 Some(Value::Number(n)) => n.as_i64().and_then(vote_option),
                 Some(Value::String(s)) => match s.as_str() {
-                    "VOTE_OPTION_YES" => Some("Yes"),
-                    "VOTE_OPTION_ABSTAIN" => Some("Abstain"),
-                    "VOTE_OPTION_NO" => Some("No"),
-                    "VOTE_OPTION_NO_WITH_VETO" => Some("No with Veto"),
+                    "Yes" | "1" | "VOTE_OPTION_YES" => Some("Yes"),
+                    "Abstain" | "2" | "VOTE_OPTION_ABSTAIN" => Some("Abstain"),
+                    "No" | "3" | "VOTE_OPTION_NO" => Some("No"),
+                    "NoWithVeto" | "4" | "VOTE_OPTION_NO_WITH_VETO" => Some("No with Veto"),
                     _ => None,
                 },
                 _ => None,
@@ -310,9 +482,11 @@ fn render_msg(v: &Value, prefix: &str, depth: usize, out: &mut Out) -> Result<()
                 Some(o) => out.text(&p("Option"), o)?,
                 None => out.text(&p("Option"), "unrecognized")?,
             }
-            let metadata = m.str("metadata")?;
-            if !metadata.is_empty() {
-                out.text(&p("Metadata"), metadata)?;
+            if ty == "cosmos-sdk/v1/MsgVote" {
+                let metadata = m.str("metadata")?;
+                if !metadata.is_empty() {
+                    out.text(&p("Metadata"), metadata)?;
+                }
             }
         }
         "cosmos-sdk/MsgExec" => {
