@@ -16,6 +16,12 @@ The Cosmos module decodes the bytes a Cosmos SDK signer is asked to sign and ren
 ### Dependencies
 The protobuf messages are hand-written `prost` structs. The crate does not depend on `cosmrs` or the Cosmos SDK protos.
 
+## SDK compatibility
+
+Compatibility is selected by wire/message shape, not a latest-SDK gate. Historical Amino bank/staking layouts and governance option strings are retained alongside ordinary protobuf Direct transactions. The shared fixture corpus covers tagged schema families from v0.30 through v0.55. Historical delegation shares are shown as shares, never token amounts; ambiguous mixed-era schemas reject.
+
+See [the compatibility matrix and exact limits](../cosmos-sdk-compatibility.md), including fixture provenance and unsupported signing modes. The v0.55 ML-DSA key type does not limit classical transaction parsing to that SDK version.
+
 ## Supported messages
 
 | Message | Direct type URL | Amino type | Fields surfaced |
