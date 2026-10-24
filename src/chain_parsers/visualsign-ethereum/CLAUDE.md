@@ -268,8 +268,7 @@ fn decode_operation(
     // Step 3: Format amount with decimals
     let (amount_str, _) = registry
         .and_then(|r| {
-            let amount: u128 = params.amount.to_string().parse().ok()?;
-            r.format_token_amount(chain_id, params.token, amount)
+            r.format_token_amount_u256(chain_id, params.token, U256::from(params.amount))
         })
         .unwrap_or_else(|| (params.amount.to_string(), token_symbol.clone()));
 

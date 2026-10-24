@@ -655,30 +655,7 @@ mod tests {
     /// collapsed to a fractional zero.
     #[test]
     fn test_visualize_permit_amount_above_u128_max_is_not_zero() {
-        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
-
-        let amount = U160::from(u128::MAX) + U160::from(1u64);
-        let permit_single = PermitSingle {
-            details: PermitDetails {
-                token: weth_mainnet_address(),
-                amount,
-                expiration: U48::from(1_704_067_200u64),
-                nonce: U48::from(0u64),
-            },
-            spender: [0x44u8; 20].into(),
-            sigDeadline: U256::from(u64::MAX),
-        };
-        let call = IPermit2::permitCall {
-            owner: [0x55u8; 20].into(),
-            permitSingle: permit_single,
-            signature: alloy_primitives::Bytes::default(),
-        };
-        let input = IPermit2::permitCall::abi_encode(&call);
-
-        let visualizer = Permit2Visualizer;
-        let field = visualizer
-            .visualize_tx_commands(&input, 1, Some(&registry))
-            .expect("permit should decode");
+        let json = render_permit_json(U160::from(u128::MAX) + U160::from(1u64));
 
         // The expanded "Amount" field always renders the raw uint160 integer,
         // so a "contains the big number" check would pass even on broken code.
@@ -686,7 +663,6 @@ mod tests {
         // collapsed to "0.000000000000000000" (WETH has 18 decimals) under the
         // bug. Assert its absence; the subtitle now carries the decimal-scaled
         // amount instead.
-        let json = serde_json::to_string(&field).expect("serializable");
         assert!(
             !json.contains("0.000000000000000000"),
             "amount above u128::MAX rendered as fractional zero: {json}"
@@ -697,6 +673,65 @@ mod tests {
         assert!(
             json.contains("340282366920938463463.374607431768211456"),
             "expected decimal-scaled amount in subtitle, got: {json}"
+        );
+    }
+
+    /// Renders a `permit` for WETH with the given uint160 amount and returns
+    /// the serialized field.
+    fn render_permit_json(amount: U160) -> String {
+        let (registry, _) = crate::registry::ContractRegistry::with_default_protocols();
+        let call = IPermit2::permitCall {
+            owner: [0x55u8; 20].into(),
+            permitSingle: PermitSingle {
+                details: PermitDetails {
+                    token: weth_mainnet_address(),
+                    amount,
+                    expiration: U48::from(1_704_067_200u64),
+                    nonce: U48::from(0u64),
+                },
+                spender: [0x44u8; 20].into(),
+                sigDeadline: U256::from(u64::MAX),
+            },
+            signature: alloy_primitives::Bytes::default(),
+        };
+        let input = IPermit2::permitCall::abi_encode(&call);
+        let field = Permit2Visualizer
+            .visualize_tx_commands(&input, 1, Some(&registry))
+            .expect("permit should decode");
+        serde_json::to_string(&field).expect("serializable")
+    }
+
+    /// Regression: a `permit` for 2^159 (between `u128::MAX` and `U160::MAX`)
+    /// shows the real decimal-scaled amount, neither "0" nor the unlimited
+    /// sentinel.
+    #[test]
+    fn test_visualize_permit_amount_2_pow_159_shows_actual_amount() {
+        let json = render_permit_json(U160::from(1u8) << 159);
+
+        // 2^159 = 730750818665451459101842416358141509827966271488 at 18 decimals.
+        assert!(
+            json.contains("730750818665451459101842416358.141509827966271488"),
+            "expected decimal-scaled 2^159 in subtitle, got: {json}"
+        );
+        assert!(
+            !json.contains("0.000000000000000000"),
+            "amount rendered as fractional zero: {json}"
+        );
+        assert!(
+            !json.contains("Unlimited Amount"),
+            "2^159 must not render as unlimited: {json}"
+        );
+    }
+
+    /// Sentinel: a `permit` for `U160::MAX` still renders "Unlimited Amount"
+    /// in the subtitle.
+    #[test]
+    fn test_visualize_permit_amount_u160_max_renders_unlimited() {
+        let json = render_permit_json(U160::MAX);
+
+        assert!(
+            json.contains("to spend Unlimited Amount of"),
+            "U160::MAX must render as unlimited in the subtitle: {json}"
         );
     }
 
