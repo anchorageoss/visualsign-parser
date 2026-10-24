@@ -26,6 +26,11 @@ pub fn create_registry(
         visualsign::registry::Chain::Ethereum,
         visualsign_ethereum::EthereumVisualSignConverter::with_policy(config.abi_trust.clone()),
     );
+    #[cfg(feature = "bitcoin")]
+    registry.register::<visualsign_bitcoin::BitcoinTransactionWrapper, _>(
+        visualsign::registry::Chain::Bitcoin,
+        visualsign_bitcoin::BitcoinVisualSignConverter::default(),
+    );
     #[cfg(feature = "solana")]
     registry.register::<visualsign_solana::SolanaTransactionWrapper, _>(
         visualsign::registry::Chain::Solana,

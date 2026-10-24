@@ -1,0 +1,64 @@
+---
+title: Bitcoin
+description: Partially Signed Bitcoin Transactions (BIP-174) with fee trust indicators
+---
+
+The Bitcoin module decodes Partially Signed Bitcoin Transactions (PSBTs) into VisualSign payloads: what is being spent, who is being paid, and the fee.
+
+## Architecture overview
+
+### Transaction model
+- **Encoding**: BIP-174 PSBT version 0, supplied as base64 or hex (an optional `0x` prefix is accepted). PSBT v2 (BIP-370), v2-only fields in a v0 PSBT, and trailing bytes are rejected. Encoded inputs are capped at 4 MiB; the unsigned transaction must be at most 400,000 weight units (the final signed transaction may be larger).
+- **UTXO model**: the PSBT carries the unsigned transaction plus per-input metadata (`witness_utxo`, `non_witness_utxo`, derivation paths, scripts).
+- **Address encoding**: a PSBT does not name its network. Addresses are encoded for mainnet by default; `parser_cli` takes `--bitcoin-network` (`bitcoin`, `testnet`, `testnet4`, `signet`, `regtest`).
+
+### Key components
+
+The Bitcoin parser produces:
+- `Address Encoding`, explicitly marked `transaction network unknown`: the chosen encoding does not establish the transaction's network. The enclave uses mainnet encoding; the CLI accepts the selection above.
+- One expandable `Input N` per input: outpoint, address, script type, amount, and where the amount came from. A `witness_utxo`-only amount is also marked `claimed amount, unverified` in the preview subtitle.
+- One expandable `Output N` per output: address (or the raw script for `OP_RETURN` and other non-address scripts), script type and amount.
+- Multisig details inside an input or output when the PSBT carries a recognized script: `Multisig` (threshold, script kind), `Cosigner N` (key and origin), and for taproot the `Internal Key`.
+- `Fee`, transaction `Version`, per-input `Sequence` (replaceability signaling and BIP-68 relative locks), and effective `Lock Time` when non-zero. Lock time distinguishes block heights from Unix timestamps and is marked inactive when all input sequences are final.
+
+## What the parser can and cannot vouch for
+
+The parser holds no keys. It checks what a PSBT can prove on its own and flags the rest.
+
+| Situation | Behavior |
+|---|---|
+| `non_witness_utxo` does not hash to the prevout txid, or the output index is out of range | Rejected |
+| `witness_utxo` disagrees with `non_witness_utxo` | Rejected |
+| Duplicate input outpoints, input/output values or totals above `MAX_MONEY` (21 million BTC), or outputs exceed the fully known input total | Rejected |
+| Every input amount verified through its previous transaction, with only ALL / DEFAULT sighashes | `Fee` shown as an amount |
+| Every input spends a taproot output, with only ALL / DEFAULT sighashes | `Fee` shown as an amount (a BIP-341 ALL / DEFAULT signature without ANYONECANPAY commits to all input amounts and outputs) |
+| Any other input amount known only from `witness_utxo` | `Fee` shown as `unknown (claimed X BTC; unverified: ...)`. A segwit v0 signature commits only to its own input amount, so a wrong `witness_utxo` can hide a large fee. |
+| An input has no UTXO data, or the PSBT has zero inputs | `Fee` shown as `unknown` |
+| An output carries `bip32_derivation` or `tap_key_origins` | Displayed as an ordinary output. Derivation metadata alone cannot establish a change claim or ownership. |
+| An input or output carries a `witness_script` (wsh, optionally P2SH-wrapped) or tap leaf scripts | If the script is bound to the output (script hash, or taproot commitment through the control block or tap tree) and matches `multi`/`sortedmulti` or `multi_a` with distinct keys, the threshold, cosigner keys and key origins are shown. Anything else is shown raw as `unrecognized script`. |
+| Taproot multisig whose internal key is not the BIP-341 NUMS point | `Internal Key Warning: internal key can spend alone` |
+| Input requests NONE, SINGLE, either mode with ANYONECANPAY, or an invalid sighash | Rejected: this preview requires a commitment to every displayed output. This also refuses the legacy out-of-range SINGLE constant-hash case. |
+| Input requests ALL with ANYONECANPAY | Accepted with a `Sighash Type` field and `Fee` shown as `unknown (claimed X BTC; unverified: ...)`: every output is committed, but other inputs can change. |
+
+Change verification (deriving a change key from an account xpub) needs wallet context the parser does not have, and belongs in the signer. The signer must enforce the PSBT sighash requests when producing signatures. The parser does not validate existing signatures or query the chain to confirm that inputs are unspent.
+
+## Using parser_cli
+
+```bash
+cargo run --bin parser_cli -- decode \
+  --chain bitcoin \
+  --bitcoin-network bitcoin \
+  --output human \
+  -t "$(cat chain_parsers/visualsign-bitcoin/tests/fixtures/synthetic-p2wpkh-single-sig.input)"
+```
+
+## Test vectors
+
+Fixtures live in `src/chain_parsers/visualsign-bitcoin/tests/fixtures/`. The `bip174-*` and `bip371-*` files are copied from the test vectors in [BIP-174](https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki) and [BIP-371](https://github.com/bitcoin/bips/blob/master/bip-0371.mediawiki); the `synthetic-*` files are built by the test suite from the BIP-84/BIP-86 test-vector keys.
+
+## Implementation details
+
+The `bitcoin` dependency uses the C-based `secp256k1-sys` implementation; building this crate requires a C toolchain, including for Apple targets.
+
+Source code available at:
+- [Bitcoin Parser](https://github.com/anchorageoss/visualsign-parser/tree/main/src/chain_parsers/visualsign-bitcoin)

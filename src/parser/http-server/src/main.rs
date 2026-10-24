@@ -664,7 +664,7 @@ mod tests {
     // proof, never succeed with an empty `awsAttestationDocB64`.
     #[test]
     fn successful_parse_without_attestation_is_503_with_redacted_boot_proof() {
-        let raw = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83","include_intermediate_output":false}}"#;
+        let raw = br#"{"request":{"chain":"CHAIN_ETHEREUM","unsigned_payload":"0xec808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a764000080018080","include_intermediate_output":false}}"#;
         let headers = HeaderMap::new();
 
         // Control: the same request succeeds with a static source.

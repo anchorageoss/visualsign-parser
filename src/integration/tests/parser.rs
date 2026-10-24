@@ -402,10 +402,9 @@ async fn parser_solana_native_transfer_e2e() {
 #[tokio::test]
 async fn parser_ethereum_native_transfer_e2e() {
     async fn test(test_args: TestArgs) {
-        // Signed EIP-155 legacy transaction (v=0x25, chain_id=1 via EIP-155).
-        // Sent through the unsigned-only API path, so the parser decodes v=37 as
-        // a raw chain_id, yielding "Unknown Network (Chain ID: 37)" with no fee asset symbol.
-        let ethereum_tx_hex = "0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83";
+        // Unsigned EIP-155 legacy transaction in its signing encoding:
+        // rlp([nonce, gasPrice, gas, to, value, data, chain_id=1, 0, 0]).
+        let ethereum_tx_hex = "0xec808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a764000080018080";
 
         let parse_request = ParseRequest {
             include_intermediate_output: false,
@@ -429,10 +428,10 @@ async fn parser_ethereum_native_transfer_e2e() {
         let expected_sp = serde_json::json!({
           "Fields": [
           {
-            "FallbackText": "Unknown Network (Chain ID: 37)",
+            "FallbackText": "Ethereum Mainnet",
             "Label": "Network",
             "TextV2": {
-            "Text": "Unknown Network (Chain ID: 37)"
+            "Text": "Ethereum Mainnet"
             },
             "Type": "text_v2"
           },
@@ -441,14 +440,16 @@ async fn parser_ethereum_native_transfer_e2e() {
             "Label": "To",
             "AddressV2": {
               "Address": "0x3535353535353535353535353535353535353535",
-              "Name": "To"
+              "Name": "To",
+              "AssetLabel": "ETH"
             },
             "Type": "address_v2"
           },
           {
-            "FallbackText": "1",
+            "FallbackText": "1 ETH",
             "Label": "Value",
             "AmountV2": {
+              "Abbreviation": "ETH",
               "Amount": "1"
             },
             "Type": "amount_v2"
@@ -505,7 +506,7 @@ async fn parser_charset_validation_all_chains() {
         let solana_jupiter_tx = "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAkSTXq/T5ciKTTbZJhKN+HNd2Q3/i8mDBxbxpek3krZ664CMz4dTWd4gwDq6aKU/sqHgTzleVA7bTCOy59kSOO+0EPkGS7bWuT/2yiCuaADtj/v6d+KwyTj46OQM2MjIq6hTqzVdwLTW8t+UsWMrwHEvc/r814OmVR9yLVQZujbWvpTh0XSNlF7uoIvuHyKD/16mBElrNa/eT8vB1KVUaN8IoaTvZbN4b7iiv8Q8cl5bDecNqCXzTS1Xmsmh5b2UVZniTbtX0AYG5QKiSDC10m0caM6frmEVukpjEWOk7F/0OzFKL0A0HdMWTIMuQj4xBuP3csLyGzVO/MXtPu6woNViO2O9ocxd1YSDcIwhrzHY3a9ewvycRH5q662TcQqdxD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEedVb8jHAbu50xW7OaBUH/bGy3qP0jlECsc2iVrwTjwabiFf+q4GE+2h/Y0YYwDXaxDncGus7VZig8AAAAAABBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKkOA2hfjpCQU+RYEhxm9adq7cdwaqEcgviqlSqPK3h5qVJNNVq4xx0JIWWE9kFLvpQK5lvS5UCde3W3QfWYLIxYjJclj04kifG7PRApFI4NgwtaE5na/xCEBI572Nvp+Fm0P/on9df2SnTAmx8pWHneSwmrNt/J3VFLMhqns4zl6Mb6evO+2606PWXzaqvJdDGxu+TC0vbg5HymAgNFL11hXuFhKBWRymmouYdcNxL6PjM1Bkcio0R+AtqA/P3C3jAFDwYABgALCQwBAQkCAAYMAgAAAEBCDwAAAAAADAEGAREKFQwABgUKEQoQCg0MAAQGAwUHCAECDiTlF8uXeuOtKgEAAAARAWQAAUBCDwAAAAAAtEADAAAAAAAyAAAMAwYAAAEJ";
 
         // Ethereum transaction
-        let ethereum_tx = "0xf86c808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83";
+        let ethereum_tx = "0xec808504a817c800825208943535353535353535353535353535353535353535880de0b6b3a764000080018080";
 
         // Sui transaction
         let sui_tx = "AAACACCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJCrze8SNFZ4kAAIAMqaOwAAAAACAgABAQEAAQECAAABAADW6S4ALibDr7IIgAHBtYILZPK8NRv9paI0Ksv59cHKwgHLSF74CguvkHmmIcQsiwy2XOmYbhyB/RbuiAOPAEpa7Rua1BcAAAAAIGOAX4LpV/FYmnpiNGs3y1rsDwwf9O10x5SdK7vXP+9Q1ukuAC4mw6+yCIABwbWCC2TyvDUb/aWiNCrL+fXBysLoAwAAAAAAAEBLTAAAAAAAAA==";

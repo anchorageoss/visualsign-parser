@@ -208,11 +208,10 @@ fn create_chain_metadata(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use near_crypto::{KeyType, PublicKey};
-    use near_primitives::action::{Action, FunctionCallAction};
-    use near_primitives::hash::CryptoHash;
-    use near_primitives::transaction::{Transaction, TransactionV0};
-    use near_primitives::types::{Balance, Gas};
+    use crate::primitives::{
+        Action, Balance, CryptoHash, FunctionCallAction, Gas, KeyType, PublicKey, Transaction,
+        TransactionV0,
+    };
     use parser_cli_core::ChainPlugin;
     use visualsign::vsptrait::VisualSignOptions;
 

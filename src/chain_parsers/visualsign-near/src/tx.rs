@@ -5,7 +5,7 @@
 //! unambiguously: a successful borsh decode is a transaction, otherwise the
 //! input is validated as an envelope. Input that is neither is rejected.
 
-use near_primitives::transaction::{SignedTransaction, Transaction};
+use crate::primitives::{SignedTransaction, Transaction};
 use visualsign::encodings::SupportedEncodings;
 use visualsign::vsptrait::{DeveloperConfig, TransactionParseError};
 
@@ -110,7 +110,7 @@ fn decode_input(s: &str) -> Result<Vec<u8>, TransactionParseError> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use near_crypto::{KeyType, Signature};
+    use crate::primitives::{KeyType, Signature};
     use visualsign::vsptrait::Transaction as _;
 
     /// Borsh-encoded unsigned NEAR Transfer: alice.near -> bob.near, 1 NEAR.
@@ -138,7 +138,7 @@ mod tests {
         assert_eq!(inner.signer_id().as_str(), "alice.near");
         assert_eq!(inner.receiver_id().as_str(), "bob.near");
         assert_eq!(inner.actions().len(), 1);
-        let near_primitives::action::Action::Transfer(transfer) = &inner.actions()[0] else {
+        let crate::primitives::Action::Transfer(transfer) = &inner.actions()[0] else {
             panic!("expected Transfer");
         };
         assert_eq!(
