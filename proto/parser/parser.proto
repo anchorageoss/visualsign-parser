@@ -19,9 +19,10 @@ enum Chain {
   CHAIN_SUI = 4;
   CHAIN_TRON = 5;
   CHAIN_NEAR = 6;
+  CHAIN_COSMOS = 8;
 
   // Reserve space for future chains
-  reserved 7 to 998;
+  reserved 9 to 998;
 
   // Custom for extensibility
   CHAIN_CUSTOM = 999;

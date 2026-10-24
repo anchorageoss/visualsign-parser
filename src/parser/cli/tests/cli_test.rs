@@ -9,7 +9,8 @@
         feature = "ethereum",
         feature = "solana",
         feature = "near",
-        feature = "tron"
+        feature = "tron",
+        feature = "cosmos"
     )),
     allow(dead_code, unused_imports)
 )]
@@ -64,6 +65,8 @@ fn test_cli_with_fixtures() {
     // Fixture names are prefixed with their chain (e.g. "solana-json", "ethereum-text").
     // Build the skip list once from compile-time feature flags.
     let disabled_chain_prefixes: &[&str] = &[
+        #[cfg(not(feature = "cosmos"))]
+        "cosmos",
         #[cfg(not(feature = "ethereum"))]
         "ethereum",
         #[cfg(not(feature = "near"))]

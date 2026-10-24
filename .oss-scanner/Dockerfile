@@ -16,7 +16,7 @@ ENV CARGOFLAGS='--target x86_64-unknown-linux-musl --no-default-features --locke
 ENV RELEASE_DIR=/src/target/x86_64-unknown-linux-musl/release
 ARG VERSION
 ENV VERSION=$VERSION
-ARG CHAIN_FEATURES="ethereum near solana sui tron unspecified"
+ARG CHAIN_FEATURES="cosmos ethereum near solana sui tron unspecified"
 ENV CHAIN_FEATURES=$CHAIN_FEATURES
 ADD src /src
 WORKDIR /src/

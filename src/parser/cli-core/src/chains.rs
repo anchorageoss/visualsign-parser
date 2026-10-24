@@ -12,6 +12,7 @@ fn chain_string_mapping() -> BTreeMap<&'static str, Chain> {
     mapping.insert("polkadot", Chain::Polkadot);
     mapping.insert("tron", Chain::Tron);
     mapping.insert("near", Chain::Near);
+    mapping.insert("cosmos", Chain::Cosmos);
     mapping
 }
 
