@@ -31,7 +31,7 @@ cargo run --bin parser_cli -- decode --chain ethereum --network ETHEREUM_MAINNET
 cargo run --bin parser_cli --features serve -- serve --chain ethereum --network ETHEREUM_MAINNET --dir ./txs
 ```
 
-CI requires: codegen produces no diff, clippy passes with `-D warnings`, all tests pass. Protoc v21.4.
+CI requires: codegen produces no diff, clippy passes with `-D warnings`, all tests pass. Protoc version and hashes are pinned in `.github/protoc.env` (install locally with `scripts/install-protoc.sh`).
 
 ## Architecture
 

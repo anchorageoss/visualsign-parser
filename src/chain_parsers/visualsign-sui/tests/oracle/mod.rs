@@ -330,13 +330,21 @@ fn newer_sdk_variants_are_rejected_by_the_pinned_upstream_decoder() {
 
 #[test]
 fn fluid_fixture_cases_match_the_pre_migration_type_oracle() {
-    let data: Value = serde_json::from_str(include_str!(
-        "../../src/integrations/fluid/aggregated_test_data.json"
-    ))
-    .unwrap();
     let mut fixtures = Vec::new();
-    walk_fixtures(&data, "fluid", &mut fixtures);
-    assert_eq!(fixtures.len(), 10);
+    for (name, source) in [
+        (
+            "fluid",
+            include_str!("../../src/integrations/fluid/aggregated_test_data.json"),
+        ),
+        (
+            "fluid-previous",
+            include_str!("../../src/integrations/fluid/previous_deployment_test_data.json"),
+        ),
+    ] {
+        let data: Value = serde_json::from_str(source).unwrap();
+        walk_fixtures(&data, name, &mut fixtures);
+    }
+    assert_eq!(fixtures.len(), 14);
     for (label, encoded) in fixtures {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&encoded)
@@ -347,4 +355,49 @@ fn fluid_fixture_cases_match_the_pre_migration_type_oracle() {
             &old_decode(&bytes),
         );
     }
+}
+
+#[test]
+fn deeply_nested_type_tags_are_rejected_by_the_sdk_decoder() {
+    let fixtures: Vec<String> = serde_json::from_str(include_str!("decode_fixtures.json")).unwrap();
+    let mut transaction = SuiTransactionWrapper::from_string(&fixtures[0])
+        .unwrap()
+        .inner()
+        .clone();
+    let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &mut transaction.kind else {
+        panic!("PTB")
+    };
+    ptb.inputs = vec![Input::Pure(42u64.to_le_bytes().to_vec())];
+    ptb.commands = vec![Command::MoveCall(sui_sdk_types::MoveCall {
+        package: Address::TWO,
+        module: "test".parse().unwrap(),
+        function: "call".parse().unwrap(),
+        type_arguments: vec!["u64".parse().unwrap()],
+        arguments: vec![Argument::Input(0)],
+    })];
+    let bytes = bcs::to_bytes(&transaction).unwrap();
+    // BCS TypeTag: vector = 6, u64 = 2. Wrap the single `u64` argument in 128 vectors.
+    let marker = [&[4u8][..], b"call", &[1, 2]].concat();
+    let at = bytes
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .unwrap();
+    let tag_at = at + 1 + 4 + 1;
+    let mut nested = bytes[..tag_at].to_vec();
+    nested.extend(std::iter::repeat_n(6u8, 128));
+    nested.extend_from_slice(&bytes[tag_at..]);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&nested);
+
+    assert!(
+        bcs::from_bytes::<TransactionData>(&nested).is_ok(),
+        "historical decoder accepts 128 nested vectors"
+    );
+    assert!(
+        bcs::from_bytes::<sui_sdk_types::Transaction>(&nested).is_err(),
+        "SDK caps type-tag nesting at 128 levels"
+    );
+    assert!(
+        crate::transaction_string_to_visual_sign(&encoded, VisualSignOptions::default()).is_err(),
+        "public converter fails closed"
+    );
 }

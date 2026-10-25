@@ -6,7 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 base64 = "0.22.1"
-borsh = "1.5"
+borsh = { version = "1.5", features = ["derive"] }
 bs58 = "0.5.1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 clap = { version = "4.0", features = ["derive"], optional = true }
@@ -14,9 +14,6 @@ ed25519-dalek = "2"
 generated = { path = "../../generated" }
 hex = "0.4.3"
 k256 = "0.13"
-# Pulls in ~34 transitive crates as mandatory (non-dev) dependencies, including
-# serde_yaml 0.9 (unsafe-libyaml) and the arbitrary fuzzing derive.
-near-primitives = "0.35.1"
 parser_cli_core = { path = "../../parser/cli-core", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -31,7 +28,13 @@ defuse-crypto = { workspace = true }
 defuse-deadline = { workspace = true }
 
 [dev-dependencies]
+# Differential-test oracles for the local wire types in src/primitives.rs.
+# near-primitives must never be a normal dependency: it makes zstd (zstd-sys,
+# native C) mandatory. near-crypto (and secp256k1-sys 0.8) is still in the
+# normal tree, via near-sdk's `non-contract-usage` feature; listing it here only
+# makes it available to the tests.
 near-crypto = "0.35.1"
+near-primitives = "0.35.1"
 parser_cli_core = { path = "../../parser/cli-core", features = ["test-utils"] }
 
 [features]

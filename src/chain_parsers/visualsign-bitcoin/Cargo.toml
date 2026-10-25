@@ -1,0 +1,24 @@
+[package]
+name = "visualsign-bitcoin"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+
+[features]
+default    = ["cli-plugin"]
+cli-plugin = ["dep:clap", "dep:parser_cli_core", "dep:generated"]
+
+[dependencies]
+base64 = { workspace = true }
+bitcoin = "0.32"
+clap = { version = "4.0", features = ["derive"], optional = true }
+generated = { path = "../../generated", optional = true }
+parser_cli_core = { path = "../../parser/cli-core", optional = true }
+thiserror = "2.0.12"
+visualsign = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+
+[lints]
+workspace = true
