@@ -8,7 +8,9 @@ use std::sync::Arc;
 use crate::fmt::{format_ether, format_gwei};
 use crate::registry::ContractType;
 use crate::visualizer::CalldataVisualizer;
-use alloy_consensus::{Transaction as _, TxEnvelope, TxType, TypedTransaction};
+use alloy_consensus::{
+    SignableTransaction as _, Transaction as _, TxEnvelope, TxType, TypedTransaction,
+};
 use alloy_rlp::{Buf, Decodable};
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use visualsign::{
@@ -56,6 +58,8 @@ pub enum EthereumParserError {
     FailedToDecodeTransaction(String),
     #[error("Failed to parse JSON transaction: {0}")]
     FailedToParseJsonTransaction(String),
+    #[error("Not a canonical unsigned transaction encoding: {0}")]
+    NonCanonicalUnsignedTransaction(String),
 }
 
 // Helper function to extract gas price from different transaction types
@@ -379,6 +383,7 @@ fn decode_transaction_bytes(
 fn decode_unsigned_transaction_bytes(
     mut buf: &[u8],
 ) -> Result<TypedTransaction, EthereumParserError> {
+    let input = buf;
     let tx = if buf.is_empty() {
         Err(EthereumParserError::FailedToDecodeTransaction(
             "Input too short".to_string(),
@@ -427,7 +432,20 @@ fn decode_unsigned_transaction_bytes(
             buf,
         )));
     }
-    tx
+    let tx = tx?;
+    // The decoders accept more than the signing encoding: `TxLegacy::decode`
+    // reads the trailing EIP-155 fields as (chain_id, r, s) without requiring
+    // r == s == 0. Require the input to be exactly the bytes that
+    // `signature_hash()` covers, so a caller hashing the input and a caller
+    // signing `signature_hash()` sign the same thing.
+    let mut canonical = Vec::with_capacity(input.len());
+    tx.encode_for_signing(&mut canonical);
+    if canonical != input {
+        return Err(EthereumParserError::NonCanonicalUnsignedTransaction(
+            "input bytes differ from the transaction's signing encoding".to_string(),
+        ));
+    }
+    Ok(tx)
 }
 
 fn decode_transaction(
@@ -2833,5 +2851,83 @@ mod tests {
             address_v2.badge_text.as_deref(),
             Some("Proxy implementation (unresolved)"),
         );
+    }
+
+    /// The EIP-155 example transaction with its v byte replaced by 0x01: the
+    /// trailing (chain_id, r, s) fields read as chain_id = 1 with non-zero r
+    /// and s. `TxLegacy::decode` accepts it, but it is not the unsigned
+    /// signing encoding, so `signature_hash()` would not cover these bytes.
+    const LEGACY_NONZERO_RS: &str = "f86c098504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008001a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83";
+
+    fn legacy_transfer(chain_id: Option<u64>) -> TxLegacy {
+        TxLegacy {
+            chain_id,
+            nonce: 9,
+            gas_price: 20_000_000_000,
+            gas_limit: 21_000,
+            to: alloy_primitives::TxKind::Call(Address::repeat_byte(0x35)),
+            value: U256::from(1_000_000_000_000_000_000u128),
+            input: Bytes::new(),
+        }
+    }
+
+    #[test]
+    fn test_legacy_with_nonzero_r_s_is_rejected() {
+        let bytes = hex::decode(LEGACY_NONZERO_RS).unwrap();
+        let err = decode_transaction_bytes(&bytes, false).unwrap_err();
+        assert!(
+            matches!(err, EthereumParserError::NonCanonicalUnsignedTransaction(_)),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_legacy_with_zero_r_nonzero_s_is_rejected() {
+        let mut encoded = Vec::new();
+        legacy_transfer(Some(1)).encode_for_signing(&mut encoded);
+        // Canonical EIP-155 signing form ends in (chain_id=0x01, r=0x80, s=0x80).
+        assert_eq!(&encoded[encoded.len() - 3..], &[0x01, 0x80, 0x80]);
+        // Replace s = 0x80 (empty) with s = 0x01 (one byte, same length).
+        let n = encoded.len();
+        encoded[n - 1] = 0x01;
+        let err = decode_transaction_bytes(&encoded, false).unwrap_err();
+        assert!(
+            matches!(err, EthereumParserError::NonCanonicalUnsignedTransaction(_)),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_canonical_unsigned_legacy_is_accepted() {
+        for chain_id in [Some(1u64), None] {
+            let tx = legacy_transfer(chain_id);
+            let mut encoded = Vec::new();
+            tx.encode_for_signing(&mut encoded);
+            let decoded = decode_transaction_bytes(&encoded, false).unwrap();
+            assert_eq!(
+                decoded,
+                TypedTransaction::Legacy(tx),
+                "chain_id {chain_id:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_canonical_unsigned_eip1559_is_accepted() {
+        let tx = alloy_consensus::TxEip1559 {
+            chain_id: 1,
+            nonce: 9,
+            gas_limit: 21_000,
+            max_fee_per_gas: 20_000_000_000,
+            max_priority_fee_per_gas: 1_000_000_000,
+            to: alloy_primitives::TxKind::Call(Address::repeat_byte(0x35)),
+            value: U256::from(1u64),
+            access_list: Default::default(),
+            input: Bytes::new(),
+        };
+        let mut encoded = Vec::new();
+        tx.encode_for_signing(&mut encoded);
+        let decoded = decode_transaction_bytes(&encoded, false).unwrap();
+        assert_eq!(decoded, TypedTransaction::Eip1559(tx));
     }
 }

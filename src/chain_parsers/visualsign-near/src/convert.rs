@@ -2,8 +2,6 @@
 
 use std::sync::Arc;
 
-use near_primitives::action::{Action, FunctionCallAction};
-use near_primitives::transaction::Transaction;
 use visualsign::errors::VisualSignError;
 use visualsign::field_builders::{create_address_field, create_text_field};
 use visualsign::registry::LayeredRegistry;
@@ -19,6 +17,7 @@ use crate::presets::intents::{
     NearIntentsError, NearTokenRegistry, RejectedTokenMetadata, authorized_token_metadata_signers,
     try_extract_token_metadata_from_chain_metadata,
 };
+use crate::primitives::{Action, FunctionCallAction, Transaction};
 use crate::tx::NearTransaction;
 
 /// Build the token registry for this request: an empty global layer, plus
@@ -445,13 +444,24 @@ fn title_for(actions: &[Action]) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+    use crate::primitives::{
+        Balance, CreateAccountAction, CryptoHash, FunctionCallAction, Gas, KeyType, PublicKey,
+        Signature, SignedTransaction, TransactionV0, TransferAction,
+    };
     use generated::parser::{ChainMetadata, NearMetadata, chain_metadata};
-    use near_crypto::{KeyType, PublicKey, Signature};
-    use near_primitives::action::{CreateAccountAction, FunctionCallAction, TransferAction};
-    use near_primitives::hash::CryptoHash;
-    use near_primitives::transaction::{SignedTransaction, TransactionV0};
-    use near_primitives::types::{Balance, Gas};
     use visualsign::vsptrait::DeveloperConfig;
+
+    /// A `"ed25519:<base58>"` key string as a [`PublicKey`].
+    fn ed25519_key(s: &str) -> PublicKey {
+        let data = s.strip_prefix("ed25519:").expect("ed25519 prefix");
+        PublicKey::ED25519(
+            bs58::decode(data)
+                .into_vec()
+                .expect("base58")
+                .try_into()
+                .expect("32 bytes"),
+        )
+    }
 
     fn transfer() -> Action {
         Action::Transfer(TransferAction {
@@ -695,9 +705,7 @@ mod tests {
 
         let txv0 = TransactionV0 {
             signer_id: "alice.near".parse().unwrap(),
-            public_key: "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"
-                .parse()
-                .unwrap(),
+            public_key: ed25519_key("ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"),
             nonce: 1,
             receiver_id: "intents.near".parse().unwrap(),
             block_hash: CryptoHash::default(),
@@ -740,9 +748,7 @@ mod tests {
 
         let txv0 = TransactionV0 {
             signer_id: "alice.near".parse().unwrap(),
-            public_key: "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"
-                .parse()
-                .unwrap(),
+            public_key: ed25519_key("ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"),
             nonce: 1,
             receiver_id: "intents.near".parse().unwrap(),
             block_hash: CryptoHash::default(),
@@ -945,9 +951,7 @@ mod tests {
         // envelope.
         let txv0 = TransactionV0 {
             signer_id: "alice.near".parse().unwrap(),
-            public_key: "ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"
-                .parse()
-                .unwrap(),
+            public_key: ed25519_key("ed25519:8rVvtHWFr8hasdQGGD5WiQBTyr4iH2ruEPPVfj491RPN"),
             nonce: 1,
             receiver_id: "intents.near".parse().unwrap(),
             block_hash: CryptoHash::default(),

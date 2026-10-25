@@ -50,6 +50,9 @@ pub(crate) struct ChainArgs {
     #[command(flatten)]
     pub(crate) tron: visualsign_tron::TronArgs,
 
+    #[cfg(feature = "bitcoin")]
+    #[command(flatten)]
+    pub(crate) bitcoin: visualsign_bitcoin::BitcoinArgs,
     #[cfg(feature = "zcash")]
     #[command(flatten)]
     pub(crate) zcash: visualsign_zcash::ZcashArgs,
@@ -75,6 +78,10 @@ impl ChainArgs {
         #[cfg(feature = "tron")]
         plugins.push(Box::new(visualsign_tron::TronPlugin::new(
             self.tron.clone(),
+        )));
+        #[cfg(feature = "bitcoin")]
+        plugins.push(Box::new(visualsign_bitcoin::BitcoinPlugin::new(
+            self.bitcoin.clone(),
         )));
         #[cfg(feature = "zcash")]
         plugins.push(Box::new(visualsign_zcash::ZcashPlugin::new(

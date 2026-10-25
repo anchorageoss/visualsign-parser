@@ -12,6 +12,7 @@ VisualSign transforms opaque transaction data (hex strings, base64 blobs) into s
 - Solana
 - Sui
 - Tron
+- Bitcoin (PSBT, BIP-174)
 
 See the [Adding a New Chain](https://visualsign.dev/adding-new-chain) guide to add support for another blockchain. [Join the community on Telegram](https://t.me/+B03D2m1WlBBiYTdh) if you're interested in contributing.
 

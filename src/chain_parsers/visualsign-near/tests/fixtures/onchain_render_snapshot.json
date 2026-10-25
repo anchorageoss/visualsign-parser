@@ -1,0 +1,5579 @@
+[
+  {
+    "name": "v0_single_create_account",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Create Account",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Create Account"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Create Account",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_create_account",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Create Account",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Create Account"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Create Account",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_deploy_contract",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000001080000000061736d01000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Deploy Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deploy Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Deploy Contract (not fully decoded)",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_deploy_contract",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000001080000000061736d01000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Deploy Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deploy Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Deploy Contract (not fully decoded)",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_function_call_ft_transfer_call",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e656172010101010101010101010101010101010101010101010101010101010101010101000000021000000066745f7472616e736665725f63616c6c4f0000007b2272656365697665725f6964223a22696e74656e74732e6e656172222c22616d6f756e74223a2231303030303030222c226d7367223a227b5c22785c223a317d222c226d656d6f223a226869227d00407a10f35a000001000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ft_transfer_call",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_transfer_call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "intents.near"
+            },
+            "FallbackText": "intents.near",
+            "Label": "Recipient",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "raw token units",
+              "Amount": "1000000"
+            },
+            "FallbackText": "1000000 raw token units",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "hi",
+            "Label": "Memo",
+            "TextV2": {
+              "Text": "hi"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "{\"x\":1}",
+            "Label": "Message",
+            "TextV2": {
+              "Text": "{\"x\":1}"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "100 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "100 Tgas"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Function Call",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_function_call_ft_transfer_call",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e656172030303030303030303030303030303030303030303030303030303030303030301000000021000000066745f7472616e736665725f63616c6c4f0000007b2272656365697665725f6964223a22696e74656e74732e6e656172222c22616d6f756e74223a2231303030303030222c226d7367223a227b5c22785c223a317d222c226d656d6f223a226869227d00407a10f35a000001000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ft_transfer_call",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_transfer_call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "intents.near"
+            },
+            "FallbackText": "intents.near",
+            "Label": "Recipient",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "raw token units",
+              "Amount": "1000000"
+            },
+            "FallbackText": "1000000 raw token units",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "hi",
+            "Label": "Memo",
+            "TextV2": {
+              "Text": "hi"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "{\"x\":1}",
+            "Label": "Message",
+            "TextV2": {
+              "Text": "{\"x\":1}"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "100 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "100 Tgas"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Function Call",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_function_call_ft_transfer",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e656172010101010101010101010101010101010101010101010101010101010101010101000000020b00000066745f7472616e73666572270000007b2272656365697665725f6964223a22626f622e6e656172222c22616d6f756e74223a2235227d00e057eb481b000001000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ft_transfer",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_transfer"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "Recipient",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "raw token units",
+              "Amount": "5"
+            },
+            "FallbackText": "5 raw token units",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "30 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "30 Tgas"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Function Call",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_function_call_ft_transfer",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e656172030303030303030303030303030303030303030303030303030303030303030301000000020b00000066745f7472616e73666572270000007b2272656365697665725f6964223a22626f622e6e656172222c22616d6f756e74223a2235227d00e057eb481b000001000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ft_transfer",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_transfer"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "Recipient",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "raw token units",
+              "Amount": "5"
+            },
+            "FallbackText": "5 raw token units",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "30 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "30 Tgas"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Function Call",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_function_call_ft_withdraw",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e656172010101010101010101010101010101010101010101010101010101010101010101000000020b00000066745f77697468647261774a0000007b22746f6b656e223a22777261702e6e656172222c2272656365697665725f6964223a22626f622e6e656172222c22616d6f756e74223a2237222c226d7367223a22307864656164227d00407a10f35a000001000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ft_withdraw",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_withdraw"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "wrap.near"
+            },
+            "FallbackText": "wrap.near",
+            "Label": "Token",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "Recipient",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "raw token units",
+              "Amount": "7"
+            },
+            "FallbackText": "7 raw token units",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "0xdead",
+            "Label": "Message",
+            "TextV2": {
+              "Text": "0xdead"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "100 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "100 Tgas"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Function Call",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_function_call_ft_withdraw",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e656172030303030303030303030303030303030303030303030303030303030303030301000000020b00000066745f77697468647261774a0000007b22746f6b656e223a22777261702e6e656172222c2272656365697665725f6964223a22626f622e6e656172222c22616d6f756e74223a2237222c226d7367223a22307864656164227d00407a10f35a000001000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ft_withdraw",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_withdraw"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "wrap.near"
+            },
+            "FallbackText": "wrap.near",
+            "Label": "Token",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "Recipient",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "raw token units",
+              "Amount": "7"
+            },
+            "FallbackText": "7 raw token units",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "0xdead",
+            "Label": "Message",
+            "TextV2": {
+              "Text": "0xdead"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "100 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "100 Tgas"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Function Call",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_function_call_invalid_receiver",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e656172010101010101010101010101010101010101010101010101010101010101010101000000020b00000066745f7472616e73666572270000007b2272656365697665725f6964223a22426f622e6e656172222c22616d6f756e74223a2235227d00e057eb481b000001000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ft_transfer",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_transfer"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "7b2272656365697665725f6964223a22426f622e6e656172222c22616d6f756e74223a2235227d",
+            "Label": "Raw Data",
+            "TextV2": {
+              "Text": "7b2272656365697665725f6964223a22426f622e6e656172222c22616d6f756e74223a2235227d"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "30 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "30 Tgas"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Function Call",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_function_call_invalid_receiver",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e656172030303030303030303030303030303030303030303030303030303030303030301000000020b00000066745f7472616e73666572270000007b2272656365697665725f6964223a22426f622e6e656172222c22616d6f756e74223a2235227d00e057eb481b000001000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ft_transfer",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_transfer"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "7b2272656365697665725f6964223a22426f622e6e656172222c22616d6f756e74223a2235227d",
+            "Label": "Raw Data",
+            "TextV2": {
+              "Text": "7b2272656365697665725f6964223a22426f622e6e656172222c22616d6f756e74223a2235227d"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "30 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "30 Tgas"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Function Call",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_function_call_unknown_method",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e656172010101010101010101010101010101010101010101010101010101010101010101000000020c000000646f5f736f6d657468696e67070000007b2261223a317dcb04fb711f01000000000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "do_something",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "do_something"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "7b2261223a317d",
+            "Label": "Raw Data",
+            "TextV2": {
+              "Text": "7b2261223a317d"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "1.234567890123 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "1.234567890123 Tgas"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Function Call",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_function_call_unknown_method",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e656172030303030303030303030303030303030303030303030303030303030303030301000000020c000000646f5f736f6d657468696e67070000007b2261223a317dcb04fb711f01000000000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "do_something",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "do_something"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "7b2261223a317d",
+            "Label": "Raw Data",
+            "TextV2": {
+              "Text": "7b2261223a317d"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "1.234567890123 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "1.234567890123 Tgas"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Function Call",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_function_call_empty_args",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000002040000006e6f6f7000000000000000000000000000000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "noop",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "noop"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "0 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "0 Tgas"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Function Call",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_function_call_empty_args",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000002040000006e6f6f7000000000000000000000000000000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "noop",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "noop"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "0 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "0 Tgas"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Function Call",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_transfer",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000003010080716433b629a33d010000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "1.500000000000000000000001"
+            },
+            "FallbackText": "1.500000000000000000000001 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Transfer",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_transfer",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000003010080716433b629a33d010000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "1.500000000000000000000001"
+            },
+            "FallbackText": "1.500000000000000000000001 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Transfer",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_stake_ed25519",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000004000000e4d20cc8dcd2b7520000000000000303030303030303030303030303030303030303030303030303030303030303",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "100"
+            },
+            "FallbackText": "100 NEAR",
+            "Label": "Stake",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "ed25519:CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+            "Label": "Validator Public Key",
+            "TextV2": {
+              "Text": "ed25519:CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Stake",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_stake_ed25519",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000004000000e4d20cc8dcd2b7520000000000000303030303030303030303030303030303030303030303030303030303030303",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "100"
+            },
+            "FallbackText": "100 NEAR",
+            "Label": "Stake",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "ed25519:CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+            "Label": "Validator Public Key",
+            "TextV2": {
+              "Text": "ed25519:CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Stake",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_stake_secp256k1",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000004000000000000000000000000000000000104040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0"
+            },
+            "FallbackText": "0 NEAR",
+            "Label": "Stake",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "secp256k1:5f5r5AjuFd8WwUagQSztAgufUCE6rdYhXmjU5rtnBPsxmfC5fFCUGiqQCcQZmAfFzuo6gyYYm616Roc1HEhREX5",
+            "Label": "Validator Public Key",
+            "TextV2": {
+              "Text": "secp256k1:5f5r5AjuFd8WwUagQSztAgufUCE6rdYhXmjU5rtnBPsxmfC5fFCUGiqQCcQZmAfFzuo6gyYYm616Roc1HEhREX5"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Stake",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_stake_secp256k1",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000004000000000000000000000000000000000104040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0"
+            },
+            "FallbackText": "0 NEAR",
+            "Label": "Stake",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "secp256k1:5f5r5AjuFd8WwUagQSztAgufUCE6rdYhXmjU5rtnBPsxmfC5fFCUGiqQCcQZmAfFzuo6gyYYm616Roc1HEhREX5",
+            "Label": "Validator Public Key",
+            "TextV2": {
+              "Text": "secp256k1:5f5r5AjuFd8WwUagQSztAgufUCE6rdYhXmjU5rtnBPsxmfC5fFCUGiqQCcQZmAfFzuo6gyYYm616Roc1HEhREX5"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Stake",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_add_key_full_access",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000005000505050505050505050505050505050505050505050505050505050505050505070000000000000001",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ed25519:LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Full Access",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Full Access"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Add Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_add_key_full_access",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000005000505050505050505050505050505050505050505050505050505050505050505070000000000000001",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ed25519:LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Full Access",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Full Access"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Add Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_add_key_function_call_unbounded",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e656172010101010101010101010101010101010101010101010101010101010101010101000000050106060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606070000000000000000000d000000636f6e74726163742e6e65617200000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "secp256k1:7z8GcFcMNwCGuiNX7AzpkXrzhnqenSpYoA6hdHqfmbKSezHczNJCuakboR7M9FVPVsC9XxpKe8W99CuWRMYdMH7",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "secp256k1:7z8GcFcMNwCGuiNX7AzpkXrzhnqenSpYoA6hdHqfmbKSezHczNJCuakboR7M9FVPVsC9XxpKe8W99CuWRMYdMH7"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "contract.near"
+            },
+            "FallbackText": "contract.near",
+            "Label": "Contract",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Any method",
+            "Label": "Allowed Methods",
+            "TextV2": {
+              "Text": "Any method"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Unlimited",
+            "Label": "Allowance",
+            "TextV2": {
+              "Text": "Unlimited"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Add Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_add_key_function_call_unbounded",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e656172030303030303030303030303030303030303030303030303030303030303030301000000050106060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606070000000000000000000d000000636f6e74726163742e6e65617200000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "secp256k1:7z8GcFcMNwCGuiNX7AzpkXrzhnqenSpYoA6hdHqfmbKSezHczNJCuakboR7M9FVPVsC9XxpKe8W99CuWRMYdMH7",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "secp256k1:7z8GcFcMNwCGuiNX7AzpkXrzhnqenSpYoA6hdHqfmbKSezHczNJCuakboR7M9FVPVsC9XxpKe8W99CuWRMYdMH7"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "contract.near"
+            },
+            "FallbackText": "contract.near",
+            "Label": "Contract",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Any method",
+            "Label": "Allowed Methods",
+            "TextV2": {
+              "Text": "Any method"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Unlimited",
+            "Label": "Allowance",
+            "TextV2": {
+              "Text": "Unlimited"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Add Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_add_key_function_call_bounded",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e6561720101010101010101010101010101010101010101010101010101010101010101010000000500070707070707070707070707070707070707070707070707070707070707070707000000000000000001000040683bb3f386f0340000000000000d000000636f6e74726163742e6e656172020000000b00000066745f7472616e736665720f00000073746f726167655f6465706f736974",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ed25519:US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "contract.near"
+            },
+            "FallbackText": "contract.near",
+            "Label": "Contract",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ft_transfer\nstorage_deposit",
+            "Label": "Allowed Methods",
+            "TextV2": {
+              "Text": "ft_transfer\nstorage_deposit"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.25"
+            },
+            "FallbackText": "0.25 NEAR",
+            "Label": "Allowance",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Add Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_add_key_function_call_bounded",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e6561720303030303030303030303030303030303030303030303030303030303030303010000000500070707070707070707070707070707070707070707070707070707070707070707000000000000000001000040683bb3f386f0340000000000000d000000636f6e74726163742e6e656172020000000b00000066745f7472616e736665720f00000073746f726167655f6465706f736974",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ed25519:US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "contract.near"
+            },
+            "FallbackText": "contract.near",
+            "Label": "Contract",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ft_transfer\nstorage_deposit",
+            "Label": "Allowed Methods",
+            "TextV2": {
+              "Text": "ft_transfer\nstorage_deposit"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.25"
+            },
+            "FallbackText": "0.25 NEAR",
+            "Label": "Allowance",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Add Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_add_key_gas_key_function_call",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e6561720101010101010101010101010101010101010101010101010101010101010101010000000500080808080808080808080808080808080808080808080808080808080808080807000000000000000200000042db999d3784a7010000000000040001010000000000000000000000000000000d000000636f6e74726163742e6e656172010000000100000061",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ed25519:YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Gas Key (Function Call)",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Gas Key (Function Call)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "2"
+            },
+            "FallbackText": "2 NEAR",
+            "Label": "Gas Key Balance",
+            "Type": "amount_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "",
+              "Amount": "4"
+            },
+            "FallbackText": "4",
+            "Label": "Gas Key Nonces",
+            "Type": "amount_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "contract.near"
+            },
+            "FallbackText": "contract.near",
+            "Label": "Contract",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "a",
+            "Label": "Allowed Methods",
+            "TextV2": {
+              "Text": "a"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Allowance",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Add Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_add_key_gas_key_function_call",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e6561720303030303030303030303030303030303030303030303030303030303030303010000000500080808080808080808080808080808080808080808080808080808080808080807000000000000000200000042db999d3784a7010000000000040001010000000000000000000000000000000d000000636f6e74726163742e6e656172010000000100000061",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ed25519:YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Gas Key (Function Call)",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Gas Key (Function Call)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "2"
+            },
+            "FallbackText": "2 NEAR",
+            "Label": "Gas Key Balance",
+            "Type": "amount_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "",
+              "Amount": "4"
+            },
+            "FallbackText": "4",
+            "Label": "Gas Key Nonces",
+            "Type": "amount_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "contract.near"
+            },
+            "FallbackText": "contract.near",
+            "Label": "Contract",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "a",
+            "Label": "Allowed Methods",
+            "TextV2": {
+              "Text": "a"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Allowance",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Add Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_add_key_gas_key_full_access",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e656172010101010101010101010101010101010101010101010101010101010101010101000000050109090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909070000000000000003000080d07666e70de1690000000000000004",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "secp256k1:BUguQsv2ZuHus54HAFzjdJHzZBkygAjKhEeYwSG19tUfUyvvz3worsdQCdAXDNjakJHioSiyxhFiDJrm8XpSXRA",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "secp256k1:BUguQsv2ZuHus54HAFzjdJHzZBkygAjKhEeYwSG19tUfUyvvz3worsdQCdAXDNjakJHioSiyxhFiDJrm8XpSXRA"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Gas Key (Full Access)",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Gas Key (Full Access)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.5"
+            },
+            "FallbackText": "0.5 NEAR",
+            "Label": "Gas Key Balance",
+            "Type": "amount_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "",
+              "Amount": "1024"
+            },
+            "FallbackText": "1024",
+            "Label": "Gas Key Nonces",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Add Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_add_key_gas_key_full_access",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e656172030303030303030303030303030303030303030303030303030303030303030301000000050109090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909070000000000000003000080d07666e70de1690000000000000004",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "secp256k1:BUguQsv2ZuHus54HAFzjdJHzZBkygAjKhEeYwSG19tUfUyvvz3worsdQCdAXDNjakJHioSiyxhFiDJrm8XpSXRA",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "secp256k1:BUguQsv2ZuHus54HAFzjdJHzZBkygAjKhEeYwSG19tUfUyvvz3worsdQCdAXDNjakJHioSiyxhFiDJrm8XpSXRA"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Gas Key (Full Access)",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Gas Key (Full Access)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.5"
+            },
+            "FallbackText": "0.5 NEAR",
+            "Label": "Gas Key Balance",
+            "Type": "amount_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "",
+              "Amount": "1024"
+            },
+            "FallbackText": "1024",
+            "Label": "Gas Key Nonces",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Add Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_delete_key_ed25519",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000006000a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ed25519:gBxS1f6uyyGPuW5MzGBukidSb71jdsCb5fZaoSzULE5",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:gBxS1f6uyyGPuW5MzGBukidSb71jdsCb5fZaoSzULE5"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Delete Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_delete_key_ed25519",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000006000a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ed25519:gBxS1f6uyyGPuW5MzGBukidSb71jdsCb5fZaoSzULE5",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:gBxS1f6uyyGPuW5MzGBukidSb71jdsCb5fZaoSzULE5"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Delete Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_delete_key_secp256k1",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000006010b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "secp256k1:DojKwxnUhDMfqJr7ryzgD9FKnnNXbz1Axd1nUsCtk5v9NK2UKB3YVjYboRsJbTZiFFgmeRzkqjkkviAGGefeeBC",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "secp256k1:DojKwxnUhDMfqJr7ryzgD9FKnnNXbz1Axd1nUsCtk5v9NK2UKB3YVjYboRsJbTZiFFgmeRzkqjkkviAGGefeeBC"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Delete Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_delete_key_secp256k1",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000006010b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "secp256k1:DojKwxnUhDMfqJr7ryzgD9FKnnNXbz1Axd1nUsCtk5v9NK2UKB3YVjYboRsJbTZiFFgmeRzkqjkkviAGGefeeBC",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "secp256k1:DojKwxnUhDMfqJr7ryzgD9FKnnNXbz1Axd1nUsCtk5v9NK2UKB3YVjYboRsJbTZiFFgmeRzkqjkkviAGGefeeBC"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Delete Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_delete_account",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e656172010101010101010101010101010101010101010101010101010101010101010101000000071000000062656e65666963696172792e6e656172",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "beneficiary.near"
+            },
+            "FallbackText": "beneficiary.near",
+            "Label": "Beneficiary",
+            "Type": "address_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Delete Account",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_delete_account",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e656172030303030303030303030303030303030303030303030303030303030303030301000000071000000062656e65666963696172792e6e656172",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "beneficiary.near"
+            },
+            "FallbackText": "beneficiary.near",
+            "Label": "Beneficiary",
+            "Type": "address_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Delete Account",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_deploy_global_contract_code_hash",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e656172010101010101010101010101010101010101010101010101010101010101010101000000090300000001020300",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Deploy Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deploy Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Deploy Global Contract (not fully decoded)",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_deploy_global_contract_code_hash",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e656172030303030303030303030303030303030303030303030303030303030303030301000000090300000001020300",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Deploy Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deploy Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Deploy Global Contract (not fully decoded)",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_deploy_global_contract_account_id",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000009010000000401",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Deploy Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deploy Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Deploy Global Contract (not fully decoded)",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_deploy_global_contract_account_id",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000009010000000401",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Deploy Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deploy Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Deploy Global Contract (not fully decoded)",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_use_global_contract_code_hash",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e6561720101010101010101010101010101010101010101010101010101010101010101010000000a000c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Use Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Use Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Use Global Contract (not fully decoded)",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_use_global_contract_code_hash",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e6561720303030303030303030303030303030303030303030303030303030303030303010000000a000c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Use Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Use Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Use Global Contract (not fully decoded)",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_use_global_contract_account_id",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e6561720101010101010101010101010101010101010101010101010101010101010101010000000a010b000000676c6f62616c2e6e656172",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Use Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Use Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Use Global Contract (not fully decoded)",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_use_global_contract_account_id",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e6561720303030303030303030303030303030303030303030303030303030303030303010000000a010b000000676c6f62616c2e6e656172",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Use Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Use Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Use Global Contract (not fully decoded)",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_deterministic_state_init_code_hash",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e6561720101010101010101010101010101010101010101010101010101010101010101010000000b00000d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d02000000020000006b31020000007631020000006b320000000000000042db999d3784a7010000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "2"
+            },
+            "FallbackText": "2 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "(not fully decoded)",
+            "Label": "State Init",
+            "TextV2": {
+              "Text": "(not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Deterministic State Init",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_deterministic_state_init_code_hash",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e6561720303030303030303030303030303030303030303030303030303030303030303010000000b00000d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d02000000020000006b31020000007631020000006b320000000000000042db999d3784a7010000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "2"
+            },
+            "FallbackText": "2 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "(not fully decoded)",
+            "Label": "State Init",
+            "TextV2": {
+              "Text": "(not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Deterministic State Init",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_deterministic_state_init_account_id",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e6561720101010101010101010101010101010101010101010101010101010101010101010000000b000109000000636f64652e6e65617202000000020000006b31020000007631020000006b320000000000000042db999d3784a7010000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "2"
+            },
+            "FallbackText": "2 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "(not fully decoded)",
+            "Label": "State Init",
+            "TextV2": {
+              "Text": "(not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Deterministic State Init",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_deterministic_state_init_account_id",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e6561720303030303030303030303030303030303030303030303030303030303030303010000000b000109000000636f64652e6e65617202000000020000006b31020000007631020000006b320000000000000042db999d3784a7010000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "2"
+            },
+            "FallbackText": "2 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "(not fully decoded)",
+            "Label": "State Init",
+            "TextV2": {
+              "Text": "(not fully decoded)"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Deterministic State Init",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_transfer_to_gas_key",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e6561720101010101010101010101010101010101010101010101010101010101010101010000000c000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000e3c8666c53467b020000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "3"
+            },
+            "FallbackText": "3 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "ed25519:ws91DX9HBAAxGW77BZs5FogRDwpRtcUpiLBpKdPTfWu",
+            "Label": "Gas Key Public Key",
+            "TextV2": {
+              "Text": "ed25519:ws91DX9HBAAxGW77BZs5FogRDwpRtcUpiLBpKdPTfWu"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Transfer To Gas Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_transfer_to_gas_key",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e6561720303030303030303030303030303030303030303030303030303030303030303010000000c000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000e3c8666c53467b020000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "3"
+            },
+            "FallbackText": "3 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "ed25519:ws91DX9HBAAxGW77BZs5FogRDwpRtcUpiLBpKdPTfWu",
+            "Label": "Gas Key Public Key",
+            "TextV2": {
+              "Text": "ed25519:ws91DX9HBAAxGW77BZs5FogRDwpRtcUpiLBpKdPTfWu"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Transfer To Gas Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_single_withdraw_from_gas_key",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e6561720101010101010101010101010101010101010101010101010101010101010101010000000d010f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f2a000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000042"
+            },
+            "FallbackText": "0.000000000000000000000042 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "secp256k1:JTpB28XNwqVBmnRoGRzZNq9zFybdTcYsVPkFZj6fvUo78yDYyRF1mTP113GsMdDyFAUsLQYJbpkrMWmGYtN4shG",
+            "Label": "Gas Key Public Key",
+            "TextV2": {
+              "Text": "secp256k1:JTpB28XNwqVBmnRoGRzZNq9zFybdTcYsVPkFZj6fvUo78yDYyRF1mTP113GsMdDyFAUsLQYJbpkrMWmGYtN4shG"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Withdraw From Gas Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_single_withdraw_from_gas_key",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200050000000000000008000000626f622e6e6561720303030303030303030303030303030303030303030303030303030303030303010000000d010f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f2a000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000042"
+            },
+            "FallbackText": "0.000000000000000000000042 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "secp256k1:JTpB28XNwqVBmnRoGRzZNq9zFybdTcYsVPkFZj6fvUo78yDYyRF1mTP113GsMdDyFAUsLQYJbpkrMWmGYtN4shG",
+            "Label": "Gas Key Public Key",
+            "TextV2": {
+              "Text": "secp256k1:JTpB28XNwqVBmnRoGRzZNq9zFybdTcYsVPkFZj6fvUo78yDYyRF1mTP113GsMdDyFAUsLQYJbpkrMWmGYtN4shG"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Withdraw From Gas Key",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_all_actions",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101011b0000000001080000000061736d01000000021000000066745f7472616e736665725f63616c6c4f0000007b2272656365697665725f6964223a22696e74656e74732e6e656172222c22616d6f756e74223a2231303030303030222c226d7367223a227b5c22785c223a317d222c226d656d6f223a226869227d00407a10f35a000001000000000000000000000000000000020b00000066745f7472616e73666572270000007b2272656365697665725f6964223a22626f622e6e656172222c22616d6f756e74223a2235227d00e057eb481b000001000000000000000000000000000000020b00000066745f77697468647261774a0000007b22746f6b656e223a22777261702e6e656172222c2272656365697665725f6964223a22626f622e6e656172222c22616d6f756e74223a2237222c226d7367223a22307864656164227d00407a10f35a000001000000000000000000000000000000020b00000066745f7472616e73666572270000007b2272656365697665725f6964223a22426f622e6e656172222c22616d6f756e74223a2235227d00e057eb481b000001000000000000000000000000000000020c000000646f5f736f6d657468696e67070000007b2261223a317dcb04fb711f0100000000000000000000000000000000000002040000006e6f6f700000000000000000000000000000000000000000000000000000000003010080716433b629a33d01000000000004000000e4d20cc8dcd2b75200000000000003030303030303030303030303030303030303030303030303030303030303030400000000000000000000000000000000010404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040405000505050505050505050505050505050505050505050505050505050505050505070000000000000001050106060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606070000000000000000000d000000636f6e74726163742e6e656172000000000500070707070707070707070707070707070707070707070707070707070707070707000000000000000001000040683bb3f386f0340000000000000d000000636f6e74726163742e6e656172020000000b00000066745f7472616e736665720f00000073746f726167655f6465706f7369740500080808080808080808080808080808080808080808080808080808080808080807000000000000000200000042db999d3784a7010000000000040001010000000000000000000000000000000d000000636f6e74726163742e6e656172010000000100000061050109090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909070000000000000003000080d07666e70de169000000000000000406000a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a06010b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b071000000062656e65666963696172792e6e656172090300000001020300090100000004010a000c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0a010b000000676c6f62616c2e6e6561720b00000d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d02000000020000006b31020000007631020000006b320000000000000042db999d3784a70100000000000b000109000000636f64652e6e65617202000000020000006b31020000007631020000006b320000000000000042db999d3784a70100000000000c000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000e3c8666c53467b0200000000000d010f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f2a000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Create Account",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Create Account"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Deploy Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deploy Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ft_transfer_call",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_transfer_call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "intents.near"
+            },
+            "FallbackText": "intents.near",
+            "Label": "Recipient",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "raw token units",
+              "Amount": "1000000"
+            },
+            "FallbackText": "1000000 raw token units",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "hi",
+            "Label": "Memo",
+            "TextV2": {
+              "Text": "hi"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "{\"x\":1}",
+            "Label": "Message",
+            "TextV2": {
+              "Text": "{\"x\":1}"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "100 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "100 Tgas"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ft_transfer",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_transfer"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "Recipient",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "raw token units",
+              "Amount": "5"
+            },
+            "FallbackText": "5 raw token units",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "30 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "30 Tgas"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ft_withdraw",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_withdraw"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "wrap.near"
+            },
+            "FallbackText": "wrap.near",
+            "Label": "Token",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "Recipient",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "raw token units",
+              "Amount": "7"
+            },
+            "FallbackText": "7 raw token units",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "0xdead",
+            "Label": "Message",
+            "TextV2": {
+              "Text": "0xdead"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "100 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "100 Tgas"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ft_transfer",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_transfer"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "7b2272656365697665725f6964223a22426f622e6e656172222c22616d6f756e74223a2235227d",
+            "Label": "Raw Data",
+            "TextV2": {
+              "Text": "7b2272656365697665725f6964223a22426f622e6e656172222c22616d6f756e74223a2235227d"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "30 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "30 Tgas"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "do_something",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "do_something"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "7b2261223a317d",
+            "Label": "Raw Data",
+            "TextV2": {
+              "Text": "7b2261223a317d"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "1.234567890123 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "1.234567890123 Tgas"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "noop",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "noop"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "0 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "0 Tgas"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Transfer",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Transfer"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "1.500000000000000000000001"
+            },
+            "FallbackText": "1.500000000000000000000001 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "Stake",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Stake"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "100"
+            },
+            "FallbackText": "100 NEAR",
+            "Label": "Stake",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "ed25519:CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+            "Label": "Validator Public Key",
+            "TextV2": {
+              "Text": "ed25519:CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Stake",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Stake"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0"
+            },
+            "FallbackText": "0 NEAR",
+            "Label": "Stake",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "secp256k1:5f5r5AjuFd8WwUagQSztAgufUCE6rdYhXmjU5rtnBPsxmfC5fFCUGiqQCcQZmAfFzuo6gyYYm616Roc1HEhREX5",
+            "Label": "Validator Public Key",
+            "TextV2": {
+              "Text": "secp256k1:5f5r5AjuFd8WwUagQSztAgufUCE6rdYhXmjU5rtnBPsxmfC5fFCUGiqQCcQZmAfFzuo6gyYYm616Roc1HEhREX5"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Add Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Add Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ed25519:LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Full Access",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Full Access"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Add Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Add Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "secp256k1:7z8GcFcMNwCGuiNX7AzpkXrzhnqenSpYoA6hdHqfmbKSezHczNJCuakboR7M9FVPVsC9XxpKe8W99CuWRMYdMH7",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "secp256k1:7z8GcFcMNwCGuiNX7AzpkXrzhnqenSpYoA6hdHqfmbKSezHczNJCuakboR7M9FVPVsC9XxpKe8W99CuWRMYdMH7"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "contract.near"
+            },
+            "FallbackText": "contract.near",
+            "Label": "Contract",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Any method",
+            "Label": "Allowed Methods",
+            "TextV2": {
+              "Text": "Any method"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Unlimited",
+            "Label": "Allowance",
+            "TextV2": {
+              "Text": "Unlimited"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Add Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Add Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ed25519:US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "contract.near"
+            },
+            "FallbackText": "contract.near",
+            "Label": "Contract",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ft_transfer\nstorage_deposit",
+            "Label": "Allowed Methods",
+            "TextV2": {
+              "Text": "ft_transfer\nstorage_deposit"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.25"
+            },
+            "FallbackText": "0.25 NEAR",
+            "Label": "Allowance",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "Add Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Add Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ed25519:YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Gas Key (Function Call)",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Gas Key (Function Call)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "2"
+            },
+            "FallbackText": "2 NEAR",
+            "Label": "Gas Key Balance",
+            "Type": "amount_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "",
+              "Amount": "4"
+            },
+            "FallbackText": "4",
+            "Label": "Gas Key Nonces",
+            "Type": "amount_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "contract.near"
+            },
+            "FallbackText": "contract.near",
+            "Label": "Contract",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "a",
+            "Label": "Allowed Methods",
+            "TextV2": {
+              "Text": "a"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Allowance",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "Add Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Add Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "secp256k1:BUguQsv2ZuHus54HAFzjdJHzZBkygAjKhEeYwSG19tUfUyvvz3worsdQCdAXDNjakJHioSiyxhFiDJrm8XpSXRA",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "secp256k1:BUguQsv2ZuHus54HAFzjdJHzZBkygAjKhEeYwSG19tUfUyvvz3worsdQCdAXDNjakJHioSiyxhFiDJrm8XpSXRA"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Gas Key (Full Access)",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Gas Key (Full Access)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.5"
+            },
+            "FallbackText": "0.5 NEAR",
+            "Label": "Gas Key Balance",
+            "Type": "amount_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "",
+              "Amount": "1024"
+            },
+            "FallbackText": "1024",
+            "Label": "Gas Key Nonces",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "Delete Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Delete Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ed25519:gBxS1f6uyyGPuW5MzGBukidSb71jdsCb5fZaoSzULE5",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:gBxS1f6uyyGPuW5MzGBukidSb71jdsCb5fZaoSzULE5"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Delete Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Delete Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "secp256k1:DojKwxnUhDMfqJr7ryzgD9FKnnNXbz1Axd1nUsCtk5v9NK2UKB3YVjYboRsJbTZiFFgmeRzkqjkkviAGGefeeBC",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "secp256k1:DojKwxnUhDMfqJr7ryzgD9FKnnNXbz1Axd1nUsCtk5v9NK2UKB3YVjYboRsJbTZiFFgmeRzkqjkkviAGGefeeBC"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Delete Account",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Delete Account"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "beneficiary.near"
+            },
+            "FallbackText": "beneficiary.near",
+            "Label": "Beneficiary",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Deploy Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deploy Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Deploy Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deploy Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Use Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Use Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Use Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Use Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Deterministic State Init",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deterministic State Init"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "2"
+            },
+            "FallbackText": "2 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "(not fully decoded)",
+            "Label": "State Init",
+            "TextV2": {
+              "Text": "(not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Deterministic State Init",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deterministic State Init"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "2"
+            },
+            "FallbackText": "2 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "(not fully decoded)",
+            "Label": "State Init",
+            "TextV2": {
+              "Text": "(not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Transfer To Gas Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Transfer To Gas Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "3"
+            },
+            "FallbackText": "3 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "ed25519:ws91DX9HBAAxGW77BZs5FogRDwpRtcUpiLBpKdPTfWu",
+            "Label": "Gas Key Public Key",
+            "TextV2": {
+              "Text": "ed25519:ws91DX9HBAAxGW77BZs5FogRDwpRtcUpiLBpKdPTfWu"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Withdraw From Gas Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Withdraw From Gas Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000042"
+            },
+            "FallbackText": "0.000000000000000000000042 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "secp256k1:JTpB28XNwqVBmnRoGRzZNq9zFybdTcYsVPkFZj6fvUo78yDYyRF1mTP113GsMdDyFAUsLQYJbpkrMWmGYtN4shG",
+            "Label": "Gas Key Public Key",
+            "TextV2": {
+              "Text": "secp256k1:JTpB28XNwqVBmnRoGRzZNq9zFybdTcYsVPkFZj6fvUo78yDYyRF1mTP113GsMdDyFAUsLQYJbpkrMWmGYtN4shG"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "NEAR Transaction",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v1_gas_key_nonce_all_actions",
+    "hex": "010a000000616c6963652e6e6561720102020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202014d00000000000000030008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303031b0000000001080000000061736d01000000021000000066745f7472616e736665725f63616c6c4f0000007b2272656365697665725f6964223a22696e74656e74732e6e656172222c22616d6f756e74223a2231303030303030222c226d7367223a227b5c22785c223a317d222c226d656d6f223a226869227d00407a10f35a000001000000000000000000000000000000020b00000066745f7472616e73666572270000007b2272656365697665725f6964223a22626f622e6e656172222c22616d6f756e74223a2235227d00e057eb481b000001000000000000000000000000000000020b00000066745f77697468647261774a0000007b22746f6b656e223a22777261702e6e656172222c2272656365697665725f6964223a22626f622e6e656172222c22616d6f756e74223a2237222c226d7367223a22307864656164227d00407a10f35a000001000000000000000000000000000000020b00000066745f7472616e73666572270000007b2272656365697665725f6964223a22426f622e6e656172222c22616d6f756e74223a2235227d00e057eb481b000001000000000000000000000000000000020c000000646f5f736f6d657468696e67070000007b2261223a317dcb04fb711f0100000000000000000000000000000000000002040000006e6f6f700000000000000000000000000000000000000000000000000000000003010080716433b629a33d01000000000004000000e4d20cc8dcd2b75200000000000003030303030303030303030303030303030303030303030303030303030303030400000000000000000000000000000000010404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040405000505050505050505050505050505050505050505050505050505050505050505070000000000000001050106060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606070000000000000000000d000000636f6e74726163742e6e656172000000000500070707070707070707070707070707070707070707070707070707070707070707000000000000000001000040683bb3f386f0340000000000000d000000636f6e74726163742e6e656172020000000b00000066745f7472616e736665720f00000073746f726167655f6465706f7369740500080808080808080808080808080808080808080808080808080808080808080807000000000000000200000042db999d3784a7010000000000040001010000000000000000000000000000000d000000636f6e74726163742e6e656172010000000100000061050109090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909090909070000000000000003000080d07666e70de169000000000000000406000a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a06010b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b071000000062656e65666963696172792e6e656172090300000001020300090100000004010a000c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0a010b000000676c6f62616c2e6e6561720b00000d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d02000000020000006b31020000007631020000006b320000000000000042db999d3784a70100000000000b000109000000636f64652e6e65617202000000020000006b31020000007631020000006b320000000000000042db999d3784a70100000000000c000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000e3c8666c53467b0200000000000d010f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f2a000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Create Account",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Create Account"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Deploy Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deploy Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ft_transfer_call",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_transfer_call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "intents.near"
+            },
+            "FallbackText": "intents.near",
+            "Label": "Recipient",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "raw token units",
+              "Amount": "1000000"
+            },
+            "FallbackText": "1000000 raw token units",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "hi",
+            "Label": "Memo",
+            "TextV2": {
+              "Text": "hi"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "{\"x\":1}",
+            "Label": "Message",
+            "TextV2": {
+              "Text": "{\"x\":1}"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "100 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "100 Tgas"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ft_transfer",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_transfer"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "Recipient",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "raw token units",
+              "Amount": "5"
+            },
+            "FallbackText": "5 raw token units",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "30 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "30 Tgas"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ft_withdraw",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_withdraw"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "wrap.near"
+            },
+            "FallbackText": "wrap.near",
+            "Label": "Token",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "Recipient",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "raw token units",
+              "Amount": "7"
+            },
+            "FallbackText": "7 raw token units",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "0xdead",
+            "Label": "Message",
+            "TextV2": {
+              "Text": "0xdead"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "100 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "100 Tgas"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ft_transfer",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "ft_transfer"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "7b2272656365697665725f6964223a22426f622e6e656172222c22616d6f756e74223a2235227d",
+            "Label": "Raw Data",
+            "TextV2": {
+              "Text": "7b2272656365697665725f6964223a22426f622e6e656172222c22616d6f756e74223a2235227d"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "30 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "30 Tgas"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "do_something",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "do_something"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "7b2261223a317d",
+            "Label": "Raw Data",
+            "TextV2": {
+              "Text": "7b2261223a317d"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "1.234567890123 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "1.234567890123 Tgas"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "noop",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "noop"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "0 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "0 Tgas"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Transfer",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Transfer"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "1.500000000000000000000001"
+            },
+            "FallbackText": "1.500000000000000000000001 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "Stake",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Stake"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "100"
+            },
+            "FallbackText": "100 NEAR",
+            "Label": "Stake",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "ed25519:CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+            "Label": "Validator Public Key",
+            "TextV2": {
+              "Text": "ed25519:CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Stake",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Stake"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0"
+            },
+            "FallbackText": "0 NEAR",
+            "Label": "Stake",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "secp256k1:5f5r5AjuFd8WwUagQSztAgufUCE6rdYhXmjU5rtnBPsxmfC5fFCUGiqQCcQZmAfFzuo6gyYYm616Roc1HEhREX5",
+            "Label": "Validator Public Key",
+            "TextV2": {
+              "Text": "secp256k1:5f5r5AjuFd8WwUagQSztAgufUCE6rdYhXmjU5rtnBPsxmfC5fFCUGiqQCcQZmAfFzuo6gyYYm616Roc1HEhREX5"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Add Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Add Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ed25519:LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Full Access",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Full Access"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Add Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Add Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "secp256k1:7z8GcFcMNwCGuiNX7AzpkXrzhnqenSpYoA6hdHqfmbKSezHczNJCuakboR7M9FVPVsC9XxpKe8W99CuWRMYdMH7",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "secp256k1:7z8GcFcMNwCGuiNX7AzpkXrzhnqenSpYoA6hdHqfmbKSezHczNJCuakboR7M9FVPVsC9XxpKe8W99CuWRMYdMH7"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "contract.near"
+            },
+            "FallbackText": "contract.near",
+            "Label": "Contract",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Any method",
+            "Label": "Allowed Methods",
+            "TextV2": {
+              "Text": "Any method"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Unlimited",
+            "Label": "Allowance",
+            "TextV2": {
+              "Text": "Unlimited"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Add Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Add Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ed25519:US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Function Call",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Function Call"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "contract.near"
+            },
+            "FallbackText": "contract.near",
+            "Label": "Contract",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "ft_transfer\nstorage_deposit",
+            "Label": "Allowed Methods",
+            "TextV2": {
+              "Text": "ft_transfer\nstorage_deposit"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.25"
+            },
+            "FallbackText": "0.25 NEAR",
+            "Label": "Allowance",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "Add Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Add Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ed25519:YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:YMN9Qj5jPNp7j14VPcML1B6xGgcPWVZUGLFU3Mnyfaf"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Gas Key (Function Call)",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Gas Key (Function Call)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "2"
+            },
+            "FallbackText": "2 NEAR",
+            "Label": "Gas Key Balance",
+            "Type": "amount_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "",
+              "Amount": "4"
+            },
+            "FallbackText": "4",
+            "Label": "Gas Key Nonces",
+            "Type": "amount_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "contract.near"
+            },
+            "FallbackText": "contract.near",
+            "Label": "Contract",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "a",
+            "Label": "Allowed Methods",
+            "TextV2": {
+              "Text": "a"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000001"
+            },
+            "FallbackText": "0.000000000000000000000001 NEAR",
+            "Label": "Allowance",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "Add Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Add Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "secp256k1:BUguQsv2ZuHus54HAFzjdJHzZBkygAjKhEeYwSG19tUfUyvvz3worsdQCdAXDNjakJHioSiyxhFiDJrm8XpSXRA",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "secp256k1:BUguQsv2ZuHus54HAFzjdJHzZBkygAjKhEeYwSG19tUfUyvvz3worsdQCdAXDNjakJHioSiyxhFiDJrm8XpSXRA"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Gas Key (Full Access)",
+            "Label": "Permission",
+            "TextV2": {
+              "Text": "Gas Key (Full Access)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.5"
+            },
+            "FallbackText": "0.5 NEAR",
+            "Label": "Gas Key Balance",
+            "Type": "amount_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "",
+              "Amount": "1024"
+            },
+            "FallbackText": "1024",
+            "Label": "Gas Key Nonces",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "Delete Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Delete Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "ed25519:gBxS1f6uyyGPuW5MzGBukidSb71jdsCb5fZaoSzULE5",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "ed25519:gBxS1f6uyyGPuW5MzGBukidSb71jdsCb5fZaoSzULE5"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Delete Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Delete Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "secp256k1:DojKwxnUhDMfqJr7ryzgD9FKnnNXbz1Axd1nUsCtk5v9NK2UKB3YVjYboRsJbTZiFFgmeRzkqjkkviAGGefeeBC",
+            "Label": "Public Key",
+            "TextV2": {
+              "Text": "secp256k1:DojKwxnUhDMfqJr7ryzgD9FKnnNXbz1Axd1nUsCtk5v9NK2UKB3YVjYboRsJbTZiFFgmeRzkqjkkviAGGefeeBC"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Delete Account",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Delete Account"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "beneficiary.near"
+            },
+            "FallbackText": "beneficiary.near",
+            "Label": "Beneficiary",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "Deploy Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deploy Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Deploy Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deploy Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Use Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Use Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Use Global Contract (not fully decoded)",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Use Global Contract (not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Deterministic State Init",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deterministic State Init"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "2"
+            },
+            "FallbackText": "2 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "(not fully decoded)",
+            "Label": "State Init",
+            "TextV2": {
+              "Text": "(not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Deterministic State Init",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Deterministic State Init"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "2"
+            },
+            "FallbackText": "2 NEAR",
+            "Label": "Deposit",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "(not fully decoded)",
+            "Label": "State Init",
+            "TextV2": {
+              "Text": "(not fully decoded)"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Transfer To Gas Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Transfer To Gas Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "3"
+            },
+            "FallbackText": "3 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "ed25519:ws91DX9HBAAxGW77BZs5FogRDwpRtcUpiLBpKdPTfWu",
+            "Label": "Gas Key Public Key",
+            "TextV2": {
+              "Text": "ed25519:ws91DX9HBAAxGW77BZs5FogRDwpRtcUpiLBpKdPTfWu"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "Withdraw From Gas Key",
+            "Label": "Action",
+            "TextV2": {
+              "Text": "Withdraw From Gas Key"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "0.000000000000000000000042"
+            },
+            "FallbackText": "0.000000000000000000000042 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          },
+          {
+            "FallbackText": "secp256k1:JTpB28XNwqVBmnRoGRzZNq9zFybdTcYsVPkFZj6fvUo78yDYyRF1mTP113GsMdDyFAUsLQYJbpkrMWmGYtN4shG",
+            "Label": "Gas Key Public Key",
+            "TextV2": {
+              "Text": "secp256k1:JTpB28XNwqVBmnRoGRzZNq9zFybdTcYsVPkFZj6fvUo78yDYyRF1mTP113GsMdDyFAUsLQYJbpkrMWmGYtN4shG"
+            },
+            "Type": "text_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "NEAR Transaction",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_delegate",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e656172010101010101010101010101010101010101010101010101010101010101010101000000080a000000616c6963652e6e6561720d000000636f6e74726163742e6e656172010000000001000000000000000200000000000000001010101010101010101010101010101010101010101010101010101010101010001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111f",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ValidationError(\"NEAR Delegate (meta-transaction) actions are not supported for signing display\")"
+    }
+  },
+  {
+    "name": "v0_transfer_then_delegate",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010200000003000000a1edccce1bc2d3000000000000080a000000616c6963652e6e6561720d000000636f6e74726163742e6e656172010000000001000000000000000200000000000000001010101010101010101010101010101010101010101010101010101010101010001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111f",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ValidationError(\"NEAR Delegate (meta-transaction) actions are not supported for signing display\")"
+    }
+  },
+  {
+    "name": "v0_no_actions",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e656172010101010101010101010101010101010101010101010101010101010101010100000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ValidationError(\"NEAR transaction has no actions\")"
+    }
+  },
+  {
+    "name": "v0_implicit_signer",
+    "hex": "4000000061616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000003000000a1edccce1bc2d3000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "FallbackText": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "1"
+            },
+            "FallbackText": "1 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Transfer",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_testnet_accounts_on_mainnet",
+    "hex": "0d000000616c6963652e746573746e657400010101010101010101010101010101010101010101010101010101010101010163000000000000000b000000626f622e746573746e657401010101010101010101010101010101010101010101010101010101010101010100000003000000a1edccce1bc2d3000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ValidationError(\"signer account 'alice.testnet' does not match resolved network Mainnet\")"
+    }
+  },
+  {
+    "name": "v0_testnet_accounts_on_testnet",
+    "hex": "0d000000616c6963652e746573746e657400010101010101010101010101010101010101010101010101010101010101010163000000000000000b000000626f622e746573746e657401010101010101010101010101010101010101010101010101010101010101010100000003000000a1edccce1bc2d3000000000000",
+    "allow_signed": false,
+    "network_id": "NEAR_TESTNET",
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Testnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Testnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.testnet"
+            },
+            "FallbackText": "alice.testnet",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.testnet"
+            },
+            "FallbackText": "bob.testnet",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "1"
+            },
+            "FallbackText": "1 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Transfer",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_two_char_accounts",
+    "hex": "0200000061620101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101630000000000000002000000636401010101010101010101010101010101010101010101010101010101010101010100000003000000a1edccce1bc2d3000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "ab"
+            },
+            "FallbackText": "ab",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "cd"
+            },
+            "FallbackText": "cd",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "1"
+            },
+            "FallbackText": "1 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Transfer",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "v0_execute_intents",
+    "hex": "0a000000616c6963652e6e65617200010101010101010101010101010101010101010101010101010101010101010163000000000000000c000000696e74656e74732e6e656172010101010101010101010101010101010101010101010101010101010101010101000000020f000000657865637574655f696e74656e7473050200007b227369676e6564223a5b7b227374616e64617264223a227261775f65643235353139222c227061796c6f6164223a227b5c227369676e65725f69645c223a5c22616c6963652e6e6561725c222c5c22766572696679696e675f636f6e74726163745c223a5c22696e74656e74732e6e6561725c222c5c22646561646c696e655c223a5c22323939392d30312d30315430303a30303a30305a5c222c5c226e6f6e63655c223a5c2258566f4b666d53636233472b587148396b652f66536c4a2f33784f3539734e6843786870473832314248383d5c222c5c22696e74656e74735c223a5b7b5c22696e74656e745c223a5c2266745f77697468647261775c222c5c22746f6b656e5c223a5c22777261702e6e6561725c222c5c2272656365697665725f69645c223a5c22626f622e6e6561725c222c5c22616d6f756e745c223a5c22313030303030305c227d5d7d222c227075626c69635f6b6579223a22656432353531393a387256767448574672386861736451474744355769514254797234694832727545505056666a34393152504e222c227369676e6174757265223a22656432353531393a337674624e514a485a66755631733544796b7a796a6b624e4c63353833686e6b7268547a35376544686439363669717a6b6f723654776772344c6f68324331393553435345736947667264364b6378706a4e71395a62566a227d5d7d00e057eb481b000000000000000000000000000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "intents.near"
+            },
+            "FallbackText": "intents.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "FallbackText": "execute_intents",
+            "Label": "Method",
+            "TextV2": {
+              "Text": "execute_intents"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "7b227369676e6564223a5b7b227374616e64617264223a227261775f65643235353139222c227061796c6f6164223a227b5c227369676e65725f69645c223a5c22616c6963652e6e6561725c222c5c22766572696679696e675f636f6e74726163745c223a5c22696e74656e74732e6e6561725c222c5c22646561646c696e655c223a5c22323939392d30312d30315430303a30303a30305a5c222c5c226e6f6e63655c223a5c2258566f4b666d53636233472b587148396b652f66536c4a2f33784f3539734e6843786870473832314248383d5c222c5c22696e74656e74735c223a5b7b5c22696e74656e745c223a5c2266745f77697468647261775c222c5c22746f6b656e5c223a5c22777261702e6e6561725c222c5c2272656365697665725f69645c223a5c22626f622e6e6561725c222c5c22616d6f756e745c223a5c22313030303030305c227d5d7d222c227075626c69635f6b6579223a22656432353531393a387256767448574672386861736451474744355769514254797234694832727545505056666a34393152504e222c227369676e6174757265223a22656432353531393a337674624e514a485a66755631733544796b7a796a6b624e4c63353833686e6b7268547a35376544686439363669717a6b6f723654776772344c6f68324331393553435345736947667264364b6378706a4e71395a62566a227d5d7d",
+            "Label": "Raw Data",
+            "TextV2": {
+              "Text": "7b227369676e6564223a5b7b227374616e64617264223a227261775f65643235353139222c227061796c6f6164223a227b5c227369676e65725f69645c223a5c22616c6963652e6e6561725c222c5c22766572696679696e675f636f6e74726163745c223a5c22696e74656e74732e6e6561725c222c5c22646561646c696e655c223a5c22323939392d30312d30315430303a30303a30305a5c222c5c226e6f6e63655c223a5c2258566f4b666d53636233472b587148396b652f66536c4a2f33784f3539734e6843786870473832314248383d5c222c5c22696e74656e74735c223a5b7b5c22696e74656e745c223a5c2266745f77697468647261775c222c5c22746f6b656e5c223a5c22777261702e6e6561725c222c5c2272656365697665725f69645c223a5c22626f622e6e6561725c222c5c22616d6f756e745c223a5c22313030303030305c227d5d7d222c227075626c69635f6b6579223a22656432353531393a387256767448574672386861736451474744355769514254797234694832727545505056666a34393152504e222c227369676e6174757265223a22656432353531393a337674624e514a485a66755631733544796b7a796a6b624e4c63353833686e6b7268547a35376544686439363669717a6b6f723654776772344c6f68324331393553435345736947667264364b6378706a4e71395a62566a227d5d7d"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "30 Tgas",
+            "Label": "Gas",
+            "TextV2": {
+              "Text": "30 Tgas"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "1 of 1",
+            "Label": "Signed Intent",
+            "TextV2": {
+              "Text": "1 of 1"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "raw_ed25519",
+            "Label": "Standard",
+            "TextV2": {
+              "Text": "raw_ed25519"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "signature: signature verification failed",
+            "Label": "Warning",
+            "TextV2": {
+              "Text": "signature: signature verification failed"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "alice.near",
+            "Label": "Signer",
+            "TextV2": {
+              "Text": "alice.near"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "intents.near",
+            "Label": "Verifying Contract",
+            "TextV2": {
+              "Text": "intents.near"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "2999-01-01T00:00:00+00:00",
+            "Label": "Deadline",
+            "TextV2": {
+              "Text": "2999-01-01T00:00:00+00:00"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f",
+            "Label": "Nonce",
+            "TextV2": {
+              "Text": "0x5d5a0a7e649c6f71be5ea1fd91efdf4a527fdf13b9f6c3610b18691bcdb5047f"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "FT Withdraw",
+            "Label": "Intent",
+            "TextV2": {
+              "Text": "FT Withdraw"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "wrap.near",
+            "Label": "Token",
+            "TextV2": {
+              "Text": "wrap.near"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "TextV2": {
+              "Text": "bob.near"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "wNEAR",
+              "Amount": "0.000000000000000001"
+            },
+            "FallbackText": "0.000000000000000001 wNEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Function Call",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "signed_v0_ed25519_allow_false",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000003000000a1edccce1bc2d3000000000000001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111f",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: Not all bytes read\"))"
+    }
+  },
+  {
+    "name": "signed_v0_ed25519_allow_true",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000003000000a1edccce1bc2d3000000000000001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111f",
+    "allow_signed": true,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "1"
+            },
+            "FallbackText": "1 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Transfer",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "signed_v1_ed25519_allow_false",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200010000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000003000000a1edccce1bc2d3000000000000001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111f",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid number at line 1 column 2; near borsh decode: Not all bytes read\"))"
+    }
+  },
+  {
+    "name": "signed_v1_ed25519_allow_true",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200010000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000003000000a1edccce1bc2d3000000000000001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111f",
+    "allow_signed": true,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "1"
+            },
+            "FallbackText": "1 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Transfer",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "signed_v0_secp256k1_allow_false",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000003000000a1edccce1bc2d3000000000000012222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: Not all bytes read\"))"
+    }
+  },
+  {
+    "name": "signed_v0_secp256k1_allow_true",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000003000000a1edccce1bc2d3000000000000012222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222",
+    "allow_signed": true,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "1"
+            },
+            "FallbackText": "1 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Transfer",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "signed_v1_secp256k1_allow_false",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200010000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000003000000a1edccce1bc2d3000000000000012222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid number at line 1 column 2; near borsh decode: Not all bytes read\"))"
+    }
+  },
+  {
+    "name": "signed_v1_secp256k1_allow_true",
+    "hex": "010a000000616c6963652e6e656172010202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200010000000000000008000000626f622e6e65617203030303030303030303030303030303030303030303030303030303030303030100000003000000a1edccce1bc2d3000000000000012222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222",
+    "allow_signed": true,
+    "network_id": null,
+    "result": {
+      "Ok": {
+        "Fields": [
+          {
+            "FallbackText": "NEAR Mainnet",
+            "Label": "Network",
+            "TextV2": {
+              "Text": "NEAR Mainnet"
+            },
+            "Type": "text_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "alice.near"
+            },
+            "FallbackText": "alice.near",
+            "Label": "From",
+            "Type": "address_v2"
+          },
+          {
+            "AddressV2": {
+              "Address": "bob.near"
+            },
+            "FallbackText": "bob.near",
+            "Label": "To",
+            "Type": "address_v2"
+          },
+          {
+            "AmountV2": {
+              "Abbreviation": "NEAR",
+              "Amount": "1"
+            },
+            "FallbackText": "1 NEAR",
+            "Label": "Amount",
+            "Type": "amount_v2"
+          }
+        ],
+        "PayloadType": "NearTx",
+        "Title": "Transfer",
+        "Version": "0"
+      }
+    }
+  },
+  {
+    "name": "err_trailing_byte",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000003000000a1edccce1bc2d300000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: Not all bytes read\"))"
+    }
+  },
+  {
+    "name": "err_truncated",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000003000000a1edccce1bc2d30000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: Unexpected length of input\"))"
+    }
+  },
+  {
+    "name": "err_empty",
+    "hex": "",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: EOF while parsing a value at line 1 column 0; near borsh decode: Unexpected length of input\"))"
+    }
+  },
+  {
+    "name": "err_one_byte",
+    "hex": "01",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid number at line 1 column 2; near borsh decode: Unexpected length of input\"))"
+    }
+  },
+  {
+    "name": "err_bad_version_tag",
+    "hex": "02010000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000003000000a1edccce1bc2d3000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid number at line 1 column 2; near borsh decode: invalid transaction version tag: 2\"))"
+    }
+  },
+  {
+    "name": "err_uppercase_signer",
+    "hex": "0a000000416c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000003000000a1edccce1bc2d3000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: invalid value: \\\"Alice.near\\\", the Account ID contains an invalid character 'A' at index 0\"))"
+    }
+  },
+  {
+    "name": "err_bad_key_tag",
+    "hex": "0a000000616c6963652e6e656172070101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e65617201010101010101010101010101010101010101010101010101010101010101010100000003000000a1edccce1bc2d3000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: unknown key type '7'\"))"
+    }
+  },
+  {
+    "name": "err_unknown_action_tag",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e6561720101010101010101010101010101010101010101010101010101010101010101010000000e000000a1edccce1bc2d3000000000000",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: Unexpected variant tag: 14\"))"
+    }
+  },
+  {
+    "name": "err_nested_delegate",
+    "hex": "0a000000616c6963652e6e656172000101010101010101010101010101010101010101010101010101010101010101630000000000000008000000626f622e6e656172010101010101010101010101010101010101010101010101010101010101010101000000080a000000616c6963652e6e6561720d000000636f6e74726163742e6e65617201000000080a000000616c6963652e6e6561720d000000636f6e74726163742e6e6561720000000001000000000000000200000000000000001010101010101010101010101010101010101010101010101010101010101010001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111f01000000000000000200000000000000001010101010101010101010101010101010101010101010101010101010101010001111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111f",
+    "allow_signed": false,
+    "network_id": null,
+    "result": {
+      "Err": "ParseError(DecodeError(\"input is neither a NEAR borsh transaction nor a DefusePayload JSON envelope: invalid type: integer `0`, expected struct DefusePayload at line 1 column 1; near borsh decode: DelegateAction mustn't contain a nested one\"))"
+    }
+  }
+]

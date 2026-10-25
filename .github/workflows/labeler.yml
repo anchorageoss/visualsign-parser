@@ -20,7 +20,7 @@ concurrency:
 jobs:
   label:
     name: Label PRs by changed paths
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       # actions/labeler@v5.0.0
