@@ -73,6 +73,18 @@ pub const MAX_PCZT_BYTES: usize = 4 * 1024 * 1024;
 /// batch payments. It is independent of the byte cap and Zcash consensus rules.
 pub const MAX_SHIELDED_OUTPUTS: usize = 64;
 
+/// Maximum transparent inputs. Per-input ZIP-244 sighashes each re-hash every
+/// input, so this bounds that quadratic work; 600 P2PKH inputs is about zcashd's
+/// 100,000-byte standard transaction size.
+pub const MAX_TRANSPARENT_INPUTS: usize = 600;
+
+/// Maximum transparent outputs, about zcashd's 100,000-byte standard transaction
+/// size for P2PKH outputs. Bounds rendering work and payload size.
+pub const MAX_TRANSPARENT_OUTPUTS: usize = 2_900;
+
+/// Largest amount of ZEC that can exist, in zatoshis.
+const MAX_MONEY: u64 = 21_000_000 * 100_000_000;
+
 /// Text shown wherever the parser would need a viewing key to say more.
 pub const UNVERIFIED: &str = "unverified (parser has no viewing key)";
 
@@ -111,6 +123,18 @@ impl ZcashTransactionWrapper {
         if shielded_outputs > MAX_SHIELDED_OUTPUTS {
             return Err(TransactionParseError::InvalidFormat(format!(
                 "PCZT has {shielded_outputs} shielded outputs/actions; the limit is {MAX_SHIELDED_OUTPUTS}"
+            )));
+        }
+        let transparent_inputs = pczt.transparent().inputs().len();
+        let transparent_outputs = pczt.transparent().outputs().len();
+        if transparent_inputs > MAX_TRANSPARENT_INPUTS {
+            return Err(TransactionParseError::InvalidFormat(format!(
+                "PCZT has {transparent_inputs} transparent inputs; the limit is {MAX_TRANSPARENT_INPUTS}"
+            )));
+        }
+        if transparent_outputs > MAX_TRANSPARENT_OUTPUTS {
+            return Err(TransactionParseError::InvalidFormat(format!(
+                "PCZT has {transparent_outputs} transparent outputs; the limit is {MAX_TRANSPARENT_OUTPUTS}"
             )));
         }
         let version = bytes
@@ -229,6 +253,13 @@ fn memo_view(bytes: Option<&[u8; 512]>) -> MemoView {
             let t = String::from(t);
             if t.is_empty() {
                 MemoView::Empty
+            } else if t.starts_with(' ') || t.ends_with(' ') || t.contains("  ") {
+                // Padding with spaces can push or spoof other fields in a
+                // rendering; show the bytes instead.
+                MemoView::Bytes(format!(
+                    "text memo with repeated or edge spaces, UTF-8 0x{}",
+                    hex(trimmed)
+                ))
             } else if t.bytes().all(|b| b == b' ' || b.is_ascii_graphic()) {
                 MemoView::Text(t)
             } else {
@@ -253,6 +284,8 @@ struct Analysis {
     sends: Vec<Send>,
     spent: Vec<(Pool, u64)>,
     t_inputs: Vec<(String, u64)>,
+    /// Per input (1-based): non-default sequence/lock-time claims, if any.
+    t_locks: Vec<(usize, String)>,
     t_in: u64,
     t_out: u64,
     /// `None` once any input's size is unknown (non-P2PKH).
@@ -277,12 +310,23 @@ fn zec(z: u64) -> String {
 fn add(total: &mut u64, v: u64) -> Result<(), VisualSignError> {
     *total = total
         .checked_add(v)
-        .ok_or_else(|| malformed("value overflow"))?;
+        .filter(|t| *t <= MAX_MONEY)
+        .ok_or_else(|| malformed("value exceeds the maximum amount of ZEC"))?;
+    Ok(())
+}
+
+fn check_money(v: u64) -> Result<(), VisualSignError> {
+    if v > MAX_MONEY {
+        return Err(malformed("value exceeds the maximum amount of ZEC"));
+    }
     Ok(())
 }
 
 struct CheckedAddress {
+    /// The receiver actually paid, encoded from the output itself.
     text: String,
+    /// The unsigned `user_address` hint, once checked to contain the receiver.
+    requested: Option<String>,
     expiry_time: Option<u64>,
     tex: bool,
 }
@@ -296,6 +340,7 @@ fn check_user_address(
     matches: impl Fn(&Address) -> bool,
     fallback: impl FnOnce() -> Option<String>,
 ) -> Result<CheckedAddress, VisualSignError> {
+    let paid = fallback().ok_or_else(|| malformed("cannot encode receiver"))?;
     match user {
         Some(s) => {
             let addr = Address::decode(net, s).ok_or_else(|| {
@@ -323,13 +368,15 @@ fn check_user_address(
                 None
             };
             Ok(CheckedAddress {
-                text: s.clone(),
+                requested: (*s != paid).then(|| s.clone()),
+                text: paid,
                 expiry_time,
                 tex: matches!(addr, Address::Tex(_)),
             })
         }
         None => Ok(CheckedAddress {
-            text: fallback().ok_or_else(|| malformed("cannot encode receiver"))?,
+            text: paid,
+            requested: None,
             expiry_time: None,
             tex: false,
         }),
@@ -403,6 +450,7 @@ fn analyze_orchard(
                 "{p} action {i}: output does not match its note commitment ({e:?})"
             ))
         })?;
+        check_money(value)?;
         outputs += i128::from(value);
 
         let shown = check_user_address(
@@ -492,6 +540,7 @@ fn analyze_sapling(
                 "Sapling output {i}: does not match its note commitment ({e:?})"
             ))
         })?;
+        check_money(value)?;
         outputs += i128::from(value);
         let shown = check_user_address(
             net,
@@ -559,9 +608,29 @@ fn analyze_transparent(
     a: &mut Analysis,
 ) -> Result<(), VisualSignError> {
     a.t_input_sizes = Some(vec![]);
-    for input in bundle.inputs() {
+    let mut prevouts = std::collections::BTreeSet::new();
+    for (i, input) in bundle.inputs().iter().enumerate() {
         let value = u64::from(*input.value());
         add(&mut a.t_in, value)?;
+        if !prevouts.insert((*input.prevout_txid(), *input.prevout_index())) {
+            return Err(malformed(format!(
+                "transparent input {}: duplicate previous output",
+                i + 1
+            )));
+        }
+        let outpoint = format!("{}:{}", input.prevout_txid(), input.prevout_index());
+        let sequence = input.sequence().unwrap_or(u32::MAX);
+        let mut locks = vec![];
+        if sequence != u32::MAX {
+            locks.push(format!("sequence 0x{sequence:08x}"));
+        }
+        if let Some(t) = input.required_time_lock_time() {
+            locks.push(format!("required time lock {t}"));
+        }
+        if let Some(h) = input.required_height_lock_time() {
+            locks.push(format!("required height lock {h}"));
+        }
+        a.t_locks.push((i + 1, locks.join(", ")));
         let addr = TransparentAddress::from_script_from_chain(input.script_pubkey());
         let (shown, p2pkh) = match addr {
             Some(t @ TransparentAddress::PublicKeyHash(_)) => {
@@ -584,7 +653,7 @@ fn analyze_transparent(
             // known, so the ZIP-317 conventional fee cannot be computed.
             _ => a.t_input_sizes = None,
         }
-        a.t_inputs.push((shown, value));
+        a.t_inputs.push((format!("{outpoint} {shown}"), value));
     }
     for out in bundle.outputs() {
         let value = u64::from(*out.value());
@@ -593,7 +662,6 @@ fn analyze_transparent(
         let len = script.byte_len();
         a.t_output_sizes.push(8 + compact_size_len(len) + len);
         let addr = TransparentAddress::from_script_pubkey(script);
-        let claims_change = !out.bip32_derivation().is_empty();
         let (to, kind) = match addr {
             Some(t) => {
                 let shown = check_user_address(
@@ -617,16 +685,12 @@ fn analyze_transparent(
             None => (
                 CheckedAddress {
                     text: format!("script 0x{}", hex(&script.to_bytes())),
+                    requested: None,
                     expiry_time: None,
                     tex: false,
                 },
                 "non-standard transparent script".to_string(),
             ),
-        };
-        let kind = if claims_change {
-            format!("{kind}, claimed change {UNVERIFIED}")
-        } else {
-            kind
         };
         a.sends.push(Send {
             to,
@@ -673,6 +737,7 @@ fn decode(pczt: Pczt) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
     let branch = BranchId::try_from(*g.consensus_branch_id())
         .map_err(|_| malformed("unknown consensus branch"))?;
     let expiry = *g.expiry_height();
+    let fallback_lock_time = g.fallback_lock_time().unwrap_or(0);
 
     let signer = pczt::roles::signer::Signer::new(pczt.clone())
         .map_err(|e| malformed(format!("cannot compute sighash: {e:?}")))?;
@@ -730,6 +795,9 @@ fn decode(pczt: Pczt) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
         let vb = balance(pool);
         shielded_balance += vb;
         let spent = vb + outputs;
+        if spent > i128::from(MAX_MONEY) || outputs > i128::from(MAX_MONEY) {
+            return Err(malformed("value exceeds the maximum amount of ZEC"));
+        }
         if spent < 0 || stated.is_some_and(|s| s != spent) {
             return Err(malformed(format!(
                 "{} value balance does not match the notes",
@@ -748,7 +816,12 @@ fn decode(pczt: Pczt) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
         ));
     }
     let fee = i128::from(a.t_in) - i128::from(a.t_out) + shielded_balance;
-    let fee = u64::try_from(fee).map_err(|_| malformed("outputs exceed inputs"))?;
+    let fee = u64::try_from(fee)
+        .ok()
+        .filter(|f| *f <= MAX_MONEY)
+        .ok_or_else(|| {
+            malformed("outputs exceed inputs, or fee exceeds the maximum amount of ZEC")
+        })?;
 
     let count = |n: Option<usize>| n.unwrap_or(0);
     let conventional = match (&a.t_input_sizes, expiry) {
@@ -795,6 +868,12 @@ fn decode(pczt: Pczt) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
             &zec(s.value),
             ZEC,
         )?);
+        if let Some(requested) = &s.to.requested {
+            fields.push(create_text_field(
+                &format!("Output {n} requested address (unsigned hint)"),
+                requested,
+            )?);
+        }
         if let Some(time) = s.to.expiry_time {
             fields.push(create_text_field(
                 &format!("Output {n} address expiry time"),
@@ -826,6 +905,12 @@ fn decode(pczt: Pczt) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
         fields.push(create_text_field(
             &format!("Transparent input {}", i + 1),
             &text,
+        )?);
+    }
+    for (n, locks) in a.t_locks.iter().filter(|(_, l)| !l.is_empty()) {
+        fields.push(create_text_field(
+            &format!("Transparent input {n} timelock"),
+            locks,
         )?);
     }
     for (i, digest) in transparent_sighashes.iter().enumerate() {
@@ -860,9 +945,18 @@ fn decode(pczt: Pczt) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
             "the PCZT carries a Sapling proof generation key (lets its holder prove and link the spender's Sapling spends, not spend them)",
         )?);
     }
+    if expiry == 0 {
+        fields.push(create_text_field("Expiry height", "none")?);
+    } else {
+        fields.push(create_number_field(
+            "Expiry height",
+            &expiry.to_string(),
+            "",
+        )?);
+    }
     fields.push(create_number_field(
-        "Expiry height",
-        &expiry.to_string(),
+        "Fallback lock time",
+        &fallback_lock_time.to_string(),
         "",
     )?);
     fields.push(create_text_field(
@@ -874,4 +968,47 @@ fn decode(pczt: Pczt) -> Result<Vec<AnnotatedPayloadField>, VisualSignError> {
         &hex(sighash.as_ref()),
     )?);
     Ok(fields)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    fn memo(text: &str) -> [u8; 512] {
+        let mut b = [0u8; 512];
+        b[..text.len()].copy_from_slice(text.as_bytes());
+        b
+    }
+
+    fn rendered(text: &str) -> MemoView {
+        memo_view(Some(&memo(text)))
+    }
+
+    #[test]
+    fn plain_text_memo_is_shown_verbatim() {
+        assert!(
+            matches!(rendered("thanks for lunch"), MemoView::Text(t) if t == "thanks for lunch")
+        );
+    }
+
+    #[test]
+    fn memo_spacing_that_could_spoof_fields_is_shown_as_hex() {
+        let spoof = format!("{}Fee 0.00010000 ZEC", " ".repeat(400));
+        for text in [spoof.as_str(), " leading", "trailing ", "two  spaces"] {
+            assert!(
+                matches!(rendered(text), MemoView::Bytes(b) if b.contains("UTF-8 0x")),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn amounts_above_max_money_are_refused() {
+        let mut total = 0;
+        add(&mut total, MAX_MONEY).unwrap();
+        assert!(add(&mut total, 1).is_err());
+        assert!(check_money(MAX_MONEY).is_ok());
+        assert!(check_money(MAX_MONEY + 1).is_err());
+    }
 }

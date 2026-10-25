@@ -262,14 +262,17 @@ fn sapling_send() {
 }
 
 #[test]
-fn transparent_inputs_outputs_and_claimed_change() {
+fn transparent_inputs_and_outputs_carry_no_change_badge() {
     let spec = &builder::fixtures()[3].1;
     let p = parse(&input("transparent_mix_v5")).unwrap();
     let ours = zcash_transparent::address::TransparentAddress::from_pubkey(
         &builder::sender_tkey().public_key(),
     );
+    let input_1 = text(&p, "Transparent input 1");
+    let (outpoint, rest) = input_1.split_once(' ').unwrap();
+    assert!(outpoint.ends_with(":0"), "{outpoint}");
     assert_eq!(
-        text(&p, "Transparent input 1"),
+        rest,
         format!(
             "{} (P2PKH) {} ZEC",
             ours.encode(&builder::MAIN),
@@ -299,10 +302,8 @@ fn transparent_inputs_outputs_and_claimed_change() {
         }
         other => panic!("{other:?}"),
     };
-    assert_eq!(
-        badge,
-        format!("transparent P2PKH, claimed change {UNVERIFIED}")
-    );
+    // A BIP 32 derivation is unsigned, so it must not earn a change badge.
+    assert_eq!(badge, "transparent P2PKH");
     assert_eq!(
         text(&p, "Fee"),
         format!("{} ZEC", zec(builder::fee_for(spec)))
@@ -587,7 +588,11 @@ fn review_ua_expiry_height_is_enforced_and_time_is_visible() {
         if accepted {
             let p = result.unwrap();
             let n = (1..=3)
-                .find(|n| text(&p, &format!("Output {n}")) == addr)
+                .find(|n| {
+                    has(&p, &format!("Output {n} requested address (unsigned hint)"))
+                        && text(&p, &format!("Output {n} requested address (unsigned hint)"))
+                            == addr
+                })
                 .unwrap();
             assert_eq!(
                 text(&p, &format!("Output {n} address expiry time")),
@@ -759,4 +764,86 @@ fn shielded_work_limit_preserves_boundary_payment_rendering() {
     let payload = parse_bytes(&pczt).unwrap();
     assert_eq!(outputs(&payload).len(), 65); // 64 payments plus transparent change.
     assert_eq!(text(&payload, "Output 64 amount"), "0.00001000 ZEC");
+}
+
+#[test]
+fn transparent_input_and_output_counts_are_bounded() {
+    let b = bytes("transparent_mix_v5");
+    for (key, limit) in [
+        ("inputs", visualsign_zcash::MAX_TRANSPARENT_INPUTS),
+        ("outputs", visualsign_zcash::MAX_TRANSPARENT_OUTPUTS),
+    ] {
+        let edited = edit_pczt(&b, |v| {
+            let list = v["transparent"][key].as_array_mut().unwrap();
+            let first = list[0].clone();
+            list.resize(limit + 1, first);
+        });
+        let e = parse_bytes(&edited).unwrap_err();
+        assert!(format!("{e}").contains("the limit is"), "{key}: {e}");
+    }
+}
+
+#[test]
+fn duplicate_transparent_prevouts_are_refused() {
+    let b = bytes("transparent_mix_v5");
+    let edited = edit_pczt(&b, |v| {
+        let inputs = v["transparent"]["inputs"].as_array_mut().unwrap();
+        let first = inputs[0].clone();
+        inputs.push(first);
+    });
+    let e = parse_bytes(&edited).unwrap_err();
+    assert!(format!("{e}").contains("duplicate previous output"), "{e}");
+}
+
+#[test]
+fn lock_times_sequences_and_missing_expiry_are_rendered() {
+    let b = bytes("transparent_mix_v5");
+    let base = parse_bytes(&b).unwrap();
+    assert_eq!(text(&base, "Fallback lock time"), "0");
+    assert!(!has(&base, "Transparent input 1 timelock"));
+
+    let edited = edit_pczt(&b, |v| {
+        v["global"]["fallback_lock_time"] = 2_000_000_000u32.into();
+        v["global"]["expiry_height"] = 0u32.into();
+        v["transparent"]["inputs"][0]["sequence"] = 1u32.into();
+        v["transparent"]["inputs"][0]["required_height_lock_time"] = 4_000_000u32.into();
+    });
+    let p = parse_bytes(&edited).unwrap();
+    assert_eq!(text(&p, "Fallback lock time"), "2000000000");
+    assert_eq!(text(&p, "Expiry height"), "none");
+    assert_eq!(
+        text(&p, "Transparent input 1 timelock"),
+        "sequence 0x00000001, required height lock 4000000"
+    );
+}
+
+#[test]
+fn user_address_never_replaces_the_paid_receiver() {
+    let b = bytes("transparent_mix_v5");
+    let foreign = builder::foreign_taddr();
+    let ua = UnifiedAddress::from_receivers(
+        Some(builder::foreign_orchard_address()),
+        None,
+        Some(foreign),
+        None,
+        None,
+    )
+    .unwrap()
+    .encode(&builder::MAIN);
+    let edited = edit_pczt(&b, |v| {
+        for o in v["transparent"]["outputs"].as_array_mut().unwrap() {
+            if o["value"] == 300_000u64 {
+                o["user_address"] = ua.clone().into();
+            }
+        }
+    });
+    let p = parse_bytes(&edited).unwrap();
+    let paid = foreign.encode(&builder::MAIN);
+    let n = (1..)
+        .find(|n| text(&p, &format!("Output {n}")) == paid)
+        .unwrap();
+    assert_eq!(
+        text(&p, &format!("Output {n} requested address (unsigned hint)")),
+        ua
+    );
 }

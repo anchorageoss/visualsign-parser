@@ -129,6 +129,15 @@ SignablePayload {
                 number: "2851312",
             },
         },
+        Number {
+            common: SignablePayloadFieldCommon {
+                fallback_text: "0",
+                label: "Fallback lock time",
+            },
+            number: SignablePayloadFieldNumber {
+                number: "0",
+            },
+        },
         TextV2 {
             common: SignablePayloadFieldCommon {
                 fallback_text: "Nu6 (0xc8e71055)",
